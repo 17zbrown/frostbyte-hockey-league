@@ -888,9 +888,16 @@
   /* BOXY headers — tighter tracking, heavier condensed */
   .sec-head h2,.hero h1,.team-banner h2,.ph-info h2,.rule-sec h3,.gate h2,.mgr-bar h2{font-weight:800;letter-spacing:0}
   .sec-head h2 em{color:var(--frost)}
+  /* Auth slot in the nav */
+  .auth-slot{display:flex;align-items:center;gap:8px}
+  #signupAuthBanner{margin-bottom:16px}
+  .auth-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 16px;border-radius:8px;border:1px solid var(--line);background:linear-gradient(120deg,#eef6fc,#fff);font-size:13.5px;color:var(--navy)}
+  .auth-banner.in{border-color:#a9cfe8}
+  .auth-banner .dcirc{width:30px;height:30px;border-radius:8px;background:#5865F2;display:grid;place-items:center;flex-shrink:0}
 </style>
 </head>
 <body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <!-- ============ NAV ============ -->
 <header class="nav">
@@ -944,10 +951,7 @@
     <div class="nav-right">
       <button class="btn btn-ghost btn-sm" data-go="manager">Manager</button>
       <button class="btn btn-ghost btn-sm" data-go="admin">Commissioner</button>
-      <div class="user-chip clickable" data-go="player" data-param="FrostByte_Zack">
-        <span class="av">ZB</span>
-        <div class="txt"><b>FrostByte_Zack</b><small>Glacier Kings · C</small></div>
-      </div>
+      <div class="auth-slot" id="authSlot"></div>
       <button class="hamburger" id="ham" aria-label="Menu" aria-expanded="false"><span></span><span></span><span></span></button>
     </div>
   </div>
@@ -1184,6 +1188,7 @@
       <p>Free agents enter the draft pool. Full clubs can register as a unit. Roster locks the Sunday before Week 1.</p></div></div>
     <div class="signup-grid">
       <form class="form-card" id="signupForm">
+        <div id="signupAuthBanner"></div>
         <div class="field"><label for="su-gamer">Gamertag / PSN ID</label><input id="su-gamer" required placeholder="e.g. FrostByte_Zack" /></div>
         <div class="field"><div class="row2">
           <div><label for="su-name">Full Name</label><input id="su-name" required placeholder="Zack Brown" /></div>
@@ -2130,33 +2135,80 @@ function assignModal(name,code){
   $("#modalOk").textContent="View My Team";$("#modalOk").style.display="";$("#modalCancel").textContent="Close";
   modalCb=()=>go("team",code);$("#modalBg").classList.add("on");
 }
-$("#signupForm").addEventListener("submit",e=>{e.preventDefault();
-  const gt=($("#su-gamer").value||"New Skater").trim();
-  const pos=(document.querySelector('input[name="pos"]:checked')||{}).value||"C";
-  const ovr=72+Math.floor(Math.random()*10);          // rookie 72-81
-  const cap=+(0.8+Math.random()*0.6).toFixed(1);
-  const prefNum=Math.max(0,Math.min(99,parseInt($("#su-num").value,10)||0)); // 0 = no choice → keep default
-  const row=[gt,pos,ovr,0,0,0,cap];
-  if(seasonActive){
-    const open=TEAM_KEYS.filter(k=>rosters[k].length<MAX_ROSTER);
-    if(open.length){
-      const code=open[Math.floor(Math.random()*open.length)];
-      rosters[code].push(row);registerPlayer(code,row);
-      if(prefNum)setJersey(gt,nextFreeNumber(code,prefNum)); // honor choice; bump only if taken on the assigned club
-      transactions.unshift(["sign",`<b>${teams[code].name}</b> signed free agent ${pos} <b>${gt}</b> #${jn(gt)} (mid-season auto-assign)`,"Just now"]);renderTxns();
-      if(typeof currentClub!=="undefined"&&currentClub===code&&$("#mgrDash").style.display!=="none")refreshFrontOffice();
-      assignModal(gt,code);
+/* ===================== SUPABASE — auth + persistence (Phase 2a) ===================== */
+const SB_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co";
+const SB_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
+const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
+let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null;
+const DISCORD_GLYPH=`<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg>`;
+async function sbInit(){
+  if(!sb){renderAuthUI();return;}
+  try{
+    const {data:seasons}=await sb.from("seasons").select("*").eq("registration_open",true).order("number",{ascending:false}).limit(1);
+    openSeason=(seasons&&seasons[0])||null;
+    const {data:tms}=await sb.from("teams").select("*").order("code");
+    dbTeams=tms||[];
+  }catch(err){console.warn("Supabase public load failed:",err&&err.message);}
+  const {data:{session}}=await sb.auth.getSession();
+  await setAuth(session);
+  sb.auth.onAuthStateChange((_evt,s)=>{setAuth(s);});
+}
+async function setAuth(session){
+  authUser=session?session.user:null;
+  if(authUser){
+    const {data:prof}=await sb.from("profiles").select("*").eq("id",authUser.id).maybeSingle();
+    authProfile=prof||null;
+    await loadMyRegistration();
+  }else{authProfile=null;myRegistration=null;}
+  renderAuthUI();
+}
+async function loadMyRegistration(){
+  if(!sb||!authUser||!openSeason){myRegistration=null;return;}
+  const {data}=await sb.from("season_registrations").select("*").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
+  myRegistration=data||null;
+}
+async function signInDiscord(){ if(sb) await sb.auth.signInWithOAuth({provider:"discord",options:{redirectTo:window.location.origin}}); else toast("Backend unavailable","Open the deployed site to sign in."); }
+async function signOutSb(){ if(sb){ await sb.auth.signOut(); toast("Signed out","See you next game night."); } }
+function renderAuthUI(){
+  const slot=document.querySelector("#authSlot");
+  if(slot){
+    if(authProfile){
+      const rl=authProfile.role==="commissioner"?"Commissioner":(authProfile.role==="gm"?"General Manager":"Member");
+      slot.innerHTML=`<div class="user-chip"><span class="av">${initials(authProfile.gamertag)}</span><div class="txt"><b>${authProfile.gamertag}</b><small>${rl}</small></div></div><button class="btn btn-ghost btn-sm" id="signOutBtn">Sign out</button>`;
     }else{
-      if(prefNum)setJersey(gt,prefNum);
-      freeAgents.push(row);renderFA();
-      toast("Added to free agency","Every club is at max roster — "+gt+" enters the free-agent pool.");
+      slot.innerHTML=`<button class="btn btn-frost btn-sm" id="signInBtn"><span style="display:inline-flex;vertical-align:-3px;margin-right:5px">${DISCORD_GLYPH}</span>Sign in</button>`;
     }
-  }else{
-    if(prefNum)setJersey(gt,prefNum);
-    freeAgents.push(row);renderFA();
-    toast("Registration received","Pre-season sign-up — "+gt+" enters the draft pool.");
   }
-  e.target.reset();
+  renderSignupAuth();
+}
+function renderSignupAuth(){
+  const b=document.querySelector("#signupAuthBanner");if(!b)return;
+  const glyph=`<span class="dcirc">${DISCORD_GLYPH}</span>`;
+  const seasonLabel=openSeason?("Season "+openSeason.number):"the open season";
+  const hdr=document.querySelector("#view-signup .sec-head h2 em");if(hdr&&openSeason)hdr.textContent="Season "+openSeason.number;
+  if(authProfile){
+    const g=document.querySelector("#su-gamer");if(g&&!g.value)g.value=authProfile.gamertag;
+    const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+authProfile.gamertag+".");
+    b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${authProfile.gamertag}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div></div></div>`;
+  }else{
+    b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to register</b><div style="color:var(--fog);font-size:12.5px">Registration is tied to your Discord so your roster spot is saved.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
+  }
+}
+document.addEventListener("click",e=>{
+  if(e.target.closest("#signInBtn")||e.target.closest("#signInBtn2")){e.preventDefault();signInDiscord();}
+  else if(e.target.closest("#signOutBtn")){e.preventDefault();signOutSb();}
+});
+$("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
+  if(!sb){toast("Backend unavailable","Open the deployed site to register.");return;}
+  if(!authUser){toast("Sign in to register","Use “Sign in with Discord” first.");signInDiscord();return;}
+  if(!openSeason){toast("Registration closed","No season is open for registration right now.");return;}
+  const pos=(document.querySelector('input[name="pos"]:checked')||{}).value||"C";
+  const prefNum=Math.max(0,Math.min(99,parseInt($("#su-num").value,10)||0))||null;
+  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,entry_type:$("#su-entry").value,note:($("#su-note").value||"").trim()||null};
+  const {error}=await sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
+  if(error){toast("Couldn't register",error.message);return;}
+  myRegistration=payload;renderSignupAuth();
+  toast("You're registered!","Season "+openSeason.number+" registration received — the commissioner assigns roster spots.");
 });
 
 /* ------------------------------ LEADERBOARD TABS ------------------------------ */
@@ -2646,6 +2698,7 @@ renderRules();
 renderChannels();
 renderChat();
 renderOnline();
+sbInit();   // connect Supabase: load teams/open season, restore session, wire auth UI
 
 </script>
 </body>
