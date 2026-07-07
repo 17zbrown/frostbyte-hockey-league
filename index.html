@@ -1184,8 +1184,8 @@
 
   <!-- SIGN UP -->
   <div class="view" id="view-signup"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Registration Open</span><h2>Sign Up · <em>Season 4</em></h2>
-      <p>Free agents enter the draft pool. Full clubs can register as a unit. Roster locks the Sunday before Week 1.</p></div></div>
+    <div class="sec-head"><div><span class="eyebrow">Registration Open</span><h2>Sign Up · <em>Season 1</em></h2>
+      <p>Sign in with Discord, claim your position and number, and lock in your spot for the season.</p></div></div>
     <div class="signup-grid">
       <form class="form-card" id="signupForm">
         <div id="signupAuthBanner"></div>
@@ -1202,7 +1202,7 @@
         <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Registration</button>
       </form>
       <div class="signup-side">
-        <div class="info-card"><h3>Season 4 At A Glance</h3>
+        <div class="info-card"><h3 id="signupGlanceTitle">Season 1 At A Glance</h3>
           <div class="info-line"><span>Regular season</span><b>14 games</b></div>
           <div class="info-line"><span>Game nights</span><b>Tue / Thu</b></div>
           <div class="info-line"><span>Puck drop</span><b>9:00 PM ET</b></div>
@@ -2182,6 +2182,7 @@ function renderSignupAuth(){
   const glyph=`<span class="dcirc">${DISCORD_GLYPH}</span>`;
   const seasonLabel=openSeason?("Season "+openSeason.number):"the open season";
   const hdr=document.querySelector("#view-signup .sec-head h2 em");if(hdr&&openSeason)hdr.textContent="Season "+openSeason.number;
+  const gl=document.querySelector("#signupGlanceTitle");if(gl&&openSeason)gl.textContent="Season "+openSeason.number+" At A Glance";
   if(authProfile){
     const g=document.querySelector("#su-gamer");if(g&&!g.value)g.value=authProfile.gamertag;
     const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+authProfile.gamertag+".");
