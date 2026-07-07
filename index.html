@@ -1220,16 +1220,9 @@
 
   <!-- MANAGER -->
   <div class="view" id="view-manager"><section class="pad"><div class="wrap">
-    <div id="mgrGate">
-      <div class="sec-head" style="justify-content:center;text-align:center"><div>
-        <span class="eyebrow" style="justify-content:center">Team Management</span><h2>Manager <em>Portal</em></h2></div></div>
-      <div class="gate"><div class="lock"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4fe3e6" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-        <h2>Front Office Access</h2><p>Sign in as a general manager to run trades, waivers, free-agent signings, and set your game-night lineup. Demo: any password works.</p>
-        <form id="mgrLogin"><div class="field"><label for="mgr-club">Club</label><select id="mgr-club"></select></div>
-          <div class="field"><label for="mgr-pass">GM Passcode</label><input id="mgr-pass" type="password" placeholder="••••••••" value="demo" /></div>
-          <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Enter Front Office</button></form>
-      </div>
-    </div>
+    <div class="sec-head" style="justify-content:center;text-align:center"><div>
+      <span class="eyebrow" style="justify-content:center">Team Management</span><h2>Manager <em>Portal</em></h2></div></div>
+    <div id="mgrGate"></div>
     <div id="mgrDash" style="display:none">
       <div class="mgr-bar"><span id="mgrBadge" style="line-height:0"></span>
         <div><h2 id="mgrName">Glacier Kings</h2><small>General Manager · FrostByte_Zack</small></div>
@@ -1283,7 +1276,7 @@
         <button class="mgr-tab" data-atab="registrations">Registrations</button>
         <button class="mgr-tab" data-atab="schedbuild">Schedule</button>
         <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
-        <button class="mgr-tab" data-atab="clubsgm">Clubs &amp; GMs</button>
+        <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
       </div>
       <div class="mgr-panel on" id="atab-season"><div class="card"><div class="card-h"><h3>Season &amp; Deadlines</h3><span class="pill" id="seasonStatusPill"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Set the key dates for the season — registration, team-owner applications, draft night, and start/finish. Toggle registration open or closed.</div>
@@ -1298,9 +1291,9 @@
       <div class="mgr-panel" id="atab-gamestats"><div class="card"><div class="card-h"><h3>Games &amp; Stats</h3><span class="pill" id="gamesCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Enter final scores — standings and points update automatically. Per-player box scores can be added after.</div>
         <div id="gamesAdminBody"></div></div></div>
-      <div class="mgr-panel" id="atab-clubsgm"><div class="card"><div class="card-h"><h3>Clubs &amp; GMs</h3></div>
-        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Assign a general manager to each club. Assigning a GM promotes that member so they can run their team's front office.</div>
-        <div id="clubsGmBody"></div></div></div>
+      <div class="mgr-panel" id="atab-members"><div class="card"><div class="card-h"><h3>Members &amp; Roles</h3><span class="pill" id="membersCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office.</div>
+        <div id="membersBody"></div></div></div>
       <div class="mgr-panel" id="atab-news"><div class="card" style="padding:24px 26px"><div class="field"><label for="an-title">Headline</label><input id="an-title" placeholder="Kings clinch top seed with OT thriller" /></div>
         <div class="field"><div class="row2"><div><label for="an-cat">Category</label><select id="an-cat"><option>Game Recap</option><option>Trade Buzz</option><option>Feature</option><option>League News</option></select></div>
           <div><label for="an-author">Byline</label><input id="an-author" value="Frostbyte Post" /></div></div></div>
@@ -1660,6 +1653,7 @@ function go(view,param){
   if(view==="player")renderPlayerPage(param);
   if(view==="article")renderArticle(param);
   if(view==="admin"&&typeof renderCommissioner==="function")renderCommissioner();
+  if(view==="manager"&&typeof renderManager==="function")renderManager();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
 }
@@ -2215,6 +2209,7 @@ function renderAuthUI(){
   }
   renderSignupAuth();
   renderCommissioner();
+  renderManager();
 }
 function renderSignupAuth(){
   const b=document.querySelector("#signupAuthBanner");if(!b)return;
@@ -2257,11 +2252,26 @@ $("#lbTabs").addEventListener("click",e=>{const b=e.target.closest(".lb-tab");if
 let currentClub="GLK";
 const clubByName=n=>TEAM_KEYS.find(k=>teams[k].name===n);
 function fillClubSelect(sel){sel.innerHTML=TEAM_KEYS.map(k=>`<option>${teams[k].name}</option>`).join("");}
-fillClubSelect($("#mgr-club"));
-$("#mgrLogin").addEventListener("submit",e=>{e.preventDefault();currentClub=clubByName($("#mgr-club").value);
-  $("#mgrGate").style.display="none";$("#mgrDash").style.display="block";loadFrontOffice();
-  toast("Front office unlocked","Signed in as GM of "+teams[currentClub].name+".");});
-$("#mgrLogout").addEventListener("click",()=>{$("#mgrDash").style.display="none";$("#mgrGate").style.display="block";});
+const MGR_LOCK=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4fe3e6" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
+function renderManager(){
+  const gate=$("#mgrGate"),dash=$("#mgrDash");if(!gate||!dash)return;
+  const club=(dbTeams||[]).find(t=>authUser&&t.gm_profile_id===authUser.id);
+  const isCommish=authProfile&&authProfile.role==="commissioner";
+  const canEnter=authProfile&&(authProfile.role==="gm"||isCommish)&&(club||isCommish);
+  if(canEnter){
+    if(club)currentClub=club.code;
+    gate.style.display="none";gate.innerHTML="";dash.style.display="block";
+    loadFrontOffice();
+    const nm=$("#mgrName");if(nm){nm.textContent=teams[currentClub].name;
+      const sm=nm.nextElementSibling;if(sm)sm.textContent=(club?"General Manager":"Commissioner view")+" · "+authProfile.gamertag;}
+  }else{
+    dash.style.display="none";gate.style.display="block";
+    gate.innerHTML=authProfile
+      ? `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Manager access needed</h2><p>You're signed in as <b>${authProfile.gamertag}</b>. A commissioner grants <b>Manager</b> access and assigns your club in the League Office → Members &amp; Roles.</p></div>`
+      : `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Front Office Access</h2><p>Sign in with Discord. Managers — assigned by the commissioner — run their club's roster, game-night lineup, and trades.</p><button class="btn btn-frost" id="signInBtn2" style="margin-top:14px">Sign in with Discord</button></div>`;
+  }
+}
+document.addEventListener("click",e=>{if(e.target.closest("#mgrLogout")){e.preventDefault();signOutSb();}});
 function loadFrontOffice(){const t=teams[currentClub];
   $("#mgrName").textContent=t.name;$("#mgrBadge").innerHTML=badge(currentClub,50);
   $("#tradeMyName").textContent=t.name;$("#tradeMyBadge").innerHTML=badge(currentClub,22);
@@ -2627,7 +2637,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadClubsGm();
+    loadMembers();
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
@@ -2762,29 +2772,44 @@ async function saveGameResult(btn){
   loadGamesAdmin();loadScheduleAdmin();
 }
 
-/* ---- Clubs & GMs ---- */
-async function loadClubsGm(){
-  const el=$("#clubsGmBody");if(!el||!sb)return;
-  const {data:profs}=await sb.from("profiles").select("id,gamertag").order("gamertag");
-  const {data:tms}=await sb.from("teams").select("*").order("division").order("code");
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Division</th><th>General Manager</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
-    (tms||[]).map(t=>`<tr><td><b>${t.name}</b></td><td>${t.division}</td>
-      <td><select class="cg-gm" data-team="${t.id}"><option value="">— unassigned —</option>${(profs||[]).map(p=>`<option value="${p.id}" ${p.id===t.gm_profile_id?"selected":""}>${p.gamertag}</option>`).join("")}</select></td>
-      <td style="text-align:right"><button class="mini good cg-save" data-team="${t.id}">Save</button></td></tr>`).join("")+"</tbody></table></div>";
+/* ---- Members & Roles (grant Manager / Commissioner, assign a club) ---- */
+const ROLE_OPTS=[["member","Member"],["gm","Manager"],["commissioner","Commissioner"]];
+async function loadMembers(){
+  const el=$("#membersBody");if(!el||!sb)return;
+  const {data:profs}=await sb.from("profiles").select("id,gamertag,role").order("role",{ascending:false}).order("gamertag");
+  const {data:tms}=await sb.from("teams").select("id,code,name,gm_profile_id").order("code");
+  const clubOf={};(tms||[]).forEach(t=>{if(t.gm_profile_id)clubOf[t.gm_profile_id]=t.code;});
+  const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
+  if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Role</th><th>Club (managers only)</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
+    profs.map(p=>`<tr><td><b>${p.gamertag}</b></td>
+      <td><select class="mb-role" data-id="${p.id}">${ROLE_OPTS.map(([v,l])=>`<option value="${v}" ${v===p.role?"selected":""}>${l}</option>`).join("")}</select></td>
+      <td><select class="mb-club" data-id="${p.id}"><option value="">— none —</option>${(tms||[]).map(t=>`<option value="${t.code}" ${clubOf[p.id]===t.code?"selected":""}>${t.name}</option>`).join("")}</select></td>
+      <td style="text-align:right"><button class="mini good mb-save" data-id="${p.id}">Save</button></td></tr>`).join("")+"</tbody></table></div>";
 }
-async function saveClubGm(btn){
-  const gm=(document.querySelector('.cg-gm[data-team="'+btn.dataset.team+'"]')||{}).value||null;
-  const {error}=await sb.from("teams").update({gm_profile_id:gm}).eq("id",btn.dataset.team);
+async function saveMember(btn){
+  const id=btn.dataset.id;
+  const role=(document.querySelector('.mb-role[data-id="'+id+'"]')||{}).value;
+  const code=(document.querySelector('.mb-club[data-id="'+id+'"]')||{}).value;
+  const {error}=await sb.from("profiles").update({role}).eq("id",id);
   if(error){toast("Couldn't save",error.message);return;}
-  if(gm){await sb.from("profiles").update({role:"gm"}).eq("id",gm).eq("role","member");}
-  toast("GM saved","Club front office updated.");loadClubsGm();
+  if(role==="gm"&&code){const tid=teamIdOf(code);
+    await sb.from("teams").update({gm_profile_id:null}).eq("gm_profile_id",id).neq("id",tid);
+    await sb.from("teams").update({gm_profile_id:id}).eq("id",tid);
+  }else{
+    await sb.from("teams").update({gm_profile_id:null}).eq("gm_profile_id",id);
+  }
+  const rl=ROLE_OPTS.find(r=>r[0]===role);
+  toast("Member updated",rl[1]+(role==="gm"&&code?" · "+teams[code].name:""));
+  loadMembers();
+  const {data:tms}=await sb.from("teams").select("*");if(tms)dbTeams=tms;  // refresh so manager gate sees new assignments
 }
 $("#view-admin").addEventListener("click",e=>{
   const a=e.target.closest(".ra-assign");if(a){e.preventDefault();assignRegistration(a);return;}
   if(e.target.closest("#genScheduleBtn")){e.preventDefault();generateSchedule();return;}
   if(e.target.closest("#clearScheduleBtn")){e.preventDefault();clearSchedule();return;}
   const gs=e.target.closest(".ga-save");if(gs){e.preventDefault();saveGameResult(gs);return;}
-  const cs=e.target.closest(".cg-save");if(cs){e.preventDefault();saveClubGm(cs);return;}
+  const mb=e.target.closest(".mb-save");if(mb){e.preventDefault();saveMember(mb);return;}
 });
 $("#postNews").addEventListener("click",()=>{const t=$("#an-title").value.trim();if(!t){toast("Missing headline","Give the story a headline first.");return;}
   const id="post-"+hash(t);const body=($("#an-body").value.trim()||"Story filed by the commissioner's office.").split("\n").filter(Boolean);
