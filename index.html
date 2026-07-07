@@ -1270,7 +1270,7 @@
     <div id="admGate">
       <div class="sec-head" style="justify-content:center;text-align:center"><div><span class="eyebrow" style="justify-content:center">League Office</span><h2>Commissioner <em>Panel</em></h2></div></div>
       <div class="gate"><div class="lock"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffcf6b" stroke-width="2"><path d="M12 2l2.4 6.9H22l-6 4.6 2.3 7-6.3-4.4L5.7 20.5 8 13.5 2 8.9h7.6z"/></svg></div>
-        <h2>Commissioner Login</h2><p>League administration: approve trades, post news, edit the schedule, and manage clubs. Demo: any password works.</p>
+        <h2>Commissioner Login</h2><p>League administration: set deadlines, run the schedule, upload stats, and manage clubs and members.</p>
         <form id="admLogin"><div class="field"><label for="adm-user">Commissioner</label><input id="adm-user" value="FrostByte_Zack" /></div>
           <div class="field"><label for="adm-pass">Passcode</label><input id="adm-pass" type="password" value="commish" /></div>
           <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Enter League Office</button></form></div>
@@ -1509,7 +1509,7 @@ const rules = [
   {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>14-game</b> regular season, played Tuesday and Thursday nights at 9:00 PM ET.","Each club plays division rivals three times and cross-division opponents twice."]},
   {n:"02",t:"Standings & Points",items:["<b>2 points</b> for a win, <b>1 point</b> for an overtime or shootout loss, <b>0</b> for a regulation loss.","Ties in the standings broken by: wins, then head-to-head, then goal differential.","<b>Top three</b> from each division qualify for the Frostbyte Cup, plus <b>two wild cards</b>."]},
   {n:"03",t:"Rosters & Cap",items:["Rosters carry <b>up to 12 players</b> including two goalies.","A <b>$45M salary cap</b> applies — no lineup may exceed it on game night.","Roster lock is the <b>Sunday before Week 1</b>; in-season moves go through waivers or trade."]},
-  {n:"04",t:"Trades & Waivers",items:["Trades must be <b>cap-legal for both clubs</b> and are reviewed by the commissioners for 24 hours.","Waived players clear after <b>24 hours</b>; any club may claim in reverse standings order.","The <b>trade deadline</b> falls two weeks before the end of the regular season."]},
+  {n:"04",t:"Trades & Waivers",items:["A trade goes through <b>the moment both GMs agree</b> — no commissioner approval needed.","Either club can <b>accept, decline, or counter</b> a trade proposal.","Waived players clear waivers and enter the free-agent pool for any club to sign.","The <b>trade deadline</b> falls two weeks before the end of the regular season."]},
   {n:"05",t:"Game Night",items:["Lobbies open <b>15 minutes</b> before puck drop; lineups are due <b>30 minutes</b> prior.","A club that can't ice a full six may use <b>one approved sub</b> from the call-up pool.","<b>No-shows</b> forfeit 6-0 and lose a point of standing; repeat offenses risk removal."]},
   {n:"06",t:"Conduct",items:["Keep league chat and lobbies <b>respectful</b> — trash talk is fine, harassment is not.","<b>Rage quits</b> are logged; the score stands as a loss for the quitting club.","Commissioners have final say on disputes. Play hard, play clean, drop the puck."]}
 ];
