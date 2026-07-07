@@ -1,0 +1,11 @@
+{
+  "name": "frostbyte-hockey-league",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frostbyte Hockey League hub + free AI screenshot box-score import (Gemini → Groq fallback)",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

@@ -1,0 +1,20 @@
+# Netlify configuration for Frostbyte Hockey League
+# Static site (index.html at the root) + one serverless function for AI screenshot parsing.
+
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# The front-end calls /api/parse-screenshots; route that to the serverless function.
+[[redirects]]
+  from = "/api/parse-screenshots"
+  to = "/.netlify/functions/parse-screenshots"
+  status = 200
+
+# Basic security headers for the static site.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"

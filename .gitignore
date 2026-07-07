@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit API keys
+.env
+.env.*
+!.env.example
+
+# Netlify local state
+.netlify/
+
+# Editor / OS
+.DS_Store
+.claude/
+
+# Local reference material (not needed for the site)
+*.pdf
+
+# Logs
+*.log
+npm-debug.log*
