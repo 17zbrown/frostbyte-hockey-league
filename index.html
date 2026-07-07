@@ -1226,7 +1226,7 @@
     <div id="mgrDash" style="display:none">
       <div class="mgr-bar"><span id="mgrBadge" style="line-height:0"></span>
         <div><h2 id="mgrName">Glacier Kings</h2><small>General Manager · FrostByte_Zack</small></div>
-        <div class="cap"><div class="v" id="capSpace">$4.1M</div><small>Cap Space</small></div>
+        <div class="cap"><div class="v" id="capSpace">—</div><small>Roster</small></div>
         <button class="btn btn-ghost" id="mgrLogout">Sign Out</button></div>
       <div class="mgr-tabs">
         <button class="mgr-tab active" data-mtab="roster">Roster &amp; Waivers</button>
@@ -1235,8 +1235,8 @@
         <button class="mgr-tab" data-mtab="lineup">Game-Night Lineup</button>
         <button class="mgr-tab" data-mtab="reports">Game Reports</button>
       </div>
-      <div class="mgr-panel on" id="mtab-roster"><div class="card"><div class="card-h"><h3>Active Roster</h3><span class="pill frost" id="rosterCount">12 players</span></div>
-        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>OVR</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th>Cap Hit</th><th style="text-align:right">Action</th></tr></thead><tbody id="rosterBody"></tbody></table></div></div></div>
+      <div class="mgr-panel on" id="mtab-roster"><div class="card"><div class="card-h"><h3>Active Roster</h3><span class="pill frost" id="rosterCount"></span></div>
+        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th style="text-align:right">Action</th></tr></thead><tbody id="rosterBody"></tbody></table></div></div></div>
       <div class="mgr-panel" id="mtab-trade"><div class="card" style="padding:22px 24px">
         <div class="next-game-bar" style="margin-bottom:22px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Build a trade</b><span style="color:var(--fog);font-size:13.5px">Pick players from each side, then propose. Trades sit for 24h of league review.</span></div>
         <div class="trade-grid">
@@ -2276,8 +2276,7 @@ function loadFrontOffice(){const t=teams[currentClub];
   $("#mgrName").textContent=t.name;$("#mgrBadge").innerHTML=badge(currentClub,50);
   $("#tradeMyName").textContent=t.name;$("#tradeMyBadge").innerHTML=badge(currentClub,22);
   const lb=$("#lineupBadge");if(lb)lb.innerHTML=badge(currentClub,32);
-  const capUsed=rosters[currentClub].reduce((s,p)=>s+p[6],0);$("#capSpace").textContent="$"+(45-capUsed).toFixed(1)+"M";
-  const sel=$("#tradePartner");sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
+  const sel=$("#tradePartner");if(sel)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
   renderRoster();renderTrade();renderLineup();renderFAmgr();initGameReports(currentClub);renderReports();}
 
 /* ---- Game Reports: full per-player box score for BOTH clubs; must mirror opponent to publish ---- */
@@ -2427,34 +2426,35 @@ $("#reportsBody").addEventListener("dragover",e=>{const d=e.target.closest(".ai-
 $("#reportsBody").addEventListener("dragleave",e=>{const d=e.target.closest(".ai-drop");if(d)d.classList.remove("drag");});
 $("#reportsBody").addEventListener("drop",e=>{const d=e.target.closest(".ai-drop");if(d){e.preventDefault();d.classList.remove("drag");aiAddFiles(d.dataset.gid,e.dataTransfer.files);}});
 let rosterState=[];
-function renderRoster(){rosterState=rosters[currentClub].map(p=>({name:p[0],pos:p[1],ovr:p[2],gp:p[3],g:p[4],a:p[5],cap:p[6]}));drawRoster();}
-function drawRoster(){$("#rosterCount").textContent=rosterState.length+" / "+MAX_ROSTER+" players";
-  $("#rosterBody").innerHTML=rosterState.map((p,i)=>`<tr>
-    <td><div class="rp lk" data-go="player" data-param="${p.name}"><span class="num">${jn(p.name)}</span><div><b>${p.name}</b><small>${teams[currentClub].name}</small></div></div></td>
-    <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.ovr}</td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
-    <td style="color:var(--frost);font-weight:700">${p.g+p.a}</td><td>$${p.cap.toFixed(1)}M</td>
-    <td><div class="act"><button class="mini" data-editnum="${i}">Edit #</button><button class="mini danger" data-waive="${i}">Waive</button></div></td></tr>`).join("");
+async function renderRoster(){
+  if(!sb||!openSeason){rosterState=[];drawRoster();return;}
+  const tid=teamIdOf(currentClub);if(!tid){rosterState=[];drawRoster();return;}
+  const {data:spots}=await sb.from("roster_spots").select("id,profile_id,jersey_number,position, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+  const {data:stats}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
+  const statBy={};(stats||[]).forEach(s=>statBy[s.profile_id]=s);
+  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,name:s.profiles?s.profiles.gamertag:"?",pos:s.position,num:s.jersey_number,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
+  drawRoster();
 }
-function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();
-  const capUsed=rosters[currentClub].reduce((s,p)=>s+p[6],0);$("#capSpace").textContent="$"+(45-capUsed).toFixed(1)+"M";}
+function drawRoster(){
+  const cap=openSeason?openSeason.roster_max:12;
+  const rc=$("#rosterCount");if(rc)rc.textContent=rosterState.length+" / "+cap+" players";
+  const cs=$("#capSpace");if(cs)cs.textContent=rosterState.length+" / "+cap;
+  const body=$("#rosterBody");if(!body)return;
+  if(!rosterState.length){body.innerHTML='<tr><td colspan="7" style="padding:22px;color:var(--fog);text-align:center">No players on your roster yet. The commissioner assigns registered players to your club in the League Office.</td></tr>';return;}
+  body.innerHTML=rosterState.map((p,i)=>`<tr>
+    <td><div class="rp"><span class="num">${p.num}</span><div><b>${p.name}</b><small>${teams[currentClub].name}</small></div></div></td>
+    <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
+    <td style="color:var(--frost);font-weight:700">${p.pts}</td>
+    <td style="text-align:right"><div class="act"><button class="mini danger" data-waive="${i}">Waive</button></div></td></tr>`).join("");
+}
+function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();}
 $("#rosterBody").addEventListener("click",e=>{
-  const en=e.target.closest("[data-editnum]");
-  if(en){const p=rosterState[+en.dataset.editnum];
-    formModal("Edit "+p.name+"'s number",[{key:"num",label:"Jersey number (1–99)",type:"number",value:jn(p.name),min:1,max:99}],v=>{
-      const n=Math.max(1,Math.min(99,+v.num||1));
-      if(clubUsedNumbers(currentClub,p.name).has(n)){toast("Number taken","#"+n+" is already worn by another "+teams[currentClub].name+" player.");return;}
-      setJersey(p.name,n);refreshFrontOffice();
-      transactions.unshift(["trade",`<b>${teams[currentClub].name}</b> set ${p.pos} <b>${p.name}</b>'s number to <b>#${n}</b>`,"Just now"]);renderTxns();
-      toast("Number updated",p.name+" now wears #"+n+".");});
-    return;}
-  const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];
-  confirmModal("Waive "+p.name+"?","They clear waivers and move straight into the free-agent pool, where any club can sign them.","Waive Player",()=>{
-    const idx=rosters[currentClub].findIndex(r=>r[0]===p.name);if(idx>-1)rosters[currentClub].splice(idx,1);
-    freeAgents.push([p.name,p.pos,p.ovr,p.gp,p.g,p.a,p.cap]);
-    if(playersById[p.name]){playersById[p.name].team=null;playersById[p.name].fa=true;}
-    refreshFrontOffice();renderFA();
-    transactions.unshift(["waive",`<b>${teams[currentClub].name}</b> waived ${p.pos} <b>${p.name}</b> — now a free agent`,"Just now"]);renderTxns();
-    toast("Player waived",p.name+" moved to the free-agent pool.");});});
+  const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
+  confirmModal("Waive "+p.name+"?","They're removed from your roster and become a free agent the commissioner can reassign.","Waive Player",async()=>{
+    const {error}=await sb.from("roster_spots").delete().eq("id",p.spotId);
+    if(error){toast("Couldn't waive",error.message);return;}
+    if(openSeason)await sb.from("transactions").insert({season_id:openSeason.id,type:"waive",description:teams[currentClub].name+" waived "+p.pos+" <b>"+p.name+"</b>"});
+    toast("Player waived",p.name+" is off your roster.");renderRoster();});});
 // trade
 let tradeSel={mine:new Set(),theirs:new Set()};
 function tradeCard(list,side){return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${jn(p[0])}</span><b>${p[0]}</b><small>${p[1]} · ${p[2]}</small></div>`).join("");}
