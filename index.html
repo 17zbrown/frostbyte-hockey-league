@@ -1182,7 +1182,7 @@
     <div class="signup-grid">
       <form class="form-card" id="signupForm">
         <div id="signupAuthBanner"></div>
-        <div class="field"><label for="su-gamer">Gamertag / PSN ID</label><input id="su-gamer" required placeholder="e.g. FrostByte_Zack" /></div>
+        <div class="field"><label for="su-gamer">EA ID</label><input id="su-gamer" required placeholder="Your EA account name (used to invite you to a club)" /></div>
         <div class="field"><label>Primary Position</label><div class="pos-pick">
           <label><input type="radio" name="pos" value="C" checked /><span>Center</span></label>
           <label><input type="radio" name="pos" value="W" /><span>Wing</span></label>
@@ -2209,7 +2209,7 @@ function renderSignupAuth(){
   const hdr=document.querySelector("#view-signup .sec-head h2 em");if(hdr&&openSeason)hdr.textContent="Season "+openSeason.number;
   const gl=document.querySelector("#signupGlanceTitle");if(gl&&openSeason)gl.textContent="Season "+openSeason.number+" At A Glance";
   if(authProfile){
-    const g=document.querySelector("#su-gamer");if(g&&!g.value)g.value=authProfile.gamertag;
+    const g=document.querySelector("#su-gamer");if(g&&!g.value&&myRegistration&&myRegistration.ea_id)g.value=myRegistration.ea_id;
     const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+authProfile.gamertag+".");
     b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${authProfile.gamertag}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div></div></div>`;
   }else{
@@ -2226,7 +2226,9 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
   if(!openSeason){toast("Registration closed","No season is open for registration right now.");return;}
   const pos=(document.querySelector('input[name="pos"]:checked')||{}).value||"C";
   const prefNum=Math.max(0,Math.min(99,parseInt($("#su-num").value,10)||0))||null;
-  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,note:($("#su-note").value||"").trim()||null};
+  const eaId=($("#su-gamer").value||"").trim();
+  if(!eaId){toast("EA ID required","Enter your EA account name so we can invite you to a club.");return;}
+  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,ea_id:eaId,note:($("#su-note").value||"").trim()||null};
   const {error}=await sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(error){toast("Couldn't register",error.message);return;}
   myRegistration=payload;renderSignupAuth();
