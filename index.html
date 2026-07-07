@@ -888,6 +888,12 @@
   /* BOXY headers — tighter tracking, heavier condensed */
   .sec-head h2,.hero h1,.team-banner h2,.ph-info h2,.rule-sec h3,.gate h2,.mgr-bar h2{font-weight:800;letter-spacing:0}
   .sec-head h2 em{color:var(--frost)}
+  /* Empty / pre-season states */
+  .empty-note{padding:13px 16px;margin-bottom:14px;border:1px solid #cbdeeb;border-left:3px solid var(--frost);border-radius:7px;background:linear-gradient(120deg,#eef6fc,#fff);color:var(--navy);font-size:13.5px;line-height:1.5}
+  .empty-state{text-align:center;padding:46px 24px;color:var(--fog)}
+  .empty-state .es-ic{width:46px;height:46px;border-radius:12px;background:var(--panel-2);display:grid;place-items:center;margin:0 auto 14px;color:var(--frost)}
+  .empty-state h4{font-family:var(--f-cond);font-weight:600;font-size:17px;letter-spacing:.02em;color:var(--navy);margin-bottom:6px}
+  .empty-state p{max-width:42ch;margin:0 auto;font-size:13.5px}
   /* Auth slot in the nav */
   .auth-slot{display:flex;align-items:center;gap:8px}
   #signupAuthBanner{margin-bottom:16px}
@@ -1019,9 +1025,9 @@
 
   <!-- STANDINGS -->
   <div class="view" id="view-standings"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Season 4 · Regular Season</span><h2>League <em>Standings</em></h2>
-      <p>Two points a win, one for an overtime loss. Top three from each division make the Frostbyte Cup playoffs — line marks the cut.</p></div>
-      <span class="pill frost">Updated after Week 7</span></div>
+    <div class="sec-head"><div><span class="eyebrow" id="standingsEyebrow">Season 1 · Regular Season</span><h2>League <em>Standings</em></h2>
+      <p>Two points a win, one for an overtime loss. Top three from each division make the Frostbyte Cup playoffs.</p></div>
+      <span class="pill frost" id="standingsPill">Pre-season</span></div>
     <div class="card"><div id="fullStandings"></div></div>
   </div></section></div>
 
@@ -1679,23 +1685,37 @@ function buildNav(){
 }
 
 /* ------------------------------ STANDINGS ------------------------------ */
+let liveStandings=[];
+function initEmptyStandings(){liveStandings=TEAM_KEYS.map(c=>[c,0,0,0,0,0,0,"—"]);}
+async function loadStandings(){
+  if(!sb||!openSeason||!dbTeams.length){if(!liveStandings.length)initEmptyStandings();return;}
+  const idToCode={};dbTeams.forEach(t=>idToCode[t.id]=t.code);
+  let rows=[];try{const {data}=await sb.from("team_standings").select("*").eq("season_id",openSeason.id);rows=data||[];}catch(e){}
+  const byCode={};rows.forEach(r=>{const c=idToCode[r.team_id];if(c)byCode[c]=r;});
+  liveStandings=TEAM_KEYS.map(c=>{const r=byCode[c]||{};return [c,r.gp||0,r.wins||0,r.losses||0,r.otl||0,r.gf||0,r.ga||0,"—"];});
+}
 function standRow(r,rank,cut){
-  const [code,gp,w,l,otl,gf,ga]=r;const t=teams[code];const strk=r[7];const sc=strk[0]==="W"?"w":"l";
+  const [code,gp,w,l,otl,gf,ga]=r;const t=teams[code];const strk=r[7]||"—";const sc=strk[0]==="W"?"w":(strk[0]==="L"?"l":"");
   return `<tr class="rowlink${cut?' playoff-cut':''}" data-go="team" data-param="${code}">
     <td class="team"><div class="team-cell"><span class="rank mono">${rank}</span>${badge(code,26)}<div><b>${t.name}</b><small>${t.div} Division</small></div></div></td>
     <td>${gp}</td><td>${w}</td><td>${l}</td><td>${otl}</td><td>${gf}</td><td>${ga}</td><td>${gf-ga>0?"+":""}${gf-ga}</td>
     <td class="strk ${sc}">${strk}</td><td class="pts">${pts(r)}</td></tr>`;
 }
 function renderStandings(el,full){
+  if(!liveStandings.length)initEmptyStandings();
+  const rows=liveStandings;const noGames=rows.every(r=>(r[1]||0)===0);
   const head=`<table class="tbl"><thead><tr><th class="team">Club</th><th>GP</th><th>W</th><th>L</th><th>OTL</th><th>GF</th><th>GA</th><th>DIFF</th><th>STRK</th><th>PTS</th></tr></thead>`;
-  if(!full){const sorted=[...standings].sort((a,b)=>pts(b)-pts(a));
+  if(!full){const sorted=[...rows].sort((a,b)=>pts(b)-pts(a));
     el.innerHTML=head+"<tbody>"+sorted.map((r,i)=>standRow(r,i+1,false)).join("")+"</tbody></table>";return;}
+  const ey=document.querySelector("#standingsEyebrow");if(ey&&openSeason)ey.textContent="Season "+openSeason.number+" · Regular Season";
+  const pl=document.querySelector("#standingsPill");if(pl)pl.textContent=noGames?"Pre-season":"Live";
+  const note=noGames?`<div class="empty-note">Season ${openSeason?openSeason.number:1} hasn't dropped the puck yet — standings update automatically as game results are reported.</div>`:"";
   let html=head+"<tbody>";
   ["Frost","Byte"].forEach(div=>{
     html+=`<tr><td colspan="10" class="divlabel">${div} Division</td></tr>`;
-    const d=standings.filter(r=>teams[r[0]].div===div).sort((a,b)=>pts(b)-pts(a));
-    html+=d.map((r,i)=>standRow(r,i+1,i===2)).join("");});
-  el.innerHTML=html+"</tbody></table>";
+    const d=rows.filter(r=>teams[r[0]].div===div).sort((a,b)=>pts(b)-pts(a));
+    html+=d.map((r,i)=>standRow(r,i+1,false)).join("");});
+  el.innerHTML=note+html+"</tbody></table>";
 }
 
 /* ------------------------------ FIXTURES / RESULTS ------------------------------ */
@@ -2144,6 +2164,8 @@ async function sbInit(){
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
     dbTeams=tms||[];
+    await loadStandings();
+    renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
   }catch(err){console.warn("Supabase public load failed:",err&&err.message);}
   const {data:{session}}=await sb.auth.getSession();
   await setAuth(session);
@@ -2676,6 +2698,7 @@ buildNav();
 $("#sbHome").innerHTML=badge("GLK",34);$("#sbAway").innerHTML=badge("FBV",34);
 renderHeroWatch();
 renderHeroCarousel();wireHeroControls();
+initEmptyStandings();
 renderStandings($("#homeStandings"),false);
 renderStandings($("#fullStandings"),true);
 renderFixtures();
