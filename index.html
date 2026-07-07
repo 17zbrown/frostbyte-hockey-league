@@ -900,6 +900,7 @@
   .rink-empty p{color:var(--fog);font-size:13.5px;max-width:38ch;margin:6px 0 4px;line-height:1.55}
   .rink-cta{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:16px 0 22px}
   .rink-empty .twitch-bar{width:100%;border:1px solid var(--line);border-radius:8px;margin-top:6px}
+  .se-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-family:var(--f-cond);font-weight:600;font-size:13.5px;letter-spacing:.02em;color:var(--navy);text-transform:uppercase}
   /* Auth slot in the nav */
   .auth-slot{display:flex;align-items:center;gap:8px}
   #signupAuthBanner{margin-bottom:16px}
@@ -1267,20 +1268,14 @@
 
   <!-- ADMIN -->
   <div class="view" id="view-admin"><section class="pad"><div class="wrap">
-    <div id="admGate">
-      <div class="sec-head" style="justify-content:center;text-align:center"><div><span class="eyebrow" style="justify-content:center">League Office</span><h2>Commissioner <em>Panel</em></h2></div></div>
-      <div class="gate"><div class="lock"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffcf6b" stroke-width="2"><path d="M12 2l2.4 6.9H22l-6 4.6 2.3 7-6.3-4.4L5.7 20.5 8 13.5 2 8.9h7.6z"/></svg></div>
-        <h2>Commissioner Login</h2><p>League administration: set deadlines, run the schedule, upload stats, and manage clubs and members.</p>
-        <form id="admLogin"><div class="field"><label for="adm-user">Commissioner</label><input id="adm-user" value="FrostByte_Zack" /></div>
-          <div class="field"><label for="adm-pass">Passcode</label><input id="adm-pass" type="password" value="commish" /></div>
-          <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Enter League Office</button></form></div>
-    </div>
+    <div class="sec-head" style="justify-content:center;text-align:center"><div><span class="eyebrow" style="justify-content:center">League Office</span><h2>Commissioner <em>Panel</em></h2></div></div>
+    <div id="admGate"></div>
     <div id="admDash" style="display:none">
       <div class="mgr-bar"><span class="bd" style="background:#ffcf6b"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#04161c" stroke-width="2"><path d="M12 2l2.4 6.9H22l-6 4.6 2.3 7-6.3-4.4L5.7 20.5 8 13.5 2 8.9h7.6z"/></svg></span>
-        <div><h2>League Office</h2><small>Commissioner · Season 4</small></div>
+        <div><h2>League Office</h2><small id="admSeasonLabel">Commissioner</small></div>
         <button class="btn btn-ghost" id="admLogout" style="margin-left:auto">Sign Out</button></div>
       <div class="mgr-tabs">
-        <button class="mgr-tab active" data-atab="approvals">Pending Approvals</button>
+        <button class="mgr-tab active" data-atab="season">Season &amp; Deadlines</button>
         <button class="mgr-tab" data-atab="games">Game Control</button>
         <button class="mgr-tab" data-atab="clubs">Clubs</button>
         <button class="mgr-tab" data-atab="rosters">Rosters &amp; Players</button>
@@ -1288,7 +1283,9 @@
         <button class="mgr-tab" data-atab="news">News &amp; Content</button>
         <button class="mgr-tab" data-atab="schedule">Schedule</button>
       </div>
-      <div class="mgr-panel on" id="atab-approvals"><div class="card"><div class="card-h"><h3>Pending Trades &amp; Claims</h3><span class="pill live" id="pendCount">3 pending</span></div><div id="approvalsBody"></div></div></div>
+      <div class="mgr-panel on" id="atab-season"><div class="card"><div class="card-h"><h3>Season &amp; Deadlines</h3><span class="pill" id="seasonStatusPill"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Set the key dates for the season — registration, team-owner applications, draft night, and start/finish. Toggle registration open or closed.</div>
+        <div id="seasonAdminBody" style="padding:16px 20px 22px"></div></div></div>
       <div class="mgr-panel" id="atab-news"><div class="card" style="padding:24px 26px"><div class="field"><label for="an-title">Headline</label><input id="an-title" placeholder="Kings clinch top seed with OT thriller" /></div>
         <div class="field"><div class="row2"><div><label for="an-cat">Category</label><select id="an-cat"><option>Game Recap</option><option>Trade Buzz</option><option>Feature</option><option>League News</option></select></div>
           <div><label for="an-author">Byline</label><input id="an-author" value="Frostbyte Post" /></div></div></div>
@@ -1647,6 +1644,7 @@ function go(view,param){
   if(view==="team")renderTeamPage(param);
   if(view==="player")renderPlayerPage(param);
   if(view==="article")renderArticle(param);
+  if(view==="admin"&&typeof renderCommissioner==="function")renderCommissioner();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
 }
@@ -2201,6 +2199,7 @@ function renderAuthUI(){
     }
   }
   renderSignupAuth();
+  renderCommissioner();
 }
 function renderSignupAuth(){
   const b=document.querySelector("#signupAuthBanner");if(!b)return;
@@ -2605,19 +2604,60 @@ $("#newsManageBody").addEventListener("click",e=>{
     confirmModal("Delete story?","\""+n.title+"\" will be pulled from the News page.","Delete",()=>{
       news.splice(i,1);renderNews();renderNewsManage();toast("Story deleted","Removed from the wire.");});return;}});
 
-$("#admLogin").addEventListener("submit",e=>{e.preventDefault();$("#admGate").style.display="none";$("#admDash").style.display="block";
-  renderApprovals();renderClubs();initGameControl();renderGameControl();renderFeatures();renderPlayersEdit();renderNewsManage();fillClubSelect($("#sc-home"));fillClubSelect($("#sc-away"));$("#sc-away").selectedIndex=1;
-  toast("League office unlocked","Signed in as commissioner.");});
-$("#admLogout").addEventListener("click",()=>{$("#admDash").style.display="none";$("#admGate").style.display="block";});
-function renderApprovals(){$("#pendCount").textContent=pendingApprovals.length+" pending";
-  if(!pendingApprovals.length){$("#approvalsBody").innerHTML='<div class="txn"><div class="tx-body"><div class="tx-desc" style="color:var(--fog)">No pending items. All caught up. 🧊</div></div></div>';return;}
-  const ic={trade:'⇄',waive:'✕',sign:'✓'};
-  $("#approvalsBody").innerHTML=pendingApprovals.map((a,i)=>`<div class="txn"><div class="ic ${a.type}">${ic[a.type]}</div>
-    <div class="tx-body"><div class="tx-desc">${a.desc}</div><div class="tx-type" style="text-transform:none;letter-spacing:0;color:var(--fog-dim);margin-top:4px">${a.meta}</div></div>
-    <div class="act" style="align-self:center"><button class="mini good" data-approve="${i}">Approve</button><button class="mini danger" data-reject="${i}">Reject</button></div></div>`).join("");}
-$("#approvalsBody").addEventListener("click",e=>{const a=e.target.closest("[data-approve]"),r=e.target.closest("[data-reject]");
-  if(a){const i=+a.dataset.approve;const item=pendingApprovals.splice(i,1)[0];transactions.unshift([item.type,item.desc+" — <b>approved</b>","Just now"]);renderTxns();renderApprovals();toast("Approved","Transaction posted to the wire.");}
-  if(r){const i=+r.dataset.reject;pendingApprovals.splice(i,1);renderApprovals();toast("Rejected","The submitting GM has been notified.");}});
+/* ===== COMMISSIONER: real Discord-auth gating + Season & Deadlines ===== */
+const STAR_SVG=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffcf6b" stroke-width="2"><path d="M12 2l2.4 6.9H22l-6 4.6 2.3 7-6.3-4.4L5.7 20.5 8 13.5 2 8.9h7.6z"/></svg>`;
+let adminSeason=null;
+function renderCommissioner(){
+  const gate=$("#admGate"),dash=$("#admDash");if(!gate||!dash)return;
+  if(authProfile&&authProfile.role==="commissioner"){
+    gate.style.display="none";gate.innerHTML="";dash.style.display="block";
+    loadSeasonAdmin();
+    try{renderClubs();initGameControl();renderGameControl();renderFeatures();renderPlayersEdit();renderNewsManage();fillClubSelect($("#sc-home"));fillClubSelect($("#sc-away"));$("#sc-away").selectedIndex=1;}catch(e){}
+  }else{
+    dash.style.display="none";gate.style.display="block";
+    gate.innerHTML=authProfile
+      ? `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioners only</h2><p>You're signed in as <b>${authProfile.gamertag}</b> (${authProfile.role}). The League Office is limited to league commissioners.</p></div>`
+      : `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioner access</h2><p>Sign in with Discord to enter the League Office — only league commissioners can access it.</p><button class="btn btn-frost" id="signInBtn2" style="margin-top:14px">Sign in with Discord</button></div>`;
+  }
+}
+function dtLocal(ts){if(!ts)return "";const d=new Date(ts);const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;}
+async function loadSeasonAdmin(){
+  if(!sb)return;
+  const {data}=await sb.from("seasons").select("*").order("number",{ascending:false}).limit(1).maybeSingle();
+  adminSeason=data||null;renderSeasonAdmin();
+}
+function renderSeasonAdmin(){
+  const el=$("#seasonAdminBody");if(!el)return;const s=adminSeason;
+  if(!s){el.innerHTML='<div class="empty-note">No season found.</div>';return;}
+  const lbl=$("#admSeasonLabel");if(lbl)lbl.textContent="Commissioner · Season "+s.number;
+  const pill=$("#seasonStatusPill");if(pill)pill.textContent=s.registration_open?"Registration open":(s.status[0].toUpperCase()+s.status.slice(1));
+  const dl=[["se-regdl","Registration deadline",s.registration_deadline],["se-ownerdl","Team-owner application deadline",s.owner_app_deadline],["se-draft","Draft night",s.draft_at],["se-start","Season start",s.starts_at],["se-end","Season finish",s.ends_at]];
+  el.innerHTML=`
+    <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-bottom:6px">
+      <div class="ef-row"><label>Season status</label><select id="se-status">${["upcoming","active","complete"].map(x=>`<option value="${x}" ${x===s.status?"selected":""}>${x[0].toUpperCase()+x.slice(1)}</option>`).join("")}</select></div>
+      <div class="ef-row"><label>Roster cap</label><input id="se-cap" type="number" min="1" max="30" value="${s.roster_max}"></div>
+    </div>
+    <label class="se-toggle"><span>Registration open</span><span class="switch"><input type="checkbox" id="se-regopen" ${s.registration_open?"checked":""}><span class="track"></span><span class="knob"></span></span></label>
+    <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-top:6px">
+      ${dl.map(([id,lab,val])=>`<div class="ef-row"><label for="${id}">${lab}</label><input id="${id}" type="datetime-local" value="${dtLocal(val)}"></div>`).join("")}
+    </div>
+    <button class="btn btn-frost" id="saveSeasonBtn" style="margin-top:18px">Save Season Settings</button>`;
+}
+async function saveSeason(){
+  if(!sb||!adminSeason)return;
+  const iso=id=>{const v=($("#"+id)||{}).value;return v?new Date(v).toISOString():null;};
+  const payload={status:$("#se-status").value,roster_max:Math.max(1,Math.min(30,+$("#se-cap").value||12)),registration_open:$("#se-regopen").checked,
+    registration_deadline:iso("se-regdl"),owner_app_deadline:iso("se-ownerdl"),draft_at:iso("se-draft"),starts_at:iso("se-start"),ends_at:iso("se-end")};
+  const {error}=await sb.from("seasons").update(payload).eq("id",adminSeason.id);
+  if(error){toast("Couldn't save",error.message);return;}
+  Object.assign(adminSeason,payload);if(adminSeason.registration_open)openSeason=adminSeason;
+  renderSeasonAdmin();renderSignupAuth();
+  toast("Season saved","Deadlines and settings are updated.");
+}
+document.addEventListener("click",e=>{
+  if(e.target.closest("#admLogout")){e.preventDefault();signOutSb();}
+  else if(e.target.closest("#saveSeasonBtn")){e.preventDefault();saveSeason();}
+});
 $("#postNews").addEventListener("click",()=>{const t=$("#an-title").value.trim();if(!t){toast("Missing headline","Give the story a headline first.");return;}
   const id="post-"+hash(t);const body=($("#an-body").value.trim()||"Story filed by the commissioner's office.").split("\n").filter(Boolean);
   news.unshift({id,cat:$("#an-cat").value,title:t,excerpt:body[0].slice(0,140),author:$("#an-author").value||"Frostbyte Post",date:"Just now",body});
