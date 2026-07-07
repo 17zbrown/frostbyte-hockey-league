@@ -1190,9 +1190,6 @@
       <form class="form-card" id="signupForm">
         <div id="signupAuthBanner"></div>
         <div class="field"><label for="su-gamer">Gamertag / PSN ID</label><input id="su-gamer" required placeholder="e.g. FrostByte_Zack" /></div>
-        <div class="field"><div class="row2">
-          <div><label for="su-name">Full Name</label><input id="su-name" required placeholder="Zack Brown" /></div>
-          <div><label for="su-email">Email</label><input id="su-email" type="email" required placeholder="you@email.com" /></div></div></div>
         <div class="field"><label>Primary Position</label><div class="pos-pick">
           <label><input type="radio" name="pos" value="C" checked /><span>Center</span></label>
           <label><input type="radio" name="pos" value="W" /><span>Wing</span></label>
@@ -1201,7 +1198,6 @@
         <div class="field"><div class="row2">
           <div><label for="su-num">Jersey Number</label><input id="su-num" type="number" min="1" max="99" placeholder="Pick your number (1–99)" /></div>
           <div><label for="su-plat">Platform</label><select id="su-plat"><option>PlayStation 5</option><option>Xbox Series X|S</option></select></div></div></div>
-        <div class="field"><label for="su-entry">Entry Type</label><select id="su-entry"><option>Free Agent (draft pool)</option><option>Full Club</option><option>Substitute / Call-up</option></select></div>
         <div class="field"><label for="su-note">Anything the commissioners should know?</label><textarea id="su-note" rows="3" placeholder="Availability, preferred club, past leagues…"></textarea></div>
         <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Registration</button>
       </form>
@@ -2204,7 +2200,7 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
   if(!openSeason){toast("Registration closed","No season is open for registration right now.");return;}
   const pos=(document.querySelector('input[name="pos"]:checked')||{}).value||"C";
   const prefNum=Math.max(0,Math.min(99,parseInt($("#su-num").value,10)||0))||null;
-  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,entry_type:$("#su-entry").value,note:($("#su-note").value||"").trim()||null};
+  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,note:($("#su-note").value||"").trim()||null};
   const {error}=await sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(error){toast("Couldn't register",error.message);return;}
   myRegistration=payload;renderSignupAuth();
