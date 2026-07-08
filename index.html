@@ -1354,154 +1354,8 @@ function buildTeams(){
     TEAM_KEYS.push(t.code);
   });
 }
-const MAX_ROSTER = 12;     // clubs carry up to 12 players
-let seasonActive = true;   // Season 4 is underway — games have started
 
 // standings: code, gp, w, l, otl, gf, ga, streak
-const standings = [
-  ["GLK",15,11,3,1,68,41,"W4"],["TUN",15,9,5,1,59,49,"W1"],["POL",15,8,6,1,54,52,"L2"],["AUR",15,5,9,1,44,60,"L1"],
-  ["FBV",15,9,4,2,63,45,"W2"],["CBR",15,8,5,2,57,50,"W3"],["ICE",15,6,7,2,50,55,"L1"],["YET",15,4,10,1,40,68,"L3"]
-];
-const standBy = {}; standings.forEach(r=>standBy[r[0]]=r);
-
-// rosters: [name, pos, ovr, gp, g, a, cap(M)]
-const rosters = {
-  GLK:[["FrostByte_Zack","C",89,15,14,17,3.8],["Wallz","G",91,15,0,1,5.2],["Sniper_Jo","W",86,15,11,9,2.9],["BlueLineBri","D",84,15,3,14,3.1],["Kowalik","C",82,15,8,7,2.2],["T_Rex","D",81,15,2,9,2.0],["Halvorsen","W",80,15,6,6,1.8],["Mendez","D",79,14,1,7,1.6],["QuickStick","W",78,13,5,4,1.3],["Odin_G","G",80,4,0,0,1.1],["Rookie_Vex","W",74,9,2,3,0.9],["Palermo","D",76,11,0,4,1.0]],
-  TUN:[["Nyx","C",87,15,9,16,4.0],["Puckett","G",85,15,0,0,3.6],["Grendel","D",83,15,4,8,2.7],["Fox_88","W",82,15,10,5,2.5],["Ravin","W",80,15,7,6,1.9],["Stonewall","D",81,15,1,10,2.1],["Kessler","C",78,15,5,5,1.5],["Novak_D","D",76,14,1,4,1.2],["Rime","W",75,13,4,3,1.0]],
-  POL:[["Bauer_D","C",86,15,11,12,3.9],["Cage","G",84,15,0,1,3.4],["Ice_Trey","D",82,15,5,7,2.4],["Vlk","W",80,15,8,4,1.8],["North_9","C",79,15,6,7,1.6],["Barrow","D",78,15,2,6,1.4],["Sable","W",77,15,5,4,1.2],["Pike_G","G",78,3,0,0,0.9],["Odell","D",75,12,0,3,0.9]],
-  AUR:[["Solberg","C",83,15,7,6,2.8],["Netminder_X","G",82,15,0,0,3.0],["Frost_E","D",80,15,3,5,1.9],["Kite","W",78,15,5,4,1.5],["Lund","W",77,15,6,3,1.3],["Aksel_D","D",76,15,1,5,1.1],["Bly","C",74,14,3,3,0.9]],
-  FBV:[["Marek","C",88,15,12,16,4.2],["Iron_Mike","G",89,15,0,0,4.6],["Venom_7","W",84,15,10,6,2.8],["ColdSnap","D",83,15,4,9,2.6],["Basher","C",81,15,8,5,2.0],["Wraith","D",80,15,2,7,1.7],["Fang","W",78,15,6,4,1.4],["Sly_D","D",76,14,1,4,1.1],["Cobra_J","W",75,13,4,3,1.0]],
-  CBR:[["Toews99","C",87,15,15,11,4.1],["Zero","G",86,15,0,0,3.9],["Volt","W",83,15,9,7,2.5],["Circuit_D","D",82,15,3,8,2.3],["Amp","C",80,15,6,5,1.7],["Relay","D",78,15,1,6,1.4],["Surge","W",77,15,5,4,1.2],["Ohm_D","D",75,13,0,3,0.9],["Diode","W",74,12,3,2,0.8]],
-  ICE:[["Slapshot","W",84,15,10,5,3.0],["Gloves","G",83,15,0,1,3.2],["Midnight_D","D",81,15,2,7,2.1],["Hawk_11","C",79,15,7,4,1.6],["Dusk","W",77,15,5,4,1.3],["Talon_D","D",76,15,1,5,1.1],["Moor","C",74,14,3,3,0.9]],
-  YET:[["Boulder","C",81,15,8,4,2.4],["Avalanche","G",80,15,0,0,2.8],["Yeti_D","D",79,15,1,5,1.5],["Frostjaw","W",77,15,5,3,1.2],["Granite","D",76,15,2,4,1.0],["Blizz","W",75,15,4,3,0.9],["Cairn","C",73,14,2,2,0.8]]
-};
-
-// free agents pool: [name, pos, ovr, gp, g, a, asking(M)] — grows as players are waived/unassigned
-let freeAgents = [
-  ["Volkov","C",81,14,9,8,2.3],["Sten_G","G",80,12,0,0,2.6],["Rourke","D",79,15,3,7,2.0],
-  ["Ash_9","W",78,13,7,5,1.7],["Delacroix","W",77,14,6,6,1.5],["Byte_King","D",76,15,2,6,1.3],
-  ["Nordin","C",75,12,4,5,1.1],["Frost_Jr","W",74,10,3,2,0.9],["Kaz_G","G",76,6,0,0,1.0],["Petrov","D",73,13,1,4,0.8]
-];
-
-// draft prospects: [name, pos, ovr, note]
-const draftProspects = [
-  ["Kai Sorensen","C",84,"Two-way pivot, elite vision"],["Dmitri Volkov","D",83,"Puck-mover, quarterbacks a power play"],
-  ["Leo Frost","G",82,"Calm crease presence, tracks pucks well"],["Ty Mercer","W",81,"Pure sniper, heavy release"],
-  ["Anders Wiik","C",80,"Faceoff monster, penalty-kill ace"],["Rhys Calder","D",79,"Shutdown D, blocks everything"],
-  ["Milo Sato","W",78,"Speed merchant on the wing"],["Bruno Salta","D",77,"Mean, physical, first pass"],
-  ["Enzo Ray","W",76,"Net-front presence, tips and screens"],["Nils Berg","G",75,"Athletic backup upside"]
-];
-
-// results (recent) & fixtures (upcoming)
-const results = [["GLK",4,"AUR",2],["FBV",3,"YET",1],["CBR",5,"ICE",2],["TUN",2,"POL",3]];
-const fixtures = [["GLK","FBV","Thu 9:00 ET"],["TUN","CBR","Thu 9:00 ET"],["POL","ICE","Tue 9:00 ET"],["AUR","YET","Tue 9:00 ET"]];
-
-// schedule with box-score detail on finals
-let schedule = [
-  {wk:"Week 8 · This Week",games:[
-    {a:"GLK",b:"FBV",t:"Thu · 9:00 PM ET"},{a:"TUN",b:"CBR",t:"Thu · 9:00 PM ET"},
-    {a:"POL",b:"ICE",t:"Tue · 9:00 PM ET"},{a:"AUR",b:"YET",t:"Tue · 9:00 PM ET"}]},
-  {wk:"Week 7 · Final",games:[
-    {a:"GLK",as:4,b:"AUR",bs:2,scorers:{GLK:["FrostByte_Zack (2)","Sniper_Jo","Kowalik"],AUR:["Solberg","Kite"]},goalies:{GLK:["Wallz — 28 sv, .933"],AUR:["Netminder_X — 31 sv, .886"]},shots:[34,30]},
-    {a:"FBV",as:3,b:"YET",bs:1,scorers:{FBV:["Marek","Venom_7","Basher"],YET:["Boulder"]},goalies:{FBV:["Iron_Mike — 22 sv, .957"],YET:["Avalanche — 33 sv, .917"]},shots:[25,23]},
-    {a:"CBR",as:5,b:"ICE",bs:2,scorers:{CBR:["Toews99 (2)","Volt","Amp","Surge"],ICE:["Slapshot","Hawk_11"]},goalies:{CBR:["Zero — 24 sv, .923"],ICE:["Gloves — 29 sv, .853"]},shots:[34,26]},
-    {a:"TUN",as:2,b:"POL",bs:3,scorers:{TUN:["Nyx","Fox_88"],POL:["Bauer_D (2)","Vlk"]},goalies:{TUN:["Puckett — 27 sv, .900"],POL:["Cage — 26 sv, .929"]},shots:[28,30]}]},
-  {wk:"Week 6 · Final",games:[
-    {a:"GLK",as:3,b:"CBR",bs:2,scorers:{GLK:["Kowalik","FrostByte_Zack","Halvorsen"],CBR:["Toews99","Volt"]},goalies:{GLK:["Wallz — 30 sv, .938"],CBR:["Zero — 25 sv, .893"]},shots:[27,32]},
-    {a:"POL",as:1,b:"FBV",bs:4,scorers:{POL:["North_9"],FBV:["Marek (2)","Venom_7","Fang"]},goalies:{POL:["Cage — 26 sv, .867"],FBV:["Iron_Mike — 21 sv, .955"]},shots:[22,30]},
-    {a:"ICE",as:2,b:"TUN",bs:3,scorers:{ICE:["Slapshot","Dusk"],TUN:["Nyx (2)","Ravin"]},goalies:{ICE:["Gloves — 28 sv, .903"],TUN:["Puckett — 25 sv, .926"]},shots:[27,31]},
-    {a:"YET",as:2,b:"AUR",bs:5,scorers:{YET:["Boulder","Frostjaw"],AUR:["Kite (2)","Solberg","Lund","Bly"]},goalies:{YET:["Avalanche — 24 sv, .828"],AUR:["Netminder_X — 22 sv, .917"]},shots:[24,29]}]}
-];
-
-// transactions: [type, desc, date]
-let transactions = [
-  ["trade","<b>Circuit Breakers</b> acquire D <b>Rourke</b> from free agency for a 3rd-round pick","W7 · Thu"],
-  ["waive","<b>Steel Yetis</b> placed W <b>Cairn</b> on waivers","W7 · Wed"],
-  ["sign","<b>Aurora Blades</b> signed C <b>Bly</b> to a 1-season deal","W7 · Tue"],
-  ["callup","<b>Polar Reign</b> called up G <b>Pike_G</b> from the sub pool","W6 · Sun"],
-  ["trade","<b>Tundra Wolves</b> traded W <b>Rime</b> to <b>Midnight Icehawks</b> for D <b>Talon_D</b>","W6 · Thu"],
-  ["waive","<b>Frostbite Vipers</b> waived W <b>Cobra_J</b>; cleared and re-signed","W6 · Wed"],
-  ["sign","<b>Glacier Kings</b> signed W <b>Rookie_Vex</b> off the combine list","W5 · Mon"],
-  ["callup","<b>Circuit Breakers</b> called up D <b>Diode</b> for injury cover","W5 · Sun"]
-];
-
-// power rankings: [code, prevRank, blurb]
-const powerRankings = [
-  ["GLK",1,"Four straight and the league's best goal differential. Wallz is stealing games."],
-  ["FBV",2,"Iron_Mike is a wall. The only club that can trade punches with the Kings."],
-  ["CBR",4,"Toews99 is on a heater — Voltage City's power play is humming at 27%."],
-  ["TUN",3,"Cooled off after a hot start but Nyx keeps the offense dangerous."],
-  ["POL",5,"Bauer_D drags them into every game. Goaltending is the swing factor."],
-  ["ICE",6,"Slapshot carrying the load; the blue line needs to tighten up."],
-  ["AUR",7,"Young and inconsistent, but the Blades' upside showed in a 5-2 romp."],
-  ["YET",8,"Rebuild mode. Avalanche faces the most rubber in the league nightly."]
-];
-
-// awards: [name, sub, leaderName, statLine]
-const awards = [
-  ["Frostbyte MVP","Most Valuable Player","FrostByte_Zack","31 PTS · 14G 17A"],
-  ["Golden Blade","Top Goal Scorer","Toews99","15 Goals"],
-  ["The Playmaker","Most Assists","Nyx","16 Assists"],
-  ["Iron Mask","Best Goaltender","Iron_Mike",".924 SV%"],
-  ["Blue-Line Award","Top Defenseman","BlueLineBri","17 PTS from D"],
-  ["Rookie of the Year","Top First-Season Player","Rookie_Vex","5 PTS in 9 GP"]
-];
-
-const recordsGame = [
-  ["Most goals, one game","6","Toews99 · S3"],["Most points, one game","7","Marek · S2"],
-  ["Most assists, one game","5","Nyx · S4"],["Most saves, one game","48","Avalanche · S4"]
-];
-const recordsSeason = [
-  ["Most points, season","54","Marek · S2"],["Most goals, season","31","Toews99 · S3"],
-  ["Longest win streak","9","Glacier Kings · S4"],["Best save %, season",".938","Iron_Mike · S3"],
-  ["Most shutouts, season","6","Wallz · S4"],["Best goal differential","+41","Frostbite Vipers · S2"]
-];
-
-// news: [id, cat, title, excerpt, author, date, body[]]
-const news = [
-  {id:"kings-top-seed",cat:"Game Recap",title:"Kings Ride Zack's Double to a 4-2 Win Over Aurora",
-   excerpt:"FrostByte_Zack potted two and Wallz slammed the door as Glacier Kings extended their win streak to four and tightened their grip on the Frost Division.",
-   author:"Frostbyte Post",date:"Week 7 · Thursday",
-   body:["Nord Harbor's Icebox was rocking as the Glacier Kings turned a tight first period into a statement win, downing the Aurora Blades 4-2 to run their streak to four straight.",
-     "Captain FrostByte_Zack was the difference, burying a pair of second-period goals — the first a snap shot off the rush, the second a tip in tight on the power play.",
-     "\"We're finding another gear at the right time,\" Zack said afterward. \"Wallz has been unreal, so we just play loose in front of him.\"",
-     "Wallz stopped 28 of 30 for a .933 night, and the Kings' penalty kill went a perfect 4-for-4. Aurora got goals from Solberg and Kite but couldn't solve the Kings' netminder down the stretch."]},
-  {id:"vipers-mike",cat:"Feature",title:"The Wall in Ashfall: How Iron_Mike Became the League's Best Goalie",
-   excerpt:"A .924 save percentage doesn't happen by accident. Inside the crease habits that turned the Frostbite Vipers into a defensive juggernaut.",
-   author:"R. Calder",date:"Week 7 · Wednesday",
-   body:["Ask any shooter in Frostbyte who they least want to face on a breakaway, and the answer comes back the same: Iron_Mike.",
-     "The Vipers' netminder has posted a .924 save percentage through 15 games, the best mark in the league, and has done it while facing the third-most shots.",
-     "\"It's positioning and patience,\" Mike says. \"I don't chase the play. I let it come to me and I trust my depth.\"",
-     "Whatever it is, it's working — Ashfall's Pit has become the hardest building to score in, and the Vipers sit atop the Byte Division because of it."]},
-  {id:"trade-buzz-w8",cat:"Trade Buzz",title:"Trade Buzz: Who's Buying Before the Deadline?",
-   excerpt:"With the playoff picture tightening, three GMs are working the phones. Here's what we're hearing around the league.",
-   author:"The Insider",date:"Week 8 · Monday",
-   body:["The Frostbyte trade deadline is two weeks out, and the market is heating up.",
-     "Sources say the Circuit Breakers are hunting for a top-four defenseman to shore up a leaky blue line, and have made calls on Tundra's Stonewall.",
-     "Meanwhile, rebuilding clubs like the Steel Yetis are listening on veterans — Boulder's name has come up, though the asking price is said to be steep.",
-     "Expect the wire to stay busy. As one GM put it: \"Everybody thinks they're a piece away.\""]},
-  {id:"power-shift",cat:"League News",title:"Power Rankings Shakeup: Breakers Surge, Wolves Slide",
-   excerpt:"Circuit Breakers jump to third on the back of a 27% power play, while Tundra's cold streak drops them out of the top three.",
-   author:"Frostbyte Post",date:"Week 8 · Monday",
-   body:["This week's power rankings feature the biggest move of the season so far.",
-     "The Circuit Breakers climb from fourth to third after a 5-2 dismantling of Midnight, powered by a power play that's suddenly the most dangerous in the league.",
-     "Tundra Wolves, hot out of the gate, have cooled — a 3-2 loss to Polar Reign drops them a spot and raises questions about their goaltending depth.",
-     "At the top, nothing changes: Glacier Kings and Frostbite Vipers remain 1-2, on a collision course for the Frostbyte Cup."]},
-  {id:"aurora-youth",cat:"Feature",title:"Growing Pains and Bright Spots for the Aurora Blades",
-   excerpt:"The league's youngest club is learning on the fly. The results are uneven, but the flashes are real.",
-   author:"M. Sato",date:"Week 6 · Friday",
-   body:["The Aurora Blades entered Season 4 with the youngest roster in Frostbyte, and it's shown — both the good and the bad.",
-     "A 5-2 romp over the Steel Yetis showed the ceiling: quick, connected, relentless on the forecheck. Other nights, the wheels come off.",
-     "\"We're building something,\" GM Solberg said. \"These guys are going to be a problem in a season or two. Right now we take our lumps and we get better.\""]},
-  {id:"records-chase",cat:"League News",title:"Marek Chasing the Single-Season Points Record",
-   excerpt:"The Vipers' captain is on pace to threaten his own mark of 54 set back in Season 2.",
-   author:"The Insider",date:"Week 6 · Tuesday",
-   body:["Marek already owns the single-season points record at 54, set in Season 2. He may be about to break it.",
-     "Through 15 games the Frostbite captain has 28 points and is trending up, with a stretch of easier matchups on the horizon.",
-     "\"Records are nice, but I'd trade every one of them for the Cup,\" Marek said. Spoken like a captain — but the league will be watching the chase all the same."]}
-];
-
-// rules
 const rules = [
   {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>14-game</b> regular season, played Tuesday and Thursday nights at 9:00 PM ET.","Each club plays division rivals three times and cross-division opponents twice."]},
   {n:"02",t:"Standings & Points",items:["<b>2 points</b> for a win, <b>1 point</b> for an overtime or shootout loss, <b>0</b> for a regulation loss.","Ties in the standings broken by: wins, then head-to-head, then goal differential.","<b>Top three</b> from each division qualify for the Frostbyte Cup, plus <b>two wild cards</b>."]},
@@ -1512,30 +1366,6 @@ const rules = [
 ];
 
 // chat channels
-const channels = {
-  general:{name:"#general",msgs:[
-    {u:"Marek",t:"FBV",m:"gg last night kings, that OT winner was filthy",time:"7:42"},
-    {u:"FrostByte_Zack",me:1,t:"GLK",m:"appreciate it — Wallz stood on his head all series",time:"7:43"},
-    {u:"Nyx",t:"TUN",m:"anyone watching the CBR power play? unreal rn",time:"7:51"},
-    {u:"commish",t:"GLK",sys:1,m:"Week 8 lineups are due 30 min before puck drop"},
-    {u:"Toews99",t:"CBR",m:"come get some 😤",time:"7:55"}]},
-  trades:{name:"#trades",msgs:[
-    {u:"Toews99",t:"CBR",m:"looking for a top-4 D, have picks + a middle-6 W",time:"6:20"},
-    {u:"Nyx",t:"TUN",m:"Stonewall available for the right price",time:"6:25"},
-    {u:"Boulder",t:"YET",m:"everything's on the table over here lol",time:"6:31"}]},
-  "free-agents":{name:"#free-agents",msgs:[
-    {u:"commish",t:"GLK",sys:1,m:"Volkov (C, 81) and Rourke (D, 79) hit the FA pool"},
-    {u:"Solberg",t:"AUR",m:"we might kick tires on Nordin, need a 4C",time:"5:10"}]},
-  highlights:{name:"#highlights",msgs:[
-    {u:"Slapshot",t:"ICE",m:"clipped my OT winner, posting after work",time:"4:02"},
-    {u:"Fox_88",t:"TUN",m:"that Marek toe-drag is going in the season montage",time:"4:15"}]}
-};
-
-const online=[
-  ["Marek","FBV",1],["Toews99","CBR",1],["Nyx","TUN",1],["Bauer_D","POL",1],["Iron_Mike","FBV",1],
-  ["Wallz","GLK",1],["Slapshot","ICE",0],["Volt","CBR",1],["Grendel","TUN",0],["Boulder","YET",1]
-];
-
 let leaders = {points:[],goals:[],assists:[],save:[]};   // populated live from player_season_stats
 
 /* ------------------------------ HELPERS ------------------------------ */
@@ -1580,51 +1410,6 @@ const goalieStats={
   Gloves:{sv:.900,gaa:3.02,so:1},Netminder_X:{sv:.897,gaa:3.10,so:1}
 };
 // enrich a roster row into a full player object
-function playerObj(code,row){
-  const [name,pos,ovr,gp,g,a,cap]=row;
-  const h=hash(name);
-  const isG=pos==="G";
-  const cs=1+(h%3); // contract length in seasons
-  const o={id:name,name,team:code,pos,ovr,gp,cap,num:jn(name),
-    contract:`${cs} season${cs>1?"s":""} · $${cap.toFixed(1)}M`};
-  if(isG){
-    const teamRec=standBy[code];const gs=goalieStats[name];
-    o.g=0;o.a=a;o.pts=0;
-    o.gaa=gs?gs.gaa.toFixed(2):(2.0+(h%16)/10).toFixed(2);
-    o.svpct=gs?gs.sv.toFixed(3).replace(/^0/,""):(.885+(h%50)/1000).toFixed(3).replace(/^0/,"");
-    o.so=gs?gs.so:h%5;o.gw=teamRec?Math.round(teamRec[2]*(gp/15)):Math.round(gp*0.5);
-  } else {
-    o.g=g;o.a=a;o.pts=g+a;
-    o.pm=(h%25)-9;o.pim=h%20;
-    o.shots=g*4+(h%18)+8;
-    o.spct=o.shots?((g/o.shots)*100).toFixed(1):"0.0";
-    o.toi=(13+(h%9)+((h%60)/100)).toFixed(1);
-    o.hits=6+h%42;o.blocks=pos==="D"?18+h%36:2+h%16;
-    o.fow=(pos==="C")?46+h%110:0;
-    o.fopct=(pos==="C")?(47+h%12).toFixed(1):null;
-  }
-  return o;
-}
-const playersByTeam={},playersById={};
-TEAM_KEYS.forEach(code=>{playersByTeam[code]=rosters[code].map(r=>playerObj(code,r));
-  playersByTeam[code].forEach(p=>playersById[p.id]=p);});
-// include free agents & known leaders in the lookup so profiles resolve
-freeAgents.forEach(r=>{const o=playerObj("FA",[r[0],r[1],r[2],r[3],r[4],r[5],r[6]]);o.team=null;o.fa=true;o.asking=r[6];playersById[o.id]=o;});
-
-// DATA RECONCILIATION — single source of truth is the rosters
-function reconcile(){
-  // team Goals For = sum of that club's skater goals (verifiable against the roster)
-  TEAM_KEYS.forEach(code=>{standBy[code][5]=playersByTeam[code].filter(p=>p.pos!=="G").reduce((s,p)=>s+p.g,0);});
-}
-function computeLeaders(){
-  const all=[];TEAM_KEYS.forEach(c=>all.push(...playersByTeam[c]));
-  const sk=all.filter(p=>p.pos!=="G"),gl=all.filter(p=>p.pos==="G"&&p.gp>=8);
-  leaders.points=sk.slice().sort((a,b)=>b.pts-a.pts||b.g-a.g).slice(0,5).map(p=>[p.name,p.team,p.g,p.a,p.pts]);
-  leaders.goals=sk.slice().sort((a,b)=>b.g-a.g||b.pts-a.pts).slice(0,5).map(p=>[p.name,p.team,p.g]);
-  leaders.assists=sk.slice().sort((a,b)=>b.a-a.a||b.pts-a.pts).slice(0,5).map(p=>[p.name,p.team,p.a]);
-  leaders.save=gl.slice().sort((a,b)=>parseFloat(b.svpct)-parseFloat(a.svpct)).slice(0,5).map(p=>[p.name,p.team,parseFloat(p.svpct)]);
-}
-reconcile();   // (demo helper; live leaders come from loadLeaders via player_season_stats)
 
 /* ------------------------------ ROUTER ------------------------------ */
 let currentParam=null;
@@ -1767,18 +1552,13 @@ function renderHeroRink(){
 /* ------------------------------ HERO CAROUSEL (rotating headlines) ------------------------------ */
 const HERO_SLIDE_CAP=7;
 const numWord=n=>["zero","one","two","three","four","five","six","seven","eight","nine","ten"][n]||n;
-function slidePoW(){const[name,tc,g,a,pts]=leaders.points[0];const t=teams[tc];
+function slidePoW(){const[name,tc,g,a,pts]=leaders.points[0];const t=teams[tc];if(!t)return null;
   return{eyebrow:"Player of the Week",title:name.toUpperCase(),
     line:`Leads the league with ${pts} points (${g}G, ${a}A) — the engine driving the ${t.name}.`,
     cta:`<button class="btn btn-frost" data-go="player" data-param="${name}">View Profile</button><button class="btn btn-light" data-go="stats">All Leaders</button>`};}
-function slideOnFire(){const s=[...standings].filter(r=>r[7][0]==="W").sort((a,b)=>(+b[7].slice(1))-(+a[7].slice(1)))[0];
-  const code=s[0],t=teams[code],n=+s[7].slice(1);
-  return{eyebrow:"On Fire · Hot Streak",title:`${t.name.toUpperCase()} WIN ${String(numWord(n)).toUpperCase()} STRAIGHT`,
-    line:`The hottest club in Frostbyte, riding a ${n}-game win streak to the top of the ${t.div} Division.`,
-    cta:`<button class="btn btn-frost" data-go="team" data-param="${code}">Team Page</button><button class="btn btn-light" data-go="standings">Standings</button>`};}
-function slideGoalie(){const[name,tc]=leaders.save[0];const t=teams[tc],p=playersById[name];
+function slideGoalie(){const g=leaders.save[0];const name=g[0],tc=g[1],sv=g[2];const t=teams[tc];if(!t)return null;
   return{eyebrow:"Between the Pipes",title:`${name.toUpperCase()} IS A WALL`,
-    line:`A league-best ${p.svpct} save percentage${p.so?` and ${p.so} shutouts`:""} for the ${t.name}.`,
+    line:`A league-best ${(sv).toFixed(3).replace(/^0/,"")} save percentage for the ${t.name}.`,
     cta:`<button class="btn btn-frost" data-go="player" data-param="${name}">View Profile</button><button class="btn btn-light" data-go="stats">Leaders</button>`};}
 let heroSlides=[];
 // Data-driven slides (player of the week, hot streak, goalie, news) are added back
@@ -1797,7 +1577,8 @@ function buildHeroSlides(){
     line:"Sign in with Discord, claim your position and jersey number, and get drafted to a club.",
     cta:`<button class="btn btn-frost" data-go="signup">Register Now</button><button class="btn btn-light" data-go="standings">View Clubs</button>`
   }];
-  try{if(leaders&&leaders.points&&leaders.points.length&&leaders.points[0]&&liveStandings.some(r=>(r[1]||0)>0))slides.push(slidePoW(),slideGoalie());}catch(e){}
+  try{if(leaders&&leaders.points&&leaders.points.length&&leaders.points[0]&&liveStandings.some(r=>(r[1]||0)>0)){const pw=slidePoW();if(pw)slides.push(pw);}
+    if(leaders&&leaders.save&&leaders.save.length&&leaders.save[0]){const sg=slideGoalie();if(sg)slides.push(sg);}}catch(e){}
   return slides.slice(0,HERO_SLIDE_CAP);
 }
 let heroIdx=0,heroTimer=null;
@@ -2363,7 +2144,7 @@ function loadFrontOffice(){const t=teams[currentClub];
   $("#tradeMyName").textContent=t.name;$("#tradeMyBadge").innerHTML=badge(currentClub,22);
   const lb=$("#lineupBadge");if(lb)lb.innerHTML=badge(currentClub,32);
   const sel=$("#tradePartner");if(sel)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
-  renderRoster();renderTrade();renderLineup();renderFAmgr();initGameReports(currentClub);renderReports();}
+  renderRoster();renderTrade();renderLineup();renderFAmgr();renderReports();}
 
 /* ---- Game Reports: full per-player box score for BOTH clubs; must mirror opponent to publish ---- */
 let gameReports=[];
@@ -3116,7 +2897,6 @@ document.addEventListener("change",e=>{
 
 /* ------------------------------ INIT ------------------------------ */
 buildNav();
-{const sj=document.querySelector('#view-stats .jersey b');if(sj)sj.textContent=jn("FrostByte_Zack");}
 renderHeroRink();
 renderHeroCarousel();wireHeroControls();
 initEmptyStandings();
