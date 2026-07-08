@@ -1910,65 +1910,72 @@ function teamSeasonLine(code,s){const t=teams[code];
 function seasonSelect(id,seasons,cur){return `<select id="${id}" class="season-sel" aria-label="Select season">${seasons.slice().reverse().map(s=>`<option value="${s}"${s===cur?" selected":""}>Season ${s}${s===4?" · Current":""}</option>`).join("")}</select>`;}
 
 /* ------------------------------ TEAM PAGE ------------------------------ */
-function renderTeamPage(code){
-  if(!code||!teams[code])code="GLK";
-  if(code!==curTeamCode){curTeamCode=code;teamSeason=4;}
-  const t=teams[code];const seasons=getTeamSeasons(code);if(!seasons.includes(teamSeason))teamSeason=4;
-  const cur=teamSeason===4;const TS=teamSeasonLine(code,teamSeason);
-  const rec=`${TS.w}-${TS.l}-${TS.otl}`,pts_=TS.w*2+TS.otl,diff=TS.gf-TS.ga;
-  const roster=playersByTeam[code];const capUsed=roster.reduce((s,p)=>s+p.cap,0);
-  const skaters=roster.filter(p=>p.pos!=="G").sort((a,b)=>b.pts-a.pts);
-  const goalies=roster.filter(p=>p.pos==="G");
-  const teamGames=[];schedule.forEach(wk=>wk.games.forEach(g=>{if(g.a===code||g.b===code)teamGames.push({...g,wk:wk.wk});}));
-  const body=cur?`
-    <div class="grid-2" style="align-items:start">
-      <div class="card"><div class="card-h"><h3>Roster — Skaters</h3><span class="pill frost">${skaters.length}</span></div>
-        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>OVR</th><th>GP</th><th>G</th><th>A</th><th>PTS</th></tr></thead>
-        <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.id}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.ovr}</td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td></tr>`).join("")}</tbody></table></div></div>
-      <div class="stack">
-        <div class="card"><div class="card-h"><h3>Goaltending</h3></div>
-          <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Goalie</th><th>OVR</th><th>GP</th><th>GAA</th><th>SV%</th><th>SO</th></tr></thead>
-          <tbody>${goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.id}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-            <td>${p.ovr}</td><td>${p.gp}</td><td>${p.gaa}</td><td>${p.svpct}</td><td>${p.so}</td></tr>`).join("")}</tbody></table></div></div>
-        <div class="card"><div class="card-h"><h3>Schedule</h3><span class="lnk" data-go="schedule">Full →</span></div>
-          <div class="fixtures">${teamGames.slice(0,5).map(g=>{const home=g.a===code;const opp=home?g.b:g.a;const done=g.as!=null;
-            const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
-            return `<div class="fx ${done?'final':''}"><div class="side">${badge(code,22)}${home?'vs':'@'} </div>
-              <div class="vs" ${done?`data-box="${g.a}-${g.b}"`:''}>${done?`<b style="color:${win?'var(--win)':'var(--loss)'}">${us}-${them} ${win?'W':'L'}</b>`:`<b>${g.t.split(' · ')[1]||g.t}</b>`}${g.wk.split(' · ')[0]}</div>
-              <div class="side away clickable" data-go="team" data-param="${opp}">${teams[opp].name}${badge(opp,22)}</div></div>`;}).join("")}</div></div>
-      </div>
-    </div>`:`
-    <div class="grid-2" style="align-items:start">
-      <div class="card"><div class="card-h"><h3>Season ${teamSeason} Summary</h3><span class="pill frost">Final</span></div>
-        <div class="info-line" style="padding:14px 20px 9px"><span>Record</span><b class="mono">${rec}</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>Points</span><b class="mono">${pts_}</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>Goals For / Against</span><b class="mono">${TS.gf} / ${TS.ga}</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>Differential</span><b class="mono">${diff>0?'+':''}${diff}</b></div>
-        <div class="info-line" style="padding:9px 20px 14px"><span>Final Standing</span><b class="mono">${TS.finish}</b></div></div>
-      <div class="card"><div class="card-h"><h3>Franchise</h3></div>
-        <div class="info-line" style="padding:14px 20px 9px"><span>Established</span><b class="mono">Season ${t.est}</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>Home Arena</span><b class="mono">${t.arena}</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>City</span><b class="mono">${t.city}</b></div>
-        <div class="info-line" style="padding:9px 20px 14px"><span>General Manager</span><b class="mono">${t.gm}</b></div></div>
-    </div>`;
-  $("#teamPage").innerHTML=`
-    <div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${t.name}${seasonSelect("teamSeasonSel",seasons,teamSeason)}</div>
+let teamPageToken=0;
+async function renderTeamPage(code){
+  const el=$("#teamPage");if(!el)return;
+  if(!code||!teams[code])code=TEAM_KEYS[0];
+  curTeamCode=code;
+  const t=teams[code];
+  const sr=(liveStandings||[]).find(r=>r[0]===code)||[code,0,0,0,0,0,0,"—"];
+  const gp=sr[1]||0,w=sr[2]||0,l=sr[3]||0,otl=sr[4]||0,gf=sr[5]||0,ga=sr[6]||0;
+  const pts_=w*2+otl,diff=gf-ga,rec=`${w}-${l}-${otl}`;
+  el.innerHTML=`
+    <div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${t.name}</div>
     <div class="team-banner">
       <div class="tb-top"><div style="position:absolute;inset:0;background:${t.c};opacity:.14"></div>
         <span style="line-height:0;position:relative;z-index:1">${badge(code,82)}</span>
         <div class="tb-info"><h2>${t.name}</h2>
-          <div class="tb-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${teamSeason}${cur?"":" · Final"}</span><span class="ph-tag">${t.div} Division</span>
-            <span class="ph-tag">Finish · <b>${TS.finish}</b></span><span class="ph-tag link" data-go="player" data-param="${t.gm}">GM <b>${t.gm}</b></span></div></div>
+          <div class="tb-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
+            <span class="ph-tag" id="tbManager">Manager · <b>TBD</b></span></div></div>
         <div class="tb-rec"><div class="v">${rec}</div><small>${pts_} pts</small></div></div>
       <div class="tb-stats">
-        <div><div class="n">${TS.gf}</div><div class="l">Goals For</div></div>
-        <div><div class="n">${TS.ga}</div><div class="l">Goals Against</div></div>
+        <div><div class="n">${gp}</div><div class="l">Games</div></div>
+        <div><div class="n">${gf}</div><div class="l">Goals For</div></div>
+        <div><div class="n">${ga}</div><div class="l">Goals Against</div></div>
         <div><div class="n" style="color:${diff>=0?'var(--win)':'var(--loss)'}">${diff>0?'+':''}${diff}</div><div class="l">Differential</div></div>
-        <div><div class="n">${TS.streak}</div><div class="l">${cur?'Streak':'Result'}</div></div>
-        <div><div class="n">${cur?'$'+capUsed.toFixed(1)+'M':'S'+t.est}</div><div class="l">${cur?'Cap Used':'Founded'}</div></div>
+        <div><div class="n">${sr[7]||'—'}</div><div class="l">Streak</div></div>
       </div></div>
-    ${body}`;
+    <div id="teamBody"><div class="empty-note">Loading roster…</div></div>`;
+  const token=++teamPageToken;
+  let spots=[],stats=[];
+  if(sb&&openSeason){const tid=teamIdOf(code);
+    if(tid){
+      const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+      spots=r1.data||[];
+      const r2=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
+      stats=r2.data||[];
+    }}
+  if(token!==teamPageToken)return;
+  const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
+  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  const mgr=roster.find(p=>p.role==="gm")||roster.find(p=>p.role==="commissioner");
+  const mgrTag=$("#tbManager");if(mgrTag)mgrTag.innerHTML=mgr?`Manager · <b>${mgr.name}</b>`:'<b>No manager yet</b>';
+  const skaters=roster.filter(p=>!p.is_goalie).sort((a,b)=>b.pts-a.pts);
+  const goalies=roster.filter(p=>p.is_goalie);
+  const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if(g.a===code||g.b===code)teamGames.push(g);}));
+  const svpFmt=p=>p.sa?(p.saves/p.sa).toFixed(3).replace(/^0/,""):"—";
+  const gaaFmt=p=>p.gp?(p.ga/p.gp).toFixed(2):"—";
+  const bodyEl=$("#teamBody");if(!bodyEl)return;
+  if(!roster.length&&!teamGames.length){bodyEl.innerHTML=`<div class="empty-note">No players assigned to ${t.name} yet — rosters fill in during the draft. Check back once the season forms.</div>`;return;}
+  bodyEl.innerHTML=`
+    <div class="grid-2" style="align-items:start">
+      <div class="card"><div class="card-h"><h3>Roster — Skaters</h3><span class="pill frost">${skaters.length}</span></div>
+        ${skaters.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th></tr></thead>
+        <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
+          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No skaters on the roster yet.</div>'}</div>
+      <div class="stack">
+        <div class="card"><div class="card-h"><h3>Goaltending</h3></div>
+          ${goalies.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Goalie</th><th>GP</th><th>GAA</th><th>SV%</th></tr></thead>
+          <tbody>${goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
+            <td>${p.gp}</td><td>${gaaFmt(p)}</td><td>${svpFmt(p)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No goalies yet.</div>'}</div>
+        <div class="card"><div class="card-h"><h3>Schedule</h3><span class="lnk" data-go="schedule">Full →</span></div>
+          ${teamGames.length?`<div class="fixtures">${teamGames.slice(0,6).map(g=>{const home=g.a===code;const opp=home?g.b:g.a;const done=g.done;
+            const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
+            return `<div class="fx ${done?'final':''}"><div class="side">${badge(code,22)}${home?'vs':'@'} </div>
+              <div class="vs" ${done?`data-box="${g.a}-${g.b}"`:''}>${done?`<b style="color:${win?'var(--win)':'var(--loss)'}">${us}-${them} ${win?'W':'L'}</b>`:`<b>${fmtGameDate(g.when).split(' ')[0]}</b>`}</div>
+              <div class="side away clickable" data-go="team" data-param="${opp}">${teams[opp].name}${badge(opp,22)}</div></div>`;}).join("")}</div>`:'<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet.</div>'}</div>
+      </div>
+    </div>`;
 }
 
 /* ------------------------------ PLAYER PAGE ------------------------------ */
@@ -2025,57 +2032,51 @@ async function renderMyStats(){
 
 /* ------------------------------ BRACKET ------------------------------ */
 function renderBracket(){
-  // seed all eight clubs by points; standard 1-8 bracket, every club appears once
-  const seeds=[...standings].sort((a,b)=>pts(b)-pts(a)).map(r=>r[0]);
-  const S={}; seeds.forEach((c,i)=>S[c]=i+1);
-  const series=(c1,c2,w1,w2,winner)=>`<div class="series">
-    <div class="sr ${winner===c1?'wins':''}">${badge(c1,28)}<span class="sn">${teams[c1].name}</span><span class="seed">(${S[c1]})</span><span class="sw">${w1}</span></div>
-    <div class="sr ${winner===c2?'wins':''}">${badge(c2,28)}<span class="sn">${teams[c2].name}</span><span class="seed">(${S[c2]})</span><span class="sw">${w2}</span></div></div>`;
-  const s=seeds; // s[0]=1 seed ... s[7]=8 seed
-  // Quarterfinals: 1v8, 4v5, 2v7, 3v6 — projected: higher seed wins, with one 5-over-4 upset
-  const qfWin=[s[0], s[4], s[1], s[2]]; // winners of the four QFs
-  // Semis: qf0 v qf1, qf2 v qf3
-  const sfWin=[qfWin[0], qfWin[2]];
-  $("#bracket").innerHTML=`
-    <div class="br-col"><div class="br-round">Quarterfinals</div>
-      ${series(s[0],s[7],3,1,s[0])}
-      ${series(s[3],s[4],2,3,s[4])}
-      ${series(s[1],s[6],3,0,s[1])}
-      ${series(s[2],s[5],3,2,s[2])}</div>
+  const el=$("#bracket");if(!el)return;
+  const rows=[...(liveStandings||[])];
+  const played=rows.some(r=>(r[1]||0)>0);
+  if(!played){el.innerHTML='<div class="empty-note">The Frostbyte Cup bracket is seeded from the final standings — the projected matchups appear here once the regular season is underway.</div>';return;}
+  const seeds=rows.sort((a,b)=>pts(b)-pts(a)).map(r=>r[0]).slice(0,8);
+  while(seeds.length<8)seeds.push(null);
+  const S={};seeds.forEach((c,i)=>{if(c)S[c]=i+1;});
+  const sr=(c)=>c?`<div class="sr">${badge(c,28)}<span class="sn">${teams[c].name}</span><span class="seed">(${S[c]})</span><span class="sw">—</span></div>`
+    :`<div class="sr"><span class="sn" style="color:var(--fog)">TBD</span><span class="sw">—</span></div>`;
+  const series=(c1,c2)=>`<div class="series">${sr(c1)}${sr(c2)}</div>`;
+  const s=seeds;
+  el.innerHTML=`
+    <div class="br-col"><div class="br-round">Quarterfinals · Projected</div>
+      ${series(s[0],s[7])}${series(s[3],s[4])}${series(s[1],s[6])}${series(s[2],s[5])}</div>
     <div class="br-col"><div class="br-round">Semifinals</div>
-      ${series(qfWin[0],qfWin[1],3,1,sfWin[0])}
-      ${series(qfWin[2],qfWin[3],3,2,sfWin[1])}</div>
+      ${series(null,null)}${series(null,null)}</div>
     <div class="br-col"><div class="br-round">Frostbyte Cup Final</div>
-      ${series(sfWin[0],sfWin[1],2,2,null)}
+      ${series(null,null)}
       <div class="series"><div class="cup"><div class="trophy"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 4h12v4a6 6 0 0 1-12 0zM4 5h2M18 5h2M9 16h6M8 20h8v-2H8z"/></svg></div><div class="cn">Frostbyte Cup</div><div class="cl">Best of Five</div></div></div></div>`;
 }
 
 /* ------------------------------ RANKINGS ------------------------------ */
 function renderRankings(){
-  $("#rankingsBody").innerHTML=powerRankings.map((row,i)=>{const[code,prev,blurb]=row;const rank=i+1;
-    const diff=prev-rank;const mv=diff>0?`▲ ${diff}`:(diff<0?`▼ ${-diff}`:"—");const cls=diff>0?"up":(diff<0?"down":"same");
-    return `<div class="rank-row"><span class="rk">${rank}</span><span class="mv ${cls}">${mv}</span>
+  const el=$("#rankingsBody");if(!el)return;
+  const rows=[...(liveStandings||[])].sort((a,b)=>pts(b)-pts(a));
+  const played=rows.some(r=>(r[1]||0)>0);
+  if(!played){el.innerHTML='<div class="empty-note">Power rankings track each club\'s form once the puck drops — they update automatically as game results come in.</div>';return;}
+  el.innerHTML=rows.map((r,i)=>{const code=r[0];const rank=i+1;const w=r[2]||0,l=r[3]||0,otl=r[4]||0,gf=r[5]||0,ga=r[6]||0;
+    return `<div class="rank-row"><span class="rk">${rank}</span><span class="mv same">—</span>
       <span class="clickable" style="line-height:0" data-go="team" data-param="${code}">${badge(code,44)}</span>
-      <div class="rr-info"><b data-go="team" data-param="${code}">${teams[code].name}</b><p>${blurb}</p></div>
-      <span class="rr-rec">${recStr(code)}<br><span style="font-size:11px;color:var(--fog-dim)">${pts(standBy[code])} pts</span></span></div>`;}).join("");
+      <div class="rr-info"><b data-go="team" data-param="${code}">${teams[code].name}</b><p>${teams[code].div} Division · ${gf} GF / ${ga} GA</p></div>
+      <span class="rr-rec">${w}-${l}-${otl}<br><span style="font-size:11px;color:var(--fog-dim)">${pts(r)} pts</span></span></div>`;}).join("");
 }
 
 /* ------------------------------ AWARDS ------------------------------ */
 function renderAwards(){
-  $("#awardsGrid").innerHTML=awards.map(([name,sub,lead,line])=>{
-    const p=playersById[lead];const tc=p?p.team:"GLK";
-    return `<div class="award-card"><div class="trophy"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 4h12v4a6 6 0 0 1-12 0zM4 5h2M18 5h2M9 16h6M8 20h8v-2H8z"/></svg></div>
-      <h4>${name}</h4><div class="aw-sub">${sub}</div>
-      <div class="award-lead" data-go="player" data-param="${lead}"><span class="av" style="background:${tc?teams[tc].c:'#4fe3e6'}">${initials(lead)}</span>
-        <div><b>${lead}</b><small>${tc?teams[tc].name:'Free Agent'}</small></div>
-        <div class="stat"><div class="v">${line}</div></div></div></div>`;}).join("");
+  const el=$("#awardsGrid");if(!el)return;
+  el.innerHTML='<div class="empty-note" style="grid-column:1/-1">Season awards — MVP, leading scorer, best goaltender, and the Frostbyte Cup — are presented at the end of the season.</div>';
 }
 
 /* ------------------------------ RECORDS ------------------------------ */
 function renderRecords(){
-  const row=([cat,val,holder])=>`<div class="rec-row"><div class="rec-cat">${cat}</div><div class="rec-val">${val}</div><div class="rec-holder">${holder}</div></div>`;
-  $("#recordsGame").innerHTML=recordsGame.map(row).join("");
-  $("#recordsSeason").innerHTML=recordsSeason.map(row).join("");
+  const note='<div class="empty-note">No records on the books yet — single-game and season records are set once games are played and reported.</div>';
+  const g=$("#recordsGame");if(g)g.innerHTML=note;
+  const s=$("#recordsSeason");if(s)s.innerHTML=note;
 }
 
 /* ------------------------------ TRANSACTIONS ------------------------------ */
@@ -2152,15 +2153,22 @@ function renderArticle(id){
 }
 
 /* ------------------------------ FREE AGENCY / DRAFT ------------------------------ */
-function renderFA(){
-  const sk=freeAgents.filter(r=>r[1]!=="G");const g=freeAgents.filter(r=>r[1]==="G");
-  const faItem=(r)=>{const[name,pos,ovr,gp,gg,aa,ask]=r;
+async function renderFA(){
+  const skEl=$("#faSkaters"),gEl=$("#faGoalies"),skc=$("#faSkCount"),gc=$("#faGCount");
+  if(!skEl||!gEl)return;
+  if(!sb||!openSeason){skEl.innerHTML='';gEl.innerHTML='';if(skc)skc.textContent=0;if(gc)gc.textContent=0;return;}
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
+  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
+  const taken=new Set((spots||[]).map(s=>s.profile_id));
+  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id));
+  const skaters=pool.filter(r=>r.position!=="G"),goalies=pool.filter(r=>r.position==="G");
+  if(skc)skc.textContent=skaters.length;if(gc)gc.textContent=goalies.length;
+  const faItem=(r)=>{const name=r.profiles?r.profiles.gamertag:"?";
     return `<div class="fa-item"><span class="av clickable" data-go="player" data-param="${name}">${initials(name)}</span>
-      <div class="fa-info"><b class="clickable" data-go="player" data-param="${name}">${name}</b><small>${({C:'Center',W:'Wing',D:'Defense',G:'Goalie'})[pos]} · ${gp} GP · ${pos==='G'?'FA goalie':gg+'G '+aa+'A'} · asking $${ask.toFixed(1)}M</small></div>
-      <div class="fa-ovr">${ovr}</div></div>`;};
-  $("#faSkaters").innerHTML=sk.map(faItem).join("");
-  $("#faGoalies").innerHTML=g.map(faItem).join("");
-  $("#faSkCount").textContent=sk.length;$("#faGCount").textContent=g.length;
+      <div class="fa-info"><b class="clickable" data-go="player" data-param="${name}">${name}</b><small>${POS_NAME[r.position]||r.position} · EA: ${r.ea_id||'—'} · available</small></div>
+      <div class="fa-ovr" style="font-size:15px">${r.position}</div></div>`;};
+  skEl.innerHTML=skaters.length?skaters.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available skaters right now — registered players show up here until they\'re drafted to a club.</div>';
+  gEl.innerHTML=goalies.length?goalies.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available goalies right now.</div>';
 }
 async function renderDraft(){
   const el=$("#draftBody");if(!el)return;
