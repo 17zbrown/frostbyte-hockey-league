@@ -2079,37 +2079,70 @@ function renderRecords(){
 }
 
 /* ------------------------------ TRANSACTIONS ------------------------------ */
+/* Live transactions, read from the transactions table. */
+let liveTxns=[];
+function shortDate(iso){if(!iso)return"";try{const d=new Date(iso);
+  const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+  return `${mo} ${d.getDate()}`;}catch(e){return"";}}
+async function loadTxns(){
+  liveTxns=[];if(!sb||!openSeason)return;
+  let d=[];try{const {data}=await sb.from("transactions").select("*").eq("season_id",openSeason.id)
+    .order("occurred_at",{ascending:false}).limit(50);d=data||[];}catch(e){}
+  liveTxns=d.map(t=>({type:(t.type||"sign").toLowerCase(),desc:t.description||"",date:shortDate(t.occurred_at||t.created_at)}));
+}
+const TXN_SVG={trade:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13l-3-3M17 16H4l3 3"/></svg>',
+  waive:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  sign:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>',
+  callup:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>'};
 function renderTxns(){
-  const icon={trade:'⇄',waive:'✕',sign:'✓',callup:'↑'};
-  const svg={trade:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13l-3-3M17 16H4l3 3"/></svg>',
-    waive:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-    sign:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>',
-    callup:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>'};
-  const html=transactions.map(([type,desc,date])=>`<div class="txn"><div class="ic ${type}">${svg[type]}</div>
-    <div class="tx-body"><div class="tx-type">${type}</div><div class="tx-desc">${desc}</div></div><div class="tx-date">${date}</div></div>`).join("");
-  $("#txnBody").innerHTML=html;
-  $("#homeTxns").innerHTML=transactions.slice(0,4).map(([type,desc,date])=>`<div class="txn" style="padding:13px 20px"><div class="ic ${type}" style="width:30px;height:30px">${svg[type]}</div>
-    <div class="tx-body"><div class="tx-desc" style="font-size:13px">${desc}</div></div><div class="tx-date">${date}</div></div>`).join("");
+  const rows=liveTxns;const svg=TXN_SVG;
+  const type1=t=>svg[t.type]?t.type:"sign";
+  const tb=$("#txnBody");
+  if(tb)tb.innerHTML=rows.length?rows.map(t=>`<div class="txn"><div class="ic ${type1(t)}">${svg[type1(t)]}</div>
+    <div class="tx-body"><div class="tx-type">${t.type}</div><div class="tx-desc">${t.desc}</div></div><div class="tx-date">${t.date}</div></div>`).join("")
+    :'<div class="empty-note">No transactions yet — trades and roster moves post here automatically as they happen.</div>';
+  const ht=$("#homeTxns");
+  if(ht)ht.innerHTML=rows.length?rows.slice(0,4).map(t=>`<div class="txn" style="padding:13px 20px"><div class="ic ${type1(t)}" style="width:30px;height:30px">${svg[type1(t)]}</div>
+    <div class="tx-body"><div class="tx-desc" style="font-size:13px">${t.desc}</div></div><div class="tx-date">${t.date}</div></div>`).join("")
+    :'<div class="empty-note" style="margin:0;padding:20px">No transactions yet.</div>';
 }
 
 /* ------------------------------ NEWS ------------------------------ */
+/* Live news, read from the news table. */
+let liveNews=[];
+async function loadNews(){
+  liveNews=[];if(!sb)return;
+  let d=[];try{const {data}=await sb.from("news").select("*").order("published_at",{ascending:false}).limit(30);d=data||[];}catch(e){}
+  liveNews=d.map(n=>{const paras=(n.body||"").split("\n").map(s=>s.trim()).filter(Boolean);
+    return {id:n.id,cat:n.category||"League News",title:n.title||"Untitled",
+      excerpt:(paras[0]||"").slice(0,150),author:n.author||"Frostbyte Post",
+      date:shortDate(n.published_at||n.created_at),body:paras.length?paras:["No content."]};});
+}
 function newsArt(color){return `background:linear-gradient(150deg,${color},#001838)`;}
 function renderNews(){
-  const feat=news[0];const teamColor=teams.GLK.c;
-  $("#newsHero").innerHTML=`<div class="news-hero" data-go="article" data-param="${feat.id}">
+  const rows=liveNews;const hero=$("#newsHero"),grid=$("#newsGrid"),home=$("#homeNews");
+  if(!rows.length){
+    if(hero)hero.innerHTML='<div class="empty-note">No stories published yet — league news from the commissioner\'s office appears here.</div>';
+    if(grid)grid.innerHTML="";
+    if(home)home.innerHTML='<div class="empty-note" style="margin:0;padding:20px">No news yet.</div>';
+    return;
+  }
+  const feat=rows[0];const teamColor=teams.GLK.c;
+  if(hero)hero.innerHTML=`<div class="news-hero" data-go="article" data-param="${feat.id}">
     <div class="nh-art" style="${newsArt(teamColor)}"><span class="pill frost">Featured</span></div>
     <div class="nh-body"><span class="news-cat">${feat.cat}</span><h3>${feat.title}</h3><p>${feat.excerpt}</p>
       <div class="news-meta">${feat.author} · ${feat.date}</div></div></div>`;
   const colors=["#ff8a5c","#ffd166","#8fb8d6","#7ce0a8","#a99cf0"];
-  $("#newsGrid").innerHTML=news.slice(1).map((n,i)=>`<div class="news-card" data-go="article" data-param="${n.id}">
+  if(grid)grid.innerHTML=rows.slice(1).map((n,i)=>`<div class="news-card" data-go="article" data-param="${n.id}">
     <div class="nc-art" style="${newsArt(colors[i%colors.length])}"><span class="news-cat">${n.cat}</span></div>
     <div class="nc-body"><h4>${n.title}</h4><p>${n.excerpt}</p><div class="news-meta">${n.date}</div></div></div>`).join("");
-  // home latest news (3)
-  $("#homeNews").innerHTML=news.slice(0,3).map(n=>`<div class="txn" style="padding:14px 20px;cursor:pointer" data-go="article" data-param="${n.id}">
+  if(home)home.innerHTML=rows.slice(0,3).map(n=>`<div class="txn" style="padding:14px 20px;cursor:pointer" data-go="article" data-param="${n.id}">
     <div class="tx-body"><div class="tx-type" style="color:var(--frost)">${n.cat}</div><div class="tx-desc" style="font-size:14px;font-weight:600">${n.title}</div></div></div>`).join("");
 }
 function renderArticle(id){
-  const n=news.find(x=>x.id===id)||news[0];const colors={"Game Recap":teams.GLK.c,"Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
+  const n=liveNews.find(x=>x.id===id)||liveNews[0];
+  if(!n){$("#articlePage").innerHTML='<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> Article</div><div class="empty-note">This story is no longer available.</div><div style="margin-top:24px"><button class="btn btn-ghost" data-go="news">← Back to News</button></div>';return;}
+  const colors={"Game Recap":teams.GLK.c,"Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
   $("#articlePage").innerHTML=`<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> ${n.cat}</div>
     <div class="art-hero" style="${newsArt(colors[n.cat]||teams.GLK.c)}"><div><span class="news-cat">${n.cat}</span>
       <h2 style="font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4.4vw,48px);line-height:.92;margin:10px 0 0;max-width:20ch">${n.title}</h2></div></div>
@@ -2207,10 +2240,10 @@ async function sbInit(){
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
     dbTeams=tms||[];
-    await loadStandings();await loadLeaders();await loadSchedule();
+    await loadStandings();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     renderTeamsGrid();renderHeroCarousel();renderHeroRink();
-    renderFixtures();renderSchedule();
+    renderFixtures();renderSchedule();renderTxns();renderNews();
     renderLeaderList($("#homeLeaders"),"points");
     const lba=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lba?lba.dataset.lb:"points");
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
@@ -2896,10 +2929,17 @@ $("#view-admin").addEventListener("click",e=>{
   const gs=e.target.closest(".ga-save");if(gs){e.preventDefault();saveGameResult(gs);return;}
   const mb=e.target.closest(".mb-save");if(mb){e.preventDefault();saveMember(mb);return;}
 });
-$("#postNews").addEventListener("click",()=>{const t=$("#an-title").value.trim();if(!t){toast("Missing headline","Give the story a headline first.");return;}
-  const id="post-"+hash(t);const body=($("#an-body").value.trim()||"Story filed by the commissioner's office.").split("\n").filter(Boolean);
-  news.unshift({id,cat:$("#an-cat").value,title:t,excerpt:body[0].slice(0,140),author:$("#an-author").value||"Frostbyte Post",date:"Just now",body});
-  renderNews();toast("Article published","\""+t+"\" is live on the News page.");$("#an-title").value="";$("#an-body").value="";});
+$("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.trim();if(!t){toast("Missing headline","Give the story a headline first.");return;}
+  if(!sb){toast("Not connected","Sign in to publish news.");return;}
+  const body=$("#an-body").value.trim()||"Story filed by the commissioner's office.";
+  const row={category:$("#an-cat").value,title:t,body,author:$("#an-author").value.trim()||"Frostbyte Post"};
+  if(openSeason)row.season_id=openSeason.id;
+  const btn=$("#postNews");btn.disabled=true;
+  const {error}=await sb.from("news").insert(row);
+  btn.disabled=false;
+  if(error){toast("Couldn't publish",error.message);return;}
+  await loadNews();renderNews();
+  toast("Article published","\""+t+"\" is live on the News page.");$("#an-title").value="";$("#an-body").value="";});
 $("#addFixture").addEventListener("click",()=>{const h=clubByName($("#sc-home").value),a=clubByName($("#sc-away").value);
   if(h===a){toast("Invalid fixture","A club can't play itself.");return;}
   schedule[0].games.push({a:h,b:a,t:`${$("#sc-day").value} · ${$("#sc-time").value} ET`});renderSchedule();
