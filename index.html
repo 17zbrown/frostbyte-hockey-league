@@ -1081,7 +1081,7 @@
   <!-- SCHEDULE -->
   <div class="view" id="view-schedule"><section class="pad"><div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">Season 1 · Fixtures</span><h2>The <em>Schedule</em></h2>
-      <p>Games run Wednesday and Friday nights — three a night at 9:00, 9:35 and 10:10 PM ET. Tap a scheduled game for its match card, or a final for the box score.</p></div></div>
+      <p>Every club plays three games a night on Wednesdays and Fridays (9:00, 9:35, 10:10 PM ET) — a 54-game, 9-week season. Tap a scheduled game for its match card, or a final for the box score.</p></div></div>
     <div id="scheduleBody"></div>
   </div></section></div>
 
@@ -1200,9 +1200,9 @@
       </form>
       <div class="signup-side">
         <div class="info-card"><h3 id="signupGlanceTitle">Season 1 At A Glance</h3>
-          <div class="info-line"><span>Regular season</span><b>54 games</b></div>
+          <div class="info-line"><span>Regular season</span><b>54 games · 9 weeks</b></div>
           <div class="info-line"><span>Game nights</span><b>Wed / Fri</b></div>
-          <div class="info-line"><span>Games / night</span><b>3</b></div>
+          <div class="info-line"><span>Per club</span><b>3 a night · 6 a week</b></div>
           <div class="info-line"><span>Puck drops</span><b>9:00 · 9:35 · 10:10 ET</b></div>
           <div class="info-line"><span>Roster lock</span><b>Sun, Aug 30</b></div>
           <div class="info-line"><span>Playoffs</span><b>Top 3 / division</b></div>
@@ -1387,7 +1387,7 @@ function buildTeams(){
 
 // standings: code, gp, w, l, otl, gf, ga, streak
 const rules = [
-  {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>54-game</b> regular season, played Wednesday and Friday nights — three games a night at <b>9:00, 9:35 and 10:10 PM ET</b>.","Every game is free to play — no entry fee, ever."]},
+  {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>54-game</b> regular season over <b>9 weeks</b> — every club plays <b>three games a night</b> on Wednesdays and Fridays (six a week) at 9:00, 9:35 and 10:10 PM ET.","Every game is free to play — no entry fee, ever."]},
   {n:"02",t:"Standings & Points",items:["<b>2 points</b> for a win, <b>1 point</b> for an overtime or shootout loss, <b>0</b> for a regulation loss.","Ties in the standings broken by: wins, then head-to-head, then goal differential.","<b>Top three</b> from each division qualify for the Frostbyte Cup, plus <b>two wild cards</b>."]},
   {n:"03",t:"Rosters & Cap",items:["Rosters carry <b>up to 12 players</b> including two goalies.","A <b>$45M salary cap</b> applies — no lineup may exceed it on game night.","Roster lock is the <b>Sunday before Week 1</b>; in-season moves go through waivers or trade."]},
   {n:"04",t:"Trades & Waivers",items:["A trade goes through <b>the moment both GMs agree</b> — no commissioner approval needed.","Either club can <b>accept, decline, or counter</b> a trade proposal.","Waived players clear waivers and enter the free-agent pool for any club to sign.","The <b>trade deadline</b> falls two weeks before the end of the regular season."]},
@@ -2529,8 +2529,7 @@ async function assignRegistration(btn){
 
 /* ---- Schedule auto-generate (round-robin) ---- */
 const GAMES_PER_CLUB=54;          // regular-season games each club plays
-const NIGHT_SLOTS=["21:00","21:35","22:10"];  // three Eastern-time slots per game night
-const GAMES_PER_NIGHT=3;          // Wed & Fri, three games a night
+const NIGHT_SLOTS=["21:00","21:35","22:10"];  // three Eastern-time slots per game night (each club plays once per slot)
 function rrRotate(a,r){const n=a.length,out=[];for(let i=0;i<n;i++)out.push(a[(i+r)%n]);return out;}
 function ymd(d){return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");}
 // Sequence of Wed/Fri game-night calendar dates starting from the season's first Wednesday.
@@ -2552,35 +2551,27 @@ async function generateSchedule(){
   if(codes.length<2){toast("Add clubs first","You need at least two clubs to build a schedule.");return;}
   const {count}=await sb.from("games").select("*",{count:"exact",head:true}).eq("season_id",adminSeason.id);
   if(count){toast("Schedule already exists","Clear it first to regenerate.");return;}
-  // 1) Matchups — GAMES_PER_CLUB rounds via the circle method (alternating home/away).
+  // Each time slot is a full round — every club plays once per slot. With 3 slots a night
+  // (Wed & Fri) every club plays 3 games a night, 6 a week; GAMES_PER_CLUB slots = the season.
   const arr=codes.slice();if(arr.length%2)arr.push(null);
   const m=arr.length,fixed=arr[0],others=arr.slice(1);
-  const all=[];
+  const perNight=NIGHT_SLOTS.length;
+  const weeks=Math.ceil(GAMES_PER_CLUB/perNight/2);
+  const dates=gameNightDates(adminSeason.starts_at,weeks+1);
+  const rows=[];
   for(let r=0;r<GAMES_PER_CLUB;r++){
+    const d=dates[Math.floor(r/perNight)];if(!d)continue;
+    const iso=etInputToISO(d.date+"T"+NIGHT_SLOTS[r%perNight]);
     const order=[fixed].concat(rrRotate(others,r));
     for(let i=0;i<m/2;i++){let a=order[i],b=order[m-1-i];if(!a||!b)continue;
       if(r%2===1){const t=a;a=b;b=t;}
-      all.push([a,b]);}
+      rows.push({season_id:adminSeason.id,week:d.week,home_team_id:teamIdOf(a),away_team_id:teamIdOf(b),scheduled_at:iso,status:"scheduled"});}
   }
-  // 2) Pack into nights of up to 3 games with no club playing twice the same night.
-  const nights=[],rem=all.slice();
-  while(rem.length){const night=[],used=new Set();
-    for(let i=0;i<rem.length&&night.length<GAMES_PER_NIGHT;){const [a,b]=rem[i];
-      if(!used.has(a)&&!used.has(b)){night.push(rem[i]);used.add(a);used.add(b);rem.splice(i,1);}else i++;}
-    nights.push(night);}
-  // 3) Assign Wed/Fri dates + the three ET slots, from the season start date.
-  const dates=gameNightDates(adminSeason.starts_at,Math.ceil(nights.length/2)+1);
-  const rows=[];
-  nights.forEach((night,ni)=>{const d=dates[ni];
-    night.forEach((g,si)=>rows.push({season_id:adminSeason.id,week:d.week,
-      home_team_id:teamIdOf(g[0]),away_team_id:teamIdOf(g[1]),
-      scheduled_at:etInputToISO(d.date+"T"+NIGHT_SLOTS[si]),status:"scheduled"}));});
-  // insert in batches (keeps the request small; codes auto-generate per row)
   for(let i=0;i<rows.length;i+=100){
     const {error}=await sb.from("games").insert(rows.slice(i,i+100));
     if(error){toast("Couldn't generate",error.message);return;}
   }
-  toast("Schedule generated",rows.length+" games · "+GAMES_PER_CLUB+"/club · "+nights.length+" nights over "+Math.ceil(nights.length/2)+" weeks (Wed & Fri).");
+  toast("Schedule generated",rows.length+" games · "+GAMES_PER_CLUB+"/club · 3 a night, 6 a week · "+weeks+"-week season.");
   loadScheduleAdmin();loadGamesAdmin();
 }
 function clearSchedule(){
