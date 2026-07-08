@@ -1013,7 +1013,7 @@
         <div class="card"><div class="card-h"><h3>Recent Results</h3><span class="lnk" data-go="schedule">Schedule →</span></div><div class="fixtures" id="homeResults"></div></div>
       </div>
       <div class="stack">
-        <div class="card"><div class="card-h"><h3>Next Fixtures</h3><span class="pill frost">Week 8</span></div><div class="fixtures" id="homeFixtures"></div></div>
+        <div class="card"><div class="card-h"><h3>Next Fixtures</h3><span class="pill frost" id="nextFixWeek">Pre-season</span></div><div class="fixtures" id="homeFixtures"></div></div>
         <div class="card"><div class="card-h"><h3>Scoring Leaders</h3><span class="lnk" data-go="stats">All stats →</span></div><div class="leaders" id="homeLeaders"></div></div>
         <div class="card"><div class="card-h"><h3>Transactions</h3><span class="lnk" data-go="transactions">All →</span></div><div id="homeTxns"></div></div>
       </div>
@@ -1687,15 +1687,40 @@ function renderStandings(el,full){
 }
 
 /* ------------------------------ FIXTURES / RESULTS ------------------------------ */
+/* Live schedule, read from the games table (written by the commissioner's scheduler). */
+let liveSchedule=[];
+function fmtGameDate(iso){if(!iso)return"TBD";try{const d=new Date(iso);
+  const day=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+  const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+  return `${day} ${mo} ${d.getDate()}`;}catch(e){return"TBD";}}
+function fmtGameTime(iso){if(!iso)return"TBD";try{const d=new Date(iso);let h=d.getHours();const m=d.getMinutes();
+  const ap=h>=12?"PM":"AM";h=h%12||12;return `${h}:${String(m).padStart(2,"0")} ${ap} ET`;}catch(e){return"TBD";}}
+async function loadSchedule(){
+  liveSchedule=[];
+  if(!sb||!openSeason||!dbTeams.length)return;
+  let g=[];try{const {data}=await sb.from("games").select("*").eq("season_id",openSeason.id)
+    .order("week",{ascending:true}).order("scheduled_at",{ascending:true});g=data||[];}catch(e){}
+  const byWk={};
+  g.forEach(x=>{const a=codeOfId(x.home_team_id),b=codeOfId(x.away_team_id);if(!a||!b)return;
+    const done=x.status==="final";const wk=x.week||1;
+    (byWk[wk]=byWk[wk]||[]).push({a,b,as:done?x.home_score:null,bs:done?x.away_score:null,ot:!!x.went_ot,done,when:x.scheduled_at,twitch:x.twitch_url});});
+  liveSchedule=Object.keys(byWk).map(Number).sort((a,b)=>a-b).map(wk=>({wk:"Week "+wk,n:wk,games:byWk[wk]}));
+}
 function renderFixtures(){
-  $("#homeFixtures").innerHTML=fixtures.map(([a,b,t])=>`<div class="fx">
-    <div class="side clickable" data-go="team" data-param="${a}">${badge(a,24)}${teams[a].name}</div>
-    <div class="vs"><b>${t.split(" ")[0]}</b>${t.split(" ").slice(1).join(" ")}</div>
-    <div class="side away clickable" data-go="team" data-param="${b}">${teams[b].name}${badge(b,24)}</div></div>`).join("");
-  $("#homeResults").innerHTML=results.map(([a,as,b,bs])=>`<div class="fx final">
-    <div class="side" style="${as>bs?'':'opacity:.6'}">${badge(a,24)}${teams[a].name}</div>
-    <div class="vs" data-box="${a}-${b}"><b>${as} - ${bs}</b>Final</div>
-    <div class="side away" style="${bs>as?'':'opacity:.6'}">${teams[b].name}${badge(b,24)}</div></div>`).join("");
+  const fx=[],res=[];
+  liveSchedule.forEach(wk=>wk.games.forEach(g=>{(g.done?res:fx).push(g);}));
+  const upcoming=fx.slice(0,4),recent=res.slice(-4).reverse();
+  const emptyF='<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet — fixtures appear once the commissioner posts the schedule.</div>';
+  const emptyR='<div class="empty-note" style="margin:0;padding:20px">No results yet — recent finals show up here once games are reported.</div>';
+  const fe=$("#homeFixtures");if(fe)fe.innerHTML=upcoming.length?upcoming.map(g=>`<div class="fx">
+    <div class="side clickable" data-go="team" data-param="${g.a}">${badge(g.a,24)}${teams[g.a].name}</div>
+    <div class="vs"><b>${fmtGameDate(g.when).split(" ")[0]}</b>${fmtGameTime(g.when)}</div>
+    <div class="side away clickable" data-go="team" data-param="${g.b}">${teams[g.b].name}${badge(g.b,24)}</div></div>`).join(""):emptyF;
+  const re=$("#homeResults");if(re)re.innerHTML=recent.length?recent.map(g=>`<div class="fx final">
+    <div class="side" style="${g.as>g.bs?'':'opacity:.6'}">${badge(g.a,24)}${teams[g.a].name}</div>
+    <div class="vs" data-box="${g.a}-${g.b}"><b>${g.as} - ${g.bs}</b>${g.ot?"OT/SO":"Final"}</div>
+    <div class="side away" style="${g.bs>g.as?'':'opacity:.6'}">${teams[g.b].name}${badge(g.b,24)}</div></div>`).join(""):emptyR;
+  const pill=$("#nextFixWeek");if(pill)pill.textContent=upcoming.length?`Week ${liveSchedule.find(w=>w.games.some(x=>!x.done)).n}`:"Pre-season";
 }
 
 /* ------------------------------ HERO: PLAYERS TO WATCH ------------------------------ */
@@ -1817,23 +1842,27 @@ function renderLeaderList(el,key){
 
 /* ------------------------------ SCHEDULE ------------------------------ */
 function renderSchedule(){
-  $("#scheduleBody").innerHTML=schedule.map(wk=>`<div class="week"><div class="week-h">${wk.wk}</div>
-    <div class="games">${wk.games.map(g=>{const done=g.as!=null;
+  const el=$("#scheduleBody");if(!el)return;
+  if(!liveSchedule.length){el.innerHTML=`<div class="empty-note">Season ${openSeason?openSeason.number:1}'s schedule hasn't been posted yet — the full slate appears here once the commissioner builds the schedule.</div>`;return;}
+  el.innerHTML=liveSchedule.map(wk=>`<div class="week"><div class="week-h">${wk.wk}</div>
+    <div class="games">${wk.games.map(g=>{const done=g.done;
       const aWin=done&&g.as>g.bs,bWin=done&&g.bs>g.as;
       return `<div class="game ${done?'done':''}" ${done?`data-box="${g.a}-${g.b}"`:''}>
-        <div class="game-top"><span class="game-date">${done?'Final':g.t.split(' · ')[0]}</span>
+        <div class="game-top"><span class="game-date">${done?(g.ot?'Final / OT':'Final'):fmtGameDate(g.when)}</span>
           ${done?'<span class="pill dim">Final</span>':'<span class="pill live"><span class="dot-mini" style="background:var(--live)"></span>Scheduled</span>'}</div>
-        <div class="g-row ${aWin?'win':(bWin?'lose':'')}">${badge(g.a,28)}<span class="gn">${teams[g.a].name}</span>${done?`<span class="gs">${g.as}</span>`:`<span class="g-time">${g.t.split(' · ')[1]}</span>`}</div>
+        <div class="g-row ${aWin?'win':(bWin?'lose':'')}">${badge(g.a,28)}<span class="gn">${teams[g.a].name}</span>${done?`<span class="gs">${g.as}</span>`:`<span class="g-time">${fmtGameTime(g.when)}</span>`}</div>
         <div class="g-row ${bWin?'win':(aWin?'lose':'')}">${badge(g.b,28)}<span class="gn">${teams[g.b].name}</span>${done?`<span class="gs">${g.bs}</span>`:'<span class="g-time" style="opacity:.5">—</span>'}</div>
       </div>`;}).join("")}</div></div>`).join("");
 }
 // box score modal
-function findGame(key){const[a,b]=key.split("-");for(const wk of schedule)for(const g of wk.games)if(g.a===a&&g.b===b&&g.as!=null)return g;return null;}
+function findGame(key){const[a,b]=key.split("-");for(const wk of liveSchedule)for(const g of wk.games)if(g.a===a&&g.b===b&&g.done)return g;return null;}
 document.addEventListener("click",e=>{const el=e.target.closest("[data-box]");if(!el)return;
   const g=findGame(el.dataset.box);if(!g)return;boxScore(g);});
 function boxScore(g){
-  const sc=(code)=>`<div class="box-sec"><h4>${teams[code].name} — Goals</h4>${(g.scorers[code]||[]).map(s=>`<div class="box-line"><span>${s}</span></div>`).join("")||'<div class="box-line"><span class="mono">—</span></div>'}
-    ${(g.goalies[code]||[]).map(gl=>`<div class="box-line"><span class="mono">${gl}</span></div>`).join("")}</div>`;
+  const sc=(code)=>{const gs=(g.scorers&&g.scorers[code])||[],gl=(g.goalies&&g.goalies[code])||[];
+    if(!gs.length&&!gl.length)return `<div class="box-sec"><h4>${teams[code].name}</h4><div class="box-line"><span class="mono" style="color:var(--fog)">Goal-by-goal detail isn't recorded for this game.</span></div></div>`;
+    return `<div class="box-sec"><h4>${teams[code].name} — Goals</h4>${gs.map(s=>`<div class="box-line"><span>${s}</span></div>`).join("")||'<div class="box-line"><span class="mono">—</span></div>'}
+    ${gl.map(x=>`<div class="box-line"><span class="mono">${x}</span></div>`).join("")}</div>`;};
   $("#modalCard").classList.add("wide");
   $("#modalTitle").textContent="Box Score";
   $("#modalMsg").innerHTML=`
@@ -2178,9 +2207,10 @@ async function sbInit(){
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
     dbTeams=tms||[];
-    await loadStandings();await loadLeaders();
+    await loadStandings();await loadLeaders();await loadSchedule();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     renderTeamsGrid();renderHeroCarousel();renderHeroRink();
+    renderFixtures();renderSchedule();
     renderLeaderList($("#homeLeaders"),"points");
     const lba=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lba?lba.dataset.lb:"points");
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
