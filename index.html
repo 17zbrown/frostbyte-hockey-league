@@ -905,6 +905,11 @@
   .ga-score{display:flex;align-items:center;gap:8px;margin-left:auto}
   .ga-score .box-in{width:46px}
   .ga-ot{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-cond);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog)}
+  .trade-offer{display:flex;align-items:center;gap:14px;padding:12px 20px;border-top:1px solid var(--line-soft);flex-wrap:wrap}
+  .trade-offer .to-body{flex:1;min-width:180px}
+  .trade-offer .to-dir{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);margin-bottom:4px}
+  .trade-offer .to-swap{display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--navy)}
+  .trade-offer .act{display:flex;gap:6px;flex-wrap:wrap}
   /* Auth slot in the nav */
   .auth-slot{display:flex;align-items:center;gap:8px}
   #signupAuthBanner{margin-bottom:16px}
@@ -1237,8 +1242,10 @@
       </div>
       <div class="mgr-panel on" id="mtab-roster"><div class="card"><div class="card-h"><h3>Active Roster</h3><span class="pill frost" id="rosterCount"></span></div>
         <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th style="text-align:right">Action</th></tr></thead><tbody id="rosterBody"></tbody></table></div></div></div>
-      <div class="mgr-panel" id="mtab-trade"><div class="card" style="padding:22px 24px">
-        <div class="next-game-bar" style="margin-bottom:22px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Build a trade</b><span style="color:var(--fog);font-size:13.5px">Pick players from each side, then propose. Trades sit for 24h of league review.</span></div>
+      <div class="mgr-panel" id="mtab-trade">
+        <div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Trade Offers</h3><span class="pill" id="tradesPendingCount"></span></div><div id="tradesPending"></div></div>
+        <div class="card" style="padding:22px 24px">
+        <div class="next-game-bar" style="margin-bottom:22px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Propose a trade</b><span style="color:var(--fog);font-size:13.5px">Pick players from each side and send it — a trade goes through the moment the other GM accepts. No commissioner approval.</span></div>
         <div class="trade-grid">
           <div class="trade-col"><h4><span id="tradeMyBadge" style="line-height:0"></span> <span id="tradeMyName">Glacier Kings</span> send</h4><div id="tradeMine"></div></div>
           <div class="trade-mid"><div class="swap-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13l-3-3M17 16H4l3 3"/></svg></div><span class="pill dim">Swap</span></div>
@@ -2459,19 +2466,60 @@ $("#rosterBody").addEventListener("click",e=>{
     toast("Player waived",p.name+" is off your roster.");renderRoster();});});
 // trade
 let tradeSel={mine:new Set(),theirs:new Set()};
-function tradeCard(list,side){return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${jn(p[0])}</span><b>${p[0]}</b><small>${p[1]} · ${p[2]}</small></div>`).join("");}
-function renderTrade(){tradeSel={mine:new Set(),theirs:new Set()};
-  const partner=clubByName($("#tradePartner").value)||TEAM_KEYS.find(k=>k!==currentClub);
-  $("#tradeMine").innerHTML=tradeCard(rosters[currentClub],"mine");$("#tradeTheirs").innerHTML=tradeCard(rosters[partner],"theirs");updateTradeSummary();}
+let tradeMineList=[],tradeTheirsList=[];
+async function loadRosterFor(code){
+  const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
+  const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+  return (data||[]).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position}));
+}
+function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;color:var(--fog);font-size:13px">No players on this roster yet.</div>';
+  return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
+async function renderTrade(){
+  if(!sb||!openSeason)return;
+  tradeSel={mine:new Set(),theirs:new Set()};
+  const sel=$("#tradePartner");if(sel&&!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
+  const partner=(sel&&clubByName(sel.value))||TEAM_KEYS.find(k=>k!==currentClub);
+  tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
+  const me=$("#tradeMine");if(me)me.innerHTML=tradeCard(tradeMineList,"mine");
+  const th=$("#tradeTheirs");if(th)th.innerHTML=tradeCard(tradeTheirsList,"theirs");
+  updateTradeSummary();loadMyTrades();
+}
 $("#tradePartner").addEventListener("change",renderTrade);
 document.addEventListener("click",e=>{const it=e.target.closest(".trade-item");if(!it)return;const side=it.dataset.side,i=+it.dataset.i;
   if(tradeSel[side].has(i)){tradeSel[side].delete(i);it.classList.remove("sel");}else{tradeSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
-function updateTradeSummary(){const m=tradeSel.mine.size,t=tradeSel.theirs.size;const el=$("#tradeSummary");
-  el.textContent=(!m&&!t)?"Select at least one player from each side.":`Sending ${m} · Receiving ${t}`;}
-$("#proposeTrade").addEventListener("click",()=>{if(!tradeSel.mine.size||!tradeSel.theirs.size){toast("Incomplete trade","Pick at least one player from each side.");return;}
-  const partner=$("#tradePartner").value;confirmModal("Propose this trade?",`This offer goes to ${partner} and sits for 24 hours of league review before it can be accepted.`,"Send Offer",()=>{
-    transactions.unshift(["trade",`<b>${teams[currentClub].name}</b> proposed a trade to <b>${partner}</b> (pending review)`,"Just now"]);renderTxns();
-    toast("Trade proposed","Offer sent to "+partner+" — pending review.");renderTrade();});});
+function updateTradeSummary(){const m=tradeSel.mine.size,t=tradeSel.theirs.size;const el=$("#tradeSummary");if(el)el.textContent=(!m&&!t)?"Select at least one player from each side.":`Sending ${m} · Receiving ${t}`;}
+$("#proposeTrade").addEventListener("click",async()=>{
+  if(!sb||!authUser){toast("Sign in first","");return;}
+  if(!tradeSel.mine.size||!tradeSel.theirs.size){toast("Incomplete trade","Pick at least one player from each side.");return;}
+  const partnerCode=clubByName($("#tradePartner").value)||TEAM_KEYS.find(k=>k!==currentClub);
+  const offered=[...tradeSel.mine].map(i=>tradeMineList[i].pid),requested=[...tradeSel.theirs].map(i=>tradeTheirsList[i].pid);
+  const {error}=await sb.from("trades").insert({season_id:openSeason.id,from_team_id:teamIdOf(currentClub),to_team_id:teamIdOf(partnerCode),from_profile_id:authUser.id,offered_profile_ids:offered,requested_profile_ids:requested});
+  if(error){toast("Couldn't propose",error.message);return;}
+  toast("Trade proposed","Sent to "+teams[partnerCode].name+" — it goes through the moment they accept.");renderTrade();
+});
+async function loadMyTrades(){
+  const el=$("#tradesPending");if(!el||!sb||!openSeason)return;
+  const myTid=teamIdOf(currentClub),uid=authUser?authUser.id:"00000000-0000-0000-0000-000000000000";
+  const {data:trades}=await sb.from("trades").select("*").eq("season_id",openSeason.id).eq("status","proposed").or(`to_team_id.eq.${myTid},from_profile_id.eq.${uid}`).order("created_at",{ascending:false});
+  const cnt=$("#tradesPendingCount");if(cnt)cnt.textContent=(trades?trades.length:0)+" open";
+  if(!trades||!trades.length){el.innerHTML='<div style="padding:16px 20px;color:var(--fog);font-size:13px">No open trade offers.</div>';return;}
+  const pids=[...new Set(trades.flatMap(t=>[...t.offered_profile_ids,...t.requested_profile_ids]))];
+  const {data:profs}=await sb.from("profiles").select("id,gamertag").in("id",pids.length?pids:["00000000-0000-0000-0000-000000000000"]);
+  const nameOf={};(profs||[]).forEach(p=>nameOf[p.id]=p.gamertag);
+  const codeT=id=>{const t=dbTeams.find(x=>x.id===id);return t?t.code:"?";};
+  el.innerHTML=trades.map(t=>{const incoming=t.to_team_id===myTid;const fC=codeT(t.from_team_id),tC=codeT(t.to_team_id);
+    const off=t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—",req=t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—";
+    return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name}</div>
+      <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div></div>
+      <div class="act">${incoming?`<button class="mini good tr-accept" data-id="${t.id}">Accept</button><button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
+}
+$("#tradesPending").addEventListener("click",async e=>{
+  const acc=e.target.closest(".tr-accept"),dec=e.target.closest(".tr-decline"),can=e.target.closest(".tr-cancel");
+  if(acc){const {error}=await sb.rpc("accept_trade",{p_trade:acc.dataset.id});if(error){toast("Couldn't accept",error.message);return;}
+    toast("Trade accepted","Rosters updated.");renderTrade();renderRoster();return;}
+  if(dec){await sb.from("trades").update({status:"declined",updated_at:new Date().toISOString()}).eq("id",dec.dataset.id);toast("Trade declined","");loadMyTrades();return;}
+  if(can){await sb.from("trades").update({status:"cancelled",updated_at:new Date().toISOString()}).eq("id",can.dataset.id);toast("Trade cancelled","");loadMyTrades();return;}
+});
 // free agent signings (manager)
 function renderFAmgr(){$("#faMgrCount").textContent=freeAgents.length+" available";
   $("#faMgrBody").innerHTML=freeAgents.map((r,i)=>`<tr><td><div class="rp lk" data-go="player" data-param="${r[0]}"><span class="num">${jn(r[0])}</span><div><b>${r[0]}</b></div></div></td>
