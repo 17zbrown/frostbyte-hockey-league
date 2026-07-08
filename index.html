@@ -327,10 +327,10 @@
   .field input,.field select,.field textarea{width:100%;background:#08161f;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:12px 14px;font-family:var(--f-body);font-size:14.5px}
   .field input::placeholder,.field textarea::placeholder{color:var(--fog-dim)}
   .field .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .pos-pick{display:flex;gap:8px;flex-wrap:wrap}
-  .pos-pick label{cursor:pointer;flex:1;min-width:64px;margin:0}
+  .pos-pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .pos-pick label{cursor:pointer;margin:0}
   .pos-pick input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-  .pos-pick span{display:block;text-align:center;padding:12px 6px;border:1px solid var(--line);border-radius:var(--r-s);font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:13px;color:var(--fog);transition:.15s}
+  .pos-pick span{display:flex;align-items:center;justify-content:center;text-align:center;min-height:48px;padding:8px 6px;border:1px solid var(--line);border-radius:var(--r-s);font-family:var(--f-cond);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:13px;line-height:1.12;color:var(--fog);transition:.15s}
   .pos-pick input:checked+span{border-color:var(--frost);background:var(--frost-glow);color:var(--frost)}
   .signup-side{display:flex;flex-direction:column;gap:16px}
   .info-card{background:linear-gradient(180deg,#0c1e2f,#0a1826);border:1px solid var(--line);border-radius:var(--r-l);padding:22px 24px}
@@ -375,8 +375,8 @@
   .rp .lk{cursor:pointer}.rp .lk:hover b{color:var(--frost)}
   .posbadge{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;padding:3px 8px;border-radius:5px;background:#12293d;color:var(--fog)}
   .posbadge.F{background:#123a44;color:var(--frost)}.posbadge.C{background:#123a44;color:var(--frost)}
-  .posbadge.W{background:#123a44;color:var(--frost)}
-  .posbadge.D{background:#1a3320;color:var(--win)}.posbadge.G{background:#3a2f14;color:var(--gold)}
+  .posbadge.W,.posbadge.LW,.posbadge.RW{background:#123a44;color:var(--frost)}
+  .posbadge.D,.posbadge.LD,.posbadge.RD{background:#1a3320;color:var(--win)}.posbadge.G{background:#3a2f14;color:var(--gold)}
   .act{display:flex;gap:7px;justify-content:flex-end}
   .mini{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.05em;text-transform:uppercase;padding:6px 11px;border-radius:5px;border:1px solid var(--line);color:var(--fog);transition:.15s;white-space:nowrap}
   .mini:hover{border-color:var(--frost);color:var(--frost)}
@@ -1189,8 +1189,8 @@
           <label><input type="radio" name="pos" value="C" checked /><span>Center</span></label>
           <label><input type="radio" name="pos" value="LW" /><span>Left Wing</span></label>
           <label><input type="radio" name="pos" value="RW" /><span>Right Wing</span></label>
-          <label><input type="radio" name="pos" value="W" /><span>Wing</span></label>
-          <label><input type="radio" name="pos" value="D" /><span>Defense</span></label>
+          <label><input type="radio" name="pos" value="LD" /><span>Left Defense</span></label>
+          <label><input type="radio" name="pos" value="RD" /><span>Right Defense</span></label>
           <label><input type="radio" name="pos" value="G" /><span>Goalie</span></label></div></div>
         <div class="field"><div class="row2">
           <div><label for="su-num">Jersey Number</label><input id="su-num" type="number" min="1" max="99" placeholder="Pick your number (1–99)" /></div>
@@ -1810,7 +1810,7 @@ async function renderTeamPage(code){
 }
 
 /* ------------------------------ PLAYER PAGE ------------------------------ */
-const POS_NAME={C:"Center",LW:"Left Wing",RW:"Right Wing",W:"Wing",D:"Defense",G:"Goalie"};
+const POS_NAME={C:"Center",LW:"Left Wing",RW:"Right Wing",LD:"Left Defense",RD:"Right Defense",W:"Wing",D:"Defense",G:"Goalie"};
 async function renderPlayerPage(id){
   const el=$("#playerPage");if(!el)return;
   if(!sb){el.innerHTML='<div class="empty-note">Player data will load on the live site.</div>';return;}
@@ -2004,7 +2004,7 @@ async function renderFA(){
 }
 async function renderDraft(){
   const el=$("#draftBody");if(!el)return;
-  const posName={C:"Center",LW:"Left Wing",RW:"Right Wing",W:"Wing",D:"Defense",G:"Goalie"};
+  const posName={C:"Center",LW:"Left Wing",RW:"Right Wing",LD:"Left Defense",RD:"Right Defense",W:"Wing",D:"Defense",G:"Goalie"};
   const cnt=$("#draftCount");
   if(!sb||!openSeason){el.innerHTML="";return;}
   if(!isManager()){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Managers only</h4><p>The draft pool is visible to club managers and the commissioner.</p></div>';if(cnt)cnt.textContent="";return;}
@@ -2313,9 +2313,10 @@ async function renderLineup(){
   if(!roster.length){grid.innerHTML='<div class="empty-note" style="margin:0">No players on your roster yet — the lineup builder unlocks once players are assigned to your club.</div>';return;}
   const used={C:0,W:0,D:0,G:0};
   grid.innerHTML=lineupRoles.map((role,idx)=>{
-    const want=role==="Goalie"?"G":(role.includes("Defense")?"D":(role==="Center"?"C":"W"));
-    let pool=roster.filter(p=>p.pos===want);if(!pool.length)pool=roster.filter(p=>p.pos!=="G");if(!pool.length)pool=roster;
-    const def=Math.min(used[want]++,pool.length-1);
+    const grp=role==="Goalie"?"G":(role.includes("Defense")?"D":(role==="Center"?"C":"W"));
+    const match=grp==="G"?["G"]:grp==="D"?["D","LD","RD"]:grp==="W"?["W","LW","RW"]:["C"];
+    let pool=roster.filter(p=>match.includes(p.pos));if(!pool.length)pool=roster.filter(p=>p.pos!=="G");if(!pool.length)pool=roster;
+    const def=Math.min(used[grp]++,pool.length-1);
     return `<div class="slot"><div class="role">${role}</div><select data-role="${idx}" aria-label="${role} lineup slot">${pool.map((p,i)=>`<option ${i===def?'selected':''}>#${p.num} ${p.name}</option>`).join("")}</select></div>`;}).join("");
 }
 $("#saveLineup").addEventListener("click",()=>{
