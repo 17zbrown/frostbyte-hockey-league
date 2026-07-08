@@ -1858,15 +1858,17 @@ function boxScore(g){
 
 /* ------------------------------ TEAMS INDEX ------------------------------ */
 function renderTeamsGrid(){
-  $("#teamsGrid").innerHTML=TEAM_KEYS.map(code=>{const t=teams[code];const r=standBy[code];
+  const byCode={};(liveStandings||[]).forEach(r=>byCode[r[0]]=r);
+  $("#teamsGrid").innerHTML=TEAM_KEYS.map(code=>{const t=teams[code];const r=byCode[code]||[code,0,0,0,0,0,0,"—"];
+    const diff=r[5]-r[6];
     return `<div class="team-card" data-go="team" data-param="${code}">
       <div class="tc-top">${badge(code,50)}
         <div><h3>${t.name}</h3><div class="tc-sub">${t.div} Division · ${t.city}</div></div>
         <div style="position:absolute;right:-30px;top:-30px;width:120px;height:120px;border-radius:50%;background:${t.c};opacity:.14"></div></div>
       <div class="tc-stats">
-        <div><div class="n">${recStr(code)}</div><div class="l">Record</div></div>
+        <div><div class="n">${r[2]}-${r[3]}-${r[4]}</div><div class="l">Record</div></div>
         <div><div class="n" style="color:var(--frost)">${pts(r)}</div><div class="l">Points</div></div>
-        <div><div class="n">${r[5]>r[6]?'+':''}${r[5]-r[6]}</div><div class="l">Diff</div></div>
+        <div><div class="n">${diff>0?'+':''}${diff}</div><div class="l">Diff</div></div>
       </div></div>`;}).join("");
 }
 
@@ -2173,7 +2175,7 @@ async function sbInit(){
     dbTeams=tms||[];
     await loadStandings();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
-    renderHeroCarousel();renderHeroRink();
+    renderTeamsGrid();renderHeroCarousel();renderHeroRink();
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
       const hs=$("#heroSkaters");if(hs)hs.textContent=count||0;}
   }catch(err){console.warn("Supabase public load failed:",err&&err.message);}
