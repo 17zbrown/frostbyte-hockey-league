@@ -2621,19 +2621,20 @@ async function loadMembers(){
       <td style="text-align:right"><button class="mini good mb-save" data-id="${p.id}">Save</button></td></tr>`).join("")+"</tbody></table></div>";
 }
 async function saveMember(btn){
-  const id=btn.dataset.id;
+  const id=btn.dataset.id;if(!id||!sb)return;
   const role=(document.querySelector('.mb-role[data-id="'+id+'"]')||{}).value;
   const code=(document.querySelector('.mb-club[data-id="'+id+'"]')||{}).value;
-  const {error}=await sb.from("profiles").update({role}).eq("id",id);
-  if(error){toast("Couldn't save",error.message);return;}
-  if(role==="gm"&&code){const tid=teamIdOf(code);
-    await sb.from("teams").update({gm_profile_id:null}).eq("gm_profile_id",id).neq("id",tid);
-    await sb.from("teams").update({gm_profile_id:id}).eq("id",tid);
-  }else{
-    await sb.from("teams").update({gm_profile_id:null}).eq("gm_profile_id",id);
+  if(!role){toast("Pick a role","");return;}
+  btn.disabled=true;
+  const {data,error}=await sb.rpc("set_member_role",{p_target:id,p_role:role,p_team_code:code||null});
+  btn.disabled=false;
+  if(error){
+    toast("Couldn't save role",/commissioner/i.test(error.message)?"Your commissioner session may have expired — sign out and back in, then retry.":error.message);
+    return;
   }
   const rl=ROLE_OPTS.find(r=>r[0]===role);
-  toast("Member updated",rl[1]+(role==="gm"&&code?" · "+teams[code].name:""));
+  const clubName=(role==="gm"&&code&&teams[code])?" · "+teams[code].name:"";
+  toast("Member updated",(rl?rl[1]:role)+clubName);
   loadMembers();
   const {data:tms}=await sb.from("teams").select("*");if(tms){dbTeams=tms;buildTeams();}  // refresh so manager gate sees new assignments
 }
