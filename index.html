@@ -2528,19 +2528,59 @@ async function assignRegistration(btn){
 }
 
 /* ---- Schedule auto-generate (round-robin) ---- */
-function roundRobin(codes){let arr=[...codes];if(arr.length%2)arr.push(null);const n=arr.length,rounds=[];
-  for(let r=0;r<n-1;r++){const round=[];for(let i=0;i<n/2;i++){const a=arr[i],b=arr[n-1-i];if(a&&b)round.push([a,b]);}
-    arr=[arr[0],arr[n-1]].concat(arr.slice(1,n-1));rounds.push(round);}return rounds;}
+const GAMES_PER_CLUB=54;          // regular-season games each club plays
+const NIGHT_SLOTS=["21:00","21:35","22:10"];  // three Eastern-time slots per game night
+const GAMES_PER_NIGHT=3;          // Wed & Fri, three games a night
+function rrRotate(a,r){const n=a.length,out=[];for(let i=0;i<n;i++)out.push(a[(i+r)%n]);return out;}
+function ymd(d){return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");}
+// Sequence of Wed/Fri game-night calendar dates starting from the season's first Wednesday.
+function gameNightDates(startISO,weeks){
+  const base=startISO?new Date(startISO):new Date();
+  const d=new Date(Date.UTC(base.getUTCFullYear(),base.getUTCMonth(),base.getUTCDate(),12,0,0));
+  while(d.getUTCDay()!==3)d.setUTCDate(d.getUTCDate()+1);  // advance to Wednesday
+  const out=[];
+  for(let w=0;w<weeks;w++){
+    const wed=new Date(d);wed.setUTCDate(d.getUTCDate()+7*w);
+    const fri=new Date(wed);fri.setUTCDate(wed.getUTCDate()+2);
+    out.push({week:w+1,date:ymd(wed)});out.push({week:w+1,date:ymd(fri)});
+  }
+  return out;
+}
 async function generateSchedule(){
   if(!sb||!adminSeason)return;
+  const codes=TEAM_KEYS.slice();
+  if(codes.length<2){toast("Add clubs first","You need at least two clubs to build a schedule.");return;}
   const {count}=await sb.from("games").select("*",{count:"exact",head:true}).eq("season_id",adminSeason.id);
   if(count){toast("Schedule already exists","Clear it first to regenerate.");return;}
-  const rounds=roundRobin(TEAM_KEYS),rows=[];let wk=1;
-  rounds.forEach(round=>{round.forEach(([h,a])=>rows.push({season_id:adminSeason.id,week:wk,home_team_id:teamIdOf(h),away_team_id:teamIdOf(a),status:"scheduled"}));wk++;});
-  rounds.forEach(round=>{round.forEach(([h,a])=>rows.push({season_id:adminSeason.id,week:wk,home_team_id:teamIdOf(a),away_team_id:teamIdOf(h),status:"scheduled"}));wk++;});
-  const {error}=await sb.from("games").insert(rows);
-  if(error){toast("Couldn't generate",error.message);return;}
-  toast("Schedule generated",rows.length+" games across "+(wk-1)+" weeks.");
+  // 1) Matchups — GAMES_PER_CLUB rounds via the circle method (alternating home/away).
+  const arr=codes.slice();if(arr.length%2)arr.push(null);
+  const m=arr.length,fixed=arr[0],others=arr.slice(1);
+  const all=[];
+  for(let r=0;r<GAMES_PER_CLUB;r++){
+    const order=[fixed].concat(rrRotate(others,r));
+    for(let i=0;i<m/2;i++){let a=order[i],b=order[m-1-i];if(!a||!b)continue;
+      if(r%2===1){const t=a;a=b;b=t;}
+      all.push([a,b]);}
+  }
+  // 2) Pack into nights of up to 3 games with no club playing twice the same night.
+  const nights=[],rem=all.slice();
+  while(rem.length){const night=[],used=new Set();
+    for(let i=0;i<rem.length&&night.length<GAMES_PER_NIGHT;){const [a,b]=rem[i];
+      if(!used.has(a)&&!used.has(b)){night.push(rem[i]);used.add(a);used.add(b);rem.splice(i,1);}else i++;}
+    nights.push(night);}
+  // 3) Assign Wed/Fri dates + the three ET slots, from the season start date.
+  const dates=gameNightDates(adminSeason.starts_at,Math.ceil(nights.length/2)+1);
+  const rows=[];
+  nights.forEach((night,ni)=>{const d=dates[ni];
+    night.forEach((g,si)=>rows.push({season_id:adminSeason.id,week:d.week,
+      home_team_id:teamIdOf(g[0]),away_team_id:teamIdOf(g[1]),
+      scheduled_at:etInputToISO(d.date+"T"+NIGHT_SLOTS[si]),status:"scheduled"}));});
+  // insert in batches (keeps the request small; codes auto-generate per row)
+  for(let i=0;i<rows.length;i+=100){
+    const {error}=await sb.from("games").insert(rows.slice(i,i+100));
+    if(error){toast("Couldn't generate",error.message);return;}
+  }
+  toast("Schedule generated",rows.length+" games · "+GAMES_PER_CLUB+"/club · "+nights.length+" nights over "+Math.ceil(nights.length/2)+" weeks (Wed & Fri).");
   loadScheduleAdmin();loadGamesAdmin();
 }
 function clearSchedule(){
