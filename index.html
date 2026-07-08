@@ -2648,7 +2648,7 @@ async function loadMembers(){
   const clubOf={};(tms||[]).forEach(t=>{if(t.gm_profile_id)clubOf[t.gm_profile_id]=t.code;});
   const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Role</th><th>Club (managers only)</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Role</th><th>Club (managers &amp; commissioners)</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
     profs.map(p=>`<tr><td><b>${p.gamertag}</b></td>
       <td><select class="mb-role" data-id="${p.id}">${ROLE_OPTS.map(([v,l])=>`<option value="${v}" ${v===p.role?"selected":""}>${l}</option>`).join("")}</select></td>
       <td><select class="mb-club" data-id="${p.id}"><option value="">— none —</option>${(tms||[]).map(t=>`<option value="${t.code}" ${clubOf[p.id]===t.code?"selected":""}>${t.name}</option>`).join("")}</select></td>
@@ -2672,14 +2672,15 @@ async function saveMember(btn){
   loadMembers();
   const {data:tms}=await sb.from("teams").select("*");if(tms){dbTeams=tms;buildTeams();}  // refresh so manager gate sees new assignments
 }
-// Keep the role/club selects consistent: choosing a club makes them a Manager;
-// picking any non-Manager role clears the club (only managers hold a club).
+// Keep the role/club selects consistent: picking a club promotes a plain member to
+// Manager (gm & commissioner keep their role — both can run a club); switching to
+// Member clears the club, since only managers and commissioners hold one.
 $("#view-admin").addEventListener("change",e=>{
   const club=e.target.closest(".mb-club");
   if(club){const roleSel=document.querySelector('.mb-role[data-id="'+club.dataset.id+'"]');
-    if(club.value&&roleSel&&roleSel.value!=="gm")roleSel.value="gm";return;}
+    if(club.value&&roleSel&&roleSel.value==="member")roleSel.value="gm";return;}
   const roleSel=e.target.closest(".mb-role");
-  if(roleSel&&roleSel.value!=="gm"){const clubSel=document.querySelector('.mb-club[data-id="'+roleSel.dataset.id+'"]');
+  if(roleSel&&roleSel.value==="member"){const clubSel=document.querySelector('.mb-club[data-id="'+roleSel.dataset.id+'"]');
     if(clubSel)clubSel.value="";}
 });
 
