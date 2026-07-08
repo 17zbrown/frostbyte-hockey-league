@@ -1551,12 +1551,7 @@ const online=[
   ["Wallz","GLK",1],["Slapshot","ICE",0],["Volt","CBR",1],["Grendel","TUN",0],["Boulder","YET",1]
 ];
 
-const leaders = {
-  points:[["FrostByte_Zack","GLK",14,17,31],["Marek","FBV",12,16,28],["Toews99","CBR",15,11,26],["Nyx","TUN",9,16,25],["Bauer_D","POL",11,12,23]],
-  goals:[["Toews99","CBR",15],["FrostByte_Zack","GLK",14],["Marek","FBV",12],["Bauer_D","POL",11],["Sniper_Jo","GLK",11]],
-  assists:[["FrostByte_Zack","GLK",17],["Marek","FBV",16],["Nyx","TUN",16],["BlueLineBri","GLK",14],["Bauer_D","POL",12]],
-  save:[["Wallz","GLK",.931],["Iron_Mike","FBV",.924],["Zero","CBR",.918],["Puckett","TUN",.910],["Cage","POL",.902]]
-};
+let leaders = {points:[],goals:[],assists:[],save:[]};   // populated live from player_season_stats
 
 /* ------------------------------ HELPERS ------------------------------ */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -1644,7 +1639,7 @@ function computeLeaders(){
   leaders.assists=sk.slice().sort((a,b)=>b.a-a.a||b.pts-a.pts).slice(0,5).map(p=>[p.name,p.team,p.a]);
   leaders.save=gl.slice().sort((a,b)=>parseFloat(b.svpct)-parseFloat(a.svpct)).slice(0,5).map(p=>[p.name,p.team,parseFloat(p.svpct)]);
 }
-reconcile();computeLeaders();
+reconcile();   // (demo helper; live leaders come from loadLeaders via player_season_stats)
 
 /* ------------------------------ ROUTER ------------------------------ */
 let currentParam=null;
@@ -1821,8 +1816,23 @@ function wireHeroControls(){
 }
 
 /* ------------------------------ LEADERS ------------------------------ */
+async function loadLeaders(){
+  if(!sb||!openSeason){leaders={points:[],goals:[],assists:[],save:[]};return;}
+  const {data:stats}=await sb.from("player_season_stats").select("*, profiles(gamertag)").eq("season_id",openSeason.id);
+  const {data:spots}=await sb.from("roster_spots").select("profile_id,team_id").eq("season_id",openSeason.id);
+  const teamOf={};(spots||[]).forEach(s=>teamOf[s.profile_id]=codeOfId(s.team_id));
+  const rows=(stats||[]).map(s=>({name:s.profiles?s.profiles.gamertag:"?",tc:teamOf[s.profile_id],g:s.goals,a:s.assists,pts:s.points,isG:s.is_goalie,saves:s.saves,sa:s.shots_against})).filter(r=>r.tc);
+  const svp=r=>r.sa?r.saves/r.sa:0;
+  leaders={
+    points:[...rows].filter(r=>!r.isG).sort((a,b)=>b.pts-a.pts||b.g-a.g).slice(0,10).map(r=>[r.name,r.tc,r.g,r.a,r.pts]),
+    goals:[...rows].filter(r=>!r.isG).sort((a,b)=>b.g-a.g).slice(0,10).map(r=>[r.name,r.tc,r.g]),
+    assists:[...rows].filter(r=>!r.isG).sort((a,b)=>b.a-a.a).slice(0,10).map(r=>[r.name,r.tc,r.a]),
+    save:[...rows].filter(r=>r.isG&&r.sa>0).sort((a,b)=>svp(b)-svp(a)).slice(0,10).map(r=>[r.name,r.tc,svp(r)])
+  };
+}
 function renderLeaderList(el,key){
-  const rows=leaders[key];
+  const rows=(leaders&&leaders[key])||[];
+  if(!rows.length){el.innerHTML='<div style="padding:24px;text-align:center;color:var(--fog);font-size:13.5px">No stats yet — leaders appear once games are reported.</div>';return;}
   el.innerHTML=rows.map((r,i)=>{const[name,tc]=r;const t=teams[tc];
     const val=key==="save"?r[2].toFixed(3).replace(/^0/,""):r[2];
     const unit=({points:"PTS",goals:"G",assists:"A",save:"SV%"})[key];
@@ -2193,9 +2203,11 @@ async function sbInit(){
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
     dbTeams=tms||[];
-    await loadStandings();
+    await loadStandings();await loadLeaders();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     renderTeamsGrid();renderHeroCarousel();renderHeroRink();
+    renderLeaderList($("#homeLeaders"),"points");
+    const lba=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lba?lba.dataset.lb:"points");
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
       const hs=$("#heroSkaters");if(hs)hs.textContent=count||0;}
   }catch(err){console.warn("Supabase public load failed:",err&&err.message);}
