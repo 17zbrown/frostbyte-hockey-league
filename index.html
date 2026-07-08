@@ -1080,8 +1080,8 @@
 
   <!-- SCHEDULE -->
   <div class="view" id="view-schedule"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Season 4 · Fixtures</span><h2>The <em>Schedule</em></h2>
-      <p>Games run Tuesday and Thursday nights, 9:00 PM ET. Tap a final to open the box score.</p></div></div>
+    <div class="sec-head"><div><span class="eyebrow">Season 1 · Fixtures</span><h2>The <em>Schedule</em></h2>
+      <p>Games run Wednesday and Friday nights — three a night at 9:00, 9:35 and 10:10 PM ET. Tap a scheduled game for its match card, or a final for the box score.</p></div></div>
     <div id="scheduleBody"></div>
   </div></section></div>
 
@@ -1200,12 +1200,12 @@
       </form>
       <div class="signup-side">
         <div class="info-card"><h3 id="signupGlanceTitle">Season 1 At A Glance</h3>
-          <div class="info-line"><span>Regular season</span><b>14 games</b></div>
-          <div class="info-line"><span>Game nights</span><b>Tue / Thu</b></div>
-          <div class="info-line"><span>Puck drop</span><b>9:00 PM ET</b></div>
+          <div class="info-line"><span>Regular season</span><b>54 games</b></div>
+          <div class="info-line"><span>Game nights</span><b>Wed / Fri</b></div>
+          <div class="info-line"><span>Games / night</span><b>3</b></div>
+          <div class="info-line"><span>Puck drops</span><b>9:00 · 9:35 · 10:10 ET</b></div>
           <div class="info-line"><span>Roster lock</span><b>Sun, Aug 30</b></div>
           <div class="info-line"><span>Playoffs</span><b>Top 3 / division</b></div>
-          <div class="info-line"><span>Entry fee</span><b>Free</b></div>
         </div>
         <div class="info-card"><h3>How Entry Works</h3><div class="steps">
           <div class="step"><div class="no"></div><div><b>Register</b><p>Submit your gamertag, position, and platform.</p></div></div>
@@ -1387,7 +1387,7 @@ function buildTeams(){
 
 // standings: code, gp, w, l, otl, gf, ga, streak
 const rules = [
-  {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>14-game</b> regular season, played Tuesday and Thursday nights at 9:00 PM ET.","Each club plays division rivals three times and cross-division opponents twice."]},
+  {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>54-game</b> regular season, played Wednesday and Friday nights — three games a night at <b>9:00, 9:35 and 10:10 PM ET</b>.","Every game is free to play — no entry fee, ever."]},
   {n:"02",t:"Standings & Points",items:["<b>2 points</b> for a win, <b>1 point</b> for an overtime or shootout loss, <b>0</b> for a regulation loss.","Ties in the standings broken by: wins, then head-to-head, then goal differential.","<b>Top three</b> from each division qualify for the Frostbyte Cup, plus <b>two wild cards</b>."]},
   {n:"03",t:"Rosters & Cap",items:["Rosters carry <b>up to 12 players</b> including two goalies.","A <b>$45M salary cap</b> applies — no lineup may exceed it on game night.","Roster lock is the <b>Sunday before Week 1</b>; in-season moves go through waivers or trade."]},
   {n:"04",t:"Trades & Waivers",items:["A trade goes through <b>the moment both GMs agree</b> — no commissioner approval needed.","Either club can <b>accept, decline, or counter</b> a trade proposal.","Waived players clear waivers and enter the free-agent pool for any club to sign.","The <b>trade deadline</b> falls two weeks before the end of the regular season."]},
