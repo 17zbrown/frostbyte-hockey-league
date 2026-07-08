@@ -956,7 +956,7 @@
         <div class="dropdown">
           <a data-go="stats">Stats &amp; Leaders</a>
           <a data-go="freeagency" data-feature="freeagency">Free Agency</a>
-          <a data-go="draft" data-feature="draft">Draft Board</a>
+          <a data-go="draft" data-feature="draft" data-role="manager">Draft Board</a>
         </div>
       </div>
       <div class="navgrp">
@@ -1173,9 +1173,9 @@
 
   <!-- DRAFT -->
   <div class="view" id="view-draft"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Season 5 Class</span><h2>Draft <em>Board</em></h2>
-      <p>Scout rankings for the upcoming rookie draft, ordered by projected value.</p></div></div>
-    <div class="card"><div id="draftBody"></div></div>
+    <div class="sec-head"><div><span class="eyebrow" id="draftEyebrow">Draft Pool</span><h2>Draft <em>Board</em></h2>
+      <p>Registered players who are available to draft onto a club. Managers only.</p></div></div>
+    <div class="card"><div class="card-h"><h3>Available Players</h3><span class="pill" id="draftCount"></span></div><div id="draftBody"></div></div>
   </div></section></div>
 
   <!-- RULEBOOK -->
@@ -1339,7 +1339,7 @@
         <a href="#" aria-label="X"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h3l-7 8 8 12h-6l-5-7-6 7H2l8-9L2 2h6l4 6Zm-2 18h2L8 4H6Z"/></svg></a>
       </div></div>
     <div class="foot-col"><h4>League</h4><a data-go="standings">Standings</a><a data-go="schedule">Schedule</a><a data-go="bracket">Playoffs</a><a data-go="rankings">Power Rankings</a><a data-go="records">Records</a></div>
-    <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency">Free Agency</a><a data-go="draft">Draft Board</a><a data-go="transactions">Transactions</a></div>
+    <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency">Free Agency</a><a data-go="draft" data-role="manager">Draft Board</a><a data-go="transactions">Transactions</a></div>
     <div class="foot-col"><h4>Community</h4><a data-go="news">News</a><a data-go="chat">League Chat</a><a data-go="rulebook">Rulebook</a><a data-go="manager">Manager Portal</a><a data-go="admin">Commissioner</a></div>
   </div>
   <div class="foot-bottom"><span>© Season 4 · Frostbyte Hockey League. Not affiliated with the NHL or EA Sports.</span>
@@ -1650,6 +1650,7 @@ reconcile();computeLeaders();
 let currentParam=null;
 function go(view,param){
   const fk=viewFeature(view);if(fk&&!featureOn(fk)){toast("Feature unavailable","The commissioner has turned off "+features.find(x=>x.key===fk).label+".");view="home";}
+  if(MANAGER_VIEWS.has(view)&&!isManager()){toast("Managers only","The draft pool is available to club managers.");view="home";}
   currentParam=param!==undefined?param:null;
   $$(".view").forEach(v=>v.classList.remove("on"));
   const el=$("#view-"+view);if(el)el.classList.add("on");
@@ -1661,6 +1662,7 @@ function go(view,param){
   if(view==="article")renderArticle(param);
   if(view==="admin"&&typeof renderCommissioner==="function")renderCommissioner();
   if(view==="manager"&&typeof renderManager==="function")renderManager();
+  if(view==="draft"&&typeof renderDraft==="function")renderDraft();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
 }
@@ -1681,7 +1683,7 @@ function buildNav(){
     ["Front Office",[["manager","Manager Portal"],["admin","Commissioner"]]]
   ];
   $("#mobileMenu").innerHTML=groups.map(([g,items])=>
-    `<div class="mm-group">${g}</div>`+items.map(([v,l])=>{const fk=viewFeature(v);return `<button data-go="${v}"${fk?` data-feature="${fk}"`:""}>${l}</button>`;}).join("")).join("");
+    `<div class="mm-group">${g}</div>`+items.map(([v,l])=>{const fk=viewFeature(v);return `<button data-go="${v}"${fk?` data-feature="${fk}"`:""}${MANAGER_VIEWS.has(v)?' data-role="manager"':""}>${l}</button>`;}).join("")).join("");
   applyFeatures();
 }
 
@@ -2111,10 +2113,21 @@ function renderFA(){
   $("#faGoalies").innerHTML=g.map(faItem).join("");
   $("#faSkCount").textContent=sk.length;$("#faGCount").textContent=g.length;
 }
-function renderDraft(){
-  $("#draftBody").innerHTML=draftProspects.map((p,i)=>`<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b>${p[0]}</b><small>${({C:'Center',W:'Wing',D:'Defense',G:'Goalie'})[p[1]]} · ${p[3]}</small></div>
-    <div class="pv-ovr">${p[2]}<small>Proj OVR</small></div></div>`).join("");
+async function renderDraft(){
+  const el=$("#draftBody");if(!el)return;
+  const posName={C:"Center",LW:"Left Wing",RW:"Right Wing",W:"Wing",D:"Defense",G:"Goalie"};
+  const cnt=$("#draftCount");
+  if(!sb||!openSeason){el.innerHTML="";return;}
+  if(!isManager()){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Managers only</h4><p>The draft pool is visible to club managers and the commissioner.</p></div>';if(cnt)cnt.textContent="";return;}
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
+  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
+  const taken=new Set((spots||[]).map(s=>s.profile_id));
+  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id));
+  if(cnt)cnt.textContent=pool.length+" available";
+  if(!pool.length){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Draft pool is empty</h4><p>Registered players who haven\'t been assigned to a club yet will appear here.</p></div>';return;}
+  el.innerHTML=pool.map((p,i)=>`<div class="prospect"><span class="pk">${i+1}</span>
+    <div class="pv-info"><b>${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${p.ea_id||"—"}</small></div>
+    <div class="pv-ovr" style="font-size:16px">${p.position}<small>Pos</small></div></div>`).join("");
 }
 
 /* ------------------------------ RULEBOOK ------------------------------ */
@@ -2219,6 +2232,7 @@ function renderAuthUI(){
   renderSignupAuth();
   renderCommissioner();
   renderManager();
+  applyRoleVisibility();
 }
 function renderSignupAuth(){
   const b=document.querySelector("#signupAuthBanner");if(!b)return;
@@ -2565,7 +2579,10 @@ let features=[
 ];
 function featureOn(key){const f=features.find(x=>x.key===key);return f?f.on:true;}
 function viewFeature(view){const f=features.find(x=>x.view===view);return f?f.key:null;}
-function applyFeatures(){document.querySelectorAll("[data-feature]").forEach(el=>{el.style.display=featureOn(el.dataset.feature)?"":"none";});}
+function applyFeatures(){document.querySelectorAll("[data-feature]").forEach(el=>{el.style.display=featureOn(el.dataset.feature)?"":"none";});applyRoleVisibility();}
+function isManager(){return authProfile&&(authProfile.role==="gm"||authProfile.role==="commissioner");}
+const MANAGER_VIEWS=new Set(["draft"]);
+function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{el.style.display=isManager()?"":"none";});}
 function renderFeatures(){const el=$("#featuresBody");if(!el)return;
   $("#featCount").textContent=features.filter(f=>f.on).length+" / "+features.length+" on";
   el.innerHTML=features.map((f,i)=>`<div class="feat-row ${f.on?"":"feat-off"}">
