@@ -2640,6 +2640,16 @@ async function saveMember(btn){
   loadMembers();
   const {data:tms}=await sb.from("teams").select("*");if(tms){dbTeams=tms;buildTeams();}  // refresh so manager gate sees new assignments
 }
+// Keep the role/club selects consistent: choosing a club makes them a Manager;
+// picking any non-Manager role clears the club (only managers hold a club).
+$("#view-admin").addEventListener("change",e=>{
+  const club=e.target.closest(".mb-club");
+  if(club){const roleSel=document.querySelector('.mb-role[data-id="'+club.dataset.id+'"]');
+    if(club.value&&roleSel&&roleSel.value!=="gm")roleSel.value="gm";return;}
+  const roleSel=e.target.closest(".mb-role");
+  if(roleSel&&roleSel.value!=="gm"){const clubSel=document.querySelector('.mb-club[data-id="'+roleSel.dataset.id+'"]');
+    if(clubSel)clubSel.value="";}
+});
 
 /* ---- Teams (add / remove clubs) ---- */
 async function refreshTeamsEverywhere(){
