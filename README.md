@@ -8,9 +8,12 @@ The entire site is one self-contained **`index.html`** (all CSS + JS inlined). T
 only backend piece is a serverless function that reads EA end-of-game screenshots
 with a free vision model and returns a structured box score.
 
-> **Current data note:** the app currently runs on in-memory demo data that resets
-> on reload. Persistence (registrations, rosters, trades) via Supabase is the next
-> phase — see **Roadmap** below.
+> **Data:** the site runs on a live **Supabase** backend (Postgres + Auth + RLS).
+> Every public and manager view reads real data — standings, schedule, rosters,
+> team pages, stats & leaders, player profiles, transactions, news, free agency,
+> bracket, and power rankings — with clean pre-season empty states until games are
+> played. Discord OAuth gates the Manager and Commissioner tools. League chat lives
+> in Discord.
 
 ---
 
@@ -80,17 +83,20 @@ netlify.toml                       Netlify config + /api route + security header
 
 ## Roadmap — from demo to production
 
-- [x] **Deploy the static build** (GitHub + Netlify) ← you are here
-- [ ] **Supabase project** for hockey (Postgres + Auth + Storage)
-- [ ] **Auth** (Discord OAuth) + roles (member / GM / commissioner)
-- [ ] **Schema** — profiles, seasons, teams, players, roster_spots,
-      season_registrations, trades, waivers, transactions, game_reports,
-      box_score_entries, chat_messages, news, feature_flags (all with RLS)
-- [ ] **Wire reads** (standings/rosters/stats from the DB), then **writes**
-      (registration → roster spot → jersey number persist)
-- [ ] Game-report storage + screenshot uploads to Supabase Storage
-- [ ] Realtime league chat
-- [ ] Security hardening (RLS review, rate limits, backups)
+- [x] **Deploy the static build** (GitHub + Netlify)
+- [x] **Supabase project** (Postgres + Auth + RLS)
+- [x] **Auth** (Discord OAuth) + roles (member / GM / commissioner)
+- [x] **Schema** — profiles, seasons, teams, roster_spots, season_registrations,
+      trades, transactions, games, player_season_stats, news, app_config (all with RLS)
+- [x] **Wire reads** (standings, schedule, rosters, team pages, stats & leaders,
+      profiles, transactions, news, free agency, bracket, rankings from the DB)
+- [x] **Writes** — registration → roster spot (+ jersey), trades (mutual accept),
+      commissioner scheduler/scores, news publishing
+- [ ] Game-report box scores + screenshot uploads to Supabase Storage
+      (needs `game_reports` / `box_score_entries` tables — commissioner scores are
+      the live stat path today)
+- [ ] Playoff bracket results model + awards/records tracking
+- [ ] Deadline automation (pg_cron) + more Discord automation
 
 ---
 
