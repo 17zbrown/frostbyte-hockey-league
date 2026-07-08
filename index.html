@@ -1375,13 +1375,8 @@ function hash(s){let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0
 // Jersey numbers are chosen at sign-up and stay fixed all season (editable by the GM/commissioner).
 // jerseys{} is the stored source of truth; players without an explicit choice fall back to a stable default.
 const jerseys={};
-function jn(name){if(jerseys[name]!=null)return jerseys[name];const m=name.match(/\d+/);if(m)return +m[0].slice(0,2)||(hash(name)%96)+2;return (hash(name)%96)+2;}
-function setJersey(name,num){jerseys[name]=+num;if(playersById[name])playersById[name].num=+num;}
-function clubUsedNumbers(code,exceptName){const s=new Set();if(code&&code!=="FA")rosters[code].forEach(r=>{if(r[0]!==exceptName)s.add(+jn(r[0]));});return s;}
-function nextFreeNumber(code,pref){const used=clubUsedNumbers(code,null);if(!used.has(+pref))return +pref;for(let n=1;n<=99;n++)if(!used.has(n))return n;return +pref;}
 jerseys["FrostByte_Zack"]=91; // captain's chosen number — keeps every card/profile in agreement
 function ordinal(n){const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);}
-function recStr(code){const r=standBy[code];return `${r[2]}-${r[3]}-${r[4]}`;}
 function shade(hex,amt){let c=hex.replace('#','');if(c.length===3)c=c.split('').map(x=>x+x).join('');
   const cl=x=>Math.max(0,Math.min(255,x));const p=i=>parseInt(c.slice(i,i+2),16);
   return '#'+[cl(p(0)+amt),cl(p(2)+amt),cl(p(4)+amt)].map(x=>x.toString(16).padStart(2,'0')).join('');}
@@ -1526,12 +1521,6 @@ function renderFixtures(){
 
 /* ------------------------------ HERO: PLAYERS TO WATCH ------------------------------ */
 const heroMatchup=["GLK","FBV"];   // this week's featured game
-function keyPlayers(code){
-  const r=playersByTeam[code];
-  const sk=r.filter(p=>p.pos!=="G").sort((a,b)=>b.pts-a.pts).slice(0,3);
-  const g=r.filter(p=>p.pos==="G").sort((a,b)=>b.ovr-a.ovr)[0];
-  return g?[...sk,g]:sk;
-}
 function renderHeroRink(){
   const el=$("#heroRink");if(!el)return;
   const sn=openSeason?openSeason.number:1;
@@ -1689,22 +1678,6 @@ function renderTeamsGrid(){
 
 /* ------------------------------ SEASON HISTORY ------------------------------ */
 let curPlayerId=null,profileSeason=4,curTeamCode=null,teamSeason=4;
-function getPlayerSeasons(p){const n=1+(hash(p.id)%4);const arr=[];for(let s=Math.max(1,5-n);s<=4;s++)arr.push(s);return arr;}
-function playerSeasonLine(p,s){
-  if(s===4)return p;
-  const h=hash(p.id+"|s"+s);const gp=12+h%4;
-  if(p.pos==="G")return Object.assign({},p,{gp,gaa:(2.1+(h%20)/10).toFixed(2),svpct:(.885+(h%45)/1000).toFixed(3).replace(/^0/,""),so:h%5,gw:Math.round(gp*(0.4+(h%40)/100))});
-  const g=Math.max(0,Math.round(p.g*(0.55+(h%80)/100))),a=Math.max(0,Math.round(p.a*(0.55+((h>>3)%80)/100))),shots=g*4+8+h%16;
-  return Object.assign({},p,{gp,g,a,pts:g+a,pm:(h%25)-9,spct:shots?((g/shots)*100).toFixed(1):"0.0",shots,fopct:p.pos==="C"?(46+h%12).toFixed(1):null,hits:5+h%40,blocks:p.pos==="D"?15+h%30:2+h%15,pim:h%20});
-}
-function getTeamSeasons(code){const est=teams[code].est;const arr=[];for(let s=est;s<=4;s++)arr.push(s);return arr;}
-function teamSeasonLine(code,s){const t=teams[code];
-  if(s===4){const r=standBy[code];const rank=[...standings].filter(x=>teams[x[0]].div===t.div).sort((a,b)=>pts(b)-pts(a)).findIndex(x=>x[0]===code)+1;return{w:r[2],l:r[3],otl:r[4],gf:r[5],ga:r[6],streak:r[7],finish:ordinal(rank)+", "+t.div};}
-  const h=hash(code+"|ts"+s),w=4+h%10,l=3+((h>>2)%10),otl=h%3,gf=35+h%28,ga=34+((h>>3)%28);
-  const finishes=["Frostbyte Cup Champions","Cup Finalist","Division Final","1st, "+t.div,"2nd, "+t.div,"3rd, "+t.div,"Missed Playoffs"];
-  return{w,l,otl,gf,ga,streak:"—",finish:finishes[h%finishes.length]};
-}
-function seasonSelect(id,seasons,cur){return `<select id="${id}" class="season-sel" aria-label="Select season">${seasons.slice().reverse().map(s=>`<option value="${s}"${s===cur?" selected":""}>Season ${s}${s===4?" · Current":""}</option>`).join("")}</select>`;}
 
 /* ------------------------------ TEAM PAGE ------------------------------ */
 let teamPageToken=0;
@@ -2010,16 +1983,6 @@ function renderChat(){
 $("#chatForm").addEventListener("submit",e=>{e.preventDefault();toast("Chat is in Discord","The league chats in the Frostbyte Discord server.");});
 
 /* ------------------------------ SIGNUP ------------------------------ */
-function registerPlayer(code,row){const obj=playerObj(code,row);playersById[obj.id]=obj;if(playersByTeam[code])playersByTeam[code].push(obj);return obj;}
-function assignModal(name,code){
-  $("#modalCard").classList.remove("wide");$("#modalTitle").textContent="You're in the league";
-  $("#modalMsg").innerHTML=`Season 4 is already underway, so <b>${name}</b> has been assigned to an open roster:
-    <div style="display:flex;align-items:center;gap:13px;margin-top:16px">${badge(code,46)}
-      <div><div style="font-family:var(--f-display);text-transform:uppercase;font-size:22px;letter-spacing:0;color:var(--navy)">${teams[code].name}</div>
-      <div class="mono" style="color:var(--fog);font-size:12px">${teams[code].div} Division · #${jn(name)} · ${rosters[code].length}/${MAX_ROSTER} on roster</div></div></div>`;
-  $("#modalOk").textContent="View My Team";$("#modalOk").style.display="";$("#modalCancel").textContent="Close";
-  modalCb=()=>go("team",code);$("#modalBg").classList.add("on");
-}
 /* ===================== SUPABASE — auth + persistence (Phase 2a) ===================== */
 const SB_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co";
 const SB_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
@@ -2148,104 +2111,9 @@ function loadFrontOffice(){const t=teams[currentClub];
 
 /* ---- Game Reports: full per-player box score for BOTH clubs; must mirror opponent to publish ---- */
 let gameReports=[];
-function makeBox(code,teamGoals,oppGoals,seed){
-  const roster=playersByTeam[code];const sk=roster.filter(p=>p.pos!=="G").sort((a,b)=>b.pts-a.pts).slice(0,6);
-  const g=sk.map(()=>0),a=sk.map(()=>0);
-  for(let k=0;k<teamGoals;k++)g[hash(seed+"g"+k)%sk.length]++;
-  const totA=Math.round(teamGoals*1.4);for(let k=0;k<totA;k++)a[hash(seed+"a"+k)%sk.length]++;
-  const gk=roster.find(p=>p.pos==="G");const sv=oppGoals+16+hash(seed+"sv")%12;
-  return {skaters:sk.map((p,i)=>{const h=hash(seed+"|"+p.name);
-    return {name:p.name,pos:p.pos,g:g[i],a:a[i],s:g[i]+1+h%5,hit:h%9,pim:(h%6===0?2:0)};}),
-    goalie:{name:gk?gk.name:"—",sa:sv+oppGoals,sv,ga:oppGoals}};
-}
-function initGameReports(code){gameReports=[];let i=0;
-  schedule.forEach(wk=>wk.games.forEach(gm=>{if(gm.a!==code&&gm.b!==code)return;
-    const home=gm.a===code,opp=home?gm.b:gm.a,played=gm.as!=null;
-    const truth=played?{us:home?gm.as:gm.bs,them:home?gm.bs:gm.as}:null;const key=code+wk.wk+opp;
-    const box=played?{us:makeBox(code,truth.us,truth.them,key+"U"),them:makeBox(opp,truth.them,truth.us,key+"T")}:null;
-    let status="scheduled";if(played)status=/Week 6/.test(wk.wk)?"published":"pending";
-    gameReports.push({id:"r"+(i++),status,truth,box,expanded:false,wk:wk.wk,opp,home});}));
-}
-function boxSide(code,box,ro){
-  const cell=(v,i,s,mx)=>ro?`<span class="box-val">${v}</span>`:`<input class="box-in" data-code="${code}" data-i="${i}" data-s="${s}" type="number" min="0" max="${mx}" value="${v}">`;
-  const rows=box.skaters.map((p,i)=>`<tr><td><span class="posbadge ${p.pos}">${p.pos}</span>${p.name}</td>
-    <td>${cell(p.g,i,"g",15)}</td><td>${cell(p.a,i,"a",15)}</td><td>${cell(p.s,i,"s",40)}</td><td>${cell(p.hit,i,"hit",50)}</td><td>${cell(p.pim,i,"pim",30)}</td><td class="box-p">${p.g+p.a}</td></tr>`).join("");
-  const svp=box.goalie.sa?(box.goalie.sv/box.goalie.sa).toFixed(3).replace(/^0/,""):".000";
-  const grow=`<div class="box-goalie"><span class="posbadge G">G</span><b>${box.goalie.name}</b>
-    <span class="gl-in">SA ${cell(box.goalie.sa,"g","sa",60)}</span><span class="gl-in">SV ${cell(box.goalie.sv,"g","sv",60)}</span><span class="gl-in">GA ${cell(box.goalie.ga,"g","ga",15)}</span>
-    <span class="gl-sv mono">${svp} SV%</span></div>`;
-  return `<div class="box-side"><div class="box-side-h">${badge(code,20)} ${teams[code].name}</div>
-    <div class="box-scroll"><table class="box-tbl"><thead><tr><th>Player</th><th>G</th><th>A</th><th>S</th><th>HIT</th><th>PIM</th><th>P</th></tr></thead><tbody>${rows}</tbody></table></div>${grow}</div>`;
-}
-function boxEditor(gr,ro){
-  let foot;
-  if(ro){
-    foot=`<span class="mono" style="color:var(--fog);font-size:12.5px">${gr.status==="published"?"Published — both clubs' box scores matched.":"Forfeit — the 24-hour window closed without both clubs' box scores matching. Opponent's last entry shown."}</span>`;
-  }else if(gr.status==="mismatch"){
-    foot=`<span class="mono" style="color:#b26a00;font-size:12.5px">Stats not matching — your entry differs from <b>${teams[gr.opp].gm}</b>'s. Fix it and resubmit. <b><span class="rr-countdown" data-id="${gr.id}">${fmtLeft(gr.deadline-Date.now())}</span> left</b> before it's ruled a forfeit for both clubs.</span><button class="btn btn-frost btn-sm rr-submit" data-id="${gr.id}">Resubmit</button>`;
-  }else{
-    foot=`<span class="mono" style="color:var(--fog);font-size:12.5px">Enter every skater and goalie. Your box score must mirror <b>${teams[gr.opp].gm}</b>'s entry to publish.</span><button class="btn btn-frost btn-sm rr-submit" data-id="${gr.id}">Submit to League</button>`;
-  }
-  return `<div class="box-edit" data-gid="${gr.id}">${(ro||!featureOn("aiImport"))?"":aiImportPanel(gr)}<div class="box-grid">${boxSide(currentClub,gr.box.us,ro)}${boxSide(gr.opp,gr.box.them,ro)}</div><div class="box-foot">${foot}</div></div>`;
-}
 const AI_SCAN_IC=`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.3L18 9l-4.1 1.7L12 15l-1.9-4.3L6 9l4.1-1.7z"/><path d="M19 14l.8 1.9L22 17l-2.2.9L19 20l-.8-2.1L16 17l2.2-1.1z"/></svg>`;
 const AI_UP_IC=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v13"/></svg>`;
 const scanImages={};
-function aiImportPanel(gr){
-  const imgs=scanImages[gr.id]||[];
-  return `<div class="ai-import" data-gid="${gr.id}">
-    <div class="ai-head"><span class="ai-ic">${AI_SCAN_IC}</span>
-      <div class="ai-title"><b>Import from EA screenshots</b><small>Drop your end-of-game Player Summary screens — the AI reads the box score and fills both clubs.</small></div></div>
-    <label class="ai-drop" data-gid="${gr.id}"><input type="file" accept="image/*" multiple class="ai-file" data-gid="${gr.id}" hidden>
-      <span class="ai-drop-ic">${AI_UP_IC}</span><span class="ai-drop-txt">Drag screenshots here, or <b>browse</b></span></label>
-    <div class="ai-thumbs" data-gid="${gr.id}">${imgs.map((s,i)=>aiThumb(gr.id,s,i)).join("")}</div>
-    <div class="ai-actions"><span class="ai-status" data-gid="${gr.id}"></span>
-      <button class="btn btn-frost btn-sm ai-scan" data-id="${gr.id}" ${imgs.length?"":"disabled"}>Scan with AI</button></div></div>`;
-}
-function aiThumb(gid,src,i){return `<span class="ai-thumb"><img src="${src}" alt="screenshot ${i+1}"><button class="ai-rm" data-gid="${gid}" data-i="${i}" aria-label="Remove screenshot">×</button></span>`;}
-function aiRenderThumbs(gid){const wrap=document.querySelector('.ai-thumbs[data-gid="'+gid+'"]');if(!wrap)return;
-  const imgs=scanImages[gid]||[];wrap.innerHTML=imgs.map((s,i)=>aiThumb(gid,s,i)).join("");
-  const btn=document.querySelector('.ai-scan[data-id="'+gid+'"]');if(btn)btn.disabled=!imgs.length;}
-function aiReadFile(f){return new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f);});}
-async function aiAddFiles(gid,fileList){const imgs=[...fileList].filter(f=>f.type.startsWith("image/"));if(!imgs.length)return;
-  scanImages[gid]=scanImages[gid]||[];for(const f of imgs)scanImages[gid].push(await aiReadFile(f));aiRenderThumbs(gid);}
-function aiMockParse(gr){const t=(code,box,goals)=>({name:teams[code].name,goals,
-    skaters:box.skaters.map(p=>({name:p.name,position:p.pos,goals:p.g,assists:p.a,shots:p.s,hits:p.hit,pim:p.pim})),
-    goalie:{name:box.goalie.name,saves:box.goalie.sv,shotsAgainst:box.goalie.sa,goalsAgainst:box.goalie.ga}});
-  return {teams:[t(currentClub,gr.box.us,gr.truth.us),t(gr.opp,gr.box.them,gr.truth.them)]};}
-function aiApply(gr,parsed){const sides=[gr.box.us,gr.box.them];
-  (parsed.teams||[]).slice(0,2).forEach((tm,ti)=>{const box=sides[ti];if(!box)return;
-    (tm.skaters||[]).slice(0,6).forEach((p,i)=>{if(!box.skaters[i])return;
-      box.skaters[i].g=+p.goals||0;box.skaters[i].a=+p.assists||0;box.skaters[i].s=+p.shots||0;box.skaters[i].hit=+p.hits||0;box.skaters[i].pim=+p.pim||0;});
-    if(tm.goalie){box.goalie.sv=+tm.goalie.saves||0;box.goalie.ga=+tm.goalie.goalsAgainst||0;box.goalie.sa=+tm.goalie.shotsAgainst||(box.goalie.sv+box.goalie.ga);}});
-  if(parsed.teams&&parsed.teams[0]&&parsed.teams[0].goals!=null)gr.truth.us=+parsed.teams[0].goals;
-  if(parsed.teams&&parsed.teams[1]&&parsed.teams[1].goals!=null)gr.truth.them=+parsed.teams[1].goals;
-  renderReports();aiRenderThumbs(gr.id);
-  setTimeout(()=>{document.querySelectorAll('.box-edit[data-gid="'+gr.id+'"] .box-in').forEach(inp=>{inp.classList.add("flash");setTimeout(()=>inp.classList.remove("flash"),720);});},20);}
-async function aiScan(gid){const gr=gameReports.find(x=>x.id===gid);if(!gr)return;
-  const imgs=scanImages[gid]||[];if(!imgs.length)return;
-  const panel=document.querySelector('.ai-import[data-gid="'+gid+'"]');
-  const setStatus=h=>{const s=document.querySelector('.ai-status[data-gid="'+gid+'"]');if(s)s.innerHTML=h;};
-  if(panel)panel.classList.add("scanning");setStatus("Reading screenshots…");
-  let parsed=null,demo=false;
-  try{const r=await fetch("/api/parse-screenshots",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({images:imgs})});
-    if(!r.ok)throw new Error("backend unavailable");const d=await r.json();if(!d||!Array.isArray(d.teams))throw new Error("bad response");parsed=d;
-  }catch(e){parsed=aiMockParse(gr);demo=true;}
-  if(panel)panel.classList.remove("scanning");
-  aiApply(gr,parsed);
-  const a=parsed.teams[0]||{},b=parsed.teams[1]||{};
-  const src=demo?` <span style="color:var(--fog)">· demo scan (start <span class="mono">node server.js</span> with a key for live reading)</span>`:(parsed._provider?` <span style="color:var(--fog)">· read by ${parsed._provider}</span>`:"");
-  setStatus(`<b style="color:var(--win)">✓ Imported</b> — read ${a.name||"Home"} <b>${a.goals??"?"}</b>–<b>${b.goals??"?"}</b> ${b.name||"Away"}. Review below, then submit.`+src);}
-function reportRow(gr){
-  let right,ro=true;
-  if(gr.status==="scheduled")right=`<span class="rr-state sched">Scheduled — report after puck drop</span>`;
-  else if(gr.status==="published"){const w=gr.truth.us>gr.truth.them;right=`<span class="rr-state ok">✓ Published · ${gr.truth.us}–${gr.truth.them} ${w?"W":"L"}</span><button class="mini rr-toggle" data-id="${gr.id}">${gr.expanded?"Hide":"Box Score"}</button>`;}
-  else if(gr.status==="mismatch"){right=`<span class="rr-state warn">Stats not matching · <span class="rr-countdown" data-id="${gr.id}">${fmtLeft(gr.deadline-Date.now())}</span> left</span><button class="mini rr-toggle" data-id="${gr.id}">${gr.expanded?"Hide":"Fix Entry"}</button>`;ro=false;}
-  else if(gr.status==="forfeit")right=`<span class="rr-state bad">✗ Forfeit — no match in time</span><button class="mini rr-toggle" data-id="${gr.id}">${gr.expanded?"Hide":"Details"}</button>`;
-  else{right=`<button class="mini rr-toggle" data-id="${gr.id}">${gr.expanded?"Hide":"Enter Box Score"}</button>`;ro=false;}
-  const row=`<div class="rr-game"><div class="rr-teams">${badge(currentClub,26)}<span class="rr-vs">${gr.home?"vs":"@"}</span>${badge(gr.opp,26)}<span class="rr-opp">${teams[gr.opp].name}</span></div><div class="rr-actions">${right}</div></div>`;
-  return row+((gr.expanded&&gr.box)?boxEditor(gr,ro):"");
-}
 function renderReports(){const el=$("#reportsBody");if(!el)return;
   const byWeek=[];(liveSchedule||[]).forEach(wk=>{const g=wk.games.filter(x=>x.a===currentClub||x.b===currentClub);if(g.length)byWeek.push({wk:wk.wk,games:g});});
   if(!byWeek.length){el.innerHTML='<div class="empty-note">No games to report yet — your fixtures appear here once the commissioner posts the schedule. After each game, submit your EA end-of-game box score (or send screenshots to the commissioners).</div>';return;}
@@ -2255,36 +2123,7 @@ function renderReports(){const el=$("#reportsBody");if(!el)return;
     return `<div class="rr-game"><div class="rr-teams">${badge(currentClub,26)}<span class="rr-vs">${home?"vs":"@"}</span>${badge(opp,26)}<span class="rr-opp">${teams[opp].name}</span></div><div class="rr-actions">${right}</div></div>`;}).join("")).join("");
 }
 const MISMATCH_WINDOW_MS=24*60*60*1000; // 24 hours to align before a forfeit is ruled
-function fmtLeft(ms){if(ms<=0)return "0:00:00";const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;return h+":"+String(m).padStart(2,"0")+":"+String(ss).padStart(2,"0");}
 let reportTimer=null;
-function checkDeadlines(){let changed=false,gcChanged=false;
-  gameReports.forEach(gr=>{if(gr.status==="mismatch"&&gr.deadline&&Date.now()>=gr.deadline){gr.status="forfeit";changed=true;
-    transactions.unshift(["waive",`<b>${teams[currentClub].name}</b> vs <b>${teams[gr.opp].name}</b> ruled a forfeit — no matching box score within 24 hours`,"Just now"]);}});
-  leagueGames.forEach(g=>{if(g.status==="pending"&&g.deadline&&Date.now()>=g.deadline){g.status="forfeit";gcChanged=true;
-    transactions.unshift(["waive",`<b>${teams[g.a].name}</b> vs <b>${teams[g.b].name}</b> ruled a forfeit — alignment window closed`,"Just now"]);}});
-  if(changed||gcChanged)renderTxns();if(gcChanged)renderGameControl();return changed;}
-function anyLiveWindow(){return gameReports.some(g=>g.status==="mismatch")||leagueGames.some(g=>g.status==="pending");}
-function tickReports(){
-  document.querySelectorAll(".rr-countdown[data-id]").forEach(el=>{const gr=gameReports.find(x=>x.id===el.dataset.id);if(gr&&gr.deadline)el.textContent=fmtLeft(gr.deadline-Date.now());});
-  document.querySelectorAll(".gc-countdown[data-id]").forEach(el=>{const g=leagueGames.find(x=>x.id===el.dataset.id);if(g&&g.deadline)el.textContent=fmtLeft(g.deadline-Date.now());});
-  if(checkDeadlines())renderReports();
-  if(!anyLiveWindow()){clearInterval(reportTimer);reportTimer=null;}}
-function startReportTimer(){if(!reportTimer)reportTimer=setInterval(tickReports,1000);}
-function submitBox(gr){
-  const cont=document.querySelector('.box-edit[data-gid="'+gr.id+'"]');if(!cont)return;
-  let aligned=true;
-  cont.querySelectorAll(".box-in").forEach(inp=>{
-    const box=inp.dataset.code===currentClub?gr.box.us:gr.box.them;
-    const truthVal=inp.dataset.i==="g"?box.goalie[inp.dataset.s]:box.skaters[+inp.dataset.i][inp.dataset.s];
-    if(+inp.value!==truthVal)aligned=false;});
-  if(aligned){gr.status="published";gr.expanded=false;gr.deadline=null;
-    transactions.unshift(["sign",`<b>${teams[currentClub].name}</b> published the box score vs <b>${teams[gr.opp].name}</b> (${gr.truth.us}–${gr.truth.them})`,"Just now"]);renderTxns();
-    toast("Box score published","Your entry mirrors "+teams[gr.opp].gm+"'s — the stats are now official.");
-  }else{if(!gr.deadline)gr.deadline=Date.now()+MISMATCH_WINDOW_MS;gr.status="mismatch";gr.expanded=true;startReportTimer();
-    transactions.unshift(["waive",`<b>${teams[currentClub].name}</b> vs <b>${teams[gr.opp].name}</b> — box scores don't match; 24-hour window to align`,"Just now"]);renderTxns();
-    toast("Stats not matching","Your entry doesn't match "+teams[gr.opp].gm+"'s yet. You have 24 hours to align it before it's ruled a forfeit.");}
-  renderReports();
-}
 $("#reportsBody").addEventListener("click",e=>{
   const t=e.target.closest(".rr-toggle");if(t){const gr=gameReports.find(x=>x.id===t.dataset.id);if(gr){gr.expanded=!gr.expanded;renderReports();}return;}
   const sc=e.target.closest(".ai-scan");if(sc){aiScan(sc.dataset.id);return;}
@@ -2446,12 +2285,6 @@ function applyFeatures(){document.querySelectorAll("[data-feature]").forEach(el=
 function isManager(){return authProfile&&(authProfile.role==="gm"||authProfile.role==="commissioner");}
 const MANAGER_VIEWS=new Set(["draft"]);
 function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{el.style.display=isManager()?"":"none";});}
-function renderFeatures(){const el=$("#featuresBody");if(!el)return;
-  $("#featCount").textContent=features.filter(f=>f.on).length+" / "+features.length+" on";
-  el.innerHTML=features.map((f,i)=>`<div class="feat-row ${f.on?"":"feat-off"}">
-    <label class="switch"><input type="checkbox" data-feat="${i}" ${f.on?"checked":""}><span class="track"></span><span class="knob"></span></label>
-    <div class="feat-txt"><b>${f.label}</b><small>${f.desc}</small></div>
-    <button class="feat-rm" data-featrm="${i}" aria-label="Remove ${f.label}" title="Remove feature">×</button></div>`).join("");}
 $("#featuresBody").addEventListener("change",e=>{const t=e.target.closest("[data-feat]");if(!t)return;
   const f=features[+t.dataset.feat];f.on=t.checked;applyFeatures();renderFeatures();
   if(currentClub)refreshFrontOffice();
@@ -2471,23 +2304,6 @@ $("#featAddBtn").addEventListener("click",()=>{const v=$("#featNew").value.trim(
 
 /* -------------------- COMMISSIONER: GAME CONTROL -------------------- */
 let leagueGames=[];
-function initGameControl(){leagueGames=[];let i=0;
-  schedule.forEach(wk=>wk.games.forEach(gm=>{const played=gm.as!=null;
-    leagueGames.push({id:"g"+(i++),wk:wk.wk,a:gm.a,b:gm.b,as:gm.as,bs:gm.bs,status:played?"official":"scheduled",deadline:null});}));}
-function gcPill(g){const map={official:"Official",forfeit:"Forfeit — both clubs",scheduled:"Not yet reported",pending:"Window open"};
-  const cd=g.status==="pending"&&g.deadline?` · <span class="gc-countdown" data-id="${g.id}">${fmtLeft(g.deadline-Date.now())}</span> left`:"";
-  return `<span class="gc-pill ${g.status}">${map[g.status]}${cd}</span>`;}
-function gcActions(g){const b=[];
-  if(g.status!=="official"&&g.as!=null)b.push(`<button class="mini good" data-gc="official" data-id="${g.id}">Force Official</button>`);
-  if(g.status!=="forfeit")b.push(`<button class="mini danger" data-gc="forfeit" data-id="${g.id}">Rule Forfeit</button>`);
-  b.push(`<button class="mini" data-gc="extend" data-id="${g.id}">${g.status==="pending"?"+24h":"Open Window"}</button>`);
-  if(g.status!=="scheduled")b.push(`<button class="mini" data-gc="reopen" data-id="${g.id}">Reopen</button>`);
-  return b.join("");}
-function renderGameControl(){const el=$("#gameControlBody");if(!el)return;
-  const byWeek={};leagueGames.forEach(g=>{(byWeek[g.wk]=byWeek[g.wk]||[]).push(g);});
-  el.innerHTML=schedule.map(w=>w.wk).filter(w=>byWeek[w]).map(w=>`<div class="gc-week">${w}</div>`+
-    byWeek[w].map(g=>`<div class="gc-game"><div class="gc-teams">${badge(g.a,24)}<span class="gc-vs">vs</span>${badge(g.b,24)}<span class="gc-opp">${teams[g.a].name} · ${teams[g.b].name}</span></div>
-      <span class="gc-score">${g.as!=null?g.as+"–"+g.bs:"—"}</span>${gcPill(g)}<div class="gc-actions">${gcActions(g)}</div></div>`).join("")).join("");}
 $("#gameControlBody").addEventListener("click",e=>{const t=e.target.closest("[data-gc]");if(!t)return;
   const g=leagueGames.find(x=>x.id===t.dataset.id);if(!g)return;const act=t.dataset.gc,vs=`<b>${teams[g.a].name}</b> vs <b>${teams[g.b].name}</b>`;
   if(act==="official"){g.status="official";g.deadline=null;transactions.unshift(["sign",`Commissioner ruled ${vs} <b>official</b> (${g.as}–${g.bs})`,"Just now"]);toast("Result made official","The commissioner published this game.");}
@@ -2497,18 +2313,6 @@ $("#gameControlBody").addEventListener("click",e=>{const t=e.target.closest("[da
   renderTxns();renderGameControl();});
 
 /* -------------------- COMMISSIONER: ROSTER / PLAYER EDITOR -------------------- */
-const EDIT_POS=[{value:"C",label:"C"},{value:"LW",label:"LW"},{value:"RW",label:"RW"},{value:"W",label:"W"},{value:"D",label:"D"},{value:"G",label:"G"}];
-function allPlayerEntries(){const out=[];
-  TEAM_KEYS.forEach(code=>rosters[code].forEach((row,i)=>out.push({loc:code,i,row})));
-  freeAgents.forEach((row,i)=>out.push({loc:"FA",i,row}));return out;}
-function playerArr(loc){return loc==="FA"?freeAgents:rosters[loc];}
-function renderPlayersEdit(){const el=$("#playersEditBody");if(!el)return;
-  const q=(($("#plEditSearch")||{}).value||"").trim().toLowerCase();
-  const rows=allPlayerEntries().filter(e=>{if(!q)return true;const tn=e.loc==="FA"?"free agent":teams[e.loc].name.toLowerCase();return e.row[0].toLowerCase().includes(q)||tn.includes(q)||e.loc.toLowerCase()===q;});
-  el.innerHTML=rows.map(e=>{const[name,pos,ovr,gp,g,a,cap]=e.row;const club=e.loc==="FA"?'<span style="color:var(--fog)">Free Agent</span>':teams[e.loc].name;
-    return `<tr><td><b>${name}</b></td><td>${club}</td><td style="text-align:center"><span class="posbadge ${pos}">${pos}</span></td><td>${ovr}</td><td>${gp}</td><td>${g}</td><td>${a}</td><td>$${(+cap).toFixed(1)}M</td>
-    <td><div class="act"><button class="mini" data-editp="${e.loc}:${e.i}">Edit</button><button class="mini danger" data-delp="${e.loc}:${e.i}">Release</button></div></td></tr>`;}).join("")||`<tr><td colspan="9" style="color:var(--fog);padding:16px 20px">No players match that search.</td></tr>`;}
-$("#plEditSearch").addEventListener("input",renderPlayersEdit);
 $("#playersEditBody").addEventListener("click",e=>{
   const ed=e.target.closest("[data-editp]"),del=e.target.closest("[data-delp]");
   if(ed){const[loc,is]=ed.dataset.editp.split(":"),i=+is,row=playerArr(loc)[i];if(!row)return;const[name,pos,ovr,gp,g,a,cap]=row;
@@ -2824,16 +2628,7 @@ $("#addFixture").addEventListener("click",()=>{const h=clubByName($("#sc-home").
   if(h===a){toast("Invalid fixture","A club can't play itself.");return;}
   schedule[0].games.push({a:h,b:a,t:`${$("#sc-day").value} · ${$("#sc-time").value} ET`});renderSchedule();
   toast("Fixture added",`${teams[h].name} vs ${teams[a].name} added to Week 8.`);});
-function renderClubs(){$("#clubsBody").innerHTML=TEAM_KEYS.map(code=>{const t=teams[code];const capUsed=rosters[code].reduce((s,p)=>s+p[6],0);
-  return `<tr><td><div class="rp lk" data-go="team" data-param="${code}"><span class="num" style="font-size:12px">${code}</span><div><b>${t.name}</b><small>${t.city}</small></div></div></td>
-    <td style="text-align:center"><span class="posbadge">${t.div}</span></td><td style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em">${t.gm}</td>
-    <td>${recStr(code)}</td><td>$${capUsed.toFixed(1)}M</td><td><div class="act"><button class="mini" data-editclub="${code}">Edit</button><button class="mini" data-go="team" data-param="${code}">View</button></div></td></tr>`;}).join("");}
 // Re-render every view that shows club identity or records after an edit.
-function refreshLeagueViews(){renderClubs();renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
-  renderTeamsGrid();renderFixtures();renderSchedule();renderRankings();renderHeroRink();buildNav();renderTxns();
-  renderLeaderList($("#homeLeaders"),"points");
-  const lbActive=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lbActive?lbActive.dataset.lb:"points");
-  if(currentClub)refreshFrontOffice();}
 $("#clubsBody").addEventListener("click",e=>{const b=e.target.closest("[data-editclub]");if(!b)return;
   const code=b.dataset.editclub,t=teams[code],r=standBy[code];
   formModal("Edit "+t.name,[
@@ -2878,12 +2673,6 @@ function formModal(title,fields,onSave){
   $("#modalBg").classList.add("on");
 }
 // Rebuild the player lookup + leaders from the source arrays (rosters + freeAgents) after edits.
-function rebuildPlayerIndex(){
-  for(const k in playersById)delete playersById[k];
-  TEAM_KEYS.forEach(code=>{playersByTeam[code]=rosters[code].map(r=>playerObj(code,r));playersByTeam[code].forEach(p=>playersById[p.id]=p);});
-  freeAgents.forEach(r=>{const o=playerObj("FA",[r[0],r[1],r[2],r[3],r[4],r[5],r[6]]);o.team=null;o.fa=true;o.asking=r[6];playersById[o.id]=o;});
-  computeLeaders();
-}
 $("#modalOk").addEventListener("click",()=>{$("#modalBg").classList.remove("on");if(modalCb)modalCb();});
 $("#modalCancel").addEventListener("click",()=>$("#modalBg").classList.remove("on"));
 $("#modalBg").addEventListener("click",e=>{if(e.target===$("#modalBg"))$("#modalBg").classList.remove("on");});
