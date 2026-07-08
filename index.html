@@ -261,6 +261,29 @@
   .g-row.win .gn,.g-row.win .gs{color:var(--ice)}
   .g-row.lose{opacity:.62}
   .g-time{margin-left:auto;font-family:var(--f-mono);font-size:15px;color:var(--frost);font-weight:700}
+  .game[data-match]:hover{border-color:var(--frost)}
+  .game-foot{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+  .gf-code{font-family:var(--f-mono);font-size:12px;color:var(--fog)}
+  .gf-code b{color:var(--ice);letter-spacing:.06em}
+  .gf-link{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;color:var(--frost);font-weight:600}
+  /* Match card (EA lobby details) */
+  .match-card{text-align:center}
+  .mc-teams{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px}
+  .mc-team{display:flex;align-items:center;gap:10px}
+  .mc-team.away{flex-direction:row-reverse;text-align:right}
+  .mc-team b{display:block;font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--ice);font-size:15px}
+  .mc-team small{color:var(--fog);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em}
+  .mc-vs{font-family:var(--f-display);color:var(--fog-dim);font-size:14px}
+  .mc-time{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--ice);font-size:15px;margin-bottom:6px}
+  .mc-you{display:inline-block;background:var(--frost);color:#fff;font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;padding:3px 11px;border-radius:20px;margin-bottom:14px}
+  .mc-code-label{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--fog);text-transform:uppercase;margin-top:6px}
+  .mc-code{font-family:var(--f-mono);font-weight:700;font-size:38px;letter-spacing:.16em;color:var(--frost);margin:2px 0 16px}
+  .mc-settings{border-top:1px solid var(--line);padding-top:12px;text-align:left}
+  .mc-set-title{font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;color:var(--fog);text-transform:uppercase;margin-bottom:8px}
+  .mc-set{display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;font-size:14px}
+  .mc-set b{font-family:var(--f-mono);font-size:13px;padding:2px 10px;border-radius:6px}
+  .mc-set b.off{background:rgba(224,122,154,.16);color:#c65b7d}
+  .mc-set b.on{background:rgba(124,224,168,.16);color:#3f9d6f}
 
   /* ============================ CHAT ============================ */
   .chat-shell{display:grid;grid-template-columns:200px 1fr 250px;gap:18px;align-items:start}
@@ -1490,12 +1513,14 @@ function renderStandings(el,full){
 /* ------------------------------ FIXTURES / RESULTS ------------------------------ */
 /* Live schedule, read from the games table (written by the commissioner's scheduler). */
 let liveSchedule=[];
-function fmtGameDate(iso){if(!iso)return"TBD";try{const d=new Date(iso);
-  const day=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
-  const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-  return `${day} ${mo} ${d.getDate()}`;}catch(e){return"TBD";}}
-function fmtGameTime(iso){if(!iso)return"TBD";try{const d=new Date(iso);let h=d.getHours();const m=d.getMinutes();
-  const ap=h>=12?"PM":"AM";h=h%12||12;return `${h}:${String(m).padStart(2,"0")} ${ap} ET`;}catch(e){return"TBD";}}
+/* All game times display in US Eastern regardless of the viewer's timezone. */
+function fmtGameDate(iso){if(!iso)return"TBD";try{
+  return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",month:"short",day:"numeric"}).format(new Date(iso));
+}catch(e){return"TBD";}}
+function fmtGameTime(iso){if(!iso)return"TBD";try{
+  return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit",hour12:true}).format(new Date(iso))+" ET";
+}catch(e){return"TBD";}}
+function fmtGameDateTime(iso){if(!iso)return"Time TBD";return fmtGameDate(iso)+" · "+fmtGameTime(iso);}
 async function loadSchedule(){
   liveSchedule=[];
   if(!sb||!openSeason||!dbTeams.length)return;
@@ -1504,9 +1529,37 @@ async function loadSchedule(){
   const byWk={};
   g.forEach(x=>{const a=codeOfId(x.home_team_id),b=codeOfId(x.away_team_id);if(!a||!b)return;
     const done=x.status==="final";const wk=x.week||1;
-    (byWk[wk]=byWk[wk]||[]).push({a,b,as:done?x.home_score:null,bs:done?x.away_score:null,ot:!!x.went_ot,done,when:x.scheduled_at,twitch:x.twitch_url});});
+    (byWk[wk]=byWk[wk]||[]).push({id:x.id,code:x.game_code||null,a,b,as:done?x.home_score:null,bs:done?x.away_score:null,ot:!!x.went_ot,done,when:x.scheduled_at,twitch:x.twitch_url});});
   liveSchedule=Object.keys(byWk).map(Number).sort((a,b)=>a-b).map(wk=>({wk:"Week "+wk,n:wk,games:byWk[wk]}));
 }
+function findGameById(id){for(const wk of liveSchedule)for(const g of wk.games)if(g.id===id)return g;return null;}
+/* EA private-lobby "match card" for a scheduled game. */
+function showMatchCard(g){
+  if(!g)return;const home=teams[g.a],away=teams[g.b];if(!home||!away)return;
+  const mine=myTeamCode;const homeYou=mine===g.a,awayYou=mine===g.b;
+  const yourSide=homeYou?"HOME":(awayYou?"AWAY":null);
+  $("#modalCard").classList.remove("wide");
+  $("#modalTitle").textContent="Match Details";
+  $("#modalMsg").innerHTML=`
+    <div class="match-card">
+      <div class="mc-teams">
+        <div class="mc-team">${badge(g.a,44)}<div><b>${home.name}</b><small>HOME</small></div></div>
+        <span class="mc-vs">vs</span>
+        <div class="mc-team away">${badge(g.b,44)}<div><b>${away.name}</b><small>AWAY</small></div></div>
+      </div>
+      <div class="mc-time">${g.when?fmtGameDateTime(g.when):"⏱ Game time to be set by the commissioner"}</div>
+      ${yourSide?`<div class="mc-you">Your club plays <b>${yourSide}</b></div>`:""}
+      <div class="mc-code-label">Private Lobby Code</div>
+      <div class="mc-code">${g.code||"— pending —"}</div>
+      <div class="mc-settings">
+        <div class="mc-set-title">EA Lobby Settings</div>
+        <div class="mc-set"><span>Grudge Match</span><b class="off">OFF</b></div>
+        <div class="mc-set"><span>Allow Replay Skips</span><b class="on">ON</b></div>
+      </div>
+    </div>`;
+  modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
+}
+document.addEventListener("click",e=>{const el=e.target.closest("[data-match]");if(!el)return;showMatchCard(findGameById(el.dataset.match));});
 function renderFixtures(){
   const fx=[],res=[];
   liveSchedule.forEach(wk=>wk.games.forEach(g=>{(g.done?res:fx).push(g);}));
@@ -1638,11 +1691,12 @@ function renderSchedule(){
   el.innerHTML=liveSchedule.map(wk=>`<div class="week"><div class="week-h">${wk.wk}</div>
     <div class="games">${wk.games.map(g=>{const done=g.done;
       const aWin=done&&g.as>g.bs,bWin=done&&g.bs>g.as;
-      return `<div class="game ${done?'done':''}" ${done?`data-box="${g.a}-${g.b}"`:''}>
+      return `<div class="game ${done?'done':''}" ${done?`data-box="${g.a}-${g.b}"`:`data-match="${g.id}" style="cursor:pointer"`}>
         <div class="game-top"><span class="game-date">${done?(g.ot?'Final / OT':'Final'):fmtGameDate(g.when)}</span>
           ${done?'<span class="pill dim">Final</span>':'<span class="pill live"><span class="dot-mini" style="background:var(--live)"></span>Scheduled</span>'}</div>
         <div class="g-row ${aWin?'win':(bWin?'lose':'')}">${badge(g.a,28)}<span class="gn">${teams[g.a].name}</span>${done?`<span class="gs">${g.as}</span>`:`<span class="g-time">${fmtGameTime(g.when)}</span>`}</div>
         <div class="g-row ${bWin?'win':(aWin?'lose':'')}">${badge(g.b,28)}<span class="gn">${teams[g.b].name}</span>${done?`<span class="gs">${g.bs}</span>`:'<span class="g-time" style="opacity:.5">—</span>'}</div>
+        ${done?'':`<div class="game-foot"><span class="gf-code">Code <b>${g.code||'—'}</b></span><span class="gf-link">Match card →</span></div>`}
       </div>`;}).join("")}</div></div>`).join("");
 }
 // box score modal
@@ -1792,6 +1846,7 @@ async function renderMyStats(){
   if(sb&&openSeason&&authUser){
     const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
     if(rs){tc=codeOfId(rs.team_id);num=rs.jersey_number;pos=rs.position;}
+    myTeamCode=tc;
     const {data:ps}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();if(ps)st=ps;
   }
   const t=tc?teams[tc]:null;
@@ -1992,7 +2047,7 @@ $("#chatForm").addEventListener("submit",e=>{e.preventDefault();toast("Chat is i
 const SB_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co";
 const SB_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
 const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
-let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null;
+let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null,myTeamCode=null;
 const DISCORD_GLYPH=`<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg>`;
 async function sbInit(){
   if(!sb){renderAuthUI();return;}
@@ -2124,7 +2179,8 @@ function renderReports(){const el=$("#reportsBody");if(!el)return;
   if(!byWeek.length){el.innerHTML='<div class="empty-note">No games to report yet — your fixtures appear here once the commissioner posts the schedule. After each game, submit your EA end-of-game box score (or send screenshots to the commissioners).</div>';return;}
   el.innerHTML=byWeek.map(w=>`<div class="rr-week">${w.wk}</div>`+w.games.map(g=>{const opp=g.a===currentClub?g.b:g.a,home=g.a===currentClub;
     const done=g.done;const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
-    const right=done?`<span class="rr-state ok">✓ Final · ${us}–${them} ${win?"W":"L"}</span>`:`<span class="rr-state sched">Scheduled — report after the game</span>`;
+    const right=done?`<span class="rr-state ok">✓ Final · ${us}–${them} ${win?"W":"L"}</span>`
+      :`<span class="rr-state sched" style="margin-right:8px">${home?"HOME":"AWAY"} · Code <b class="mono">${g.code||"—"}</b> · ${g.when?fmtGameTime(g.when):"time TBD"}</span><button class="mini" data-match="${g.id}">Match card</button>`;
     return `<div class="rr-game"><div class="rr-teams">${badge(currentClub,26)}<span class="rr-vs">${home?"vs":"@"}</span>${badge(opp,26)}<span class="rr-opp">${teams[opp].name}</span></div><div class="rr-actions">${right}</div></div>`;}).join("")).join("");
 }
 const MISMATCH_WINDOW_MS=24*60*60*1000; // 24 hours to align before a forfeit is ruled
@@ -2491,14 +2547,39 @@ function clearSchedule(){
     if(error){toast("Couldn't clear",error.message);return;}
     toast("Schedule cleared","");loadScheduleAdmin();loadGamesAdmin();loadStandings();});
 }
+/* Eastern-time helpers for the datetime-local editor (round-trips ET regardless of the commissioner's own timezone). */
+function isoToETInput(iso){if(!iso)return"";try{
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date(iso));
+  const p={};parts.forEach(x=>p[x.type]=x.value);const hh=p.hour==="24"?"00":p.hour;
+  return `${p.year}-${p.month}-${p.day}T${hh}:${p.minute}`;}catch(e){return"";}}
+function etInputToISO(s){if(!s)return null;try{
+  const [d,t]=s.split("T");const [y,mo,da]=d.split("-").map(Number);const [h,mi]=t.split(":").map(Number);
+  const guess=new Date(Date.UTC(y,mo-1,da,h,mi));
+  const tz=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",timeZoneName:"short"}).formatToParts(guess).find(x=>x.type==="timeZoneName").value;
+  const off=tz==="EST"?5:4;
+  return new Date(Date.UTC(y,mo-1,da,h+off,mi)).toISOString();}catch(e){return null;}}
 async function loadScheduleAdmin(){
   const el=$("#schedAdminBody");if(!el||!sb||!adminSeason)return;
   const {data:games}=await sb.from("games").select("*").eq("season_id",adminSeason.id).order("week").order("created_at");
   const pc=$("#schedCount");if(pc)pc.textContent=(games?games.length:0)+" games";
   if(!games||!games.length){el.innerHTML=ADMIN_EMPTY("No schedule yet","Click Auto-Generate to build the full season for all 8 clubs.");return;}
   const byWeek={};games.forEach(g=>{(byWeek[g.week]=byWeek[g.week]||[]).push(g);});
-  el.innerHTML=Object.keys(byWeek).sort((a,b)=>a-b).map(w=>`<div class="gc-week">Week ${w}</div>`+byWeek[w].map(g=>{const h=codeOfId(g.home_team_id),a=codeOfId(g.away_team_id);
-    return `<div class="gc-game"><div class="gc-teams">${badge(h,22)}<span class="gc-vs">vs</span>${badge(a,22)}<span class="gc-opp">${teams[h].name} · ${teams[a].name}</span></div><span class="gc-score">${g.home_score!=null?g.home_score+"–"+g.away_score:"—"}</span><span class="gc-pill ${g.status}">${g.status}</span></div>`;}).join("")).join("");
+  el.innerHTML='<p style="padding:2px 2px 10px;color:var(--fog);font-size:12.5px">Set each game\'s start time below (entered &amp; shown in <b>Eastern Time</b>). Every game gets a unique 6-digit lobby code automatically.</p>'+
+    Object.keys(byWeek).sort((a,b)=>a-b).map(w=>`<div class="gc-week">Week ${w}</div>`+byWeek[w].map(g=>{const h=codeOfId(g.home_team_id),a=codeOfId(g.away_team_id);
+    return `<div class="gc-game" data-game="${g.id}" style="flex-wrap:wrap;gap:8px">
+      <div class="gc-teams" style="flex:1;min-width:180px">${badge(h,22)}<span class="gc-vs">vs</span>${badge(a,22)}<span class="gc-opp">${teams[h].name} · ${teams[a].name}</span></div>
+      <span class="gc-code mono" style="color:var(--fog);font-size:12px">#${g.game_code||"—"}</span>
+      <input type="datetime-local" class="sc-time box-in" value="${isoToETInput(g.scheduled_at)}" aria-label="Game time (Eastern)">
+      <button class="mini good sc-savetime" data-game="${g.id}">Set time</button>
+      <span class="gc-pill ${g.status}">${g.status}</span></div>`;}).join("")).join("");
+}
+async function saveGameTime(btn){
+  const row=btn.closest(".gc-game");if(!row)return;const val=row.querySelector(".sc-time").value;
+  const iso=etInputToISO(val);
+  const {error}=await sb.from("games").update({scheduled_at:iso}).eq("id",btn.dataset.game);
+  if(error){toast("Couldn't save time",error.message);return;}
+  toast("Game time set",iso?fmtGameDate(iso)+" · "+fmtGameTime(iso):"Time cleared.");
+  loadScheduleAdmin();await loadSchedule();renderSchedule();renderFixtures();
 }
 
 /* ---- Games & Stats — final score entry ---- */
@@ -2663,6 +2744,7 @@ $("#view-admin").addEventListener("click",e=>{
   const dcl=e.target.closest(".dc-clear");if(dcl){e.preventDefault();clearDiscordWebhook(dcl.dataset.key);return;}
   if(e.target.closest("#addTeamBtn")){e.preventDefault();addTeam();return;}
   const td=e.target.closest(".tm-del");if(td){e.preventDefault();removeTeam(td);return;}
+  const st=e.target.closest(".sc-savetime");if(st){e.preventDefault();saveGameTime(st);return;}
   if(e.target.closest("#genScheduleBtn")){e.preventDefault();generateSchedule();return;}
   if(e.target.closest("#clearScheduleBtn")){e.preventDefault();clearSchedule();return;}
   const gs=e.target.closest(".ga-save");if(gs){e.preventDefault();saveGameResult(gs);return;}
