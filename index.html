@@ -1254,6 +1254,8 @@
         <button class="mgr-tab" data-atab="schedbuild">Schedule</button>
         <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
         <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
+        <button class="mgr-tab" data-atab="teams">Teams</button>
+        <button class="mgr-tab" data-atab="news">News</button>
       </div>
       <div class="mgr-panel on" id="atab-season"><div class="card"><div class="card-h"><h3>Season &amp; Deadlines</h3><span class="pill" id="seasonStatusPill"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Set the key dates for the season — registration, team-owner applications, draft night, and start/finish. Toggle registration open or closed.</div>
@@ -1271,6 +1273,18 @@
       <div class="mgr-panel" id="atab-members"><div class="card"><div class="card-h"><h3>Members &amp; Roles</h3><span class="pill" id="membersCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office.</div>
         <div id="membersBody"></div></div></div>
+      <div class="mgr-panel" id="atab-teams">
+        <div class="card" style="padding:22px 26px"><div class="card-h" style="padding:0 0 14px"><h3>Add a Club</h3></div>
+          <div class="ef-grid" style="grid-template-columns:90px 1fr;gap:12px">
+            <div class="ef-row"><label>Code</label><input id="tm-code" maxlength="3" placeholder="GLK" style="text-transform:uppercase" /></div>
+            <div class="ef-row"><label>Club name</label><input id="tm-name" placeholder="Glacier Kings" /></div>
+          </div>
+          <div class="ef-grid" style="grid-template-columns:1fr 120px;gap:12px;margin-top:10px">
+            <div class="ef-row"><label>Division</label><select id="tm-div"><option value="Frost">Frost</option><option value="Byte">Byte</option></select></div>
+            <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#4fe3e6" style="height:38px;padding:2px" /></div>
+          </div>
+          <button class="btn btn-frost" id="addTeamBtn" style="margin-top:16px">Add Club</button></div>
+        <div class="card" style="margin-top:16px"><div class="card-h"><h3>Current Clubs</h3><span class="pill" id="teamsAdminCount"></span></div><div id="teamsAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-news"><div class="card" style="padding:24px 26px"><div class="field"><label for="an-title">Headline</label><input id="an-title" placeholder="Kings clinch top seed with OT thriller" /></div>
         <div class="field"><div class="row2"><div><label for="an-cat">Category</label><select id="an-cat"><option>Game Recap</option><option>Trade Buzz</option><option>Feature</option><option>League News</option></select></div>
           <div><label for="an-author">Byline</label><input id="an-author" value="Frostbyte Post" /></div></div></div>
@@ -1328,17 +1342,18 @@
    ========================================================================== */
 
 /* ------------------------------ DATA ------------------------------ */
-const teams = {
-  GLK:{name:"Glacier Kings",code:"GLK",c:"#4fe3e6",div:"Frost",city:"Nord Harbor",arena:"The Icebox",gm:"FrostByte_Zack",est:1},
-  TUN:{name:"Tundra Wolves",code:"TUN",c:"#8fb8d6",div:"Frost",city:"Greywater",arena:"Den Arena",gm:"Nyx",est:1},
-  POL:{name:"Polar Reign",code:"POL",c:"#c7d8e6",div:"Frost",city:"Whitecliff",arena:"The Throne",gm:"Bauer_D",est:2},
-  AUR:{name:"Aurora Blades",code:"AUR",c:"#7ce0a8",div:"Frost",city:"Northshore",arena:"Lights Center",gm:"Solberg",est:3},
-  FBV:{name:"Frostbite Vipers",code:"FBV",c:"#ff8a5c",div:"Byte",city:"Ashfall",arena:"The Pit",gm:"Marek",est:1},
-  CBR:{name:"Circuit Breakers",code:"CBR",c:"#ffd166",div:"Byte",city:"Voltage City",arena:"The Grid",gm:"Toews99",est:2},
-  ICE:{name:"Midnight Icehawks",code:"ICE",c:"#a99cf0",div:"Byte",city:"Duskmoor",arena:"Nest Arena",gm:"Slapshot",est:2},
-  YET:{name:"Steel Yetis",code:"YET",c:"#e07a9a",div:"Byte",city:"Iron Ridge",arena:"The Foundry",gm:"Boulder",est:3}
-};
-const TEAM_KEYS = Object.keys(teams);
+/* Teams are DB-driven — `teams` + `TEAM_KEYS` are rebuilt from the `teams` table
+   (buildTeams, called in sbInit) so the commissioner can add/remove clubs live. */
+let teams = {};
+let TEAM_KEYS = [];
+const TEAM_PALETTE = ["#4fe3e6","#8fb8d6","#c7d8e6","#7ce0a8","#ff8a5c","#ffd166","#a99cf0","#e07a9a","#5bd6b0","#f2a65a","#6ea8fe","#d98cf0","#f07a7a","#9ad06a"];
+function buildTeams(){
+  teams={};TEAM_KEYS=[];
+  (dbTeams||[]).forEach((t,i)=>{
+    teams[t.code]={id:t.id,code:t.code,name:t.name,c:t.color||TEAM_PALETTE[i%TEAM_PALETTE.length],div:t.division,city:t.city||"",arena:t.arena||"",est:t.founded_season||1};
+    TEAM_KEYS.push(t.code);
+  });
+}
 const MAX_ROSTER = 12;     // clubs carry up to 12 players
 let seasonActive = true;   // Season 4 is underway — games have started
 
@@ -2129,7 +2144,7 @@ function renderNews(){
     if(home)home.innerHTML='<div class="empty-note" style="margin:0;padding:20px">No news yet.</div>';
     return;
   }
-  const feat=rows[0];const teamColor=teams.GLK.c;
+  const feat=rows[0];const teamColor="#1273b8";
   if(hero)hero.innerHTML=`<div class="news-hero" data-go="article" data-param="${feat.id}">
     <div class="nh-art" style="${newsArt(teamColor)}"><span class="pill frost">Featured</span></div>
     <div class="nh-body"><span class="news-cat">${feat.cat}</span><h3>${feat.title}</h3><p>${feat.excerpt}</p>
@@ -2144,9 +2159,9 @@ function renderNews(){
 function renderArticle(id){
   const n=liveNews.find(x=>x.id===id)||liveNews[0];
   if(!n){$("#articlePage").innerHTML='<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> Article</div><div class="empty-note">This story is no longer available.</div><div style="margin-top:24px"><button class="btn btn-ghost" data-go="news">← Back to News</button></div>';return;}
-  const colors={"Game Recap":teams.GLK.c,"Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
+  const colors={"Game Recap":"#1273b8","Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
   $("#articlePage").innerHTML=`<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> ${n.cat}</div>
-    <div class="art-hero" style="${newsArt(colors[n.cat]||teams.GLK.c)}"><div><span class="news-cat">${n.cat}</span>
+    <div class="art-hero" style="${newsArt(colors[n.cat]||"#1273b8")}"><div><span class="news-cat">${n.cat}</span>
       <h2 style="font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4.4vw,48px);line-height:.92;margin:10px 0 0;max-width:20ch">${n.title}</h2></div></div>
     <div class="news-meta" style="margin-bottom:22px">By ${n.author} · ${n.date}</div>
     <div class="article-body">${n.body.map((para,i)=>i===2?`<blockquote>${para.replace(/^"|"$/g,'')}</blockquote>`:`<p>${para}</p>`).join("")}</div>
@@ -2236,7 +2251,7 @@ async function sbInit(){
     const {data:seasons}=await sb.from("seasons").select("*").eq("registration_open",true).order("number",{ascending:false}).limit(1);
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
-    dbTeams=tms||[];
+    dbTeams=tms||[];buildTeams();
     await loadStandings();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     renderTeamsGrid();renderHeroCarousel();renderHeroRink();
@@ -2744,24 +2759,28 @@ $("#playersEditBody").addEventListener("click",e=>{
 
 /* -------------------- COMMISSIONER: NEWS EDITOR -------------------- */
 function renderNewsManage(){const el=$("#newsManageBody");if(!el)return;
-  $("#newsCount").textContent=news.length+" live";
-  el.innerHTML=news.map((n,i)=>`<div class="news-edit-row"><div class="ner-txt"><b>${n.title}</b><small>${n.cat} · ${n.author} · ${n.date}</small></div>
-    <div class="act"><button class="mini" data-editnews="${i}">Edit</button><button class="mini danger" data-delnews="${i}">Delete</button></div></div>`).join("");}
+  const rows=liveNews||[];
+  const cnt=$("#newsCount");if(cnt)cnt.textContent=rows.length+" live";
+  if(!rows.length){el.innerHTML=ADMIN_EMPTY("No stories yet","Articles you publish appear here to edit or delete.");return;}
+  el.innerHTML=rows.map(n=>`<div class="news-edit-row"><div class="ner-txt"><b>${n.title}</b><small>${n.cat} · ${n.author} · ${n.date}</small></div>
+    <div class="act"><button class="mini" data-editnews="${n.id}">Edit</button><button class="mini danger" data-delnews="${n.id}">Delete</button></div></div>`).join("");}
 $("#newsManageBody").addEventListener("click",e=>{
   const ed=e.target.closest("[data-editnews]"),del=e.target.closest("[data-delnews]");
-  if(ed){const i=+ed.dataset.editnews,n=news[i];
+  if(ed){const n=(liveNews||[]).find(x=>x.id===ed.dataset.editnews);if(!n||!sb)return;
     formModal("Edit story",[
       {key:"title",label:"Headline",value:n.title},
       {key:"cat",label:"Category",type:"select",value:n.cat,options:["Game Recap","Trade Buzz","Feature","League News"].map(c=>({value:c,label:c}))},
       {key:"author",label:"Byline",value:n.author},
       {key:"body",label:"Story",type:"textarea",value:(n.body||[]).join("\n")}
-    ],v=>{if(!v.title.trim()){toast("Headline required","Give the story a headline.");return;}
-      n.title=v.title.trim();n.cat=v.cat;n.author=v.author.trim()||"Frostbyte Post";
-      n.body=v.body.split("\n").filter(Boolean);n.excerpt=(n.body[0]||"").slice(0,140);
-      renderNews();renderNewsManage();toast("Story updated","\""+n.title+"\" saved.");});return;}
-  if(del){const i=+del.dataset.delnews,n=news[i];
-    confirmModal("Delete story?","\""+n.title+"\" will be pulled from the News page.","Delete",()=>{
-      news.splice(i,1);renderNews();renderNewsManage();toast("Story deleted","Removed from the wire.");});return;}});
+    ],async v=>{if(!v.title.trim()){toast("Headline required","Give the story a headline.");return;}
+      const {error}=await sb.from("news").update({title:v.title.trim(),category:v.cat,author:v.author.trim()||"Frostbyte Post",body:v.body.trim()}).eq("id",n.id);
+      if(error){toast("Couldn't save",error.message);return;}
+      await loadNews();renderNews();renderNewsManage();toast("Story updated","\""+v.title.trim()+"\" saved.");});return;}
+  if(del){const n=(liveNews||[]).find(x=>x.id===del.dataset.delnews);if(!n||!sb)return;
+    confirmModal("Delete story?","\""+n.title+"\" will be pulled from the News page. This can't be undone.","Delete",async()=>{
+      const {error}=await sb.from("news").delete().eq("id",n.id);
+      if(error){toast("Couldn't delete",error.message);return;}
+      await loadNews();renderNews();renderNewsManage();toast("Story deleted","Removed from the News page.");});return;}});
 
 /* ===== COMMISSIONER: real Discord-auth gating + Season & Deadlines ===== */
 const STAR_SVG=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffcf6b" stroke-width="2"><path d="M12 2l2.4 6.9H22l-6 4.6 2.3 7-6.3-4.4L5.7 20.5 8 13.5 2 8.9h7.6z"/></svg>`;
@@ -2771,7 +2790,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();
+    loadMembers();loadTeamsAdmin();renderNewsManage();
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
@@ -2829,12 +2848,21 @@ async function loadRegistrations(){
   const assigned=new Set((spots||[]).map(s=>s.profile_id));
   const pc=$("#regCount");if(pc)pc.textContent=(regs?regs.length:0)+" signed up";
   if(!regs||!regs.length){el.innerHTML=ADMIN_EMPTY("No registrations yet","Players who sign up for the season appear here to be assigned to a club.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th>Pos</th><th>#</th><th>Club</th><th style="text-align:right">Add</th></tr></thead><tbody>'+
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th>Pos</th><th>#</th><th>Club</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       return `<tr><td><b>${g}</b></td><td class="mono">${r.ea_id||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
       <td>${done?'<span style="color:var(--win);font-weight:600">On a roster</span>':`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${teams[k].name}</option>`).join("")}</select>`}</td>
-      <td style="text-align:right">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}">Add</button>`}</td></tr>`;}).join("")+
+      <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${g}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
+}
+async function deleteRegistration(btn){
+  const name=btn.dataset.name||"this player";
+  confirmModal("Delete "+name+"'s registration?","This removes their season sign-up entirely. If they're already on a roster, that roster spot is not affected. This can't be undone.","Delete Registration",async()=>{
+    const {error}=await sb.from("season_registrations").delete().eq("id",btn.dataset.reg);
+    if(error){toast("Couldn't delete",error.message);return;}
+    toast("Registration deleted",name+" was removed from the sign-up list.");
+    loadRegistrations();
+  });
 }
 async function assignRegistration(btn){
   const code=(document.querySelector('.ra-team[data-reg="'+btn.dataset.reg+'"]')||{}).value;
@@ -2936,10 +2964,65 @@ async function saveMember(btn){
   const rl=ROLE_OPTS.find(r=>r[0]===role);
   toast("Member updated",rl[1]+(role==="gm"&&code?" · "+teams[code].name:""));
   loadMembers();
-  const {data:tms}=await sb.from("teams").select("*");if(tms)dbTeams=tms;  // refresh so manager gate sees new assignments
+  const {data:tms}=await sb.from("teams").select("*");if(tms){dbTeams=tms;buildTeams();}  // refresh so manager gate sees new assignments
+}
+
+/* ---- Teams (add / remove clubs) ---- */
+async function refreshTeamsEverywhere(){
+  const {data:tms}=await sb.from("teams").select("*").order("code");if(tms){dbTeams=tms;buildTeams();}
+  await loadStandings();await loadSchedule();
+  renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
+  renderTeamsGrid();renderFixtures();renderSchedule();renderRankings();renderBracket();renderHeroRink();
+  if($("#membersBody"))loadMembers();
+  if(adminSeason){loadGamesAdmin();loadScheduleAdmin();}
+}
+async function loadTeamsAdmin(){
+  const el=$("#teamsAdminBody");if(!el||!sb)return;
+  const {data:tms}=await sb.from("teams").select("*").order("division").order("code");
+  const cnt=$("#teamsAdminCount");if(cnt)cnt.textContent=(tms?tms.length:0)+" clubs";
+  if(!tms||!tms.length){el.innerHTML=ADMIN_EMPTY("No clubs yet","Add your league's clubs above — they appear across standings, schedule, teams, and rosters.");return;}
+  const {data:spots}=await sb.from("roster_spots").select("team_id");
+  const {data:games}=await sb.from("games").select("home_team_id,away_team_id");
+  const spotCount={},gameCount={};
+  (spots||[]).forEach(s=>spotCount[s.team_id]=(spotCount[s.team_id]||0)+1);
+  (games||[]).forEach(g=>{gameCount[g.home_team_id]=(gameCount[g.home_team_id]||0)+1;gameCount[g.away_team_id]=(gameCount[g.away_team_id]||0)+1;});
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Division</th><th>In use</th><th style="text-align:right">Remove</th></tr></thead><tbody>'+
+    tms.map(t=>{const sc=spotCount[t.id]||0,gc=gameCount[t.id]||0;const locked=sc>0||gc>0;
+      return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#1273b8'};color:#fff">${t.code}</span><div><b>${t.name}</b></div></div></td>
+      <td class="mono">${t.code}</td><td><span class="posbadge">${t.division}</span></td>
+      <td style="font-size:12.5px;color:var(--fog)">${sc?sc+" player"+(sc===1?"":"s"):""}${sc&&gc?" · ":""}${gc?gc+" games":""}${!sc&&!gc?"—":""}</td>
+      <td style="text-align:right">${locked?'<span style="color:var(--fog);font-size:12px">Clear first</span>':`<button class="mini danger tm-del" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Remove</button>`}</td></tr>`;}).join("")+
+    "</tbody></table></div>";
+}
+async function addTeam(){
+  if(!sb){toast("Not connected","Sign in to add a club.");return;}
+  const code=($("#tm-code").value||"").trim().toUpperCase();
+  const name=($("#tm-name").value||"").trim();
+  const division=$("#tm-div").value;const color=$("#tm-color").value||null;
+  if(!/^[A-Z]{2,3}$/.test(code)){toast("Invalid code","Use a 2–3 letter club code, e.g. GLK.");return;}
+  if(!name){toast("Name required","Give the club a name.");return;}
+  const btn=$("#addTeamBtn");btn.disabled=true;
+  const {error}=await sb.from("teams").insert({code,name,division,color});
+  btn.disabled=false;
+  if(error){toast("Couldn't add club",/duplicate|unique/i.test(error.message)?"That club code already exists.":error.message);return;}
+  await refreshTeamsEverywhere();loadTeamsAdmin();
+  toast("Club added",name+" ("+code+") joined the league.");
+  $("#tm-code").value="";$("#tm-name").value="";
+}
+async function removeTeam(btn){
+  const name=btn.dataset.name||"this club";
+  confirmModal("Remove "+name+"?","This deletes the club from the league. This can't be undone.","Remove Club",async()=>{
+    const {error}=await sb.from("teams").delete().eq("id",btn.dataset.id);
+    if(error){toast("Couldn't remove",/foreign key|violates/i.test(error.message)?"This club still has players or games — clear those first.":error.message);return;}
+    await refreshTeamsEverywhere();loadTeamsAdmin();
+    toast("Club removed",name+" is no longer in the league.");
+  });
 }
 $("#view-admin").addEventListener("click",e=>{
   const a=e.target.closest(".ra-assign");if(a){e.preventDefault();assignRegistration(a);return;}
+  const rd=e.target.closest(".ra-del");if(rd){e.preventDefault();deleteRegistration(rd);return;}
+  if(e.target.closest("#addTeamBtn")){e.preventDefault();addTeam();return;}
+  const td=e.target.closest(".tm-del");if(td){e.preventDefault();removeTeam(td);return;}
   if(e.target.closest("#genScheduleBtn")){e.preventDefault();generateSchedule();return;}
   if(e.target.closest("#clearScheduleBtn")){e.preventDefault();clearSchedule();return;}
   const gs=e.target.closest(".ga-save");if(gs){e.preventDefault();saveGameResult(gs);return;}
@@ -2954,7 +3037,7 @@ $("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.t
   const {error}=await sb.from("news").insert(row);
   btn.disabled=false;
   if(error){toast("Couldn't publish",error.message);return;}
-  await loadNews();renderNews();
+  await loadNews();renderNews();renderNewsManage();
   toast("Article published","\""+t+"\" is live on the News page.");$("#an-title").value="";$("#an-body").value="";});
 $("#addFixture").addEventListener("click",()=>{const h=clubByName($("#sc-home").value),a=clubByName($("#sc-away").value);
   if(h===a){toast("Invalid fixture","A club can't play itself.");return;}
