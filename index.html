@@ -1256,6 +1256,7 @@
         <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
         <button class="mgr-tab" data-atab="teams">Teams</button>
         <button class="mgr-tab" data-atab="news">News</button>
+        <button class="mgr-tab" data-atab="discord">Discord</button>
       </div>
       <div class="mgr-panel on" id="atab-season"><div class="card"><div class="card-h"><h3>Season &amp; Deadlines</h3><span class="pill" id="seasonStatusPill"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Set the key dates for the season — registration, team-owner applications, draft night, and start/finish. Toggle registration open or closed.</div>
@@ -1291,6 +1292,10 @@
         <div class="field"><label for="an-body">Story</label><textarea id="an-body" rows="5" placeholder="Write the story…"></textarea></div>
         <button class="btn btn-frost" id="postNews">Publish Article</button></div>
         <div class="card" style="margin-top:16px"><div class="card-h"><h3>Manage Published Stories</h3><span class="pill" id="newsCount"></span></div><div id="newsManageBody"></div></div></div>
+      <div class="mgr-panel" id="atab-discord"><div class="card" style="padding:22px 26px">
+        <div class="card-h" style="padding:0 0 8px"><h3>Discord Integrations</h3></div>
+        <p style="margin:0 0 4px;color:var(--fog);font-size:12.5px">Auto-post league activity to your Discord server. In Discord, open a channel's <b>Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL</b>, then paste it below. Leave a channel blank to route its events to the <b>Default</b> channel.</p>
+        <div id="discordBody"></div></div></div>
       <div class="mgr-panel" id="atab-rosters"><div class="card"><div class="card-h"><h3>Rosters &amp; Players</h3><span class="pill">Edit or release any player</span></div>
         <input class="adm-search" id="plEditSearch" placeholder="Search players by name or club…" />
         <div class="pl-scroll"><table class="roster-tbl"><thead><tr><th>Player</th><th>Club</th><th>Pos</th><th>OVR</th><th>GP</th><th>G</th><th>A</th><th>Cap</th><th style="text-align:right">Edit</th></tr></thead><tbody id="playersEditBody"></tbody></table></div></div></div>
@@ -2375,7 +2380,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();
+    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
@@ -2603,9 +2608,59 @@ async function removeTeam(btn){
     toast("Club removed",name+" is no longer in the league.");
   });
 }
+
+/* ---- Discord Integrations (webhooks per channel, stored in app_config) ---- */
+const DISCORD_CHANNELS=[
+  {key:"discord_default_webhook",label:"Default channel",desc:"Catch-all — any event without its own channel below posts here."},
+  {key:"discord_signup_webhook",label:"New signups",desc:"Posts when a player registers for the season."},
+  {key:"discord_transactions_webhook",label:"Trades, signings & waives",desc:"Every roster move, the moment it happens."},
+  {key:"discord_scores_webhook",label:"Final scores",desc:"Posts when a game is marked final."},
+  {key:"discord_news_webhook",label:"Published news",desc:"Posts when you publish a news article."},
+];
+async function loadDiscordAdmin(){
+  const el=$("#discordBody");if(!el||!sb)return;
+  let set={};
+  const {data}=await sb.from("app_config").select("key,value");
+  (data||[]).forEach(r=>{if(r.value)set[r.key]=true;});
+  el.innerHTML=DISCORD_CHANNELS.map(c=>{const on=!!set[c.key];
+    return `<div style="padding:14px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+        <b style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--navy);font-size:14px">${c.label}</b>
+        <span class="pill ${on?"frost":""}" style="font-size:10.5px">${on?"Connected":"Not set"}</span></div>
+      <div style="color:var(--fog);font-size:12px;margin-bottom:8px">${c.desc}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input class="dc-url" data-key="${c.key}" type="password" autocomplete="off" placeholder="${on?"•••• connected — paste a new URL to replace":"Paste the Discord webhook URL"}" style="flex:1;min-width:220px;font-family:var(--f-mono);font-size:12px" />
+        <button class="mini good dc-save" data-key="${c.key}">Save</button>
+        ${on?`<button class="mini dc-test" data-key="${c.key}">Test</button><button class="mini danger dc-clear" data-key="${c.key}">Clear</button>`:""}
+      </div></div>`;}).join("");
+}
+async function saveDiscordWebhook(key){
+  const inp=document.querySelector('.dc-url[data-key="'+key+'"]');if(!inp)return;
+  const url=(inp.value||"").trim();
+  if(!/^https:\/\/(discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)\/api\/(v\d+\/)?webhooks\//i.test(url)){
+    toast("Invalid webhook","Paste a full Discord webhook URL (Channel Settings → Integrations → Webhooks → Copy URL).");return;}
+  const {error}=await sb.from("app_config").upsert({key,value:url},{onConflict:"key"});
+  if(error){toast("Couldn't save",error.message);return;}
+  toast("Channel connected","Saved — hit Test to send a check message.");loadDiscordAdmin();
+}
+async function testDiscordWebhook(key){
+  const {error}=await sb.rpc("send_discord_test",{p_key:key});
+  if(error){toast("Test failed",error.message);return;}
+  toast("Test sent","Check that Discord channel for the ✅ message.");
+}
+function clearDiscordWebhook(key){
+  confirmModal("Disconnect this channel?","Its events stop posting here (they fall back to the Default channel if one is set).","Disconnect",async()=>{
+    const {error}=await sb.from("app_config").update({value:""}).eq("key",key);
+    if(error){toast("Couldn't clear",error.message);return;}
+    toast("Channel disconnected","");loadDiscordAdmin();
+  });
+}
 $("#view-admin").addEventListener("click",e=>{
   const a=e.target.closest(".ra-assign");if(a){e.preventDefault();assignRegistration(a);return;}
   const rd=e.target.closest(".ra-del");if(rd){e.preventDefault();deleteRegistration(rd);return;}
+  const ds=e.target.closest(".dc-save");if(ds){e.preventDefault();saveDiscordWebhook(ds.dataset.key);return;}
+  const dt=e.target.closest(".dc-test");if(dt){e.preventDefault();testDiscordWebhook(dt.dataset.key);return;}
+  const dcl=e.target.closest(".dc-clear");if(dcl){e.preventDefault();clearDiscordWebhook(dcl.dataset.key);return;}
   if(e.target.closest("#addTeamBtn")){e.preventDefault();addTeam();return;}
   const td=e.target.closest(".tm-del");if(td){e.preventDefault();removeTeam(td);return;}
   if(e.target.closest("#genScheduleBtn")){e.preventDefault();generateSchedule();return;}
