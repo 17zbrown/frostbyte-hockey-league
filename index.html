@@ -1223,10 +1223,11 @@
         <div class="trade-foot"><div class="mono" style="color:var(--fog);font-size:13px" id="tradeSummary">Select at least one player from each side.</div><button class="btn btn-frost" id="proposeTrade">Propose Trade</button></div>
       </div></div>
       <div class="mgr-panel" id="mtab-fa"><div class="card"><div class="card-h"><h3>Free-Agent Pool</h3><span class="pill frost" id="faMgrCount"></span></div>
-        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>OVR</th><th>GP</th><th>PTS</th><th>Asking</th><th style="text-align:right">Action</th></tr></thead><tbody id="faMgrBody"></tbody></table></div></div></div>
+        <p style="padding:0 24px;margin:0 0 4px;color:var(--fog);font-size:12.5px">Registered players not yet on a club. Rosters are set by the commissioner's draft — acquire players through trades, or ask the league office to assign a free agent.</p>
+        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>EA ID</th><th style="text-align:right">Status</th></tr></thead><tbody id="faMgrBody"></tbody></table></div></div></div>
       <div class="mgr-panel" id="mtab-lineup"><div class="card" style="padding:22px 24px">
         <div class="next-game-bar"><span id="lineupBadge" style="line-height:0"></span>
-          <div><b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">vs Frostbite Vipers</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Thu · Week 8 · 9:00 PM ET</small></div>
+          <div id="lineupNextText"><b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">Next game</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears here</small></div>
           <span class="pill frost">Lineup due 30 min before puck drop</span></div>
         <div class="lineup-grid" id="lineupGrid"></div>
         <div class="trade-foot" style="margin-top:20px"><div class="mono" style="color:var(--fog);font-size:13px" id="lineupNote">Assign a player to each position. Bench the rest.</div><button class="btn btn-frost" id="saveLineup">Save Lineup</button></div>
@@ -2196,33 +2197,21 @@ function renderRules(){
 
 /* ------------------------------ CHAT ------------------------------ */
 let currentChan="general";
-function renderChannels(){
-  $("#chanList").innerHTML=Object.keys(channels).map(k=>`<div class="chan ${k===currentChan?'active':''}" data-chan="${k}">
-    <span class="h">#</span>${channels[k].name.replace('#','')}<small>${channels[k].msgs.filter(m=>!m.sys).length}</small></div>`).join("");
-}
-function avColor(t){return teams[t]?teams[t].c:"#4fe3e6";}
+/* League chat runs in the Frostbyte Discord server — the in-app view points there. */
+function renderChannels(){const el=$("#chanList");if(el)el.innerHTML='<div class="chan active"><span class="h">#</span>discord<small>live</small></div>';}
+function renderOnline(){const el=$("#onlineList");if(el)el.innerHTML='<div style="padding:16px;color:var(--fog);font-size:12.5px">Members hang out in the Discord server.</div>';}
 function renderChat(){
-  const ch=channels[currentChan];
-  $("#chatChanName").textContent=ch.name;
-  $("#chatLog").innerHTML=ch.msgs.map(m=>{
-    if(m.sys)return `<div class="msg sys"><p>${m.m}</p></div>`;
-    return `<div class="msg ${m.me?'me':''}"><span class="av" style="background:${avColor(m.t)}">${initials(m.u)}</span>
-      <div class="body"><b>${m.u}</b><span class="t">${m.time}</span><p>${m.m}</p></div></div>`;}).join("");
-  $("#chatLog").scrollTop=$("#chatLog").scrollHeight;
+  const name=$("#chatChanName");if(name)name.textContent="#discord";
+  const oc=$("#onlineCount");if(oc)oc.textContent="—";const op=$("#onlinePill");if(op)op.textContent="Discord";
+  const log=$("#chatLog");
+  if(log)log.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:52px 24px;color:var(--fog)">
+    <span style="width:56px;height:56px;border-radius:16px;background:#5865F2;display:grid;place-items:center">${DISCORD_GLYPH}</span>
+    <div><b style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--navy);font-size:19px;display:block;margin-bottom:5px">League chat lives in Discord</b>
+    Game coordination, trash talk, and trade talk all happen in the Frostbyte Discord server.<br>Sign in with Discord and jump into the conversation.</div></div>`;
+  const inp=$("#chatInput");if(inp){inp.disabled=true;inp.placeholder="Chat happens in the Discord server";}
+  const form=$("#chatForm");if(form){const btn=form.querySelector("button");if(btn)btn.disabled=true;}
 }
-function renderOnline(){
-  $("#onlineList").innerHTML=online.map(([u,t,on])=>`<div class="online-item ${on?'':'away'}"><span class="dot"></span>
-    <b class="clickable" data-go="player" data-param="${u}">${u}</b><small>${teams[t].name.split(' ').pop()}</small></div>`).join("");
-}
-document.addEventListener("click",e=>{const c=e.target.closest("[data-chan]");if(!c)return;currentChan=c.dataset.chan;renderChannels();renderChat();});
-$("#chatForm").addEventListener("submit",e=>{e.preventDefault();const inp=$("#chatInput");const v=inp.value.trim();if(!v)return;
-  const now=new Date();const hh=now.getHours()%12||12;const mm=String(now.getMinutes()).padStart(2,"0");
-  channels[currentChan].msgs.push({u:"FrostByte_Zack",me:1,t:"GLK",m:v.replace(/</g,"&lt;"),time:`${hh}:${mm}`});
-  renderChannels();renderChat();inp.value="";
-  const replies=[{u:"Marek",t:"FBV",m:"lol facts"},{u:"Nyx",t:"TUN",m:"see you on the ice 🧊"},{u:"Toews99",t:"CBR",m:"+1"},{u:"Bauer_D",t:"POL",m:"say less"}];
-  const r=replies[hash(v+currentChan)%replies.length];
-  setTimeout(()=>{channels[currentChan].msgs.push({...r,time:`${hh}:${mm}`});renderChannels();renderChat();},1100);
-});
+$("#chatForm").addEventListener("submit",e=>{e.preventDefault();toast("Chat is in Discord","The league chats in the Frostbyte Discord server.");});
 
 /* ------------------------------ SIGNUP ------------------------------ */
 function registerPlayer(code,row){const obj=playerObj(code,row);playersById[obj.id]=obj;if(playersByTeam[code])playersByTeam[code].push(obj);return obj;}
@@ -2462,9 +2451,12 @@ function reportRow(gr){
   return row+((gr.expanded&&gr.box)?boxEditor(gr,ro):"");
 }
 function renderReports(){const el=$("#reportsBody");if(!el)return;
-  const order=schedule.map(w=>w.wk),byWeek={};
-  gameReports.forEach(gr=>{(byWeek[gr.wk]=byWeek[gr.wk]||[]).push(gr);});
-  el.innerHTML=order.filter(w=>byWeek[w]).map(w=>`<div class="rr-week">${w}</div>${byWeek[w].map(reportRow).join("")}`).join("");
+  const byWeek=[];(liveSchedule||[]).forEach(wk=>{const g=wk.games.filter(x=>x.a===currentClub||x.b===currentClub);if(g.length)byWeek.push({wk:wk.wk,games:g});});
+  if(!byWeek.length){el.innerHTML='<div class="empty-note">No games to report yet — your fixtures appear here once the commissioner posts the schedule. After each game, submit your EA end-of-game box score (or send screenshots to the commissioners).</div>';return;}
+  el.innerHTML=byWeek.map(w=>`<div class="rr-week">${w.wk}</div>`+w.games.map(g=>{const opp=g.a===currentClub?g.b:g.a,home=g.a===currentClub;
+    const done=g.done;const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
+    const right=done?`<span class="rr-state ok">✓ Final · ${us}–${them} ${win?"W":"L"}</span>`:`<span class="rr-state sched">Scheduled — report after the game</span>`;
+    return `<div class="rr-game"><div class="rr-teams">${badge(currentClub,26)}<span class="rr-vs">${home?"vs":"@"}</span>${badge(opp,26)}<span class="rr-opp">${teams[opp].name}</span></div><div class="rr-actions">${right}</div></div>`;}).join("")).join("");
 }
 const MISMATCH_WINDOW_MS=24*60*60*1000; // 24 hours to align before a forfeit is ruled
 function fmtLeft(ms){if(ms<=0)return "0:00:00";const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;return h+":"+String(m).padStart(2,"0")+":"+String(ss).padStart(2,"0");}
@@ -2594,28 +2586,44 @@ $("#tradesPending").addEventListener("click",async e=>{
   if(can){await sb.from("trades").update({status:"cancelled",updated_at:new Date().toISOString()}).eq("id",can.dataset.id);toast("Trade cancelled","");loadMyTrades();return;}
 });
 // free agent signings (manager)
-function renderFAmgr(){$("#faMgrCount").textContent=freeAgents.length+" available";
-  $("#faMgrBody").innerHTML=freeAgents.map((r,i)=>`<tr><td><div class="rp lk" data-go="player" data-param="${r[0]}"><span class="num">${jn(r[0])}</span><div><b>${r[0]}</b></div></div></td>
-    <td style="text-align:center"><span class="posbadge ${r[1]}">${r[1]}</span></td><td>${r[2]}</td><td>${r[3]}</td><td style="color:var(--frost);font-weight:700">${r[1]==='G'?'—':r[4]+r[5]}</td><td>$${r[6].toFixed(1)}M</td>
-    <td><div class="act"><button class="mini good" data-sign="${i}">Sign</button></div></td></tr>`).join("");}
-$("#faMgrBody").addEventListener("click",e=>{const s=e.target.closest("[data-sign]");if(!s)return;const fa=freeAgents[+s.dataset.sign];if(!fa)return;
-  confirmModal("Sign "+fa[0]+"?",`Add ${fa[0]} (${fa[1]}, ${fa[2]} OVR) at $${fa[6].toFixed(1)}M to ${teams[currentClub].name}.`,"Sign Player",()=>{
-    if(rosters[currentClub].length>=MAX_ROSTER){toast("Roster full","Waive a player first — clubs carry a max of "+MAX_ROSTER+".");return;}
-    const j=freeAgents.indexOf(fa);if(j>-1)freeAgents.splice(j,1);
-    const row=[fa[0],fa[1],fa[2],fa[3],fa[4],fa[5],fa[6]];rosters[currentClub].push(row);registerPlayer(currentClub,row);
-    refreshFrontOffice();renderFA();
-    transactions.unshift(["sign",`<b>${teams[currentClub].name}</b> signed ${fa[1]} <b>${fa[0]}</b> from free agency`,"Just now"]);renderTxns();
-    toast("Player signed",fa[0]+" joins "+teams[currentClub].name+".");});});
+async function renderFAmgr(){
+  const body=$("#faMgrBody"),cnt=$("#faMgrCount");if(!body)return;
+  if(!sb||!openSeason){body.innerHTML='';if(cnt)cnt.textContent='0 available';return;}
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,preferred_number, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
+  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
+  const taken=new Set((spots||[]).map(s=>s.profile_id));
+  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id));
+  if(cnt)cnt.textContent=pool.length+" available";
+  if(!pool.length){body.innerHTML='<tr><td colspan="4" style="padding:22px;color:var(--fog);text-align:center">No available players right now — registered players appear here until they\'re drafted to a club.</td></tr>';return;}
+  body.innerHTML=pool.map(r=>{const name=r.profiles?r.profiles.gamertag:"?";
+    return `<tr><td><div class="rp lk" data-go="player" data-param="${name}"><span class="num">${r.preferred_number||'—'}</span><div><b>${name}</b></div></div></td>
+    <td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td class="mono">${r.ea_id||'—'}</td>
+    <td style="text-align:right"><span style="color:var(--fog);font-size:12px">Available</span></td></tr>`;}).join("");
+}
 // lineup
 const lineupRoles=["Center","Left Wing","Right Wing","Left Defense","Right Defense","Goalie"];
-function renderLineup(){const roster=rosters[currentClub];const used={C:0,W:0,D:0,G:0,F:0};
-  $("#lineupGrid").innerHTML=lineupRoles.map((role,idx)=>{
+async function renderLineup(){
+  const grid=$("#lineupGrid");if(!grid)return;
+  const badgeEl=$("#lineupBadge"),nextText=$("#lineupNextText");
+  if(badgeEl&&currentClub)badgeEl.innerHTML=badge(currentClub,34);
+  const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if((g.a===currentClub||g.b===currentClub)&&!g.done)teamGames.push(g);}));
+  const ng=teamGames[0];
+  if(nextText){if(ng){const opp=ng.a===currentClub?ng.b:ng.a,home=ng.a===currentClub;
+      nextText.innerHTML=`<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">${home?'vs':'@'} ${teams[opp].name}</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">${fmtGameDate(ng.when)} · ${fmtGameTime(ng.when)}</small>`;}
+    else nextText.innerHTML='<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">No game scheduled</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears once the schedule is posted</small>';}
+  let roster=[];if(sb&&openSeason&&currentClub)roster=await loadRosterFor(currentClub);
+  if(!roster.length){grid.innerHTML='<div class="empty-note" style="margin:0">No players on your roster yet — the lineup builder unlocks once players are assigned to your club.</div>';return;}
+  const used={C:0,W:0,D:0,G:0};
+  grid.innerHTML=lineupRoles.map((role,idx)=>{
     const want=role==="Goalie"?"G":(role.includes("Defense")?"D":(role==="Center"?"C":"W"));
-    let pool=roster.filter(p=>p[1]===want);if(!pool.length)pool=roster.filter(p=>p[1]!=="G");if(!pool.length)pool=roster;
+    let pool=roster.filter(p=>p.pos===want);if(!pool.length)pool=roster.filter(p=>p.pos!=="G");if(!pool.length)pool=roster;
     const def=Math.min(used[want]++,pool.length-1);
-    return `<div class="slot"><div class="role">${role}</div><select data-role="${idx}" aria-label="${role} lineup slot">${pool.map((p,i)=>`<option ${i===def?'selected':''}>${p[0]} · ${p[2]} OVR</option>`).join("")}</select></div>`;}).join("");}
-$("#saveLineup").addEventListener("click",()=>{toast("Lineup saved","Your Week 8 starting six is locked in.");
-  $("#lineupNote").innerHTML='<span style="color:var(--win)">✓ Lineup submitted for Thu vs Frostbite Vipers.</span>';});
+    return `<div class="slot"><div class="role">${role}</div><select data-role="${idx}" aria-label="${role} lineup slot">${pool.map((p,i)=>`<option ${i===def?'selected':''}>#${p.num} ${p.name}</option>`).join("")}</select></div>`;}).join("");
+}
+$("#saveLineup").addEventListener("click",()=>{
+  if(!$("#lineupGrid").querySelector("select")){toast("No roster yet","Players must be assigned to your club before you can set a lineup.");return;}
+  toast("Lineup saved","Your starting six is locked in for your next game.");
+  $("#lineupNote").innerHTML='<span style="color:var(--win)">✓ Lineup submitted for your next game.</span>';});
 $$(".mgr-tab").forEach(tab=>tab.addEventListener("click",()=>{$$("#view-manager .mgr-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");
   $$("#view-manager .mgr-panel").forEach(p=>p.classList.remove("on"));$("#mtab-"+tab.dataset.mtab).classList.add("on");}));
 
