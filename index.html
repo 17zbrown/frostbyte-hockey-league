@@ -1040,40 +1040,9 @@
 
   <!-- STATS -->
   <div class="view" id="view-stats"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Player Card</span><h2>Your <em>Stats</em></h2></div>
-      <button class="btn btn-ghost btn-sm" data-go="player" data-param="FrostByte_Zack">Full Profile →</button></div>
-    <div class="player-hero">
-      <div class="jersey" style="background:linear-gradient(150deg,#4fe3e6,#16a6b4)"><b>91</b><small>Kings</small></div>
-      <div class="ph-info"><h2>FrostByte_Zack</h2>
-        <div class="ph-meta">
-          <span class="ph-tag link" data-go="team" data-param="GLK">Center · <b>Glacier Kings</b></span>
-          <span class="ph-tag">Captain <b>(C)</b></span><span class="ph-tag">Overall <b>89</b></span><span class="ph-tag">In league since <b>Season 1</b></span>
-        </div></div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat accent"><div class="k">Points</div><div class="v">31</div><div class="d up">+6 last 5</div></div>
-      <div class="stat"><div class="k">Goals</div><div class="v">14</div><div class="d up">+3 last 5</div></div>
-      <div class="stat"><div class="k">Assists</div><div class="v">17</div><div class="d up">+3 last 5</div></div>
-      <div class="stat"><div class="k">Plus / Minus</div><div class="v">+12</div><div class="d up">Best on team</div></div>
-      <div class="stat"><div class="k">Shot %</div><div class="v">18.2</div><div class="d down">-1.1 last 5</div></div>
-      <div class="stat"><div class="k">Faceoff %</div><div class="v">54.6</div><div class="d up">+2.4 last 5</div></div>
-    </div>
-    <div class="split2">
-      <div class="card"><div class="card-h"><h3>Last 10 Games</h3><span class="pill frost">7-2-1</span></div>
-        <div class="form-row" id="playerForm"></div>
-        <div class="bar-row"><span class="lb">Goals / Game</span><div class="bar"><i style="width:70%"></i></div><span class="vv">0.9</span></div>
-        <div class="bar-row"><span class="lb">Points / Game</span><div class="bar"><i style="width:82%"></i></div><span class="vv">2.1</span></div>
-        <div class="bar-row"><span class="lb">TOI (min)</span><div class="bar"><i style="width:64%"></i></div><span class="vv">18.4</span></div>
-        <div class="bar-row" style="padding-bottom:18px"><span class="lb">Takeaways</span><div class="bar"><i style="width:48%"></i></div><span class="vv">1.4</span></div>
-      </div>
-      <div class="card"><div class="card-h"><h3>Glacier Kings — Team</h3><span class="lnk" data-go="team" data-param="GLK">Team page →</span></div>
-        <div class="bar-row" style="padding-top:16px"><span class="lb">Record</span><div class="bar"><i style="width:78%"></i></div><span class="vv">11-3-1</span></div>
-        <div class="bar-row"><span class="lb">Goals For</span><div class="bar"><i style="width:88%"></i></div><span class="vv">68</span></div>
-        <div class="bar-row"><span class="lb">Goals Against</span><div class="bar"><i style="width:34%"></i></div><span class="vv">41</span></div>
-        <div class="bar-row"><span class="lb">Power Play %</span><div class="bar"><i style="width:61%"></i></div><span class="vv">24.1</span></div>
-        <div class="bar-row" style="padding-bottom:18px"><span class="lb">Penalty Kill %</span><div class="bar"><i style="width:84%"></i></div><span class="vv">86.7</span></div>
-      </div>
-    </div>
+    <div class="sec-head"><div><span class="eyebrow">Season Stats</span><h2>Stats &amp; <em>Leaders</em></h2>
+      <p>League leaders and your own numbers — everything updates automatically as game results are reported.</p></div></div>
+    <div id="myStatsCard"></div>
     <div class="card" style="margin-top:22px"><div class="card-h"><h3>League Leaderboards</h3></div>
       <div class="lb-tabs" id="lbTabs">
         <button class="lb-tab active" data-lb="points">Points</button><button class="lb-tab" data-lb="goals">Goals</button>
@@ -1658,6 +1627,7 @@ function go(view,param){
   if(view==="admin"&&typeof renderCommissioner==="function")renderCommissioner();
   if(view==="manager"&&typeof renderManager==="function")renderManager();
   if(view==="draft"&&typeof renderDraft==="function")renderDraft();
+  if(view==="stats"&&typeof renderMyStats==="function")renderMyStats();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
 }
@@ -1973,48 +1943,55 @@ function renderTeamPage(code){
 }
 
 /* ------------------------------ PLAYER PAGE ------------------------------ */
-function renderPlayerPage(id){
-  const player=playersById[id]||playersById["FrostByte_Zack"];id=player.id;
-  if(id!==curPlayerId){curPlayerId=id;profileSeason=4;}
-  const seasons=getPlayerSeasons(player);if(!seasons.includes(profileSeason))profileSeason=4;
-  const p=playerSeasonLine(player,profileSeason);
-  const t=p.team?teams[p.team]:null;
-  const isG=p.pos==="G";
-  // deterministic game log (last 10) — seeded per season
-  const h=hash(p.id+"|"+profileSeason);const log=[];
-  for(let i=0;i<10;i++){const gh=hash(p.id+"|"+profileSeason+"g"+i);
-    const opp=TEAM_KEYS[(gh)%TEAM_KEYS.length];const res=["W","W","L","OT","W","L","W","W","L","W"][(i+h)%10];
-    if(isG){log.push({opp,res,sv:20+gh%18,ga:1+gh%4,svp:(.88+(gh%12)/100).toFixed(3).replace(/^0/,"")});}
-    else{const g=(gh%10<3)?1+(gh%2):0;const a=(gh%10<5)?1+(gh%2):0;log.push({opp,res,g,a,p:g+a,sog:1+gh%6,pm:((gh%5)-2)});}
-  }
+const POS_NAME={C:"Center",LW:"Left Wing",RW:"Right Wing",W:"Wing",D:"Defense",G:"Goalie"};
+async function renderPlayerPage(id){
+  const el=$("#playerPage");if(!el)return;
+  if(!sb){el.innerHTML='<div class="empty-note">Player data will load on the live site.</div>';return;}
+  const {data:prof}=await sb.from("profiles").select("id,gamertag,role").eq("gamertag",id).maybeSingle();
+  if(!prof){el.innerHTML=`<div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${id}</div><div class="empty-state"><h4>Player not found</h4><p>No registered player by that name.</p></div>`;return;}
+  let spot=null,tc=null;
+  if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
+  let st={gp:0,goals:0,assists:0,points:0,shots:0,hits:0,pim:0,saves:0,shots_against:0,goals_against:0,is_goalie:false};
+  if(openSeason){const {data:ps}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();if(ps)st=ps;}
+  const t=tc?teams[tc]:null;const pos=spot?spot.position:null;const isG=pos==="G"||st.is_goalie;
+  const num=spot?spot.jersey_number:"—";
   const statCard=(k,v,acc)=>`<div class="stat${acc?' accent':''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-  const skaterStats=`${statCard("Points",p.pts,1)}${statCard("Goals",p.g)}${statCard("Assists",p.a)}${statCard("+/-",(p.pm>0?'+':'')+p.pm)}${statCard("Shot %",p.spct)}${statCard(p.pos==="C"?"Faceoff %":"Hits",p.pos==="C"?p.fopct:p.hits)}`;
-  const goalieStats=`${statCard("Record",`${p.gw}-${p.gp-p.gw}`,1)}${statCard("GAA",p.gaa)}${statCard("Save %",p.svpct)}${statCard("Shutouts",p.so)}${statCard("Games",p.gp)}${statCard("OVR",p.ovr)}`;
-  const logHead=isG?`<th>Opp</th><th>Res</th><th>SV</th><th>GA</th><th>SV%</th>`:`<th>Opp</th><th>Res</th><th>G</th><th>A</th><th>PTS</th><th>SOG</th><th>+/-</th>`;
-  const logRows=log.map(r=>isG?`<tr><td>${badge(r.opp,20)} ${r.opp}</td><td class="res-${r.res}">${r.res}</td><td>${r.sv}</td><td>${r.ga}</td><td>${r.svp}</td></tr>`
-    :`<tr><td>${badge(r.opp,20)} ${r.opp}</td><td class="res-${r.res}">${r.res}</td><td>${r.g}</td><td>${r.a}</td><td style="color:var(--frost);font-weight:700">${r.p}</td><td>${r.sog}</td><td>${r.pm>0?'+':''}${r.pm}</td></tr>`).join("");
-  $("#playerPage").innerHTML=`
-    <div class="breadcrumb">${t?`<a data-go="team" data-param="${p.team}">${t.name}</a>`:'<a data-go="freeagency">Free Agency</a>'} <span>›</span> ${p.name}${seasonSelect("playerSeasonSel",seasons,profileSeason)}</div>
+  const svp=st.shots_against?(st.saves/st.shots_against).toFixed(3).replace(/^0/,""):".000";
+  const grid=isG
+    ? `${statCard("Games",st.gp,1)}${statCard("Saves",st.saves)}${statCard("Goals Against",st.goals_against)}${statCard("Save %",svp)}`
+    : `${statCard("Points",st.points,1)}${statCard("Goals",st.goals)}${statCard("Assists",st.assists)}${statCard("Games",st.gp)}${statCard("Shots",st.shots)}${statCard("Hits",st.hits)}`;
+  const roleTag=prof.role==="commissioner"?"Commissioner":(prof.role==="gm"?"Manager":null);
+  el.innerHTML=`
+    <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}">${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
     <div class="player-hero">
-      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#4fe3e6'},#16a6b4)"><b>${jn(p.name)}</b><small>${t?t.code:'FA'}</small></div>
-      <div class="ph-info"><h2>${p.name}</h2>
+      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#4fe3e6'},#16a6b4)"><b>${num}</b><small>${tc||'FA'}</small></div>
+      <div class="ph-info"><h2>${prof.gamertag}</h2>
         <div class="ph-meta">
-          <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${profileSeason}${profileSeason===4?'':' · Final'}</span>
-          ${t?`<span class="ph-tag link" data-go="team" data-param="${p.team}">${({C:'Center',W:'Wing',D:'Defense',G:'Goalie'})[p.pos]} · <b>${t.name}</b></span>`:`<span class="ph-tag">${({C:'Center',W:'Wing',D:'Defense',G:'Goalie'})[p.pos]} · <b>Free Agent</b></span>`}
-          <span class="ph-tag">#<b>${p.num}</b></span><span class="ph-tag">Overall <b>${p.ovr}</b></span>
-          <span class="ph-tag">In league since <b>Season ${seasons[0]}</b></span><span class="ph-tag">Seasons played <b>${seasons.length}</b></span></div></div>
+          <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
+          ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
+          ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}</div></div>
     </div>
-    <div class="stat-grid">${isG?goalieStats:skaterStats}</div>
-    <div class="split2">
-      <div class="card"><div class="card-h"><h3>Game Log — Last 10</h3><span class="pill dim">Season ${profileSeason}</span></div>
-        <div style="overflow-x:auto"><table class="gamelog"><thead><tr>${logHead}</tr></thead><tbody>${logRows}</tbody></table></div></div>
-      <div class="card"><div class="card-h"><h3>Details</h3></div>
-        <div class="info-line" style="padding:14px 20px 9px"><span>Contract</span><b class="mono">${p.contract}</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>Cap Hit</span><b class="mono">$${p.cap.toFixed(1)}M</b></div>
-        <div class="info-line" style="padding:9px 20px"><span>Games Played</span><b class="mono">${p.gp}</b></div>
-        ${isG?`<div class="info-line" style="padding:9px 20px"><span>Quality Starts</span><b class="mono">${Math.round(p.gp*0.7)}</b></div>`:`<div class="info-line" style="padding:9px 20px"><span>Hits</span><b class="mono">${p.hits}</b></div><div class="info-line" style="padding:9px 20px"><span>Blocks</span><b class="mono">${p.blocks}</b></div><div class="info-line" style="padding:9px 20px 14px"><span>PIM</span><b class="mono">${p.pim}</b></div>`}
-      </div>
-    </div>`;
+    <div class="stat-grid">${grid}</div>
+    ${st.gp===0?'<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>':''}`;
+}
+async function renderMyStats(){
+  const el=$("#myStatsCard");if(!el)return;
+  if(!authProfile){el.innerHTML=`<div class="auth-banner"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your stats</b><div style="color:var(--fog);font-size:12.5px">Your profile and season numbers appear once you sign in with Discord.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;return;}
+  let tc=null,num="—",pos=null,st={gp:0,points:0,goals:0,assists:0};
+  if(sb&&openSeason&&authUser){
+    const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
+    if(rs){tc=codeOfId(rs.team_id);num=rs.jersey_number;pos=rs.position;}
+    const {data:ps}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();if(ps)st=ps;
+  }
+  const t=tc?teams[tc]:null;
+  el.innerHTML=`<div class="player-hero">
+    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#4fe3e6'},#16a6b4)"><b>${num}</b><small>${tc||'FA'}</small></div>
+    <div class="ph-info"><h2>${authProfile.gamertag}</h2>
+      <div class="ph-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
+        ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">Not on a roster yet</span>`}
+        <span class="ph-tag">${st.points} PTS · ${st.goals}G ${st.assists}A · ${st.gp} GP</span></div>
+      <div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-go="player" data-param="${authProfile.gamertag}">View Full Profile →</button></div>
+    </div></div>`;
 }
 
 /* ------------------------------ BRACKET ------------------------------ */
@@ -2178,8 +2155,6 @@ $("#chatForm").addEventListener("submit",e=>{e.preventDefault();const inp=$("#ch
 });
 
 /* ------------------------------ SIGNUP ------------------------------ */
-const form10=["W","W","L","W","OT","W","W","L","W","W"];
-$("#playerForm").innerHTML=form10.map(g=>`<span class="gm ${g}">${g==="OT"?"OTL":g}</span>`).join("");
 function registerPlayer(code,row){const obj=playerObj(code,row);playersById[obj.id]=obj;if(playersByTeam[code])playersByTeam[code].push(obj);return obj;}
 function assignModal(name,code){
   $("#modalCard").classList.remove("wide");$("#modalTitle").textContent="You're in the league";
@@ -2244,6 +2219,7 @@ function renderAuthUI(){
   renderSignupAuth();
   renderCommissioner();
   renderManager();
+  renderMyStats();
   applyRoleVisibility();
 }
 function renderSignupAuth(){
