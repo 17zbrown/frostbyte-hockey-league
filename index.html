@@ -444,6 +444,24 @@
   .lineup-night{margin-bottom:20px}
   .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
   .lineup-night-h span{font-family:var(--f-cond);font-weight:500;font-size:11.5px;letter-spacing:.08em;color:var(--fog-dim)}
+  .gn-sub{font-family:var(--f-cond);font-weight:600;letter-spacing:.09em;text-transform:uppercase;font-size:11px;color:var(--fog-dim);margin:2px 0 10px}
+  .gn-games{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+  .gn-game{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--panel-2)}
+  .gn-game-top{display:flex;align-items:center;gap:8px 13px;flex-wrap:wrap}
+  .gn-time{font-family:var(--f-mono);font-weight:700;font-size:13px;color:var(--frost)}
+  .gn-opp{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.02em;font-size:14px;color:var(--fog)}
+  .gn-opp b{color:var(--ice);font-weight:700}
+  .gn-ha{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.08em;padding:2px 7px;border-radius:100px;border:1px solid var(--line);color:var(--fog-dim)}
+  .gn-ha.home{color:var(--frost);border-color:#9cc7e6}
+  .gn-code{margin-left:auto;font-size:12px;color:var(--fog);font-weight:700}
+  .gn-mc{flex-shrink:0}
+  .gn-veto{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft)}
+  .gn-veto-l{display:flex;align-items:center;gap:9px;font-family:var(--f-cond);font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:11px;color:var(--fog)}
+  .veto-in{width:184px;font-family:var(--f-body);font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice);text-transform:none;letter-spacing:0}
+  .veto-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #1273b81f}
+  .gn-oppveto{font-family:var(--f-cond);font-size:12px;letter-spacing:.02em;color:var(--fog)}
+  .gn-oppveto b{color:var(--ice)}
+  .gn-empty{color:var(--fog);font-size:13px;padding:14px;border:1px dashed var(--line);border-radius:8px;margin-bottom:18px}
   .slot{background:#08161f;border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px;min-height:78px}
   .slot .role{font-family:var(--f-cond);font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:11px;color:var(--frost);margin-bottom:8px}
   .slot select{width:100%;background:#0a1a28;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:9px 10px;font-family:var(--f-cond);font-size:13.5px;letter-spacing:.03em;text-transform:uppercase}
@@ -1411,7 +1429,7 @@
         <button class="mgr-tab active" data-mtab="roster">Roster &amp; Waivers</button>
         <button class="mgr-tab" data-mtab="trade" data-feature="trades">Trade Center</button>
         <button class="mgr-tab" data-mtab="fa" data-feature="freeagency">Free Agents</button>
-        <button class="mgr-tab" data-mtab="lineup">Game-Night Lineup</button>
+        <button class="mgr-tab" data-mtab="lineup">Game Night Info</button>
         <button class="mgr-tab" data-mtab="reports">Game Reports</button>
       </div>
       <div class="mgr-panel on" id="mtab-roster"><div class="card"><div class="card-h"><h3>Active Roster</h3><span class="pill frost" id="rosterCount"></span></div>
@@ -2805,21 +2823,59 @@ async function renderFAmgr(){
 const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
 const LINEUP_ROLES=[{key:"center",label:"Center",pool:["C"]},{key:"lw",label:"Left Wing",pool:["W","LW","RW"]},{key:"rw",label:"Right Wing",pool:["W","LW","RW"]},{key:"ld",label:"Left Defense",pool:["D","LD","RD"]},{key:"rd",label:"Right Defense",pool:["D","LD","RD"]},{key:"goalie",label:"Goalie",pool:["G"]}];
 let lineupRosterCache=[];
+// ET calendar parts (weekday + Y-M-D) for bucketing games into Wed/Fri nights.
+function etParts(iso){try{const p={};new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",weekday:"short"}).formatToParts(new Date(iso)).forEach(x=>p[x.type]=x.value);return p;}catch(e){return {};}}
+// This club's next upcoming games grouped into the next Wednesday and Friday night.
+function clubNightGames(){
+  const buckets={Wed:{},Fri:{}};
+  (liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{
+    if(g.done||!g.when)return;
+    if(g.a!==currentClub&&g.b!==currentClub)return;
+    const p=etParts(g.when);if(p.weekday!=="Wed"&&p.weekday!=="Fri")return;
+    const key=p.year+"-"+p.month+"-"+p.day;
+    (buckets[p.weekday][key]=buckets[p.weekday][key]||[]).push(g);
+  }));
+  const earliest=b=>{const ks=Object.keys(b).sort();return ks.length?{games:b[ks[0]].slice().sort((x,y)=>new Date(x.when)-new Date(y.when))}:null;};
+  return {wed:earliest(buckets.Wed),fri:earliest(buckets.Fri)};
+}
 async function renderLineup(){
   const grid=$("#lineupGrid");if(!grid)return;
   const badgeEl=$("#lineupBadge"),nextText=$("#lineupNextText");
   if(badgeEl&&currentClub)badgeEl.innerHTML=badge(currentClub,34);
   const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if((g.a===currentClub||g.b===currentClub)&&!g.done)teamGames.push(g);}));
-  const ng=teamGames[0];
+  const ng=teamGames.slice().sort((a,b)=>new Date(a.when)-new Date(b.when))[0];
   if(nextText){if(ng){const opp=ng.a===currentClub?ng.b:ng.a,home=ng.a===currentClub;
       nextText.innerHTML=`<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">${home?'vs':'@'} ${teams[opp].name}</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">${fmtGameDate(ng.when)} · ${fmtGameTime(ng.when)}</small>`;}
     else nextText.innerHTML='<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">No game scheduled</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears once the schedule is posted</small>';}
+  const tid=teamIdOf(currentClub);
   let roster=[];if(sb&&openSeason&&currentClub)roster=await loadRosterFor(currentClub);
   lineupRosterCache=roster;
-  if(!roster.length){grid.innerHTML='<div class="empty-note" style="margin:0">No players on your roster yet — the lineup builder unlocks once players are assigned to your club.</div>';return;}
-  // saved lineups for this club/season
-  const saved={};const tid=teamIdOf(currentClub);
+  // saved lineups
+  const saved={};
   if(sb&&openSeason&&tid){const {data}=await sb.from("lineups").select("*").eq("season_id",openSeason.id).eq("team_id",tid);(data||[]).forEach(r=>saved[r.night]=r);}
+  // this week's games per night + server vetoes
+  const nights=clubNightGames();
+  const gameIds=[];[nights.wed,nights.fri].forEach(n=>{if(n)n.games.forEach(g=>gameIds.push(g.id));});
+  const vmap={};
+  if(sb&&gameIds.length){const {data}=await sb.from("game_vetoes").select("game_id,team_id,servers").in("game_id",gameIds);(data||[]).forEach(v=>{(vmap[v.game_id]=vmap[v.game_id]||{})[v.team_id]=v.servers;});}
+  const gameRow=g=>{
+    const home=g.a===currentClub,oppCode=home?g.b:g.a,oppTid=teamIdOf(oppCode);
+    const oppName=teams[oppCode]?teams[oppCode].name:oppCode;
+    const myVeto=(vmap[g.id]||{})[tid]||"",oppVeto=(vmap[g.id]||{})[oppTid]||"";
+    return `<div class="gn-game">
+      <div class="gn-game-top">
+        <span class="gn-time">${fmtGameTime(g.when)} ET</span>
+        <span class="gn-opp">${home?"vs":"@"} <b>${esc(oppName)}</b></span>
+        <span class="gn-ha ${home?"home":"away"}">${home?"HOME":"AWAY"}</span>
+        <span class="gn-code mono">Lobby #${g.code||"—"}</span>
+        <button class="mini gn-mc" data-match="${g.id}">Match card</button>
+      </div>
+      <div class="gn-veto">
+        <label class="gn-veto-l">Your server vetoes<input class="veto-in" data-game="${g.id}" value="${esc(myVeto)}" placeholder="e.g. East 1, East 2"></label>
+        <span class="gn-oppveto">${esc(oppName)} vetoes: <b>${oppVeto?esc(oppVeto):"—"}</b></span>
+      </div>
+    </div>`;
+  };
   const slotFor=(night,role)=>{
     let pool=roster.filter(p=>role.pool.includes(p.pos));
     if(!pool.length)pool=role.key==="goalie"?roster:roster.filter(p=>p.pos!=="G");
@@ -2828,10 +2884,26 @@ async function renderLineup(){
     const opts='<option value="">— Bench / none —</option>'+pool.map(p=>`<option value="${p.pid}" ${p.pid===savedPid?"selected":""}>#${p.num} ${esc(p.name)}</option>`).join("");
     return `<div class="slot"><div class="role">${role.label}</div><select data-night="${night.key}" data-role="${role.key}" aria-label="${role.label} — ${night.label}">${opts}</select></div>`;
   };
-  grid.innerHTML=LINEUP_NIGHTS.map(night=>
-    `<div class="lineup-night"><div class="lineup-night-h">${night.label}<span>3 games · ${teams[currentClub].name}</span></div>
-      <div class="lineup-grid">${LINEUP_ROLES.map(role=>slotFor(night,role)).join("")}</div></div>`).join("");
+  const nightCard=night=>{
+    const nd=nights[night.key];
+    const dateLabel=nd&&nd.games.length?fmtGameDate(nd.games[0].when):"Game night";
+    const gamesHtml=nd&&nd.games.length?nd.games.map(gameRow).join(""):'<div class="gn-empty">No games scheduled for this night yet — they appear once the commissioner posts the schedule.</div>';
+    const lineupHtml=roster.length?`<div class="gn-sub">Starting lineup</div><div class="lineup-grid">${LINEUP_ROLES.map(role=>slotFor(night,role)).join("")}</div>`:'<div class="gn-empty">Your lineup builder unlocks once players are assigned to your club.</div>';
+    return `<div class="lineup-night"><div class="lineup-night-h">${night.label} <span>${dateLabel}</span></div>
+      <div class="gn-sub">Games &amp; server vetoes</div>
+      <div class="gn-games">${gamesHtml}</div>
+      ${lineupHtml}</div>`;
+  };
+  grid.innerHTML=LINEUP_NIGHTS.map(nightCard).join("");
 }
+$("#lineupGrid").addEventListener("change",async e=>{
+  const v=e.target.closest(".veto-in");if(!v)return;
+  if(!sb||!currentClub){toast("Not connected","Sign in to save your vetoes.");return;}
+  const tid=teamIdOf(currentClub);if(!tid)return;
+  const {error}=await sb.from("game_vetoes").upsert({game_id:v.dataset.game,team_id:tid,servers:(v.value||"").trim()||null,updated_by:authUser?authUser.id:null,updated_at:new Date().toISOString()},{onConflict:"game_id,team_id"});
+  if(error){toast("Couldn't save veto",error.message);return;}
+  toast("Server vetoes saved","Recorded for this game.");
+});
 $("#saveLineup").addEventListener("click",async()=>{
   if(!$("#lineupGrid").querySelector("select")){toast("No roster yet","Players must be assigned to your club before you can set a lineup.");return;}
   if(!sb||!openSeason||!currentClub){toast("Not connected","Sign in to save your lineup.");return;}
