@@ -451,6 +451,15 @@
   .trade-item b{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.02em;text-transform:uppercase}
   .trade-item small{font-family:var(--f-mono);font-size:10px;color:var(--fog-dim);margin-left:auto}
   .trade-foot{margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+  .trade-count{font-family:var(--f-cond);letter-spacing:.03em;text-transform:uppercase;font-size:13px;color:var(--fog);margin-bottom:8px}
+  .ret-list{display:flex;flex-direction:column;gap:7px}
+  .ret-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:var(--f-body)}
+  .ret-name{font-family:var(--f-cond);font-weight:600;letter-spacing:.02em;text-transform:uppercase;font-size:13px;color:var(--ice)}
+  .ret-name small{font-family:var(--f-mono);font-weight:600;color:var(--fog);text-transform:none;letter-spacing:0;margin-left:5px}
+  .ret-ctl{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-cond);font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--fog)}
+  .ret-pct{padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice);font-family:var(--f-mono);font-size:12px;font-weight:600}
+  .ret-info{font-family:var(--f-mono);font-size:11.5px;color:var(--frost);margin-left:auto}
+  .to-ret{margin-top:6px;font-family:var(--f-cond);font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--frost)}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
   .lineup-night{margin-bottom:20px}
   .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
@@ -2852,15 +2861,15 @@ let myTradesById={},counteringTradeId=null;
 let tradeMineList=[],tradeTheirsList=[];
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
-  const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+  const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
   const gmId=(dbTeams.find(t=>t.id===tid)||{}).gm_profile_id;  // managers can't be traded
-  return (data||[]).filter(s=>s.profile_id!==gmId).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position}));
+  return (data||[]).filter(s=>s.profile_id!==gmId).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position,salary:+s.salary||0}));
 }
 function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;color:var(--fog);font-size:13px">No players on this roster yet.</div>';
   return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
 async function renderTrade(){
   if(!sb||!openSeason)return;
-  tradeSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;
+  tradeSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;retentionSel={};
   const sel=$("#tradePartner");if(sel&&!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
   const partner=(sel&&clubByName(sel.value))||TEAM_KEYS.find(k=>k!==currentClub);
   tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
@@ -2871,17 +2880,32 @@ async function renderTrade(){
 $("#tradePartner").addEventListener("change",renderTrade);
 document.addEventListener("click",e=>{const it=e.target.closest(".trade-item");if(!it)return;const side=it.dataset.side,i=+it.dataset.i;
   if(tradeSel[side].has(i)){tradeSel[side].delete(i);it.classList.remove("sel");}else{tradeSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
+let retentionSel={};   // pid -> retained percent (on players I'm sending)
 function updateTradeSummary(){const el=$("#tradeSummary");if(!el)return;
   const pb=$("#proposeTrade");const locked=seasonMovesLocked();if(pb)pb.disabled=locked;
   if(locked){el.innerHTML='<b style="color:var(--loss)">Roster moves are locked</b> — the trade deadline has passed or a commissioner locked moves.';return;}
-  const m=tradeSel.mine.size,t=tradeSel.theirs.size;el.textContent=(!m&&!t)?"Select at least one player from each side.":`Sending ${m} · Receiving ${t}`;}
+  const mineSel=[...tradeSel.mine].map(i=>tradeMineList[i]).filter(Boolean);
+  const t=tradeSel.theirs.size;
+  if(!mineSel.length&&!t){el.innerHTML="Select at least one player from each side.";return;}
+  let html=`<div class="trade-count">Sending <b>${mineSel.length}</b> · Receiving <b>${t}</b></div>`;
+  if(mineSel.length){
+    html+='<div class="ret-list">'+mineSel.map(p=>{
+      const pct=retentionSel[p.pid]||0,retained=Math.round((p.salary||0)*pct/100),net=(p.salary||0)-retained;
+      return `<div class="ret-row"><span class="ret-name">${esc(p.name)} <small>${fmtMoney(p.salary)}</small></span>
+        <label class="ret-ctl">Retain <select class="ret-pct" data-pid="${p.pid}">${[0,25,50].map(v=>`<option value="${v}" ${v===pct?"selected":""}>${v}%</option>`).join("")}</select></label>
+        <span class="ret-info">${pct?`you keep ${fmtMoney(retained)} · they take ${fmtMoney(net)}`:`they take ${fmtMoney(p.salary)}`}</span></div>`;
+    }).join("")+'</div>';
+  }
+  el.innerHTML=html;}
+$("#tradeSummary").addEventListener("change",e=>{const s=e.target.closest(".ret-pct");if(!s)return;retentionSel[s.dataset.pid]=+s.value;updateTradeSummary();});
 $("#proposeTrade").addEventListener("click",async()=>{
   if(!sb||!authUser){toast("Sign in first","");return;}
   if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
   if(!tradeSel.mine.size||!tradeSel.theirs.size){toast("Incomplete trade","Pick at least one player from each side.");return;}
   const partnerCode=clubByName($("#tradePartner").value)||TEAM_KEYS.find(k=>k!==currentClub);
   const offered=[...tradeSel.mine].map(i=>tradeMineList[i].pid),requested=[...tradeSel.theirs].map(i=>tradeTheirsList[i].pid);
-  const {error}=await sb.from("trades").insert({season_id:openSeason.id,from_team_id:teamIdOf(currentClub),to_team_id:teamIdOf(partnerCode),from_profile_id:authUser.id,offered_profile_ids:offered,requested_profile_ids:requested});
+  const retention={};[...tradeSel.mine].forEach(i=>{const p=tradeMineList[i];const pct=retentionSel[p.pid]||0;if(pct>0)retention[p.pid]=pct;});
+  const {error}=await sb.from("trades").insert({season_id:openSeason.id,from_team_id:teamIdOf(currentClub),to_team_id:teamIdOf(partnerCode),from_profile_id:authUser.id,offered_profile_ids:offered,requested_profile_ids:requested,retention});
   if(error){toast("Couldn't propose",error.message);return;}
   const wasCounter=counteringTradeId;
   if(counteringTradeId){await sb.from("trades").update({status:"declined",updated_at:new Date().toISOString()}).eq("id",counteringTradeId);counteringTradeId=null;}
@@ -2901,8 +2925,9 @@ async function loadMyTrades(){
   myTradesById={};trades.forEach(x=>myTradesById[x.id]=x);
   el.innerHTML=trades.map(t=>{const incoming=t.to_team_id===myTid;const fC=codeT(t.from_team_id),tC=codeT(t.to_team_id);
     const off=t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—",req=t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—";
+    const ret=t.retention||{};const retNote=Object.keys(ret).length?`<div class="to-ret">${esc(teams[fC].name)} retains ${Object.entries(ret).map(([pid,pct])=>pct+"% of "+(nameOf[pid]||"?")).join(", ")}</div>`:"";
     return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name}</div>
-      <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div></div>
+      <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div>${retNote}</div>
       <div class="act">${incoming?`${locked?'<span style="color:var(--fog);font-size:12px;align-self:center">Locked</span>':`<button class="mini good tr-accept" data-id="${t.id}">Accept</button><button class="mini tr-adjust" data-id="${t.id}">Adjust</button>`}<button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
 }
 // Adjust an incoming offer: pre-fill the trade builder (flipped to our side) to send a counter.
