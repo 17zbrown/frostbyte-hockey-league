@@ -990,6 +990,11 @@
   .ef-row input,.ef-row select,.ef-row textarea{padding:9px 11px;border:1px solid var(--line);border-radius:7px;font-family:var(--f-body);font-size:14px;background:#fff;color:var(--navy);width:100%}
   .ef-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
   .ef-grid .ef-row{gap:4px}
+  .ac-wrap{position:relative}
+  .ac-menu{position:absolute;top:100%;left:0;right:0;z-index:40;margin-top:4px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(11,31,59,.16);max-height:210px;overflow:auto;display:none}
+  .ac-menu.on{display:block}
+  .ac-opt{display:block;width:100%;text-align:left;padding:9px 11px;border:0;background:none;font-family:var(--f-body);font-size:14px;color:var(--navy);cursor:pointer}
+  .ac-opt:hover,.ac-opt.act{background:var(--ice)}
   .adm-search{width:100%;padding:10px 13px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin:10px 20px;width:calc(100% - 40px);box-sizing:border-box}
   .pl-scroll{max-height:480px;overflow:auto}
   .news-edit-row{display:flex;align-items:center;gap:12px;padding:11px 20px;border-top:1px solid var(--line-soft)}
@@ -3160,6 +3165,11 @@ document.addEventListener("click",e=>{
 /* ------------------------------ ACTION CENTER ------------------------------ */
 const ACTION_META={complaint:{label:"Complaint",route:"commissioner"},appeal:{label:"Suspension / Ban Appeal",route:"commissioner"},trade_request:{label:"Trade Request",route:"manager"},position_change:{label:"Position Change",route:"commissioner"}};
 const AC_POS=[["C","Center"],["LW","Left Wing"],["RW","Right Wing"],["LD","Left Defense"],["RD","Right Defense"],["G","Goalie"]];
+const COMPLAINT_SUBJECTS=["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
+const APPEAL_SUBJECTS=["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Fine or point deduction","Warning or strike","Trade reversal","Something else"];
+const TRADE_WANTS=["Trade me to another club","Trade for a specific player","Trade for a draft pick","Trade for cap space / salary relief","More ice time or a bigger role","Explore my trade value","Something else"];
+const POSCHANGE_REASONS=["Better fit for my playstyle","Team needs at the position","Struggling at current position","More comfortable elsewhere","Returning to my natural position","Something else"];
+const selOpts=arr=>[{value:"",label:"Select one…"}].concat(arr.map(s=>({value:s,label:s})));
 let myClubInfo={team_id:null,team_name:null,position:null};
 async function renderActionCenter(){
   const gate=$("#actionsGate");if(!gate)return;
@@ -3167,6 +3177,7 @@ async function renderActionCenter(){
     if($("#myActionsBody"))$("#myActionsBody").innerHTML='';if($("#myActionsCount"))$("#myActionsCount").textContent='';return;}
   gate.innerHTML='';
   myClubInfo={team_id:null,team_name:null,position:null};
+  if(sb&&!acPlayers.length){const {data:pl}=await sb.from("profiles").select("gamertag").order("gamertag");acPlayers=(pl||[]).map(p=>p.gamertag).filter(Boolean);}
   if(sb&&openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,position").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
     if(rs){myClubInfo.team_id=rs.team_id;myClubInfo.position=rs.position;const c=codeOfId(rs.team_id);myClubInfo.team_name=c&&teams[c]?teams[c].name:null;}}
   loadMyActions();
@@ -3201,11 +3212,12 @@ function actionRow(a,rev){
 function openActionForm(type){
   if(!sb||!authUser){toast("Sign in first","Sign in with Discord to file a request.");return;}
   const meta=ACTION_META[type];let fields;
-  if(type==='complaint')fields=[{key:"subject",label:"What's the complaint about?",value:""},{key:"target",label:"Who / what is this about? (optional)",value:""},{key:"details",label:"Details",type:"textarea",value:""}];
-  else if(type==='appeal')fields=[{key:"subject",label:"What are you appealing? (e.g. 3-game suspension)",value:""},{key:"details",label:"Your explanation",type:"textarea",value:""}];
-  else if(type==='trade_request'){if(!myClubInfo.team_id){toast("Join a club first","You must be on a club roster to request a trade.");return;}fields=[{key:"target",label:"What are you asking for?",value:""},{key:"details",label:`Message to ${myClubInfo.team_name||'your club'}'s management`,type:"textarea",value:""}];}
-  else fields=[{key:"current_position",label:"Current position",type:"select",value:myClubInfo.position||"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"requested_position",label:"Requested position",type:"select",value:"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"details",label:"Why?",type:"textarea",value:""}];
+  if(type==='complaint')fields=[{key:"subject",label:"What's the complaint about?",type:"select",value:"",options:selOpts(COMPLAINT_SUBJECTS)},{key:"target",label:"Who is this about? (optional)",type:"player",placeholder:"Start typing a player's name…"},{key:"details",label:"Details",type:"textarea",value:"",placeholder:"What happened, when, and any evidence (links, clips)…"}];
+  else if(type==='appeal')fields=[{key:"subject",label:"What are you appealing?",type:"select",value:"",options:selOpts(APPEAL_SUBJECTS)},{key:"details",label:"Your explanation",type:"textarea",value:"",placeholder:"Why the ruling should be reconsidered…"}];
+  else if(type==='trade_request'){if(!myClubInfo.team_id){toast("Join a club first","You must be on a club roster to request a trade.");return;}fields=[{key:"subject",label:"What are you asking for?",type:"select",value:"",options:selOpts(TRADE_WANTS)},{key:"target",label:"Player involved (optional)",type:"player",placeholder:"Player you want / want to be dealt for…"},{key:"details",label:`Message to ${myClubInfo.team_name||'your club'}'s management`,type:"textarea",value:"",placeholder:"Give your GM the context…"}];}
+  else fields=[{key:"current_position",label:"Current position",type:"select",value:myClubInfo.position||"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"requested_position",label:"Requested position",type:"select",value:"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"subject",label:"Reason for the change",type:"select",value:"",options:selOpts(POSCHANGE_REASONS)},{key:"details",label:"Anything else?",type:"textarea",value:"",placeholder:"Optional — add any context…"}];
   formModal("File — "+meta.label,fields,async v=>{
+    if((type==='complaint'||type==='appeal'||type==='trade_request')&&!(v.subject||"").trim()){toast("Pick an option","Choose what this is about from the dropdown.");return;}
     if(!(v.details||"").trim()){toast("Add details","Please describe your request.");return;}
     const payload={profile_id:authUser.id,type,route:meta.route,details:v.details.trim(),season_id:openSeason?openSeason.id:null,subject:(v.subject||"").trim()||null,target:(v.target||"").trim()||null};
     if(type==='trade_request')payload.team_id=myClubInfo.team_id;
@@ -3982,16 +3994,34 @@ function confirmModal(title,msg,ok,cb){$("#modalCard").classList.remove("wide");
   $("#modalOk").textContent=ok;$("#modalOk").style.display="";$("#modalCancel").textContent="Cancel";modalCb=cb;$("#modalBg").classList.add("on");}
 // Generic edit-form modal used by the commissioner editors.
 // fields: {key,label,type?('text'|'number'|'select'|'textarea'),value,options?,min?,max?,step?,grid?}
+let acPlayers=[];   // gamertags for Action Center "who" autocomplete
+function wireAutocomplete(i,opts){
+  const inp=$("#modalMsg").querySelector('[data-ef="'+i+'"]');if(!inp)return;
+  const wrap=inp.closest('.ef-row'),menu=wrap.querySelector('.ac-menu');let act=-1,cur=[];
+  const paint=()=>{menu.innerHTML=cur.map((n,k)=>`<button type="button" class="ac-opt${k===act?' act':''}">${esc(n)}</button>`).join('');menu.classList.toggle('on',cur.length>0);};
+  const render=()=>{const s=inp.value.trim().toLowerCase();cur=!s?[]:(opts||[]).filter(n=>n&&n.toLowerCase().includes(s)).slice(0,8);act=-1;paint();};
+  inp.addEventListener('input',render);
+  inp.addEventListener('focus',render);
+  inp.addEventListener('keydown',e=>{if(!cur.length)return;
+    if(e.key==='ArrowDown'){e.preventDefault();act=(act+1)%cur.length;paint();}
+    else if(e.key==='ArrowUp'){e.preventDefault();act=(act-1+cur.length)%cur.length;paint();}
+    else if(e.key==='Enter'&&act>=0){e.preventDefault();inp.value=cur[act];menu.classList.remove('on');}
+    else if(e.key==='Escape'){menu.classList.remove('on');}});
+  menu.addEventListener('mousedown',e=>{const b=e.target.closest('.ac-opt');if(!b)return;e.preventDefault();inp.value=b.textContent;menu.classList.remove('on');});
+  inp.addEventListener('blur',()=>setTimeout(()=>menu.classList.remove('on'),120));
+}
 function formModal(title,fields,onSave){
   $("#modalCard").classList.remove("wide");$("#modalTitle").textContent=title;
   const fieldHTML=f=>{const i=fields.indexOf(f);
-    if(f.type==="select")return `<div class="ef-row"><label>${f.label}</label><select data-ef="${i}">${f.options.map(o=>`<option value="${o.value}" ${String(o.value)===String(f.value)?"selected":""}>${o.label}</option>`).join("")}</select></div>`;
-    if(f.type==="textarea")return `<div class="ef-row"><label>${f.label}</label><textarea data-ef="${i}" rows="4">${f.value??""}</textarea></div>`;
+    if(f.type==="select")return `<div class="ef-row"><label>${f.label}</label><select data-ef="${i}">${f.options.map(o=>`<option value="${esc(o.value)}" ${String(o.value)===String(f.value)?"selected":""}>${esc(o.label)}</option>`).join("")}</select></div>`;
+    if(f.type==="player")return `<div class="ef-row ac-wrap"><label>${f.label}</label><input data-ef="${i}" class="ac-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder||"Start typing a name…")}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}"><div class="ac-menu"></div></div>`;
+    if(f.type==="textarea")return `<div class="ef-row"><label>${f.label}</label><textarea data-ef="${i}" rows="4" placeholder="${esc(f.placeholder||"")}">${f.value??""}</textarea></div>`;
     return `<div class="ef-row"><label>${f.label}</label><input data-ef="${i}" type="${f.type||"text"}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.min!=null?`min="${f.min}"`:""} ${f.max!=null?`max="${f.max}"`:""} ${f.step!=null?`step="${f.step}"`:""}></div>`;};
   let html="",gridBuf=[];
   const flushGrid=()=>{if(gridBuf.length){html+=`<div class="ef-grid">${gridBuf.map(fieldHTML).join("")}</div>`;gridBuf=[];}};
   fields.forEach(f=>{if(f.grid){gridBuf.push(f);}else{flushGrid();html+=fieldHTML(f);}});flushGrid();
   $("#modalMsg").innerHTML=`<div class="edit-form">${html}</div>`;
+  fields.forEach((f,i)=>{if(f.type==="player")wireAutocomplete(i,f.options&&f.options.length?f.options:acPlayers);});
   $("#modalOk").textContent="Save Changes";$("#modalOk").style.display="";$("#modalCancel").textContent="Cancel";
   modalCb=()=>{const v={};fields.forEach((f,i)=>{const el=$("#modalMsg").querySelector('[data-ef="'+i+'"]');if(!el)return;v[f.key]=f.type==="number"?(el.value===""?0:+el.value):el.value;});onSave(v);};
   $("#modalBg").classList.add("on");
