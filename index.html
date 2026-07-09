@@ -2386,6 +2386,7 @@ $("#rosterBody").addEventListener("click",e=>{
     toast("Player waived",p.name+" is off your roster.");renderRoster();});});
 // trade
 let tradeSel={mine:new Set(),theirs:new Set()};
+let myTradesById={},counteringTradeId=null;
 let tradeMineList=[],tradeTheirsList=[];
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
@@ -2396,7 +2397,7 @@ function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;c
   return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
 async function renderTrade(){
   if(!sb||!openSeason)return;
-  tradeSel={mine:new Set(),theirs:new Set()};
+  tradeSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;
   const sel=$("#tradePartner");if(sel&&!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
   const partner=(sel&&clubByName(sel.value))||TEAM_KEYS.find(k=>k!==currentClub);
   tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
@@ -2419,7 +2420,9 @@ $("#proposeTrade").addEventListener("click",async()=>{
   const offered=[...tradeSel.mine].map(i=>tradeMineList[i].pid),requested=[...tradeSel.theirs].map(i=>tradeTheirsList[i].pid);
   const {error}=await sb.from("trades").insert({season_id:openSeason.id,from_team_id:teamIdOf(currentClub),to_team_id:teamIdOf(partnerCode),from_profile_id:authUser.id,offered_profile_ids:offered,requested_profile_ids:requested});
   if(error){toast("Couldn't propose",error.message);return;}
-  toast("Trade proposed","Sent to "+teams[partnerCode].name+" — it goes through the moment they accept.");renderTrade();
+  const wasCounter=counteringTradeId;
+  if(counteringTradeId){await sb.from("trades").update({status:"declined",updated_at:new Date().toISOString()}).eq("id",counteringTradeId);counteringTradeId=null;}
+  toast(wasCounter?"Counter sent":"Trade proposed",(wasCounter?"Your counter went to ":"Sent to ")+teams[partnerCode].name+" — it goes through the moment they accept.");renderTrade();
 });
 async function loadMyTrades(){
   const el=$("#tradesPending");if(!el||!sb||!openSeason)return;
@@ -2432,14 +2435,34 @@ async function loadMyTrades(){
   const nameOf={};(profs||[]).forEach(p=>nameOf[p.id]=p.gamertag);
   const codeT=id=>{const t=dbTeams.find(x=>x.id===id);return t?t.code:"?";};
   const locked=seasonMovesLocked();
+  myTradesById={};trades.forEach(x=>myTradesById[x.id]=x);
   el.innerHTML=trades.map(t=>{const incoming=t.to_team_id===myTid;const fC=codeT(t.from_team_id),tC=codeT(t.to_team_id);
     const off=t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—",req=t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—";
     return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name}</div>
       <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div></div>
-      <div class="act">${incoming?`${locked?'<span style="color:var(--fog);font-size:12px;align-self:center">Locked</span>':`<button class="mini good tr-accept" data-id="${t.id}">Accept</button>`}<button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
+      <div class="act">${incoming?`${locked?'<span style="color:var(--fog);font-size:12px;align-self:center">Locked</span>':`<button class="mini good tr-accept" data-id="${t.id}">Accept</button><button class="mini tr-adjust" data-id="${t.id}">Adjust</button>`}<button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
+}
+// Adjust an incoming offer: pre-fill the trade builder (flipped to our side) to send a counter.
+async function adjustTrade(id){
+  const t=myTradesById[id];if(!t)return;
+  if(seasonMovesLocked()){toast("Moves locked","Roster moves are locked right now.");return;}
+  const fromCode=codeOfId(t.from_team_id);if(!fromCode||!teams[fromCode]){toast("Can't adjust","The other club could not be found.");return;}
+  const sel=$("#tradePartner");
+  if(sel){if(!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");sel.value=teams[fromCode].name;}
+  await renderTrade();  // loads my roster + partner roster, resets selection
+  const reqSet=new Set(t.requested_profile_ids),offSet=new Set(t.offered_profile_ids);
+  tradeMineList.forEach((p,i)=>{if(reqSet.has(p.pid))tradeSel.mine.add(i);});       // my players they wanted
+  tradeTheirsList.forEach((p,i)=>{if(offSet.has(p.pid))tradeSel.theirs.add(i);});    // their players they offered
+  document.querySelectorAll('#tradeMine .trade-item').forEach(el=>{if(tradeSel.mine.has(+el.dataset.i))el.classList.add('sel');});
+  document.querySelectorAll('#tradeTheirs .trade-item').forEach(el=>{if(tradeSel.theirs.has(+el.dataset.i))el.classList.add('sel');});
+  updateTradeSummary();
+  counteringTradeId=id;
+  const builder=($("#tradeMine")&&$("#tradeMine").closest(".card"))||$("#proposeTrade");if(builder)builder.scrollIntoView({behavior:"smooth",block:"center"});
+  toast("Adjust the offer","Tweak the players, then hit Propose to send a counter — the original offer is declined.");
 }
 $("#tradesPending").addEventListener("click",async e=>{
-  const acc=e.target.closest(".tr-accept"),dec=e.target.closest(".tr-decline"),can=e.target.closest(".tr-cancel");
+  const acc=e.target.closest(".tr-accept"),dec=e.target.closest(".tr-decline"),can=e.target.closest(".tr-cancel"),adj=e.target.closest(".tr-adjust");
+  if(adj){adjustTrade(adj.dataset.id);return;}
   if(acc){const {error}=await sb.rpc("accept_trade",{p_trade:acc.dataset.id});if(error){toast("Couldn't accept",error.message);return;}
     toast("Trade accepted","Rosters updated.");renderTrade();renderRoster();return;}
   if(dec){await sb.from("trades").update({status:"declined",updated_at:new Date().toISOString()}).eq("id",dec.dataset.id);toast("Trade declined","");loadMyTrades();return;}
