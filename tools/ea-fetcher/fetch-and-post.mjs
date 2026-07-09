@@ -23,11 +23,15 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 for (const [k, v] of Object.entries({ INGEST_URL, INGEST_KEY, SUPABASE_URL, SUPABASE_ANON_KEY }))
   if (!v) { console.error(`Missing env ${k}`); process.exit(1); }
 
-// If this IP is EA-blocked, install undici and uncomment to route EA calls via a
-// residential proxy:  npm i undici  then set HTTPS_PROXY=http://user:pass@host:port
-// import { ProxyAgent } from "undici";
-// const eaDispatcher = process.env.HTTPS_PROXY ? new ProxyAgent(process.env.HTTPS_PROXY) : undefined;
-const eaDispatcher = undefined;
+// EA blocks datacenter IPs, so when running in the cloud (e.g. GitHub Actions) set
+// HTTPS_PROXY to a RESIDENTIAL proxy — only the EA calls are routed through it.
+// Needs the `undici` package (installed automatically in the GitHub workflow).
+let eaDispatcher;
+if (process.env.HTTPS_PROXY) {
+  const { ProxyAgent } = await import("undici");
+  eaDispatcher = new ProxyAgent(process.env.HTTPS_PROXY);
+  console.log("Routing EA calls through residential proxy.");
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
