@@ -11,6 +11,12 @@
   to = "/.netlify/functions/parse-screenshots"
   status = 200
 
+# The EA stats fetcher POSTs raw match data here (auth: x-ingest-key header).
+[[redirects]]
+  from = "/api/ingest-stats"
+  to = "/.netlify/functions/ingest-stats"
+  status = 200
+
 # Basic security headers for the static site.
 [[headers]]
   for = "/*"
