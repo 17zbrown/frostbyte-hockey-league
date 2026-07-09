@@ -1238,7 +1238,7 @@
   <!-- RULEBOOK -->
   <div class="view" id="view-rulebook"><section class="pad"><div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">The Fine Print</span><h2>League <em>Rulebook</em></h2>
-      <p>Everything you agree to when you drop the puck in Frostbyte. Season 4 edition.</p></div></div>
+      <p>Everything you agree to when you drop the puck in Frostbyte.</p></div></div>
     <div class="rules-shell"><nav class="rules-toc" id="rulesToc" aria-label="Rulebook sections"></nav><div id="rulesBody"></div></div>
   </div></section></div>
 
@@ -1453,12 +1453,89 @@ function buildTeams(){
 
 // standings: code, gp, w, l, otl, gf, ga, streak
 const rules = [
-  {n:"01",t:"Format",items:["<b>6v6 club hockey</b> on EA Sports NHL 27 — three forwards, two defense, one goalie per side.","<b>Eight clubs</b> split into the Frost and Byte divisions.","<b>54-game</b> regular season over <b>9 weeks</b> — every club plays <b>three games a night</b> on Wednesdays and Fridays (six a week) at 9:00, 9:35 and 10:10 PM ET.","Every game is free to play — no entry fee, ever."]},
-  {n:"02",t:"Standings & Points",items:["<b>2 points</b> for a win, <b>1 point</b> for an overtime or shootout loss, <b>0</b> for a regulation loss.","Ties in the standings broken by: wins, then head-to-head, then goal differential.","<b>Top three</b> from each division qualify for the Frostbyte Cup, plus <b>two wild cards</b>."]},
-  {n:"03",t:"Rosters & Cap",items:["Rosters carry <b>up to 12 players</b> including two goalies.","A <b>$45M salary cap</b> applies — no lineup may exceed it on game night.","Roster lock is the <b>Sunday before Week 1</b>; in-season moves go through waivers or trade."]},
-  {n:"04",t:"Trades & Waivers",items:["A trade goes through <b>the moment both GMs agree</b> — no commissioner approval needed.","Either club can <b>accept, decline, or counter</b> a trade proposal.","Waived players clear waivers and enter the free-agent pool for any club to sign.","The <b>trade deadline</b> falls two weeks before the end of the regular season."]},
-  {n:"05",t:"Game Night",items:["Lobbies open <b>15 minutes</b> before puck drop; lineups are due <b>30 minutes</b> prior.","A club that can't ice a full six may use <b>one approved sub</b> from the call-up pool.","<b>No-shows</b> forfeit 6-0 and lose a point of standing; repeat offenses risk removal."]},
-  {n:"06",t:"Conduct",items:["Keep league chat and lobbies <b>respectful</b> — trash talk is fine, harassment is not.","<b>Rage quits</b> are logged; the score stands as a loss for the quitting club.","Commissioners have final say on disputes. Play hard, play clean, drop the puck."]}
+  {n:"01",t:"The League",items:[
+    "A competitive 6v6 EA Sports NHL league of <b>32 franchises</b> — each with one Owner, up to two General Managers (optional), an active player roster, and a salary cap.",
+    "The league runs a <b>trade system</b>, <b>waiver system</b>, <b>free agency</b>, and <b>seasonal playoffs</b>.",
+    "There are <b>no</b> affiliated lower-tier teams, call-ups, or send-downs — one roster per franchise."]},
+  {n:"02",t:"Ownership",items:[
+    "Owners manage their roster, follow league rules, schedule games, maintain communication, pay player salaries, and stay active all season.",
+    "Owners may be removed for <b>inactivity, rule violations, roster neglect, toxic behavior, or league misconduct</b>.",
+    "Commissioners may appoint replacement owners when necessary."]},
+  {n:"03",t:"Management",items:[
+    "Each team may appoint an <b>Owner</b>, a <b>General Manager</b>, and an optional <b>Assistant General Manager</b>.",
+    "Management handles roster building, player communication, trades, line management, and salary management.",
+    "Management members are expected to lead professionally."]},
+  {n:"04",t:"Players",items:[
+    "Players are expected to show up for scheduled games, communicate availability, play assigned positions, respect teammates, opponents and staff, and avoid quitting games.",
+    "Players may <b>not</b> intentionally lose games, harass others, exploit game mechanics, share accounts, or circumvent league rules."]},
+  {n:"05",t:"Registration & Eligibility",items:[
+    "Every player must have an active EA account, register on the league website, join the league Discord, and use only <b>one</b> league account.",
+    "Multiple accounts and account sharing are prohibited.",
+    "Impersonation results in immediate removal."]},
+  {n:"06",t:"Player Conduct",items:[
+    "Sportsmanship is mandatory.",
+    "Prohibited: <b>racism, hate speech, discrimination, threats, harassment, personal attacks, doxxing, match fixing, intentional griefing, and unsportsmanlike conduct</b>.",
+    "Trash talk is permitted provided it stays respectful and never becomes personal.",
+    "League staff may issue warnings, suspensions, or bans."]},
+  {n:"07",t:"Scheduling",items:[
+    "League nights are set before each season.",
+    "Each team must be ready <b>15 minutes</b> before scheduled games, have six eligible players available, and notify opponents immediately of delays.",
+    "<b>Grace period:</b> 10 minutes after the scheduled start.",
+    "Failure to field six players after the grace period may result in a forfeit."]},
+  {n:"08",t:"Game Rules",items:[
+    "Games are played on <b>NHL EASHL Club 6v6</b>. Required lineup: Center, Left Wing, Right Wing, Left Defense, Right Defense, Goalie.",
+    "CPU skaters are not permitted unless specifically approved by league staff.",
+    "<b>Disconnect before puck drop:</b> restart the game.",
+    "<b>Disconnect during the first period:</b> restart with original lineups and recreate the score if possible.",
+    "<b>Disconnect after the halfway point:</b> league staff determines the outcome.",
+    "Intentional quitting is prohibited."]},
+  {n:"09",t:"Statistics",items:[
+    "The league records <b>Goals, Assists, Points, Plus/Minus, Hits, Faceoff %, Saves, Save %, Goals Against Average, and Shutouts</b>.",
+    "Stat corrections must be submitted within <b>24 hours</b>."]},
+  {n:"10",t:"Roster Rules",items:[
+    "Roster <b>minimum 8</b> players, <b>maximum 18</b> players.",
+    "Teams must remain salary-cap compliant, and only rostered players may participate.",
+    "Using an ineligible player results in a forfeit and possible additional discipline."]},
+  {n:"11",t:"Trades",items:[
+    "Trades are permitted throughout the regular season until the <b>Trade Deadline</b>.",
+    "Trades may involve players, draft picks, and salary retention (if the league allows).",
+    "Trades require approval from both teams and league approval.",
+    "Trades may be overturned for collusion, rule violations, or exceeding the salary cap."]},
+  {n:"12",t:"Waivers",items:[
+    "Players released by a team enter <b>Waivers</b> for a <b>24-hour</b> period.",
+    "Claim priority: (1) lowest standings position, then (2) earliest waiver claim time.",
+    "If unclaimed, the player becomes an unrestricted free agent.",
+    "Teams remain responsible for any applicable salary-cap penalties if defined by league rules."]},
+  {n:"13",t:"Free Agency",items:[
+    "Players without contracts become <b>unrestricted free agents</b>.",
+    "Owners may sign free agents provided roster space exists and the salary cap permits.",
+    "Free agents sign first-come, first-served unless during an official bidding period."]},
+  {n:"14",t:"Re-signings",items:[
+    "Owners may re-sign eligible players before Free Agency.",
+    "The league may set a maximum contract length, salary limits, and re-sign windows.",
+    "Players are not required to accept a re-sign offer."]},
+  {n:"15",t:"Salary Cap",items:[
+    "Each team must remain under the league salary cap <b>at all times</b>.",
+    "Teams over the cap may lose trade approval, be forced to release players, or receive additional penalties.",
+    "Intentional cap circumvention is prohibited."]},
+  {n:"16",t:"Playoffs",items:[
+    "Playoff qualification is determined by league standings.",
+    "Example format: <b>top 8 teams per conference</b>, <b>best-of-seven</b> series, home ice to the higher seed.",
+    "Tiebreakers: (1) Wins, (2) Regulation Wins, (3) Goal Differential, (4) Head-to-Head, (5) Goals For."]},
+  {n:"17",t:"Awards",items:[
+    "<b>Individual:</b> Most Valuable Player, Best Forward, Best Defenseman, Best Goaltender, Rookie of the Year, Most Improved Player, Best Defensive Forward.",
+    "<b>Team:</b> President's Trophy, Coach/Manager of the Year, Organization of the Year."]},
+  {n:"18",t:"Violations & Punishments",items:[
+    "<b>Minor:</b> warning or fine (if applicable).",
+    "<b>Moderate:</b> 1–5 game suspension, loss of draft picks, or salary penalties.",
+    "<b>Major:</b> season suspension, management removal, or permanent league ban.",
+    "Examples: roster circumvention, match fixing, toxic conduct, multi-accounting, intentional forfeits, cheating, and exploiting glitches."]},
+  {n:"19",t:"Commissioner Authority",items:[
+    "Commissioners have final authority over rule interpretation, appeals, competitive integrity, disciplinary action, emergency rulings, and rule amendments.",
+    "The Commissioner may issue rulings for situations not explicitly covered here to preserve fairness and the integrity of the league."]},
+  {n:"20",t:"League Philosophy",items:[
+    "All members are expected to compete honestly, respect opponents, stay active and communicative, support a positive community, and accept league decisions professionally.",
+    "The goal is a competitive environment where skill, teamwork, and sportsmanship determine success — every member shares responsibility for the league's integrity and enjoyment."]}
 ];
 
 // chat channels
