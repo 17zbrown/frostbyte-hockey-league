@@ -1865,7 +1865,7 @@ async function loadSchedule(){
 function findGameById(id){for(const wk of liveSchedule)for(const g of wk.games)if(g.id===id)return g;return null;}
 /* Live-games dashboard module — shows matchups being played right now (time-based,
    never live scores) + a LIVE badge when a rostered player is streaming on Twitch. */
-const LIVE_WIN_BEFORE=10*60*1000, LIVE_WIN_AFTER=55*60*1000;
+const LIVE_WIN_BEFORE=5*60*1000, LIVE_WIN_AFTER=30*60*1000;
 async function renderLiveGames(){
   const mod=$("#liveGamesModule");if(!mod)return;
   const now=Date.now();
