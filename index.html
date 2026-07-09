@@ -147,6 +147,18 @@
   .twitch-bar .tw-go{margin-left:auto;color:var(--frost);display:inline-flex;align-items:center;gap:6px;
     font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;transition:gap .15s}
   .twitch-bar:hover .tw-go{gap:9px}
+  .twitch-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;padding:13px 18px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-l)}
+  .twitch-card .tw-ic{width:34px;height:34px;border-radius:8px;background:#9146ff;display:grid;place-items:center;color:#fff;flex-shrink:0}
+  .tw-watch,.tw-empty{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:200px}
+  .tw-watch .tw-txt,.tw-empty .tw-txt{display:flex;flex-direction:column;font-family:var(--f-cond);font-weight:600;letter-spacing:.03em;text-transform:uppercase;font-size:14px;color:var(--ice)}
+  .tw-watch .tw-txt span,.tw-empty .tw-txt span{font-family:var(--f-mono);text-transform:none;font-weight:500;font-size:12px;color:var(--fog);letter-spacing:0}
+  .tw-watch .tw-go{margin-left:auto;color:#9146ff;font-family:var(--f-cond);font-weight:700;letter-spacing:.05em;text-transform:uppercase;font-size:12px}
+  .tw-watch.live .tw-txt{color:#9146ff}
+  .tw-own{display:flex;gap:8px;flex-wrap:wrap}
+  .live-tag{display:inline-flex;align-items:center;gap:6px;border-color:var(--live)!important;color:#fff!important;background:var(--live);font-weight:700;text-decoration:none}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;animation:livePulse 1.4s infinite}
+  @keyframes livePulse{0%,100%{opacity:1}50%{opacity:.3}}
+  @media(prefers-reduced-motion:reduce){.live-dot{animation:none}}
 
   /* ============================ CARDS / GRID ============================ */
   .card{background:linear-gradient(180deg,#0c1e2f,#0a1a29);border:1px solid var(--line);border-radius:var(--r-l);box-shadow:var(--sh-1)}
@@ -1304,6 +1316,7 @@
         <div class="field"><div class="row2">
           <div><label for="su-num">Jersey Number</label><input id="su-num" type="number" min="1" max="99" placeholder="Pick your number (1–99)" /></div>
           <div><label for="su-plat">Platform</label><select id="su-plat"><option>PlayStation 5</option><option>Xbox Series X|S</option></select></div></div></div>
+        <div class="field"><label for="su-twitch">Twitch <span style="color:var(--fog);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label><input id="su-twitch" placeholder="Your Twitch username — for stream links on your profile" /></div>
         <div class="field"><label for="su-note">Anything the commissioners should know?</label><textarea id="su-note" rows="3" placeholder="Availability, preferred club, past leagues…"></textarea></div>
         <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Registration</button>
       </form>
@@ -2059,7 +2072,7 @@ const POS_NAME={C:"Center",LW:"Left Wing",RW:"Right Wing",LD:"Left Defense",RD:"
 async function renderPlayerPage(id){
   const el=$("#playerPage");if(!el)return;
   if(!sb){el.innerHTML='<div class="empty-note">Player data will load on the live site.</div>';return;}
-  const {data:prof}=await sb.from("profiles").select("id,gamertag,role").eq("gamertag",id).maybeSingle();
+  const {data:prof}=await sb.from("profiles").select("id,gamertag,role,twitch,live").eq("gamertag",id).maybeSingle();
   if(!prof){el.innerHTML=`<div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${id}</div><div class="empty-state"><h4>Player not found</h4><p>No registered player by that name.</p></div>`;return;}
   let spot=null,tc=null;
   if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
@@ -2081,11 +2094,55 @@ async function renderPlayerPage(id){
         <div class="ph-meta">
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
           ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
-          ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}</div></div>
+          ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}
+          ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div></div>
     </div>
+    ${twitchBlock(prof)}
     <div class="stat-grid">${grid}</div>
     ${st.gp===0?'<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>':''}`;
 }
+const TWITCH_GLYPH='<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 2 3 6.5V19h4v3h3l3-3h4l4.5-4.5V2H4zm2 2h13.5v9L16 16h-4l-3 3v-3H6V4zm5.25 3v5h2V7h-2zm5 0v5h2V7h-2z"/></svg>';
+function twitchBlock(prof){
+  const own=authUser&&prof&&authUser.id===prof.id;
+  if(!prof.twitch&&!own)return"";
+  let html='<div class="twitch-card">';
+  if(prof.twitch){
+    html+=`<a class="tw-watch${prof.live?' live':''}" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer">
+      <span class="tw-ic">${TWITCH_GLYPH}</span>
+      <span class="tw-txt">${prof.live?'Live now on Twitch':'Watch on Twitch'}<span>@${esc(prof.twitch)}</span></span>
+      <span class="tw-go">Open ↗</span></a>`;
+  } else {
+    html+=`<div class="tw-empty"><span class="tw-ic">${TWITCH_GLYPH}</span><span class="tw-txt">Link your Twitch<span>Let the league find your streams</span></span></div>`;
+  }
+  if(own){
+    html+=`<div class="tw-own">
+      ${prof.twitch?`<button class="btn btn-sm ${prof.live?'btn-ghost':'btn-frost'}" data-twlive="${prof.live?'off':'on'}">${prof.live?'End Stream':'Go Live'}</button>`:''}
+      <button class="btn btn-ghost btn-sm" id="twEdit">${prof.twitch?'Change Twitch':'Add Twitch handle'}</button>
+    </div>`;
+  }
+  return html+'</div>';
+}
+document.addEventListener("click",async e=>{
+  const lv=e.target.closest("[data-twlive]");
+  if(lv&&sb&&authUser){e.preventDefault();
+    const {error}=await sb.from("profiles").update({live:lv.dataset.twlive==="on"}).eq("id",authUser.id);
+    if(error){toast("Couldn't update",error.message);return;}
+    if(authProfile)authProfile.live=lv.dataset.twlive==="on";
+    toast(lv.dataset.twlive==="on"?"You're live":"Stream ended",lv.dataset.twlive==="on"?"A LIVE badge now shows on your profile.":"Your LIVE badge is off.");
+    renderPlayerPage(authProfile.gamertag);return;}
+  const ed=e.target.closest("#twEdit");
+  if(ed&&sb&&authUser){e.preventDefault();
+    const cur=authProfile&&authProfile.twitch||"";
+    let v=prompt("Your Twitch username (leave blank to remove):",cur);
+    if(v===null)return;
+    v=v.trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
+    const handle=v||null;
+    const {error}=await sb.from("profiles").update({twitch:handle}).eq("id",authUser.id);
+    if(error){toast("Couldn't save",error.message);return;}
+    if(authProfile)authProfile.twitch=handle;
+    toast("Twitch saved",handle?("@"+handle+" linked to your profile."):"Twitch handle removed.");
+    renderPlayerPage(authProfile.gamertag);return;}
+});
 async function renderMyStats(){
   const el=$("#myStatsCard");if(!el)return;
   if(!authProfile){el.innerHTML=`<div class="auth-banner"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your stats</b><div style="color:var(--fog);font-size:12.5px">Your profile and season numbers appear once you sign in with Discord.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;return;}
@@ -2365,6 +2422,7 @@ function renderSignupAuth(){
   const gl=document.querySelector("#signupGlanceTitle");if(gl&&openSeason)gl.textContent="Season "+openSeason.number+" At A Glance";
   if(authProfile){
     const g=document.querySelector("#su-gamer");if(g&&!g.value&&myRegistration&&myRegistration.ea_id)g.value=myRegistration.ea_id;
+    const tw=document.querySelector("#su-twitch");if(tw&&!tw.value&&authProfile.twitch)tw.value=authProfile.twitch;
     const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+authProfile.gamertag+".");
     b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${authProfile.gamertag}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div></div></div>`;
   }else{
@@ -2386,7 +2444,15 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
   const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,ea_id:eaId,note:($("#su-note").value||"").trim()||null};
   const {error}=await sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(error){toast("Couldn't register",error.message);return;}
-  myRegistration=payload;renderSignupAuth();
+  myRegistration=payload;
+  // save Twitch handle onto the profile (optional)
+  let tw=($("#su-twitch").value||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
+  const twHandle=tw||null;
+  if((authProfile&&authProfile.twitch||null)!==twHandle){
+    const {error:twErr}=await sb.from("profiles").update({twitch:twHandle}).eq("id",authUser.id);
+    if(!twErr&&authProfile)authProfile.twitch=twHandle;
+  }
+  renderSignupAuth();
   toast("You're registered!","Season "+openSeason.number+" registration received — the commissioner assigns roster spots.");
 });
 
