@@ -594,7 +594,7 @@
     .nav-inner{gap:10px}
   }
   @media(max-width:1040px){
-    nav.primary,.user-chip .txt,.nav-right>.btn{display:none}
+    nav.primary,.user-chip .txt,.nav-right>.btn,#signOutBtn{display:none}
     .hamburger{display:flex}
   }
   @media(max-width:1000px){
@@ -949,6 +949,29 @@
   .theme-toggle:hover{background:#ffffff33}
   .theme-toggle svg{width:19px;height:19px}
 
+  /* Notification bell + dropdown */
+  .notif-wrap{position:relative;display:flex}
+  .notif-bell{position:relative}
+  .notif-badge{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;
+    background:var(--live);color:#fff;font-family:var(--f-mono);font-size:10px;font-weight:700;display:grid;place-items:center;line-height:1;box-shadow:0 0 0 2px var(--sky-nav)}
+  .notif-panel{position:absolute;top:calc(100% + 9px);right:0;width:346px;max-width:calc(100vw - 24px);max-height:min(440px,70vh);overflow-y:auto;
+    background:#fff;border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--sh-2);z-index:80}
+  .notif-head{display:flex;align-items:center;justify-content:space-between;padding:12px 15px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
+  .notif-head b{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px;color:var(--navy)}
+  .notif-head button{font-family:var(--f-cond);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--frost);font-weight:600;background:none;border:0;padding:2px}
+  .notif-item{display:flex;gap:10px;padding:12px 15px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .15s}
+  .notif-item:last-child{border-bottom:0}
+  .notif-item:hover,.notif-item:focus-visible{background:var(--panel-2);outline:none}
+  .notif-item.unread{background:var(--frost-glow)}
+  .notif-dot{width:8px;height:8px;border-radius:50%;background:var(--frost);flex-shrink:0;margin-top:5px}
+  .notif-item.read .notif-dot{background:transparent;box-shadow:inset 0 0 0 1px var(--line)}
+  .notif-body{min-width:0}
+  .notif-body b{display:block;font-family:var(--f-cond);font-weight:600;font-size:13.5px;color:var(--navy);letter-spacing:.01em}
+  .notif-body p{margin:2px 0 0;font-size:12.5px;color:var(--fog);line-height:1.42}
+  .notif-time{font-family:var(--f-mono);font-size:10.5px;color:var(--fog-dim);margin-top:4px}
+  .notif-empty{padding:36px 22px;text-align:center;color:var(--fog);font-size:13px}
+  @media(max-width:560px){.notif-panel{position:fixed;top:calc(var(--nav-h) + 6px);left:8px;right:8px;width:auto;max-width:none}}
+
   html[data-theme="dark"]{
     --ink:#0a1622;--panel:#10222f;--panel-2:#152a3a;--panel-3:#1c3549;
     --line:#263d54;--line-soft:#1b3042;
@@ -966,6 +989,9 @@
   html[data-theme="dark"] nav.primary>button:hover,html[data-theme="dark"] .navtop:hover,html[data-theme="dark"] .navgrp:hover .navtop,html[data-theme="dark"] nav.primary>button.active{color:#fff}
   html[data-theme="dark"] nav.primary>button.active::after{background:var(--frost)}
   html[data-theme="dark"] .dropdown{background:var(--panel);border-color:var(--line)}
+  html[data-theme="dark"] .notif-panel,html[data-theme="dark"] .notif-head{background:var(--panel)}
+  html[data-theme="dark"] .notif-item:hover,html[data-theme="dark"] .notif-item:focus-visible{background:#17293a}
+  html[data-theme="dark"] .notif-item.unread{background:#12283a}
   html[data-theme="dark"] .dropdown a{color:var(--fog)} html[data-theme="dark"] .dropdown a:hover{background:var(--panel-2);color:var(--frost)}
   html[data-theme="dark"] .btn-frost{background:var(--frost);color:#04121e} html[data-theme="dark"] .btn-frost:hover{background:#7cc6f4}
   html[data-theme="dark"] .btn-ghost{border-color:#33526e;color:var(--ice)} html[data-theme="dark"] .btn-ghost:hover{border-color:var(--frost);background:#ffffff10;color:#fff}
@@ -1061,6 +1087,13 @@
       <button class="btn btn-ghost btn-sm" data-go="manager">Manager</button>
       <button class="btn btn-ghost btn-sm" data-go="admin">Commissioner</button>
       <div class="auth-slot" id="authSlot"></div>
+      <div class="notif-wrap" id="notifWrap" style="display:none">
+        <button class="theme-toggle notif-bell" id="notifBell" type="button" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span class="notif-badge" id="notifBadge" hidden>0</span>
+        </button>
+        <div class="notif-panel" id="notifPanel" role="menu" hidden></div>
+      </div>
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light/dark theme" title="Toggle theme"></button>
       <button class="hamburger" id="ham" aria-label="Menu" aria-expanded="false"><span></span><span></span><span></span></button>
     </div>
@@ -1615,6 +1648,40 @@ $("#themeToggle")&&$("#themeToggle").addEventListener("click",()=>{
   applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");});
 applyTheme(document.documentElement.getAttribute("data-theme")||"light");
 
+/* ------------------------------ NOTIFICATIONS ------------------------------ */
+let notifItems=[],notifChannel=null;
+function esc(s){return (s==null?"":String(s)).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));}
+function timeAgo(iso){try{const d=new Date(iso),s=Math.floor((Date.now()-d.getTime())/1000);
+  if(s<60)return"just now";const m=Math.floor(s/60);if(m<60)return m+"m ago";const h=Math.floor(m/60);if(h<24)return h+"h ago";const dy=Math.floor(h/24);if(dy<7)return dy+"d ago";
+  return new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric"}).format(d);}catch(e){return"";}}
+function renderNotifBadge(){const unread=notifItems.filter(n=>!n.read).length;const b=$("#notifBadge");if(b){b.textContent=unread>9?"9+":unread;b.hidden=unread===0;}}
+function renderNotifPanel(){const el=$("#notifPanel");if(!el)return;const unread=notifItems.filter(n=>!n.read).length;
+  el.innerHTML=`<div class="notif-head"><b>Notifications</b>${unread?'<button type="button" id="notifMarkAll">Mark all read</button>':""}</div>`+
+    (notifItems.length?notifItems.map(n=>`<div class="notif-item ${n.read?"read":"unread"}" data-nid="${n.id}" ${n.link_view?`data-nview="${esc(n.link_view)}" data-nparam="${esc(n.link_param||"")}"`:""} role="menuitem" tabindex="0">
+      <span class="notif-dot"></span><div class="notif-body"><b>${esc(n.title)}</b>${n.body?`<p>${esc(n.body)}</p>`:""}<div class="notif-time">${timeAgo(n.created_at)}</div></div></div>`).join("")
+     :'<div class="notif-empty">You\'re all caught up.</div>');}
+function toggleNotifPanel(open){const p=$("#notifPanel"),b=$("#notifBell");if(!p||!b)return;
+  const willOpen=(open===undefined)?p.hidden:open;
+  if(willOpen){renderNotifPanel();p.hidden=false;b.setAttribute("aria-expanded","true");}else{p.hidden=true;b.setAttribute("aria-expanded","false");}}
+async function loadNotifications(){if(!sb||!authUser)return;
+  const {data}=await sb.from("notifications").select("*").eq("profile_id",authUser.id).order("created_at",{ascending:false}).limit(30);
+  notifItems=data||[];renderNotifBadge();if($("#notifPanel")&&!$("#notifPanel").hidden)renderNotifPanel();}
+async function markNotifRead(id){const n=notifItems.find(x=>x.id===id);if(n&&!n.read){n.read=true;renderNotifBadge();try{await sb.from("notifications").update({read:true}).eq("id",id);}catch(e){}}}
+async function markAllNotifRead(){const unread=notifItems.filter(n=>!n.read);if(!unread.length||!authUser)return;
+  unread.forEach(n=>n.read=true);renderNotifBadge();renderNotifPanel();try{await sb.from("notifications").update({read:true}).eq("profile_id",authUser.id).eq("read",false);}catch(e){}}
+function subscribeNotifs(){if(!sb||!authUser||notifChannel)return;
+  notifChannel=sb.channel("notif-"+authUser.id)
+    .on("postgres_changes",{event:"INSERT",schema:"public",table:"notifications",filter:"profile_id=eq."+authUser.id},payload=>{
+      notifItems.unshift(payload.new);renderNotifBadge();if($("#notifPanel")&&!$("#notifPanel").hidden)renderNotifPanel();toast("🔔 "+payload.new.title,payload.new.body||"");}).subscribe();}
+function teardownNotifs(){notifItems=[];renderNotifBadge();toggleNotifPanel(false);if(notifChannel){try{sb.removeChannel(notifChannel);}catch(e){}notifChannel=null;}}
+if($("#notifBell"))$("#notifBell").addEventListener("click",e=>{e.stopPropagation();toggleNotifPanel();});
+if($("#notifPanel"))$("#notifPanel").addEventListener("click",e=>{
+  if(e.target.closest("#notifMarkAll")){e.stopPropagation();markAllNotifRead();return;}
+  const it=e.target.closest(".notif-item");if(!it)return;markNotifRead(it.dataset.nid);
+  if(it.dataset.nview){toggleNotifPanel(false);go(it.dataset.nview,it.dataset.nparam||undefined);}else{renderNotifPanel();}});
+if($("#notifPanel"))$("#notifPanel").addEventListener("keydown",e=>{if(e.key==="Enter"){const it=e.target.closest(".notif-item");if(it)it.click();}});
+document.addEventListener("click",e=>{if(!e.target.closest("#notifWrap"))toggleNotifPanel(false);});
+
 /* ------------------------------ NAV BUILD ------------------------------ */
 function buildNav(){
   $("#teamsDropdown").innerHTML=`<a data-go="teams" style="color:var(--frost)">All Teams →</a>`+
@@ -1628,8 +1695,11 @@ function buildNav(){
   ];
   $("#mobileMenu").innerHTML=groups.map(([g,items])=>
     `<div class="mm-group">${g}</div>`+items.map(([v,l])=>{const fk=viewFeature(v);return `<button data-go="${v}"${fk?` data-feature="${fk}"`:""}${MANAGER_VIEWS.has(v)?' data-role="manager"':""}>${l}</button>`;}).join("")).join("");
+  if(typeof authProfile!=="undefined"&&authProfile)$("#mobileMenu").insertAdjacentHTML("beforeend",MM_ACCOUNT_HTML);
   applyFeatures();
 }
+const MM_ACCOUNT_HTML='<div class="mm-group" id="mmAccount">Account</div><button type="button" id="mmSignOut">Sign out</button>';
+$("#mobileMenu").addEventListener("click",e=>{if(e.target.closest("#mmSignOut")){e.preventDefault();closeMobile();signOutSb();}});
 
 /* ------------------------------ STANDINGS ------------------------------ */
 let liveStandings=[];
@@ -2257,6 +2327,13 @@ function renderAuthUI(){
   renderManager();
   renderMyStats();
   applyRoleVisibility();
+  const nw=$("#notifWrap");
+  if(authProfile&&authUser){if(nw)nw.style.display="";loadNotifications();subscribeNotifs();}
+  else{if(nw)nw.style.display="none";teardownNotifs();}
+  // mobile sign-out lives in the hamburger menu (keeps the top bar to icons)
+  const mm=$("#mobileMenu"),acc=$("#mmAccount");
+  if(authProfile){if(mm&&!acc)mm.insertAdjacentHTML("beforeend",MM_ACCOUNT_HTML);}
+  else if(acc){const so=$("#mmSignOut");if(so)so.remove();acc.remove();}
 }
 function renderSignupAuth(){
   const b=document.querySelector("#signupAuthBanner");if(!b)return;
