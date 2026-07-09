@@ -2368,15 +2368,17 @@ function drawRoster(){
   const cs=$("#capSpace");if(cs)cs.textContent=rosterState.length+" / "+cap;
   const body=$("#rosterBody");if(!body)return;
   if(!rosterState.length){body.innerHTML='<tr><td colspan="7" style="padding:22px;color:var(--fog);text-align:center">No players on your roster yet. The commissioner assigns registered players to your club in the League Office.</td></tr>';return;}
+  const locked=seasonMovesLocked();
   body.innerHTML=rosterState.map((p,i)=>`<tr>
     <td><div class="rp"><span class="num">${p.num}</span><div><b>${p.name}</b><small>${teams[currentClub].name}</small></div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost);font-weight:700">${p.pts}</td>
-    <td style="text-align:right"><div class="act"><button class="mini danger" data-waive="${i}">Waive</button></div></td></tr>`).join("");
+    <td style="text-align:right"><div class="act">${locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`}</div></td></tr>`).join("");
 }
 function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
+  if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
   confirmModal("Waive "+p.name+"?","They're removed from your roster and become a free agent the commissioner can reassign.","Waive Player",async()=>{
     const {error}=await sb.from("roster_spots").delete().eq("id",p.spotId);
     if(error){toast("Couldn't waive",error.message);return;}
@@ -2405,9 +2407,13 @@ async function renderTrade(){
 $("#tradePartner").addEventListener("change",renderTrade);
 document.addEventListener("click",e=>{const it=e.target.closest(".trade-item");if(!it)return;const side=it.dataset.side,i=+it.dataset.i;
   if(tradeSel[side].has(i)){tradeSel[side].delete(i);it.classList.remove("sel");}else{tradeSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
-function updateTradeSummary(){const m=tradeSel.mine.size,t=tradeSel.theirs.size;const el=$("#tradeSummary");if(el)el.textContent=(!m&&!t)?"Select at least one player from each side.":`Sending ${m} · Receiving ${t}`;}
+function updateTradeSummary(){const el=$("#tradeSummary");if(!el)return;
+  const pb=$("#proposeTrade");const locked=seasonMovesLocked();if(pb)pb.disabled=locked;
+  if(locked){el.innerHTML='<b style="color:var(--loss)">Roster moves are locked</b> — the trade deadline has passed or a commissioner locked moves.';return;}
+  const m=tradeSel.mine.size,t=tradeSel.theirs.size;el.textContent=(!m&&!t)?"Select at least one player from each side.":`Sending ${m} · Receiving ${t}`;}
 $("#proposeTrade").addEventListener("click",async()=>{
   if(!sb||!authUser){toast("Sign in first","");return;}
+  if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
   if(!tradeSel.mine.size||!tradeSel.theirs.size){toast("Incomplete trade","Pick at least one player from each side.");return;}
   const partnerCode=clubByName($("#tradePartner").value)||TEAM_KEYS.find(k=>k!==currentClub);
   const offered=[...tradeSel.mine].map(i=>tradeMineList[i].pid),requested=[...tradeSel.theirs].map(i=>tradeTheirsList[i].pid);
@@ -2425,11 +2431,12 @@ async function loadMyTrades(){
   const {data:profs}=await sb.from("profiles").select("id,gamertag").in("id",pids.length?pids:["00000000-0000-0000-0000-000000000000"]);
   const nameOf={};(profs||[]).forEach(p=>nameOf[p.id]=p.gamertag);
   const codeT=id=>{const t=dbTeams.find(x=>x.id===id);return t?t.code:"?";};
+  const locked=seasonMovesLocked();
   el.innerHTML=trades.map(t=>{const incoming=t.to_team_id===myTid;const fC=codeT(t.from_team_id),tC=codeT(t.to_team_id);
     const off=t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—",req=t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—";
     return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name}</div>
       <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div></div>
-      <div class="act">${incoming?`<button class="mini good tr-accept" data-id="${t.id}">Accept</button><button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
+      <div class="act">${incoming?`${locked?'<span style="color:var(--fog);font-size:12px;align-self:center">Locked</span>':`<button class="mini good tr-accept" data-id="${t.id}">Accept</button>`}<button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
 }
 $("#tradesPending").addEventListener("click",async e=>{
   const acc=e.target.closest(".tr-accept"),dec=e.target.closest(".tr-decline"),can=e.target.closest(".tr-cancel");
@@ -2623,13 +2630,31 @@ function renderSeasonAdmin(){
     <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-top:6px">
       ${dl.map(([id,lab,val])=>`<div class="ef-row"><label for="${id}">${lab}</label><input id="${id}" type="datetime-local" value="${dtLocal(val)}"></div>`).join("")}
     </div>
+    <div class="card-h" style="padding:16px 0 4px;border:0"><h3 style="font-size:15px">Trade deadline &amp; roster lock</h3></div>
+    <div class="ef-grid" style="grid-template-columns:1fr 1fr">
+      <div class="ef-row"><label for="se-deadline">Trade deadline (week)</label><input id="se-deadline" type="number" min="1" max="40" value="${s.trade_deadline_week||""}" placeholder="e.g. 6"></div>
+      <div class="ef-row"><label for="se-lock">Roster moves</label><select id="se-lock">
+        <option value="auto" ${s.moves_lock_override==="auto"?"selected":""}>Auto — lock after the deadline week</option>
+        <option value="open" ${s.moves_lock_override==="open"?"selected":""}>Force open — allow moves</option>
+        <option value="locked" ${s.moves_lock_override==="locked"?"selected":""}>Force locked — no moves</option>
+      </select></div>
+    </div>
+    <div style="font-size:12.5px;color:var(--fog);margin-top:7px">Trades &amp; waivers ${seasonMovesLocked(s)?'<b style="color:var(--loss)">are LOCKED</b>':'<b style="color:var(--win)">are OPEN</b>'} right now. On <b>Auto</b>, they lock once week ${s.trade_deadline_week||"—"}'s games are final; use <b>Force locked/open</b> to override for special occasions.</div>
     <button class="btn btn-frost" id="saveSeasonBtn" style="margin-top:18px">Save Season Settings</button>`;
+}
+function seasonMovesLocked(s){s=s||openSeason;if(!s)return false;
+  if(s.moves_lock_override==="locked")return true;
+  if(s.moves_lock_override==="open")return false;
+  if(!s.trade_deadline_week)return false;
+  let mx=0;(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if(g.done&&(wk.n||0)>mx)mx=wk.n;}));
+  return mx>=s.trade_deadline_week;
 }
 async function saveSeason(){
   if(!sb||!adminSeason)return;
   const iso=id=>{const v=($("#"+id)||{}).value;return v?new Date(v).toISOString():null;};
   const payload={status:$("#se-status").value,roster_max:Math.max(1,Math.min(30,+$("#se-cap").value||12)),registration_open:$("#se-regopen").checked,
-    registration_deadline:iso("se-regdl"),owner_app_deadline:iso("se-ownerdl"),draft_at:iso("se-draft"),starts_at:iso("se-start"),ends_at:iso("se-end")};
+    registration_deadline:iso("se-regdl"),owner_app_deadline:iso("se-ownerdl"),draft_at:iso("se-draft"),starts_at:iso("se-start"),ends_at:iso("se-end"),
+    trade_deadline_week:(+$("#se-deadline").value||null),moves_lock_override:$("#se-lock").value};
   const {error}=await sb.from("seasons").update(payload).eq("id",adminSeason.id);
   if(error){toast("Couldn't save",error.message);return;}
   Object.assign(adminSeason,payload);if(adminSeason.registration_open)openSeason=adminSeason;
