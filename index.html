@@ -421,6 +421,8 @@
   .rp small{font-family:var(--f-mono);font-size:10.5px;color:var(--fog-dim)}
   .rp .lk{cursor:pointer}.rp .lk:hover b{color:var(--frost)}
   .cap-hit{font-family:var(--f-mono);font-weight:600;color:var(--fog)}
+  .caphit-cell{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end}
+  .term-tag{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog-dim);background:var(--panel-3);padding:2px 7px;border-radius:100px;flex-shrink:0}
   .mgr-tag{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);background:var(--frost-glow);padding:4px 10px;border-radius:100px}
   .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
   .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #1273b833}
@@ -2798,7 +2800,9 @@ async function renderRoster(){
   const {data:spots}=await sb.from("roster_spots").select("id,profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
   const {data:stats}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
   const statBy={};(stats||[]).forEach(s=>statBy[s.profile_id]=s);
-  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
+  const {data:cons}=await sb.from("contracts").select("profile_id,start_season,end_season").eq("team_id",tid).eq("status","active");
+  const yrBy={};(cons||[]).forEach(c=>yrBy[c.profile_id]=Math.max(1,(c.end_season-c.start_season+1)));
+  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,years:yrBy[s.profile_id]||1,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
   drawRoster();
 }
 function drawRoster(){
@@ -2821,7 +2825,7 @@ function drawRoster(){
     <td><div class="rp"><span class="num">${p.num}</span><div><b>${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small></div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost);font-weight:700">${p.pts}</td>
-    <td style="text-align:right">${isMgr?`<span class="cap-hit" title="Managers are locked to their club at $3M">${fmtMoney(p.salary)}</span>`:(isComm?`<input class="sal-in" data-salspot="${p.spotId}" value="${p.salary?esc(fmtMoney(p.salary)):""}" placeholder="$0" aria-label="Cap hit for ${esc(p.name)}">`:`<span class="cap-hit">${fmtMoney(p.salary)}</span>`)}</td>
+    <td style="text-align:right"><div class="caphit-cell">${isMgr?`<span class="cap-hit" title="Managers are locked to their club at $3M">${fmtMoney(p.salary)}</span>`:(isComm?`<input class="sal-in" data-salspot="${p.spotId}" value="${p.salary?esc(fmtMoney(p.salary)):""}" placeholder="$0" aria-label="Cap hit for ${esc(p.name)}">`:`<span class="cap-hit">${fmtMoney(p.salary)}</span>`)}<span class="term-tag" title="Contract term">${p.years} yr</span></div></td>
     <td style="text-align:right"><div class="act">${isMgr?'<span class="mgr-tag">Manager</span>':(locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`)}</div></td></tr>`;}).join("");
 }
 function parseMoney(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="m")v*=1e6;else if(u==="k")v*=1e3;return Math.round(v);}
@@ -3241,7 +3245,7 @@ async function loadRegistrations(){
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       return `<tr><td><b>${esc(g)}</b></td><td class="mono">${esc(r.ea_id)||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
       <td>${done?'<span style="color:var(--win);font-weight:600">On a roster</span>':`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
-      <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="2M" placeholder="$0" aria-label="Cap hit">`}</td>
+      <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="$750K" aria-label="Cap hit">`}</td>
       <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${g.replace(/"/g,'&quot;')}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
 }
