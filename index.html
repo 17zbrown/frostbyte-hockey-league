@@ -375,6 +375,7 @@
   .rp small{font-family:var(--f-mono);font-size:10.5px;color:var(--fog-dim)}
   .rp .lk{cursor:pointer}.rp .lk:hover b{color:var(--frost)}
   .cap-hit{font-family:var(--f-mono);font-weight:600;color:var(--fog)}
+  .mgr-tag{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);background:var(--frost-glow);padding:4px 10px;border-radius:100px}
   .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
   .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #1273b833}
   .cap-bar-wrap{padding:14px 18px 4px}
@@ -2447,7 +2448,7 @@ async function renderRoster(){
   const {data:spots}=await sb.from("roster_spots").select("id,profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
   const {data:stats}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
   const statBy={};(stats||[]).forEach(s=>statBy[s.profile_id]=s);
-  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
+  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
   drawRoster();
 }
 function drawRoster(){
@@ -2465,12 +2466,13 @@ function drawRoster(){
   const body=$("#rosterBody");if(!body)return;
   if(!rosterState.length){body.innerHTML='<tr><td colspan="8" style="padding:22px;color:var(--fog);text-align:center">No players on your roster yet. The commissioner assigns registered players to your club in the League Office.</td></tr>';return;}
   const locked=seasonMovesLocked();
-  body.innerHTML=rosterState.map((p,i)=>`<tr>
-    <td><div class="rp"><span class="num">${p.num}</span><div><b>${esc(p.name)}</b><small>${esc(teams[currentClub].name)}</small></div></div></td>
+  const gmId=(dbTeams.find(t=>t.code===currentClub)||{}).gm_profile_id;
+  body.innerHTML=rosterState.map((p,i)=>{const isMgr=gmId&&p.pid===gmId;return `<tr>
+    <td><div class="rp"><span class="num">${p.num}</span><div><b>${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small></div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost);font-weight:700">${p.pts}</td>
-    <td style="text-align:right">${isComm?`<input class="sal-in" data-salspot="${p.spotId}" value="${p.salary?esc(fmtMoney(p.salary)):""}" placeholder="$0" aria-label="Cap hit for ${esc(p.name)}">`:`<span class="cap-hit">${fmtMoney(p.salary)}</span>`}</td>
-    <td style="text-align:right"><div class="act">${locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`}</div></td></tr>`).join("");
+    <td style="text-align:right">${isMgr?`<span class="cap-hit" title="Managers are locked to their club at $3M">${fmtMoney(p.salary)}</span>`:(isComm?`<input class="sal-in" data-salspot="${p.spotId}" value="${p.salary?esc(fmtMoney(p.salary)):""}" placeholder="$0" aria-label="Cap hit for ${esc(p.name)}">`:`<span class="cap-hit">${fmtMoney(p.salary)}</span>`)}</td>
+    <td style="text-align:right"><div class="act">${isMgr?'<span class="mgr-tag">Manager</span>':(locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`)}</div></td></tr>`;}).join("");
 }
 function parseMoney(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="m")v*=1e6;else if(u==="k")v*=1e3;return Math.round(v);}
 $("#rosterBody").addEventListener("change",async e=>{
@@ -2497,7 +2499,8 @@ let tradeMineList=[],tradeTheirsList=[];
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
   const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
-  return (data||[]).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position}));
+  const gmId=(dbTeams.find(t=>t.id===tid)||{}).gm_profile_id;  // managers can't be traded
+  return (data||[]).filter(s=>s.profile_id!==gmId).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position}));
 }
 function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;color:var(--fog);font-size:13px">No players on this roster yet.</div>';
   return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
