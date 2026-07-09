@@ -476,6 +476,7 @@
   .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
   .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#fff;padding:2px 6px;border-radius:4px;flex-shrink:0}
   .pk-ovr{font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--win);letter-spacing:0}
+  .pk-ovr-empty{font-weight:500;color:var(--fog-dim);text-transform:none}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
   .lineup-night{margin-bottom:20px}
   .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
@@ -2910,9 +2911,12 @@ async function loadPicksFor(code){
   const {data}=await sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id").eq("current_team_id",tid).eq("used",false).order("season_number").order("round");
   return (data||[]).map(p=>({id:p.id,season:p.season_number,round:p.round,orig:p.original_team_id,owner:p.current_team_id}));
 }
-async function loadRoundOvrAvg(){roundOvrAvg={};if(!sb)return;try{const {data}=await sb.from("draft_round_avg").select("round,avg_overall");(data||[]).forEach(r=>roundOvrAvg[r.round]=r.avg_overall);}catch(e){}}
-function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;const av=roundOvrAvg[p.round];
-  return `’${String(p.season).slice(-2)} R${p.round}`+(av?` <span class="pk-ovr">(~${av} OVR)</span>`:"")+(oc?` · via ${oc}`:"");}
+async function loadRoundOvrAvg(){roundOvrAvg={};if(!sb)return;try{const {data}=await sb.from("draft_round_avg").select("round,avg_overall,n");(data||[]).forEach(r=>roundOvrAvg[r.round]={avg:r.avg_overall,n:r.n});}catch(e){}}
+function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;const rd=roundOvrAvg[p.round];
+  const ovr=(rd&&rd.avg!=null)
+    ? ` <span class="pk-ovr" title="Live average overall of every player drafted in round ${p.round} (${rd.n} drafted)">(~${rd.avg} OVR)</span>`
+    : ` <span class="pk-ovr pk-ovr-empty" title="No players have been drafted in round ${p.round} yet — this fills in as picks are made">(no draft data yet)</span>`;
+  return `’${String(p.season).slice(-2)} R${p.round}${ovr}`+(oc?` · via ${oc}`:"");}
 function pickCard(list,side){return list.map((p,i)=>`<div class="pick-chip" data-pside="${side}" data-i="${i}"><span class="pk-badge">PICK</span>${pickLabel(p)}</div>`).join("");}
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
