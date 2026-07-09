@@ -404,6 +404,9 @@
   .trade-item small{font-family:var(--f-mono);font-size:10px;color:var(--fog-dim);margin-left:auto}
   .trade-foot{margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .lineup-night{margin-bottom:20px}
+  .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
+  .lineup-night-h span{font-family:var(--f-cond);font-weight:500;font-size:11.5px;letter-spacing:.08em;color:var(--fog-dim)}
   .slot{background:#08161f;border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px;min-height:78px}
   .slot .role{font-family:var(--f-cond);font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:11px;color:var(--frost);margin-bottom:8px}
   .slot select{width:100%;background:#0a1a28;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:9px 10px;font-family:var(--f-cond);font-size:13.5px;letter-spacing:.03em;text-transform:uppercase}
@@ -1365,8 +1368,8 @@
         <div class="next-game-bar"><span id="lineupBadge" style="line-height:0"></span>
           <div id="lineupNextText"><b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">Next game</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears here</small></div>
           <span class="pill frost">Lineup due 30 min before puck drop</span></div>
-        <div class="lineup-grid" id="lineupGrid"></div>
-        <div class="trade-foot" style="margin-top:20px"><div class="mono" style="color:var(--fog);font-size:13px" id="lineupNote">Assign a player to each position. Bench the rest.</div><button class="btn btn-frost" id="saveLineup">Save Lineup</button></div>
+        <div id="lineupGrid"></div>
+        <div class="trade-foot" style="margin-top:20px"><div class="mono" style="color:var(--fog);font-size:13px" id="lineupNote">Set your six for each game night. Both lineups save together.</div><button class="btn btn-frost" id="saveLineup">Save Lineups</button></div>
       </div></div>
       <div class="mgr-panel" id="mtab-reports"><div class="card">
         <div class="card-h"><h3>Game Reports</h3><span class="pill dim">Both clubs must report the same score</span></div>
@@ -2599,8 +2602,10 @@ async function renderFAmgr(){
     <td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td class="mono">${r.ea_id||'—'}</td>
     <td style="text-align:right"><span style="color:var(--fog);font-size:12px">Available</span></td></tr>`;}).join("");
 }
-// lineup
-const lineupRoles=["Center","Left Wing","Right Wing","Left Defense","Right Defense","Goalie"];
+// lineup — persisted per game night (Wed / Fri)
+const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
+const LINEUP_ROLES=[{key:"center",label:"Center",pool:["C"]},{key:"lw",label:"Left Wing",pool:["W","LW","RW"]},{key:"rw",label:"Right Wing",pool:["W","LW","RW"]},{key:"ld",label:"Left Defense",pool:["D","LD","RD"]},{key:"rd",label:"Right Defense",pool:["D","LD","RD"]},{key:"goalie",label:"Goalie",pool:["G"]}];
+let lineupRosterCache=[];
 async function renderLineup(){
   const grid=$("#lineupGrid");if(!grid)return;
   const badgeEl=$("#lineupBadge"),nextText=$("#lineupNextText");
@@ -2611,19 +2616,36 @@ async function renderLineup(){
       nextText.innerHTML=`<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">${home?'vs':'@'} ${teams[opp].name}</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">${fmtGameDate(ng.when)} · ${fmtGameTime(ng.when)}</small>`;}
     else nextText.innerHTML='<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">No game scheduled</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears once the schedule is posted</small>';}
   let roster=[];if(sb&&openSeason&&currentClub)roster=await loadRosterFor(currentClub);
+  lineupRosterCache=roster;
   if(!roster.length){grid.innerHTML='<div class="empty-note" style="margin:0">No players on your roster yet — the lineup builder unlocks once players are assigned to your club.</div>';return;}
-  const used={C:0,W:0,D:0,G:0};
-  grid.innerHTML=lineupRoles.map((role,idx)=>{
-    const grp=role==="Goalie"?"G":(role.includes("Defense")?"D":(role==="Center"?"C":"W"));
-    const match=grp==="G"?["G"]:grp==="D"?["D","LD","RD"]:grp==="W"?["W","LW","RW"]:["C"];
-    let pool=roster.filter(p=>match.includes(p.pos));if(!pool.length)pool=roster.filter(p=>p.pos!=="G");if(!pool.length)pool=roster;
-    const def=Math.min(used[grp]++,pool.length-1);
-    return `<div class="slot"><div class="role">${role}</div><select data-role="${idx}" aria-label="${role} lineup slot">${pool.map((p,i)=>`<option ${i===def?'selected':''}>#${p.num} ${p.name}</option>`).join("")}</select></div>`;}).join("");
+  // saved lineups for this club/season
+  const saved={};const tid=teamIdOf(currentClub);
+  if(sb&&openSeason&&tid){const {data}=await sb.from("lineups").select("*").eq("season_id",openSeason.id).eq("team_id",tid);(data||[]).forEach(r=>saved[r.night]=r);}
+  const slotFor=(night,role)=>{
+    let pool=roster.filter(p=>role.pool.includes(p.pos));
+    if(!pool.length)pool=role.key==="goalie"?roster:roster.filter(p=>p.pos!=="G");
+    if(!pool.length)pool=roster;
+    const savedPid=saved[night.key]?saved[night.key][role.key]:null;
+    const opts='<option value="">— Bench / none —</option>'+pool.map(p=>`<option value="${p.pid}" ${p.pid===savedPid?"selected":""}>#${p.num} ${esc(p.name)}</option>`).join("");
+    return `<div class="slot"><div class="role">${role.label}</div><select data-night="${night.key}" data-role="${role.key}" aria-label="${role.label} — ${night.label}">${opts}</select></div>`;
+  };
+  grid.innerHTML=LINEUP_NIGHTS.map(night=>
+    `<div class="lineup-night"><div class="lineup-night-h">${night.label}<span>3 games · ${teams[currentClub].name}</span></div>
+      <div class="lineup-grid">${LINEUP_ROLES.map(role=>slotFor(night,role)).join("")}</div></div>`).join("");
 }
-$("#saveLineup").addEventListener("click",()=>{
+$("#saveLineup").addEventListener("click",async()=>{
   if(!$("#lineupGrid").querySelector("select")){toast("No roster yet","Players must be assigned to your club before you can set a lineup.");return;}
-  toast("Lineup saved","Your starting six is locked in for your next game.");
-  $("#lineupNote").innerHTML='<span style="color:var(--win)">✓ Lineup submitted for your next game.</span>';});
+  if(!sb||!openSeason||!currentClub){toast("Not connected","Sign in to save your lineup.");return;}
+  const tid=teamIdOf(currentClub);if(!tid)return;
+  const rows=LINEUP_NIGHTS.map(night=>{
+    const row={season_id:openSeason.id,team_id:tid,night:night.key,updated_by:authUser?authUser.id:null,updated_at:new Date().toISOString()};
+    LINEUP_ROLES.forEach(role=>{const sel=$('#lineupGrid select[data-night="'+night.key+'"][data-role="'+role.key+'"]');row[role.key]=sel&&sel.value?sel.value:null;});
+    return row;
+  });
+  const {error}=await sb.from("lineups").upsert(rows,{onConflict:"season_id,team_id,night"});
+  if(error){toast("Couldn't save lineups",error.message);return;}
+  toast("Lineups saved","Your Wednesday and Friday lineups are locked in.");
+  $("#lineupNote").innerHTML='<span style="color:var(--win)">✓ Both game-night lineups saved.</span>';});
 $$(".mgr-tab").forEach(tab=>tab.addEventListener("click",()=>{$$("#view-manager .mgr-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");
   $$("#view-manager .mgr-panel").forEach(p=>p.classList.remove("on"));$("#mtab-"+tab.dataset.mtab).classList.add("on");}));
 
