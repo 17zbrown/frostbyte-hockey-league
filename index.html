@@ -3178,16 +3178,24 @@ async function loadMyActions(){
   el.innerHTML=(data&&data.length)?data.map(a=>actionRow(a,false)).join(""):'<div style="color:var(--fog);font-size:13px">You haven\'t filed anything yet. Pick an option above to get started.</div>';
 }
 function actionRow(a,rev){
-  const sc=a.status==='resolved'?'var(--win)':(a.status==='denied'?'var(--loss)':(a.status==='reviewing'?'var(--gold)':'var(--frost)'));
+  const sc=a.status==='resolved'?'var(--win)':(a.status==='denied'?'var(--loss)':(a.status==='acknowledged'?'#0e9aa7':(a.status==='reviewing'?'var(--gold)':'var(--frost)')));
+  const stLabel=a.status==='acknowledged'?'acknowledged':a.status;
   const who=rev?`<b>${esc(a._name||'Member')}</b> · `:'';
   const meta=[];
   if(a.type==='position_change'&&a.requested_position)meta.push((POS_NAME[a.current_position]||a.current_position||'?')+' → '+(POS_NAME[a.requested_position]||a.requested_position));
   if(a.target)meta.push(esc(a.target));
-  return `<div class="ar-card"><div class="ar-head"><div>${who}<span class="ar-type">${ACTION_META[a.type]?ACTION_META[a.type].label:a.type}</span> <span class="ar-status" style="color:${sc};border-color:${sc}">${a.status}</span></div><span class="ar-time">${timeAgo(a.created_at)}</span></div>
+  let btns='';
+  if(rev){
+    if(a.type==='trade_request'){ if(a.status==='open'||a.status==='reviewing') btns+=`<button class="mini good oa-set2" data-id="${a.id}" data-status="acknowledged">Acknowledge</button>`; }
+    else if(a.status!=='reviewing') btns+=`<button class="mini oa-set2" data-id="${a.id}" data-status="reviewing">Reviewing</button>`;
+    btns+=`<button class="mini good oa-set2" data-id="${a.id}" data-status="resolved">Resolve</button><button class="mini oa-set2" data-id="${a.id}" data-status="denied">Deny</button><button class="mini oa-reply" data-id="${a.id}">Respond</button>`;
+    if(authProfile&&authProfile.role==='commissioner')btns+=`<button class="mini danger oa-del2" data-id="${a.id}">Delete</button>`;
+  }
+  return `<div class="ar-card"><div class="ar-head"><div>${who}<span class="ar-type">${ACTION_META[a.type]?ACTION_META[a.type].label:a.type}</span> <span class="ar-status" style="color:${sc};border-color:${sc}">${stLabel}</span></div><span class="ar-time">${timeAgo(a.created_at)}</span></div>
     ${a.subject?`<div class="ar-subj">${esc(a.subject)}</div>`:''}${meta.length?`<div class="ar-meta">${meta.join(' · ')}</div>`:''}
     <div class="ar-body">${esc(a.details)}</div>
     ${a.response?`<div class="ar-resp"><span>Reviewer response</span>${esc(a.response)}</div>`:''}
-    ${rev?`<div class="ar-acts"><button class="mini oa-set2" data-id="${a.id}" data-status="reviewing">Reviewing</button><button class="mini good oa-set2" data-id="${a.id}" data-status="resolved">Resolve</button><button class="mini oa-set2" data-id="${a.id}" data-status="denied">Deny</button><button class="mini oa-reply" data-id="${a.id}">Respond</button>${authProfile&&authProfile.role==='commissioner'?`<button class="mini danger oa-del2" data-id="${a.id}">Delete</button>`:''}</div>`:''}
+    ${rev?`<div class="ar-acts">${btns}</div>`:''}
   </div>`;
 }
 function openActionForm(type){
