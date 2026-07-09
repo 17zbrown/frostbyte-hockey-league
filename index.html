@@ -370,6 +370,15 @@
   .pos-pick input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
   .pos-pick span{display:flex;align-items:center;justify-content:center;text-align:center;min-height:48px;padding:8px 6px;border:1px solid var(--line);border-radius:var(--r-s);font-family:var(--f-cond);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:13px;line-height:1.12;color:var(--fog);transition:.15s}
   .pos-pick input:checked+span{border-color:var(--frost);background:var(--frost-glow);color:var(--frost)}
+  .opt-pick{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .opt-pick label{cursor:pointer;margin:0}
+  .opt-pick input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  .opt-pick span{display:flex;flex-direction:column;gap:3px;min-height:60px;justify-content:center;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-m);transition:.15s}
+  .opt-pick span b{font-family:var(--f-cond);font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:13.5px;color:var(--ice)}
+  .opt-pick span small{font-family:var(--f-body);font-size:12px;color:var(--fog);text-transform:none;letter-spacing:0}
+  .opt-pick input:checked+span{border-color:var(--frost);background:var(--frost-glow)}
+  .opt-pick input:checked+span b{color:var(--frost)}
+  .opt-pick input:focus-visible+span{outline:2px solid var(--frost);outline-offset:2px}
   .signup-side{display:flex;flex-direction:column;gap:16px}
   .info-card{background:linear-gradient(180deg,#0c1e2f,#0a1826);border:1px solid var(--line);border-radius:var(--r-l);padding:22px 24px}
   .info-card h3{font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:16px;margin-bottom:14px}
@@ -468,6 +477,9 @@
   .oa-who b{font-family:var(--f-cond);font-weight:700;font-size:16px;letter-spacing:.02em;text-transform:uppercase;color:var(--ice)}
   .oa-status{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:2px 9px;border-radius:100px;border:1px solid}
   .oa-meta{font-family:var(--f-mono);font-size:12px;color:var(--fog)}.oa-meta b{color:var(--ice)}
+  .oa-teampref{margin-top:3px}
+  .oa-tag{display:inline-block;font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;border-radius:100px;background:var(--panel-3);color:var(--fog);margin-right:3px}
+  .oa-tag.build{background:var(--frost-glow);color:var(--frost)}
   .oa-block{margin-top:9px}
   .oa-block span{display:block;font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin-bottom:3px}
   .oa-block p{margin:0;font-size:13.5px;line-height:1.5;color:var(--ice);white-space:pre-wrap}
@@ -1439,7 +1451,15 @@
         <div class="field"><div class="row2">
           <div><label for="ow-tz">Time zone</label><input id="ow-tz" placeholder="e.g. Eastern (ET)" /></div>
           <div><label for="ow-avail">Availability</label><input id="ow-avail" placeholder="e.g. 3–4 nights / week" /></div></div></div>
-        <div class="field"><label for="ow-club">Preferred club <span style="color:var(--fog);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label><select id="ow-club"><option value="">No preference</option></select></div>
+        <div class="field"><label>Team preference</label>
+          <div class="opt-pick">
+            <label><input type="radio" name="teamchoice" value="random" checked /><span><b>Random / assigned club</b><small>The league assigns you a club</small></span></label>
+            <label><input type="radio" name="teamchoice" value="build" /><span><b>Build my own team</b><small>Propose a location and name</small></span></label>
+          </div></div>
+        <div class="field" id="ow-randomwrap"><label for="ow-club">Preferred club <span style="color:var(--fog);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label><select id="ow-club"><option value="">No preference</option></select></div>
+        <div class="field" id="ow-buildwrap" style="display:none"><div class="row2">
+          <div><label for="ow-loc">Proposed location</label><input id="ow-loc" placeholder="e.g. Anchorage, AK" /></div>
+          <div><label for="ow-name">Proposed team name</label><input id="ow-name" placeholder="e.g. Anchorage Avalanche" /></div></div></div>
         <div class="field"><label for="ow-exp">Management &amp; league experience</label><textarea id="ow-exp" rows="3" placeholder="Past leagues, GM / owner roles, teams you've run…"></textarea></div>
         <div class="field"><label for="ow-pitch">Why would you make a great owner?</label><textarea id="ow-pitch" rows="4" placeholder="Your vision for the club — how you'll build a roster, run game nights, and keep players engaged…"></textarea></div>
         <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Application</button>
@@ -2667,6 +2687,9 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
 });
 
 /* ------------------------------ OWNER APPLICATION ------------------------------ */
+function ownerTeamChoice(){return (document.querySelector('input[name="teamchoice"]:checked')||{}).value||"random";}
+function ownerToggleChoice(){const build=ownerTeamChoice()==="build";const rw=$("#ow-randomwrap"),bw=$("#ow-buildwrap");if(rw)rw.style.display=build?"none":"";if(bw)bw.style.display=build?"":"none";}
+document.addEventListener("change",e=>{if(e.target.name==="teamchoice")ownerToggleChoice();});
 function renderOwnerAuth(){
   const b=$("#ownerAuthBanner");if(!b)return;
   const sel=$("#ow-club");if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">No preference</option>'+TEAM_KEYS.map(k=>`<option value="${teams[k].code}">${esc(teams[k].name)}</option>`).join("");
@@ -2679,7 +2702,10 @@ function renderOwnerAuth(){
       if(l)l.innerHTML='Your application is <b style="color:'+sc+'">'+data.status.toUpperCase()+'</b> — resubmit below to update it.';
       const setv=(id,v)=>{const el=$(id);if(el&&!el.value)el.value=v||"";};
       setv("#ow-ea",data.ea_id);setv("#ow-tz",data.timezone);setv("#ow-avail",data.availability);setv("#ow-exp",data.experience);setv("#ow-pitch",data.pitch);
+      setv("#ow-loc",data.proposed_location);setv("#ow-name",data.proposed_name);
       const cs=$("#ow-club");if(cs&&!cs.value&&data.preferred_club)cs.value=data.preferred_club;
+      if(data.team_choice==="build"){const r=document.querySelector('input[name="teamchoice"][value="build"]');if(r)r.checked=true;}
+      ownerToggleChoice();
     });
   }else{
     b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to apply</b><div style="color:var(--fog);font-size:12.5px">Owner applications are tied to your Discord so the commissioners know who applied.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
@@ -2691,7 +2717,13 @@ $("#ownerForm").addEventListener("submit",async e=>{e.preventDefault();
   const ea=($("#ow-ea").value||"").trim(),pitch=($("#ow-pitch").value||"").trim();
   if(!ea){toast("EA ID required","Enter your EA account name.");return;}
   if(!pitch){toast("Add a short pitch","Tell the commissioners why you'd make a great owner.");return;}
-  const payload={season_id:openSeason?openSeason.id:null,profile_id:authUser.id,ea_id:ea,timezone:($("#ow-tz").value||"").trim()||null,availability:($("#ow-avail").value||"").trim()||null,preferred_club:$("#ow-club").value||null,experience:($("#ow-exp").value||"").trim()||null,pitch:pitch,status:"pending",updated_at:new Date().toISOString()};
+  const choice=ownerTeamChoice();
+  const propName=choice==="build"?(($("#ow-name").value||"").trim()||null):null;
+  const propLoc=choice==="build"?(($("#ow-loc").value||"").trim()||null):null;
+  if(choice==="build"&&!propName){toast("Name your team","Enter a proposed team name, or pick 'Random / assigned club'.");return;}
+  const payload={season_id:openSeason?openSeason.id:null,profile_id:authUser.id,ea_id:ea,timezone:($("#ow-tz").value||"").trim()||null,availability:($("#ow-avail").value||"").trim()||null,
+    team_choice:choice,preferred_club:choice==="build"?null:($("#ow-club").value||null),proposed_location:propLoc,proposed_name:propName,
+    experience:($("#ow-exp").value||"").trim()||null,pitch:pitch,status:"pending",updated_at:new Date().toISOString()};
   const {error}=await sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
   if(error){toast("Couldn't submit",error.message);return;}
   toast("Application submitted","The commissioners will review it — thanks for applying!");
@@ -3231,9 +3263,14 @@ async function loadOwnerApps(){
   el.innerHTML=data.map(a=>{const g=a.profiles?a.profiles.gamertag:"?";
     const club=a.preferred_club&&teams[a.preferred_club]?teams[a.preferred_club].name:(a.preferred_club||"No preference");
     const sc=a.status==="approved"?"var(--win)":(a.status==="denied"?"var(--loss)":"var(--frost)");
+    const build=a.team_choice==="build";
+    const teamPref=build
+      ? `<span class="oa-tag build">Build own</span> <b>${esc(a.proposed_name)||"(unnamed)"}</b>${a.proposed_location?" · "+esc(a.proposed_location):""}`
+      : `<span class="oa-tag">Random / assigned</span> Prefers: <b>${esc(club)}</b>`;
     return `<div class="owner-app">
       <div class="oa-head"><div class="oa-who"><b>${esc(g)}</b><span class="oa-status" style="color:${sc};border-color:${sc}">${a.status}</span></div>
-        <div class="oa-meta">${esc(a.ea_id)||"—"} · ${esc(a.timezone)||"—"} · ${esc(a.availability)||"—"} · Prefers: <b>${esc(club)}</b></div></div>
+        <div class="oa-meta">${esc(a.ea_id)||"—"} · ${esc(a.timezone)||"—"} · ${esc(a.availability)||"—"}</div>
+        <div class="oa-meta oa-teampref">${teamPref}</div></div>
       ${a.experience?`<div class="oa-block"><span>Experience</span><p>${esc(a.experience)}</p></div>`:""}
       ${a.pitch?`<div class="oa-block"><span>Pitch</span><p>${esc(a.pitch)}</p></div>`:""}
       <div class="oa-actions"><button class="mini good oa-set" data-id="${a.id}" data-status="approved">Approve</button><button class="mini oa-set" data-id="${a.id}" data-status="denied">Deny</button><button class="mini oa-set" data-id="${a.id}" data-status="pending">Reset</button><button class="mini danger oa-del" data-id="${a.id}" data-name="${esc(g)}">Delete</button></div>
