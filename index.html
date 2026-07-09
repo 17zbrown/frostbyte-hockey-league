@@ -1257,10 +1257,10 @@
           </div>
         </div>
         <div class="hero-stats">
-          <div><div class="n">8</div><small>Clubs</small></div>
-          <div><div class="n">2</div><small>Divisions</small></div>
+          <div><div class="n" id="heroClubs">8</div><small>Clubs</small></div>
+          <div><div class="n" id="heroDivisions">2</div><small>Divisions</small></div>
           <div><div class="n"><span id="heroSkaters">0</span></div><small>Registered</small></div>
-          <div><div class="n">12</div><small>Roster Cap</small></div>
+          <div><div class="n" id="heroRosterCap">12</div><small>Roster Cap</small></div>
         </div>
       </div>
       <div class="hero-rink">
@@ -1673,7 +1673,7 @@
     <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency">Free Agency</a><a data-go="draft" data-role="manager">Draft Board</a><a data-go="transactions">Transactions</a></div>
     <div class="foot-col"><h4>Community</h4><a data-go="news">News</a><a data-go="chat">League Chat</a><a data-go="rulebook">Rulebook</a><a data-go="manager">Manager Portal</a><a data-go="admin">Commissioner</a></div>
   </div>
-  <div class="foot-bottom"><span>© Season 4 · Chel Gaming Hockey League. Not affiliated with the NHL or EA Sports.</span>
+  <div class="foot-bottom"><span>© Season <span id="footSeason">1</span> · Chel Gaming Hockey League. Not affiliated with the NHL or EA Sports.</span>
     <span class="mono">STATUS: <span style="color:var(--win)">ALL SYSTEMS ON ICE</span></span></div>
 </div></footer>
 
@@ -1700,6 +1700,7 @@ function buildTeams(){
     teams[t.code]={id:t.id,code:t.code,name:t.name,c:t.color||TEAM_PALETTE[i%TEAM_PALETTE.length],div:t.division,conf:t.conference||"",city:t.city||"",arena:t.arena||"",est:t.founded_season||1};
     TEAM_KEYS.push(t.code);
   });
+  if(typeof updateBranding==="function")updateBranding();
 }
 
 // standings: code, gp, w, l, otl, gf, ga, streak
@@ -2108,12 +2109,22 @@ let heroSlides=[];
 // Data-driven slides (player of the week, hot streak, goalie, news) are added back
 // automatically once the stats/news tables have real data; until then the hero is
 // registration-focused.
+function leagueCounts(){
+  const nClubs=TEAM_KEYS.length;
+  const nDiv=new Set(TEAM_KEYS.map(k=>teams[k]&&teams[k].div).filter(Boolean)).size;
+  return {nClubs,nDiv,cap:openSeason?openSeason.roster_max:12,sn:openSeason?openSeason.number:1};
+}
+function updateBranding(){
+  const c=leagueCounts();const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
+  set("#heroClubs",c.nClubs||"—");set("#heroDivisions",c.nDiv||"—");set("#heroRosterCap",c.cap);set("#footSeason",c.sn);
+}
 function buildHeroSlides(){
-  const sn=openSeason?openSeason.number:1;
+  const c=leagueCounts(),sn=c.sn;
+  const clubsClause=c.nClubs?` ${c.nClubs} club${c.nClubs!==1?"s":""}, ${c.nDiv} division${c.nDiv!==1?"s":""}, one championship.`:"";
   const slides=[{
     eyebrow:`Season ${sn} · Registration Open`,
     title:`WHERE THE<br>ICE MEETS<br>THE <span class="out">ALGORITHM</span>`,
-    line:"The home rink for competitive 6v6 EA Sports NHL 27. Eight clubs, two divisions, one championship.",
+    line:`The home rink for competitive 6v6 EA Sports NHL 27.${clubsClause}`,
     cta:`<button class="btn btn-frost" data-go="signup">Sign Up For Season ${sn}</button><button class="btn btn-light" data-go="rulebook">Read the Rulebook</button>`
   },{
     eyebrow:"Now Forming",
@@ -2604,7 +2615,7 @@ async function sbInit(){
     dbTeams=tms||[];buildTeams();
     await loadStandings();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
-    renderTeamsGrid();renderHeroCarousel();renderHeroRink();
+    updateBranding();renderTeamsGrid();renderHeroCarousel();renderHeroRink();
     renderFixtures();renderSchedule();renderTxns();renderNews();renderLiveGames();
     renderLeaderList($("#homeLeaders"),"points");
     const lba=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lba?lba.dataset.lb:"points");
@@ -3382,7 +3393,7 @@ async function saveSeason(){
   const {error}=await sb.from("seasons").update(payload).eq("id",adminSeason.id);
   if(error){toast("Couldn't save",error.message);return;}
   Object.assign(adminSeason,payload);if(adminSeason.registration_open)openSeason=adminSeason;
-  renderSeasonAdmin();renderSignupAuth();
+  renderSeasonAdmin();renderSignupAuth();updateBranding();renderHeroCarousel();
   toast("Season saved","Deadlines and settings are updated.");
 }
 document.addEventListener("click",e=>{
