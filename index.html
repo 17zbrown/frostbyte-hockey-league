@@ -1412,7 +1412,7 @@
     <div class="foot-brand"><b>FROST<span>BYTE</span></b>
       <p>The competitive home of 6v6 EA Sports NHL 27. Run by players, for players, since Season 1.</p>
       <div class="socials">
-        <a href="#" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg></a>
+        <a href="https://discord.gg/UQYqKD8bd" target="_blank" rel="noopener noreferrer" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg></a>
       </div></div>
     <div class="foot-col"><h4>League</h4><a data-go="standings">Standings</a><a data-go="schedule">Schedule</a><a data-go="bracket">Playoffs</a><a data-go="rankings">Power Rankings</a><a data-go="records">Records</a></div>
     <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency">Free Agency</a><a data-go="draft" data-role="manager">Draft Board</a><a data-go="transactions">Transactions</a></div>
@@ -2106,7 +2106,8 @@ function renderChat(){
   if(log)log.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:52px 24px;color:var(--fog)">
     <span style="width:56px;height:56px;border-radius:16px;background:#5865F2;display:grid;place-items:center">${DISCORD_GLYPH}</span>
     <div><b style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--navy);font-size:19px;display:block;margin-bottom:5px">League chat lives in Discord</b>
-    Game coordination, trash talk, and trade talk all happen in the Frostbyte Discord server.<br>Sign in with Discord and jump into the conversation.</div></div>`;
+    Game coordination, trash talk, and trade talk all happen in the Frostbyte Discord server.</div>
+    <a class="btn btn-frost" href="${DISCORD_INVITE}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">Join the Frostbyte Discord →</a></div>`;
   const inp=$("#chatInput");if(inp){inp.disabled=true;inp.placeholder="Chat happens in the Discord server";}
   const form=$("#chatForm");if(form){const btn=form.querySelector("button");if(btn)btn.disabled=true;}
 }
@@ -2118,6 +2119,7 @@ const SB_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co";
 const SB_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
 const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
 let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null,myTeamCode=null;
+const DISCORD_INVITE="https://discord.gg/UQYqKD8bd";
 const DISCORD_GLYPH=`<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg>`;
 async function sbInit(){
   if(!sb){renderAuthUI();return;}
