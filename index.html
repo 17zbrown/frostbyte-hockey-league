@@ -512,6 +512,22 @@
   .oa-block span{display:block;font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin-bottom:3px}
   .oa-block p{margin:0;font-size:13.5px;line-height:1.5;color:var(--ice);white-space:pre-wrap}
   .oa-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;padding-top:12px;border-top:1px solid var(--line-soft)}
+  .act-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .act-card{display:flex;flex-direction:column;align-items:flex-start;gap:5px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;cursor:pointer;transition:.15s;box-shadow:var(--sh-1)}
+  .act-card:hover{border-color:var(--frost);transform:translateY(-2px)}
+  .act-card b{font-family:var(--f-cond);font-weight:700;font-size:16px;letter-spacing:.01em;text-transform:uppercase;color:var(--ice)}
+  .act-card small{font-family:var(--f-body);font-size:12.5px;color:var(--fog);line-height:1.45}
+  .ar-card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:11px;background:var(--panel-2)}
+  .ar-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
+  .ar-type{font-family:var(--f-cond);font-weight:700;letter-spacing:.02em;text-transform:uppercase;font-size:13.5px;color:var(--ice)}
+  .ar-status{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;border-radius:100px;border:1px solid;margin-left:6px}
+  .ar-time{font-family:var(--f-mono);font-size:11px;color:var(--fog-dim);flex-shrink:0}
+  .ar-subj{font-family:var(--f-cond);font-weight:600;font-size:14px;color:var(--ice);margin-bottom:3px}
+  .ar-meta{font-family:var(--f-mono);font-size:12px;color:var(--frost);margin-bottom:5px}
+  .ar-body{font-size:13.5px;line-height:1.5;color:var(--ice);white-space:pre-wrap}
+  .ar-resp{margin-top:9px;padding:9px 12px;border-left:3px solid var(--frost);background:var(--frost-glow);border-radius:4px;font-size:13px;color:var(--ice);white-space:pre-wrap}
+  .ar-resp span{display:block;font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px;color:var(--fog-dim);margin-bottom:2px}
+  .ar-acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;padding-top:11px;border-top:1px solid var(--line-soft)}
   .slot{background:#08161f;border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px;min-height:78px}
   .slot .role{font-family:var(--f-cond);font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:11px;color:var(--frost);margin-bottom:8px}
   .slot select{width:100%;background:#0a1a28;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:9px 10px;font-family:var(--f-cond);font-size:13.5px;letter-spacing:.03em;text-transform:uppercase}
@@ -1222,6 +1238,7 @@
           <a data-go="chat" data-feature="chat">League Chat</a>
           <a data-go="rulebook">Rulebook</a>
           <a data-go="owner">Owner Application</a>
+          <a data-go="actions">Action Center</a>
         </div>
       </div>
       <button data-go="signup" data-feature="signup">Sign Up</button>
@@ -1516,6 +1533,21 @@
       <div id="myOffersBody" style="padding:12px 20px 18px"></div></div>
   </div></section></div>
 
+  <!-- ACTION CENTER (member requests) -->
+  <div class="view" id="view-actions"><section class="pad"><div class="wrap">
+    <div class="sec-head"><div><span class="eyebrow">Member Services</span><h2>Action <em>Center</em></h2>
+      <p>File a complaint, appeal a suspension or ban, ask your club's management for a trade, or request a pre-season position change.</p></div></div>
+    <div id="actionsGate"></div>
+    <div class="act-grid">
+      <button class="act-card" data-action="complaint"><b>File a Complaint</b><small>Report a conduct issue or dispute to the league office.</small></button>
+      <button class="act-card" data-action="appeal"><b>Appeal a Suspension / Ban</b><small>Contest a suspension or ban and make your case.</small></button>
+      <button class="act-card" data-action="trade_request"><b>Request a Trade</b><small>Ask your club's management to explore a trade.</small></button>
+      <button class="act-card" data-action="position_change"><b>Pre-Season Position Change</b><small>Request a different position before the season starts.</small></button>
+    </div>
+    <div class="card" style="margin-top:20px"><div class="card-h"><h3>My Requests</h3><span class="pill" id="myActionsCount"></span></div>
+      <div id="myActionsBody" style="padding:12px 20px 18px"></div></div>
+  </div></section></div>
+
   <!-- MANAGER -->
   <div class="view" id="view-manager"><section class="pad"><div class="wrap">
     <div class="sec-head" style="justify-content:center;text-align:center"><div>
@@ -1537,6 +1569,7 @@
         <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th style="text-align:right">Cap Hit</th><th style="text-align:right">Action</th></tr></thead><tbody id="rosterBody"></tbody></table></div>
         <div class="cap-bar-wrap" id="capBarWrap" hidden><div class="cap-bar"><span id="capBarFill"></span></div><div class="cap-bar-lbl"><span id="capUsedLbl"></span><span id="capTotalLbl"></span></div></div></div></div>
       <div class="mgr-panel" id="mtab-trade">
+        <div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Player Trade Requests</h3><span class="pill" id="tradeReqCount"></span></div><div id="tradeReqBody" style="padding:12px 20px 18px"></div></div>
         <div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Trade Offers</h3><span class="pill" id="tradesPendingCount"></span></div><div id="tradesPending"></div></div>
         <div class="card" style="padding:22px 24px">
         <div class="next-game-bar" style="margin-bottom:22px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Propose a trade</b><span style="color:var(--fog);font-size:13.5px">Pick players from each side and send it — a trade goes through the moment the other GM accepts. No commissioner approval.</span></div>
@@ -1582,6 +1615,7 @@
         <button class="mgr-tab active" data-atab="season">Season &amp; Deadlines</button>
         <button class="mgr-tab" data-atab="registrations">Registrations</button>
         <button class="mgr-tab" data-atab="owners">Owner Apps</button>
+        <button class="mgr-tab" data-atab="actions">Action Center</button>
         <button class="mgr-tab" data-atab="schedbuild">Schedule</button>
         <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
         <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
@@ -1599,6 +1633,9 @@
       <div class="mgr-panel" id="atab-owners"><div class="card"><div class="card-h"><h3>Owner Applications</h3><span class="pill" id="ownerAppCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Applications submitted on the Owner Application page. Approve to shortlist an owner, then assign them a club in Members &amp; Roles.</div>
         <div id="ownerAppsBody" style="padding:12px 20px 20px"></div></div></div>
+      <div class="mgr-panel" id="atab-actions"><div class="card"><div class="card-h"><h3>Action Center</h3><span class="pill" id="actionAdminCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Member complaints, appeals, and position-change requests. Trade requests route to the club's manager — you can see all of them here.</div>
+        <div id="actionAdminBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-schedbuild"><div class="card"><div class="card-h"><h3>Season Schedule</h3><span class="pill" id="schedCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Generate a full home-and-away round-robin for all 8 clubs (14 weeks), or clear it and start over.</div>
         <div style="padding:12px 20px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-frost btn-sm" id="genScheduleBtn">Auto-Generate Full Schedule</button><button class="btn btn-ghost btn-sm" id="clearScheduleBtn">Clear Schedule</button></div>
@@ -1850,6 +1887,7 @@ function go(view,param,fromPop){
   if(view==="stats"&&typeof renderMyStats==="function")renderMyStats();
   if(view==="owner"&&typeof renderOwnerAuth==="function")renderOwnerAuth();
   if(view==="offers"&&typeof renderMyOffers==="function")renderMyOffers();
+  if(view==="actions"&&typeof renderActionCenter==="function")renderActionCenter();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
   // browser history: push a state on real navigation so Back returns to the prior in-app page
@@ -1920,7 +1958,7 @@ function buildNav(){
     ["Main",[["home","Home"],["standings","Standings"],["teams","All Teams"],["signup","Sign Up"]]],
     ["League",[["schedule","Schedule"],["bracket","Playoff Bracket"],["rankings","Power Rankings"],["awards","Awards"],["records","Record Book"],["transactions","Transactions"]]],
     ["Players",[["stats","Stats & Leaders"],["freeagency","Free Agency"],["draft","Draft Board"]]],
-    ["Community",[["news","News"],["chat","League Chat"],["rulebook","Rulebook"],["owner","Owner Application"]]],
+    ["Community",[["news","News"],["chat","League Chat"],["rulebook","Rulebook"],["owner","Owner Application"],["actions","Action Center"]]],
     ["Front Office",[["manager","Manager Portal"],["admin","Commissioner"]]]
   ];
   $("#mobileMenu").innerHTML=groups.map(([g,items])=>
@@ -2665,6 +2703,7 @@ function renderAuthUI(){
           ${(mgr||comm)?'<div class="acct-sep"></div>':""}
           ${item('data-go="player" data-param="'+esc(authProfile.gamertag)+'" role="menuitem"',IC_USER,"My Profile")}
           ${item('data-go="offers" role="menuitem"',IC_OFFER,"Contract Offers")}
+          ${item('data-go="actions" role="menuitem"',IC_OFFER,"Action Center")}
           ${item('id="acctEditProfile" role="menuitem"',IC_EDIT,"Edit Profile")}
           <div class="acct-sep"></div>
           ${item('id="acctSignOut" role="menuitem"',IC_OUT,"Sign out")}
@@ -2902,7 +2941,7 @@ $("#rosterBody").addEventListener("change",async e=>{
   if(error){toast("Couldn't save salary",error.message);return;}
   renderRoster();
 });
-function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();}
+function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();renderTradeRequests();}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
   if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
@@ -3116,6 +3155,79 @@ document.addEventListener("click",e=>{
   const ac=e.target.closest(".off-accept");if(ac){confirmModal("Accept this contract?","This finalizes the deal at the current terms for next season.","Accept Contract",()=>respondOffer(ac.dataset.id,'accept'));return;}
   const dn=e.target.closest(".off-deny");if(dn){respondOffer(dn.dataset.id,'deny');return;}
   const ed=e.target.closest(".off-edit");if(ed){editOffer(ed.dataset.id,+ed.dataset.salary,+ed.dataset.years,!!e.target.closest("#myOffersBody"));return;}
+});
+
+/* ------------------------------ ACTION CENTER ------------------------------ */
+const ACTION_META={complaint:{label:"Complaint",route:"commissioner"},appeal:{label:"Suspension / Ban Appeal",route:"commissioner"},trade_request:{label:"Trade Request",route:"manager"},position_change:{label:"Position Change",route:"commissioner"}};
+const AC_POS=[["C","Center"],["LW","Left Wing"],["RW","Right Wing"],["LD","Left Defense"],["RD","Right Defense"],["G","Goalie"]];
+let myClubInfo={team_id:null,team_name:null,position:null};
+async function renderActionCenter(){
+  const gate=$("#actionsGate");if(!gate)return;
+  if(!authProfile||!authUser){gate.innerHTML=`<div class="auth-banner" style="margin-bottom:16px"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to use the Action Center</b><div style="color:var(--fog);font-size:12.5px">Requests are tied to your Discord account.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
+    if($("#myActionsBody"))$("#myActionsBody").innerHTML='';if($("#myActionsCount"))$("#myActionsCount").textContent='';return;}
+  gate.innerHTML='';
+  myClubInfo={team_id:null,team_name:null,position:null};
+  if(sb&&openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,position").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
+    if(rs){myClubInfo.team_id=rs.team_id;myClubInfo.position=rs.position;const c=codeOfId(rs.team_id);myClubInfo.team_name=c&&teams[c]?teams[c].name:null;}}
+  loadMyActions();
+}
+async function loadMyActions(){
+  const el=$("#myActionsBody"),cnt=$("#myActionsCount");if(!el||!sb||!authUser)return;
+  const {data}=await sb.from("action_requests").select("*").eq("profile_id",authUser.id).order("created_at",{ascending:false});
+  if(cnt)cnt.textContent=(data?data.length:0)+"";
+  el.innerHTML=(data&&data.length)?data.map(a=>actionRow(a,false)).join(""):'<div style="color:var(--fog);font-size:13px">You haven\'t filed anything yet. Pick an option above to get started.</div>';
+}
+function actionRow(a,rev){
+  const sc=a.status==='resolved'?'var(--win)':(a.status==='denied'?'var(--loss)':(a.status==='reviewing'?'var(--gold)':'var(--frost)'));
+  const who=rev?`<b>${esc(a._name||'Member')}</b> · `:'';
+  const meta=[];
+  if(a.type==='position_change'&&a.requested_position)meta.push((POS_NAME[a.current_position]||a.current_position||'?')+' → '+(POS_NAME[a.requested_position]||a.requested_position));
+  if(a.target)meta.push(esc(a.target));
+  return `<div class="ar-card"><div class="ar-head"><div>${who}<span class="ar-type">${ACTION_META[a.type]?ACTION_META[a.type].label:a.type}</span> <span class="ar-status" style="color:${sc};border-color:${sc}">${a.status}</span></div><span class="ar-time">${timeAgo(a.created_at)}</span></div>
+    ${a.subject?`<div class="ar-subj">${esc(a.subject)}</div>`:''}${meta.length?`<div class="ar-meta">${meta.join(' · ')}</div>`:''}
+    <div class="ar-body">${esc(a.details)}</div>
+    ${a.response?`<div class="ar-resp"><span>Reviewer response</span>${esc(a.response)}</div>`:''}
+    ${rev?`<div class="ar-acts"><button class="mini oa-set2" data-id="${a.id}" data-status="reviewing">Reviewing</button><button class="mini good oa-set2" data-id="${a.id}" data-status="resolved">Resolve</button><button class="mini oa-set2" data-id="${a.id}" data-status="denied">Deny</button><button class="mini oa-reply" data-id="${a.id}">Respond</button>${authProfile&&authProfile.role==='commissioner'?`<button class="mini danger oa-del2" data-id="${a.id}">Delete</button>`:''}</div>`:''}
+  </div>`;
+}
+function openActionForm(type){
+  if(!sb||!authUser){toast("Sign in first","Sign in with Discord to file a request.");return;}
+  const meta=ACTION_META[type];let fields;
+  if(type==='complaint')fields=[{key:"subject",label:"What's the complaint about?",value:""},{key:"target",label:"Who / what is this about? (optional)",value:""},{key:"details",label:"Details",type:"textarea",value:""}];
+  else if(type==='appeal')fields=[{key:"subject",label:"What are you appealing? (e.g. 3-game suspension)",value:""},{key:"details",label:"Your explanation",type:"textarea",value:""}];
+  else if(type==='trade_request'){if(!myClubInfo.team_id){toast("Join a club first","You must be on a club roster to request a trade.");return;}fields=[{key:"target",label:"What are you asking for?",value:""},{key:"details",label:`Message to ${myClubInfo.team_name||'your club'}'s management`,type:"textarea",value:""}];}
+  else fields=[{key:"current_position",label:"Current position",type:"select",value:myClubInfo.position||"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"requested_position",label:"Requested position",type:"select",value:"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"details",label:"Why?",type:"textarea",value:""}];
+  formModal("File — "+meta.label,fields,async v=>{
+    if(!(v.details||"").trim()){toast("Add details","Please describe your request.");return;}
+    const payload={profile_id:authUser.id,type,route:meta.route,details:v.details.trim(),season_id:openSeason?openSeason.id:null,subject:(v.subject||"").trim()||null,target:(v.target||"").trim()||null};
+    if(type==='trade_request')payload.team_id=myClubInfo.team_id;
+    if(type==='position_change'){payload.current_position=v.current_position;payload.requested_position=v.requested_position;}
+    const {error}=await sb.from("action_requests").insert(payload);
+    if(error){toast("Couldn't submit",error.message);return;}
+    toast("Request filed",meta.route==='manager'?"Sent to your club's management.":"Sent to the league office.");loadMyActions();
+  });
+}
+document.addEventListener("click",e=>{const c=e.target.closest(".act-card");if(c)openActionForm(c.dataset.action);});
+async function loadActionAdmin(){
+  const el=$("#actionAdminBody"),cnt=$("#actionAdminCount");if(!el||!sb)return;
+  const {data}=await sb.from("action_requests").select("*, profiles(gamertag)").order("created_at",{ascending:false});
+  if(cnt)cnt.textContent=(data?data.filter(a=>a.status==='open').length:0)+" open";
+  if(!data||!data.length){el.innerHTML=ADMIN_EMPTY("No requests yet","Member complaints, appeals, and requests appear here for review.");return;}
+  el.innerHTML=data.map(a=>{a._name=a.profiles?a.profiles.gamertag:'Member';return actionRow(a,true);}).join("");
+}
+async function renderTradeRequests(){
+  const el=$("#tradeReqBody"),cnt=$("#tradeReqCount");if(!el||!sb)return;
+  const tid=teamIdOf(currentClub);if(!tid){el.innerHTML='';if(cnt)cnt.textContent='0 open';return;}
+  const {data}=await sb.from("action_requests").select("*, profiles(gamertag)").eq("type","trade_request").eq("team_id",tid).order("created_at",{ascending:false});
+  if(cnt)cnt.textContent=(data?data.filter(a=>a.status==='open').length:0)+" open";
+  el.innerHTML=(data&&data.length)?data.map(a=>{a._name=a.profiles?a.profiles.gamertag:'Player';return actionRow(a,true);}).join(""):'<div style="color:var(--fog);font-size:13px">No trade requests from your players.</div>';
+}
+async function setActionStatus(id,status){const {error}=await sb.from("action_requests").update({status,updated_at:new Date().toISOString()}).eq("id",id);if(error){toast("Couldn't update",error.message);return;}toast("Request "+status,"");loadActionAdmin();renderTradeRequests();}
+function respondAction(id){formModal("Respond to request",[{key:"response",label:"Response to the member",type:"textarea",value:""}],async v=>{const {error}=await sb.from("action_requests").update({response:(v.response||"").trim()||null,updated_at:new Date().toISOString()}).eq("id",id);if(error){toast("Couldn't save",error.message);return;}toast("Response saved","The member sees it when you resolve or deny."); loadActionAdmin();renderTradeRequests();});}
+document.addEventListener("click",e=>{
+  const s=e.target.closest(".oa-set2");if(s){setActionStatus(s.dataset.id,s.dataset.status);return;}
+  const r=e.target.closest(".oa-reply");if(r){respondAction(r.dataset.id);return;}
+  const d=e.target.closest(".oa-del2");if(d){confirmModal("Delete this request?","This permanently removes it. This can't be undone.","Delete",async()=>{const {error}=await sb.from("action_requests").delete().eq("id",d.dataset.id);if(error){toast("Couldn't delete",error.message);return;}toast("Deleted","");loadActionAdmin();});return;}
 });
 // lineup — persisted per game night (Wed / Fri)
 const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
@@ -3331,7 +3443,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();
+    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
