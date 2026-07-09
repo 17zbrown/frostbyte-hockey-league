@@ -374,6 +374,13 @@
   .rp b{font-family:var(--f-cond);font-weight:600;font-size:14px;letter-spacing:.02em;text-transform:uppercase;display:block}
   .rp small{font-family:var(--f-mono);font-size:10.5px;color:var(--fog-dim)}
   .rp .lk{cursor:pointer}.rp .lk:hover b{color:var(--frost)}
+  .cap-hit{font-family:var(--f-mono);font-weight:600;color:var(--fog)}
+  .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
+  .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #1273b833}
+  .cap-bar-wrap{padding:14px 18px 4px}
+  .cap-bar{height:8px;border-radius:5px;background:var(--line-soft,#12283a);overflow:hidden}
+  .cap-bar span{display:block;height:100%;border-radius:5px;transition:width .35s ease}
+  .cap-bar-lbl{display:flex;justify-content:space-between;margin-top:7px;font-family:var(--f-cond);letter-spacing:.06em;text-transform:uppercase;font-size:11px;color:var(--fog-dim)}
   .posbadge{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;padding:3px 8px;border-radius:5px;background:#12293d;color:var(--fog)}
   .posbadge.F{background:#123a44;color:var(--frost)}.posbadge.C{background:#123a44;color:var(--frost)}
   .posbadge.W,.posbadge.LW,.posbadge.RW{background:#123a44;color:var(--frost)}
@@ -1327,7 +1334,7 @@
     <div id="mgrDash" style="display:none">
       <div class="mgr-bar"><span id="mgrBadge" style="line-height:0"></span>
         <div><h2 id="mgrName">Glacier Kings</h2><small>General Manager · FrostByte_Zack</small></div>
-        <div class="cap"><div class="v" id="capSpace">—</div><small>Roster</small></div>
+        <div class="cap"><div class="v" id="capSpace">—</div><small>Cap Space</small></div>
         <button class="btn btn-ghost" id="mgrLogout">Sign Out</button></div>
       <div class="mgr-tabs">
         <button class="mgr-tab active" data-mtab="roster">Roster &amp; Waivers</button>
@@ -1337,7 +1344,8 @@
         <button class="mgr-tab" data-mtab="reports">Game Reports</button>
       </div>
       <div class="mgr-panel on" id="mtab-roster"><div class="card"><div class="card-h"><h3>Active Roster</h3><span class="pill frost" id="rosterCount"></span></div>
-        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th style="text-align:right">Action</th></tr></thead><tbody id="rosterBody"></tbody></table></div></div></div>
+        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th style="text-align:right">Cap Hit</th><th style="text-align:right">Action</th></tr></thead><tbody id="rosterBody"></tbody></table></div>
+        <div class="cap-bar-wrap" id="capBarWrap" hidden><div class="cap-bar"><span id="capBarFill"></span></div><div class="cap-bar-lbl"><span id="capUsedLbl"></span><span id="capTotalLbl"></span></div></div></div></div>
       <div class="mgr-panel" id="mtab-trade">
         <div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Trade Offers</h3><span class="pill" id="tradesPendingCount"></span></div><div id="tradesPending"></div></div>
         <div class="card" style="padding:22px 24px">
@@ -1651,6 +1659,7 @@ applyTheme(document.documentElement.getAttribute("data-theme")||"light");
 /* ------------------------------ NOTIFICATIONS ------------------------------ */
 let notifItems=[],notifChannel=null;
 function esc(s){return (s==null?"":String(s)).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));}
+function fmtMoney(n){n=+n||0;if(n>=1e6){const m=n/1e6;return "$"+(m%1===0?m.toFixed(0):m.toFixed(1))+"M";}if(n>=1e3){const k=n/1e3;return "$"+(k%1===0?k.toFixed(0):k.toFixed(0))+"K";}return "$"+n;}
 function timeAgo(iso){try{const d=new Date(iso),s=Math.floor((Date.now()-d.getTime())/1000);
   if(s<60)return"just now";const m=Math.floor(s/60);if(m<60)return m+"m ago";const h=Math.floor(m/60);if(h<24)return h+"h ago";const dy=Math.floor(h/24);if(dy<7)return dy+"d ago";
   return new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric"}).format(d);}catch(e){return"";}}
@@ -1994,14 +2003,16 @@ async function renderTeamPage(code){
   let spots=[],stats=[];
   if(sb&&openSeason){const tid=teamIdOf(code);
     if(tid){
-      const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+      const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
       spots=r1.data||[];
       const r2=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
       stats=r2.data||[];
     }}
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
-  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  const teamCapUsed=roster.reduce((s,p)=>s+(+p.salary||0),0);
+  const teamSalCap=openSeason?(+openSeason.salary_cap||0):0;
   const mgr=roster.find(p=>p.role==="gm")||roster.find(p=>p.role==="commissioner");
   const mgrTag=$("#tbManager");if(mgrTag)mgrTag.innerHTML=mgr?`Manager · <b>${mgr.name}</b>`:'<b>No manager yet</b>';
   const skaters=roster.filter(p=>!p.is_goalie).sort((a,b)=>b.pts-a.pts);
@@ -2013,15 +2024,15 @@ async function renderTeamPage(code){
   if(!roster.length&&!teamGames.length){bodyEl.innerHTML=`<div class="empty-note">No players assigned to ${t.name} yet — rosters fill in during the draft. Check back once the season forms.</div>`;return;}
   bodyEl.innerHTML=`
     <div class="grid-2" style="align-items:start">
-      <div class="card"><div class="card-h"><h3>Roster — Skaters</h3><span class="pill frost">${skaters.length}</span></div>
-        ${skaters.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th></tr></thead>
+      <div class="card"><div class="card-h"><h3>Roster — Skaters</h3>${teamSalCap?`<span class="pill" title="Salary committed vs cap">${fmtMoney(teamCapUsed)} / ${fmtMoney(teamSalCap)}</span>`:""}<span class="pill frost">${skaters.length}</span></div>
+        ${skaters.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th>Cap Hit</th></tr></thead>
         <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No skaters on the roster yet.</div>'}</div>
+          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No skaters on the roster yet.</div>'}</div>
       <div class="stack">
         <div class="card"><div class="card-h"><h3>Goaltending</h3></div>
-          ${goalies.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Goalie</th><th>GP</th><th>GAA</th><th>SV%</th></tr></thead>
+          ${goalies.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Goalie</th><th>GP</th><th>GAA</th><th>SV%</th><th>Cap Hit</th></tr></thead>
           <tbody>${goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-            <td>${p.gp}</td><td>${gaaFmt(p)}</td><td>${svpFmt(p)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No goalies yet.</div>'}</div>
+            <td>${p.gp}</td><td>${gaaFmt(p)}</td><td>${svpFmt(p)}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No goalies yet.</div>'}</div>
         <div class="card"><div class="card-h"><h3>Schedule</h3><span class="lnk" data-go="schedule">Full →</span></div>
           ${teamGames.length?`<div class="fixtures">${teamGames.slice(0,6).map(g=>{const home=g.a===code;const opp=home?g.b:g.a;const done=g.done;
             const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
@@ -2433,25 +2444,43 @@ let rosterState=[];
 async function renderRoster(){
   if(!sb||!openSeason){rosterState=[];drawRoster();return;}
   const tid=teamIdOf(currentClub);if(!tid){rosterState=[];drawRoster();return;}
-  const {data:spots}=await sb.from("roster_spots").select("id,profile_id,jersey_number,position, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+  const {data:spots}=await sb.from("roster_spots").select("id,profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
   const {data:stats}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
   const statBy={};(stats||[]).forEach(s=>statBy[s.profile_id]=s);
-  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,name:s.profiles?s.profiles.gamertag:"?",pos:s.position,num:s.jersey_number,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
+  rosterState=(spots||[]).map(s=>{const st=statBy[s.profile_id]||{};return {spotId:s.id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0};});
   drawRoster();
 }
 function drawRoster(){
-  const cap=openSeason?openSeason.roster_max:12;
-  const rc=$("#rosterCount");if(rc)rc.textContent=rosterState.length+" / "+cap+" players";
-  const cs=$("#capSpace");if(cs)cs.textContent=rosterState.length+" / "+cap;
+  const rcap=openSeason?openSeason.roster_max:12;
+  const salCap=openSeason?(+openSeason.salary_cap||0):0;
+  const used=rosterState.reduce((s,p)=>s+(+p.salary||0),0);
+  const space=salCap-used;
+  const rc=$("#rosterCount");if(rc)rc.textContent=rosterState.length+" / "+rcap+" players";
+  const cs=$("#capSpace");if(cs){cs.textContent=fmtMoney(space);cs.style.color=space<0?"var(--loss)":"";}
+  const isComm=authProfile&&authProfile.role==="commissioner";
+  const bw=$("#capBarWrap");if(bw){bw.hidden=!salCap;const pct=salCap?Math.min(100,Math.round(used/salCap*100)):0;
+    const fill=$("#capBarFill");if(fill){fill.style.width=pct+"%";fill.style.background=used>salCap?"var(--loss)":"var(--frost)";}
+    const ul=$("#capUsedLbl");if(ul)ul.textContent=fmtMoney(used)+" used";
+    const tl=$("#capTotalLbl");if(tl)tl.textContent=fmtMoney(salCap)+" cap";}
   const body=$("#rosterBody");if(!body)return;
-  if(!rosterState.length){body.innerHTML='<tr><td colspan="7" style="padding:22px;color:var(--fog);text-align:center">No players on your roster yet. The commissioner assigns registered players to your club in the League Office.</td></tr>';return;}
+  if(!rosterState.length){body.innerHTML='<tr><td colspan="8" style="padding:22px;color:var(--fog);text-align:center">No players on your roster yet. The commissioner assigns registered players to your club in the League Office.</td></tr>';return;}
   const locked=seasonMovesLocked();
   body.innerHTML=rosterState.map((p,i)=>`<tr>
-    <td><div class="rp"><span class="num">${p.num}</span><div><b>${p.name}</b><small>${teams[currentClub].name}</small></div></div></td>
+    <td><div class="rp"><span class="num">${p.num}</span><div><b>${esc(p.name)}</b><small>${esc(teams[currentClub].name)}</small></div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost);font-weight:700">${p.pts}</td>
+    <td style="text-align:right">${isComm?`<input class="sal-in" data-salspot="${p.spotId}" value="${p.salary?esc(fmtMoney(p.salary)):""}" placeholder="$0" aria-label="Cap hit for ${esc(p.name)}">`:`<span class="cap-hit">${fmtMoney(p.salary)}</span>`}</td>
     <td style="text-align:right"><div class="act">${locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`}</div></td></tr>`).join("");
 }
+function parseMoney(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="m")v*=1e6;else if(u==="k")v*=1e3;return Math.round(v);}
+$("#rosterBody").addEventListener("change",async e=>{
+  const inp=e.target.closest(".sal-in");if(!inp||!sb)return;
+  const v=parseMoney(inp.value);
+  if(isNaN(v)||v<0){toast("Invalid salary","Use a value like 3M, 750K, or 3000000.");renderRoster();return;}
+  const {error}=await sb.from("roster_spots").update({salary:v}).eq("id",inp.dataset.salspot);
+  if(error){toast("Couldn't save salary",error.message);return;}
+  renderRoster();
+});
 function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
@@ -2724,7 +2753,10 @@ function renderSeasonAdmin(){
   el.innerHTML=`
     <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-bottom:6px">
       <div class="ef-row"><label>Season status</label><select id="se-status">${["upcoming","active","complete"].map(x=>`<option value="${x}" ${x===s.status?"selected":""}>${x[0].toUpperCase()+x.slice(1)}</option>`).join("")}</select></div>
-      <div class="ef-row"><label>Roster cap</label><input id="se-cap" type="number" min="1" max="30" value="${s.roster_max}"></div>
+      <div class="ef-row"><label>Roster cap (players)</label><input id="se-cap" type="number" min="1" max="30" value="${s.roster_max}"></div>
+    </div>
+    <div class="ef-grid" style="grid-template-columns:1fr;margin-bottom:6px">
+      <div class="ef-row"><label for="se-salcap">Salary cap</label><input id="se-salcap" type="text" value="${s.salary_cap?fmtMoney(s.salary_cap):""}" placeholder="e.g. 65M"><small style="color:var(--fog);font-size:11.5px">Accepts values like <b>65M</b>, <b>750K</b>, or a raw number. Clubs can't trade or sign over this.</small></div>
     </div>
     <label class="se-toggle"><span>Registration open</span><span class="switch"><input type="checkbox" id="se-regopen" ${s.registration_open?"checked":""}><span class="track"></span><span class="knob"></span></span></label>
     <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-top:6px">
@@ -2752,7 +2784,9 @@ function seasonMovesLocked(s){s=s||openSeason;if(!s)return false;
 async function saveSeason(){
   if(!sb||!adminSeason)return;
   const iso=id=>{const v=($("#"+id)||{}).value;return v?new Date(v).toISOString():null;};
+  let salCap=parseMoney($("#se-salcap").value);if(isNaN(salCap)||salCap<0)salCap=adminSeason.salary_cap;
   const payload={status:$("#se-status").value,roster_max:Math.max(1,Math.min(30,+$("#se-cap").value||12)),registration_open:$("#se-regopen").checked,
+    salary_cap:salCap,
     registration_deadline:iso("se-regdl"),owner_app_deadline:iso("se-ownerdl"),draft_at:iso("se-draft"),starts_at:iso("se-start"),ends_at:iso("se-end"),
     trade_deadline_week:(+$("#se-deadline").value||null),moves_lock_override:$("#se-lock").value};
   const {error}=await sb.from("seasons").update(payload).eq("id",adminSeason.id);
@@ -2777,11 +2811,12 @@ async function loadRegistrations(){
   const assigned=new Set((spots||[]).map(s=>s.profile_id));
   const pc=$("#regCount");if(pc)pc.textContent=(regs?regs.length:0)+" signed up";
   if(!regs||!regs.length){el.innerHTML=ADMIN_EMPTY("No registrations yet","Players who sign up for the season appear here to be assigned to a club.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th>Pos</th><th>#</th><th>Club</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th>Pos</th><th>#</th><th>Club</th><th>Cap Hit</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
-      return `<tr><td><b>${g}</b></td><td class="mono">${r.ea_id||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
-      <td>${done?'<span style="color:var(--win);font-weight:600">On a roster</span>':`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${teams[k].name}</option>`).join("")}</select>`}</td>
-      <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${g.replace(/"/g,'&quot;')}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${g}">Delete</button></div></td></tr>`;}).join("")+
+      return `<tr><td><b>${esc(g)}</b></td><td class="mono">${esc(r.ea_id)||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
+      <td>${done?'<span style="color:var(--win);font-weight:600">On a roster</span>':`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
+      <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="2M" placeholder="$0" aria-label="Cap hit">`}</td>
+      <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${g.replace(/"/g,'&quot;')}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
 }
 async function deleteRegistration(btn){
@@ -2799,7 +2834,9 @@ async function assignRegistration(btn){
   const {data:existing}=await sb.from("roster_spots").select("jersey_number").eq("season_id",adminSeason.id).eq("team_id",teamId);
   const used=new Set((existing||[]).map(x=>x.jersey_number));
   let num=+btn.dataset.num||0;if(!num||used.has(num)){num=0;for(let n=1;n<=99;n++)if(!used.has(n)){num=n;break;}}
-  const {error}=await sb.from("roster_spots").insert({season_id:adminSeason.id,team_id:teamId,profile_id:btn.dataset.prof,jersey_number:num,position:btn.dataset.pos});
+  const salEl=document.querySelector('.ra-sal[data-reg="'+btn.dataset.reg+'"]');
+  let salary=salEl?parseMoney(salEl.value):0;if(isNaN(salary)||salary<0)salary=0;
+  const {error}=await sb.from("roster_spots").insert({season_id:adminSeason.id,team_id:teamId,profile_id:btn.dataset.prof,jersey_number:num,position:btn.dataset.pos,salary});
   if(error){toast("Couldn't add player",error.message);return;}
   await sb.from("season_registrations").update({status:"assigned"}).eq("id",btn.dataset.reg);
   const pname=btn.dataset.name||"a player";
