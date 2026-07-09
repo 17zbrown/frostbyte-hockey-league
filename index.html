@@ -462,6 +462,16 @@
   .gn-oppveto{font-family:var(--f-cond);font-size:12px;letter-spacing:.02em;color:var(--fog)}
   .gn-oppveto b{color:var(--ice)}
   .gn-empty{color:var(--fog);font-size:13px;padding:14px;border:1px dashed var(--line);border-radius:8px;margin-bottom:18px}
+  .owner-app{border:1px solid var(--line);border-radius:10px;padding:15px 17px;margin-bottom:13px;background:var(--panel-2)}
+  .oa-head{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+  .oa-who{display:flex;align-items:center;gap:10px}
+  .oa-who b{font-family:var(--f-cond);font-weight:700;font-size:16px;letter-spacing:.02em;text-transform:uppercase;color:var(--ice)}
+  .oa-status{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:2px 9px;border-radius:100px;border:1px solid}
+  .oa-meta{font-family:var(--f-mono);font-size:12px;color:var(--fog)}.oa-meta b{color:var(--ice)}
+  .oa-block{margin-top:9px}
+  .oa-block span{display:block;font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin-bottom:3px}
+  .oa-block p{margin:0;font-size:13.5px;line-height:1.5;color:var(--ice);white-space:pre-wrap}
+  .oa-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;padding-top:12px;border-top:1px solid var(--line-soft)}
   .slot{background:#08161f;border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px;min-height:78px}
   .slot .role{font-family:var(--f-cond);font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:11px;color:var(--frost);margin-bottom:8px}
   .slot select{width:100%;background:#0a1a28;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:9px 10px;font-family:var(--f-cond);font-size:13.5px;letter-spacing:.03em;text-transform:uppercase}
@@ -1171,6 +1181,7 @@
           <a data-go="news">News</a>
           <a data-go="chat" data-feature="chat">League Chat</a>
           <a data-go="rulebook">Rulebook</a>
+          <a data-go="owner">Owner Application</a>
         </div>
       </div>
       <button data-go="signup" data-feature="signup">Sign Up</button>
@@ -1408,10 +1419,42 @@
           <div class="step"><div class="no"></div><div><b>Draft night</b><p>Clubs draft the free-agent pool live on Discord.</p></div></div>
           <div class="step"><div class="no"></div><div><b>Drop the puck</b><p>Week 1 opens the following Wednesday.</p></div></div>
         </div></div>
+        <div class="info-card" data-go="owner" role="link" tabindex="0" style="cursor:pointer"><h3>Want to Own a Club?</h3><p style="margin:0;color:var(--fog);font-size:13px;line-height:1.5">Apply to become a club owner and run your own roster, trades, and game nights. <b style="color:var(--frost)">Open the owner application →</b></p></div>
         <a class="info-card" href="https://discord.gg/UQYqKD8bd" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:flex;align-items:center;gap:13px">
           <span style="width:40px;height:40px;border-radius:10px;background:#5865F2;display:grid;place-items:center;flex-shrink:0"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg></span>
           <div><b style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--navy);font-size:15px;display:block">Join the Discord</b><span style="color:var(--fog);font-size:12.5px">Draft night, scheduling, and the whole community live here.</span></div>
         </a>
+      </div>
+    </div>
+  </div></section></div>
+
+  <!-- OWNER APPLICATION -->
+  <div class="view" id="view-owner"><section class="pad"><div class="wrap">
+    <div class="sec-head"><div><span class="eyebrow">Run a Club</span><h2>Owner <em>Application</em></h2>
+      <p>Apply to own and manage a Frostbyte club. Completed applications go straight to the commissioners for review.</p></div></div>
+    <div class="signup-grid">
+      <form class="form-card" id="ownerForm">
+        <div id="ownerAuthBanner"></div>
+        <div class="field"><label for="ow-ea">EA ID</label><input id="ow-ea" placeholder="Your EA account name" /></div>
+        <div class="field"><div class="row2">
+          <div><label for="ow-tz">Time zone</label><input id="ow-tz" placeholder="e.g. Eastern (ET)" /></div>
+          <div><label for="ow-avail">Availability</label><input id="ow-avail" placeholder="e.g. 3–4 nights / week" /></div></div></div>
+        <div class="field"><label for="ow-club">Preferred club <span style="color:var(--fog);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label><select id="ow-club"><option value="">No preference</option></select></div>
+        <div class="field"><label for="ow-exp">Management &amp; league experience</label><textarea id="ow-exp" rows="3" placeholder="Past leagues, GM / owner roles, teams you've run…"></textarea></div>
+        <div class="field"><label for="ow-pitch">Why would you make a great owner?</label><textarea id="ow-pitch" rows="4" placeholder="Your vision for the club — how you'll build a roster, run game nights, and keep players engaged…"></textarea></div>
+        <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Application</button>
+      </form>
+      <div class="signup-side">
+        <div class="info-card"><h3>What Owners Do</h3><div class="steps">
+          <div class="step"><div class="no"></div><div><b>Build the roster</b><p>Draft, sign free agents, and manage trades under the salary cap.</p></div></div>
+          <div class="step"><div class="no"></div><div><b>Run game nights</b><p>Set lineups, post results, and keep your club active Wed / Fri.</p></div></div>
+          <div class="step"><div class="no"></div><div><b>Lead the club</b><p>Communicate with players and the league, and uphold the rulebook.</p></div></div>
+        </div></div>
+        <div class="info-card"><h3>After You Apply</h3>
+          <div class="info-line"><span>Reviewed by</span><b>Commissioners</b></div>
+          <div class="info-line"><span>Status</span><b>Pending → Approved</b></div>
+          <div class="info-line"><span>Then</span><b>Assigned a club</b></div>
+        </div>
       </div>
     </div>
   </div></section></div>
@@ -1476,6 +1519,7 @@
       <div class="mgr-tabs">
         <button class="mgr-tab active" data-atab="season">Season &amp; Deadlines</button>
         <button class="mgr-tab" data-atab="registrations">Registrations</button>
+        <button class="mgr-tab" data-atab="owners">Owner Apps</button>
         <button class="mgr-tab" data-atab="schedbuild">Schedule</button>
         <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
         <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
@@ -1489,6 +1533,9 @@
       <div class="mgr-panel" id="atab-registrations"><div class="card"><div class="card-h"><h3>Registrations</h3><span class="pill" id="regCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Assign each signed-up player to a club and confirm a jersey number — that adds them to the roster.</div>
         <div id="regAdminBody"></div></div></div>
+      <div class="mgr-panel" id="atab-owners"><div class="card"><div class="card-h"><h3>Owner Applications</h3><span class="pill" id="ownerAppCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Applications submitted on the Owner Application page. Approve to shortlist an owner, then assign them a club in Members &amp; Roles.</div>
+        <div id="ownerAppsBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-schedbuild"><div class="card"><div class="card-h"><h3>Season Schedule</h3><span class="pill" id="schedCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Generate a full home-and-away round-robin for all 8 clubs (14 weeks), or clear it and start over.</div>
         <div style="padding:12px 20px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-frost btn-sm" id="genScheduleBtn">Auto-Generate Full Schedule</button><button class="btn btn-ghost btn-sm" id="clearScheduleBtn">Clear Schedule</button></div>
@@ -1729,6 +1776,7 @@ function go(view,param,fromPop){
   if(view==="manager"&&typeof renderManager==="function")renderManager();
   if(view==="draft"&&typeof renderDraft==="function")renderDraft();
   if(view==="stats"&&typeof renderMyStats==="function")renderMyStats();
+  if(view==="owner"&&typeof renderOwnerAuth==="function")renderOwnerAuth();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
   // browser history: push a state on real navigation so Back returns to the prior in-app page
@@ -1799,7 +1847,7 @@ function buildNav(){
     ["Main",[["home","Home"],["standings","Standings"],["teams","All Teams"],["signup","Sign Up"]]],
     ["League",[["schedule","Schedule"],["bracket","Playoff Bracket"],["rankings","Power Rankings"],["awards","Awards"],["records","Record Book"],["transactions","Transactions"]]],
     ["Players",[["stats","Stats & Leaders"],["freeagency","Free Agency"],["draft","Draft Board"]]],
-    ["Community",[["news","News"],["chat","League Chat"],["rulebook","Rulebook"]]],
+    ["Community",[["news","News"],["chat","League Chat"],["rulebook","Rulebook"],["owner","Owner Application"]]],
     ["Front Office",[["manager","Manager Portal"],["admin","Commissioner"]]]
   ];
   $("#mobileMenu").innerHTML=groups.map(([g,items])=>
@@ -2541,6 +2589,7 @@ function renderAuthUI(){
     }
   }
   renderSignupAuth();
+  if(typeof renderOwnerAuth==="function")renderOwnerAuth();
   renderCommissioner();
   renderManager();
   renderMyStats();
@@ -2615,6 +2664,38 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
   }
   renderSignupAuth();
   toast("You're registered!","Season "+openSeason.number+" registration received — the commissioner assigns roster spots.");
+});
+
+/* ------------------------------ OWNER APPLICATION ------------------------------ */
+function renderOwnerAuth(){
+  const b=$("#ownerAuthBanner");if(!b)return;
+  const sel=$("#ow-club");if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">No preference</option>'+TEAM_KEYS.map(k=>`<option value="${teams[k].code}">${esc(teams[k].name)}</option>`).join("");
+  const glyph=`<span class="dcirc">${DISCORD_GLYPH}</span>`;
+  if(authProfile){
+    b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${esc(authProfile.gamertag)}</b><div style="color:var(--fog);font-size:12.5px" id="ownerStatusLine">Fill out the form below to apply to own a club.</div></div></div>`;
+    if(sb&&authUser)sb.from("owner_applications").select("*").eq("profile_id",authUser.id).maybeSingle().then(({data})=>{
+      if(!data)return;const l=$("#ownerStatusLine");
+      const sc=data.status==="approved"?"var(--win)":(data.status==="denied"?"var(--loss)":"var(--frost)");
+      if(l)l.innerHTML='Your application is <b style="color:'+sc+'">'+data.status.toUpperCase()+'</b> — resubmit below to update it.';
+      const setv=(id,v)=>{const el=$(id);if(el&&!el.value)el.value=v||"";};
+      setv("#ow-ea",data.ea_id);setv("#ow-tz",data.timezone);setv("#ow-avail",data.availability);setv("#ow-exp",data.experience);setv("#ow-pitch",data.pitch);
+      const cs=$("#ow-club");if(cs&&!cs.value&&data.preferred_club)cs.value=data.preferred_club;
+    });
+  }else{
+    b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to apply</b><div style="color:var(--fog);font-size:12.5px">Owner applications are tied to your Discord so the commissioners know who applied.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
+  }
+}
+$("#ownerForm").addEventListener("submit",async e=>{e.preventDefault();
+  if(!sb){toast("Backend unavailable","Open the deployed site to apply.");return;}
+  if(!authUser){toast("Sign in to apply","Use “Sign in with Discord” first.");signInDiscord();return;}
+  const ea=($("#ow-ea").value||"").trim(),pitch=($("#ow-pitch").value||"").trim();
+  if(!ea){toast("EA ID required","Enter your EA account name.");return;}
+  if(!pitch){toast("Add a short pitch","Tell the commissioners why you'd make a great owner.");return;}
+  const payload={season_id:openSeason?openSeason.id:null,profile_id:authUser.id,ea_id:ea,timezone:($("#ow-tz").value||"").trim()||null,availability:($("#ow-avail").value||"").trim()||null,preferred_club:$("#ow-club").value||null,experience:($("#ow-exp").value||"").trim()||null,pitch:pitch,status:"pending",updated_at:new Date().toISOString()};
+  const {error}=await sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
+  if(error){toast("Couldn't submit",error.message);return;}
+  toast("Application submitted","The commissioners will review it — thanks for applying!");
+  renderOwnerAuth();
 });
 
 /* ------------------------------ LEADERBOARD TABS ------------------------------ */
@@ -3043,7 +3124,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();
+    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
@@ -3141,6 +3222,36 @@ async function deleteRegistration(btn){
     loadRegistrations();
   });
 }
+/* ---- Owner applications (commissioner review) ---- */
+async function loadOwnerApps(){
+  const el=$("#ownerAppsBody");if(!el||!sb)return;
+  const {data}=await sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
+  const pc=$("#ownerAppCount");if(pc)pc.textContent=(data?data.length:0)+" total";
+  if(!data||!data.length){el.innerHTML=ADMIN_EMPTY("No applications yet","Owner applications submitted on the site appear here for review.");return;}
+  el.innerHTML=data.map(a=>{const g=a.profiles?a.profiles.gamertag:"?";
+    const club=a.preferred_club&&teams[a.preferred_club]?teams[a.preferred_club].name:(a.preferred_club||"No preference");
+    const sc=a.status==="approved"?"var(--win)":(a.status==="denied"?"var(--loss)":"var(--frost)");
+    return `<div class="owner-app">
+      <div class="oa-head"><div class="oa-who"><b>${esc(g)}</b><span class="oa-status" style="color:${sc};border-color:${sc}">${a.status}</span></div>
+        <div class="oa-meta">${esc(a.ea_id)||"—"} · ${esc(a.timezone)||"—"} · ${esc(a.availability)||"—"} · Prefers: <b>${esc(club)}</b></div></div>
+      ${a.experience?`<div class="oa-block"><span>Experience</span><p>${esc(a.experience)}</p></div>`:""}
+      ${a.pitch?`<div class="oa-block"><span>Pitch</span><p>${esc(a.pitch)}</p></div>`:""}
+      <div class="oa-actions"><button class="mini good oa-set" data-id="${a.id}" data-status="approved">Approve</button><button class="mini oa-set" data-id="${a.id}" data-status="denied">Deny</button><button class="mini oa-set" data-id="${a.id}" data-status="pending">Reset</button><button class="mini danger oa-del" data-id="${a.id}" data-name="${esc(g)}">Delete</button></div>
+    </div>`;}).join("");
+}
+async function setOwnerStatus(id,status){
+  const {error}=await sb.from("owner_applications").update({status,updated_at:new Date().toISOString()}).eq("id",id);
+  if(error){toast("Couldn't update",error.message);return;}
+  toast("Application "+status,"");loadOwnerApps();
+}
+document.addEventListener("click",e=>{
+  const s=e.target.closest(".oa-set");if(s){setOwnerStatus(s.dataset.id,s.dataset.status);return;}
+  const d=e.target.closest(".oa-del");if(d){const name=d.dataset.name||"this application";
+    confirmModal("Delete "+name+"'s application?","This permanently removes their owner application. This can't be undone.","Delete Application",async()=>{
+      const {error}=await sb.from("owner_applications").delete().eq("id",d.dataset.id);
+      if(error){toast("Couldn't delete",error.message);return;}
+      toast("Application deleted","");loadOwnerApps();});}
+});
 async function assignRegistration(btn){
   const code=(document.querySelector('.ra-team[data-reg="'+btn.dataset.reg+'"]')||{}).value;
   const teamId=teamIdOf(code);if(!teamId){toast("Pick a club","");return;}
