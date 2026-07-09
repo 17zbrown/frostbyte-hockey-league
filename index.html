@@ -158,7 +158,32 @@
   .live-tag{display:inline-flex;align-items:center;gap:6px;border-color:var(--live)!important;color:#fff!important;background:var(--live);font-weight:700;text-decoration:none}
   .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;animation:livePulse 1.4s infinite}
   @keyframes livePulse{0%,100%{opacity:1}50%{opacity:.3}}
-  @media(prefers-reduced-motion:reduce){.live-dot{animation:none}}
+  @media(prefers-reduced-motion:reduce){.live-dot,.live-orb{animation:none}}
+
+  /* Live-games dashboard module */
+  .live-section{padding:26px 0 2px}
+  .live-head{display:flex;align-items:center;gap:11px;margin-bottom:15px}
+  .live-head h3{font-family:var(--f-display);text-transform:uppercase;font-size:22px;letter-spacing:.02em;color:var(--ice);margin:0}
+  .live-sub{font-family:var(--f-cond);font-weight:500;letter-spacing:.06em;text-transform:uppercase;font-size:12px;color:var(--fog-dim)}
+  .live-orb{width:11px;height:11px;border-radius:50%;background:var(--live);animation:liveOrb 1.8s infinite}
+  @keyframes liveOrb{0%{box-shadow:0 0 0 0 #d81e3f5c}70%{box-shadow:0 0 0 9px #d81e3f00}100%{box-shadow:0 0 0 0 #d81e3f00}}
+  .live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(282px,1fr));gap:16px}
+  .live-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-l);padding:15px 18px;box-shadow:var(--sh-1)}
+  .live-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+  .live-time{font-family:var(--f-mono);font-size:12.5px;font-weight:600;color:var(--fog)}
+  .live-badge{display:inline-flex;align-items:center;gap:6px;background:var(--live);color:#fff;font-family:var(--f-cond);font-weight:700;font-size:11.5px;letter-spacing:.06em;padding:3px 9px;border-radius:100px}
+  .live-onnow{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--fog-dim);border:1px solid var(--line);padding:3px 9px;border-radius:100px}
+  .live-matchup{display:flex;flex-direction:column;gap:9px}
+  .lm-team{display:flex;align-items:center;gap:10px;min-width:0}
+  .lm-team b{font-family:var(--f-cond);font-weight:600;font-size:15px;letter-spacing:.01em;text-transform:uppercase;color:var(--ice);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .lm-ha{font-family:var(--f-cond);font-weight:500;font-size:10px;letter-spacing:.09em;color:var(--fog-dim);flex-shrink:0}
+  .live-streams{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}
+  .live-stream{display:inline-flex;align-items:center;gap:6px;background:#9146ff17;color:#9146ff;text-decoration:none;font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.02em;padding:5px 9px;border-radius:6px}
+  .live-stream svg{width:13px;height:13px}
+  .live-stream:hover{background:#9146ff2b}
+  .live-foot{display:flex;align-items:center;justify-content:space-between;margin-top:13px;padding-top:11px;border-top:1px solid var(--line-soft)}
+  .live-lobby{font-size:12px;color:var(--fog);font-weight:600}
+  .live-mc{background:none;border:0;color:var(--frost);font-family:var(--f-cond);font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;padding:2px}
 
   /* ============================ CARDS / GRID ============================ */
   .card{background:linear-gradient(180deg,#0c1e2f,#0a1a29);border:1px solid var(--line);border-radius:var(--r-l);box-shadow:var(--sh-1)}
@@ -1174,6 +1199,11 @@
       </div>
     </div></div></section>
 
+    <section class="live-section" id="liveGamesModule" style="display:none"><div class="wrap">
+      <div class="live-head"><span class="live-orb"></span><h3>Live Now</h3><span class="live-sub" id="liveGamesSub"></span></div>
+      <div class="live-grid" id="liveGamesGrid"></div>
+    </div></section>
+
     <section class="dash"><div class="wrap"><div class="dash-grid">
       <div class="stack">
         <div class="card"><div class="card-h"><h3>League Standings</h3><span class="lnk" data-go="standings">Full table →</span></div><div id="homeStandings"></div></div>
@@ -1815,6 +1845,43 @@ async function loadSchedule(){
   liveSchedule=Object.keys(byWk).map(Number).sort((a,b)=>a-b).map(wk=>({wk:"Week "+wk,n:wk,games:byWk[wk]}));
 }
 function findGameById(id){for(const wk of liveSchedule)for(const g of wk.games)if(g.id===id)return g;return null;}
+/* Live-games dashboard module — shows matchups being played right now (time-based,
+   never live scores) + a LIVE badge when a rostered player is streaming on Twitch. */
+const LIVE_WIN_BEFORE=10*60*1000, LIVE_WIN_AFTER=55*60*1000;
+async function renderLiveGames(){
+  const mod=$("#liveGamesModule");if(!mod)return;
+  const now=Date.now();
+  const live=[];
+  (liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{
+    if(g.done||!g.when)return;
+    const t=new Date(g.when).getTime();if(isNaN(t))return;
+    if(t<=now+LIVE_WIN_BEFORE && t>=now-LIVE_WIN_AFTER)live.push(g);
+  }));
+  if(!live.length){mod.style.display="none";return;}
+  // which rostered players are live on Twitch, grouped by club code
+  const streamers={};
+  if(sb&&openSeason){try{
+    const {data}=await sb.from("roster_spots").select("team_id, profiles!inner(gamertag,twitch,live)")
+      .eq("season_id",openSeason.id).eq("profiles.live",true);
+    (data||[]).forEach(r=>{const c=codeOfId(r.team_id);if(!c||!r.profiles||!r.profiles.twitch)return;(streamers[c]=streamers[c]||[]).push(r.profiles);});
+  }catch(e){}}
+  mod.style.display="";
+  const sub=$("#liveGamesSub");if(sub)sub.textContent=live.length+" game"+(live.length===1?"":"s")+" on the ice";
+  live.sort((a,b)=>new Date(a.when)-new Date(b.when));
+  $("#liveGamesGrid").innerHTML=live.map(g=>{
+    const s=[].concat(streamers[g.a]||[],streamers[g.b]||[]);
+    const hasLive=s.length>0;
+    return `<div class="live-card">
+      <div class="live-card-top"><span class="live-time">${fmtGameTime(g.when)} ET</span>
+        ${hasLive?'<span class="live-badge"><span class="live-dot"></span>LIVE</span>':'<span class="live-onnow">On now</span>'}</div>
+      <div class="live-matchup">
+        <div class="lm-team">${badge(g.a,28)}<b>${esc(teams[g.a].name)}</b><span class="lm-ha">HOME</span></div>
+        <div class="lm-team">${badge(g.b,28)}<b>${esc(teams[g.b].name)}</b><span class="lm-ha">AWAY</span></div>
+      </div>
+      ${hasLive?`<div class="live-streams">${s.map(p=>`<a class="live-stream" href="https://twitch.tv/${encodeURIComponent(p.twitch)}" target="_blank" rel="noopener noreferrer">${TWITCH_GLYPH}<span>${esc(p.gamertag)}</span></a>`).join("")}</div>`:""}
+      <div class="live-foot"><span class="live-lobby mono">Lobby #${g.code||"—"}</span><button class="live-mc" data-match="${g.id}">Match card →</button></div>
+    </div>`;}).join("");
+}
 /* EA private-lobby "match card" for a scheduled game. */
 function showMatchCard(g){
   if(!g)return;const home=teams[g.a],away=teams[g.b];if(!home||!away)return;
@@ -2389,7 +2456,7 @@ async function sbInit(){
     await loadStandings();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     renderTeamsGrid();renderHeroCarousel();renderHeroRink();
-    renderFixtures();renderSchedule();renderTxns();renderNews();
+    renderFixtures();renderSchedule();renderTxns();renderNews();renderLiveGames();
     renderLeaderList($("#homeLeaders"),"points");
     const lba=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lba?lba.dataset.lb:"points");
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
@@ -3095,7 +3162,7 @@ async function saveGameTime(btn){
   const {error}=await sb.from("games").update({scheduled_at:iso}).eq("id",btn.dataset.game);
   if(error){toast("Couldn't save time",error.message);return;}
   toast("Game time set",iso?fmtGameDate(iso)+" · "+fmtGameTime(iso):"Time cleared.");
-  loadScheduleAdmin();await loadSchedule();renderSchedule();renderFixtures();
+  loadScheduleAdmin();await loadSchedule();renderSchedule();renderFixtures();renderLiveGames();
 }
 
 /* ---- Games & Stats — final score entry ---- */
@@ -3171,7 +3238,7 @@ async function refreshTeamsEverywhere(){
   const {data:tms}=await sb.from("teams").select("*").order("code");if(tms){dbTeams=tms;buildTeams();}
   await loadStandings();await loadSchedule();
   renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
-  renderTeamsGrid();renderFixtures();renderSchedule();renderRankings();renderBracket();renderHeroRink();
+  renderTeamsGrid();renderFixtures();renderSchedule();renderRankings();renderBracket();renderHeroRink();renderLiveGames();
   if($("#membersBody"))loadMembers();
   if(adminSeason){loadGamesAdmin();loadScheduleAdmin();}
 }
@@ -3394,6 +3461,8 @@ renderChannels();
 renderChat();
 renderOnline();
 sbInit();   // connect Supabase: load teams/open season, restore session, wire auth UI
+renderLiveGames();
+setInterval(renderLiveGames, 60000);   // keep the Live Now module current as games start/end and streamers go live
 
 </script>
 </body>
