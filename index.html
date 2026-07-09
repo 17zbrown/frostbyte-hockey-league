@@ -1416,7 +1416,8 @@
             <div class="ef-row"><label>Code</label><input id="tm-code" maxlength="3" placeholder="GLK" style="text-transform:uppercase" /></div>
             <div class="ef-row"><label>Club name</label><input id="tm-name" placeholder="Glacier Kings" /></div>
           </div>
-          <div class="ef-grid" style="grid-template-columns:1fr 120px;gap:12px;margin-top:10px">
+          <div class="ef-grid" style="grid-template-columns:1fr 1fr 120px;gap:12px;margin-top:10px">
+            <div class="ef-row"><label>Conference</label><input id="tm-conf" placeholder="Optional" /></div>
             <div class="ef-row"><label>Division</label><select id="tm-div"><option value="Frost">Frost</option><option value="Byte">Byte</option></select></div>
             <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#4fe3e6" style="height:38px;padding:2px" /></div>
           </div>
@@ -1488,7 +1489,7 @@ const TEAM_PALETTE = ["#4fe3e6","#8fb8d6","#c7d8e6","#7ce0a8","#ff8a5c","#ffd166
 function buildTeams(){
   teams={};TEAM_KEYS=[];
   (dbTeams||[]).forEach((t,i)=>{
-    teams[t.code]={id:t.id,code:t.code,name:t.name,c:t.color||TEAM_PALETTE[i%TEAM_PALETTE.length],div:t.division,city:t.city||"",arena:t.arena||"",est:t.founded_season||1};
+    teams[t.code]={id:t.id,code:t.code,name:t.name,c:t.color||TEAM_PALETTE[i%TEAM_PALETTE.length],div:t.division,conf:t.conference||"",city:t.city||"",arena:t.arena||"",est:t.founded_season||1};
     TEAM_KEYS.push(t.code);
   });
 }
@@ -1738,9 +1739,15 @@ function renderStandings(el,full){
   const pl=document.querySelector("#standingsPill");if(pl)pl.textContent=noGames?"Pre-season":"Live";
   const note=noGames?`<div class="empty-note">Season ${openSeason?openSeason.number:1} hasn't dropped the puck yet — standings update automatically as game results are reported.</div>`:"";
   let html=head+"<tbody>";
-  ["Frost","Byte"].forEach(div=>{
-    html+=`<tr><td colspan="10" class="divlabel">${div} Division</td></tr>`;
-    const d=rows.filter(r=>teams[r[0]].div===div).sort((a,b)=>pts(b)-pts(a));
+  // Group by conference if any club has one, otherwise by division — both derived
+  // dynamically so the table scales from a handful of clubs up to 32 / 4 conferences.
+  const useConf=rows.some(r=>teams[r[0]]&&teams[r[0]].conf);
+  const groupOf=r=>useConf?(teams[r[0]].conf||"Unassigned"):((teams[r[0]].div||"")+(teams[r[0]].div?" Division":"League"));
+  const order=[];rows.forEach(r=>{const g=groupOf(r);if(!order.includes(g))order.push(g);});
+  order.sort((a,b)=>a.localeCompare(b));
+  order.forEach(g=>{
+    html+=`<tr><td colspan="10" class="divlabel">${esc(g)}</td></tr>`;
+    const d=rows.filter(r=>groupOf(r)===g).sort((a,b)=>pts(b)-pts(a));
     html+=d.map((r,i)=>standRow(r,i+1,false)).join("");});
   el.innerHTML=note+html+"</tbody></table>";
 }
@@ -1961,7 +1968,7 @@ function renderTeamsGrid(){
     const diff=r[5]-r[6];
     return `<div class="team-card" data-go="team" data-param="${code}">
       <div class="tc-top">${badge(code,50)}
-        <div><h3>${t.name}</h3><div class="tc-sub">${t.div} Division · ${t.city}</div></div>
+        <div><h3>${t.name}</h3><div class="tc-sub">${t.conf?esc(t.conf)+" · ":""}${t.div} Division${t.city?" · "+esc(t.city):""}</div></div>
         <div style="position:absolute;right:-30px;top:-30px;width:120px;height:120px;border-radius:50%;background:${t.c};opacity:.14"></div></div>
       <div class="tc-stats">
         <div><div class="n">${r[2]}-${r[3]}-${r[4]}</div><div class="l">Record</div></div>
@@ -3024,10 +3031,10 @@ async function loadTeamsAdmin(){
   const spotCount={},gameCount={};
   (spots||[]).forEach(s=>spotCount[s.team_id]=(spotCount[s.team_id]||0)+1);
   (games||[]).forEach(g=>{gameCount[g.home_team_id]=(gameCount[g.home_team_id]||0)+1;gameCount[g.away_team_id]=(gameCount[g.away_team_id]||0)+1;});
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Division</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Conference</th><th>Division</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     tms.map(t=>{const sc=spotCount[t.id]||0,gc=gameCount[t.id]||0;const locked=sc>0||gc>0;
-      return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#1273b8'};color:#fff">${t.code}</span><div><b>${t.name}</b></div></div></td>
-      <td class="mono">${t.code}</td><td><span class="posbadge">${t.division}</span></td>
+      return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#1273b8'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
+      <td class="mono">${t.code}</td><td style="color:var(--fog)">${t.conference?esc(t.conference):"—"}</td><td><span class="posbadge">${t.division}</span></td>
       <td style="font-size:12.5px;color:var(--fog)">${sc?sc+" player"+(sc===1?"":"s"):""}${sc&&gc?" · ":""}${gc?gc+" games":""}${!sc&&!gc?"—":""}</td>
       <td style="text-align:right"><div class="act"><button class="mini tm-edit" data-id="${t.id}">Edit</button>${locked?'<span style="color:var(--fog);font-size:12px">In use</span>':`<button class="mini danger tm-del" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Remove</button>`}</div></td></tr>`;}).join("")+
     "</tbody></table></div>";
@@ -3037,15 +3044,16 @@ async function addTeam(){
   const code=($("#tm-code").value||"").trim().toUpperCase();
   const name=($("#tm-name").value||"").trim();
   const division=$("#tm-div").value;const color=$("#tm-color").value||null;
+  const conference=($("#tm-conf").value||"").trim()||null;
   if(!/^[A-Z]{2,3}$/.test(code)){toast("Invalid code","Use a 2–3 letter club code, e.g. GLK.");return;}
   if(!name){toast("Name required","Give the club a name.");return;}
   const btn=$("#addTeamBtn");btn.disabled=true;
-  const {error}=await sb.from("teams").insert({code,name,division,color});
+  const {error}=await sb.from("teams").insert({code,name,division,conference,color});
   btn.disabled=false;
   if(error){toast("Couldn't add club",/duplicate|unique/i.test(error.message)?"That club code already exists.":error.message);return;}
   await refreshTeamsEverywhere();loadTeamsAdmin();
   toast("Club added",name+" ("+code+") joined the league.");
-  $("#tm-code").value="";$("#tm-name").value="";
+  $("#tm-code").value="";$("#tm-name").value="";$("#tm-conf").value="";
 }
 async function removeTeam(btn){
   const name=btn.dataset.name||"this club";
@@ -3061,13 +3069,14 @@ function editTeam(btn){
   formModal("Edit "+t.name,[
     {key:"name",label:"Club name",value:t.name},
     {key:"code",label:"Code (2–3 letters)",value:t.code},
+    {key:"conference",label:"Conference (optional)",value:t.conference||""},
     {key:"division",label:"Division",type:"select",value:t.division,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
     {key:"color",label:"Club color",type:"color",value:t.color||"#4fe3e6"}
   ],async v=>{
     const code=(v.code||"").trim().toUpperCase(),name=(v.name||"").trim();
     if(!/^[A-Z]{2,3}$/.test(code)){toast("Invalid code","Use a 2–3 letter club code, e.g. GLK.");return;}
     if(!name){toast("Name required","Give the club a name.");return;}
-    const {error}=await sb.from("teams").update({name,code,division:v.division,color:v.color}).eq("id",t.id);
+    const {error}=await sb.from("teams").update({name,code,division:v.division,conference:(v.conference||"").trim()||null,color:v.color}).eq("id",t.id);
     if(error){toast("Couldn't save",/duplicate|unique/i.test(error.message)?"That club code is already taken.":error.message);return;}
     await refreshTeamsEverywhere();loadTeamsAdmin();
     toast("Club updated",name+" ("+code+") saved.");
