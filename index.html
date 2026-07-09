@@ -1713,7 +1713,7 @@ const goalieStats={
 
 /* ------------------------------ ROUTER ------------------------------ */
 let currentParam=null;
-function go(view,param){
+function go(view,param,fromPop){
   const fk=viewFeature(view);if(fk&&!featureOn(fk)){toast("Feature unavailable","The commissioner has turned off "+features.find(x=>x.key===fk).label+".");view="home";}
   if(MANAGER_VIEWS.has(view)&&!isManager()){toast("Managers only","The draft pool is available to club managers.");view="home";}
   currentParam=param!==undefined?param:null;
@@ -1731,8 +1731,17 @@ function go(view,param){
   if(view==="stats"&&typeof renderMyStats==="function")renderMyStats();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
+  // browser history: push a state on real navigation so Back returns to the prior in-app page
+  if(!fromPop){try{
+    const st={fbView:view,fbParam:currentParam};
+    const cur=history.state;
+    if(cur&&cur.fbView===st.fbView&&cur.fbParam===st.fbParam)history.replaceState(st,"");
+    else history.pushState(st,"");
+  }catch(e){}}
 }
 function closeMobile(){$("#mobileMenu").classList.remove("on");$("#ham").setAttribute("aria-expanded","false");}
+try{history.replaceState({fbView:"home",fbParam:null},"");}catch(e){}
+window.addEventListener("popstate",e=>{const st=e.state;if(st&&st.fbView)go(st.fbView,st.fbParam,true);else go("home",null,true);});
 document.addEventListener("click",e=>{const t=e.target.closest("[data-go]");if(t){e.preventDefault();go(t.dataset.go,t.dataset.param);}});
 document.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches("[data-go]")){e.preventDefault();go(e.target.dataset.go,e.target.dataset.param);}});
 $("#ham").addEventListener("click",()=>{const m=$("#mobileMenu");const open=m.classList.toggle("on");$("#ham").setAttribute("aria-expanded",open);});
