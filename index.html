@@ -2681,7 +2681,7 @@ async function loadRegistrations(){
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       return `<tr><td><b>${g}</b></td><td class="mono">${r.ea_id||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
       <td>${done?'<span style="color:var(--win);font-weight:600">On a roster</span>':`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${teams[k].name}</option>`).join("")}</select>`}</td>
-      <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${g}">Delete</button></div></td></tr>`;}).join("")+
+      <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${g.replace(/"/g,'&quot;')}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${g}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
 }
 async function deleteRegistration(btn){
@@ -2702,7 +2702,8 @@ async function assignRegistration(btn){
   const {error}=await sb.from("roster_spots").insert({season_id:adminSeason.id,team_id:teamId,profile_id:btn.dataset.prof,jersey_number:num,position:btn.dataset.pos});
   if(error){toast("Couldn't add player",error.message);return;}
   await sb.from("season_registrations").update({status:"assigned"}).eq("id",btn.dataset.reg);
-  await sb.from("transactions").insert({season_id:adminSeason.id,type:"sign",description:"Signed to <b>"+teams[code].name+"</b> · #"+num});
+  const pname=btn.dataset.name||"a player";
+  await sb.from("transactions").insert({season_id:adminSeason.id,type:"sign",description:teams[code].name+" signed <b>"+pname+"</b> ("+(btn.dataset.pos||"")+" #"+num+")"});
   toast("Player added","Assigned to "+teams[code].name+" · #"+num+".");
   loadRegistrations();loadStandings();
 }
