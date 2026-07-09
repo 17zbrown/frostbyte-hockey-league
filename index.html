@@ -468,6 +468,12 @@
   .oc-status.oc-countered{color:var(--gold);border-color:var(--gold)}
   .oc-acts{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   .off-wait{font-family:var(--f-cond);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog-dim)}
+  .pick-head{font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin:13px 0 7px}
+  .pick-list{display:flex;flex-direction:column;gap:6px}
+  .pick-chip{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;background:var(--panel);font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--ice);transition:.15s}
+  .pick-chip:hover{border-color:#9cc7e6}
+  .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
+  .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#fff;padding:2px 6px;border-radius:4px;flex-shrink:0}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
   .lineup-night{margin-bottom:20px}
   .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
@@ -1532,9 +1538,11 @@
         <div class="card" style="padding:22px 24px">
         <div class="next-game-bar" style="margin-bottom:22px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Propose a trade</b><span style="color:var(--fog);font-size:13.5px">Pick players from each side and send it — a trade goes through the moment the other GM accepts. No commissioner approval.</span></div>
         <div class="trade-grid">
-          <div class="trade-col"><h4><span id="tradeMyBadge" style="line-height:0"></span> <span id="tradeMyName">Glacier Kings</span> send</h4><div id="tradeMine"></div></div>
+          <div class="trade-col"><h4><span id="tradeMyBadge" style="line-height:0"></span> <span id="tradeMyName">Glacier Kings</span> send</h4><div id="tradeMine"></div>
+            <div class="pick-head" id="tradeMinePicksHead" hidden>Draft picks</div><div class="pick-list" id="tradeMinePicks"></div></div>
           <div class="trade-mid"><div class="swap-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13l-3-3M17 16H4l3 3"/></svg></div><span class="pill dim">Swap</span></div>
-          <div class="trade-col"><h4><select id="tradePartner" aria-label="Trade partner club" style="background:#fff;border:1px solid var(--line);border-radius:4px;color:var(--ice);font-family:var(--f-cond);font-size:13px;letter-spacing:.04em;text-transform:uppercase;padding:5px 8px"></select> send</h4><div id="tradeTheirs"></div></div>
+          <div class="trade-col"><h4><select id="tradePartner" aria-label="Trade partner club" style="background:#fff;border:1px solid var(--line);border-radius:4px;color:var(--ice);font-family:var(--f-cond);font-size:13px;letter-spacing:.04em;text-transform:uppercase;padding:5px 8px"></select> send</h4><div id="tradeTheirs"></div>
+            <div class="pick-head" id="tradeTheirsPicksHead" hidden>Draft picks</div><div class="pick-list" id="tradeTheirsPicks"></div></div>
         </div>
         <div class="trade-foot"><div class="mono" style="color:var(--fog);font-size:13px" id="tradeSummary">Select at least one player from each side.</div><button class="btn btn-frost" id="proposeTrade">Propose Trade</button></div>
       </div></div>
@@ -1575,6 +1583,7 @@
         <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
         <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
         <button class="mgr-tab" data-atab="teams">Teams</button>
+        <button class="mgr-tab" data-atab="draft">Draft</button>
         <button class="mgr-tab" data-atab="news">News</button>
         <button class="mgr-tab" data-atab="discord">Discord</button>
       </div>
@@ -1610,6 +1619,15 @@
           </div>
           <button class="btn btn-frost" id="addTeamBtn" style="margin-top:16px">Add Club</button></div>
         <div class="card" style="margin-top:16px"><div class="card-h"><h3>Current Clubs</h3><span class="pill" id="teamsAdminCount"></span></div><div id="teamsAdminBody"></div></div></div>
+      <div class="mgr-panel" id="atab-draft">
+        <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 14px"><h3>Generate Draft Picks</h3></div>
+          <p style="margin:0 0 12px;color:var(--fog);font-size:13px">Mint a full set of picks — one per club per round — for a draft. Clubs can then trade them in the Trade Center.</p>
+          <div class="ef-grid" style="grid-template-columns:150px 150px 1fr;gap:12px;align-items:end">
+            <div class="ef-row"><label for="dp-season">Draft season #</label><input id="dp-season" type="number" min="1" max="99" /></div>
+            <div class="ef-row"><label for="dp-rounds">Rounds</label><input id="dp-rounds" type="number" min="1" max="20" value="5" /></div>
+            <button class="btn btn-frost" id="genPicksBtn" style="height:38px">Generate Picks</button></div></div>
+        <div class="card"><div class="card-h"><h3>Draft Board</h3><span class="pill" id="draftPickCount"></span></div>
+          <div id="draftAdminBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-news"><div class="card" style="padding:24px 26px"><div class="field"><label for="an-title">Headline</label><input id="an-title" placeholder="Kings clinch top seed with OT thriller" /></div>
         <div class="field"><div class="row2"><div><label for="an-cat">Category</label><select id="an-cat"><option>Game Recap</option><option>Trade Buzz</option><option>Feature</option><option>League News</option></select></div>
           <div><label for="an-author">Byline</label><input id="an-author" value="Frostbyte Post" /></div></div></div>
@@ -2880,8 +2898,16 @@ $("#rosterBody").addEventListener("click",e=>{
     toast("Player waived",p.name+" is off your roster.");renderRoster();});});
 // trade
 let tradeSel={mine:new Set(),theirs:new Set()};
+let pickSel={mine:new Set(),theirs:new Set()};
 let myTradesById={},counteringTradeId=null;
-let tradeMineList=[],tradeTheirsList=[];
+let tradeMineList=[],tradeTheirsList=[],minePicksList=[],theirsPicksList=[];
+async function loadPicksFor(code){
+  const tid=teamIdOf(code);if(!tid||!sb)return [];
+  const {data}=await sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id").eq("current_team_id",tid).eq("used",false).order("season_number").order("round");
+  return (data||[]).map(p=>({id:p.id,season:p.season_number,round:p.round,orig:p.original_team_id,owner:p.current_team_id}));
+}
+function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;return `’${String(p.season).slice(-2)} R${p.round}`+(oc?` · via ${oc}`:"");}
+function pickCard(list,side){return list.map((p,i)=>`<div class="pick-chip" data-pside="${side}" data-i="${i}"><span class="pk-badge">PICK</span>${pickLabel(p)}</div>`).join("");}
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
   const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
@@ -2892,25 +2918,34 @@ function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;c
   return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
 async function renderTrade(){
   if(!sb||!openSeason)return;
-  tradeSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;retentionSel={};
+  tradeSel={mine:new Set(),theirs:new Set()};pickSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;retentionSel={};
   const sel=$("#tradePartner");if(sel&&!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
   const partner=(sel&&clubByName(sel.value))||TEAM_KEYS.find(k=>k!==currentClub);
   tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
+  minePicksList=await loadPicksFor(currentClub);theirsPicksList=await loadPicksFor(partner);
   const me=$("#tradeMine");if(me)me.innerHTML=tradeCard(tradeMineList,"mine");
   const th=$("#tradeTheirs");if(th)th.innerHTML=tradeCard(tradeTheirsList,"theirs");
+  const mp=$("#tradeMinePicks");if(mp)mp.innerHTML=pickCard(minePicksList,"mine");
+  const tp=$("#tradeTheirsPicks");if(tp)tp.innerHTML=pickCard(theirsPicksList,"theirs");
+  if($("#tradeMinePicksHead"))$("#tradeMinePicksHead").hidden=!minePicksList.length;
+  if($("#tradeTheirsPicksHead"))$("#tradeTheirsPicksHead").hidden=!theirsPicksList.length;
   updateTradeSummary();loadMyTrades();
 }
 $("#tradePartner").addEventListener("change",renderTrade);
 document.addEventListener("click",e=>{const it=e.target.closest(".trade-item");if(!it)return;const side=it.dataset.side,i=+it.dataset.i;
   if(tradeSel[side].has(i)){tradeSel[side].delete(i);it.classList.remove("sel");}else{tradeSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
+document.addEventListener("click",e=>{const it=e.target.closest(".pick-chip");if(!it)return;const side=it.dataset.pside,i=+it.dataset.i;
+  if(pickSel[side].has(i)){pickSel[side].delete(i);it.classList.remove("sel");}else{pickSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
 let retentionSel={};   // pid -> retained percent (on players I'm sending)
 function updateTradeSummary(){const el=$("#tradeSummary");if(!el)return;
   const pb=$("#proposeTrade");const locked=seasonMovesLocked();if(pb)pb.disabled=locked;
   if(locked){el.innerHTML='<b style="color:var(--loss)">Roster moves are locked</b> — the trade deadline has passed or a commissioner locked moves.';return;}
   const mineSel=[...tradeSel.mine].map(i=>tradeMineList[i]).filter(Boolean);
+  const mineP=pickSel.mine.size,theirsP=pickSel.theirs.size;
   const t=tradeSel.theirs.size;
-  if(!mineSel.length&&!t){el.innerHTML="Select at least one player from each side.";return;}
-  let html=`<div class="trade-count">Sending <b>${mineSel.length}</b> · Receiving <b>${t}</b></div>`;
+  if(!mineSel.length&&!t&&!mineP&&!theirsP){el.innerHTML="Add at least one player or draft pick on each side.";return;}
+  const fmtSide=(pl,pk)=>{const a=[];if(pl)a.push(pl+" player"+(pl===1?"":"s"));if(pk)a.push(pk+" pick"+(pk===1?"":"s"));return a.length?a.join(" + "):"nothing";};
+  let html=`<div class="trade-count">Sending <b>${fmtSide(mineSel.length,mineP)}</b> · Receiving <b>${fmtSide(t,theirsP)}</b></div>`;
   if(mineSel.length){
     html+='<div class="ret-list">'+mineSel.map(p=>{
       const pct=retentionSel[p.pid]||0,retained=Math.round((p.salary||0)*pct/100),net=(p.salary||0)-retained;
@@ -2924,11 +2959,12 @@ $("#tradeSummary").addEventListener("change",e=>{const s=e.target.closest(".ret-
 $("#proposeTrade").addEventListener("click",async()=>{
   if(!sb||!authUser){toast("Sign in first","");return;}
   if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
-  if(!tradeSel.mine.size||!tradeSel.theirs.size){toast("Incomplete trade","Pick at least one player from each side.");return;}
+  if((!tradeSel.mine.size&&!pickSel.mine.size)||(!tradeSel.theirs.size&&!pickSel.theirs.size)){toast("Incomplete trade","Add at least one player or draft pick on each side.");return;}
   const partnerCode=clubByName($("#tradePartner").value)||TEAM_KEYS.find(k=>k!==currentClub);
   const offered=[...tradeSel.mine].map(i=>tradeMineList[i].pid),requested=[...tradeSel.theirs].map(i=>tradeTheirsList[i].pid);
+  const offeredPicks=[...pickSel.mine].map(i=>minePicksList[i].id),requestedPicks=[...pickSel.theirs].map(i=>theirsPicksList[i].id);
   const retention={};[...tradeSel.mine].forEach(i=>{const p=tradeMineList[i];const pct=retentionSel[p.pid]||0;if(pct>0)retention[p.pid]=pct;});
-  const {error}=await sb.from("trades").insert({season_id:openSeason.id,from_team_id:teamIdOf(currentClub),to_team_id:teamIdOf(partnerCode),from_profile_id:authUser.id,offered_profile_ids:offered,requested_profile_ids:requested,retention});
+  const {error}=await sb.from("trades").insert({season_id:openSeason.id,from_team_id:teamIdOf(currentClub),to_team_id:teamIdOf(partnerCode),from_profile_id:authUser.id,offered_profile_ids:offered,requested_profile_ids:requested,offered_pick_ids:offeredPicks,requested_pick_ids:requestedPicks,retention});
   if(error){toast("Couldn't propose",error.message);return;}
   const wasCounter=counteringTradeId;
   if(counteringTradeId){await sb.from("trades").update({status:"declined",updated_at:new Date().toISOString()}).eq("id",counteringTradeId);counteringTradeId=null;}
@@ -2947,7 +2983,9 @@ async function loadMyTrades(){
   const locked=seasonMovesLocked();
   myTradesById={};trades.forEach(x=>myTradesById[x.id]=x);
   el.innerHTML=trades.map(t=>{const incoming=t.to_team_id===myTid;const fC=codeT(t.from_team_id),tC=codeT(t.to_team_id);
-    const off=t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—",req=t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||"—";
+    const pkTxt=n=>n?` <span style="color:var(--frost)">+ ${n} pick${n>1?"s":""}</span>`:"";
+    const offP=(t.offered_pick_ids||[]).length,reqP=(t.requested_pick_ids||[]).length;
+    const off=(t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||(offP?"":"—"))+pkTxt(offP),req=(t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||(reqP?"":"—"))+pkTxt(reqP);
     const ret=t.retention||{};const retNote=Object.keys(ret).length?`<div class="to-ret">${esc(teams[fC].name)} retains ${Object.entries(ret).map(([pid,pct])=>pct+"% of "+(nameOf[pid]||"?")).join(", ")}</div>`:"";
     return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name}</div>
       <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div>${retNote}</div>
@@ -3272,7 +3310,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();
+    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
@@ -3588,6 +3626,49 @@ async function refreshTeamsEverywhere(){
   if($("#membersBody"))loadMembers();
   if(adminSeason){loadGamesAdmin();loadScheduleAdmin();}
 }
+/* ---- Draft picks (commissioner) ---- */
+async function loadDraftAdmin(){
+  const el=$("#draftAdminBody"),cnt=$("#draftPickCount");if(!el||!sb)return;
+  const si=$("#dp-season");if(si&&!si.value)si.value=(openSeason?openSeason.number+1:2);
+  const {data}=await sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,used,player_id").order("season_number").order("round");
+  if(cnt)cnt.textContent=(data?data.length:0)+" picks";
+  if(!data||!data.length){el.innerHTML=ADMIN_EMPTY("No picks yet","Generate a set of draft picks above to build the board.");return;}
+  const usedIds=[...new Set(data.filter(p=>p.player_id).map(p=>p.player_id))];
+  const nameOf={};
+  if(usedIds.length){const {data:profs}=await sb.from("profiles").select("id,gamertag").in("id",usedIds);(profs||[]).forEach(p=>nameOf[p.id]=p.gamertag);}
+  const bySeason={};data.forEach(p=>{(bySeason[p.season_number]=bySeason[p.season_number]||[]).push(p);});
+  el.innerHTML=Object.keys(bySeason).sort((a,b)=>a-b).map(sn=>`<div class="gc-week">Season ${sn} Draft</div>`+
+    '<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Round</th><th>Owner</th><th>Origin</th><th>Result</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
+    bySeason[sn].map(p=>{const oc=codeOfId(p.current_team_id),ocn=oc&&teams[oc]?teams[oc].name:'—';const orig=p.original_team_id&&p.original_team_id!==p.current_team_id?codeOfId(p.original_team_id):null;
+      return `<tr><td>R${p.round}</td><td><b>${esc(ocn)}</b></td><td style="color:var(--fog)">${orig?'via '+esc(orig):'—'}</td>
+      <td>${p.used?'<span style="color:var(--win)">Drafted '+esc(nameOf[p.player_id]||'a player')+'</span>':'<span style="color:var(--fog)">Available</span>'}</td>
+      <td style="text-align:right">${p.used?'':`<button class="mini good dp-use" data-id="${p.id}">Make Pick</button>`}</td></tr>`;}).join('')+
+    '</tbody></table></div>').join('');
+}
+async function makeDraftPick(pickId){
+  if(!sb||!openSeason)return;
+  const {data:cons}=await sb.from("contracts").select("profile_id,is_manager, profiles(gamertag)").eq("status","active").lte("end_season",openSeason.number);
+  let opts=(cons||[]).filter(c=>!c.is_manager).map(c=>({value:c.profile_id,label:c.profiles?c.profiles.gamertag:'?'}));
+  const have=new Set(opts.map(o=>o.value));
+  const {data:regs}=await sb.from("season_registrations").select("profile_id, profiles(gamertag)").eq("season_id",openSeason.id);
+  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
+  const rostered=new Set((spots||[]).map(s=>s.profile_id));
+  (regs||[]).forEach(r=>{if(!rostered.has(r.profile_id)&&!have.has(r.profile_id)){have.add(r.profile_id);opts.push({value:r.profile_id,label:(r.profiles?r.profiles.gamertag:'?')+' (unsigned)'});}});
+  if(!opts.length){toast("No players","There are no available players to draft.");return;}
+  formModal("Make the pick",[{key:"player",label:"Draft player",type:"select",value:opts[0].value,options:opts}],async v=>{
+    const {error}=await sb.rpc("use_draft_pick",{p_pick:pickId,p_player:v.player});
+    if(error){toast("Couldn't make pick",error.message);return;}
+    toast("Pick made","Player drafted to the club.");loadDraftAdmin();loadTeamsAdmin();
+  });
+}
+$("#genPicksBtn")&&$("#genPicksBtn").addEventListener("click",async()=>{
+  if(!sb)return;const sn=+($("#dp-season").value||0),rounds=+($("#dp-rounds").value||5);
+  if(sn<1){toast("Enter a season #","Give the draft a season number.");return;}
+  const {data,error}=await sb.rpc("generate_draft_picks",{p_season_number:sn,p_rounds:rounds});
+  if(error){toast("Couldn't generate",error.message);return;}
+  toast("Picks generated",(data||0)+" new picks added for Season "+sn+".");loadDraftAdmin();
+});
+document.addEventListener("click",e=>{const b=e.target.closest(".dp-use");if(b)makeDraftPick(b.dataset.id);});
 async function loadTeamsAdmin(){
   const el=$("#teamsAdminBody");if(!el||!sb)return;
   const {data:tms}=await sb.from("teams").select("*").order("division").order("code");
