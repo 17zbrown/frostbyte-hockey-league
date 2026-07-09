@@ -156,6 +156,7 @@
   .tw-watch.live .tw-txt{color:#9146ff}
   .tw-own{display:flex;gap:8px;flex-wrap:wrap}
   .live-tag{display:inline-flex;align-items:center;gap:6px;border-color:var(--live)!important;color:#fff!important;background:var(--live);font-weight:700;text-decoration:none}
+  .ovr-tag{border-color:var(--frost)!important;color:#fff!important;background:var(--frost)}.ovr-tag b{font-size:14px}
   .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;animation:livePulse 1.4s infinite}
   @keyframes livePulse{0%,100%{opacity:1}50%{opacity:.3}}
   @media(prefers-reduced-motion:reduce){.live-dot,.live-orb{animation:none}}
@@ -474,6 +475,7 @@
   .pick-chip:hover{border-color:#9cc7e6}
   .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
   .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#fff;padding:2px 6px;border-radius:4px;flex-shrink:0}
+  .pk-ovr{font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--win);letter-spacing:0}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
   .lineup-night{margin-bottom:20px}
   .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
@@ -2309,7 +2311,7 @@ const POS_NAME={C:"Center",LW:"Left Wing",RW:"Right Wing",LD:"Left Defense",RD:"
 async function renderPlayerPage(id){
   const el=$("#playerPage");if(!el)return;
   if(!sb){el.innerHTML='<div class="empty-note">Player data will load on the live site.</div>';return;}
-  const {data:prof}=await sb.from("profiles").select("id,gamertag,role,twitch,live").eq("gamertag",id).maybeSingle();
+  const {data:prof}=await sb.from("profiles").select("id,gamertag,role,twitch,live,overall").eq("gamertag",id).maybeSingle();
   if(!prof){el.innerHTML=`<div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${id}</div><div class="empty-state"><h4>Player not found</h4><p>No registered player by that name.</p></div>`;return;}
   let spot=null,tc=null;
   if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
@@ -2332,6 +2334,7 @@ async function renderPlayerPage(id){
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
           ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
           ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}
+          ${prof.overall?`<span class="ph-tag ovr-tag"><b>${prof.overall}</b> OVR</span>`:''}
           ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div></div>
     </div>
     ${twitchBlock(prof)}
@@ -2694,14 +2697,15 @@ function toggleAcctMenu(open){const w=$("#acctWrap");if(!w)return;const btn=$("#
 function openEditProfile(){
   if(!authProfile||!sb){toast("Sign in first","Sign in with Discord to edit your profile.");return;}
   formModal("Edit Profile",[
+    {key:"overall",label:"EA overall (0–99)",type:"number",value:authProfile.overall||"",min:0,max:99},
     {key:"twitch",label:"Twitch handle",value:authProfile.twitch||""},
     {key:"live",label:"Live on Twitch right now",type:"select",value:authProfile.live?"on":"off",options:[{value:"off",label:"Not live"},{value:"on",label:"Live now"}]}
   ],async v=>{
     let tw=(v.twitch||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
-    const handle=tw||null,live=v.live==="on";
-    const {error}=await sb.from("profiles").update({twitch:handle,live}).eq("id",authUser.id);
+    const handle=tw||null,live=v.live==="on",ovr=(+v.overall>0&&+v.overall<=99)?+v.overall:null;
+    const {error}=await sb.from("profiles").update({twitch:handle,live,overall:ovr}).eq("id",authUser.id);
     if(error){toast("Couldn't save",error.message);return;}
-    authProfile.twitch=handle;authProfile.live=live;
+    authProfile.twitch=handle;authProfile.live=live;authProfile.overall=ovr;
     toast("Profile updated","Your profile changes are saved.");
     renderPlayerPage(authProfile.gamertag);renderSignupAuth();
   });
@@ -2900,13 +2904,15 @@ $("#rosterBody").addEventListener("click",e=>{
 let tradeSel={mine:new Set(),theirs:new Set()};
 let pickSel={mine:new Set(),theirs:new Set()};
 let myTradesById={},counteringTradeId=null;
-let tradeMineList=[],tradeTheirsList=[],minePicksList=[],theirsPicksList=[];
+let tradeMineList=[],tradeTheirsList=[],minePicksList=[],theirsPicksList=[],roundOvrAvg={};
 async function loadPicksFor(code){
   const tid=teamIdOf(code);if(!tid||!sb)return [];
   const {data}=await sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id").eq("current_team_id",tid).eq("used",false).order("season_number").order("round");
   return (data||[]).map(p=>({id:p.id,season:p.season_number,round:p.round,orig:p.original_team_id,owner:p.current_team_id}));
 }
-function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;return `’${String(p.season).slice(-2)} R${p.round}`+(oc?` · via ${oc}`:"");}
+async function loadRoundOvrAvg(){roundOvrAvg={};if(!sb)return;try{const {data}=await sb.from("draft_round_avg").select("round,avg_overall");(data||[]).forEach(r=>roundOvrAvg[r.round]=r.avg_overall);}catch(e){}}
+function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;const av=roundOvrAvg[p.round];
+  return `’${String(p.season).slice(-2)} R${p.round}`+(av?` <span class="pk-ovr">(~${av} OVR)</span>`:"")+(oc?` · via ${oc}`:"");}
 function pickCard(list,side){return list.map((p,i)=>`<div class="pick-chip" data-pside="${side}" data-i="${i}"><span class="pk-badge">PICK</span>${pickLabel(p)}</div>`).join("");}
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
@@ -2923,6 +2929,7 @@ async function renderTrade(){
   const partner=(sel&&clubByName(sel.value))||TEAM_KEYS.find(k=>k!==currentClub);
   tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
   minePicksList=await loadPicksFor(currentClub);theirsPicksList=await loadPicksFor(partner);
+  await loadRoundOvrAvg();
   const me=$("#tradeMine");if(me)me.innerHTML=tradeCard(tradeMineList,"mine");
   const th=$("#tradeTheirs");if(th)th.innerHTML=tradeCard(tradeTheirsList,"theirs");
   const mp=$("#tradeMinePicks");if(mp)mp.innerHTML=pickCard(minePicksList,"mine");
@@ -3655,8 +3662,12 @@ async function makeDraftPick(pickId){
   const rostered=new Set((spots||[]).map(s=>s.profile_id));
   (regs||[]).forEach(r=>{if(!rostered.has(r.profile_id)&&!have.has(r.profile_id)){have.add(r.profile_id);opts.push({value:r.profile_id,label:(r.profiles?r.profiles.gamertag:'?')+' (unsigned)'});}});
   if(!opts.length){toast("No players","There are no available players to draft.");return;}
-  formModal("Make the pick",[{key:"player",label:"Draft player",type:"select",value:opts[0].value,options:opts}],async v=>{
-    const {error}=await sb.rpc("use_draft_pick",{p_pick:pickId,p_player:v.player});
+  formModal("Make the pick",[
+    {key:"player",label:"Draft player",type:"select",value:opts[0].value,options:opts},
+    {key:"overall",label:"Player overall (0–99, optional)",type:"number",value:"",min:0,max:99}
+  ],async v=>{
+    const ov=(+v.overall>0&&+v.overall<=99)?+v.overall:null;
+    const {error}=await sb.rpc("use_draft_pick",{p_pick:pickId,p_player:v.player,p_overall:ov});
     if(error){toast("Couldn't make pick",error.message);return;}
     toast("Pick made","Player drafted to the club.");loadDraftAdmin();loadTeamsAdmin();
   });
