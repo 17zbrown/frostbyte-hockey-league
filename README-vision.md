@@ -1,4 +1,4 @@
-# Frostbyte Hockey League — Free AI Screenshot Import
+# Chel Gaming Hockey League — Free AI Screenshot Import
 
 Managers drop their EA NHL end-of-game **Player Summary** screenshots into a game
 report, an AI vision model reads the box score, and every skater and goalie for

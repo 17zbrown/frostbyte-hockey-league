@@ -1,4 +1,4 @@
-# Netlify configuration for Frostbyte Hockey League
+# Netlify configuration for Chel Gaming Hockey League
 # Static site (index.html at the root) + one serverless function for AI screenshot parsing.
 
 [build]

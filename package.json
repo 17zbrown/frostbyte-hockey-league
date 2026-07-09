@@ -1,9 +1,9 @@
 {
-  "name": "frostbyte-hockey-league",
+  "name": "chel-gaming-hockey-league",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Frostbyte Hockey League hub + free AI screenshot box-score import (Gemini → Groq fallback)",
+  "description": "Chel Gaming Hockey League hub + free AI screenshot box-score import (Gemini → Groq fallback)",
   "engines": { "node": ">=18" },
   "scripts": {
     "start": "node server.js"

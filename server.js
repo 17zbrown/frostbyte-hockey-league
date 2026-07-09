@@ -1,4 +1,4 @@
-// Frostbyte Hockey League — local server (FREE vision backend, with fallback)
+// Chel Gaming Hockey League — local server (FREE vision backend, with fallback)
 // Serves the static site AND exposes POST /api/parse-screenshots, which sends
 // uploaded EA NHL end-of-game screenshots to a vision model and returns a
 // structured box score. Two free providers are tried in order for redundancy:
@@ -174,5 +174,5 @@ server.listen(PORT, () => {
   const line = active.length
     ? `✓ Vision providers (in order): ${active.join(" → ")}`
     : "✗ No provider key set (GEMINI_API_KEY / GROQ_API_KEY) — screenshot scanning will use the built-in demo";
-  console.log(`\n  Frostbyte Hockey League  →  http://localhost:${PORT}\n  ${line}\n`);
+  console.log(`\n  Chel Gaming Hockey League  →  http://localhost:${PORT}\n  ${line}\n`);
 });

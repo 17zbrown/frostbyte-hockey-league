@@ -1,4 +1,4 @@
-# Frostbyte Hockey League
+# Chel Gaming Hockey League
 
 The hub for a competitive 6v6 **EA Sports NHL 27** league — standings, team pages,
 player profiles, stats, schedule, playoff bracket, awards, records, news, league
