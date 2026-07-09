@@ -2703,12 +2703,12 @@ async function loadTeamsAdmin(){
   const spotCount={},gameCount={};
   (spots||[]).forEach(s=>spotCount[s.team_id]=(spotCount[s.team_id]||0)+1);
   (games||[]).forEach(g=>{gameCount[g.home_team_id]=(gameCount[g.home_team_id]||0)+1;gameCount[g.away_team_id]=(gameCount[g.away_team_id]||0)+1;});
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Division</th><th>In use</th><th style="text-align:right">Remove</th></tr></thead><tbody>'+
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Division</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     tms.map(t=>{const sc=spotCount[t.id]||0,gc=gameCount[t.id]||0;const locked=sc>0||gc>0;
       return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#1273b8'};color:#fff">${t.code}</span><div><b>${t.name}</b></div></div></td>
       <td class="mono">${t.code}</td><td><span class="posbadge">${t.division}</span></td>
       <td style="font-size:12.5px;color:var(--fog)">${sc?sc+" player"+(sc===1?"":"s"):""}${sc&&gc?" · ":""}${gc?gc+" games":""}${!sc&&!gc?"—":""}</td>
-      <td style="text-align:right">${locked?'<span style="color:var(--fog);font-size:12px">Clear first</span>':`<button class="mini danger tm-del" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Remove</button>`}</td></tr>`;}).join("")+
+      <td style="text-align:right"><div class="act"><button class="mini tm-edit" data-id="${t.id}">Edit</button>${locked?'<span style="color:var(--fog);font-size:12px">In use</span>':`<button class="mini danger tm-del" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Remove</button>`}</div></td></tr>`;}).join("")+
     "</tbody></table></div>";
 }
 async function addTeam(){
@@ -2733,6 +2733,23 @@ async function removeTeam(btn){
     if(error){toast("Couldn't remove",/foreign key|violates/i.test(error.message)?"This club still has players or games — clear those first.":error.message);return;}
     await refreshTeamsEverywhere();loadTeamsAdmin();
     toast("Club removed",name+" is no longer in the league.");
+  });
+}
+function editTeam(btn){
+  const t=(dbTeams||[]).find(x=>x.id===btn.dataset.id);if(!t)return;
+  formModal("Edit "+t.name,[
+    {key:"name",label:"Club name",value:t.name},
+    {key:"code",label:"Code (2–3 letters)",value:t.code},
+    {key:"division",label:"Division",type:"select",value:t.division,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
+    {key:"color",label:"Club color",type:"color",value:t.color||"#4fe3e6"}
+  ],async v=>{
+    const code=(v.code||"").trim().toUpperCase(),name=(v.name||"").trim();
+    if(!/^[A-Z]{2,3}$/.test(code)){toast("Invalid code","Use a 2–3 letter club code, e.g. GLK.");return;}
+    if(!name){toast("Name required","Give the club a name.");return;}
+    const {error}=await sb.from("teams").update({name,code,division:v.division,color:v.color}).eq("id",t.id);
+    if(error){toast("Couldn't save",/duplicate|unique/i.test(error.message)?"That club code is already taken.":error.message);return;}
+    await refreshTeamsEverywhere();loadTeamsAdmin();
+    toast("Club updated",name+" ("+code+") saved.");
   });
 }
 
@@ -2789,6 +2806,7 @@ $("#view-admin").addEventListener("click",e=>{
   const dt=e.target.closest(".dc-test");if(dt){e.preventDefault();testDiscordWebhook(dt.dataset.key);return;}
   const dcl=e.target.closest(".dc-clear");if(dcl){e.preventDefault();clearDiscordWebhook(dcl.dataset.key);return;}
   if(e.target.closest("#addTeamBtn")){e.preventDefault();addTeam();return;}
+  const te=e.target.closest(".tm-edit");if(te){e.preventDefault();editTeam(te);return;}
   const td=e.target.closest(".tm-del");if(td){e.preventDefault();removeTeam(td);return;}
   const st=e.target.closest(".sc-savetime");if(st){e.preventDefault();saveGameTime(st);return;}
   if(e.target.closest("#genScheduleBtn")){e.preventDefault();generateSchedule();return;}
