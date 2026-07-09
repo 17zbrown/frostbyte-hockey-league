@@ -460,6 +460,14 @@
   .ret-pct{padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice);font-family:var(--f-mono);font-size:12px;font-weight:600}
   .ret-info{font-family:var(--f-mono);font-size:11.5px;color:var(--frost);margin-left:auto}
   .to-ret{margin-top:6px;font-family:var(--f-cond);font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--frost)}
+  .offer-card{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:9px;padding:12px 15px;margin-bottom:10px;background:var(--panel-2)}
+  .oc-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+  .oc-main b{font-family:var(--f-cond);font-weight:700;font-size:15px;letter-spacing:.02em;text-transform:uppercase;color:var(--ice)}
+  .oc-terms{font-family:var(--f-mono);font-size:13px;font-weight:600;color:var(--frost)}
+  .oc-status{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;border-radius:100px;border:1px solid var(--line);color:var(--fog)}
+  .oc-status.oc-countered{color:var(--gold);border-color:var(--gold)}
+  .oc-acts{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .off-wait{font-family:var(--f-cond);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog-dim)}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
   .lineup-night{margin-bottom:20px}
   .lineup-night-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-family:var(--f-display);text-transform:uppercase;font-size:19px;letter-spacing:.02em;color:var(--ice);padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line)}
@@ -1490,6 +1498,15 @@
     </div>
   </div></section></div>
 
+  <!-- CONTRACT OFFERS (player free agency) -->
+  <div class="view" id="view-offers"><section class="pad"><div class="wrap">
+    <div class="sec-head"><div><span class="eyebrow">Free Agency</span><h2>Contract <em>Offers</em></h2>
+      <p>Clubs offering you a deal for next season. Accept, decline, or counter with your own terms.</p></div></div>
+    <div id="offersGate"></div>
+    <div class="card"><div class="card-h"><h3>Offers To You</h3><span class="pill" id="myOffersCount"></span></div>
+      <div id="myOffersBody" style="padding:12px 20px 18px"></div></div>
+  </div></section></div>
+
   <!-- MANAGER -->
   <div class="view" id="view-manager"><section class="pad"><div class="wrap">
     <div class="sec-head" style="justify-content:center;text-align:center"><div>
@@ -1521,9 +1538,12 @@
         </div>
         <div class="trade-foot"><div class="mono" style="color:var(--fog);font-size:13px" id="tradeSummary">Select at least one player from each side.</div><button class="btn btn-frost" id="proposeTrade">Propose Trade</button></div>
       </div></div>
-      <div class="mgr-panel" id="mtab-fa"><div class="card"><div class="card-h"><h3>Free-Agent Pool</h3><span class="pill frost" id="faMgrCount"></span></div>
-        <p style="padding:0 24px;margin:0 0 4px;color:var(--fog);font-size:12.5px">Registered players not yet on a club. Rosters are set by the commissioner's draft — acquire players through trades, or ask the league office to assign a free agent.</p>
-        <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>EA ID</th><th style="text-align:right">Status</th></tr></thead><tbody id="faMgrBody"></tbody></table></div></div></div>
+      <div class="mgr-panel" id="mtab-fa">
+        <div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Your Contract Offers</h3><span class="pill" id="faOffersCount"></span></div>
+          <div id="faOffersBody" style="padding:12px 20px 18px"></div></div>
+        <div class="card"><div class="card-h"><h3>Free Agents</h3><span class="pill frost" id="faMgrCount"></span></div>
+          <p style="padding:0 24px;margin:0 0 4px;color:var(--fog);font-size:12.5px">Players whose contracts expire after this season. Offer a deal for next season — set the salary and term (1–4 yrs). They can accept, decline, or counter.</p>
+          <div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>Club</th><th>Cap Hit</th><th style="text-align:right">Offer</th></tr></thead><tbody id="faMgrBody"></tbody></table></div></div></div>
       <div class="mgr-panel" id="mtab-lineup"><div class="card" style="padding:22px 24px">
         <div class="next-game-bar"><span id="lineupBadge" style="line-height:0"></span>
           <div id="lineupNextText"><b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">Next game</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears here</small></div>
@@ -1808,6 +1828,7 @@ function go(view,param,fromPop){
   if(view==="draft"&&typeof renderDraft==="function")renderDraft();
   if(view==="stats"&&typeof renderMyStats==="function")renderMyStats();
   if(view==="owner"&&typeof renderOwnerAuth==="function")renderOwnerAuth();
+  if(view==="offers"&&typeof renderMyOffers==="function")renderMyOffers();
   closeMobile();
   window.scrollTo({top:0,behavior:"auto"});
   // browser history: push a state on real navigation so Back returns to the prior in-app page
@@ -2601,6 +2622,7 @@ function renderAuthUI(){
       const IC_COMM='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.4 8.3 8 10 4.6-1.7 8-5 8-10V6l-8-4z"/></svg>';
       const IC_USER='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>';
       const IC_EDIT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+      const IC_OFFER='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>';
       const IC_OUT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>';
       slot.innerHTML=`<div class="acct-wrap" id="acctWrap">
         <button class="user-chip" id="acctBtn" aria-haspopup="true" aria-expanded="false"><span class="av">${initials(authProfile.gamertag)}</span><div class="txt"><b>${esc(authProfile.gamertag)}</b><small>${rl}</small></div>${CARET}</button>
@@ -2610,6 +2632,7 @@ function renderAuthUI(){
           ${comm?item('data-go="admin" role="menuitem"',IC_COMM,"Commissioner"):""}
           ${(mgr||comm)?'<div class="acct-sep"></div>':""}
           ${item('data-go="player" data-param="'+esc(authProfile.gamertag)+'" role="menuitem"',IC_USER,"My Profile")}
+          ${item('data-go="offers" role="menuitem"',IC_OFFER,"Contract Offers")}
           ${item('id="acctEditProfile" role="menuitem"',IC_EDIT,"Edit Profile")}
           <div class="acct-sep"></div>
           ${item('id="acctSignOut" role="menuitem"',IC_OUT,"Sign out")}
@@ -2958,19 +2981,83 @@ $("#tradesPending").addEventListener("click",async e=>{
 });
 // free agent signings (manager)
 async function renderFAmgr(){
-  const body=$("#faMgrBody"),cnt=$("#faMgrCount");if(!body)return;
-  if(!sb||!openSeason){body.innerHTML='';if(cnt)cnt.textContent='0 available';return;}
-  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,preferred_number, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
-  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
-  const taken=new Set((spots||[]).map(s=>s.profile_id));
-  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id));
-  if(cnt)cnt.textContent=pool.length+" available";
-  if(!pool.length){body.innerHTML='<tr><td colspan="4" style="padding:22px;color:var(--fog);text-align:center">No available players right now — registered players appear here until they\'re drafted to a club.</td></tr>';return;}
-  body.innerHTML=pool.map(r=>{const name=r.profiles?r.profiles.gamertag:"?";
-    return `<tr><td><div class="rp lk" data-go="player" data-param="${name}"><span class="num">${r.preferred_number||'—'}</span><div><b>${name}</b></div></div></td>
-    <td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td class="mono">${r.ea_id||'—'}</td>
-    <td style="text-align:right"><span style="color:var(--fog);font-size:12px">Available</span></td></tr>`;}).join("");
+  const body=$("#faMgrBody"),cnt=$("#faMgrCount");
+  renderFAoffers();
+  if(!body)return;
+  if(!sb||!openSeason){body.innerHTML='';if(cnt)cnt.textContent='0';return;}
+  // free agents = active non-manager contracts expiring after this season
+  const {data:cons}=await sb.from("contracts").select("profile_id,team_id,salary,end_season,is_manager, profiles(gamertag)").eq("status","active").lte("end_season",openSeason.number);
+  const pool=(cons||[]).filter(c=>!c.is_manager);
+  if(cnt)cnt.textContent=pool.length+" free agent"+(pool.length===1?'':'s');
+  if(!pool.length){body.innerHTML='<tr><td colspan="5" style="padding:22px;color:var(--fog);text-align:center">No free agents right now — players become free agents when their contracts expire after the season.</td></tr>';return;}
+  const {data:spots}=await sb.from("roster_spots").select("profile_id,position").eq("season_id",openSeason.id);
+  const posBy={};(spots||[]).forEach(s=>posBy[s.profile_id]=s.position);
+  body.innerHTML=pool.map(c=>{const name=c.profiles?c.profiles.gamertag:"?";const cc=c.team_id?codeOfId(c.team_id):null;const club=cc&&teams[cc]?teams[cc].name:"Unsigned";const pos=posBy[c.profile_id]||"—";
+    return `<tr><td><b class="lk" data-go="player" data-param="${esc(name)}" style="cursor:pointer;font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.02em">${esc(name)}</b></td>
+    <td style="text-align:center"><span class="posbadge ${pos}">${pos}</span></td><td style="font-size:12.5px;color:var(--fog)">${esc(club)}</td><td class="cap-hit">${fmtMoney(c.salary)}</td>
+    <td style="text-align:right"><button class="mini good fa-offer" data-pid="${c.profile_id}" data-name="${esc(name).replace(/"/g,'&quot;')}">Offer</button></td></tr>`;}).join("");
 }
+function offerCard(o,viewer){
+  const who=viewer==='team'?esc(o.player?o.player.gamertag:'Player'):esc((teams[codeOfId(o.from_team_id)]||{}).name||'A club');
+  const terms=fmtMoney(o.salary)+'/yr · '+o.years+' yr'+(o.years>1?'s':'');
+  const myTurn=(viewer==='player'&&o.status==='pending')||(viewer==='team'&&o.status==='countered');
+  const wait=o.status==='pending'?(viewer==='player'?'':'Awaiting player'):(viewer==='team'?'':'Awaiting club');
+  const editLabel=viewer==='player'?'Counter':'Revise';
+  let acts=myTurn
+    ? `<button class="mini good off-accept" data-id="${o.id}">Accept</button><button class="mini off-edit" data-id="${o.id}" data-salary="${o.salary}" data-years="${o.years}">${editLabel}</button><button class="mini danger off-deny" data-id="${o.id}">${viewer==='player'?'Decline':'Withdraw'}</button>`
+    : `<span class="off-wait">${wait}</span><button class="mini danger off-deny" data-id="${o.id}">${viewer==='player'?'Decline':'Withdraw'}</button>`;
+  return `<div class="offer-card"><div class="oc-main"><b>${who}</b><span class="oc-terms">${terms}</span><span class="oc-status oc-${o.status}">${o.status==='countered'?'Countered':'Pending'}</span></div><div class="oc-acts">${acts}</div></div>`;
+}
+async function renderFAoffers(){
+  const el=$("#faOffersBody"),cnt=$("#faOffersCount");if(!el||!sb)return;
+  const myTid=teamIdOf(currentClub);if(!myTid){el.innerHTML='';if(cnt)cnt.textContent='0 open';return;}
+  const {data}=await sb.from("contract_offers").select("*, player:player_id(gamertag)").eq("from_team_id",myTid).in("status",["pending","countered"]).order("updated_at",{ascending:false});
+  if(cnt)cnt.textContent=(data?data.length:0)+" open";
+  el.innerHTML=(data&&data.length)?data.map(o=>offerCard(o,'team')).join(""):'<div style="color:var(--fog);font-size:13px">No outstanding offers. Offer a free agent below.</div>';
+}
+async function renderMyOffers(){
+  const gate=$("#offersGate"),body=$("#myOffersBody"),cnt=$("#myOffersCount");if(!body)return;
+  if(!authProfile||!authUser){if(gate)gate.innerHTML=`<div class="auth-banner" style="margin-bottom:16px"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your offers</b><div style="color:var(--fog);font-size:12.5px">Contract offers are tied to your Discord.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;body.innerHTML='';if(cnt)cnt.textContent='';return;}
+  if(gate)gate.innerHTML='';
+  const {data}=await sb.from("contract_offers").select("*").eq("player_id",authUser.id).in("status",["pending","countered"]).order("updated_at",{ascending:false});
+  if(cnt)cnt.textContent=(data?data.length:0)+" open";
+  body.innerHTML=(data&&data.length)?data.map(o=>offerCard(o,'player')).join(""):'<div style="color:var(--fog);font-size:13px">No contract offers right now. When a club offers you a deal, it appears here.</div>';
+}
+async function respondOffer(id,action,salary,years){
+  if(!sb)return;
+  const {error}=await sb.rpc("respond_offer",{p_offer:id,p_action:action,p_salary:(salary!=null?salary:null),p_years:(years!=null?years:null)});
+  if(error){toast("Couldn't update offer",error.message);return;}
+  toast(action==='accept'?'Contract signed':(action==='deny'?'Offer closed':'Sent back'),'');
+  renderMyOffers();renderFAoffers();if(typeof renderFAmgr==="function")renderFAmgr();
+}
+function makeOffer(pid,name){
+  if(!sb||!currentClub){toast("Managers only","Sign in as a club manager to make offers.");return;}
+  const myTid=teamIdOf(currentClub);if(!myTid)return;
+  formModal("Offer "+name+" a contract",[
+    {key:"salary",label:"Salary per year",value:"1M"},
+    {key:"years",label:"Term (seasons)",type:"select",value:"2",options:[1,2,3,4].map(v=>({value:String(v),label:v+" year"+(v>1?'s':'')}))}
+  ],async v=>{
+    const sal=parseMoney(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","The league minimum salary is $750K.");return;}
+    const {error}=await sb.rpc("make_contract_offer",{p_player:pid,p_team:myTid,p_salary:sal,p_years:+v.years,p_note:null});
+    if(error){toast("Couldn't send offer",error.message);return;}
+    toast("Offer sent",name+" will receive your contract offer.");renderFAoffers();
+  });
+}
+function editOffer(id,salary,years,asPlayer){
+  formModal(asPlayer?"Counter the offer":"Revise your offer",[
+    {key:"salary",label:"Salary per year",value:fmtMoney(salary)},
+    {key:"years",label:"Term (seasons)",type:"select",value:String(years),options:[1,2,3,4].map(v=>({value:String(v),label:v+" year"+(v>1?'s':'')}))}
+  ],async v=>{
+    const sal=parseMoney(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","");return;}
+    respondOffer(id,'edit',sal,+v.years);
+  });
+}
+document.addEventListener("click",e=>{
+  const of=e.target.closest(".fa-offer");if(of){makeOffer(of.dataset.pid,of.dataset.name);return;}
+  const ac=e.target.closest(".off-accept");if(ac){confirmModal("Accept this contract?","This finalizes the deal at the current terms for next season.","Accept Contract",()=>respondOffer(ac.dataset.id,'accept'));return;}
+  const dn=e.target.closest(".off-deny");if(dn){respondOffer(dn.dataset.id,'deny');return;}
+  const ed=e.target.closest(".off-edit");if(ed){editOffer(ed.dataset.id,+ed.dataset.salary,+ed.dataset.years,!!e.target.closest("#myOffersBody"));return;}
+});
 // lineup — persisted per game night (Wed / Fri)
 const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
 const LINEUP_ROLES=[{key:"center",label:"Center",pool:["C"]},{key:"lw",label:"Left Wing",pool:["W","LW","RW"]},{key:"rw",label:"Right Wing",pool:["W","LW","RW"]},{key:"ld",label:"Left Defense",pool:["D","LD","RD"]},{key:"rd",label:"Right Defense",pool:["D","LD","RD"]},{key:"goalie",label:"Goalie",pool:["G"]}];
