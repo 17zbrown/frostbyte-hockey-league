@@ -37,6 +37,9 @@ async function dApi(method, path, body) {
   return t ? JSON.parse(t) : null;
 }
 
+// Discord channel-name slug (lowercase, hyphens) to compare against team names
+function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
+
 export default async () => {
   if (!SB_URL || !SB_KEY || !BOT || !GUILD) {
     console.log("discord-sync: missing env (need bot token + guild id + Supabase) — skipping");
@@ -44,19 +47,37 @@ export default async () => {
   }
 
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id");
-  const teams = await sbGet("teams?select=id,name,gm_profile_id");
-  const teamName = Object.fromEntries(teams.map((t) => [t.id, t.name]));
+  const teams = await sbGet("teams?select=id,name,gm_profile_id,discord_role_id,discord_channel_id");
+  const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
 
-  // Map managed Discord role NAMES -> ids
+  // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
+  const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
   const roleId = {};
   for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
+  const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
+  const chanNameById = Object.fromEntries(guildChannels.map((c) => [c.id, c.name]));
+
+  const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0, errors: [] };
+
+  // (0) keep each team's Discord ROLE + CHANNEL name in sync with the site team name
+  for (const t of teams) {
+    try {
+      if (t.discord_role_id && roleNameById[t.discord_role_id] && roleNameById[t.discord_role_id] !== t.name) {
+        await dApi("PATCH", `/guilds/${GUILD}/roles/${t.discord_role_id}`, { name: t.name }); sum.roleRenamed++;
+      }
+      const wantSlug = slug(t.name);
+      if (t.discord_channel_id && chanNameById[t.discord_channel_id] && chanNameById[t.discord_channel_id] !== wantSlug) {
+        await dApi("PATCH", `/channels/${t.discord_channel_id}`, { name: wantSlug }); sum.chanRenamed++;
+      }
+    } catch (e) { sum.errors.push({ team: t.name, error: String(e.message || e) }); }
+  }
+
+  // managed role ids = the 4 static roles (by name) + every team's role (by stored id)
   const MANAGED_STATIC = ["Player", "General Manager", "Commissioner", "Free Agent"];
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
-  for (const t of teams) if (roleId[(t.name || "").toLowerCase()]) managedIds.add(roleId[(t.name || "").toLowerCase()]);
-
-  const sum = { checked: 0, renamed: 0, roleUpdated: 0, notInServer: 0, errors: [] };
+  for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
 
   for (const m of links) {
     if (!m.discord_id) continue;
@@ -72,7 +93,7 @@ export default async () => {
       // (2) role sync — desired managed roles for this member
       const desired = new Set();
       if (roleId["player"]) desired.add(roleId["player"]);
-      if (m.team_id && roleId[(teamName[m.team_id] || "").toLowerCase()]) desired.add(roleId[(teamName[m.team_id] || "").toLowerCase()]);
+      if (m.team_id && teamRoleId[m.team_id]) desired.add(teamRoleId[m.team_id]);
       else if (roleId["free agent"]) desired.add(roleId["free agent"]);
       if (m.role === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
