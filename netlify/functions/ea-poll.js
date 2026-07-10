@@ -36,11 +36,9 @@ export default async () => {
     return new Response("skipped: missing env", { status: 200 });
   }
   try {
-    // Gate: only poll when a not-final game is scheduled within [now-12h, now+8h].
-    const lo = new Date(Date.now() - 12 * 3600e3).toISOString();
-    const hi = new Date(Date.now() + 8 * 3600e3).toISOString();
-    const due = await sbGet(`games?status=neq.final&scheduled_at=gte.${encodeURIComponent(lo)}&scheduled_at=lte.${encodeURIComponent(hi)}&select=id&limit=1`);
-    if (!due.length) return json({ skipped: "no games scheduled around now" });
+    // Only poll during the league's game window: Wed 6pm ET -> Sat 2am ET (continuous, every week).
+    // Enforced in America/New_York so it stays correct across daylight saving (a fixed-UTC cron can't).
+    if (!inGameWindow()) return json({ skipped: "outside game window (Wed 6pm - Sat 2am ET)" });
 
     const clubs = [...new Set((await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id`)).map((t) => String(t.ea_club_id)).filter(Boolean))];
     if (!clubs.length) return json({ skipped: "no teams have an ea_club_id set" });
@@ -79,3 +77,14 @@ export default async () => {
 };
 
 function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } }); }
+
+// League game window: Wed 6:00pm ET -> Sat 2:00am ET, continuous. DST-safe (evaluated in ET).
+function inGameWindow() {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hour12: false }).formatToParts(new Date());
+  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[parts.find((x) => x.type === "weekday").value];
+  const hr = (+parts.find((x) => x.type === "hour").value) % 24;
+  if (wd === 3) return hr >= 18;          // Wednesday from 6pm ET
+  if (wd === 4 || wd === 5) return true;  // all of Thursday and Friday
+  if (wd === 6) return hr < 2;            // Saturday until 2am ET
+  return false;                           // Sun / Mon / Tue: off
+}
