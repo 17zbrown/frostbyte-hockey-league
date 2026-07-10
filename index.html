@@ -235,6 +235,23 @@
   .leader .who small{font-size:11px;color:var(--fog);font-family:var(--f-mono)}
   .leader .val{margin-left:auto;font-family:var(--f-mono);font-weight:700;font-size:19px;color:var(--frost)}
   .leader .val small{font-size:10px;color:var(--fog-dim);font-family:var(--f-cond);letter-spacing:.1em;text-transform:uppercase;display:block;text-align:right;font-weight:500}
+  /* leader grid (Stats page) */
+  .lg-sec{margin-top:26px}
+  .lg-h{font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--frost);margin:0 0 14px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+  .lg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+  .lc{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-l);overflow:hidden;box-shadow:var(--sh-1)}
+  .lc-h{display:flex;align-items:baseline;justify-content:space-between;padding:14px 16px 11px;border-bottom:1px solid var(--line-soft)}
+  .lc-title{font-family:var(--f-cond);font-weight:600;font-size:14px;letter-spacing:.03em;text-transform:uppercase;color:var(--ice)}
+  .lc-unit{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;color:var(--fog-dim)}
+  .lc-list{list-style:none;margin:0;padding:5px 0}
+  .lc-row{display:flex;align-items:center;gap:10px;padding:7px 16px;cursor:pointer}
+  .lc-row:hover{background:var(--panel-2)}
+  .lc-rk{font-family:var(--f-mono);font-size:12px;font-weight:700;color:var(--fog-dim);width:13px;text-align:center;flex-shrink:0}
+  .lc-rk.p1{color:var(--frost)}
+  .av.sm{width:24px;height:24px;font-size:9px;border-radius:6px}
+  .lc-nm{font-family:var(--f-cond);font-weight:600;font-size:13.5px;text-transform:uppercase;letter-spacing:.02em;color:var(--ice);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lc-tm{font-family:var(--f-mono);font-size:10px;color:var(--fog);letter-spacing:.05em;flex-shrink:0}
+  .lc-v{font-family:var(--f-mono);font-weight:700;font-size:15px;color:var(--ice);min-width:46px;text-align:right;flex-shrink:0}
 
   /* fixtures */
   .fixtures{padding:6px 20px 16px}
@@ -1432,13 +1449,7 @@
     <div class="sec-head"><div><span class="eyebrow">Season Stats</span><h2>Stats &amp; <em>Leaders</em></h2>
       <p>League leaders and your own numbers — everything updates automatically as game results are reported.</p></div></div>
     <div id="myStatsCard"></div>
-    <div class="card" style="margin-top:22px"><div class="card-h"><h3>League Leaderboards</h3></div>
-      <div class="lb-tabs" id="lbTabs">
-        <button class="lb-tab active" data-lb="points">Points</button><button class="lb-tab" data-lb="goals">Goals</button>
-        <button class="lb-tab" data-lb="assists">Assists</button><button class="lb-tab" data-lb="save">Save %</button>
-      </div>
-      <div class="leaders" id="leaderboard"></div>
-    </div>
+    <div id="leaderboard" style="margin-top:6px"></div>
   </div></section></div>
 
   <!-- PLAYER PROFILE -->
@@ -2305,13 +2316,13 @@ function renderHeroRink(){
 /* ------------------------------ HERO CAROUSEL (rotating headlines) ------------------------------ */
 const HERO_SLIDE_CAP=7;
 const numWord=n=>["zero","one","two","three","four","five","six","seven","eight","nine","ten"][n]||n;
-function slidePoW(){const[name,tc,g,a,pts]=leaders.points[0];const t=teams[tc];if(!t)return null;
+function slidePoW(){const p=leaders.points[0];const name=p.name,tc=p.tc,g=p.g,a=p.a,pts=p.pts;const t=teams[tc];if(!t)return null;
   return{eyebrow:"Player of the Week",title:name.toUpperCase(),
     line:`Leads the league with ${pts} points (${g}G, ${a}A) — the engine driving the ${t.name}.`,
     cta:`<button class="btn btn-frost" data-go="player" data-param="${name}">View Profile</button><button class="btn btn-light" data-go="stats">All Leaders</button>`};}
-function slideGoalie(){const g=leaders.save[0];const name=g[0],tc=g[1],sv=g[2];const t=teams[tc];if(!t)return null;
+function slideGoalie(){const p=leaders.save[0];const name=p.name,tc=p.tc;const t=teams[tc];if(!t)return null;
   return{eyebrow:"Between the Pipes",title:`${name.toUpperCase()} IS A WALL`,
-    line:`A league-best ${(sv).toFixed(3).replace(/^0/,"")} save percentage for the ${t.name}.`,
+    line:`A league-best ${p.disp} save percentage for the ${t.name}.`,
     cta:`<button class="btn btn-frost" data-go="player" data-param="${name}">View Profile</button><button class="btn btn-light" data-go="stats">Leaders</button>`};}
 let heroSlides=[];
 // Data-driven slides (player of the week, hot streak, goalie, news) are added back
@@ -2371,33 +2382,64 @@ function wireHeroControls(){
 }
 
 /* ------------------------------ LEADERS ------------------------------ */
+// Every leaderboard category. z:true keeps 0/negative entries (rate & +/- boards); asc:true = lower is better.
+const LEADER_CATS=[
+  {k:"points",label:"Points",unit:"PTS",val:r=>r.pts},
+  {k:"goals",label:"Goals",unit:"G",val:r=>r.g},
+  {k:"assists",label:"Assists",unit:"A",val:r=>r.a},
+  {k:"plusminus",label:"Plus / Minus",unit:"+/-",z:true,val:r=>r.pm,fmt:v=>(v>0?"+":"")+v},
+  {k:"ppg",label:"Power-Play Goals",unit:"PPG",val:r=>r.ppg},
+  {k:"gwg",label:"Game-Winners",unit:"GWG",val:r=>r.gwg},
+  {k:"shooting",label:"Shooting %",unit:"SH%",z:true,min:r=>r.shots>=5,val:r=>r.shots>0?r.g/r.shots:0,fmt:v=>(100*v).toFixed(1)+"%"},
+  {k:"hits",label:"Hits",unit:"HIT",val:r=>r.hits},
+  {k:"blocks",label:"Blocked Shots",unit:"BLK",val:r=>r.blk},
+  {k:"takeaways",label:"Takeaways",unit:"TK",val:r=>r.tk},
+  {k:"faceoff",label:"Faceoff %",unit:"FO%",z:true,min:r=>(r.fow+r.fol)>=10,val:r=>(r.fow+r.fol)>0?r.fow/(r.fow+r.fol):0,fmt:v=>(100*v).toFixed(1)+"%"},
+  {k:"save",label:"Save %",unit:"SV%",g:true,z:true,min:r=>r.sa>0,val:r=>r.sa>0?r.saves/r.sa:0,fmt:v=>v.toFixed(3).replace(/^0/,"")},
+  {k:"gaa",label:"Goals-Against Avg",unit:"GAA",g:true,asc:true,z:true,min:r=>r.gp>0,val:r=>r.gp?r.ga/r.gp:99,fmt:v=>v.toFixed(2)},
+  {k:"shutouts",label:"Shutouts",unit:"SO",g:true,val:r=>r.so}
+];
+let leaderRows=[];
 async function loadLeaders(){
-  if(!sb||!openSeason){leaders={points:[],goals:[],assists:[],save:[]};return;}
+  leaders={};leaderRows=[];
+  if(!sb||!openSeason)return;
   const {data:stats}=await sb.from("player_season_stats").select("*, profiles(gamertag)").eq("season_id",openSeason.id);
   const {data:spots}=await sb.from("roster_spots").select("profile_id,team_id").eq("season_id",openSeason.id);
   const teamOf={};(spots||[]).forEach(s=>teamOf[s.profile_id]=codeOfId(s.team_id));
-  const rows=(stats||[]).map(s=>({name:s.profiles?s.profiles.gamertag:"?",tc:teamOf[s.profile_id],g:s.goals,a:s.assists,pts:s.points,isG:s.is_goalie,saves:s.saves,sa:s.shots_against})).filter(r=>r.tc);
-  const svp=r=>r.sa?r.saves/r.sa:0;
-  leaders={
-    points:[...rows].filter(r=>!r.isG).sort((a,b)=>b.pts-a.pts||b.g-a.g).slice(0,10).map(r=>[r.name,r.tc,r.g,r.a,r.pts]),
-    goals:[...rows].filter(r=>!r.isG).sort((a,b)=>b.g-a.g).slice(0,10).map(r=>[r.name,r.tc,r.g]),
-    assists:[...rows].filter(r=>!r.isG).sort((a,b)=>b.a-a.a).slice(0,10).map(r=>[r.name,r.tc,r.a]),
-    save:[...rows].filter(r=>r.isG&&r.sa>0).sort((a,b)=>svp(b)-svp(a)).slice(0,10).map(r=>[r.name,r.tc,svp(r)])
-  };
+  leaderRows=(stats||[]).map(s=>({name:s.profiles?s.profiles.gamertag:"?",tc:teamOf[s.profile_id],
+    gp:s.gp,g:s.goals,a:s.assists,pts:s.points,pm:s.plus_minus,hits:s.hits,blk:s.blocked_shots,tk:s.takeaways,
+    ppg:s.pp_goals,gwg:s.gwg,shots:s.shots,fow:s.faceoffs_won,fol:s.faceoffs_lost,
+    isG:s.is_goalie,saves:s.saves,sa:s.shots_against,ga:s.goals_against,so:s.shutouts})).filter(r=>r.tc);
+  LEADER_CATS.forEach(c=>{
+    let rows=leaderRows.filter(r=>c.g?r.isG:!r.isG);
+    if(c.min)rows=rows.filter(c.min);
+    leaders[c.k]=rows.map(r=>({r,v:c.val(r)})).filter(x=>c.z||x.v>0)
+      .sort((x,y)=>c.asc?x.v-y.v:y.v-x.v).slice(0,5)
+      .map(({r,v})=>({name:r.name,tc:r.tc,disp:c.fmt?c.fmt(v):String(v),g:r.g,a:r.a,pts:r.pts}));
+  });
 }
+// Home "Scoring Leaders" list (points).
 function renderLeaderList(el,key){
-  const rows=(leaders&&leaders[key])||[];
+  if(!el)return;
+  const rows=(leaders&&leaders[key])||[];const cat=LEADER_CATS.find(c=>c.k===key)||{unit:""};
   if(!rows.length){el.innerHTML='<div style="padding:24px;text-align:center;color:var(--fog);font-size:13.5px">No stats yet — leaders appear once games are reported.</div>';return;}
-  el.innerHTML=rows.map((r,i)=>{const[name,tc]=r;const t=teams[tc];
-    const val=key==="save"?r[2].toFixed(3).replace(/^0/,""):r[2];
-    const unit=({points:"PTS",goals:"G",assists:"A",save:"SV%"})[key];
-    let sub=t.name;if(key==="points")sub=`${t.name} · ${r[2]}G ${r[3]}A`;
-    const bigval=key==="points"?r[4]:val;
-    return `<div class="leader" data-go="player" data-param="${name}">
+  el.innerHTML=rows.map((r,i)=>{const t=teams[r.tc];if(!t)return"";
+    const sub=key==="points"?`${t.name} · ${r.g}G ${r.a}A`:t.name;
+    return `<div class="leader" data-go="player" data-param="${r.name}">
       <span class="pos ${i===0?'p1':''}">${i+1}</span>
-      <span class="av" style="background:${t.c}">${initials(name)}</span>
-      <div class="who"><b>${name}</b><small>${sub}</small></div>
-      <div class="val">${bigval}<small>${unit}</small></div></div>`;}).join("");
+      <span class="av" style="background:${t.c}">${initials(r.name)}</span>
+      <div class="who"><b>${r.name}</b><small>${sub}</small></div>
+      <div class="val">${r.disp}<small>${cat.unit}</small></div></div>`;}).join("");
+}
+// Full Stats-page leaderboards: a grid of category cards (Skaters + Goalies).
+function renderLeaderGrid(el){
+  if(!el)return;
+  if(!LEADER_CATS.some(c=>(leaders[c.k]||[]).length)){el.innerHTML='<div class="empty-note">No stats yet — leaderboards fill in automatically once games are reported.</div>';return;}
+  const card=c=>{const rows=leaders[c.k]||[];if(!rows.length)return"";
+    return `<div class="lc"><div class="lc-h"><span class="lc-title">${c.label}</span><span class="lc-unit">${c.unit}</span></div>
+      <ol class="lc-list">${rows.map((r,i)=>{const t=teams[r.tc];return `<li class="lc-row" data-go="player" data-param="${r.name}"><span class="lc-rk${i===0?' p1':''}">${i+1}</span><span class="av sm" style="background:${t?t.c:'#333'}">${initials(r.name)}</span><span class="lc-nm">${r.name}</span><span class="lc-tm">${r.tc}</span><span class="lc-v">${r.disp}</span></li>`;}).join("")}</ol></div>`;};
+  const grp=(title,cats)=>{const cards=cats.map(card).filter(Boolean).join("");if(!cards)return"";return `<div class="lg-sec"><div class="lg-h">${title}</div><div class="lg-grid">${cards}</div></div>`;};
+  el.innerHTML=grp("Skater Leaders",LEADER_CATS.filter(c=>!c.g))+grp("Goalie Leaders",LEADER_CATS.filter(c=>c.g));
 }
 
 /* ------------------------------ SCHEDULE ------------------------------ */
@@ -2501,7 +2543,7 @@ async function renderTeamPage(code){
       </div></div>
     <div id="teamBody"><div class="empty-note">Loading roster…</div></div>`;
   const token=++teamPageToken;
-  let spots=[],stats=[],sptm=null;
+  let spots=[],stats=[],sptm=null,tstat=[];
   if(sb&&openSeason){const tid=teamIdOf(code);
     if(tid){
       const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
@@ -2510,6 +2552,8 @@ async function renderTeamPage(code){
       stats=r2.data||[];
       const r3=await sb.from("team_special_teams").select("*").eq("season_id",openSeason.id).eq("team_id",tid).maybeSingle();
       sptm=r3.data||null;
+      const r4=await sb.from("game_stats").select("shots,hits,pim,blocked_shots,takeaways,giveaways,faceoffs_won,faceoffs_lost,saves,shots_against,possession_seconds,games!inner(season_id,status)").eq("team_id",tid).eq("games.status","final").eq("games.season_id",openSeason.id);
+      tstat=r4.data||[];
     }}
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
@@ -2523,6 +2567,20 @@ async function renderTeamPage(code){
   const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if(g.a===code||g.b===code)teamGames.push(g);}));
   const svpFmt=p=>p.sa?(p.saves/p.sa).toFixed(3).replace(/^0/,""):"—";
   const gaaFmt=p=>p.gp?(p.ga/p.gp).toFixed(2):"—";
+  // team totals (accurate, aggregated from game_stats by team)
+  const tt=tstat.reduce((o,r)=>{o.sf+=r.shots||0;o.hits+=r.hits||0;o.blk+=r.blocked_shots||0;o.pim+=r.pim||0;o.tk+=r.takeaways||0;o.gv+=r.giveaways||0;o.fow+=r.faceoffs_won||0;o.fol+=r.faceoffs_lost||0;o.sv+=r.saves||0;o.saAg+=r.shots_against||0;o.poss+=r.possession_seconds||0;return o;},{sf:0,hits:0,blk:0,pim:0,tk:0,gv:0,fow:0,fol:0,sv:0,saAg:0,poss:0});
+  const tPct=(n,d)=>d?(100*n/d).toFixed(1)+"%":"—";
+  const tPer=n=>gp?(n/gp).toFixed(1):"—";
+  const tMmss=s=>{s=Math.round(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");};
+  const tCell=(v,k)=>`<div class="scell"><span class="sv">${v}</span><span class="sk">${k}</span></div>`;
+  const tSec=(h,c)=>`<div class="ssec"><div class="ssec-h">${h}</div><div class="sgrid">${c}</div></div>`;
+  const shPct=tt.sf?100*gf/tt.sf:0,svPct=tt.saAg?100*tt.sv/tt.saAg:0;
+  const teamStatsCard=gp>0?`<div class="card" style="margin-top:18px"><div class="card-h"><h3>Team Stats</h3><span class="pill dim">${gp} game${gp!==1?"s":""}</span></div>
+    ${tSec("Offense",tCell(tPer(gf),"Goals / game")+tCell(tPer(tt.sf),"Shots / game")+tCell(tt.sf?shPct.toFixed(1)+"%":"—","Shooting %"))}
+    ${tSec("Defense",tCell(tPer(ga),"GA / game")+tCell(tt.saAg?tPer(tt.saAg):"—","Shots ag. / game")+tCell(tt.saAg?svPct.toFixed(1)+"%":"—","Save %"))}
+    ${tSec("Possession & discipline",tCell(tPct(tt.fow,tt.fow+tt.fol),"Faceoff %")+tCell(tt.hits,"Hits")+tCell(tt.blk,"Blocked shots")+tCell(tt.tk,"Takeaways")+tCell(tt.gv,"Giveaways")+tCell(tt.pim,"PIM")+tCell(tMmss(tt.poss),"Possession"))}
+    ${(tt.sf&&tt.saAg)?tSec("Advanced",tCell((shPct+svPct).toFixed(1),"PDO")):""}
+  </div>`:"";
   const bodyEl=$("#teamBody");if(!bodyEl)return;
   if(!roster.length&&!teamGames.length){bodyEl.innerHTML=`<div class="empty-note">No players assigned to ${t.name} yet — rosters fill in during the draft. Check back once the season forms.</div>`;return;}
   bodyEl.innerHTML=`
@@ -2548,7 +2606,8 @@ async function renderTeamPage(code){
               <div class="vs" ${done?`data-box="${g.id}"`:''}>${done?`<b style="color:${win?'var(--win)':'var(--loss)'}">${us}-${them} ${win?'W':'L'}</b>`:`<b>${fmtGameDate(g.when).split(' ')[0]}</b>`}</div>
               <div class="side away clickable" data-go="team" data-param="${opp}">${teams[opp].name}${badge(opp,22)}</div></div>`;}).join("")}</div>`:'<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet.</div>'}</div>
       </div>
-    </div>`;
+    </div>
+    ${teamStatsCard}`;
 }
 
 /* ------------------------------ PLAYER PAGE ------------------------------ */
@@ -2915,7 +2974,7 @@ async function sbInit(){
     updateBranding();renderTeamsGrid();renderHeroCarousel();renderHeroRink();
     renderFixtures();renderSchedule();renderTxns();renderNews();renderLiveGames();
     renderLeaderList($("#homeLeaders"),"points");
-    const lba=document.querySelector("#lbTabs .lb-tab.active");renderLeaderList($("#leaderboard"),lba?lba.dataset.lb:"points");
+    renderLeaderGrid($("#leaderboard"));
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
       const hs=$("#heroSkaters");if(hs)hs.textContent=count||0;}
   }catch(err){console.warn("Supabase public load failed:",err&&err.message);}
@@ -3106,9 +3165,6 @@ $("#ownerForm").addEventListener("submit",async e=>{e.preventDefault();
   renderOwnerAuth();
 });
 
-/* ------------------------------ LEADERBOARD TABS ------------------------------ */
-$("#lbTabs").addEventListener("click",e=>{const b=e.target.closest(".lb-tab");if(!b)return;
-  $$(".lb-tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");renderLeaderList($("#leaderboard"),b.dataset.lb);});
 
 /* ------------------------------ MANAGER PORTAL ------------------------------ */
 let currentClub="GLK";
