@@ -33,7 +33,7 @@
   body{margin:0;font-family:var(--f-body);background:var(--ink);color:var(--ice);line-height:1.55;
     -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}
   body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
-    background:radial-gradient(900px 520px at 84% -12%, #6cabdd18, transparent 70%),linear-gradient(180deg,#f4f8fb,#ffffff 40%)}
+    background:radial-gradient(900px 520px at 84% -12%, #ffe50018, transparent 70%),linear-gradient(180deg,#f4f8fb,#ffffff 40%)}
   img{max-width:100%;display:block}
   a{color:inherit;text-decoration:none}
   button{font-family:inherit;cursor:pointer;border:0;background:none;color:inherit}
@@ -427,7 +427,7 @@
   .term-tag{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog-dim);background:var(--panel-3);padding:2px 7px;border-radius:100px;flex-shrink:0}
   .mgr-tag{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);background:var(--frost-glow);padding:4px 10px;border-radius:100px}
   .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
-  .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #1273b833}
+  .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #8a6d0033}
   .cap-bar-wrap{padding:14px 18px 4px}
   .cap-bar{height:8px;border-radius:5px;background:var(--line-soft,#12283a);overflow:hidden}
   .cap-bar span{display:block;height:100%;border-radius:5px;transition:width .35s ease}
@@ -473,7 +473,7 @@
   .pick-head{font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin:13px 0 7px}
   .pick-list{display:flex;flex-direction:column;gap:6px}
   .pick-chip{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;background:var(--panel);font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--ice);transition:.15s}
-  .pick-chip:hover{border-color:#9cc7e6}
+  .pick-chip:hover{border-color:#8a6d00}
   .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
   .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#fff;padding:2px 6px;border-radius:4px;flex-shrink:0}
   .pk-ovr{font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--win);letter-spacing:0}
@@ -490,13 +490,13 @@
   .gn-opp{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.02em;font-size:14px;color:var(--fog)}
   .gn-opp b{color:var(--ice);font-weight:700}
   .gn-ha{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.08em;padding:2px 7px;border-radius:100px;border:1px solid var(--line);color:var(--fog-dim)}
-  .gn-ha.home{color:var(--frost);border-color:#9cc7e6}
+  .gn-ha.home{color:var(--frost);border-color:#8a6d00}
   .gn-code{margin-left:auto;font-size:12px;color:var(--fog);font-weight:700}
   .gn-mc{flex-shrink:0}
   .gn-veto{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft)}
   .gn-veto-l{display:flex;align-items:center;gap:9px;font-family:var(--f-cond);font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:11px;color:var(--fog)}
   .veto-in{width:184px;font-family:var(--f-body);font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice);text-transform:none;letter-spacing:0}
-  .veto-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #1273b81f}
+  .veto-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #8a6d001f}
   .gn-oppveto{font-family:var(--f-cond);font-size:12px;letter-spacing:.02em;color:var(--fog)}
   .gn-oppveto b{color:var(--ice)}
   .gn-empty{color:var(--fog);font-size:13px;padding:14px;border:1px dashed var(--line);border-radius:8px;margin-bottom:18px}
@@ -788,7 +788,7 @@
   .dropdown a{color:#274255}
   .dropdown a:hover{background:var(--panel-2);color:var(--frost)}
   .btn-frost{background:var(--sky);color:var(--navy);font-weight:700}
-  .btn-frost:hover{background:#8dc1e6}
+  .btn-frost:hover{background:#6f5800}
   .btn-ghost{border:1px solid #0e3a63;color:var(--navy)}
   .btn-ghost:hover{border-color:var(--navy);background:#ffffff55;color:var(--navy)}
   .btn-light{border:1px solid #ffffff;color:#fff}
@@ -980,7 +980,7 @@
   .switch{position:relative;width:44px;height:25px;flex-shrink:0;cursor:pointer}
   .switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
   .switch .track{position:absolute;inset:0;background:#cdd7df;border-radius:20px;transition:background .18s}
-  .switch .knob{position:absolute;top:3px;left:3px;width:19px;height:19px;background:#fff;border-radius:50%;box-shadow:0 1px 3px #0018382e;transition:transform .18s}
+  .switch .knob{position:absolute;top:3px;left:3px;width:19px;height:19px;background:#fff;border-radius:50%;box-shadow:0 1px 3px #1111112e;transition:transform .18s}
   .switch input:checked~.track{background:var(--frost)}
   .switch input:checked~.knob{transform:translateX(19px)}
   .switch input:focus-visible~.track{outline:2px solid var(--navy);outline-offset:2px}
@@ -1026,7 +1026,7 @@
   /* AI screenshot import */
   .ai-import{border:1px solid #cbdeeb;border-radius:7px;background:linear-gradient(135deg,#eef6fc,#f7fbff);padding:13px 15px;margin-bottom:15px;position:relative;overflow:hidden}
   .ai-head{display:flex;align-items:center;gap:11px;margin-bottom:12px}
-  .ai-ic{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--sky),var(--frost));display:grid;place-items:center;color:#fff;flex-shrink:0;box-shadow:0 2px 6px #1273b833}
+  .ai-ic{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--sky),var(--frost));display:grid;place-items:center;color:#fff;flex-shrink:0;box-shadow:0 2px 6px #8a6d0033}
   .ai-title b{font-family:var(--f-cond);font-weight:600;font-size:14px;letter-spacing:.02em;color:var(--navy);display:block;line-height:1.2}
   .ai-title small{color:var(--fog);font-size:12px}
   .ai-drop{display:flex;align-items:center;justify-content:center;gap:10px;padding:15px;border:1.5px dashed #a9cbe4;border-radius:6px;background:#fff;cursor:pointer;transition:.15s;color:var(--fog);font-size:13.5px}
@@ -1036,10 +1036,10 @@
   .ai-drop-ic{color:var(--sky);display:flex}
   .ai-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
   .ai-thumbs:empty{margin-top:0}
-  .ai-thumb{position:relative;width:66px;height:44px;border-radius:5px;overflow:hidden;border:1px solid var(--line);box-shadow:0 1px 3px #0018380f}
+  .ai-thumb{position:relative;width:66px;height:44px;border-radius:5px;overflow:hidden;border:1px solid var(--line);box-shadow:0 1px 3px #1111110f}
   .ai-thumb img{width:100%;height:100%;object-fit:cover;display:block}
-  .ai-rm{position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;background:#001838cc;color:#fff;font-size:13px;line-height:1;display:grid;place-items:center;padding:0;border:0;cursor:pointer}
-  .ai-rm:hover{background:#001838}
+  .ai-rm{position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;background:#111111cc;color:#fff;font-size:13px;line-height:1;display:grid;place-items:center;padding:0;border:0;cursor:pointer}
+  .ai-rm:hover{background:#111111}
   .ai-actions{display:flex;align-items:center;gap:12px;margin-top:13px}
   .ai-status{font-size:12.5px;color:var(--fog);flex:1;min-width:0;line-height:1.4}
   .ai-import.scanning .ai-drop,.ai-import.scanning .ai-thumbs{opacity:.45;pointer-events:none}
@@ -1162,7 +1162,7 @@
   html[data-theme="dark"] .acct-item:hover,html[data-theme="dark"] .acct-item:focus-visible{background:#17293a}
   html[data-theme="dark"] #acctSignOut{color:#ff6b52} html[data-theme="dark"] #acctSignOut .acct-ic{color:#ff6b52}
   html[data-theme="dark"] .dropdown a{color:var(--fog)} html[data-theme="dark"] .dropdown a:hover{background:var(--panel-2);color:var(--frost)}
-  html[data-theme="dark"] .btn-frost{background:var(--frost);color:#04121e} html[data-theme="dark"] .btn-frost:hover{background:#7cc6f4}
+  html[data-theme="dark"] .btn-frost{background:var(--frost);color:#04121e} html[data-theme="dark"] .btn-frost:hover{background:#ffef66}
   html[data-theme="dark"] .btn-ghost{border-color:#33526e;color:var(--ice)} html[data-theme="dark"] .btn-ghost:hover{border-color:var(--frost);background:#ffffff10;color:#fff}
   html[data-theme="dark"] .hamburger{border-color:#33526e} html[data-theme="dark"] .hamburger span{background:#cfe0ee}
   html[data-theme="dark"] .theme-toggle{border-color:#33526e;color:var(--ice)} html[data-theme="dark"] .theme-toggle:hover{background:#ffffff10}
@@ -1683,7 +1683,7 @@
           <div class="ef-grid" style="grid-template-columns:1fr 1fr 120px;gap:12px;margin-top:10px">
             <div class="ef-row"><label>Conference</label><input id="tm-conf" placeholder="Optional" /></div>
             <div class="ef-row"><label>Division</label><select id="tm-div"><option value="Frost">Frost</option><option value="Byte">Byte</option></select></div>
-            <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#4fe3e6" style="height:38px;padding:2px" /></div>
+            <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#ffe500" style="height:38px;padding:2px" /></div>
           </div>
           <button class="btn btn-frost" id="addTeamBtn" style="margin-top:16px">Add Club</button></div>
         <div class="card" style="margin-top:16px"><div class="card-h"><h3>Current Clubs</h3><span class="pill" id="teamsAdminCount"></span></div><div id="teamsAdminBody"></div></div></div>
@@ -1758,7 +1758,7 @@
    (buildTeams, called in sbInit) so the commissioner can add/remove clubs live. */
 let teams = {};
 let TEAM_KEYS = [];
-const TEAM_PALETTE = ["#4fe3e6","#8fb8d6","#c7d8e6","#7ce0a8","#ff8a5c","#ffd166","#a99cf0","#e07a9a","#5bd6b0","#f2a65a","#6ea8fe","#d98cf0","#f07a7a","#9ad06a"];
+const TEAM_PALETTE = ["#ffe500","#8fb8d6","#c7d8e6","#7ce0a8","#ff8a5c","#ffd166","#a99cf0","#e07a9a","#5bd6b0","#f2a65a","#6ea8fe","#d98cf0","#f07a7a","#9ad06a"];
 function buildTeams(){
   teams={};TEAM_KEYS=[];
   (dbTeams||[]).forEach((t,i)=>{
@@ -2412,7 +2412,7 @@ async function renderPlayerPage(id){
   el.innerHTML=`
     <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}">${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
     <div class="player-hero">
-      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#4fe3e6'},#16a6b4)"><b>${num}</b><small>${tc||'FA'}</small></div>
+      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)"><b>${num}</b><small>${tc||'FA'}</small></div>
       <div class="ph-info"><h2>${prof.gamertag}</h2>
         <div class="ph-meta">
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
@@ -2472,7 +2472,7 @@ async function renderMyStats(){
   }
   const t=tc?teams[tc]:null;
   el.innerHTML=`<div class="player-hero">
-    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#4fe3e6'},#16a6b4)"><b>${num}</b><small>${tc||'FA'}</small></div>
+    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)"><b>${num}</b><small>${tc||'FA'}</small></div>
     <div class="ph-info"><h2>${authProfile.gamertag}</h2>
       <div class="ph-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
         ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">Not on a roster yet</span>`}
@@ -2570,7 +2570,7 @@ async function loadNews(){
       excerpt:(paras[0]||"").slice(0,150),author:n.author||"Chel Gaming Post",
       date:shortDate(n.published_at||n.created_at),body:paras.length?paras:["No content."]};});
 }
-function newsArt(color){return `background:linear-gradient(150deg,${color},#001838)`;}
+function newsArt(color){return `background:linear-gradient(150deg,${color},#111111)`;}
 function renderNews(){
   const rows=liveNews;const hero=$("#newsHero"),grid=$("#newsGrid"),home=$("#homeNews");
   if(!rows.length){
@@ -2579,7 +2579,7 @@ function renderNews(){
     if(home)home.innerHTML='<div class="empty-note" style="margin:0;padding:20px">No news yet.</div>';
     return;
   }
-  const feat=rows[0];const teamColor="#1273b8";
+  const feat=rows[0];const teamColor="#8a6d00";
   if(hero)hero.innerHTML=`<div class="news-hero" data-go="article" data-param="${feat.id}">
     <div class="nh-art" style="${newsArt(teamColor)}"><span class="pill frost">Featured</span></div>
     <div class="nh-body"><span class="news-cat">${feat.cat}</span><h3>${feat.title}</h3><p>${feat.excerpt}</p>
@@ -2594,9 +2594,9 @@ function renderNews(){
 function renderArticle(id){
   const n=liveNews.find(x=>x.id===id)||liveNews[0];
   if(!n){$("#articlePage").innerHTML='<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> Article</div><div class="empty-note">This story is no longer available.</div><div style="margin-top:24px"><button class="btn btn-ghost" data-go="news">← Back to News</button></div>';return;}
-  const colors={"Game Recap":"#1273b8","Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
+  const colors={"Game Recap":"#8a6d00","Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
   $("#articlePage").innerHTML=`<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> ${n.cat}</div>
-    <div class="art-hero" style="${newsArt(colors[n.cat]||"#1273b8")}"><div><span class="news-cat">${n.cat}</span>
+    <div class="art-hero" style="${newsArt(colors[n.cat]||"#8a6d00")}"><div><span class="news-cat">${n.cat}</span>
       <h2 style="font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4.4vw,48px);line-height:.92;margin:10px 0 0;max-width:20ch">${n.title}</h2></div></div>
     <div class="news-meta" style="margin-bottom:22px">By ${n.author} · ${n.date}</div>
     <div class="article-body">${n.body.map((para,i)=>i===2?`<blockquote>${para.replace(/^"|"$/g,'')}</blockquote>`:`<p>${para}</p>`).join("")}</div>
@@ -2870,7 +2870,7 @@ $("#lbTabs").addEventListener("click",e=>{const b=e.target.closest(".lb-tab");if
 let currentClub="GLK";
 const clubByName=n=>TEAM_KEYS.find(k=>teams[k].name===n);
 function fillClubSelect(sel){sel.innerHTML=TEAM_KEYS.map(k=>`<option>${teams[k].name}</option>`).join("");}
-const MGR_LOCK=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4fe3e6" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
+const MGR_LOCK=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffe500" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
 function renderManager(){
   const gate=$("#mgrGate"),dash=$("#mgrDash");if(!gate||!dash)return;
   const club=(dbTeams||[]).find(t=>authUser&&t.gm_profile_id===authUser.id);
@@ -3935,7 +3935,7 @@ async function loadTeamsAdmin(){
   (games||[]).forEach(g=>{gameCount[g.home_team_id]=(gameCount[g.home_team_id]||0)+1;gameCount[g.away_team_id]=(gameCount[g.away_team_id]||0)+1;});
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Conference</th><th>Division</th><th>EA club ID</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     tms.map(t=>{const sc=spotCount[t.id]||0,gc=gameCount[t.id]||0;const locked=sc>0||gc>0;
-      return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#1273b8'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
+      return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#8a6d00'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
       <td class="mono">${t.code}</td><td style="color:var(--fog)">${t.conference?esc(t.conference):"—"}</td><td><span class="posbadge">${t.division}</span></td>
       <td class="mono" style="font-size:12.5px">${t.ea_club_id?esc(t.ea_club_id):'<span style="color:var(--loss)">not set</span>'}</td>
       <td style="font-size:12.5px;color:var(--fog)">${sc?sc+" player"+(sc===1?"":"s"):""}${sc&&gc?" · ":""}${gc?gc+" games":""}${!sc&&!gc?"—":""}</td>
@@ -3974,7 +3974,7 @@ function editTeam(btn){
     {key:"code",label:"Code (2–3 letters)",value:t.code},
     {key:"conference",label:"Conference (optional)",value:t.conference||""},
     {key:"division",label:"Division",type:"select",value:t.division,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
-    {key:"color",label:"Club color",type:"color",value:t.color||"#4fe3e6"},
+    {key:"color",label:"Club color",type:"color",value:t.color||"#ffe500"},
     {key:"ea_club_id",label:"EA club ID (for auto stats — the CG… club's number)",value:t.ea_club_id||"",placeholder:"e.g. 1789231"}
   ],async v=>{
     const code=(v.code||"").trim().toUpperCase(),name=(v.name||"").trim();
