@@ -2090,6 +2090,7 @@ function showMatchCard(g){
   if(!g)return;const home=teams[g.a],away=teams[g.b];if(!home||!away)return;
   const mine=myTeamCode;const homeYou=mine===g.a,awayYou=mine===g.b;
   const yourSide=homeYou?"HOME":(awayYou?"AWAY":null);
+  const sideSel=yourSide==="HOME"?"Home":(yourSide==="AWAY"?"Away":"Home / Away");
   $("#modalCard").classList.remove("wide");
   $("#modalTitle").textContent="Match Details";
   $("#modalMsg").innerHTML=`
@@ -2105,8 +2106,14 @@ function showMatchCard(g){
       <div class="mc-code">${g.code||"— pending —"}</div>
       <div class="mc-settings">
         <div class="mc-set-title">EA Lobby Settings</div>
-        <div class="mc-set"><span>Grudge Match</span><b class="off">OFF</b></div>
-        <div class="mc-set"><span>Allow Replay Skips</span><b class="on">ON</b></div>
+        <div class="mc-set"><span>Game Type</span><b>Private Game</b></div>
+        <div class="mc-set"><span>Password</span><b class="mono">${g.code||"— pending —"}</b></div>
+        <div class="mc-set"><span>Side Selection</span><b>${sideSel}</b></div>
+        <div class="mc-set"><span>Server Selection</span><b>North America East</b></div>
+        <div class="mc-set"><span>Allow Replay Skipping</span><b class="on">Yes</b></div>
+        <div class="mc-set"><span>Period Length</span><b>4 Minutes</b></div>
+        <div class="mc-set"><span>Grudge Match Game</span><b class="off">Off</b></div>
+        <div class="mc-set"><span>Use Best Game Location</span><b>Relaxed</b></div>
       </div>
     </div>`;
   modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
