@@ -64,8 +64,16 @@ function normalizeMatch(raw) {
         plus_minus: +(p.skplusmin || 0), takeaways: +(p.sktakeaways || 0), giveaways: +(p.skgiveaways || 0),
         faceoffs_won: +(p.skfow || 0), faceoffs_lost: +(p.skfol || 0), time_on_ice_seconds: +(p.toiseconds || 0),
         pp_goals: +(p.skppg || 0), sh_goals: +(p.skshg || 0), gwg: +(p.skgwg || 0),
+        blocked_shots: +(p.skbs || 0), interceptions: +(p.skinterceptions || 0),
+        passes_completed: +(p.skpasses || 0), passes_attempted: +(p.skpassattempts || 0),
+        shot_attempts: +(p.skshotattempts || 0), possession_seconds: +(p.skpossession || 0),
+        penalties_drawn: +(p.skpenaltiesdrawn || 0), deflections: +(p.skdeflections || 0), saucer_passes: +(p.sksaucerpasses || 0),
+        offense_rating: +(p.ratingOffense || 0), defense_rating: +(p.ratingDefense || 0), team_play_rating: +(p.ratingTeamplay || 0),
         is_goalie: isG,
-        saves: isG ? +(p.glsaves || 0) : 0, shots_against: isG ? +(p.glshots || 0) : 0, goals_against: isG ? +(p.glga || 0) : 0
+        saves: isG ? +(p.glsaves || 0) : 0, shots_against: isG ? +(p.glshots || 0) : 0, goals_against: isG ? +(p.glga || 0) : 0,
+        breakaway_shots: isG ? +(p.glbrkshots || 0) : 0, breakaway_saves: isG ? +(p.glbrksaves || 0) : 0,
+        poke_checks: isG ? +(p.glpokechecks || 0) : 0,
+        shutout: isG && +(p.glga || 0) === 0 && +(p.glshots || 0) > 0
       };
     });
     return { ea_club_id: String(cid), name: c.details ? c.details.name : null, score: +(c.score || 0),
@@ -129,7 +137,14 @@ async function ingestOne(norm, summary) {
         saves: e.saves, shots_against: e.shots_against, goals_against: e.goals_against,
         ea_player_id: e.ea_player_id, plus_minus: e.plus_minus, takeaways: e.takeaways, giveaways: e.giveaways,
         faceoffs_won: e.faceoffs_won, faceoffs_lost: e.faceoffs_lost, time_on_ice_seconds: e.time_on_ice_seconds,
-        pp_goals: e.pp_goals, sh_goals: e.sh_goals, gwg: e.gwg
+        pp_goals: e.pp_goals, sh_goals: e.sh_goals, gwg: e.gwg,
+        blocked_shots: e.blocked_shots, interceptions: e.interceptions,
+        passes_completed: e.passes_completed, passes_attempted: e.passes_attempted,
+        shot_attempts: e.shot_attempts, possession_seconds: e.possession_seconds,
+        penalties_drawn: e.penalties_drawn, deflections: e.deflections, saucer_passes: e.saucer_passes,
+        offense_rating: e.offense_rating, defense_rating: e.defense_rating, team_play_rating: e.team_play_rating,
+        breakaway_shots: e.breakaway_shots, breakaway_saves: e.breakaway_saves,
+        poke_checks: e.poke_checks, shutout: e.shutout
       });
     }
   }

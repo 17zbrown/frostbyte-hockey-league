@@ -762,6 +762,12 @@
   .pf-season>summary::before{content:"\\25B8";color:var(--frost);font-size:11px;transition:transform .15s}
   .pf-season[open]>summary::before{transform:rotate(90deg)}
   .pf-sn-ct{color:var(--fog-dim);font-family:var(--f-mono);font-weight:400;font-size:11px;letter-spacing:0}
+  .ssec{margin-top:6px}
+  .ssec-h{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--frost);margin:0 0 10px;padding-top:16px;border-top:1px solid var(--line-soft)}
+  .sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:10px}
+  .scell{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-m);padding:11px 13px;display:flex;flex-direction:column;gap:4px}
+  .scell .sv{font-family:var(--f-mono);font-weight:700;font-size:18px;color:var(--ice);line-height:1}
+  .scell .sk{font-family:var(--f-cond);font-weight:600;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fog)}
   /* box score modal */
   .bx-team{margin-top:18px}
   .bx-team h4{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);margin:0 0 8px}
@@ -2561,7 +2567,7 @@ async function renderPlayerPage(id){
   const [bdRes,poRes,logRes]=await Promise.all([
     sb.rpc("overall_breakdown",{p_profile:prof.id}),
     sb.from("player_position_overalls").select("pos_cat,overall,gp").eq("profile_id",prof.id),
-    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,pp_goals,sh_goals,gwg,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final")
+    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,pp_goals,sh_goals,gwg,interceptions,passes_completed,passes_attempted,faceoffs_won,faceoffs_lost,takeaways,giveaways,shot_attempts,possession_seconds,penalties_drawn,time_on_ice_seconds,breakaway_shots,breakaway_saves,poke_checks,offense_rating,defense_rating,team_play_rating,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final")
   ]);
   const bd=bdRes&&bdRes.data;const posOvr=(poRes&&poRes.data)||[];
   const log=((logRes&&logRes.data)||[]).filter(r=>r.games).sort((a,b)=>new Date(b.games.scheduled_at)-new Date(a.games.scheduled_at));
@@ -2575,12 +2581,27 @@ async function renderPlayerPage(id){
   // career stats — box-score style table (all stats), replacing the individual boxes
   let statsCard;
   if(log.length){
-    const a=log.reduce((o,r)=>{o.gp++;o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.blk+=r.blocked_shots||0;o.pim+=r.pim||0;o.pm+=r.plus_minus||0;o.sv+=r.saves||0;o.sa+=r.shots_against||0;o.ga+=r.goals_against||0;o.so+=r.shutout?1:0;o.pp+=r.pp_goals||0;o.sh+=r.sh_goals||0;o.gw+=r.gwg||0;return o;},{gp:0,g:0,a:0,s:0,h:0,blk:0,pim:0,pm:0,sv:0,sa:0,ga:0,so:0,pp:0,sh:0,gw:0});
+    const a=log.reduce((o,r)=>{o.gp++;o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.blk+=r.blocked_shots||0;o.pim+=r.pim||0;o.pm+=r.plus_minus||0;o.sv+=r.saves||0;o.sa+=r.shots_against||0;o.ga+=r.goals_against||0;o.so+=r.shutout?1:0;o.pp+=r.pp_goals||0;o.sh+=r.sh_goals||0;o.gw+=r.gwg||0;o.int+=r.interceptions||0;o.pc+=r.passes_completed||0;o.pa+=r.passes_attempted||0;o.fow+=r.faceoffs_won||0;o.fol+=r.faceoffs_lost||0;o.tk+=r.takeaways||0;o.gv+=r.giveaways||0;o.satt+=r.shot_attempts||0;o.poss+=r.possession_seconds||0;o.pd+=r.penalties_drawn||0;o.toi+=r.time_on_ice_seconds||0;o.brs+=r.breakaway_shots||0;o.brsv+=r.breakaway_saves||0;o.poke+=r.poke_checks||0;o.off+=(+r.offense_rating||0);o.def+=(+r.defense_rating||0);o.tp+=(+r.team_play_rating||0);return o;},{gp:0,g:0,a:0,s:0,h:0,blk:0,pim:0,pm:0,sv:0,sa:0,ga:0,so:0,pp:0,sh:0,gw:0,int:0,pc:0,pa:0,fow:0,fol:0,tk:0,gv:0,satt:0,poss:0,pd:0,toi:0,brs:0,brsv:0,poke:0,off:0,def:0,tp:0});
+    let gRec={w:0,l:0,otl:0};
+    log.forEach(r=>{if(!r.is_goalie)return;const gg=r.games;const home=r.team_id===gg.home_team_id;const mine=home?gg.home_score:gg.away_score,opp=home?gg.away_score:gg.home_score;if(mine>opp)gRec.w++;else if(gg.went_ot)gRec.otl++;else gRec.l++;});
     const pg=v=>a.gp?(v/a.gp).toFixed(2):"0.00";
+    const pct=(n,d)=>d?(100*n/d).toFixed(1)+"%":"—";
+    const mmss=s=>{s=Math.round(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");};
+    const cell=(v,k)=>`<div class="scell"><span class="sv">${v}</span><span class="sk">${k}</span></div>`;
+    const ssec=(h,cells)=>`<div class="ssec"><div class="ssec-h">${h}</div><div class="sgrid">${cells}</div></div>`;
     const tbl=isG
       ? `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>SV</th><th>SA</th><th>GA</th><th>GAA</th><th>SV%</th><th>SO</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.sv}</td><td>${a.sa}</td><td>${a.ga}</td><td>${a.gp?(a.ga/a.gp).toFixed(2):"—"}</td><td>${a.sa?(a.sv/a.sa).toFixed(3).replace(/^0/,""):"—"}</td><td>${a.so}</td></tr></tbody></table>`
-      : `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th><th title="Power-play goals">PP</th><th title="Short-handed goals">SH</th><th title="Game-winning goals">GW</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.g}</td><td>${a.a}</td><td class="bx-pt">${a.g+a.a}</td><td>${a.pm>0?"+":""}${a.pm}</td><td>${a.s}</td><td>${a.h}</td><td>${a.blk}</td><td>${a.pim}</td><td>${a.pp}</td><td>${a.sh}</td><td>${a.gw}</td></tr><tr class="pf-pg"><td class="bx-lh">Per game</td><td>—</td><td>${pg(a.g)}</td><td>${pg(a.a)}</td><td class="bx-pt">${pg(a.g+a.a)}</td><td>—</td><td>${pg(a.s)}</td><td>${pg(a.h)}</td><td>${pg(a.blk)}</td><td>${pg(a.pim)}</td><td>—</td><td>—</td><td>—</td></tr></tbody></table>`;
-    statsCard=`<div class="card pf-stats-card"><div class="card-h"><h3>Career Stats</h3>${prof.overall?`<span class="pill frost">${posLbl} · ${prof.overall} OVR</span>`:""}</div><div class="gl-scroll">${tbl}</div></div>`;
+      : `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th><th>PP</th><th>SH</th><th>GW</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.g}</td><td>${a.a}</td><td class="bx-pt">${a.g+a.a}</td><td>${a.pm>0?"+":""}${a.pm}</td><td>${a.s}</td><td>${a.h}</td><td>${a.blk}</td><td>${a.pim}</td><td>${a.pp}</td><td>${a.sh}</td><td>${a.gw}</td></tr><tr class="pf-pg"><td class="bx-lh">Per game</td><td>—</td><td>${pg(a.g)}</td><td>${pg(a.a)}</td><td class="bx-pt">${pg(a.g+a.a)}</td><td>—</td><td>${pg(a.s)}</td><td>${pg(a.h)}</td><td>${pg(a.blk)}</td><td>${pg(a.pim)}</td><td>—</td><td>—</td><td>—</td></tr></tbody></table>`;
+    const detail=isG
+      ? ssec("Record",cell(`${gRec.w}-${gRec.l}-${gRec.otl}`,"W-L-OTL")+cell(a.gp?(a.ga/a.gp).toFixed(2):"—","GAA")+cell(a.sa?(100*a.sv/a.sa).toFixed(1)+"%":"—","Save %")+cell(a.so,"Shutouts"))
+        +ssec("Breakaways",cell(`${a.brsv}/${a.brs}`,"Saves")+cell(pct(a.brsv,a.brs),"Brk save %")+cell(a.poke,"Poke checks"))
+        +(a.off?ssec("EA grades (avg)",cell(Math.round(a.off/a.gp),"Offense")+cell(Math.round(a.def/a.gp),"Defense")+cell(Math.round(a.tp/a.gp),"Team play")):"")
+      : ssec("Scoring",cell(a.g-a.pp-a.sh,"EV goals")+cell(a.pp,"PP goals")+cell(a.sh,"SH goals")+cell(a.gw,"GW goals")+cell(pg(a.g+a.a),"Pts / game"))
+        +ssec("Shooting",cell(pct(a.g,a.s),"Shooting %")+cell(a.satt,"Shot attempts")+cell(pg(a.s),"Shots / game"))
+        +ssec("Puck play",cell(a.pc,"Passes")+cell(pct(a.pc,a.pa),"Pass %")+cell(a.fow,"Faceoffs won")+cell(pct(a.fow,a.fow+a.fol),"Faceoff %")+cell(a.tk,"Takeaways")+cell(a.gv,"Giveaways")+cell(a.int,"Interceptions"))
+        +ssec("Discipline & ice",cell(a.pd,"Pen. drawn")+cell(a.gp?mmss(a.toi/a.gp):"—","TOI / game")+cell(mmss(a.poss),"Possession"))
+        +(a.off?ssec("EA grades (avg)",cell(Math.round(a.off/a.gp),"Offense")+cell(Math.round(a.def/a.gp),"Defense")+cell(Math.round(a.tp/a.gp),"Team play")):"");
+    statsCard=`<div class="card pf-stats-card"><div class="card-h"><h3>Career Stats</h3>${prof.overall?`<span class="pill frost">${posLbl} · ${prof.overall} OVR</span>`:""}</div><div class="gl-scroll">${tbl}</div>${detail}</div>`;
   } else {
     statsCard=`<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>`;
   }
