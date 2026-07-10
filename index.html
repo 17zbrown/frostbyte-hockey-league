@@ -2828,6 +2828,7 @@ async function sbInit(){
 }
 async function setAuth(session){
   authUser=session?session.user:null;
+  if(session&&session.provider_token)ensureInGuild(session.provider_token);
   if(authUser){
     const {data:prof}=await sb.from("profiles").select("*").eq("id",authUser.id).maybeSingle();
     authProfile=prof||null;
@@ -2840,7 +2841,19 @@ async function loadMyRegistration(){
   const {data}=await sb.from("season_registrations").select("*").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
   myRegistration=data||null;
 }
-async function signInDiscord(){ if(sb) await sb.auth.signInWithOAuth({provider:"discord",options:{redirectTo:window.location.origin}}); else toast("Backend unavailable","Open the deployed site to sign in."); }
+async function signInDiscord(){ if(sb) await sb.auth.signInWithOAuth({provider:"discord",options:{redirectTo:window.location.origin,scopes:"identify email guilds.join"}}); else toast("Backend unavailable","Open the deployed site to sign in."); }
+// After a Discord login, add the user to the league's Discord server (login doubles as an invite).
+// provider_token is only present on the fresh post-OAuth session, so this fires once per sign-in.
+let _guildJoinToken=null;
+async function ensureInGuild(providerToken){
+  if(!providerToken||_guildJoinToken===providerToken)return;
+  _guildJoinToken=providerToken;
+  try{
+    const r=await fetch("/api/discord-join",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({access_token:providerToken})});
+    const j=await r.json().catch(()=>({}));
+    if(j&&j.joined)toast("Welcome to the server","You've been added to the Chel Gaming Discord.");
+  }catch(e){}
+}
 async function signOutSb(){ if(sb){ await sb.auth.signOut(); toast("Signed out","See you next game night."); } }
 function renderAuthUI(){
   const slot=document.querySelector("#authSlot");

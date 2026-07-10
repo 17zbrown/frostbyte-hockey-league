@@ -17,6 +17,13 @@
   to = "/.netlify/functions/ingest-stats"
   status = 200
 
+# Sign-in-with-Discord doubles as a server invite: the front-end POSTs the user's
+# Discord OAuth token here and the bot adds them to the guild.
+[[redirects]]
+  from = "/api/discord-join"
+  to = "/.netlify/functions/discord-join"
+  status = 200
+
 # Basic security headers for the static site.
 [[headers]]
   for = "/*"
