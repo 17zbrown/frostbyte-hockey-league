@@ -2664,15 +2664,6 @@ async function renderPlayerPage(id){
   } else {
     statsCard=`<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>`;
   }
-  // rating breakdown (description removed)
-  let brk="";
-  if(bd&&bd.components&&bd.components.length&&log.length){
-    brk=`<div class="card brk-card"><div class="card-h"><h3>Rating Breakdown</h3><span class="pill frost">${posLbl} · ${bd.overall} OVR</span></div>
-      ${bd.provisional?`<p class="brk-prov" style="margin:0 0 14px">Provisional — blended toward 70 until 5 games (${bd.gp} played).</p>`:""}
-      <div class="brk-head"><span>Stat</span><span>Career</span><span>Rating</span><span>Weight</span></div>
-      ${bd.components.map(c=>`<div class="brk-row"><span class="brk-l">${c.label}</span><span class="brk-v">${c.value===null||c.value===undefined?'<span class="brk-na">—</span>':esc(String(c.value))+c.suffix}</span><span class="brk-bar"><i style="width:${Math.max(2,c.score)}%"></i><em>${c.score}</em></span><span class="brk-w">${Math.round(c.weight*100)}%</span></div>`).join("")}
-    </div>`;
-  }
   // game log — current season shown directly, previous seasons in dropdowns
   const glRow=r=>{const gg=r.games;const home=r.team_id===gg.home_team_id;
     const oppCode=codeOfId(home?gg.away_team_id:gg.home_team_id);
@@ -2712,8 +2703,7 @@ async function renderPlayerPage(id){
     ${twitchBlock(prof)}
     ${posChips}
     ${statsCard}
-    ${logHtml}
-    ${brk}`;
+    ${logHtml}`;
 }
 const TWITCH_GLYPH='<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 2 3 6.5V19h4v3h3l3-3h4l4.5-4.5V2H4zm2 2h13.5v9L16 16h-4l-3 3v-3H6V4zm5.25 3v5h2V7h-2zm5 0v5h2V7h-2z"/></svg>';
 function twitchBlock(prof){
