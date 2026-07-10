@@ -37,7 +37,7 @@ then it's a quick SQL `update teams set ea_club_id='...' where code='GLK';`.
 PLATFORM=common-gen5 bash check-ip.sh
 
 # set env and run
-export INGEST_URL="https://chelgaming.netlify.app/api/ingest-stats"
+export INGEST_URL="https://chelgamingleague.com/api/ingest-stats"
 export INGEST_KEY="<same secret as Netlify>"
 export SUPABASE_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co"
 export SUPABASE_ANON_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z"   # publishable, safe

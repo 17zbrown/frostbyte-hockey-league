@@ -1325,7 +1325,7 @@
         <div class="card"><div class="card-h"><h3>Recent Results</h3><span class="lnk" data-go="schedule">Schedule →</span></div><div class="fixtures" id="homeResults"></div></div>
       </div>
       <div class="stack">
-        <div class="card"><div class="card-h"><h3>Next Fixtures</h3><span class="pill frost" id="nextFixWeek">Pre-season</span></div><div class="fixtures" id="homeFixtures"></div></div>
+        <div class="card"><div class="card-h"><h3>Upcoming Games</h3><span class="pill frost" id="nextFixWeek">Pre-season</span></div><div class="fixtures" id="homeFixtures"></div></div>
         <div class="card"><div class="card-h"><h3>Scoring Leaders</h3><span class="lnk" data-go="stats">All stats →</span></div><div class="leaders" id="homeLeaders"></div></div>
         <div class="card"><div class="card-h"><h3>Transactions</h3><span class="lnk" data-go="transactions">All →</span></div><div id="homeTxns"></div></div>
       </div>
@@ -1947,7 +1947,15 @@ function go(view,param,fromPop){
 }
 function closeMobile(){$("#mobileMenu").classList.remove("on");$("#ham").setAttribute("aria-expanded","false");}
 try{history.replaceState({fbView:"home",fbParam:null},"");}catch(e){}
-window.addEventListener("popstate",e=>{const st=e.state;if(st&&st.fbView)go(st.fbView,st.fbParam,true);else go("home",null,true);});
+window.addEventListener("popstate",e=>{const st=e.state;if(st&&st.fbView)go(st.fbView,st.fbParam,true);/* ignore null-state popstates (e.g. in-page #hash clicks) so they don't bounce to home */});
+// Rulebook table-of-contents: smooth-scroll to the section instead of hash-navigating (which was bouncing to home)
+$("#rulesToc")&&$("#rulesToc").addEventListener("click",e=>{
+  const a=e.target.closest("a[href^='#']");if(!a)return;
+  e.preventDefault();
+  const sec=document.getElementById(a.getAttribute("href").slice(1));if(!sec)return;
+  const nav=document.querySelector("header.nav");const off=(nav?nav.offsetHeight:64)+14;
+  window.scrollTo({top:sec.getBoundingClientRect().top+window.scrollY-off,behavior:"smooth"});
+});
 document.addEventListener("click",e=>{const t=e.target.closest("[data-go]");if(t){e.preventDefault();go(t.dataset.go,t.dataset.param);}});
 document.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches("[data-go]")){e.preventDefault();go(e.target.dataset.go,e.target.dataset.param);}});
 $("#ham").addEventListener("click",()=>{const m=$("#mobileMenu");const open=m.classList.toggle("on");$("#ham").setAttribute("aria-expanded",open);});

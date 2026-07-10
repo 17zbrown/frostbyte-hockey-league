@@ -8,7 +8,7 @@
 // Run on a cron every ~3-5 min. Node 18+ (global fetch, no dependencies).
 //
 // Required env:
-//   INGEST_URL   e.g. https://chelgaming.netlify.app/api/ingest-stats
+//   INGEST_URL   e.g. https://chelgamingleague.com/api/ingest-stats
 //   INGEST_KEY   the shared secret (must equal the Netlify INGEST_KEY env var)
 //   SUPABASE_URL e.g. https://bzbuyclwdhmhdzujxeqd.supabase.co
 //   SUPABASE_ANON_KEY   the PUBLISHABLE key (safe; public read of teams.ea_club_id)

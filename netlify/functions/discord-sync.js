@@ -14,7 +14,7 @@ const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT = process.env.DISCORD_BOT_TOKEN;
 const GUILD = process.env.DISCORD_GUILD_ID;
-const UA = "DiscordBot (https://chelgaming.netlify.app,1.0)";
+const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
 async function sbGet(path) {
