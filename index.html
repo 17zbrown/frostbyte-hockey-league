@@ -782,6 +782,13 @@
   .st-k{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--fog-dim)}
   .st-v{font-family:var(--f-display);font-weight:800;font-size:30px;line-height:1.1;color:var(--frost);margin:4px 0 2px}
   .st-sub{font-family:var(--f-mono);font-size:11px;color:var(--fog)}
+  /* stat-abbreviation tooltips */
+  th[data-tip]{cursor:help}
+  #statTip{position:fixed;left:0;top:0;z-index:200;background:#0a0a0a;color:#f4f4f0;border:1px solid #2f2f2f;
+    font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+    padding:6px 10px;border-radius:7px;box-shadow:0 12px 30px -10px #000;pointer-events:none;white-space:nowrap;
+    max-width:240px;opacity:0;visibility:hidden;transition:opacity .1s ease}
+  #statTip.on{opacity:1;visibility:visible}
 
   /* mobile menu */
   .mobile-menu{display:none;position:fixed;top:var(--nav-h);left:0;right:0;bottom:0;z-index:55;background:#081521f7;backdrop-filter:blur(14px);border-bottom:1px solid var(--line);flex-direction:column;padding:14px 16px 30px;overflow-y:auto}
@@ -2020,6 +2027,37 @@ $("#rulesToc")&&$("#rulesToc").addEventListener("click",e=>{
   const nav=document.querySelector("header.nav");const off=(nav?nav.offsetHeight:64)+14;
   window.scrollTo({top:sec.getBoundingClientRect().top+window.scrollY-off,behavior:"smooth"});
 });
+// Stat-abbreviation tooltips: hover a column header to see the full stat name. Fixed-positioned so
+// overflow-scrolling stat tables don't clip it; auto-applies to every table via a MutationObserver.
+const STAT_FULL={GP:"Games played",G:"Goals",A:"Assists",P:"Points",PTS:"Points","+/-":"Plus / minus",
+  S:"Shots",H:"Hits",BLK:"Blocked shots",PIM:"Penalty minutes",PP:"Power-play goals",SH:"Short-handed goals",
+  GW:"Game-winning goals",POS:"Position",SV:"Saves",SA:"Shots against",GA:"Goals against",GAA:"Goals-against average",
+  "SV%":"Save percentage",SO:"Shutouts",TK:"Takeaways",GV:"Giveaways","FO%":"Faceoff win %",TOI:"Time on ice",
+  W:"Wins",L:"Losses",OTL:"Overtime losses",GF:"Goals for",DIFF:"Goal differential",PPG:"Power-play goals",
+  PK:"Penalty kill","PP%":"Power-play %","PK%":"Penalty-kill %"};
+function tipScan(node){
+  if(!node||!node.querySelectorAll)return;
+  node.querySelectorAll("th:not([data-tipck])").forEach(el=>{
+    el.setAttribute("data-tipck","1");
+    const full=STAT_FULL[el.textContent.trim().toUpperCase()];
+    if(full){el.setAttribute("data-tip",full);el.removeAttribute("title");}
+  });
+}
+let _statTip=null;
+function showStatTip(el){
+  const tip=el.getAttribute("data-tip");if(!tip)return;
+  if(!_statTip){_statTip=document.createElement("div");_statTip.id="statTip";document.body.appendChild(_statTip);}
+  _statTip.textContent=tip;_statTip.classList.add("on");
+  const r=el.getBoundingClientRect(),w=_statTip.offsetWidth,h=_statTip.offsetHeight;
+  const left=Math.max(6,Math.min(r.left+r.width/2-w/2,window.innerWidth-w-6));
+  let top=r.top-h-8;if(top<4)top=r.bottom+8;
+  _statTip.style.left=left+"px";_statTip.style.top=top+"px";
+}
+function hideStatTip(){if(_statTip)_statTip.classList.remove("on");}
+document.addEventListener("mouseover",e=>{const el=e.target.closest&&e.target.closest("[data-tip]");if(el)showStatTip(el);});
+document.addEventListener("mouseout",e=>{const el=e.target.closest&&e.target.closest("[data-tip]");if(el)hideStatTip();});
+try{new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.nodeType===1)tipScan(n);}).observe(document.body,{childList:true,subtree:true});}catch(e){}
+tipScan(document);
 document.addEventListener("click",e=>{const t=e.target.closest("[data-go]");if(t){e.preventDefault();go(t.dataset.go,t.dataset.param);}});
 document.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches("[data-go]")){e.preventDefault();go(e.target.dataset.go,e.target.dataset.param);}});
 $("#ham").addEventListener("click",()=>{const m=$("#mobileMenu");const open=m.classList.toggle("on");$("#ham").setAttribute("aria-expanded",open);});
