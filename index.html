@@ -1601,8 +1601,8 @@
         <div class="trade-foot" style="margin-top:20px"><div class="mono" style="color:var(--fog);font-size:13px" id="lineupNote">Set your six for each game night. Both lineups save together.</div><button class="btn btn-frost" id="saveLineup">Save Lineups</button></div>
       </div></div>
       <div class="mgr-panel" id="mtab-reports"><div class="card">
-        <div class="card-h"><h3>Game Reports</h3><span class="pill dim">Both clubs must report the same score</span></div>
-        <div style="padding:14px 20px 8px;color:var(--fog);font-size:13.5px;border-bottom:1px solid var(--line)">Enter the full box score for both clubs — goals, assists, shots, hits, PIM and goalie saves — straight off your EA <b>end-of-game</b> screen. It <b style="color:var(--win)">publishes</b> only when it mirrors the opponent GM's entry. If they don't match, both GMs get <b>24 hours</b> to align their box scores; if the window closes still unmatched, the game is a <b style="color:var(--loss)">forfeit for both clubs</b>. <span style="color:var(--fog-dim)">(You can also send your EA screenshots to the commissioners.)</span></div>
+        <div class="card-h"><h3>Game Reports</h3><span class="pill dim">Stats import automatically from EA</span></div>
+        <div style="padding:14px 20px 8px;color:var(--fog);font-size:13.5px;border-bottom:1px solid var(--line)">After each scheduled game, your full box score — goals, assists, shots, hits, PIM and goalie saves — is pulled in <b style="color:var(--win)">automatically from EA</b> and posted here, usually within a few minutes on game nights. <b>You don't need to submit anything.</b> If a game ever doesn't import (played off-schedule, or a club isn't linked to its EA club yet), send your EA <b>end-of-game</b> screenshots to the commissioners and they'll add it.</div>
         <div id="reportsBody"></div>
       </div></div>
     </div>
@@ -2894,7 +2894,7 @@ const AI_UP_IC=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stro
 const scanImages={};
 function renderReports(){const el=$("#reportsBody");if(!el)return;
   const byWeek=[];(liveSchedule||[]).forEach(wk=>{const g=wk.games.filter(x=>x.a===currentClub||x.b===currentClub);if(g.length)byWeek.push({wk:wk.wk,games:g});});
-  if(!byWeek.length){el.innerHTML='<div class="empty-note">No games to report yet — your fixtures appear here once the commissioner posts the schedule. After each game, submit your EA end-of-game box score (or send screenshots to the commissioners).</div>';return;}
+  if(!byWeek.length){el.innerHTML='<div class="empty-note">No games yet — your fixtures appear here once the commissioner posts the schedule. After each game, your box score imports automatically from EA — nothing to submit.</div>';return;}
   el.innerHTML=byWeek.map(w=>`<div class="rr-week">${w.wk}</div>`+w.games.map(g=>{const opp=g.a===currentClub?g.b:g.a,home=g.a===currentClub;
     const done=g.done;const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
     const right=done?`<span class="rr-state ok">✓ Final · ${us}–${them} ${win?"W":"L"}</span>`
