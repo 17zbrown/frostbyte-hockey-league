@@ -2408,7 +2408,7 @@ async function renderPlayerPage(id){
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
           ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
           ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}
-          ${prof.overall?`<span class="ph-tag ovr-tag"><b>${prof.overall}</b> OVR</span>`:''}
+          ${prof.overall?`<span class="ph-tag ovr-tag" title="Computed from career stats, weighted by position. Provisional until 5 games played."><b>${prof.overall}</b> OVR</span>`:''}
           ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div></div>
     </div>
     ${twitchBlock(prof)}
@@ -2765,14 +2765,13 @@ function toggleAcctMenu(open){const w=$("#acctWrap");if(!w)return;const btn=$("#
 function openEditProfile(){
   if(!authProfile||!sb){toast("Sign in first","Sign in with Discord to edit your profile.");return;}
   formModal("Edit Profile",[
-    {key:"overall",label:"EA overall (0–99)",type:"number",value:authProfile.overall||"",min:0,max:99},
     {key:"twitch",label:"Twitch handle — your LIVE badge turns on automatically when you stream",value:authProfile.twitch||"",placeholder:"your_twitch_username"}
   ],async v=>{
     let tw=(v.twitch||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
-    const handle=tw||null,ovr=(+v.overall>0&&+v.overall<=99)?+v.overall:null;
-    const {error}=await sb.from("profiles").update({twitch:handle,overall:ovr}).eq("id",authUser.id);
+    const handle=tw||null;
+    const {error}=await sb.from("profiles").update({twitch:handle}).eq("id",authUser.id);
     if(error){toast("Couldn't save",error.message);return;}
-    authProfile.twitch=handle;authProfile.overall=ovr;
+    authProfile.twitch=handle;
     toast("Profile updated","Your profile changes are saved.");
     renderPlayerPage(authProfile.gamertag);renderSignupAuth();
   });
@@ -3899,11 +3898,9 @@ async function makeDraftPick(pickId){
   (regs||[]).forEach(r=>{if(!rostered.has(r.profile_id)&&!have.has(r.profile_id)){have.add(r.profile_id);opts.push({value:r.profile_id,label:(r.profiles?r.profiles.gamertag:'?')+' (unsigned)'});}});
   if(!opts.length){toast("No players","There are no available players to draft.");return;}
   formModal("Make the pick",[
-    {key:"player",label:"Draft player",type:"select",value:opts[0].value,options:opts},
-    {key:"overall",label:"Player overall (0–99, optional)",type:"number",value:"",min:0,max:99}
+    {key:"player",label:"Draft player",type:"select",value:opts[0].value,options:opts}
   ],async v=>{
-    const ov=(+v.overall>0&&+v.overall<=99)?+v.overall:null;
-    const {error}=await sb.rpc("use_draft_pick",{p_pick:pickId,p_player:v.player,p_overall:ov});
+    const {error}=await sb.rpc("use_draft_pick",{p_pick:pickId,p_player:v.player});
     if(error){toast("Couldn't make pick",error.message);return;}
     toast("Pick made","Player drafted to the club.");loadDraftAdmin();loadTeamsAdmin();
   });
