@@ -300,9 +300,6 @@
   .bar{flex:1;height:8px;background:#0e2436;border-radius:100px;overflow:hidden}
   .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--frost-deep),var(--frost));border-radius:100px}
   .bar-row .vv{font-family:var(--f-mono);font-size:13px;font-weight:700;width:52px;text-align:right}
-  .lb-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:14px 20px 4px}
-  .lb-tab{font-family:var(--f-cond);font-weight:500;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog);padding:6px 13px;border:1px solid var(--line);border-radius:100px}
-  .lb-tab.active{background:var(--frost);color:#052026;border-color:var(--frost);font-weight:600}
 
   /* ============================ SCHEDULE ============================ */
   .week{margin-bottom:26px}
@@ -983,7 +980,6 @@
   .stat.accent{border-color:#a9cfe8}
   .bar{background:#e3ecf3}
   .gm.W{background:#dcf1e7} .gm.L{background:#f8e2de} .gm.OT{background:#f6edd4}
-  .lb-tab.active{background:var(--navy);color:#fff;border-color:var(--navy)}
 
   /* CHAT */
   .chan:hover{background:#f1f6fb}
@@ -1237,7 +1233,7 @@
     --ink:#0a0a0a;--panel:#161616;--panel-2:#1f1f1f;--panel-3:#2a2a2a;
     --line:#333333;--line-soft:#242424;
     --frost:#ffe500;--frost-deep:#ffef66;--frost-glow:#ffe5001f;
-    --ice:#f4f4f0;--fog:#a2a29a;--fog-dim:#83837c;
+    --ice:#f4f4f0;--fog:#a2a29a;--fog-dim:#9a9a90;
     --navy:#f4f4f0;--navy-2:#d2d2cc;--sky:#ffe500;--sky-nav:#0a0a0a;
     --logo-c:#f4f4f0;
     --sh-1:0 1px 2px #00000066,0 6px 16px -10px #00000099;
@@ -1302,8 +1298,6 @@
   html[data-theme="dark"] .pill.gold,html[data-theme="dark"] .posbadge.G,html[data-theme="dark"] .txn .ic.callup,html[data-theme="dark"] .gm.OT,html[data-theme="dark"] .award-card .trophy,html[data-theme="dark"] .cup .trophy{background:#2f2814;color:#e0b653}
   html[data-theme="dark"] .pill.live,html[data-theme="dark"] .txn .ic.waive,html[data-theme="dark"] .gm.L{background:#331921;color:#ff6b83}
   html[data-theme="dark"] .posbadge.F,html[data-theme="dark"] .posbadge.C,html[data-theme="dark"] .posbadge.W,html[data-theme="dark"] .posbadge.LW,html[data-theme="dark"] .posbadge.RW,html[data-theme="dark"] .txn .ic.trade{background:#123048;color:#5fb8ee}
-  /* leaderboard active tab used --navy as a surface */
-  html[data-theme="dark"] .lb-tab.active{background:var(--frost);color:#04121e;border-color:var(--frost)}
   /* empty states + auth banners */
   html[data-theme="dark"] .empty-note,html[data-theme="dark"] .auth-banner{background:linear-gradient(120deg,#142b3e,#10222f);border-color:#2b445c}
   html[data-theme="dark"] .empty-state{background:var(--panel)}
@@ -1472,14 +1466,14 @@
 
   <!-- POWER RANKINGS -->
   <div class="view" id="view-rankings"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Week 8</span><h2>Power <em>Rankings</em></h2>
+    <div class="sec-head"><div><span class="eyebrow" id="rankEyebrow">Season 1</span><h2>Power <em>Rankings</em></h2>
       <p>The commissioners' weekly read on who's actually rolling — movement shown against last week.</p></div></div>
     <div class="card"><div id="rankingsBody"></div></div>
   </div></section></div>
 
   <!-- AWARDS -->
   <div class="view" id="view-awards"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Season 4 Race</span><h2>League <em>Awards</em></h2>
+    <div class="sec-head"><div><span class="eyebrow" id="awardsEyebrow">Season 1 Race</span><h2>League <em>Awards</em></h2>
       <p>Current front-runners for the end-of-season hardware. Voted by GMs and the commissioners' panel.</p></div></div>
     <div class="grid-3" id="awardsGrid"></div>
   </div></section></div>
@@ -1487,7 +1481,7 @@
   <!-- RECORDS -->
   <div class="view" id="view-records"><section class="pad"><div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">All-Time</span><h2>Record <em>Book</em></h2>
-      <p>The marks to chase across four seasons of Chel Gaming hockey.</p></div></div>
+      <p>The marks to chase across every season of Chel Gaming hockey.</p></div></div>
     <div class="grid-2">
       <div class="card"><div class="card-h"><h3>Single Game</h3></div><div id="recordsGame"></div></div>
       <div class="card"><div class="card-h"><h3>Season &amp; Career</h3></div><div id="recordsSeason"></div></div>
@@ -1878,7 +1872,7 @@ function buildTeams(){
 // standings: code, gp, w, l, otl, gf, ga, streak
 const rules = [
   {n:"01",t:"The League",items:[
-    "A competitive 6v6 EA Sports NHL league of <b>32 franchises</b> — each with one Owner, up to two General Managers (optional), an active player roster, and a salary cap.",
+    "A competitive 6v6 EA Sports NHL league — each club has one Owner, up to two General Managers (optional), an active player roster, and a salary cap.",
     "The league runs a <b>trade system</b>, <b>waiver system</b>, <b>free agency</b>, and <b>seasonal playoffs</b>.",
     "There are <b>no</b> affiliated lower-tier teams, call-ups, or send-downs — one roster per franchise."]},
   {n:"02",t:"Ownership",items:[
@@ -2058,6 +2052,10 @@ function tipScan(node){
     el.setAttribute("data-tipck","1");
     const full=STAT_FULL[el.textContent.trim().toUpperCase()];
     if(full){el.setAttribute("data-tip",full);el.removeAttribute("title");}
+  });
+  // make clickable data rows/cards keyboard-focusable (they navigate via the global data-go handler)
+  node.querySelectorAll(".rowlink[data-go]:not([tabindex]),.leader[data-go]:not([tabindex]),.lc-row[data-go]:not([tabindex]),.rank-row[data-go]:not([tabindex]),.gl-row[data-go]:not([tabindex]),.team-card[data-go]:not([tabindex])").forEach(el=>{
+    el.setAttribute("tabindex","0");el.setAttribute("role","link");
   });
 }
 let _statTip=null;
@@ -2963,6 +2961,8 @@ async function sbInit(){
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     updateBranding();renderTeamsGrid();renderHeroCarousel();renderHeroRink();
     renderFixtures();renderSchedule();renderTxns();renderNews();renderLiveGames();
+    if(openSeason){const re=$("#rankEyebrow");if(re)re.textContent="Season "+openSeason.number;
+      const ae=$("#awardsEyebrow");if(ae)ae.textContent="Season "+openSeason.number+" Race";}
     renderLeaderList($("#homeLeaders"),"points");
     renderLeaderGrid($("#leaderboard"));
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
