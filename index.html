@@ -1644,6 +1644,17 @@
       <div class="mgr-panel" id="atab-schedbuild"><div class="card"><div class="card-h"><h3>Season Schedule</h3><span class="pill" id="schedCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Generate a full home-and-away round-robin for all 8 clubs (14 weeks), or clear it and start over.</div>
         <div style="padding:12px 20px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-frost btn-sm" id="genScheduleBtn">Auto-Generate Full Schedule</button><button class="btn btn-ghost btn-sm" id="clearScheduleBtn">Clear Schedule</button></div>
+        <div style="padding:14px 20px;border-top:1px solid var(--line);margin-top:4px">
+          <div style="font-family:var(--f-cond);font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:13px;color:var(--ice);margin-bottom:4px">Schedule a single game</div>
+          <div style="color:var(--fog);font-size:12.5px;margin-bottom:12px">Add one game — useful for makeups, exhibitions, or a quick test. Time is Eastern; a 6-digit lobby code is assigned automatically.</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div class="ef-row" style="min-width:150px;flex:1"><label>Home club</label><select id="sg-home"></select></div>
+            <div class="ef-row" style="min-width:150px;flex:1"><label>Away club</label><select id="sg-away"></select></div>
+            <div class="ef-row" style="min-width:200px"><label>Date &amp; time (ET)</label><input type="datetime-local" id="sg-time"></div>
+            <div class="ef-row" style="width:80px"><label>Week</label><input type="number" id="sg-week" min="1" value="1"></div>
+            <button class="btn btn-frost btn-sm" id="addGameBtn">Add game</button>
+          </div>
+        </div>
         <div id="schedAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-gamestats"><div class="card"><div class="card-h"><h3>Games &amp; Stats</h3><span class="pill" id="gamesCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Enter final scores — standings and points update automatically. Per-player box scores can be added after.</div>
@@ -3678,8 +3689,29 @@ function etInputToISO(s){if(!s)return null;try{
   const tz=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",timeZoneName:"short"}).formatToParts(guess).find(x=>x.type==="timeZoneName").value;
   const off=tz==="EST"?5:4;
   return new Date(Date.UTC(y,mo-1,da,h+off,mi)).toISOString();}catch(e){return null;}}
+function fillGameTeamSelects(){
+  const opts='<option value="">Select…</option>'+TEAM_KEYS.map(c=>`<option value="${c}">${esc(teams[c].name)}</option>`).join("");
+  ["#sg-home","#sg-away"].forEach(sel=>{const el=$(sel);if(el&&el.dataset.filled!=="1"){el.innerHTML=opts;el.dataset.filled="1";}});
+}
+async function addSingleGame(){
+  if(!sb||!adminSeason){toast("No season yet","Set up a season before scheduling games.");return;}
+  const h=$("#sg-home").value,a=$("#sg-away").value;
+  if(!h||!a){toast("Pick both clubs","Choose a home and away club.");return;}
+  if(h===a){toast("Pick two different clubs","A club can't play itself.");return;}
+  const iso=etInputToISO($("#sg-time").value);
+  if(!iso){toast("Set a date & time","Enter when the game is played (Eastern Time).");return;}
+  const week=+($("#sg-week").value)||null;
+  const btn=$("#addGameBtn");btn.disabled=true;
+  const {error}=await sb.from("games").insert({season_id:adminSeason.id,home_team_id:teamIdOf(h),away_team_id:teamIdOf(a),scheduled_at:iso,status:"scheduled",week});
+  btn.disabled=false;
+  if(error){toast("Couldn't add game",error.message);return;}
+  toast("Game scheduled",teams[h].name+" vs "+teams[a].name+" · "+fmtGameDate(iso)+" "+fmtGameTime(iso));
+  $("#sg-home").value="";$("#sg-away").value="";$("#sg-time").value="";
+  loadScheduleAdmin();loadGamesAdmin();await loadSchedule();renderSchedule();renderFixtures();
+}
 async function loadScheduleAdmin(){
   const el=$("#schedAdminBody");if(!el||!sb||!adminSeason)return;
+  fillGameTeamSelects();
   const {data:games}=await sb.from("games").select("*").eq("season_id",adminSeason.id).order("week").order("created_at");
   const pc=$("#schedCount");if(pc)pc.textContent=(games?games.length:0)+" games";
   if(!games||!games.length){el.innerHTML=ADMIN_EMPTY("No schedule yet","Click Auto-Generate to build the full season for all 8 clubs.");return;}
@@ -3949,6 +3981,7 @@ $("#view-admin").addEventListener("click",e=>{
   const td=e.target.closest(".tm-del");if(td){e.preventDefault();removeTeam(td);return;}
   const st=e.target.closest(".sc-savetime");if(st){e.preventDefault();saveGameTime(st);return;}
   if(e.target.closest("#genScheduleBtn")){e.preventDefault();generateSchedule();return;}
+  if(e.target.closest("#addGameBtn")){e.preventDefault();addSingleGame();return;}
   if(e.target.closest("#clearScheduleBtn")){e.preventDefault();clearSchedule();return;}
   const gs=e.target.closest(".ga-save");if(gs){e.preventDefault();saveGameResult(gs);return;}
   const mb=e.target.closest(".mb-save");if(mb){e.preventDefault();saveMember(mb);return;}
