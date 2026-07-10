@@ -1660,7 +1660,8 @@
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Enter final scores — standings and points update automatically. Per-player box scores can be added after.</div>
         <div id="gamesAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-members"><div class="card"><div class="card-h"><h3>Members &amp; Roles</h3><span class="pill" id="membersCount"></span></div>
-        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office.</div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office. Change a player's position with the dropdown — it saves instantly.</div>
+        <input class="adm-search" id="mbSearch" placeholder="Search members by name…" />
         <div id="membersBody"></div></div></div>
       <div class="mgr-panel" id="atab-teams">
         <div class="card" style="padding:22px 26px"><div class="card-h" style="padding:0 0 14px"><h3>Add a Club</h3></div>
@@ -3224,10 +3225,10 @@ function openActionForm(type){
   const meta=ACTION_META[type];let fields;
   if(type==='complaint')fields=[{key:"subject",label:"What's the complaint about?",type:"select",value:"",options:selOpts(COMPLAINT_SUBJECTS)},{key:"target",label:"Who is this about? (optional)",type:"player",placeholder:"Start typing a player's name…"},{key:"details",label:"Details",type:"textarea",value:"",placeholder:"What happened, when, and any evidence (links, clips)…"}];
   else if(type==='appeal')fields=[{key:"subject",label:"What are you appealing?",type:"select",value:"",options:selOpts(APPEAL_SUBJECTS)},{key:"details",label:"Your explanation",type:"textarea",value:"",placeholder:"Why the ruling should be reconsidered…"}];
-  else if(type==='trade_request'){if(!myClubInfo.team_id){toast("Join a club first","You must be on a club roster to request a trade.");return;}fields=[{key:"subject",label:"What are you asking for?",type:"select",value:"",options:selOpts(TRADE_WANTS)},{key:"target",label:"Player involved (optional)",type:"player",placeholder:"Player you want / want to be dealt for…"},{key:"details",label:`Message to ${myClubInfo.team_name||'your club'}'s management`,type:"textarea",value:"",placeholder:"Give your GM the context…"}];}
+  else if(type==='trade_request'){if(!myClubInfo.team_id){toast("Join a club first","You must be on a club roster to request a trade.");return;}fields=[{key:"details",label:`Why are you requesting a trade?`,type:"textarea",value:"",placeholder:`Tell ${myClubInfo.team_name||'your club'}'s management why…`}];}
   else fields=[{key:"current_position",label:"Current position",type:"select",value:myClubInfo.position||"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"requested_position",label:"Requested position",type:"select",value:"C",options:AC_POS.map(p=>({value:p[0],label:p[1]}))},{key:"subject",label:"Reason for the change",type:"select",value:"",options:selOpts(POSCHANGE_REASONS)},{key:"details",label:"Anything else?",type:"textarea",value:"",placeholder:"Optional — add any context…"}];
   formModal("File — "+meta.label,fields,async v=>{
-    if((type==='complaint'||type==='appeal'||type==='trade_request')&&!(v.subject||"").trim()){toast("Pick an option","Choose what this is about from the dropdown.");return;}
+    if((type==='complaint'||type==='appeal')&&!(v.subject||"").trim()){toast("Pick an option","Choose what this is about from the dropdown.");return;}
     if(!(v.details||"").trim()){toast("Add details","Please describe your request.");return;}
     const payload={profile_id:authUser.id,type,route:meta.route,details:v.details.trim(),season_id:openSeason?openSeason.id:null,subject:(v.subject||"").trim()||null,target:(v.target||"").trim()||null};
     if(type==='trade_request')payload.team_id=myClubInfo.team_id;
@@ -3794,13 +3795,36 @@ async function loadMembers(){
   const {data:profs}=await sb.from("profiles").select("id,gamertag,role").order("role",{ascending:false}).order("gamertag");
   const {data:tms}=await sb.from("teams").select("id,code,name,gm_profile_id").order("code");
   const clubOf={};(tms||[]).forEach(t=>{if(t.gm_profile_id)clubOf[t.gm_profile_id]=t.code;});
+  // current position per player: roster spot (this season) first, else their sign-up position
+  const season=adminSeason||openSeason;const posOf={};
+  if(season){
+    const {data:regs}=await sb.from("season_registrations").select("profile_id,position").eq("season_id",season.id);
+    (regs||[]).forEach(r=>{posOf[r.profile_id]=r.position;});
+    const {data:spots}=await sb.from("roster_spots").select("profile_id,position").eq("season_id",season.id);
+    (spots||[]).forEach(s=>{posOf[s.profile_id]=s.position;});
+  }
   const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Role</th><th>Club (managers &amp; commissioners)</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
-    profs.map(p=>`<tr><td><b>${p.gamertag}</b></td>
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Role</th><th>Position</th><th>Club (managers &amp; commissioners)</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
+    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}"><td><b>${esc(p.gamertag)}</b></td>
       <td><select class="mb-role" data-id="${p.id}">${ROLE_OPTS.map(([v,l])=>`<option value="${v}" ${v===p.role?"selected":""}>${l}</option>`).join("")}</select></td>
-      <td><select class="mb-club" data-id="${p.id}"><option value="">— none —</option>${(tms||[]).map(t=>`<option value="${t.code}" ${clubOf[p.id]===t.code?"selected":""}>${t.name}</option>`).join("")}</select></td>
+      <td><select class="mb-pos" data-id="${p.id}">${AC_POS.map(([v,l])=>`<option value="${v}" ${v===(posOf[p.id]||'')?"selected":""}>${v}</option>`).join("")}</select></td>
+      <td><select class="mb-club" data-id="${p.id}"><option value="">— none —</option>${(tms||[]).map(t=>`<option value="${t.code}" ${clubOf[p.id]===t.code?"selected":""}>${esc(t.name)}</option>`).join("")}</select></td>
       <td style="text-align:right"><button class="mini good mb-save" data-id="${p.id}">Save</button></td></tr>`).join("")+"</tbody></table></div>";
+  const q=$("#mbSearch");if(q)filterMembers(q.value);
+}
+async function saveMemberPosition(id,pos){
+  const season=adminSeason||openSeason;if(!season||!sb)return;
+  const r=await sb.from("roster_spots").update({position:pos}).eq("season_id",season.id).eq("profile_id",id);
+  if(r.error){toast("Couldn't set position",/manager|protect/i.test(r.error.message)?"That player is a club's manager — position is locked while they manage.":r.error.message);loadMembers();return;}
+  await sb.from("season_registrations").update({position:pos}).eq("season_id",season.id).eq("profile_id",id);
+  toast("Position updated","Set to "+pos+".");
+}
+function filterMembers(term){
+  const t=(term||"").trim().toLowerCase();
+  document.querySelectorAll("#membersBody .mb-row").forEach(row=>{
+    row.style.display=(!t||row.dataset.name.includes(t))?"":"none";
+  });
 }
 async function saveMember(btn){
   const id=btn.dataset.id;if(!id||!sb)return;
@@ -3824,6 +3848,8 @@ async function saveMember(btn){
 // Manager (gm & commissioner keep their role — both can run a club); switching to
 // Member clears the club, since only managers and commissioners hold one.
 $("#view-admin").addEventListener("change",e=>{
+  const pos=e.target.closest(".mb-pos");
+  if(pos){saveMemberPosition(pos.dataset.id,pos.value);return;}
   const club=e.target.closest(".mb-club");
   if(club){const roleSel=document.querySelector('.mb-role[data-id="'+club.dataset.id+'"]');
     if(club.value&&roleSel&&roleSel.value==="member")roleSel.value="gm";return;}
@@ -3831,6 +3857,7 @@ $("#view-admin").addEventListener("change",e=>{
   if(roleSel&&roleSel.value==="member"){const clubSel=document.querySelector('.mb-club[data-id="'+roleSel.dataset.id+'"]');
     if(clubSel)clubSel.value="";}
 });
+$("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers(e.target.value);});
 
 /* ---- Teams (add / remove clubs) ---- */
 async function refreshTeamsEverywhere(){
