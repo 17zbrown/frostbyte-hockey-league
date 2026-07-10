@@ -1804,22 +1804,6 @@
         <div class="card-h" style="padding:0 0 8px"><h3>Discord Integrations</h3></div>
         <p style="margin:0 0 4px;color:var(--fog);font-size:12.5px">Auto-post league activity to your Discord server. In Discord, open a channel's <b>Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL</b>, then paste it below. Leave a channel blank to route its events to the <b>Default</b> channel.</p>
         <div id="discordBody"></div></div></div>
-      <div class="mgr-panel" id="atab-rosters"><div class="card"><div class="card-h"><h3>Rosters &amp; Players</h3><span class="pill">Edit or release any player</span></div>
-        <input class="adm-search" id="plEditSearch" placeholder="Search players by name or club…" />
-        <div class="pl-scroll"><table class="roster-tbl"><thead><tr><th>Player</th><th>Club</th><th>Pos</th><th>OVR</th><th>GP</th><th>G</th><th>A</th><th>Cap</th><th style="text-align:right">Edit</th></tr></thead><tbody id="playersEditBody"></tbody></table></div></div></div>
-      <div class="mgr-panel" id="atab-schedule"><div class="card" style="padding:24px 26px">
-        <div class="next-game-bar" style="margin-bottom:20px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Add a fixture to Week 8</b></div>
-        <div class="field"><div class="row2"><div><label for="sc-home">Home</label><select id="sc-home" class="team-select"></select></div><div><label for="sc-away">Away</label><select id="sc-away" class="team-select"></select></div></div></div>
-        <div class="field"><div class="row2"><div><label for="sc-day">Day</label><select id="sc-day"><option>Tue</option><option>Thu</option></select></div><div><label for="sc-time">Time (ET)</label><input id="sc-time" value="9:00 PM" /></div></div></div>
-        <button class="btn btn-frost" id="addFixture">Add Fixture</button></div></div>
-      <div class="mgr-panel" id="atab-clubs"><div class="card"><div class="card-h"><h3>Club Management</h3></div><div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Division</th><th>GM</th><th>Record</th><th>Cap Used</th><th style="text-align:right">Action</th></tr></thead><tbody id="clubsBody"></tbody></table></div></div></div>
-      <div class="mgr-panel" id="atab-games"><div class="card"><div class="card-h"><h3>Game Control</h3><span class="pill">Override any result</span></div>
-        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">The commissioner's word is final. Force a result official, rule a forfeit, reopen the 24-hour alignment window, or send a game back to unreported — any club, any week.</div>
-        <div id="gameControlBody"></div></div></div>
-      <div class="mgr-panel" id="atab-features"><div class="card"><div class="card-h"><h3>Feature Controls</h3><span class="pill" id="featCount"></span></div>
-        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Turn league features on or off across the whole site, or register a new one. Changes apply live for everyone.</div>
-        <div id="featuresBody"></div>
-        <div class="feat-add"><input id="featNew" placeholder="Add a feature (e.g. Trade Block, All-Star Voting)" /><button class="btn btn-frost btn-sm" id="featAddBtn">Add Feature</button></div></div></div>
     </div>
   </div></section></div>
 </main>
@@ -3684,62 +3668,6 @@ function applyFeatures(){document.querySelectorAll("[data-feature]").forEach(el=
 function isManager(){return authProfile&&(authProfile.role==="gm"||authProfile.role==="commissioner");}
 const MANAGER_VIEWS=new Set(["draft"]);
 function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{el.style.display=isManager()?"":"none";});}
-$("#featuresBody").addEventListener("change",e=>{const t=e.target.closest("[data-feat]");if(!t)return;
-  const f=features[+t.dataset.feat];f.on=t.checked;applyFeatures();renderFeatures();
-  if(currentClub)refreshFrontOffice();
-  transactions.unshift([f.on?"sign":"waive",`Commissioner ${f.on?"enabled":"disabled"} <b>${f.label}</b> league-wide`,"Just now"]);renderTxns();
-  toast("Feature "+(f.on?"enabled":"disabled"),f.label+" is now "+(f.on?"live":"hidden")+" across the site.");});
-$("#featuresBody").addEventListener("click",e=>{const t=e.target.closest("[data-featrm]");if(!t)return;
-  const f=features[+t.dataset.featrm];
-  confirmModal("Remove "+f.label+"?","It will be taken off the site and removed from this list.","Remove Feature",()=>{
-    features.splice(+t.dataset.featrm,1);applyFeatures();renderFeatures();if(currentClub)refreshFrontOffice();
-    transactions.unshift(["waive",`Commissioner removed the <b>${f.label}</b> feature`,"Just now"]);renderTxns();
-    toast("Feature removed",f.label+" is no longer part of the league site.");});});
-$("#featAddBtn").addEventListener("click",()=>{const v=$("#featNew").value.trim();if(!v){toast("Name the feature","Give the new feature a name first.");return;}
-  features.push({key:"custom-"+hash(v),label:v,desc:"Custom feature added by the commissioner",on:true});
-  $("#featNew").value="";renderFeatures();
-  transactions.unshift(["sign",`Commissioner added a new feature: <b>${v}</b>`,"Just now"]);renderTxns();
-  toast("Feature added","\""+v+"\" is now registered and live.");});
-
-/* -------------------- COMMISSIONER: GAME CONTROL -------------------- */
-let leagueGames=[];
-$("#gameControlBody").addEventListener("click",e=>{const t=e.target.closest("[data-gc]");if(!t)return;
-  const g=leagueGames.find(x=>x.id===t.dataset.id);if(!g)return;const act=t.dataset.gc,vs=`<b>${teams[g.a].name}</b> vs <b>${teams[g.b].name}</b>`;
-  if(act==="official"){g.status="official";g.deadline=null;transactions.unshift(["sign",`Commissioner ruled ${vs} <b>official</b> (${g.as}–${g.bs})`,"Just now"]);toast("Result made official","The commissioner published this game.");}
-  else if(act==="forfeit"){g.status="forfeit";g.deadline=null;transactions.unshift(["waive",`Commissioner ruled ${vs} a <b>forfeit</b> for both clubs`,"Just now"]);toast("Forfeit ruled","Both clubs take the loss.");}
-  else if(act==="extend"){g.status="pending";g.deadline=(g.deadline&&g.deadline>Date.now()?g.deadline:Date.now())+MISMATCH_WINDOW_MS;startReportTimer();transactions.unshift(["trade",`Commissioner opened a 24-hour alignment window for ${vs}`,"Just now"]);toast("Window opened","Clubs have 24 more hours to align this game.");}
-  else if(act==="reopen"){g.status="scheduled";g.deadline=null;transactions.unshift(["trade",`Commissioner reopened ${vs} for reporting`,"Just now"]);toast("Game reopened","Sent back to unreported.");}
-  renderTxns();renderGameControl();});
-
-/* -------------------- COMMISSIONER: ROSTER / PLAYER EDITOR -------------------- */
-$("#playersEditBody").addEventListener("click",e=>{
-  const ed=e.target.closest("[data-editp]"),del=e.target.closest("[data-delp]");
-  if(ed){const[loc,is]=ed.dataset.editp.split(":"),i=+is,row=playerArr(loc)[i];if(!row)return;const[name,pos,ovr,gp,g,a,cap]=row;
-    const teamOpts=[{value:"FA",label:"Free Agent"}].concat(TEAM_KEYS.map(k=>({value:k,label:teams[k].name})));
-    formModal("Edit "+name,[
-      {key:"name",label:"Player name",value:name},
-      {key:"pos",label:"Position",type:"select",value:pos,options:EDIT_POS,grid:true},
-      {key:"num",label:"Jersey #",type:"number",value:jn(name),min:1,max:99,grid:true},
-      {key:"ovr",label:"Overall",type:"number",value:ovr,min:40,max:99,grid:true},
-      {key:"cap",label:"Cap ($M)",type:"number",value:cap,min:0,step:0.1,grid:true},
-      {key:"gp",label:"Games",type:"number",value:gp,min:0,grid:true},
-      {key:"g",label:"Goals",type:"number",value:g,min:0,grid:true},
-      {key:"a",label:"Assists",type:"number",value:a,min:0,grid:true},
-      {key:"team",label:"Club",type:"select",value:loc,options:teamOpts}
-    ],v=>{if(!v.name.trim()){toast("Name required","A player needs a name.");return;}
-      const newName=v.name.trim(),newRow=[newName,v.pos,v.ovr,v.gp,v.g,v.a,+(+v.cap).toFixed(1)];
-      if(v.team!==loc){playerArr(loc).splice(i,1);playerArr(v.team).push(newRow);}else playerArr(loc)[i]=newRow;
-      if(name!==newName)delete jerseys[name];
-      jerseys[newName]=Math.max(1,Math.min(99,+v.num||1));
-      rebuildPlayerIndex();refreshLeagueViews();renderPlayersEdit();
-      const dest=v.team==="FA"?"free agency":teams[v.team].name;
-      transactions.unshift(["sign",`Commissioner edited <b>${newName}</b> (${v.pos} #${jn(newName)}) — now with <b>${dest}</b>`,"Just now"]);renderTxns();
-      toast("Player updated",newName+" has been saved.");});return;}
-  if(del){const[loc,is]=del.dataset.delp.split(":"),i=+is,row=playerArr(loc)[i];if(!row)return;
-    confirmModal("Release "+row[0]+"?","They'll be removed from "+(loc==="FA"?"the free-agent pool":teams[loc].name)+" entirely.","Release",()=>{
-      playerArr(loc).splice(i,1);rebuildPlayerIndex();refreshLeagueViews();renderPlayersEdit();
-      transactions.unshift(["waive",`Commissioner released <b>${row[0]}</b> from the league`,"Just now"]);renderTxns();
-      toast("Player released",row[0]+" removed.");});return;}});
 
 /* -------------------- COMMISSIONER: NEWS EDITOR -------------------- */
 function renderNewsManage(){const el=$("#newsManageBody");if(!el)return;
@@ -4354,31 +4282,6 @@ $("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.t
   if(error){toast("Couldn't publish",error.message);return;}
   await loadNews();renderNews();renderNewsManage();
   toast("Article published","\""+t+"\" is live on the News page.");$("#an-title").value="";$("#an-body").value="";});
-$("#addFixture").addEventListener("click",()=>{const h=clubByName($("#sc-home").value),a=clubByName($("#sc-away").value);
-  if(h===a){toast("Invalid fixture","A club can't play itself.");return;}
-  schedule[0].games.push({a:h,b:a,t:`${$("#sc-day").value} · ${$("#sc-time").value} ET`});renderSchedule();
-  toast("Fixture added",`${teams[h].name} vs ${teams[a].name} added to Week 8.`);});
-// Re-render every view that shows club identity or records after an edit.
-$("#clubsBody").addEventListener("click",e=>{const b=e.target.closest("[data-editclub]");if(!b)return;
-  const code=b.dataset.editclub,t=teams[code],r=standBy[code];
-  formModal("Edit "+t.name,[
-    {key:"name",label:"Club name",value:t.name},
-    {key:"city",label:"City",value:t.city},
-    {key:"arena",label:"Arena",value:t.arena},
-    {key:"gm",label:"General manager",value:t.gm},
-    {key:"div",label:"Division",type:"select",value:t.div,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
-    {key:"w",label:"Wins",type:"number",value:r[2],min:0,grid:true},
-    {key:"l",label:"Losses",type:"number",value:r[3],min:0,grid:true},
-    {key:"otl",label:"OT losses",type:"number",value:r[4],min:0,grid:true},
-    {key:"gf",label:"Goals for",type:"number",value:r[5],min:0,grid:true},
-    {key:"ga",label:"Goals against",type:"number",value:r[6],min:0,grid:true}
-  ],v=>{
-    if(!v.name.trim()){toast("Name required","A club needs a name.");return;}
-    t.name=v.name.trim();t.city=v.city.trim();t.arena=v.arena.trim();t.gm=v.gm.trim();t.div=v.div;
-    r[2]=v.w;r[3]=v.l;r[4]=v.otl;r[5]=v.gf;r[6]=v.ga;r[1]=v.w+v.l+v.otl;
-    refreshLeagueViews();
-    transactions.unshift(["trade",`Commissioner edited <b>${t.name}</b> — record ${r[2]}-${r[3]}-${r[4]}, ${r[5]} GF / ${r[6]} GA`,"Just now"]);renderTxns();
-    toast("Club updated",t.name+" has been saved league-wide.");});});
 $$(".mgr-tab[data-atab]").forEach(tab=>tab.addEventListener("click",()=>{$$("#view-admin .mgr-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");
   $$("#view-admin .mgr-panel").forEach(p=>p.classList.remove("on"));$("#atab-"+tab.dataset.atab).classList.add("on");}));
 
