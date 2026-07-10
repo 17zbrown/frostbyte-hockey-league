@@ -1633,7 +1633,7 @@
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Set the key dates for the season — registration, team-owner applications, draft night, and start/finish. Toggle registration open or closed.</div>
         <div id="seasonAdminBody" style="padding:16px 20px 22px"></div></div></div>
       <div class="mgr-panel" id="atab-registrations"><div class="card"><div class="card-h"><h3>Registrations</h3><span class="pill" id="regCount"></span></div>
-        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Assign each signed-up player to a club and confirm a jersey number — that adds them to the roster.</div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Assign each signed-up player to a club to add them to a roster. Players already on a roster can be <b>moved</b> to another club or taken <b>off roster</b> here too.</div>
         <div id="regAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-owners"><div class="card"><div class="card-h"><h3>Owner Applications</h3><span class="pill" id="ownerAppCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Applications submitted on the Owner Application page. Approve to shortlist an owner, then assign them a club in Members &amp; Roles.</div>
@@ -3551,16 +3551,22 @@ const ADMIN_EMPTY=(h,p)=>`<div class="empty-state"><div class="es-ic"><svg width
 async function loadRegistrations(){
   const el=$("#regAdminBody");if(!el||!sb||!adminSeason)return;
   const {data:regs}=await sb.from("season_registrations").select("*, profiles(gamertag)").eq("season_id",adminSeason.id).order("created_at");
-  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",adminSeason.id);
+  const {data:spots}=await sb.from("roster_spots").select("profile_id,team_id").eq("season_id",adminSeason.id);
   const assigned=new Set((spots||[]).map(s=>s.profile_id));
+  const spotBy={};(spots||[]).forEach(s=>{spotBy[s.profile_id]=codeOfId(s.team_id);});
   const pc=$("#regCount");if(pc)pc.textContent=(regs?regs.length:0)+" signed up";
   if(!regs||!regs.length){el.innerHTML=ADMIN_EMPTY("No registrations yet","Players who sign up for the season appear here to be assigned to a club.");return;}
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th>Pos</th><th>#</th><th>Club</th><th>Cap Hit</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
+      const cur=spotBy[r.profile_id];const gq=g.replace(/"/g,'&quot;');
       return `<tr><td><b>${esc(g)}</b></td><td class="mono">${esc(r.ea_id)||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
-      <td>${done?'<span style="color:var(--win);font-weight:600">On a roster</span>':`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
+      <td>${done
+        ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
+        :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
       <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="$750K" aria-label="Cap hit">`}</td>
-      <td style="text-align:right"><div class="act">${done?"":`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${g.replace(/"/g,'&quot;')}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
+      <td style="text-align:right"><div class="act">${done
+        ?`<button class="mini good rm-move" data-prof="${r.profile_id}" data-name="${gq}">Move</button><button class="mini rm-remove" data-prof="${r.profile_id}" data-name="${gq}">Off roster</button>`
+        :`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${gq}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
 }
 async function deleteRegistration(btn){
@@ -3622,6 +3628,31 @@ async function assignRegistration(btn){
   await sb.from("transactions").insert({season_id:adminSeason.id,type:"sign",description:teams[code].name+" signed <b>"+pname+"</b> ("+(btn.dataset.pos||"")+" #"+num+")"});
   toast("Player added","Assigned to "+teams[code].name+" · #"+num+".");
   loadRegistrations();loadStandings();
+}
+async function moveRosterPlayer(profileId,name){
+  const code=(document.querySelector('.rm-team[data-prof="'+profileId+'"]')||{}).value;
+  const teamId=teamIdOf(code);if(!teamId){toast("Pick a club","");return;}
+  const {data:cur}=await sb.from("roster_spots").select("id,team_id,jersey_number").eq("season_id",adminSeason.id).eq("profile_id",profileId).maybeSingle();
+  if(!cur){toast("Not on a roster","Reload and try again.");return;}
+  if(cur.team_id===teamId){toast("Already there",name+" is already on "+teams[code].name+".");return;}
+  const {data:existing}=await sb.from("roster_spots").select("jersey_number").eq("season_id",adminSeason.id).eq("team_id",teamId);
+  const used=new Set((existing||[]).map(x=>x.jersey_number));
+  let num=cur.jersey_number;if(!num||used.has(num)){num=0;for(let n=1;n<=99;n++)if(!used.has(n)){num=n;break;}}
+  const {error}=await sb.from("roster_spots").update({team_id:teamId,jersey_number:num}).eq("id",cur.id);
+  if(error){toast("Couldn't move",/manager|protect/i.test(error.message)?name+" is a club's manager — managers are locked to their own club.":error.message);return;}
+  await sb.from("transactions").insert({season_id:adminSeason.id,type:"sign",description:teams[code].name+" acquired <b>"+esc(name)+"</b> (#"+num+")"});
+  toast("Player moved",name+" → "+teams[code].name+" · #"+num+".");
+  loadRegistrations();loadStandings();
+}
+async function removeRosterPlayer(profileId,name){
+  confirmModal("Take "+name+" off their roster?","This removes them from the club and back into the unassigned pool. Their season sign-up stays, so you can re-add them anytime.","Remove from roster",async()=>{
+    const {data:cur}=await sb.from("roster_spots").select("id").eq("season_id",adminSeason.id).eq("profile_id",profileId).maybeSingle();
+    if(!cur){toast("Not on a roster","");return;}
+    const {error}=await sb.from("roster_spots").delete().eq("id",cur.id);
+    if(error){toast("Couldn't remove",/manager|protect/i.test(error.message)?name+" is a club's manager — reassign their manager role first.":error.message);return;}
+    toast("Off roster",name+" is back in the unassigned pool.");
+    loadRegistrations();loadStandings();
+  });
 }
 
 /* ---- Schedule auto-generate (round-robin) ---- */
@@ -3972,6 +4003,8 @@ function clearDiscordWebhook(key){
 }
 $("#view-admin").addEventListener("click",e=>{
   const a=e.target.closest(".ra-assign");if(a){e.preventDefault();assignRegistration(a);return;}
+  const rmv=e.target.closest(".rm-move");if(rmv){e.preventDefault();moveRosterPlayer(rmv.dataset.prof,rmv.dataset.name);return;}
+  const rmr=e.target.closest(".rm-remove");if(rmr){e.preventDefault();removeRosterPlayer(rmr.dataset.prof,rmr.dataset.name);return;}
   const rd=e.target.closest(".ra-del");if(rd){e.preventDefault();deleteRegistration(rd);return;}
   const ds=e.target.closest(".dc-save");if(ds){e.preventDefault();saveDiscordWebhook(ds.dataset.key);return;}
   const dt=e.target.closest(".dc-test");if(dt){e.preventDefault();testDiscordWebhook(dt.dataset.key);return;}
