@@ -720,6 +720,54 @@
   .box-sec h4{font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--fog-dim);margin-bottom:8px}
   .box-line{display:flex;justify-content:space-between;font-size:13.5px;padding:5px 0;border-bottom:1px solid var(--line-soft)}
   .box-line .mono{color:var(--fog)}
+  /* position ratings chips */
+  .pos-ovrs{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}
+  .po-chip{font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--fog);
+    border:1px solid var(--line);border-radius:999px;padding:6px 13px;background:var(--panel-2)}
+  .po-chip b{font-family:var(--f-mono);font-size:14px;color:var(--ice);margin-right:4px}
+  .po-chip.cur{border-color:var(--frost);color:var(--frost)}.po-chip.cur b{color:var(--frost)}
+  /* rating breakdown */
+  .brk-card{margin-top:22px}
+  .brk-note{color:var(--fog);font-size:13px;line-height:1.5;margin:2px 0 16px;max-width:70ch}
+  .brk-prov{color:var(--frost)}
+  .brk-head,.brk-row{display:grid;grid-template-columns:1.5fr .7fr 2fr .6fr;gap:12px;align-items:center}
+  .brk-head{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--fog-dim);padding:0 0 8px;border-bottom:1px solid var(--line)}
+  .brk-row{padding:9px 0;border-bottom:1px solid var(--line-soft)}
+  .brk-l{font-size:13.5px;color:var(--ice)}
+  .brk-v{font-family:var(--f-mono);font-size:13.5px;font-weight:700;text-align:right;color:var(--ice)}
+  .brk-v .brk-na,.brk-na{color:var(--fog-dim);font-weight:400}
+  .brk-bar{position:relative;height:16px;background:var(--panel-3);border-radius:999px;overflow:hidden}
+  .brk-bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--frost-deep),var(--frost));border-radius:999px;min-width:2px}
+  .brk-bar em{position:absolute;right:8px;top:0;line-height:16px;font-family:var(--f-mono);font-size:10px;font-style:normal;color:var(--ice);mix-blend-mode:difference}
+  .brk-w{font-family:var(--f-mono);font-size:13px;font-weight:700;text-align:right;color:var(--frost)}
+  /* game log */
+  .gl-card{margin-top:22px}
+  .gl-scroll{overflow-x:auto}
+  .gl-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .gl-tbl th{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fog-dim);text-align:center;padding:8px 6px;border-bottom:1px solid var(--line)}
+  .gl-tbl th:nth-child(1),.gl-tbl th:nth-child(2){text-align:left}
+  .gl-tbl td{text-align:center;padding:9px 6px;border-bottom:1px solid var(--line-soft);font-family:var(--f-mono)}
+  .gl-row{cursor:pointer}.gl-row:hover td{background:var(--panel-2)}
+  .gl-date{text-align:left!important;color:var(--fog);white-space:nowrap}
+  .gl-opp{text-align:left!important;font-family:var(--f-cond)!important;font-weight:600;text-transform:uppercase;letter-spacing:.02em}
+  .gl-team{display:inline-flex;align-items:center;gap:7px;cursor:pointer}
+  .gl-res{font-weight:700}.gl-res.w{color:var(--win)}.gl-res.l{color:var(--loss)}
+  .gl-foot{color:var(--fog-dim);font-size:11.5px;margin:10px 0 0}
+  /* box score modal */
+  .bx-team{margin-top:18px}
+  .bx-team h4{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);margin:0 0 8px}
+  .bx-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px}
+  .bx-tbl th{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fog-dim);text-align:center;padding:6px 5px;border-bottom:1px solid var(--line)}
+  .bx-tbl td{text-align:center;padding:7px 5px;border-bottom:1px solid var(--line-soft);font-family:var(--f-mono)}
+  .bx-tbl th.bx-lh,.bx-tbl td.bx-lh{text-align:left}
+  .bx-name{font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.02em;cursor:pointer;color:var(--ice)}
+  .bx-name.dim{color:var(--fog);cursor:default}
+  .bx-pos{color:var(--fog)}.bx-pt{font-weight:700;color:var(--ice)}
+  .bx-tbl tfoot td{border-bottom:none;color:var(--fog);font-weight:700}
+  .bx-tbl tfoot .bx-lh{font-family:var(--f-cond);text-transform:uppercase;font-size:11px}
+  .bx-tn{font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ice)}
+  .bx-hm{font-size:10px;color:var(--fog-dim)}
+  .bx-note{color:var(--fog-dim);font-size:11.5px;line-height:1.5;margin:14px 0 0}
 
   /* mobile menu */
   .mobile-menu{display:none;position:fixed;top:var(--nav-h);left:0;right:0;bottom:0;z-index:55;background:#081521f7;backdrop-filter:blur(14px);border-bottom:1px solid var(--line);flex-direction:column;padding:14px 16px 30px;overflow-y:auto}
@@ -2170,7 +2218,7 @@ function renderFixtures(){
     <div class="side away clickable" data-go="team" data-param="${g.b}">${teams[g.b].name}${badge(g.b,24)}</div></div>`).join(""):emptyF;
   const re=$("#homeResults");if(re)re.innerHTML=recent.length?recent.map(g=>`<div class="fx final">
     <div class="side" style="${g.as>g.bs?'':'opacity:.6'}">${badge(g.a,24)}${teams[g.a].name}</div>
-    <div class="vs" data-box="${g.a}-${g.b}"><b>${g.as} - ${g.bs}</b>${g.ot?"OT/SO":"Final"}</div>
+    <div class="vs" data-box="${g.id}"><b>${g.as} - ${g.bs}</b>${g.ot?"OT/SO":"Final"}</div>
     <div class="side away" style="${g.bs>g.as?'':'opacity:.6'}">${teams[g.b].name}${badge(g.b,24)}</div></div>`).join(""):emptyR;
   const pill=$("#nextFixWeek");if(pill)pill.textContent=upcoming.length?`Week ${liveSchedule.find(w=>w.games.some(x=>!x.done)).n}`:"Pre-season";
 }
@@ -2299,7 +2347,7 @@ function renderSchedule(){
   el.innerHTML=liveSchedule.map(wk=>`<div class="week"><div class="week-h">${wk.wk}</div>
     <div class="games">${wk.games.map(g=>{const done=g.done;
       const aWin=done&&g.as>g.bs,bWin=done&&g.bs>g.as;
-      return `<div class="game ${done?'done':''}" ${done?`data-box="${g.a}-${g.b}"`:`data-match="${g.id}" style="cursor:pointer"`}>
+      return `<div class="game ${done?'done':''}" ${done?`data-box="${g.id}"`:`data-match="${g.id}" style="cursor:pointer"`}>
         <div class="game-top"><span class="game-date">${done?(g.ot?'Final / OT':'Final'):fmtGameDate(g.when)}</span>
           ${done?'<span class="pill dim">Final</span>':'<span class="pill live"><span class="dot-mini" style="background:var(--live)"></span>Scheduled</span>'}</div>
         <div class="g-row ${aWin?'win':(bWin?'lose':'')}">${badge(g.a,28)}<span class="gn">${teams[g.a].name}</span>${done?`<span class="gs">${g.as}</span>`:`<span class="g-time">${fmtGameTime(g.when)}</span>`}</div>
@@ -2307,24 +2355,43 @@ function renderSchedule(){
         ${done?'':`<div class="game-foot"><span class="gf-code">Code <b>${g.code||'—'}</b></span><span class="gf-link">Match card →</span></div>`}
       </div>`;}).join("")}</div></div>`).join("");
 }
-// box score modal
-function findGame(key){const[a,b]=key.split("-");for(const wk of liveSchedule)for(const g of wk.games)if(g.a===a&&g.b===b&&g.done)return g;return null;}
+// box score modal — real per-player game_stats
 document.addEventListener("click",e=>{const el=e.target.closest("[data-box]");if(!el)return;
-  const g=findGame(el.dataset.box);if(!g)return;boxScore(g);});
-function boxScore(g){
-  const sc=(code)=>{const gs=(g.scorers&&g.scorers[code])||[],gl=(g.goalies&&g.goalies[code])||[];
-    if(!gs.length&&!gl.length)return `<div class="box-sec"><h4>${teams[code].name}</h4><div class="box-line"><span class="mono" style="color:var(--fog)">Goal-by-goal detail isn't recorded for this game.</span></div></div>`;
-    return `<div class="box-sec"><h4>${teams[code].name} — Goals</h4>${gs.map(s=>`<div class="box-line"><span>${s}</span></div>`).join("")||'<div class="box-line"><span class="mono">—</span></div>'}
-    ${gl.map(x=>`<div class="box-line"><span class="mono">${x}</span></div>`).join("")}</div>`;};
+  if(e.target.closest("[data-go]"))return;   // let inner team/player links navigate instead
+  openBoxScore(el.dataset.box);});
+// close the modal when a player/team link inside it is followed
+document.addEventListener("click",e=>{if(e.target.closest("#modalMsg [data-go]"))$("#modalBg").classList.remove("on");});
+async function openBoxScore(gameId){
+  if(!sb||!gameId)return;
   $("#modalCard").classList.add("wide");
   $("#modalTitle").textContent="Box Score";
+  $("#modalMsg").innerHTML='<div class="empty-note" style="margin:0">Loading box score…</div>';
+  modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
+  const {data:g}=await sb.from("games").select("id,home_team_id,away_team_id,home_score,away_score,went_ot,scheduled_at,status").eq("id",gameId).maybeSingle();
+  if(!g){$("#modalMsg").innerHTML='<div class="empty-note" style="margin:0">Game not found.</div>';return;}
+  const {data:rows}=await sb.from("game_stats").select("team_id,profile_id,skater_name,position,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,profiles(gamertag)").eq("game_id",gameId);
+  const hc=codeOfId(g.home_team_id),ac=codeOfId(g.away_team_id);
+  const nameTd=r=>{const nm=(r.profiles&&r.profiles.gamertag)||r.skater_name||"—";
+    return `<td class="bx-lh">${(r.profiles&&r.profiles.gamertag)?`<span class="bx-name" data-go="player" data-param="${esc(nm)}">${esc(nm)}</span>`:`<span class="bx-name dim">${esc(nm)}</span>`}</td>`;};
+  const teamBlock=(code,tid)=>{
+    const rs=(rows||[]).filter(r=>r.team_id===tid);
+    const nm=teams[code]?teams[code].name:esc(code||'?');
+    if(!rs.length)return `<div class="bx-team"><h4>${nm}</h4><div class="empty-note" style="margin:0;padding:12px">No player stats recorded for this club.</div></div>`;
+    const sk=rs.filter(r=>!r.is_goalie).sort((a,b)=>((b.goals||0)+(b.assists||0))-((a.goals||0)+(a.assists||0))||(b.goals||0)-(a.goals||0));
+    const gl=rs.filter(r=>r.is_goalie);
+    const tot=sk.reduce((o,r)=>{o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.b+=r.blocked_shots||0;o.p+=r.pim||0;return o;},{g:0,a:0,s:0,h:0,b:0,p:0});
+    const skTbl=sk.length?`<table class="bx-tbl"><thead><tr><th class="bx-lh">Skater</th><th>Pos</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th></tr></thead><tbody>${sk.map(r=>`<tr>${nameTd(r)}<td class="bx-pos">${r.position||'—'}</td><td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?'+':'')+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.blocked_shots||0}</td><td>${r.pim||0}</td></tr>`).join("")}</tbody><tfoot><tr><td class="bx-lh">Team</td><td></td><td>${tot.g}</td><td>${tot.a}</td><td class="bx-pt">${tot.g+tot.a}</td><td></td><td>${tot.s}</td><td>${tot.h}</td><td>${tot.b}</td><td>${tot.p}</td></tr></tfoot></table>`:'';
+    const glTbl=gl.length?`<table class="bx-tbl"><thead><tr><th class="bx-lh">Goalie</th><th>SV</th><th>SA</th><th>GA</th><th>SV%</th><th>SO</th></tr></thead><tbody>${gl.map(r=>`<tr>${nameTd(r)}<td>${r.saves||0}</td><td>${r.shots_against||0}</td><td>${r.goals_against||0}</td><td>${r.shots_against?((r.saves/r.shots_against).toFixed(3).replace(/^0/,'')):'—'}</td><td>${r.shutout?'1':'0'}</td></tr>`).join("")}</tbody></table>`:'';
+    return `<div class="bx-team"><h4>${nm}</h4>${skTbl}${glTbl}</div>`;
+  };
   $("#modalMsg").innerHTML=`
     <div class="box-teams">
-      <div class="bt">${badge(g.a,38)}<div><div style="font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ice)">${teams[g.a].name}</div><div class="mono" style="font-size:11px">${g.shots?g.shots[0]+' shots':''}</div></div></div>
-      <div style="text-align:center"><div class="bsc">${g.as} <span style="color:var(--fog-dim)">-</span> ${g.bs}</div><div class="mono" style="font-size:11px;color:var(--fog-dim)">FINAL</div></div>
-      <div class="bt">${badge(g.b,38)}<div><div style="font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ice)">${teams[g.b].name}</div><div class="mono" style="font-size:11px">${g.shots?g.shots[1]+' shots':''}</div></div></div>
-    </div>${sc(g.a)}${sc(g.b)}`;
-  modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
+      <div class="bt">${badge(hc,38)}<div><div class="bx-tn">${teams[hc]?teams[hc].name:esc(hc||'?')}</div><div class="bx-hm">HOME</div></div></div>
+      <div style="text-align:center"><div class="bsc">${g.home_score} <span style="color:var(--fog-dim)">-</span> ${g.away_score}</div><div class="mono" style="font-size:11px;color:var(--fog-dim)">${g.went_ot?'FINAL / OT':'FINAL'}</div></div>
+      <div class="bt"><div style="text-align:right"><div class="bx-tn">${teams[ac]?teams[ac].name:esc(ac||'?')}</div><div class="bx-hm">AWAY</div></div>${badge(ac,38)}</div>
+    </div>
+    ${teamBlock(hc,g.home_team_id)}${teamBlock(ac,g.away_team_id)}
+    <p class="bx-note">Per-player totals from the EA match. The EA box score reports each player's own goals, assists, and penalty minutes — it does not provide goal-by-goal timing or which player assisted each individual goal.</p>`;
 }
 
 /* ------------------------------ TEAMS INDEX ------------------------------ */
@@ -2411,7 +2478,7 @@ async function renderTeamPage(code){
           ${teamGames.length?`<div class="fixtures">${teamGames.slice(0,6).map(g=>{const home=g.a===code;const opp=home?g.b:g.a;const done=g.done;
             const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
             return `<div class="fx ${done?'final':''}"><div class="side">${badge(code,22)}${home?'vs':'@'} </div>
-              <div class="vs" ${done?`data-box="${g.a}-${g.b}"`:''}>${done?`<b style="color:${win?'var(--win)':'var(--loss)'}">${us}-${them} ${win?'W':'L'}</b>`:`<b>${fmtGameDate(g.when).split(' ')[0]}</b>`}</div>
+              <div class="vs" ${done?`data-box="${g.id}"`:''}>${done?`<b style="color:${win?'var(--win)':'var(--loss)'}">${us}-${them} ${win?'W':'L'}</b>`:`<b>${fmtGameDate(g.when).split(' ')[0]}</b>`}</div>
               <div class="side away clickable" data-go="team" data-param="${opp}">${teams[opp].name}${badge(opp,22)}</div></div>`;}).join("")}</div>`:'<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet.</div>'}</div>
       </div>
     </div>`;
@@ -2436,6 +2503,43 @@ async function renderPlayerPage(id){
     ? `${statCard("Games",st.gp,1)}${statCard("Saves",st.saves)}${statCard("Goals Against",st.goals_against)}${statCard("Save %",svp)}`
     : `${statCard("Points",st.points,1)}${statCard("Goals",st.goals)}${statCard("Assists",st.assists)}${statCard("Games",st.gp)}${statCard("Shots",st.shots)}${statCard("Hits",st.hits)}`;
   const roleTag=prof.role==="commissioner"?"Commissioner":(prof.role==="gm"?"Manager":null);
+  // rating breakdown (current position), per-position saved overalls, and career game log
+  const CATLBL={C:"Center",W:"Wing",D:"Defense",G:"Goalie"};
+  const [bdRes,poRes,logRes]=await Promise.all([
+    sb.rpc("overall_breakdown",{p_profile:prof.id}),
+    sb.from("player_position_overalls").select("pos_cat,overall,gp").eq("profile_id",prof.id),
+    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status)").eq("profile_id",prof.id).eq("games.status","final")
+  ]);
+  const bd=bdRes&&bdRes.data;const posOvr=(poRes&&poRes.data)||[];
+  const posLbl=POS_NAME[pos]||(bd?CATLBL[bd.category]:"")||"Player";
+  let posChips="";
+  if(posOvr.length>1||(posOvr.length===1&&bd&&posOvr[0].pos_cat!==bd.category)){
+    posChips=`<div class="pos-ovrs">${posOvr.slice().sort((a,b)=>b.overall-a.overall).map(p=>`<span class="po-chip${bd&&p.pos_cat===bd.category?' cur':''}"><b>${p.overall}</b>${CATLBL[p.pos_cat]||p.pos_cat}</span>`).join("")}</div>`;
+  }
+  let brk="";
+  if(bd&&bd.components&&bd.components.length){
+    brk=`<div class="card brk-card"><div class="card-h"><h3>Rating Breakdown</h3><span class="pill frost">${posLbl} · ${bd.overall} OVR</span></div>
+      <p class="brk-note">Every stat below feeds ${esc(prof.gamertag)}'s <b>${posLbl}</b> overall, from career game stats. <b>Weight</b> is how much each stat matters at this position; the bar is their 0–100 rating in that stat.${bd.provisional?` <span class="brk-prov">Provisional — blended toward 70 until 5 games (${bd.gp} played).</span>`:""}</p>
+      <div class="brk-head"><span>Stat</span><span>Career</span><span>Rating</span><span>Weight</span></div>
+      ${bd.components.map(c=>`<div class="brk-row"><span class="brk-l">${c.label}</span><span class="brk-v">${c.value===null||c.value===undefined?'<span class="brk-na">—</span>':esc(String(c.value))+c.suffix}</span><span class="brk-bar"><i style="width:${Math.max(2,c.score)}%"></i><em>${c.score}</em></span><span class="brk-w">${Math.round(c.weight*100)}%</span></div>`).join("")}
+    </div>`;
+  }
+  let logHtml="";
+  const log=((logRes&&logRes.data)||[]).filter(r=>r.games).sort((a,b)=>new Date(b.games.scheduled_at)-new Date(a.games.scheduled_at));
+  if(log.length){
+    const head=isG?`<th>SV</th><th>GA</th><th>SV%</th><th>SO</th>`:`<th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>PIM</th>`;
+    const body=log.map(r=>{const gg=r.games;const home=r.team_id===gg.home_team_id;
+      const oppCode=codeOfId(home?gg.away_team_id:gg.home_team_id);
+      const mine=home?gg.home_score:gg.away_score,opp=home?gg.away_score:gg.home_score;const win=mine>opp;
+      const cells=isG
+        ? `<td>${r.saves||0}</td><td>${r.goals_against||0}</td><td>${r.shots_against?((r.saves/r.shots_against).toFixed(3).replace(/^0/,"")):"—"}</td><td>${r.shutout?"1":"0"}</td>`
+        : `<td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?"+":"")+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.pim||0}</td>`;
+      return `<tr class="gl-row" data-box="${gg.id}"><td class="gl-date">${fmtGameDate(gg.scheduled_at)}</td><td class="gl-opp">${home?"vs":"@"} ${oppCode&&teams[oppCode]?`<span class="gl-team" data-go="team" data-param="${oppCode}">${badge(oppCode,18)}${teams[oppCode].name}</span>`:esc(oppCode||"?")}</td><td class="gl-res ${win?"w":"l"}">${win?"W":"L"} ${mine}-${opp}${gg.went_ot?" OT":""}</td>${cells}</tr>`;
+    }).join("");
+    logHtml=`<div class="card gl-card"><div class="card-h"><h3>Game Log</h3><span class="pill dim">${log.length} game${log.length!==1?"s":""}</span></div>
+      <div class="gl-scroll"><table class="gl-tbl"><thead><tr><th>Date</th><th>Matchup</th><th>Result</th>${head}</tr></thead><tbody>${body}</tbody></table></div>
+      <p class="gl-foot">Tap any game for the full box score.</p></div>`;
+  }
   el.innerHTML=`
     <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}">${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
     <div class="player-hero">
@@ -2445,12 +2549,15 @@ async function renderPlayerPage(id){
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
           ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
           ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}
-          ${prof.overall?`<span class="ph-tag ovr-tag" title="Computed from career stats, weighted by position. Provisional until 5 games played."><b>${prof.overall}</b> OVR</span>`:''}
+          ${prof.overall?`<span class="ph-tag ovr-tag" title="Computed from career stats using ${posLbl} weights. Provisional until 5 games played."><b>${prof.overall}</b> OVR</span>`:''}
           ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div></div>
     </div>
     ${twitchBlock(prof)}
+    ${posChips}
     <div class="stat-grid">${grid}</div>
-    ${st.gp===0?'<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>':''}`;
+    ${st.gp===0?'<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>':''}
+    ${brk}
+    ${logHtml}`;
 }
 const TWITCH_GLYPH='<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 2 3 6.5V19h4v3h3l3-3h4l4.5-4.5V2H4zm2 2h13.5v9L16 16h-4l-3 3v-3H6V4zm5.25 3v5h2V7h-2zm5 0v5h2V7h-2z"/></svg>';
 function twitchBlock(prof){
