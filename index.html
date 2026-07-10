@@ -410,6 +410,7 @@
   .mgr-tab{font-family:var(--f-cond);font-weight:600;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog);padding:12px 18px;position:relative}
   .mgr-tab.active{color:var(--ice)}
   .mgr-tab.active::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;background:var(--frost)}
+  .mgr-tab-sep{width:1px;background:var(--line);align-self:center;height:20px;margin:0 8px}
   .mgr-panel{display:none}.mgr-panel.on{display:block;animation:fade .3s ease both}
   .roster-tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .roster-tbl th{font-family:var(--f-cond);font-weight:500;letter-spacing:.09em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);text-align:right;padding:12px 10px;border-bottom:1px solid var(--line)}
@@ -1622,15 +1623,20 @@
         <div><h2>League Office</h2><small id="admSeasonLabel">Commissioner</small></div>
         <button class="btn btn-ghost" id="admLogout" style="margin-left:auto">Sign Out</button></div>
       <div class="mgr-tabs">
+        <!-- Season & Games -->
         <button class="mgr-tab active" data-atab="season">Season &amp; Deadlines</button>
-        <button class="mgr-tab" data-atab="registrations">Registrations</button>
-        <button class="mgr-tab" data-atab="owners">Owner Apps</button>
-        <button class="mgr-tab" data-atab="actions">Action Center</button>
+        <button class="mgr-tab" data-atab="teams">Teams</button>
         <button class="mgr-tab" data-atab="schedbuild">Schedule</button>
         <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
-        <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
-        <button class="mgr-tab" data-atab="teams">Teams</button>
+        <span class="mgr-tab-sep"></span>
+        <!-- Players & Roster -->
+        <button class="mgr-tab" data-atab="registrations">Registrations</button>
+        <button class="mgr-tab" data-atab="owners">Owner Apps</button>
         <button class="mgr-tab" data-atab="draft">Draft</button>
+        <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
+        <span class="mgr-tab-sep"></span>
+        <!-- Communication -->
+        <button class="mgr-tab" data-atab="actions">Action Center</button>
         <button class="mgr-tab" data-atab="news">News</button>
         <button class="mgr-tab" data-atab="discord">Discord</button>
       </div>
