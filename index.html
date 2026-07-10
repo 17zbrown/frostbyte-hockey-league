@@ -777,6 +777,11 @@
   .bx-tn{font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ice)}
   .bx-hm{font-size:10px;color:var(--fog-dim)}
   .bx-note{color:var(--fog-dim);font-size:11.5px;line-height:1.5;margin:14px 0 0}
+  .st-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:4px 2px 6px}
+  .st-cell{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px}
+  .st-k{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--fog-dim)}
+  .st-v{font-family:var(--f-display);font-weight:800;font-size:30px;line-height:1.1;color:var(--frost);margin:4px 0 2px}
+  .st-sub{font-family:var(--f-mono);font-size:11px;color:var(--fog)}
 
   /* mobile menu */
   .mobile-menu{display:none;position:fixed;top:var(--nav-h);left:0;right:0;bottom:0;z-index:55;background:#081521f7;backdrop-filter:blur(14px);border-bottom:1px solid var(--line);flex-direction:column;padding:14px 16px 30px;overflow-y:auto}
@@ -2380,7 +2385,7 @@ async function openBoxScore(gameId){
   modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
   const {data:g}=await sb.from("games").select("id,home_team_id,away_team_id,home_score,away_score,went_ot,scheduled_at,status").eq("id",gameId).maybeSingle();
   if(!g){$("#modalMsg").innerHTML='<div class="empty-note" style="margin:0">Game not found.</div>';return;}
-  const {data:rows}=await sb.from("game_stats").select("team_id,profile_id,skater_name,position,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,profiles(gamertag)").eq("game_id",gameId);
+  const {data:rows}=await sb.from("game_stats").select("team_id,profile_id,skater_name,position,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,pp_goals,sh_goals,gwg,profiles(gamertag)").eq("game_id",gameId);
   const hc=codeOfId(g.home_team_id),ac=codeOfId(g.away_team_id);
   const nameTd=r=>{const nm=(r.profiles&&r.profiles.gamertag)||r.skater_name||"—";
     return `<td class="bx-lh">${(r.profiles&&r.profiles.gamertag)?`<span class="bx-name" data-go="player" data-param="${esc(nm)}">${esc(nm)}</span>`:`<span class="bx-name dim">${esc(nm)}</span>`}</td>`;};
@@ -2390,8 +2395,8 @@ async function openBoxScore(gameId){
     if(!rs.length)return `<div class="bx-team"><h4>${nm}</h4><div class="empty-note" style="margin:0;padding:12px">No player stats recorded for this club.</div></div>`;
     const sk=rs.filter(r=>!r.is_goalie).sort((a,b)=>((b.goals||0)+(b.assists||0))-((a.goals||0)+(a.assists||0))||(b.goals||0)-(a.goals||0));
     const gl=rs.filter(r=>r.is_goalie);
-    const tot=sk.reduce((o,r)=>{o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.b+=r.blocked_shots||0;o.p+=r.pim||0;return o;},{g:0,a:0,s:0,h:0,b:0,p:0});
-    const skTbl=sk.length?`<table class="bx-tbl"><thead><tr><th class="bx-lh">Skater</th><th>Pos</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th></tr></thead><tbody>${sk.map(r=>`<tr>${nameTd(r)}<td class="bx-pos">${r.position||'—'}</td><td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?'+':'')+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.blocked_shots||0}</td><td>${r.pim||0}</td></tr>`).join("")}</tbody><tfoot><tr><td class="bx-lh">Team</td><td></td><td>${tot.g}</td><td>${tot.a}</td><td class="bx-pt">${tot.g+tot.a}</td><td></td><td>${tot.s}</td><td>${tot.h}</td><td>${tot.b}</td><td>${tot.p}</td></tr></tfoot></table>`:'';
+    const tot=sk.reduce((o,r)=>{o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.b+=r.blocked_shots||0;o.p+=r.pim||0;o.pp+=r.pp_goals||0;o.sh+=r.sh_goals||0;o.gw+=r.gwg||0;return o;},{g:0,a:0,s:0,h:0,b:0,p:0,pp:0,sh:0,gw:0});
+    const skTbl=sk.length?`<table class="bx-tbl"><thead><tr><th class="bx-lh">Skater</th><th>Pos</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th><th title="Power-play goals">PP</th><th title="Short-handed goals">SH</th><th title="Game-winning goals">GW</th></tr></thead><tbody>${sk.map(r=>`<tr>${nameTd(r)}<td class="bx-pos">${r.position||'—'}</td><td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?'+':'')+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.blocked_shots||0}</td><td>${r.pim||0}</td><td>${r.pp_goals||0}</td><td>${r.sh_goals||0}</td><td>${r.gwg||0}</td></tr>`).join("")}</tbody><tfoot><tr><td class="bx-lh">Team</td><td></td><td>${tot.g}</td><td>${tot.a}</td><td class="bx-pt">${tot.g+tot.a}</td><td></td><td>${tot.s}</td><td>${tot.h}</td><td>${tot.b}</td><td>${tot.p}</td><td>${tot.pp}</td><td>${tot.sh}</td><td>${tot.gw}</td></tr></tfoot></table>`:'';
     const glTbl=gl.length?`<table class="bx-tbl"><thead><tr><th class="bx-lh">Goalie</th><th>SV</th><th>SA</th><th>GA</th><th>SV%</th><th>SO</th></tr></thead><tbody>${gl.map(r=>`<tr>${nameTd(r)}<td>${r.saves||0}</td><td>${r.shots_against||0}</td><td>${r.goals_against||0}</td><td>${r.shots_against?((r.saves/r.shots_against).toFixed(3).replace(/^0/,'')):'—'}</td><td>${r.shutout?'1':'0'}</td></tr>`).join("")}</tbody></table>`:'';
     return `<div class="bx-team"><h4>${nm}</h4>${skTbl}${glTbl}</div>`;
   };
@@ -2452,13 +2457,15 @@ async function renderTeamPage(code){
       </div></div>
     <div id="teamBody"><div class="empty-note">Loading roster…</div></div>`;
   const token=++teamPageToken;
-  let spots=[],stats=[];
+  let spots=[],stats=[],sptm=null;
   if(sb&&openSeason){const tid=teamIdOf(code);
     if(tid){
       const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
       spots=r1.data||[];
       const r2=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
       stats=r2.data||[];
+      const r3=await sb.from("team_special_teams").select("*").eq("season_id",openSeason.id).eq("team_id",tid).maybeSingle();
+      sptm=r3.data||null;
     }}
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
@@ -2481,6 +2488,11 @@ async function renderTeamPage(code){
         <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
           <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No skaters on the roster yet.</div>'}</div>
       <div class="stack">
+        ${sptm?`<div class="card"><div class="card-h"><h3>Special Teams</h3></div>
+          <div class="st-grid">
+            <div class="st-cell"><div class="st-k">Power Play</div><div class="st-v">${sptm.pp_pct==null?'—':sptm.pp_pct+'%'}</div><div class="st-sub">${sptm.pp_goals}/${sptm.pp_opps} PP goals${sptm.sh_goals?` · ${sptm.sh_goals} SHG`:''}</div></div>
+            <div class="st-cell"><div class="st-k">Penalty Kill</div><div class="st-v">${sptm.pk_pct==null?'—':sptm.pk_pct+'%'}</div><div class="st-sub">${sptm.times_shorthanded-sptm.pk_goals_against}/${sptm.times_shorthanded} killed</div></div>
+          </div></div>`:''}
         <div class="card"><div class="card-h"><h3>Goaltending</h3></div>
           ${goalies.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Goalie</th><th>GP</th><th>GAA</th><th>SV%</th><th>Cap Hit</th></tr></thead>
           <tbody>${goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
@@ -2511,7 +2523,7 @@ async function renderPlayerPage(id){
   const [bdRes,poRes,logRes]=await Promise.all([
     sb.rpc("overall_breakdown",{p_profile:prof.id}),
     sb.from("player_position_overalls").select("pos_cat,overall,gp").eq("profile_id",prof.id),
-    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final")
+    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,pp_goals,sh_goals,gwg,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final")
   ]);
   const bd=bdRes&&bdRes.data;const posOvr=(poRes&&poRes.data)||[];
   const log=((logRes&&logRes.data)||[]).filter(r=>r.games).sort((a,b)=>new Date(b.games.scheduled_at)-new Date(a.games.scheduled_at));
@@ -2525,11 +2537,11 @@ async function renderPlayerPage(id){
   // career stats — box-score style table (all stats), replacing the individual boxes
   let statsCard;
   if(log.length){
-    const a=log.reduce((o,r)=>{o.gp++;o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.blk+=r.blocked_shots||0;o.pim+=r.pim||0;o.pm+=r.plus_minus||0;o.sv+=r.saves||0;o.sa+=r.shots_against||0;o.ga+=r.goals_against||0;o.so+=r.shutout?1:0;return o;},{gp:0,g:0,a:0,s:0,h:0,blk:0,pim:0,pm:0,sv:0,sa:0,ga:0,so:0});
+    const a=log.reduce((o,r)=>{o.gp++;o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.blk+=r.blocked_shots||0;o.pim+=r.pim||0;o.pm+=r.plus_minus||0;o.sv+=r.saves||0;o.sa+=r.shots_against||0;o.ga+=r.goals_against||0;o.so+=r.shutout?1:0;o.pp+=r.pp_goals||0;o.sh+=r.sh_goals||0;o.gw+=r.gwg||0;return o;},{gp:0,g:0,a:0,s:0,h:0,blk:0,pim:0,pm:0,sv:0,sa:0,ga:0,so:0,pp:0,sh:0,gw:0});
     const pg=v=>a.gp?(v/a.gp).toFixed(2):"0.00";
     const tbl=isG
       ? `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>SV</th><th>SA</th><th>GA</th><th>GAA</th><th>SV%</th><th>SO</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.sv}</td><td>${a.sa}</td><td>${a.ga}</td><td>${a.gp?(a.ga/a.gp).toFixed(2):"—"}</td><td>${a.sa?(a.sv/a.sa).toFixed(3).replace(/^0/,""):"—"}</td><td>${a.so}</td></tr></tbody></table>`
-      : `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.g}</td><td>${a.a}</td><td class="bx-pt">${a.g+a.a}</td><td>${a.pm>0?"+":""}${a.pm}</td><td>${a.s}</td><td>${a.h}</td><td>${a.blk}</td><td>${a.pim}</td></tr><tr class="pf-pg"><td class="bx-lh">Per game</td><td>—</td><td>${pg(a.g)}</td><td>${pg(a.a)}</td><td class="bx-pt">${pg(a.g+a.a)}</td><td>—</td><td>${pg(a.s)}</td><td>${pg(a.h)}</td><td>${pg(a.blk)}</td><td>${pg(a.pim)}</td></tr></tbody></table>`;
+      : `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th><th title="Power-play goals">PP</th><th title="Short-handed goals">SH</th><th title="Game-winning goals">GW</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.g}</td><td>${a.a}</td><td class="bx-pt">${a.g+a.a}</td><td>${a.pm>0?"+":""}${a.pm}</td><td>${a.s}</td><td>${a.h}</td><td>${a.blk}</td><td>${a.pim}</td><td>${a.pp}</td><td>${a.sh}</td><td>${a.gw}</td></tr><tr class="pf-pg"><td class="bx-lh">Per game</td><td>—</td><td>${pg(a.g)}</td><td>${pg(a.a)}</td><td class="bx-pt">${pg(a.g+a.a)}</td><td>—</td><td>${pg(a.s)}</td><td>${pg(a.h)}</td><td>${pg(a.blk)}</td><td>${pg(a.pim)}</td><td>—</td><td>—</td><td>—</td></tr></tbody></table>`;
     statsCard=`<div class="card pf-stats-card"><div class="card-h"><h3>Career Stats</h3>${prof.overall?`<span class="pill frost">${posLbl} · ${prof.overall} OVR</span>`:""}</div><div class="gl-scroll">${tbl}</div></div>`;
   } else {
     statsCard=`<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>`;

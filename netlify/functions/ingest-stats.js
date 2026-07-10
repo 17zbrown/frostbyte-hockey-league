@@ -63,11 +63,13 @@ function normalizeMatch(raw) {
         shots: +(p.skshots || 0), hits: +(p.skhits || 0), pim: +(p.skpim || 0),
         plus_minus: +(p.skplusmin || 0), takeaways: +(p.sktakeaways || 0), giveaways: +(p.skgiveaways || 0),
         faceoffs_won: +(p.skfow || 0), faceoffs_lost: +(p.skfol || 0), time_on_ice_seconds: +(p.toiseconds || 0),
+        pp_goals: +(p.skppg || 0), sh_goals: +(p.skshg || 0), gwg: +(p.skgwg || 0),
         is_goalie: isG,
         saves: isG ? +(p.glsaves || 0) : 0, shots_against: isG ? +(p.glshots || 0) : 0, goals_against: isG ? +(p.glga || 0) : 0
       };
     });
-    return { ea_club_id: String(cid), name: c.details ? c.details.name : null, score: +(c.score || 0), players };
+    return { ea_club_id: String(cid), name: c.details ? c.details.name : null, score: +(c.score || 0),
+             ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), players };
   };
   return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), clubs: [club(clubIds[0]), club(clubIds[1])] };
 }
@@ -126,15 +128,18 @@ async function ingestOne(norm, summary) {
         goals: e.goals, assists: e.assists, shots: e.shots, hits: e.hits, pim: e.pim, is_goalie: e.is_goalie,
         saves: e.saves, shots_against: e.shots_against, goals_against: e.goals_against,
         ea_player_id: e.ea_player_id, plus_minus: e.plus_minus, takeaways: e.takeaways, giveaways: e.giveaways,
-        faceoffs_won: e.faceoffs_won, faceoffs_lost: e.faceoffs_lost, time_on_ice_seconds: e.time_on_ice_seconds
+        faceoffs_won: e.faceoffs_won, faceoffs_lost: e.faceoffs_lost, time_on_ice_seconds: e.time_on_ice_seconds,
+        pp_goals: e.pp_goals, sh_goals: e.sh_goals, gwg: e.gwg
       });
     }
   }
   await sbSend("DELETE", `game_stats?game_id=eq.${game.id}`);
   if (rows.length) await sbSend("POST", "game_stats", rows, "return=minimal");
   // flip the game to final LAST — this fires notify_discord_game_final + updates standings
+  const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
   await sbSend("PATCH", `games?id=eq.${game.id}`,
-    { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id },
+    { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id,
+      home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
 
   const linked = rows.filter((r) => r.profile_id).length;
