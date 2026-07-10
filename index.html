@@ -2421,20 +2421,13 @@ function twitchBlock(prof){
   }
   if(own){
     html+=`<div class="tw-own">
-      ${prof.twitch?`<button class="btn btn-sm ${prof.live?'btn-ghost':'btn-frost'}" data-twlive="${prof.live?'off':'on'}">${prof.live?'End Stream':'Go Live'}</button>`:''}
       <button class="btn btn-ghost btn-sm" id="twEdit">${prof.twitch?'Change Twitch':'Add Twitch handle'}</button>
+      ${prof.twitch?'<span style="color:var(--fog);font-size:12px;align-self:center">Your LIVE badge turns on automatically when you go live on Twitch.</span>':''}
     </div>`;
   }
   return html+'</div>';
 }
 document.addEventListener("click",async e=>{
-  const lv=e.target.closest("[data-twlive]");
-  if(lv&&sb&&authUser){e.preventDefault();
-    const {error}=await sb.from("profiles").update({live:lv.dataset.twlive==="on"}).eq("id",authUser.id);
-    if(error){toast("Couldn't update",error.message);return;}
-    if(authProfile)authProfile.live=lv.dataset.twlive==="on";
-    toast(lv.dataset.twlive==="on"?"You're live":"Stream ended",lv.dataset.twlive==="on"?"A LIVE badge now shows on your profile.":"Your LIVE badge is off.");
-    renderPlayerPage(authProfile.gamertag);return;}
   const ed=e.target.closest("#twEdit");
   if(ed&&sb&&authUser){e.preventDefault();
     const cur=authProfile&&authProfile.twitch||"";
@@ -2764,14 +2757,13 @@ function openEditProfile(){
   if(!authProfile||!sb){toast("Sign in first","Sign in with Discord to edit your profile.");return;}
   formModal("Edit Profile",[
     {key:"overall",label:"EA overall (0–99)",type:"number",value:authProfile.overall||"",min:0,max:99},
-    {key:"twitch",label:"Twitch handle",value:authProfile.twitch||""},
-    {key:"live",label:"Live on Twitch right now",type:"select",value:authProfile.live?"on":"off",options:[{value:"off",label:"Not live"},{value:"on",label:"Live now"}]}
+    {key:"twitch",label:"Twitch handle — your LIVE badge turns on automatically when you stream",value:authProfile.twitch||"",placeholder:"your_twitch_username"}
   ],async v=>{
     let tw=(v.twitch||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
-    const handle=tw||null,live=v.live==="on",ovr=(+v.overall>0&&+v.overall<=99)?+v.overall:null;
-    const {error}=await sb.from("profiles").update({twitch:handle,live,overall:ovr}).eq("id",authUser.id);
+    const handle=tw||null,ovr=(+v.overall>0&&+v.overall<=99)?+v.overall:null;
+    const {error}=await sb.from("profiles").update({twitch:handle,overall:ovr}).eq("id",authUser.id);
     if(error){toast("Couldn't save",error.message);return;}
-    authProfile.twitch=handle;authProfile.live=live;authProfile.overall=ovr;
+    authProfile.twitch=handle;authProfile.overall=ovr;
     toast("Profile updated","Your profile changes are saved.");
     renderPlayerPage(authProfile.gamertag);renderSignupAuth();
   });
