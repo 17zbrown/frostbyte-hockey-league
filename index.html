@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Chel Gaming Hockey League — Competitive 6v6 NHL 26</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="mask-icon" href="favicon.svg" color="#ffe500" />
 <meta name="description" content="The Chel Gaming Hockey League hub: standings, team pages, player profiles, stats, news, transactions, awards, playoffs, free agency, chat, and the manager & commissioner portals." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,6 +21,7 @@
     --ice:#111111;--fog:#57708a;--fog-dim:#647688;
     --live:#d81e3f;--win:#0f7a45;--loss:#c8442f;--gold:#9a6c12;
     --navy:#111111;--navy-2:#333333;--sky:#ffe500;--sky-nav:#0f0f0f;
+    --logo-c:#141414;
     --f-display:"Saira Condensed",Impact,"Arial Narrow Bold",sans-serif;
     --f-cond:"Saira Semi Condensed","Arial Narrow",sans-serif;
     --f-body:"Saira",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
@@ -53,7 +56,8 @@
     background:#081521e6;backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
   .nav-inner{max-width:1320px;margin:0 auto;height:100%;padding:0 22px;display:flex;align-items:center;gap:18px}
   .brand{display:flex;align-items:center;gap:11px;flex-shrink:0;cursor:pointer}
-  .crest{width:38px;height:38px;flex-shrink:0}
+  .crest{width:34px;height:34px;flex-shrink:0;color:var(--logo-c,#f4f4f0)}
+  header.nav .crest,footer .crest{color:#f4f4f0}
   .brand b{font-family:var(--f-display);font-size:19px;letter-spacing:.02em;line-height:.9;text-transform:uppercase}
   .brand b span{color:var(--frost)}
   .brand small{display:block;font-family:var(--f-cond);font-size:9.5px;letter-spacing:.32em;color:var(--fog);text-transform:uppercase;margin-top:1px}
@@ -683,6 +687,8 @@
   /* ============================ FOOTER ============================ */
   footer{border-top:1px solid var(--line);margin-top:40px;padding:44px 0 30px;background:linear-gradient(180deg,transparent,#050c14)}
   .foot-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:30px}
+  .fb-lock{display:flex;align-items:center;gap:11px}
+  .fb-lock .crest{width:30px;height:30px}
   .foot-brand b{font-family:var(--f-display);font-size:22px;text-transform:uppercase;letter-spacing:.02em}
   .foot-brand b span{color:var(--frost)}
   .foot-brand p{color:var(--fog);font-size:13.5px;margin:12px 0 18px;max-width:34ch}
@@ -864,7 +870,6 @@
     text-transform:uppercase;color:var(--frost);padding:9px 10px;border-bottom:1px solid var(--line);background:#fff}
   .sb-vs{font-family:var(--f-display);font-weight:800;font-size:24px;letter-spacing:0;color:var(--navy);line-height:1}
   .sb-when{font-family:var(--f-mono);font-size:11px;color:var(--fog);margin-top:5px;white-space:nowrap}
-  .crest{filter:drop-shadow(0 1px 1.5px #0a284624)}
 
   /* TABLES / LEADERS / FIXTURES */
   table.tbl tbody tr:hover td,.roster-tbl tr:hover td{background:#f1f6fb}
@@ -1142,6 +1147,7 @@
     --frost:#ffe500;--frost-deep:#ffef66;--frost-glow:#ffe5001f;
     --ice:#f4f4f0;--fog:#a2a29a;--fog-dim:#83837c;
     --navy:#f4f4f0;--navy-2:#d2d2cc;--sky:#ffe500;--sky-nav:#0a0a0a;
+    --logo-c:#f4f4f0;
     --sh-1:0 1px 2px #00000066,0 6px 16px -10px #00000099;
     --sh-2:0 18px 44px -16px #000000cc;
   }
@@ -1219,10 +1225,9 @@
 <header class="nav">
   <div class="nav-inner">
     <div class="brand" role="button" tabindex="0" data-go="home" aria-label="Chel Gaming Hockey League home">
-      <svg class="crest" viewBox="0 0 40 40" aria-hidden="true">
-        <path d="M20 2 L35 9 V21 C35 30 28 36 20 39 C12 36 5 30 5 21 V9 Z" fill="#141414" stroke="#ffe500" stroke-width="1.5"/>
-        <path d="M20 9 L20 31 M12 13 L28 27 M28 13 L12 27" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" opacity=".85"/>
-        <circle cx="20" cy="20" r="3.4" fill="#ffe500"/>
+      <svg class="crest" viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M36.7 16.05 A15 15 0 1 0 36.7 31.95" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linecap="round"/>
+        <path d="M36 24 H27.5" fill="none" stroke="#ffe500" stroke-width="3.8" stroke-linecap="round"/>
       </svg>
       <div><b>CHEL <span>GAMING</span></b><small>Hockey League</small></div>
     </div>
@@ -1740,7 +1745,10 @@
 <!-- FOOTER -->
 <footer><div class="wrap">
   <div class="foot-grid">
-    <div class="foot-brand"><b>CHEL <span>GAMING</span></b>
+    <div class="foot-brand"><div class="fb-lock"><svg class="crest" viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M36.7 16.05 A15 15 0 1 0 36.7 31.95" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linecap="round"/>
+        <path d="M36 24 H27.5" fill="none" stroke="#ffe500" stroke-width="3.8" stroke-linecap="round"/>
+      </svg><b>CHEL <span>GAMING</span></b></div>
       <p>The competitive home of 6v6 EA Sports NHL 26. Run by players, for players, since Season 1.</p>
       <div class="socials">
         <a href="https://discord.gg/UQYqKD8bd" target="_blank" rel="noopener noreferrer" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg></a>
