@@ -753,6 +753,15 @@
   .gl-team{display:inline-flex;align-items:center;gap:7px;cursor:pointer}
   .gl-res{font-weight:700}.gl-res.w{color:var(--win)}.gl-res.l{color:var(--loss)}
   .gl-foot{color:var(--fog-dim);font-size:11.5px;margin:10px 0 0}
+  .gl-seasonhd{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--frost);margin:4px 0 2px}
+  .pf-pg td{color:var(--fog)!important;border-bottom:none!important;font-size:11.5px}
+  .pf-stat tbody tr:first-child td{border-bottom:1px solid var(--line-soft)}
+  .pf-season{border-top:1px solid var(--line);margin-top:4px}
+  .pf-season>summary{cursor:pointer;list-style:none;padding:13px 2px;font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--ice);display:flex;align-items:center;gap:10px}
+  .pf-season>summary::-webkit-details-marker{display:none}
+  .pf-season>summary::before{content:"\\25B8";color:var(--frost);font-size:11px;transition:transform .15s}
+  .pf-season[open]>summary::before{transform:rotate(90deg)}
+  .pf-sn-ct{color:var(--fog-dim);font-family:var(--f-mono);font-weight:400;font-size:11px;letter-spacing:0}
   /* box score modal */
   .bx-team{margin-top:18px}
   .bx-team h4{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);margin:0 0 8px}
@@ -2493,51 +2502,67 @@ async function renderPlayerPage(id){
   if(!prof){el.innerHTML=`<div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${id}</div><div class="empty-state"><h4>Player not found</h4><p>No registered player by that name.</p></div>`;return;}
   let spot=null,tc=null;
   if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
-  let st={gp:0,goals:0,assists:0,points:0,shots:0,hits:0,pim:0,saves:0,shots_against:0,goals_against:0,is_goalie:false};
-  if(openSeason){const {data:ps}=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();if(ps)st=ps;}
-  const t=tc?teams[tc]:null;const pos=spot?spot.position:null;const isG=pos==="G"||st.is_goalie;
+  const t=tc?teams[tc]:null;const pos=spot?spot.position:null;
   const num=spot?spot.jersey_number:"—";
-  const statCard=(k,v,acc)=>`<div class="stat${acc?' accent':''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-  const svp=st.shots_against?(st.saves/st.shots_against).toFixed(3).replace(/^0/,""):".000";
-  const grid=isG
-    ? `${statCard("Games",st.gp,1)}${statCard("Saves",st.saves)}${statCard("Goals Against",st.goals_against)}${statCard("Save %",svp)}`
-    : `${statCard("Points",st.points,1)}${statCard("Goals",st.goals)}${statCard("Assists",st.assists)}${statCard("Games",st.gp)}${statCard("Shots",st.shots)}${statCard("Hits",st.hits)}`;
   const roleTag=prof.role==="commissioner"?"Commissioner":(prof.role==="gm"?"Manager":null);
-  // rating breakdown (current position), per-position saved overalls, and career game log
   const CATLBL={C:"Center",W:"Wing",D:"Defense",G:"Goalie"};
   const [bdRes,poRes,logRes]=await Promise.all([
     sb.rpc("overall_breakdown",{p_profile:prof.id}),
     sb.from("player_position_overalls").select("pos_cat,overall,gp").eq("profile_id",prof.id),
-    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status)").eq("profile_id",prof.id).eq("games.status","final")
+    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final")
   ]);
   const bd=bdRes&&bdRes.data;const posOvr=(poRes&&poRes.data)||[];
+  const log=((logRes&&logRes.data)||[]).filter(r=>r.games).sort((a,b)=>new Date(b.games.scheduled_at)-new Date(a.games.scheduled_at));
+  const isG=bd?bd.category==="G":(pos==="G");
   const posLbl=POS_NAME[pos]||(bd?CATLBL[bd.category]:"")||"Player";
+  // position-rating chips
   let posChips="";
   if(posOvr.length>1||(posOvr.length===1&&bd&&posOvr[0].pos_cat!==bd.category)){
     posChips=`<div class="pos-ovrs">${posOvr.slice().sort((a,b)=>b.overall-a.overall).map(p=>`<span class="po-chip${bd&&p.pos_cat===bd.category?' cur':''}"><b>${p.overall}</b>${CATLBL[p.pos_cat]||p.pos_cat}</span>`).join("")}</div>`;
   }
+  // career stats — box-score style table (all stats), replacing the individual boxes
+  let statsCard;
+  if(log.length){
+    const a=log.reduce((o,r)=>{o.gp++;o.g+=r.goals||0;o.a+=r.assists||0;o.s+=r.shots||0;o.h+=r.hits||0;o.blk+=r.blocked_shots||0;o.pim+=r.pim||0;o.pm+=r.plus_minus||0;o.sv+=r.saves||0;o.sa+=r.shots_against||0;o.ga+=r.goals_against||0;o.so+=r.shutout?1:0;return o;},{gp:0,g:0,a:0,s:0,h:0,blk:0,pim:0,pm:0,sv:0,sa:0,ga:0,so:0});
+    const pg=v=>a.gp?(v/a.gp).toFixed(2):"0.00";
+    const tbl=isG
+      ? `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>SV</th><th>SA</th><th>GA</th><th>GAA</th><th>SV%</th><th>SO</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.sv}</td><td>${a.sa}</td><td>${a.ga}</td><td>${a.gp?(a.ga/a.gp).toFixed(2):"—"}</td><td>${a.sa?(a.sv/a.sa).toFixed(3).replace(/^0/,""):"—"}</td><td>${a.so}</td></tr></tbody></table>`
+      : `<table class="bx-tbl pf-stat"><thead><tr><th class="bx-lh">Career</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>BLK</th><th>PIM</th></tr></thead><tbody><tr><td class="bx-lh">Total</td><td>${a.gp}</td><td>${a.g}</td><td>${a.a}</td><td class="bx-pt">${a.g+a.a}</td><td>${a.pm>0?"+":""}${a.pm}</td><td>${a.s}</td><td>${a.h}</td><td>${a.blk}</td><td>${a.pim}</td></tr><tr class="pf-pg"><td class="bx-lh">Per game</td><td>—</td><td>${pg(a.g)}</td><td>${pg(a.a)}</td><td class="bx-pt">${pg(a.g+a.a)}</td><td>—</td><td>${pg(a.s)}</td><td>${pg(a.h)}</td><td>${pg(a.blk)}</td><td>${pg(a.pim)}</td></tr></tbody></table>`;
+    statsCard=`<div class="card pf-stats-card"><div class="card-h"><h3>Career Stats</h3>${prof.overall?`<span class="pill frost">${posLbl} · ${prof.overall} OVR</span>`:""}</div><div class="gl-scroll">${tbl}</div></div>`;
+  } else {
+    statsCard=`<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>`;
+  }
+  // rating breakdown (description removed)
   let brk="";
-  if(bd&&bd.components&&bd.components.length){
+  if(bd&&bd.components&&bd.components.length&&log.length){
     brk=`<div class="card brk-card"><div class="card-h"><h3>Rating Breakdown</h3><span class="pill frost">${posLbl} · ${bd.overall} OVR</span></div>
-      <p class="brk-note">Every stat below feeds ${esc(prof.gamertag)}'s <b>${posLbl}</b> overall, from career game stats. <b>Weight</b> is how much each stat matters at this position; the bar is their 0–100 rating in that stat.${bd.provisional?` <span class="brk-prov">Provisional — blended toward 70 until 5 games (${bd.gp} played).</span>`:""}</p>
+      ${bd.provisional?`<p class="brk-prov" style="margin:0 0 14px">Provisional — blended toward 70 until 5 games (${bd.gp} played).</p>`:""}
       <div class="brk-head"><span>Stat</span><span>Career</span><span>Rating</span><span>Weight</span></div>
       ${bd.components.map(c=>`<div class="brk-row"><span class="brk-l">${c.label}</span><span class="brk-v">${c.value===null||c.value===undefined?'<span class="brk-na">—</span>':esc(String(c.value))+c.suffix}</span><span class="brk-bar"><i style="width:${Math.max(2,c.score)}%"></i><em>${c.score}</em></span><span class="brk-w">${Math.round(c.weight*100)}%</span></div>`).join("")}
     </div>`;
   }
+  // game log — current season shown directly, previous seasons in dropdowns
+  const glRow=r=>{const gg=r.games;const home=r.team_id===gg.home_team_id;
+    const oppCode=codeOfId(home?gg.away_team_id:gg.home_team_id);
+    const mine=home?gg.home_score:gg.away_score,opp=home?gg.away_score:gg.home_score;const win=mine>opp;
+    const cells=isG
+      ? `<td>${r.saves||0}</td><td>${r.goals_against||0}</td><td>${r.shots_against?((r.saves/r.shots_against).toFixed(3).replace(/^0/,"")):"—"}</td><td>${r.shutout?"1":"0"}</td>`
+      : `<td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?"+":"")+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.pim||0}</td>`;
+    return `<tr class="gl-row" data-box="${gg.id}"><td class="gl-date">${fmtGameDate(gg.scheduled_at)}</td><td class="gl-opp">${home?"vs":"@"} ${oppCode&&teams[oppCode]?`<span class="gl-team" data-go="team" data-param="${oppCode}">${badge(oppCode,18)}${teams[oppCode].name}</span>`:esc(oppCode||"?")}</td><td class="gl-res ${win?"w":"l"}">${win?"W":"L"} ${mine}-${opp}${gg.went_ot?" OT":""}</td>${cells}</tr>`;
+  };
+  const glHead=isG?`<th>SV</th><th>GA</th><th>SV%</th><th>SO</th>`:`<th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>PIM</th>`;
+  const glTable=rows=>`<div class="gl-scroll"><table class="gl-tbl"><thead><tr><th>Date</th><th>Matchup</th><th>Result</th>${glHead}</tr></thead><tbody>${rows.map(glRow).join("")}</tbody></table></div>`;
   let logHtml="";
-  const log=((logRes&&logRes.data)||[]).filter(r=>r.games).sort((a,b)=>new Date(b.games.scheduled_at)-new Date(a.games.scheduled_at));
   if(log.length){
-    const head=isG?`<th>SV</th><th>GA</th><th>SV%</th><th>SO</th>`:`<th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>PIM</th>`;
-    const body=log.map(r=>{const gg=r.games;const home=r.team_id===gg.home_team_id;
-      const oppCode=codeOfId(home?gg.away_team_id:gg.home_team_id);
-      const mine=home?gg.home_score:gg.away_score,opp=home?gg.away_score:gg.home_score;const win=mine>opp;
-      const cells=isG
-        ? `<td>${r.saves||0}</td><td>${r.goals_against||0}</td><td>${r.shots_against?((r.saves/r.shots_against).toFixed(3).replace(/^0/,"")):"—"}</td><td>${r.shutout?"1":"0"}</td>`
-        : `<td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?"+":"")+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.pim||0}</td>`;
-      return `<tr class="gl-row" data-box="${gg.id}"><td class="gl-date">${fmtGameDate(gg.scheduled_at)}</td><td class="gl-opp">${home?"vs":"@"} ${oppCode&&teams[oppCode]?`<span class="gl-team" data-go="team" data-param="${oppCode}">${badge(oppCode,18)}${teams[oppCode].name}</span>`:esc(oppCode||"?")}</td><td class="gl-res ${win?"w":"l"}">${win?"W":"L"} ${mine}-${opp}${gg.went_ot?" OT":""}</td>${cells}</tr>`;
-    }).join("");
+    const curNum=openSeason?openSeason.number:null;
+    const bySeason=new Map();
+    log.forEach(r=>{const n=r.games.seasons?r.games.seasons.number:0;if(!bySeason.has(n))bySeason.set(n,[]);bySeason.get(n).push(r);});
+    const curRows=curNum!=null?(bySeason.get(curNum)||[]):log;
+    const prev=curNum==null?[]:[...bySeason.entries()].filter(([n])=>n!==curNum).sort((a,b)=>b[0]-a[0]);
     logHtml=`<div class="card gl-card"><div class="card-h"><h3>Game Log</h3><span class="pill dim">${log.length} game${log.length!==1?"s":""}</span></div>
-      <div class="gl-scroll"><table class="gl-tbl"><thead><tr><th>Date</th><th>Matchup</th><th>Result</th>${head}</tr></thead><tbody>${body}</tbody></table></div>
+      ${curNum!=null?`<div class="gl-seasonhd">Season ${curNum}</div>`:""}
+      ${curRows.length?glTable(curRows):'<div class="empty-note" style="margin:0;padding:12px 2px">No games yet this season.</div>'}
+      ${prev.map(([n,rows])=>`<details class="pf-season"><summary>Season ${n} <span class="pf-sn-ct">${rows.length} game${rows.length!==1?"s":""}</span></summary>${glTable(rows)}</details>`).join("")}
       <p class="gl-foot">Tap any game for the full box score.</p></div>`;
   }
   el.innerHTML=`
@@ -2554,10 +2579,9 @@ async function renderPlayerPage(id){
     </div>
     ${twitchBlock(prof)}
     ${posChips}
-    <div class="stat-grid">${grid}</div>
-    ${st.gp===0?'<div class="empty-note" style="margin-top:16px">No games played yet — stats populate automatically as results are reported.</div>':''}
-    ${brk}
-    ${logHtml}`;
+    ${statsCard}
+    ${logHtml}
+    ${brk}`;
 }
 const TWITCH_GLYPH='<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 2 3 6.5V19h4v3h3l3-3h4l4.5-4.5V2H4zm2 2h13.5v9L16 16h-4l-3 3v-3H6V4zm5.25 3v5h2V7h-2zm5 0v5h2V7h-2z"/></svg>';
 function twitchBlock(prof){
