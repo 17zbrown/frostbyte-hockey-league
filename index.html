@@ -2649,7 +2649,7 @@ async function renderPlayerPage(id){
         +(a.off?ssec("EA grades (avg)",cell(Math.round(a.off/a.gp),"Offense")+cell(Math.round(a.def/a.gp),"Defense")+cell(Math.round(a.tp/a.gp),"Team play")):"")
       : ssec("Scoring",cell(a.g-a.pp-a.sh,"EV goals")+cell(a.pp,"PP goals")+cell(a.sh,"SH goals")+cell(a.gw,"GW goals")+cell(pg(a.g+a.a),"Pts / game"))
         +ssec("Shooting",cell(pct(a.g,a.s),"Shooting %")+cell(a.satt,"Shot attempts")+cell(pg(a.s),"Shots / game"))
-        +ssec("Puck play",cell(a.pc,"Passes")+cell(pct(a.pc,a.pa),"Pass %")+cell(a.fow,"Faceoffs won")+cell(pct(a.fow,a.fow+a.fol),"Faceoff %")+cell(a.tk,"Takeaways")+cell(a.gv,"Giveaways")+cell(a.int,"Interceptions"))
+        +ssec("Puck play",cell(a.pc,"Passes")+cell(pct(a.pc,a.pa),"Pass %")+(pos==="C"?cell(a.fow,"Faceoffs won")+cell(pct(a.fow,a.fow+a.fol),"Faceoff %"):"")+cell(a.tk,"Takeaways")+cell(a.gv,"Giveaways")+cell(a.int,"Interceptions"))
         +ssec("Possession & discipline",cell(mmss(a.poss),"Possession")+cell(a.pd,"Pen. drawn"))
         +(a.off?ssec("EA grades (avg)",cell(Math.round(a.off/a.gp),"Offense")+cell(Math.round(a.def/a.gp),"Defense")+cell(Math.round(a.tp/a.gp),"Team play")):"");
     statsCard=`<div class="card pf-stats-card"><div class="card-h"><h3>Career Stats</h3>${prof.overall?`<span class="pill frost">${posLbl} · ${prof.overall} OVR</span>`:""}</div><div class="gl-scroll">${tbl}</div>${detail}</div>`;
