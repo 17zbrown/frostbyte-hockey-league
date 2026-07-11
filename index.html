@@ -277,8 +277,8 @@
   .player-hero{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center;background:linear-gradient(120deg,#0d2237,#0a1826);border:1px solid var(--line);border-radius:var(--r-l);padding:28px 30px;box-shadow:var(--sh-1);overflow:hidden;position:relative}
   .player-hero::after{content:"";position:absolute;right:-40px;top:-40px;width:240px;height:240px;background:radial-gradient(circle,var(--frost-glow),transparent 65%)}
   .jersey{width:118px;height:118px;border-radius:20px;display:grid;place-items:center;position:relative;flex-shrink:0;box-shadow:0 18px 40px -18px var(--frost)}
-  .jersey-logo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:15px;opacity:.34;pointer-events:none}
-  .jersey b{font-family:var(--f-display);font-size:52px;color:#062026;line-height:1;position:relative;z-index:1;text-shadow:0 1px 6px rgba(255,255,255,.35)}
+  .jersey-logo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:12px 12px 20px;opacity:1;pointer-events:none}
+  .jersey b{font-family:var(--f-display);font-size:52px;color:#062026;line-height:1}
   .jersey small{z-index:1}
   .jersey small{position:absolute;bottom:10px;font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.14em;color:#062026cc;text-transform:uppercase}
   .ph-info h2{font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4vw,42px);line-height:.92;letter-spacing:.01em}
@@ -2790,7 +2790,7 @@ async function renderPlayerPage(id){
   el.innerHTML=`
     <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}" style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${badge(tc,16)}${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
     <div class="player-hero">
-      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:''}<b>${num}</b><small>${tc||'FA'}</small></div>
+      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
       <div class="ph-info"><h2>${prof.gamertag}</h2>
         <div class="ph-meta">
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
@@ -2851,7 +2851,7 @@ async function renderMyStats(){
   }
   const t=tc?teams[tc]:null;
   el.innerHTML=`<div class="player-hero">
-    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:''}<b>${num}</b><small>${tc||'FA'}</small></div>
+    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
     <div class="ph-info"><h2>${authProfile.gamertag}</h2>
       <div class="ph-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
         ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">Not on a roster yet</span>`}
