@@ -2548,12 +2548,14 @@ async function renderTeamPage(code){
     }}
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
-  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
   const teamCapUsed=roster.reduce((s,p)=>s+(+p.salary||0),0);
   const teamSalCap=openSeason?(+openSeason.salary_cap||0):0;
-  const foOwner=roster.find(p=>p.role==="owner"),foGm=roster.find(p=>p.role==="gm")||roster.find(p=>p.role==="commissioner"),foAgm=roster.find(p=>p.role==="agm");
+  const _trow=(dbTeams||[]).find(x=>x.id===teamIdOf(code));
+  const foName=pid=>{if(!pid)return null;const r=roster.find(p=>p.pid===pid);return r?r.name:null;};
+  const foOwner=_trow?foName(_trow.owner_profile_id):null,foGm=_trow?foName(_trow.gm_profile_id):null,foAgm=_trow?foName(_trow.agm_profile_id):null;
   const mgrTag=$("#tbManager");
-  if(mgrTag){const fo=[];if(foOwner)fo.push(`Owner · <b>${foOwner.name}</b>`);if(foGm)fo.push(`GM · <b>${foGm.name}</b>`);if(foAgm)fo.push(`AGM · <b>${foAgm.name}</b>`);mgrTag.innerHTML=fo.length?fo.join(" &nbsp;·&nbsp; "):'<b>No front office yet</b>';}
+  if(mgrTag){const fo=[];if(foOwner)fo.push(`Owner · <b>${esc(foOwner)}</b>`);if(foGm)fo.push(`GM · <b>${esc(foGm)}</b>`);if(foAgm)fo.push(`AGM · <b>${esc(foAgm)}</b>`);mgrTag.innerHTML=fo.length?fo.join(" &nbsp;·&nbsp; "):'<b>No front office yet</b>';}
   const skaters=roster.filter(p=>!p.is_goalie).sort((a,b)=>b.pts-a.pts);
   const goalies=roster.filter(p=>p.is_goalie);
   const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if(g.a===code||g.b===code)teamGames.push(g);}));
@@ -2613,7 +2615,9 @@ async function renderPlayerPage(id){
   if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
   const t=tc?teams[tc]:null;const pos=spot?spot.position:null;
   const num=spot?spot.jersey_number:"—";
-  const roleTag=["owner","gm","agm","commissioner"].includes(prof.role)?ROLE_LABEL[prof.role]:null;
+  const mgmtTeam=(dbTeams||[]).find(x=>x.owner_profile_id===prof.id||x.gm_profile_id===prof.id||x.agm_profile_id===prof.id);
+  const teamRole=mgmtTeam?(mgmtTeam.owner_profile_id===prof.id?"owner":mgmtTeam.gm_profile_id===prof.id?"gm":"agm"):null;
+  const roleTag=prof.role==="commissioner"?"Commissioner":(teamRole?ROLE_LABEL[teamRole]:(prof.role==="staff"?"Staff":null));
   const CATLBL={C:"Center",W:"Wing",D:"Defense",G:"Goalie"};
   const [bdRes,poRes,logRes]=await Promise.all([
     sb.rpc("overall_breakdown",{p_profile:prof.id}),
@@ -2998,7 +3002,7 @@ function renderAuthUI(){
   const slot=document.querySelector("#authSlot");
   if(slot){
     if(authProfile){
-      const rl=ROLE_LABEL[authProfile.role]||"Member";
+      const _tr=myTeamRole();const rl=authProfile.role==="commissioner"?"Commissioner":(_tr?ROLE_LABEL[_tr]:(authProfile.role==="staff"?"Staff":"Member"));
       const mgr=isManager(),comm=authProfile.role==="commissioner";
       const CARET='<svg class="acct-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
       const item=(attrs,ic,label)=>`<button class="acct-item" ${attrs}><span class="acct-ic">${ic}</span>${label}</button>`;
@@ -3158,7 +3162,7 @@ function renderManager(){
   const gate=$("#mgrGate"),dash=$("#mgrDash");if(!gate||!dash)return;
   const club=(dbTeams||[]).find(t=>authUser&&(t.gm_profile_id===authUser.id||t.owner_profile_id===authUser.id||t.agm_profile_id===authUser.id));
   const isCommish=authProfile&&authProfile.role==="commissioner";
-  const canEnter=authProfile&&(MGMT_ROLES.includes(authProfile.role)||isCommish)&&(club||isCommish);
+  const canEnter=authProfile&&(isCommish||!!club);
   if(canEnter){
     if(club)currentClub=club.code;
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
@@ -3714,7 +3718,9 @@ function featureOn(key){const f=features.find(x=>x.key===key);return f?f.on:true
 function viewFeature(view){const f=features.find(x=>x.view===view);return f?f.key:null;}
 function applyFeatures(){document.querySelectorAll("[data-feature]").forEach(el=>{el.style.display=featureOn(el.dataset.feature)?"":"none";});applyRoleVisibility();}
 const MGMT_ROLES=["owner","gm","agm"];
-function isManager(){return authProfile&&(MGMT_ROLES.includes(authProfile.role)||authProfile.role==="commissioner");}
+// Team role now lives on the team's slot, not profiles.role. Find which post (if any) the signed-in user holds.
+function myTeamRole(){if(!authUser)return null;const t=(dbTeams||[]).find(x=>x.owner_profile_id===authUser.id||x.gm_profile_id===authUser.id||x.agm_profile_id===authUser.id);return t?(t.owner_profile_id===authUser.id?"owner":t.gm_profile_id===authUser.id?"gm":"agm"):null;}
+function isManager(){return !!authProfile&&(authProfile.role==="commissioner"||!!myTeamRole());}
 const MANAGER_VIEWS=new Set(["draft"]);
 function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{el.style.display=isManager()?"":"none";});}
 
@@ -4066,8 +4072,9 @@ async function saveGameResult(btn){
 }
 
 /* ---- Members & Roles (grant Manager / Commissioner, assign a club) ---- */
-const ROLE_OPTS=[["member","Member"],["owner","Owner"],["gm","General Manager"],["agm","Assistant GM"],["commissioner","Commissioner"]];
-const ROLE_LABEL={owner:"Owner",gm:"General Manager",agm:"Assistant GM",commissioner:"Commissioner",member:"Member"};
+// Members & Roles = LEAGUE standing only. Owner/GM/AGM are per-club, assigned in the Teams tab.
+const ROLE_OPTS=[["member","Member"],["staff","Staff"],["commissioner","Commissioner"]];
+const ROLE_LABEL={owner:"Owner",gm:"General Manager",agm:"Assistant GM",commissioner:"Commissioner",staff:"Staff",member:"Member"};
 async function loadMembers(){
   const el=$("#membersBody");if(!el||!sb)return;
   const {data:profs}=await sb.from("profiles").select("id,gamertag,role").order("role",{ascending:false}).order("gamertag");
@@ -4083,11 +4090,10 @@ async function loadMembers(){
   }
   const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Role</th><th>Position</th><th>Club (managers &amp; commissioners)</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
-    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}"><td><b>${esc(p.gamertag)}</b></td>
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>League role</th><th>Position</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
+    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}</td>
       <td><select class="mb-role" data-id="${p.id}">${ROLE_OPTS.map(([v,l])=>`<option value="${v}" ${v===p.role?"selected":""}>${l}</option>`).join("")}</select></td>
       <td><select class="mb-pos" data-id="${p.id}">${AC_POS.map(([v,l])=>`<option value="${v}" ${v===(posOf[p.id]||'')?"selected":""}>${v}</option>`).join("")}</select></td>
-      <td><select class="mb-club" data-id="${p.id}"><option value="">— none —</option>${(tms||[]).map(t=>`<option value="${t.code}" ${clubOf[p.id]===t.code?"selected":""}>${esc(t.name)}</option>`).join("")}</select></td>
       <td style="text-align:right"><button class="mini good mb-save" data-id="${p.id}">Save</button></td></tr>`).join("")+"</tbody></table></div>";
   const q=$("#mbSearch");if(q)filterMembers(q.value);
 }
@@ -4107,33 +4113,21 @@ function filterMembers(term){
 async function saveMember(btn){
   const id=btn.dataset.id;if(!id||!sb)return;
   const role=(document.querySelector('.mb-role[data-id="'+id+'"]')||{}).value;
-  const code=(document.querySelector('.mb-club[data-id="'+id+'"]')||{}).value;
   if(!role){toast("Pick a role","");return;}
   btn.disabled=true;
-  const {data,error}=await sb.rpc("set_member_role",{p_target:id,p_role:role,p_team_code:code||null});
+  const {error}=await sb.rpc("set_member_role",{p_target:id,p_role:role});
   btn.disabled=false;
   if(error){
     toast("Couldn't save role",/commissioner/i.test(error.message)?"Your commissioner session may have expired — sign out and back in, then retry.":error.message);
     return;
   }
   const rl=ROLE_OPTS.find(r=>r[0]===role);
-  const clubName=(MGMT_ROLES.includes(role)&&code&&teams[code])?" · "+teams[code].name:"";
-  toast("Member updated",(rl?rl[1]:role)+clubName);
+  toast("League role updated",(rl?rl[1]:role));
   loadMembers();
-  const {data:tms}=await sb.from("teams").select("*");if(tms){dbTeams=tms;buildTeams();}  // refresh so manager gate sees new assignments
 }
-// Keep the role/club selects consistent: picking a club promotes a plain member to
-// Manager (gm & commissioner keep their role — both can run a club); switching to
-// Member clears the club, since only managers and commissioners hold one.
 $("#view-admin").addEventListener("change",e=>{
   const pos=e.target.closest(".mb-pos");
   if(pos){saveMemberPosition(pos.dataset.id,pos.value);return;}
-  const club=e.target.closest(".mb-club");
-  if(club){const roleSel=document.querySelector('.mb-role[data-id="'+club.dataset.id+'"]');
-    if(club.value&&roleSel&&roleSel.value==="member")roleSel.value="gm";return;}
-  const roleSel=e.target.closest(".mb-role");
-  if(roleSel&&roleSel.value==="member"){const clubSel=document.querySelector('.mb-club[data-id="'+roleSel.dataset.id+'"]');
-    if(clubSel)clubSel.value="";}
 });
 $("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers(e.target.value);});
 
@@ -4235,23 +4229,45 @@ async function removeTeam(btn){
     toast("Club removed",name+" is no longer in the league.");
   });
 }
-function editTeam(btn){
+async function editTeam(btn){
   const t=(dbTeams||[]).find(x=>x.id===btn.dataset.id);if(!t)return;
+  // members for the front-office search + name<->id resolution
+  let members=[];if(sb){const {data}=await sb.from("profiles").select("id,gamertag").order("gamertag");members=data||[];}
+  const nameOf={},idByName={};members.forEach(m=>{nameOf[m.id]=m.gamertag;if(m.gamertag)idByName[m.gamertag.toLowerCase()]=m.id;});
+  const acOpts=members.map(m=>m.gamertag).filter(Boolean);
   formModal("Edit "+t.name,[
     {key:"name",label:"Club name",value:t.name},
     {key:"code",label:"Code (2–3 letters)",value:t.code},
     {key:"conference",label:"Conference (optional)",value:t.conference||""},
     {key:"division",label:"Division",type:"select",value:t.division,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
     {key:"color",label:"Club color",type:"color",value:t.color||"#ffe500"},
-    {key:"ea_club_id",label:"EA club ID (for auto stats — the CG… club's number)",value:t.ea_club_id||"",placeholder:"e.g. 1789231"}
+    {key:"ea_club_id",label:"EA club ID (for auto stats — the CG… club's number)",value:t.ea_club_id||"",placeholder:"e.g. 1789231"},
+    {key:"owner",label:"Owner — search a member (blank to clear)",type:"player",value:nameOf[t.owner_profile_id]||"",options:acOpts,placeholder:"Start typing a name…"},
+    {key:"gm",label:"General Manager — search a member",type:"player",value:nameOf[t.gm_profile_id]||"",options:acOpts,placeholder:"Start typing a name…"},
+    {key:"agm",label:"Assistant GM — search a member",type:"player",value:nameOf[t.agm_profile_id]||"",options:acOpts,placeholder:"Start typing a name…"}
   ],async v=>{
     const code=(v.code||"").trim().toUpperCase(),name=(v.name||"").trim();
     if(!/^[A-Z]{2,3}$/.test(code)){toast("Invalid code","Use a 2–3 letter club code, e.g. GLK.");return;}
     if(!name){toast("Name required","Give the club a name.");return;}
     const eaId=(v.ea_club_id||"").trim();
     if(eaId&&!/^\d{2,12}$/.test(eaId)){toast("Invalid EA club ID","The EA club ID is just the number, e.g. 1789231.");return;}
+    // resolve front-office names -> ids (blank = clear the slot)
+    const resolve=nm=>{const s=(nm||"").trim();if(!s)return{ok:true,id:null};const id=idByName[s.toLowerCase()];return id?{ok:true,id}:{ok:false,name:s};};
+    const ro=resolve(v.owner),rg=resolve(v.gm),ra=resolve(v.agm);
+    const bad=[ro,rg,ra].find(r=>!r.ok);
+    if(bad){toast("Member not found",'No member named "'+bad.name+'". Pick a name from the suggestions.');return;}
+    const chosen=[ro.id,rg.id,ra.id].filter(Boolean);
+    if(new Set(chosen).size!==chosen.length){toast("Duplicate assignment","One person can't hold two front-office posts on the same club.");return;}
     const {error}=await sb.from("teams").update({name,code,division:v.division,conference:(v.conference||"").trim()||null,color:v.color,ea_club_id:eaId||null}).eq("id",t.id);
     if(error){toast("Couldn't save",/duplicate|unique/i.test(error.message)?"That club code is already taken.":error.message);return;}
+    // apply only the front-office slots that changed
+    const cur={owner:t.owner_profile_id||null,gm:t.gm_profile_id||null,agm:t.agm_profile_id||null},want={owner:ro.id,gm:rg.id,agm:ra.id};
+    for(const rk of ["owner","gm","agm"]){
+      if((cur[rk]||null)!==(want[rk]||null)){
+        const {error:e2}=await sb.rpc("set_team_manager",{p_team_code:code,p_role:rk,p_profile:want[rk]});
+        if(e2){toast("Couldn't set "+rk.toUpperCase(),e2.message);}
+      }
+    }
     await refreshTeamsEverywhere();loadTeamsAdmin();
     toast("Club updated",name+" ("+code+") saved.");
   });

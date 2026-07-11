@@ -2,8 +2,9 @@
 //  (1) Username sync: sets each profile's gamertag to the member's current Discord
 //      display name (server nick > global name > username), so name changes flow in.
 //  (2) Role sync: reconciles each member's MANAGED Discord roles with the DB —
-//      team role (from their roster spot), General Manager, Commissioner, Player,
-//      Free Agent. Never touches non-managed roles (boosters, custom, etc.).
+//      team role (from their roster spot), Owner/GM/AGM (from the team's front-office
+//      slots), Commissioner (league role), Player, Free Agent. Never touches
+//      non-managed roles (boosters, custom, etc.).
 //  (3) Server resolution: once a game's 30-min pick-lock passes, compute its
 //      server from the teams' private veto/preference picks (auto-fills the match card).
 //
@@ -49,8 +50,15 @@ export default async () => {
   }
 
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id");
-  const teams = await sbGet("teams?select=id,name,gm_profile_id,discord_role_id,discord_channel_id");
+  const teams = await sbGet("teams?select=id,name,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
+  // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
+  const mgmtRoleByProfile = {};
+  for (const t of teams) {
+    if (t.owner_profile_id) mgmtRoleByProfile[t.owner_profile_id] = "owner";
+    if (t.gm_profile_id) mgmtRoleByProfile[t.gm_profile_id] = "gm";
+    if (t.agm_profile_id) mgmtRoleByProfile[t.agm_profile_id] = "agm";
+  }
 
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
@@ -97,9 +105,10 @@ export default async () => {
       if (roleId["player"]) desired.add(roleId["player"]);
       if (m.team_id && teamRoleId[m.team_id]) desired.add(teamRoleId[m.team_id]);
       else if (roleId["free agent"]) desired.add(roleId["free agent"]);
-      if (m.role === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
-      if (m.role === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
-      if (m.role === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
+      const teamRole = mgmtRoleByProfile[m.profile_id];
+      if (teamRole === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
+      if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
+      if (teamRole === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
 
       const current = new Set(mem.roles || []);
