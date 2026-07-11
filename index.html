@@ -435,6 +435,8 @@
   .sub-tab:hover{color:var(--ice);border-color:var(--frost)}
   .sub-tab.active{color:var(--ice);border-color:var(--frost);background:var(--frost-glow)}
   .mgr-panel{display:none}.mgr-panel.on{display:block;animation:fade .3s ease both}
+  .susp-banner{background:rgba(224,122,154,.12);border:1px solid rgba(224,122,154,.4);border-radius:10px;padding:13px 16px;margin-bottom:18px;font-size:13.5px;color:var(--ice);line-height:1.5}
+  .susp-banner b{color:#e07a9a}
   .roster-tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .roster-tbl th{font-family:var(--f-cond);font-weight:500;letter-spacing:.09em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);text-align:right;padding:12px 10px;border-bottom:1px solid var(--line)}
   .roster-tbl th:first-child,.roster-tbl td:first-child{text-align:left;padding-left:18px}
@@ -1826,8 +1828,11 @@
         <div id="poschBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-bans"><div class="card"><div class="card-h"><h3>Ban Players</h3></div>
         <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — permanently remove a member from the league <b>and</b> the Discord server, with no return. Will list active bans and let you lift one.</div></div></div>
-      <div class="mgr-panel" id="atab-suspensions"><div class="card"><div class="card-h"><h3>Suspend Players</h3></div>
-        <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — suspend a player until a set date or for a number of games, making them ineligible to play or manage until it lifts.</div></div></div>
+      <div class="mgr-panel" id="atab-suspensions">
+        <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 10px"><h3>Suspend a Player</h3></div>
+          <p style="margin:0 0 14px;color:var(--fog);font-size:13px">A suspended player keeps site &amp; Discord access, but can't be rostered or play, can't make management changes if they run a club, and may file up to 2 appeals.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-frost btn-sm" id="suspDateBtn">Suspend until a date</button><button class="btn btn-ghost btn-sm" id="suspGamesBtn">Suspend for N games</button></div></div>
+        <div class="card"><div class="card-h"><h3>Suspensions</h3><span class="pill" id="suspCount"></span></div><div id="suspBody" style="padding:12px 20px 20px"></div></div></div>
     </div>
   </div></section></div>
 </main>
@@ -3234,6 +3239,11 @@ function renderManager(){
     if(club)currentClub=club.code;
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadFrontOffice();
+    const oldB=$("#mgrSuspBanner");if(oldB)oldB.remove();
+    if(sb&&authUser)sb.rpc("is_suspended",{p_profile:authUser.id}).then(r=>{
+      if(!r.error&&r.data){const d=$("#mgrDash");if(d&&!$("#mgrSuspBanner")){const b=document.createElement("div");b.id="mgrSuspBanner";b.className="susp-banner";
+        b.innerHTML='<b>You\'re suspended.</b> You keep site &amp; Discord access, but roster, lineup, trade, and signing changes are disabled until it lifts. You may file up to 2 appeals from the Action Center.';
+        d.insertBefore(b,d.firstChild);}}});
     const nm=$("#mgrName");if(nm){nm.textContent=teams[currentClub].name;
       const sm=nm.nextElementSibling;if(sm)sm.textContent=(club?"General Manager":"Commissioner view")+" · "+authProfile.gamertag;}
   }else{
@@ -3630,6 +3640,50 @@ document.addEventListener("click",e=>{
   const r=e.target.closest(".oa-reply");if(r){respondAction(r.dataset.id);return;}
   const d=e.target.closest(".oa-del2");if(d){confirmModal("Delete this request?","This permanently removes it. This can't be undone.","Delete",async()=>{const {error}=await sb.from("action_requests").delete().eq("id",d.dataset.id);if(error){toast("Couldn't delete",error.message);return;}toast("Deleted","");loadActionAdmin();});return;}
 });
+// Suspensions (commissioner)
+let suspIdByName={},suspNames=[];
+async function loadSuspensions(){
+  const el=$("#suspBody");if(!el||!sb)return;
+  const {data:profs}=await sb.from("profiles").select("id,gamertag").order("gamertag");
+  suspIdByName={};suspNames=[];const nameById={};
+  (profs||[]).forEach(p=>{if(p.gamertag){suspIdByName[p.gamertag.toLowerCase()]=p.id;suspNames.push(p.gamertag);}nameById[p.id]=p.gamertag;});
+  const {data}=await sb.from("suspensions").select("*").order("created_at",{ascending:false});
+  const rows=data||[];const eff={};
+  await Promise.all(rows.filter(s=>s.status==='active').map(s=>sb.rpc("is_suspended",{p_profile:s.profile_id}).then(r=>{eff[s.id]=!r.error&&!!r.data;})));
+  const cnt=$("#suspCount");if(cnt)cnt.textContent=rows.filter(s=>eff[s.id]).length+" active";
+  if(!rows.length){el.innerHTML=ADMIN_EMPTY("No suspensions","Suspend a player above — active and past suspensions appear here.");return;}
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Length</th><th>Reason</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
+    rows.map(s=>{const active=s.status==='active'&&eff[s.id];
+      const len=s.mode==='date'?('Until '+(s.ends_at?fmtGameDate(s.ends_at):'—')):((s.games_total||0)+' team game'+((s.games_total||0)===1?'':'s'));
+      const st=active?'<b style="color:var(--loss)">Active</b>':(s.status==='lifted'?'<span style="color:var(--fog)">Lifted</span>':'<span style="color:var(--win)">Served</span>');
+      return `<tr><td><b>${esc(nameById[s.profile_id]||'?')}</b></td><td>${len}</td><td style="color:var(--fog);font-size:12.5px">${s.reason?esc(s.reason):'—'}</td><td>${st}</td>
+        <td style="text-align:right">${active?`<button class="mini danger susp-lift" data-id="${s.id}">Lift</button>`:''}</td></tr>`;}).join('')+'</tbody></table></div>';
+}
+function openSuspend(mode){
+  const fields=[{key:"player",label:"Player",type:"player",value:"",options:suspNames,placeholder:"Search a member…"}];
+  if(mode==='date')fields.push({key:"ends",label:"Suspended until (ET)",type:"datetime-local",value:""});
+  else fields.push({key:"games",label:"Number of their team's games",type:"number",value:1,min:1,max:82});
+  fields.push({key:"reason",label:"Reason (optional)",type:"textarea",value:""});
+  formModal(mode==='date'?"Suspend until a date":"Suspend for N games",fields,async v=>{
+    const pid=suspIdByName[(v.player||"").trim().toLowerCase()];
+    if(!pid){toast("Player not found","Pick a name from the suggestions.");return;}
+    if(mode==='date'&&!v.ends){toast("Pick an end date","");return;}
+    if(mode==='games'&&(+v.games||0)<1){toast("Enter how many games","");return;}
+    const {error}=await sb.rpc("suspend_player",{p_profile:pid,p_mode:mode,
+      p_ends_at:mode==='date'?new Date(v.ends).toISOString():null,
+      p_games:mode==='games'?(+v.games||0):null,p_reason:(v.reason||"").trim()||null});
+    if(error){toast("Couldn't suspend",error.message);return;}
+    toast("Player suspended","They're now ineligible until it lifts.");loadSuspensions();
+  });
+}
+document.addEventListener("click",e=>{
+  if(e.target.closest("#suspDateBtn")){openSuspend('date');return;}
+  if(e.target.closest("#suspGamesBtn")){openSuspend('games');return;}
+  const lift=e.target.closest(".susp-lift");
+  if(lift){confirmModal("Lift this suspension?","The player becomes eligible again immediately.","Lift Suspension",async()=>{
+    const {error}=await sb.rpc("lift_suspension",{p_id:lift.dataset.id});
+    if(error){toast("Couldn't lift",error.message);return;}toast("Suspension lifted","");loadSuspensions();});return;}
+});
 // lineup — persisted per game night (Wed / Fri)
 const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
 const LINEUP_ROLES=[{key:"center",label:"Center",pool:["C"]},{key:"lw",label:"Left Wing",pool:["W","LW","RW"]},{key:"rw",label:"Right Wing",pool:["W","LW","RW"]},{key:"ld",label:"Left Defense",pool:["D","LD","RD"]},{key:"rd",label:"Right Defense",pool:["D","LD","RD"]},{key:"goalie",label:"Goalie",pool:["G"]}];
@@ -3830,7 +3884,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();
+    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();loadSuspensions();
     if(typeof showAdminSection==="function")showAdminSection("league");
   }else{
     dash.style.display="none";gate.style.display="block";
