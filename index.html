@@ -1777,7 +1777,11 @@
         <div id="gamesAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-members"><div class="card"><div class="card-h"><h3>Members &amp; Roles</h3><span class="pill" id="membersCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office. Change a player's position with the dropdown — it saves instantly.</div>
-        <input class="adm-search" id="mbSearch" placeholder="Search members by name…" />
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
+          <input class="adm-search" id="mbSearch" placeholder="Search members…" style="margin:0;flex:1;min-width:160px;width:auto" />
+          <select id="mbRoleFilter" style="min-width:130px"><option value="">All roles</option><option value="member">Member</option><option value="staff">Staff</option><option value="commissioner">Commissioner</option></select>
+          <select id="mbPosFilter" style="min-width:120px"><option value="">All positions</option><option>C</option><option>LW</option><option>RW</option><option>LD</option><option>RD</option><option>G</option></select>
+        </div>
         <div id="membersBody"></div></div></div>
       <div class="mgr-panel" id="atab-teams">
         <div class="card" style="padding:22px 26px"><div class="card-h" style="padding:0 0 14px"><h3>Add a Club</h3></div>
@@ -1791,7 +1795,12 @@
             <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#ffe500" style="height:38px;padding:2px" /></div>
           </div>
           <button class="btn btn-frost" id="addTeamBtn" style="margin-top:16px">Add Club</button></div>
-        <div class="card" style="margin-top:16px"><div class="card-h"><h3>Current Clubs</h3><span class="pill" id="teamsAdminCount"></span></div><div id="teamsAdminBody"></div></div></div>
+        <div class="card" style="margin-top:16px"><div class="card-h"><h3>Current Clubs</h3><span class="pill" id="teamsAdminCount"></span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
+            <input class="adm-search" id="tmSearch" placeholder="Search clubs…" style="margin:0;flex:1;min-width:160px;width:auto" />
+            <select id="tmDivFilter" style="min-width:130px"><option value="">All divisions</option><option>Frost</option><option>Byte</option></select>
+          </div>
+          <div id="teamsAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-draft">
         <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 14px"><h3>Generate Draft Picks</h3></div>
           <p style="margin:0 0 12px;color:var(--fog);font-size:13px">Mint a full set of picks — one per club per round — for a draft. Clubs can then trade them in the Trade Center.</p>
@@ -4295,12 +4304,25 @@ async function loadMembers(){
   }
   const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>League role</th><th>Position</th><th style="text-align:right">Save</th></tr></thead><tbody>'+
-    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}</td>
-      <td><select class="mb-role" data-id="${p.id}">${ROLE_OPTS.map(([v,l])=>`<option value="${v}" ${v===p.role?"selected":""}>${l}</option>`).join("")}</select></td>
-      <td><select class="mb-pos" data-id="${p.id}">${AC_POS.map(([v,l])=>`<option value="${v}" ${v===(posOf[p.id]||'')?"selected":""}>${v}</option>`).join("")}</select></td>
-      <td style="text-align:right"><button class="mini good mb-save" data-id="${p.id}">Save</button></td></tr>`).join("")+"</tbody></table></div>";
-  const q=$("#mbSearch");if(q)filterMembers(q.value);
+  memberById={};(profs||[]).forEach(p=>{memberById[p.id]={name:p.gamertag||"?",role:p.role,pos:posOf[p.id]||""};});
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>League role</th><th>Position</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
+    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-role="${p.role}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}</td>
+      <td>${ROLE_LABEL[p.role]||esc(p.role)}</td>
+      <td>${posOf[p.id]?esc(posOf[p.id]):'<span style="color:var(--fog)">—</span>'}</td>
+      <td style="text-align:right"><button class="mini mb-edit" data-id="${p.id}">Edit</button></td></tr>`).join("")+"</tbody></table></div>";
+  filterMembers();
+}
+let memberById={};
+function openMemberEdit(id){
+  const m=memberById[id];if(!m||!sb)return;
+  formModal("Edit "+m.name,[
+    {key:"role",label:"League role",type:"select",value:m.role,options:ROLE_OPTS.map(([v,l])=>({value:v,label:l}))},
+    {key:"pos",label:"Position",type:"select",value:m.pos||"C",options:AC_POS.map(([v,l])=>({value:v,label:l}))}
+  ],async v=>{
+    if(v.role!==m.role){const {error}=await sb.rpc("set_member_role",{p_target:id,p_role:v.role});if(error){toast("Couldn't save role",error.message);return;}}
+    if((v.pos||"")!==(m.pos||""))await saveMemberPosition(id,v.pos);
+    toast("Member updated",m.name);loadMembers();refreshTeamsEverywhere&&refreshTeamsEverywhere();
+  });
 }
 async function saveMemberPosition(id,pos){
   const season=adminSeason||openSeason;if(!season||!sb)return;
@@ -4309,32 +4331,19 @@ async function saveMemberPosition(id,pos){
   await sb.from("season_registrations").update({position:pos}).eq("season_id",season.id).eq("profile_id",id);
   toast("Position updated","Set to "+pos+".");
 }
-function filterMembers(term){
-  const t=(term||"").trim().toLowerCase();
+function filterMembers(){
+  const t=(($("#mbSearch")||{}).value||"").trim().toLowerCase();
+  const rf=($("#mbRoleFilter")||{}).value||"",pf=($("#mbPosFilter")||{}).value||"";
   document.querySelectorAll("#membersBody .mb-row").forEach(row=>{
-    row.style.display=(!t||row.dataset.name.includes(t))?"":"none";
+    const ok=(!t||row.dataset.name.includes(t))&&(!rf||row.dataset.role===rf)&&(!pf||row.dataset.pos===pf);
+    row.style.display=ok?"":"none";
   });
 }
-async function saveMember(btn){
-  const id=btn.dataset.id;if(!id||!sb)return;
-  const role=(document.querySelector('.mb-role[data-id="'+id+'"]')||{}).value;
-  if(!role){toast("Pick a role","");return;}
-  btn.disabled=true;
-  const {error}=await sb.rpc("set_member_role",{p_target:id,p_role:role});
-  btn.disabled=false;
-  if(error){
-    toast("Couldn't save role",/commissioner/i.test(error.message)?"Your commissioner session may have expired — sign out and back in, then retry.":error.message);
-    return;
-  }
-  const rl=ROLE_OPTS.find(r=>r[0]===role);
-  toast("League role updated",(rl?rl[1]:role));
-  loadMembers();
-}
 $("#view-admin").addEventListener("change",e=>{
-  const pos=e.target.closest(".mb-pos");
-  if(pos){saveMemberPosition(pos.dataset.id,pos.value);return;}
+  if(e.target.id==="mbRoleFilter"||e.target.id==="mbPosFilter"){filterMembers();return;}
 });
-$("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers(e.target.value);});
+$("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers();});
+$("#view-admin").addEventListener("click",e=>{const b=e.target.closest(".mb-edit");if(b)openMemberEdit(b.dataset.id);});
 
 /* ---- Teams (add / remove clubs) ---- */
 async function refreshTeamsEverywhere(){
@@ -4400,15 +4409,29 @@ async function loadTeamsAdmin(){
   const spotCount={},gameCount={};
   (spots||[]).forEach(s=>spotCount[s.team_id]=(spotCount[s.team_id]||0)+1);
   (games||[]).forEach(g=>{gameCount[g.home_team_id]=(gameCount[g.home_team_id]||0)+1;gameCount[g.away_team_id]=(gameCount[g.away_team_id]||0)+1;});
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Conference</th><th>Division</th><th>EA club ID</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
+  const mgrIds=[...new Set(tms.flatMap(t=>[t.owner_profile_id,t.gm_profile_id,t.agm_profile_id]).filter(Boolean))];
+  const nameOf={};if(mgrIds.length){const {data:pf}=await sb.from("profiles").select("id,gamertag").in("id",mgrIds);(pf||[]).forEach(p=>nameOf[p.id]=p.gamertag);}
+  const mgmtCell=t=>{const parts=[];if(t.owner_profile_id)parts.push('<span style="color:var(--fog)">O</span> '+esc(nameOf[t.owner_profile_id]||'?'));if(t.gm_profile_id)parts.push('<span style="color:var(--fog)">GM</span> '+esc(nameOf[t.gm_profile_id]||'?'));if(t.agm_profile_id)parts.push('<span style="color:var(--fog)">AGM</span> '+esc(nameOf[t.agm_profile_id]||'?'));return parts.length?parts.join('<br>'):'<span style="color:var(--fog)">—</span>';};
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Division</th><th>Management</th><th>EA club ID</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     tms.map(t=>{const sc=spotCount[t.id]||0,gc=gameCount[t.id]||0;const locked=sc>0||gc>0;
-      return `<tr><td><div class="rp"><span class="num" style="background:${t.color||'#8a6d00'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
-      <td class="mono">${t.code}</td><td style="color:var(--fog)">${t.conference?esc(t.conference):"—"}</td><td><span class="posbadge">${t.division}</span></td>
+      return `<tr class="tm-row" data-name="${((t.name+' '+t.code)||'').toLowerCase().replace(/"/g,'&quot;')}" data-div="${t.division}"><td><div class="rp"><span class="num" style="background:${t.color||'#8a6d00'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
+      <td class="mono">${t.code}</td><td><span class="posbadge">${t.division}</span></td>
+      <td style="font-size:12.5px">${mgmtCell(t)}</td>
       <td class="mono" style="font-size:12.5px">${t.ea_club_id?esc(t.ea_club_id):'<span style="color:var(--loss)">not set</span>'}</td>
       <td style="font-size:12.5px;color:var(--fog)">${sc?sc+" player"+(sc===1?"":"s"):""}${sc&&gc?" · ":""}${gc?gc+" games":""}${!sc&&!gc?"—":""}</td>
       <td style="text-align:right"><div class="act"><button class="mini tm-edit" data-id="${t.id}">Edit</button>${locked?'<span style="color:var(--fog);font-size:12px">In use</span>':`<button class="mini danger tm-del" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Remove</button>`}</div></td></tr>`;}).join("")+
     "</tbody></table></div>";
+  filterTeams();
 }
+function filterTeams(){
+  const t=(($("#tmSearch")||{}).value||"").trim().toLowerCase();
+  const dv=($("#tmDivFilter")||{}).value||"";
+  document.querySelectorAll("#teamsAdminBody .tm-row").forEach(row=>{
+    row.style.display=((!t||row.dataset.name.includes(t))&&(!dv||row.dataset.div===dv))?"":"none";
+  });
+}
+$("#view-admin").addEventListener("input",e=>{if(e.target.id==="tmSearch")filterTeams();});
+$("#view-admin").addEventListener("change",e=>{if(e.target.id==="tmDivFilter")filterTeams();});
 async function addTeam(){
   if(!sb){toast("Not connected","Sign in to add a club.");return;}
   const code=($("#tm-code").value||"").trim().toUpperCase();
