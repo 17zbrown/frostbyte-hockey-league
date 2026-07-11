@@ -3,8 +3,9 @@
 //      display name (server nick > global name > username), so name changes flow in.
 //  (2) Role sync: reconciles each member's MANAGED Discord roles with the DB —
 //      team role (from their roster spot), Owner/GM/AGM (from the team's front-office
-//      slots), Commissioner (league role), Player, Free Agent. Never touches
-//      non-managed roles (boosters, custom, etc.).
+//      slots), Commissioner (league role), Player, Free Agent, and a position role
+//      (Center/Left Wing/Right Wing/Left Defense/Right Defense/Goalie, auto-created).
+//      Never touches non-managed roles (boosters, custom, etc.).
 //  (3) Server resolution: once a game's 30-min pick-lock passes, compute its
 //      server from the teams' private veto/preference picks (auto-fills the match card).
 //
@@ -61,6 +62,19 @@ export default async () => {
     if (t.agm_profile_id) mgmtRoleByProfile[t.agm_profile_id] = "agm";
   }
 
+  // player position (current season) -> for position-based Discord roles
+  const POS_LABEL = { C: "Center", LW: "Left Wing", RW: "Right Wing", LD: "Left Defense", RD: "Right Defense", G: "Goalie" };
+  const POSITION_ROLES = ["Center", "Left Wing", "Right Wing", "Left Defense", "Right Defense", "Goalie"];
+  const posOf = {};
+  try {
+    const seasons = await sbGet("seasons?select=id&order=number.desc&limit=1");
+    const seasonId = seasons[0] && seasons[0].id;
+    if (seasonId) {
+      for (const r of await sbGet(`season_registrations?season_id=eq.${seasonId}&select=profile_id,position`)) if (r.position) posOf[r.profile_id] = r.position;
+      for (const s of await sbGet(`roster_spots?season_id=eq.${seasonId}&select=profile_id,position`)) if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
+    }
+  } catch (e) { /* positions optional */ }
+
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
@@ -84,8 +98,18 @@ export default async () => {
     } catch (e) { sum.errors.push({ team: t.name, error: String(e.message || e) }); }
   }
 
-  // managed role ids = the 4 static roles (by name) + every team's role (by stored id)
-  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Free Agent"];
+  // ensure a Discord role exists for every position (created once, then reused)
+  for (const pn of POSITION_ROLES) {
+    if (!roleId[pn.toLowerCase()]) {
+      try {
+        const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: pn, mentionable: false });
+        if (created && created.id) { roleId[pn.toLowerCase()] = created.id; roleNameById[created.id] = pn; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+      } catch (e) { sum.errors.push({ role: pn, error: String(e.message || e) }); }
+    }
+  }
+
+  // managed role ids = static roles + position roles (by name) + every team's role (by stored id)
+  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Free Agent", ...POSITION_ROLES];
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
   for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
@@ -117,6 +141,9 @@ export default async () => {
       if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
       if (teamRole === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
+      // position role (Center / Left Wing / … / Goalie) from their current-season position
+      const posName = POS_LABEL[posOf[m.profile_id]];
+      if (posName && roleId[posName.toLowerCase()]) desired.add(roleId[posName.toLowerCase()]);
 
       const current = new Set(mem.roles || []);
       // keep all NON-managed roles, set the managed ones to `desired`
