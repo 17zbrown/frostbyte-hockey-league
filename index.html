@@ -280,6 +280,8 @@
   .jersey-logo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:12px 12px 20px;opacity:1;pointer-events:none}
   .jersey b{font-family:var(--f-display);font-size:52px;color:#062026;line-height:1}
   .jersey small{z-index:1}
+  .roster-tbl .rt-sub td{background:rgba(138,109,0,.10);color:var(--fog);font-family:var(--f-cond);font-weight:700;text-transform:uppercase;letter-spacing:.07em;font-size:10.5px;padding:6px 12px;border-top:1px solid var(--line)}
+  html[data-theme="dark"] .roster-tbl .rt-sub td{background:rgba(255,229,0,.08)}
   .jersey small{position:absolute;bottom:10px;font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.14em;color:#062026cc;text-transform:uppercase}
   .ph-info h2{font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4vw,42px);line-height:.92;letter-spacing:.01em}
   .ph-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -2683,20 +2685,16 @@ async function renderTeamPage(code){
   if(!roster.length&&!teamGames.length){bodyEl.innerHTML=`<div class="empty-note">No players assigned to ${t.name} yet — rosters fill in during the draft. Check back once the season forms.</div>`;return;}
   bodyEl.innerHTML=`
     <div class="grid-2" style="align-items:start">
-      <div class="card"><div class="card-h"><h3>Roster — Skaters</h3>${teamSalCap?`<span class="pill" title="Salary committed vs cap">${fmtMoney(teamCapUsed)} / ${fmtMoney(teamSalCap)}</span>`:""}<span class="pill frost">${skaters.length}</span></div>
-        ${skaters.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th>Cap Hit</th></tr></thead>
+      <div class="card"><div class="card-h"><h3>Roster</h3>${teamSalCap?`<span class="pill" title="Salary committed vs cap">${fmtMoney(teamCapUsed)} / ${fmtMoney(teamSalCap)}</span>`:""}<span class="pill frost">${roster.length}</span></div>
+        ${roster.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th>Cap Hit</th></tr></thead>
         <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No skaters on the roster yet.</div>'}</div>
+          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost);font-weight:700">${p.pts}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}${goalies.length?`<tr class="rt-sub"><td colspan="7">Goaltending</td></tr>`+goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td><td style="text-align:center"><span class="posbadge G">G</span></td><td>${p.gp}</td><td colspan="3" style="text-align:center;color:var(--fog)">GAA <b style="color:var(--ice)">${gaaFmt(p)}</b> &nbsp;·&nbsp; SV% <b style="color:var(--ice)">${svpFmt(p)}</b></td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join(""):""}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No players on the roster yet.</div>'}</div>
       <div class="stack">
         ${sptm?`<div class="card"><div class="card-h"><h3>Special Teams</h3></div>
           <div class="st-grid">
             <div class="st-cell"><div class="st-k">Power Play</div><div class="st-v">${sptm.pp_pct==null?'—':sptm.pp_pct+'%'}</div><div class="st-sub">${sptm.pp_goals}/${sptm.pp_opps} PP goals${sptm.sh_goals?` · ${sptm.sh_goals} SHG`:''}</div></div>
             <div class="st-cell"><div class="st-k">Penalty Kill</div><div class="st-v">${sptm.pk_pct==null?'—':sptm.pk_pct+'%'}</div><div class="st-sub">${sptm.times_shorthanded-sptm.pk_goals_against}/${sptm.times_shorthanded} killed</div></div>
           </div></div>`:''}
-        <div class="card"><div class="card-h"><h3>Goaltending</h3></div>
-          ${goalies.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Goalie</th><th>GP</th><th>GAA</th><th>SV%</th><th>Cap Hit</th></tr></thead>
-          <tbody>${goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-            <td>${p.gp}</td><td>${gaaFmt(p)}</td><td>${svpFmt(p)}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No goalies yet.</div>'}</div>
         <div class="card"><div class="card-h"><h3>Schedule</h3><span class="lnk" data-go="schedule">Full →</span></div>
           ${teamGames.length?`<div class="fixtures">${teamGames.slice(0,6).map(g=>{const home=g.a===code;const opp=home?g.b:g.a;const done=g.done;
             const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
