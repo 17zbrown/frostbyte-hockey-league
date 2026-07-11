@@ -74,7 +74,7 @@ export default async () => {
   }
 
   // managed role ids = the 4 static roles (by name) + every team's role (by stored id)
-  const MANAGED_STATIC = ["Player", "General Manager", "Commissioner", "Free Agent"];
+  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Free Agent"];
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
   for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
@@ -95,7 +95,9 @@ export default async () => {
       if (roleId["player"]) desired.add(roleId["player"]);
       if (m.team_id && teamRoleId[m.team_id]) desired.add(teamRoleId[m.team_id]);
       else if (roleId["free agent"]) desired.add(roleId["free agent"]);
+      if (m.role === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
       if (m.role === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
+      if (m.role === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
 
       const current = new Set(mem.roles || []);

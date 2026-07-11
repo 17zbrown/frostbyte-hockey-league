@@ -2542,8 +2542,9 @@ async function renderTeamPage(code){
   const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
   const teamCapUsed=roster.reduce((s,p)=>s+(+p.salary||0),0);
   const teamSalCap=openSeason?(+openSeason.salary_cap||0):0;
-  const mgr=roster.find(p=>p.role==="gm")||roster.find(p=>p.role==="commissioner");
-  const mgrTag=$("#tbManager");if(mgrTag)mgrTag.innerHTML=mgr?`Manager · <b>${mgr.name}</b>`:'<b>No manager yet</b>';
+  const foOwner=roster.find(p=>p.role==="owner"),foGm=roster.find(p=>p.role==="gm")||roster.find(p=>p.role==="commissioner"),foAgm=roster.find(p=>p.role==="agm");
+  const mgrTag=$("#tbManager");
+  if(mgrTag){const fo=[];if(foOwner)fo.push(`Owner · <b>${foOwner.name}</b>`);if(foGm)fo.push(`GM · <b>${foGm.name}</b>`);if(foAgm)fo.push(`AGM · <b>${foAgm.name}</b>`);mgrTag.innerHTML=fo.length?fo.join(" &nbsp;·&nbsp; "):'<b>No front office yet</b>';}
   const skaters=roster.filter(p=>!p.is_goalie).sort((a,b)=>b.pts-a.pts);
   const goalies=roster.filter(p=>p.is_goalie);
   const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if(g.a===code||g.b===code)teamGames.push(g);}));
@@ -2603,7 +2604,7 @@ async function renderPlayerPage(id){
   if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
   const t=tc?teams[tc]:null;const pos=spot?spot.position:null;
   const num=spot?spot.jersey_number:"—";
-  const roleTag=prof.role==="commissioner"?"Commissioner":(prof.role==="gm"?"Manager":null);
+  const roleTag=["owner","gm","agm","commissioner"].includes(prof.role)?ROLE_LABEL[prof.role]:null;
   const CATLBL={C:"Center",W:"Wing",D:"Defense",G:"Goalie"};
   const [bdRes,poRes,logRes]=await Promise.all([
     sb.rpc("overall_breakdown",{p_profile:prof.id}),
@@ -2989,7 +2990,7 @@ function renderAuthUI(){
   const slot=document.querySelector("#authSlot");
   if(slot){
     if(authProfile){
-      const rl=authProfile.role==="commissioner"?"Commissioner":(authProfile.role==="gm"?"General Manager":"Member");
+      const rl=ROLE_LABEL[authProfile.role]||"Member";
       const mgr=isManager(),comm=authProfile.role==="commissioner";
       const CARET='<svg class="acct-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
       const item=(attrs,ic,label)=>`<button class="acct-item" ${attrs}><span class="acct-ic">${ic}</span>${label}</button>`;
@@ -3147,9 +3148,9 @@ function fillClubSelect(sel){sel.innerHTML=TEAM_KEYS.map(k=>`<option>${teams[k].
 const MGR_LOCK=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffe500" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
 function renderManager(){
   const gate=$("#mgrGate"),dash=$("#mgrDash");if(!gate||!dash)return;
-  const club=(dbTeams||[]).find(t=>authUser&&t.gm_profile_id===authUser.id);
+  const club=(dbTeams||[]).find(t=>authUser&&(t.gm_profile_id===authUser.id||t.owner_profile_id===authUser.id||t.agm_profile_id===authUser.id));
   const isCommish=authProfile&&authProfile.role==="commissioner";
-  const canEnter=authProfile&&(authProfile.role==="gm"||isCommish)&&(club||isCommish);
+  const canEnter=authProfile&&(MGMT_ROLES.includes(authProfile.role)||isCommish)&&(club||isCommish);
   if(canEnter){
     if(club)currentClub=club.code;
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
@@ -3224,8 +3225,8 @@ function drawRoster(){
   const body=$("#rosterBody");if(!body)return;
   if(!rosterState.length){body.innerHTML='<tr><td colspan="8" style="padding:22px;color:var(--fog);text-align:center">No players on your roster yet. The commissioner assigns registered players to your club in the League Office.</td></tr>';return;}
   const locked=seasonMovesLocked();
-  const gmId=(dbTeams.find(t=>t.code===currentClub)||{}).gm_profile_id;
-  body.innerHTML=rosterState.map((p,i)=>{const isMgr=gmId&&p.pid===gmId;return `<tr>
+  const _ctm=dbTeams.find(t=>t.code===currentClub)||{};const mgrIds=[_ctm.owner_profile_id,_ctm.gm_profile_id,_ctm.agm_profile_id].filter(Boolean);
+  body.innerHTML=rosterState.map((p,i)=>{const isMgr=mgrIds.includes(p.pid);return `<tr>
     <td><div class="rp"><span class="num">${p.num}</span><div><b data-go="player" data-param="${p.name}" style="cursor:pointer">${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small></div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost);font-weight:700">${p.pts}</td>
@@ -3270,8 +3271,8 @@ function pickCard(list,side){return list.map((p,i)=>`<div class="pick-chip" data
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
   const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
-  const gmId=(dbTeams.find(t=>t.id===tid)||{}).gm_profile_id;  // managers can't be traded
-  return (data||[]).filter(s=>s.profile_id!==gmId).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position,salary:+s.salary||0}));
+  const _tt=dbTeams.find(t=>t.id===tid)||{};const mgrIds=[_tt.owner_profile_id,_tt.gm_profile_id,_tt.agm_profile_id].filter(Boolean);  // owner/gm/agm can't be traded
+  return (data||[]).filter(s=>!mgrIds.includes(s.profile_id)).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position,salary:+s.salary||0}));
 }
 function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;color:var(--fog);font-size:13px">No players on this roster yet.</div>';
   return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
@@ -3665,7 +3666,8 @@ let features=[
 function featureOn(key){const f=features.find(x=>x.key===key);return f?f.on:true;}
 function viewFeature(view){const f=features.find(x=>x.view===view);return f?f.key:null;}
 function applyFeatures(){document.querySelectorAll("[data-feature]").forEach(el=>{el.style.display=featureOn(el.dataset.feature)?"":"none";});applyRoleVisibility();}
-function isManager(){return authProfile&&(authProfile.role==="gm"||authProfile.role==="commissioner");}
+const MGMT_ROLES=["owner","gm","agm"];
+function isManager(){return authProfile&&(MGMT_ROLES.includes(authProfile.role)||authProfile.role==="commissioner");}
 const MANAGER_VIEWS=new Set(["draft"]);
 function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{el.style.display=isManager()?"":"none";});}
 
@@ -4017,12 +4019,13 @@ async function saveGameResult(btn){
 }
 
 /* ---- Members & Roles (grant Manager / Commissioner, assign a club) ---- */
-const ROLE_OPTS=[["member","Member"],["gm","Manager"],["commissioner","Commissioner"]];
+const ROLE_OPTS=[["member","Member"],["owner","Owner"],["gm","General Manager"],["agm","Assistant GM"],["commissioner","Commissioner"]];
+const ROLE_LABEL={owner:"Owner",gm:"General Manager",agm:"Assistant GM",commissioner:"Commissioner",member:"Member"};
 async function loadMembers(){
   const el=$("#membersBody");if(!el||!sb)return;
   const {data:profs}=await sb.from("profiles").select("id,gamertag,role").order("role",{ascending:false}).order("gamertag");
-  const {data:tms}=await sb.from("teams").select("id,code,name,gm_profile_id").order("code");
-  const clubOf={};(tms||[]).forEach(t=>{if(t.gm_profile_id)clubOf[t.gm_profile_id]=t.code;});
+  const {data:tms}=await sb.from("teams").select("id,code,name,owner_profile_id,gm_profile_id,agm_profile_id").order("code");
+  const clubOf={};(tms||[]).forEach(t=>{[t.owner_profile_id,t.gm_profile_id,t.agm_profile_id].forEach(pid=>{if(pid)clubOf[pid]=t.code;});});
   // current position per player: roster spot (this season) first, else their sign-up position
   const season=adminSeason||openSeason;const posOf={};
   if(season){
@@ -4067,7 +4070,7 @@ async function saveMember(btn){
     return;
   }
   const rl=ROLE_OPTS.find(r=>r[0]===role);
-  const clubName=(role==="gm"&&code&&teams[code])?" · "+teams[code].name:"";
+  const clubName=(MGMT_ROLES.includes(role)&&code&&teams[code])?" · "+teams[code].name:"";
   toast("Member updated",(rl?rl[1]:role)+clubName);
   loadMembers();
   const {data:tms}=await sb.from("teams").select("*");if(tms){dbTeams=tms;buildTeams();}  // refresh so manager gate sees new assignments
