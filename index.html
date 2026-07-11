@@ -437,6 +437,7 @@
   .mgr-panel{display:none}.mgr-panel.on{display:block;animation:fade .3s ease both}
   .susp-banner{background:rgba(224,122,154,.12);border:1px solid rgba(224,122,154,.4);border-radius:10px;padding:13px 16px;margin-bottom:18px;font-size:13.5px;color:var(--ice);line-height:1.5}
   .susp-banner b{color:#e07a9a}
+  .bx-sub{font-family:var(--f-cond);font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:12px;color:var(--frost);margin:2px 0 8px}
   #banScreen{position:fixed;inset:0;z-index:9999;background:rgba(8,8,10,.94);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)}
   #banScreen .ban-card{max-width:440px;text-align:center;background:var(--panel);border:1px solid rgba(224,122,154,.4);border-radius:16px;padding:34px 30px;box-shadow:0 30px 80px -20px #000}
   #banScreen .ban-x{font-size:44px;margin-bottom:8px}
@@ -1828,8 +1829,9 @@
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Maximum number of players each club can carry on its active roster.</div>
         <div id="rosterSizeBody" style="padding:16px 20px 22px"></div></div></div>
       <!-- Teams: Team Stats Editor -->
-      <div class="mgr-panel" id="atab-teamstats"><div class="card"><div class="card-h"><h3>Team Stats Editor</h3></div>
-        <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — manually correct a club's team totals (special teams, PP%/PK%, goals for/against) when the automatic EA import misses or misreads a game. For now, per-game results are entered under <b>Players → Player Stats Editor</b>.</div></div></div>
+      <div class="mgr-panel" id="atab-teamstats"><div class="card"><div class="card-h"><h3>Team Stats Editor</h3><span class="pill" id="teamStatsCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Correct a club's special-teams totals if the automatic EA import is off. PP% and PK% recalculate automatically on save.</div>
+        <div id="teamStatsBody" style="padding:12px 20px 20px"></div></div></div>
       <!-- Applications & Enforcement -->
       <div class="mgr-panel" id="atab-complaints"><div class="card"><div class="card-h"><h3>Filed Complaints</h3><span class="pill" id="complaintsCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Complaints submitted by members. Reply, resolve, or dismiss each one.</div>
@@ -3714,6 +3716,42 @@ document.addEventListener("click",e=>{
     const {error}=await sb.rpc("lift_suspension",{p_id:lift.dataset.id});
     if(error){toast("Couldn't lift",error.message);return;}toast("Suspension lifted","");loadSuspensions();});return;}
 });
+// Team Stats Editor (special teams) — commissioner
+let teamStatsCache={};
+async function loadTeamStats(){
+  const el=$("#teamStatsBody");if(!el||!sb)return;
+  const season=adminSeason||openSeason;if(!season){el.innerHTML='<div class="empty-note">No season found.</div>';return;}
+  const {data:tms}=await sb.from("teams").select("id,code,name").order("code");
+  const {data:st}=await sb.from("team_special_teams").select("*").eq("season_id",season.id);
+  teamStatsCache={};(st||[]).forEach(s=>teamStatsCache[s.team_id]=s);
+  const cnt=$("#teamStatsCount");if(cnt)cnt.textContent=(tms?tms.length:0)+" clubs";
+  if(!tms||!tms.length){el.innerHTML=ADMIN_EMPTY("No clubs","Add clubs first.");return;}
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>PP</th><th>PP%</th><th>SH</th><th>PK</th><th>PK%</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
+    tms.map(t=>{const s=teamStatsCache[t.id]||{};const ppO=+s.pp_opps||0,ppG=+s.pp_goals||0,shd=+s.times_shorthanded||0,pkGA=+s.pk_goals_against||0;
+      const ppP=ppO?(100*ppG/ppO).toFixed(1)+'%':'—',pkP=shd?(100*(shd-pkGA)/shd).toFixed(1)+'%':'—';
+      return `<tr><td><div class="rp"><span class="num" style="background:${'#8a6d00'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
+        <td>${ppG}/${ppO}</td><td>${ppP}</td><td>${+s.sh_goals||0}</td><td>${pkGA}/${shd}</td><td>${pkP}</td>
+        <td style="text-align:right"><button class="mini tstat-edit" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Edit</button></td></tr>`;}).join('')+'</tbody></table></div>';
+}
+function openTeamStats(teamId,name){
+  const s=teamStatsCache[teamId]||{};
+  formModal("Team stats — "+name,[
+    {key:"pp_goals",label:"Power-play goals",type:"number",value:+s.pp_goals||0,min:0,grid:true},
+    {key:"pp_opps",label:"Power-play opportunities",type:"number",value:+s.pp_opps||0,min:0,grid:true},
+    {key:"sh_goals",label:"Short-handed goals",type:"number",value:+s.sh_goals||0,min:0,grid:true},
+    {key:"times_shorthanded",label:"Times short-handed",type:"number",value:+s.times_shorthanded||0,min:0,grid:true},
+    {key:"pk_goals_against",label:"PK goals against",type:"number",value:+s.pk_goals_against||0,min:0,grid:true}
+  ],async v=>{
+    const ppO=+v.pp_opps||0,ppG=+v.pp_goals||0,shd=+v.times_shorthanded||0,pkGA=+v.pk_goals_against||0;
+    const season=adminSeason||openSeason;
+    const row={team_id:teamId,season_id:season.id,pp_goals:ppG,pp_opps:ppO,sh_goals:+v.sh_goals||0,times_shorthanded:shd,pk_goals_against:pkGA,
+      pp_pct:ppO?+(100*ppG/ppO).toFixed(1):0,pk_pct:shd?+(100*(shd-pkGA)/shd).toFixed(1):0};
+    const {error}=await sb.from("team_special_teams").upsert(row,{onConflict:"team_id,season_id"});
+    if(error){toast("Couldn't save",error.message);return;}
+    toast("Team stats saved",name);loadTeamStats();
+  });
+}
+document.addEventListener("click",e=>{const b=e.target.closest(".tstat-edit");if(b)openTeamStats(b.dataset.id,b.dataset.name);});
 // Bans (commissioner)
 async function loadBans(){
   const el=$("#banBody");if(!el||!sb)return;
@@ -3944,7 +3982,7 @@ function renderCommissioner(){
   const gate=$("#admGate"),dash=$("#admDash");if(!gate||!dash)return;
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
-    loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
+    loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();loadTeamStats();});
     loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();loadSuspensions();loadBans();
     if(typeof showAdminSection==="function")showAdminSection("league");
   }else{
@@ -4273,7 +4311,7 @@ async function loadGamesAdmin(){
       <div class="gc-teams" style="flex:1">${badge(h,20)}<span class="gc-vs">W${g.week||"?"}</span>${badge(a,20)}<span class="gc-opp">${teams[h].name} · ${teams[a].name}</span></div>
       <div class="ga-score"><input type="number" min="0" max="30" class="box-in ga-hs" value="${g.home_score??""}" placeholder="—" aria-label="${teams[h].name} score"><span>–</span><input type="number" min="0" max="30" class="box-in ga-as" value="${g.away_score??""}" placeholder="—" aria-label="${teams[a].name} score">
       <label class="ga-ot"><input type="checkbox" class="ga-otf" ${g.went_ot?"checked":""}>OT</label>
-      <button class="mini good ga-save" data-game="${g.id}">Save</button></div></div>`;}).join("");
+      <button class="mini good ga-save" data-game="${g.id}">Save</button>${g.status==="final"?`<button class="mini gs-edit" data-game="${g.id}">Player stats</button>`:""}</div></div>`;}).join("");
 }
 async function saveGameResult(btn){
   const row=btn.closest(".ga-row");const hs=row.querySelector(".ga-hs").value,as=row.querySelector(".ga-as").value;
@@ -4284,6 +4322,37 @@ async function saveGameResult(btn){
   await loadStandings();renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
   loadGamesAdmin();loadScheduleAdmin();
 }
+// Player Stats Editor — correct per-player box scores (game_stats) for a final game
+const BX_SK=[["goals","G"],["assists","A"],["shots","S"],["hits","H"],["pim","PIM"],["plus_minus","+/-"],["blocked_shots","BLK"],["pp_goals","PP"],["sh_goals","SH"],["gwg","GW"]];
+const BX_G=[["saves","SV"],["shots_against","SA"],["goals_against","GA"]];
+async function openBoxEditor(gameId){
+  if(!sb)return;
+  const {data}=await sb.from("game_stats").select("id,skater_name,position,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,pp_goals,sh_goals,gwg,saves,shots_against,goals_against,shutout, profiles(gamertag)").eq("game_id",gameId).order("is_goalie");
+  const rows=data||[];
+  if(!rows.length){toast("No box score yet","Player stats arrive from the EA import after the game — nothing to edit yet.");return;}
+  const nmOf=r=>r.profiles?r.profiles.gamertag:(r.skater_name||"?");
+  const cell=(r,f)=>`<td><input type="number" class="box-in gsf" data-f="${f}" value="${r[f]==null?"":r[f]}" style="width:52px"></td>`;
+  const skaters=rows.filter(r=>!r.is_goalie),goalies=rows.filter(r=>r.is_goalie);
+  let html="";
+  if(skaters.length)html+=`<div class="bx-sub">Skaters</div><div style="overflow:auto;margin-bottom:14px"><table class="roster-tbl"><thead><tr><th>Player</th>${BX_SK.map(f=>`<th>${f[1]}</th>`).join("")}</tr></thead><tbody>`+
+    skaters.map(r=>`<tr data-id="${r.id}"><td><b>${esc(nmOf(r))}</b> <small style="color:var(--fog)">${esc(r.position||"")}</small></td>${BX_SK.map(f=>cell(r,f[0])).join("")}</tr>`).join("")+`</tbody></table></div>`;
+  if(goalies.length)html+=`<div class="bx-sub">Goalies</div><div style="overflow:auto"><table class="roster-tbl"><thead><tr><th>Player</th>${BX_G.map(f=>`<th>${f[1]}</th>`).join("")}<th>SO</th></tr></thead><tbody>`+
+    goalies.map(r=>`<tr data-id="${r.id}"><td><b>${esc(nmOf(r))}</b></td>${BX_G.map(f=>cell(r,f[0])).join("")}<td><input type="checkbox" class="gsf-so" ${r.shutout?"checked":""}></td></tr>`).join("")+`</tbody></table></div>`;
+  $("#modalCard").classList.add("wide");$("#modalTitle").textContent="Edit box score";
+  $("#modalMsg").innerHTML=`<div style="max-height:62vh;overflow:auto">${html}</div>`;
+  $("#modalOk").textContent="Save Stats";$("#modalOk").style.display="";$("#modalCancel").textContent="Cancel";
+  modalCb=async()=>{
+    let n=0;
+    for(const tr of $("#modalMsg").querySelectorAll("tbody tr")){
+      const upd={};tr.querySelectorAll(".gsf").forEach(inp=>{upd[inp.dataset.f]=inp.value===""?0:+inp.value;});
+      const so=tr.querySelector(".gsf-so");if(so)upd.shutout=so.checked;
+      const {error}=await sb.from("game_stats").update(upd).eq("id",tr.dataset.id);if(!error)n++;
+    }
+    toast("Box score saved",n+" player row"+(n===1?"":"s")+" updated.");
+  };
+  $("#modalBg").classList.add("on");
+}
+document.addEventListener("click",e=>{const b=e.target.closest(".gs-edit");if(b)openBoxEditor(b.dataset.game);});
 
 /* ---- Members & Roles (grant Manager / Commissioner, assign a club) ---- */
 // Members & Roles = LEAGUE standing only. Owner/GM/AGM are per-club, assigned in the Teams tab.
