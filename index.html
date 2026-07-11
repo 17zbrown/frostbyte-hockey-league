@@ -91,7 +91,7 @@
   .btn-ghost{border:1px solid var(--line);color:var(--ice)}
   .btn-ghost:hover{border-color:var(--frost);color:var(--frost)}
   .btn-sm{padding:7px 12px;font-size:12.5px}
-  .user-chip{display:flex;align-items:center;gap:9px;padding:5px 12px 5px 5px;border:1px solid var(--line);border-radius:100px;background:#0b1e2e}
+  .user-chip{display:flex;align-items:center;gap:9px;height:38px;padding:0 12px 0 5px;border:1px solid var(--line);border-radius:var(--r-s);background:#0b1e2e;box-sizing:border-box}
   .user-chip .av{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--frost),var(--frost-deep));
     color:#052026;font-family:var(--f-display);font-size:13px;display:grid;place-items:center}
   .user-chip small{font-family:var(--f-cond);font-size:12px;letter-spacing:.03em;color:var(--fog);line-height:1}
@@ -467,7 +467,7 @@
   .term-tag{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog-dim);background:var(--panel-3);padding:2px 7px;border-radius:100px;flex-shrink:0}
   .mgr-tag{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost);background:var(--frost-glow);padding:4px 10px;border-radius:100px}
   .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
-  .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #8a6d0033}
+  .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px var(--frost-glow)}
   .cap-bar-wrap{padding:14px 18px 4px}
   .cap-bar{height:8px;border-radius:5px;background:var(--line-soft,#232323);overflow:hidden}
   .cap-bar span{display:block;height:100%;border-radius:5px;transition:width .35s ease}
@@ -513,7 +513,7 @@
   .pick-head{font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin:13px 0 7px}
   .pick-list{display:flex;flex-direction:column;gap:6px}
   .pick-chip{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;background:var(--panel);font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--ice);transition:.15s}
-  .pick-chip:hover{border-color:#8a6d00}
+  .pick-chip:hover{border-color:var(--frost)}
   .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
   .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#fff;padding:2px 6px;border-radius:4px;flex-shrink:0}
   .pk-ovr{font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--win);letter-spacing:0}
@@ -530,7 +530,7 @@
   .gn-opp{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.02em;font-size:14px;color:var(--fog)}
   .gn-opp b{color:var(--ice);font-weight:700}
   .gn-ha{font-family:var(--f-cond);font-weight:600;font-size:10px;letter-spacing:.08em;padding:2px 7px;border-radius:100px;border:1px solid var(--line);color:var(--fog-dim)}
-  .gn-ha.home{color:var(--frost);border-color:#8a6d00}
+  .gn-ha.home{color:var(--frost);border-color:var(--frost)}
   .gn-code{margin-left:auto;font-size:12px;color:var(--fog);font-weight:700}
   .gn-mc{flex-shrink:0}
   .gn-veto{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft)}
@@ -538,7 +538,7 @@
   .gn-pick{display:flex;flex-direction:column;gap:5px}
   .gn-pick label{font-family:var(--f-cond);font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:10.5px;color:var(--fog)}
   .srv-sel{width:168px;font-family:var(--f-body);font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice)}
-  .srv-sel:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #8a6d001f}
+  .srv-sel:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px var(--frost-glow)}
   .srv-sel:disabled{opacity:.6;cursor:default}
   .gn-picknote{font-family:var(--f-cond);font-size:11px;letter-spacing:.02em;color:var(--fog);display:flex;align-items:center;gap:6px}
   .gn-picknote svg{width:12px;height:12px;flex-shrink:0}
@@ -1148,7 +1148,7 @@
   /* AI screenshot import */
   .ai-import{border:1px solid #cbdeeb;border-radius:7px;background:linear-gradient(135deg,#eef6fc,#f7fbff);padding:13px 15px;margin-bottom:15px;position:relative;overflow:hidden}
   .ai-head{display:flex;align-items:center;gap:11px;margin-bottom:12px}
-  .ai-ic{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--sky),var(--frost));display:grid;place-items:center;color:#fff;flex-shrink:0;box-shadow:0 2px 6px #8a6d0033}
+  .ai-ic{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--sky),var(--frost));display:grid;place-items:center;color:#fff;flex-shrink:0;box-shadow:0 2px 6px var(--frost-glow)}
   .ai-title b{font-family:var(--f-cond);font-weight:600;font-size:14px;letter-spacing:.02em;color:var(--navy);display:block;line-height:1.2}
   .ai-title small{color:var(--fog);font-size:12px}
   .ai-drop{display:flex;align-items:center;justify-content:center;gap:10px;padding:15px;border:1.5px dashed #a9cbe4;border-radius:6px;background:#fff;cursor:pointer;transition:.15s;color:var(--fog);font-size:13.5px}
@@ -2788,7 +2788,7 @@ async function renderPlayerPage(id){
   el.innerHTML=`
     <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}" style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${badge(tc,16)}${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
     <div class="player-hero">
-      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
+      <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},${shade(t?t.c:'#ffe500',-22)})">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
       <div class="ph-info"><h2>${prof.gamertag}</h2>
         <div class="ph-meta">
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
@@ -2849,7 +2849,7 @@ async function renderMyStats(){
   }
   const t=tc?teams[tc]:null;
   el.innerHTML=`<div class="player-hero">
-    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},#c9a300)">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
+    <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},${shade(t?t.c:'#ffe500',-22)})">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
     <div class="ph-info"><h2>${authProfile.gamertag}</h2>
       <div class="ph-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span>
         ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">Not on a roster yet</span>`}
@@ -2956,7 +2956,7 @@ function renderNews(){
     if(home)home.innerHTML='<div class="empty-note" style="margin:0;padding:20px">No news yet.</div>';
     return;
   }
-  const feat=rows[0];const teamColor="#8a6d00";
+  const feat=rows[0];const teamColor="#ffe500";
   if(hero)hero.innerHTML=`<div class="news-hero" data-go="article" data-param="${feat.id}">
     <div class="nh-art" style="${newsArt(teamColor)}"><span class="pill frost">Featured</span></div>
     <div class="nh-body"><span class="news-cat">${feat.cat}</span><h3>${feat.title}</h3><p>${feat.excerpt}</p>
@@ -2971,9 +2971,9 @@ function renderNews(){
 function renderArticle(id){
   const n=liveNews.find(x=>x.id===id)||liveNews[0];
   if(!n){$("#articlePage").innerHTML='<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> Article</div><div class="empty-note">This story is no longer available.</div><div style="margin-top:24px"><button class="btn btn-ghost" data-go="news">← Back to News</button></div>';return;}
-  const colors={"Game Recap":"#8a6d00","Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
+  const colors={"Game Recap":"#ffe500","Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
   $("#articlePage").innerHTML=`<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> ${n.cat}</div>
-    <div class="art-hero" style="${newsArt(colors[n.cat]||"#8a6d00")}"><div><span class="news-cat">${n.cat}</span>
+    <div class="art-hero" style="${newsArt(colors[n.cat]||"#ffe500")}"><div><span class="news-cat">${n.cat}</span>
       <h2 style="font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4.4vw,48px);line-height:.92;margin:10px 0 0;max-width:20ch">${n.title}</h2></div></div>
     <div class="news-meta" style="margin-bottom:22px">By ${n.author} · ${n.date}</div>
     <div class="article-body">${n.body.map((para,i)=>i===2?`<blockquote>${para.replace(/^"|"$/g,'')}</blockquote>`:`<p>${para}</p>`).join("")}</div>
@@ -3740,7 +3740,7 @@ async function loadTeamStats(){
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>PP</th><th>PP%</th><th>SH</th><th>PK</th><th>PK%</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
     tms.map(t=>{const s=teamStatsCache[t.id]||{};const ppO=+s.pp_opps||0,ppG=+s.pp_goals||0,shd=+s.times_shorthanded||0,pkGA=+s.pk_goals_against||0;
       const ppP=ppO?(100*ppG/ppO).toFixed(1)+'%':'—',pkP=shd?(100*(shd-pkGA)/shd).toFixed(1)+'%':'—';
-      return `<tr><td><div class="rp"><span class="num" style="background:${'#8a6d00'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
+      return `<tr><td><div class="rp"><span class="num" style="background:#ffe500;color:#062026">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
         <td>${ppG}/${ppO}</td><td>${ppP}</td><td>${+s.sh_goals||0}</td><td>${pkGA}/${shd}</td><td>${pkP}</td>
         <td style="text-align:right"><button class="mini tstat-edit" data-id="${t.id}" data-name="${t.name.replace(/"/g,'&quot;')}">Edit</button></td></tr>`;}).join('')+'</tbody></table></div>';
 }
@@ -4494,7 +4494,7 @@ async function loadTeamsAdmin(){
   const mgmtCell=t=>{const parts=[];if(t.owner_profile_id)parts.push('<span style="color:var(--fog)">O</span> '+esc(nameOf[t.owner_profile_id]||'?'));if(t.gm_profile_id)parts.push('<span style="color:var(--fog)">GM</span> '+esc(nameOf[t.gm_profile_id]||'?'));if(t.agm_profile_id)parts.push('<span style="color:var(--fog)">AGM</span> '+esc(nameOf[t.agm_profile_id]||'?'));return parts.length?parts.join('<br>'):'<span style="color:var(--fog)">—</span>';};
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Club</th><th>Code</th><th>Division</th><th>Management</th><th>EA club ID</th><th>In use</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     tms.map(t=>{const sc=spotCount[t.id]||0,gc=gameCount[t.id]||0;const locked=sc>0||gc>0;
-      return `<tr class="tm-row" data-name="${((t.name+' '+t.code)||'').toLowerCase().replace(/"/g,'&quot;')}" data-div="${t.division}"><td><div class="rp"><span class="num" style="background:${t.color||'#8a6d00'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
+      return `<tr class="tm-row" data-name="${((t.name+' '+t.code)||'').toLowerCase().replace(/"/g,'&quot;')}" data-div="${t.division}"><td><div class="rp"><span class="num" style="background:${t.color||'#ffe500'};color:#fff">${t.code}</span><div><b>${esc(t.name)}</b></div></div></td>
       <td class="mono">${t.code}</td><td><span class="posbadge">${t.division}</span></td>
       <td style="font-size:12.5px">${mgmtCell(t)}</td>
       <td class="mono" style="font-size:12.5px">${t.ea_club_id?esc(t.ea_club_id):'<span style="color:var(--loss)">not set</span>'}</td>
