@@ -2646,7 +2646,6 @@ async function renderPlayerPage(id){
     const detail=isG
       ? ssec("Record",cell(`${gRec.w}-${gRec.l}-${gRec.otl}`,"W-L-OTL")+cell(a.gp?(a.ga/a.gp).toFixed(2):"—","GAA")+cell(a.sa?(100*a.sv/a.sa).toFixed(1)+"%":"—","Save %")+cell(a.so,"Shutouts"))
         +ssec("Breakaways",cell(`${a.brsv}/${a.brs}`,"Saves")+cell(pct(a.brsv,a.brs),"Brk save %")+cell(a.poke,"Poke checks"))
-        +(a.off?ssec("EA grades (avg)",cell(Math.round(a.off/a.gp),"Offense")+cell(Math.round(a.def/a.gp),"Defense")+cell(Math.round(a.tp/a.gp),"Team play")):"")
       : ssec("Scoring",cell(a.g-a.pp-a.sh,"EV goals")+cell(a.pp,"PP goals")+cell(a.sh,"SH goals")+cell(a.gw,"GW goals")+cell(pg(a.g+a.a),"Pts / game"))
         +ssec("Shooting",cell(pct(a.g,a.s),"Shooting %")+cell(a.satt,"Shot attempts")+cell(pg(a.s),"Shots / game"))
         +ssec("Puck play",cell(a.pc,"Passes")+cell(pct(a.pc,a.pa),"Pass %")+(pos==="C"?cell(a.fow,"Faceoffs won")+cell(pct(a.fow,a.fow+a.fol),"Faceoff %"):"")+cell(a.tk,"Takeaways")+cell(a.gv,"Giveaways")+cell(a.int,"Interceptions"))
