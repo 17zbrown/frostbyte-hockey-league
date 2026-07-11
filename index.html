@@ -2147,24 +2147,39 @@ async function loadStandings(){
 // dilute it and goaltending/defense carry real weight. Exact EA formula + synergy aren't
 // public, so this is a principled approximation, not a clone.
 function posCat(pos){if(pos==="G")return "G";if(pos==="LD"||pos==="RD"||pos==="D")return "D";return "F";}
-function computeTeamRatings(players){ // players: [{ovr,pos}]
-  const withOvr=(players||[]).filter(p=>p.ovr>0);if(!withOvr.length)return null;
+// Per-player offensive/defensive ability from EA per-game grades (0-100), anchored to the
+// player's overall so numbers stay on-scale; falls back to the overall until they've played.
+let playerAbility={},abilitiesLoaded=false; // {profile_id:{off,def}} raw EA-grade averages
+async function loadPlayerAbilities(){
+  if(!sb)return;
+  const {data}=await sb.from("game_stats").select("profile_id,offense_rating,defense_rating");
+  const agg={};(data||[]).forEach(r=>{if(r.offense_rating==null&&r.defense_rating==null)return;const a=agg[r.profile_id]=agg[r.profile_id]||{o:0,oc:0,d:0,dc:0};if(r.offense_rating!=null){a.o+=+r.offense_rating;a.oc++;}if(r.defense_rating!=null){a.d+=+r.defense_rating;a.dc++;}});
+  const next={};Object.keys(agg).forEach(pid=>{const a=agg[pid];next[pid]={off:a.oc?a.o/a.oc:null,def:a.dc?a.d/a.dc:null};});
+  playerAbility=next;abilitiesLoaded=true;
+}
+function abilityOf(pid,ovr){
+  const g=playerAbility[pid];if(!g)return {off:ovr,def:ovr};
+  return {off:g.off!=null?Math.round(0.6*ovr+0.4*g.off):ovr, def:g.def!=null?Math.round(0.6*ovr+0.4*g.def):ovr};
+}
+function computeTeamRatings(players){ // players: [{ovr,pos,pid}]
+  const ps=(players||[]).filter(p=>p.ovr>0).map(p=>{const ab=abilityOf(p.pid,p.ovr);return {ovr:p.ovr,cat:posCat(p.pos),off:ab.off,def:ab.def};});
+  if(!ps.length)return null;
   const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
-  const grp=c=>withOvr.filter(p=>posCat(p.pos)===c).map(p=>p.ovr).sort((a,b)=>b-a);
-  const rosterAvg=avg(withOvr.map(p=>p.ovr));
-  const f=avg(grp("F").slice(0,3)), d=avg(grp("D").slice(0,2)), g=grp("G")[0];
-  const F=f!=null?f:rosterAvg, D=d!=null?d:rosterAvg, G=g!=null?g:rosterAvg;
+  const rosterAvg=avg(ps.map(p=>p.ovr));
+  const starters=(cat,n)=>ps.filter(p=>p.cat===cat).sort((a,b)=>b.ovr-a.ovr).slice(0,n);
+  const Fs=starters("F",3),Ds=starters("D",2),Gs=starters("G",1);
+  const gm=(arr,key)=>{const v=avg(arr.map(p=>p[key]));return v!=null?v:rosterAvg;};
   return {
-    overall:Math.round(0.40*F+0.35*D+0.25*G), // forwards, defense, goalie
-    offense:Math.round(0.70*F+0.30*D),        // driven by forwards, D joins the rush
-    defense:Math.round(0.40*G+0.40*D+0.20*F)  // goalie + D anchor, F backcheck
+    overall:Math.round(0.40*gm(Fs,"ovr")+0.35*gm(Ds,"ovr")+0.25*gm(Gs,"ovr")), // F, D, G
+    offense:Math.round(0.70*gm(Fs,"off")+0.30*gm(Ds,"off")),                    // forwards drive, D joins rush
+    defense:Math.round(0.40*gm(Gs,"def")+0.40*gm(Ds,"def")+0.20*gm(Fs,"def"))   // goalie + D anchor, F backcheck
   };
 }
 let teamOvrByCode={};
 async function loadTeamOveralls(){
   if(!sb||!openSeason)return;
-  const {data}=await sb.from("roster_spots").select("team_id,position,profiles(overall)").eq("season_id",openSeason.id).eq("status","active");
-  const byTeam={};(data||[]).forEach(r=>{const c=codeOfId(r.team_id);if(!c)return;(byTeam[c]=byTeam[c]||[]).push({ovr:r.profiles?+r.profiles.overall||0:0,pos:r.position});});
+  const {data}=await sb.from("roster_spots").select("team_id,position,profile_id,profiles(overall)").eq("season_id",openSeason.id).eq("status","active");
+  const byTeam={};(data||[]).forEach(r=>{const c=codeOfId(r.team_id);if(!c)return;(byTeam[c]=byTeam[c]||[]).push({ovr:r.profiles?+r.profiles.overall||0:0,pos:r.position,pid:r.profile_id});});
   const next={};Object.keys(byTeam).forEach(c=>{const rt=computeTeamRatings(byTeam[c]);if(rt)next[c]=rt;});
   teamOvrByCode=next;
 }
@@ -2576,6 +2591,7 @@ async function renderTeamPage(code){
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
   const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,ovr:s.profiles?+s.profiles.overall||0:0,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  if(sb&&!abilitiesLoaded)await loadPlayerAbilities();
   const tRatings=computeTeamRatings(roster);
   const ovrEl=$("#tbOvr"),offEl=$("#tbOff"),defEl=$("#tbDef");
   if(ovrEl){if(tRatings){ovrEl.innerHTML=`<b>${tRatings.overall}</b> TEAM OVR`;ovrEl.style.display="";}else ovrEl.style.display="none";}
@@ -2986,7 +3002,7 @@ async function sbInit(){
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
     dbTeams=tms||[];buildTeams();
-    await loadStandings();await loadTeamOveralls();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
+    await loadStandings();await loadPlayerAbilities();await loadTeamOveralls();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     updateBranding();renderTeamsGrid();renderHeroCarousel();renderHeroRink();
     renderFixtures();renderSchedule();renderTxns();renderNews();renderLiveGames();
@@ -4166,7 +4182,7 @@ $("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filter
 /* ---- Teams (add / remove clubs) ---- */
 async function refreshTeamsEverywhere(){
   const {data:tms}=await sb.from("teams").select("*").order("code");if(tms){dbTeams=tms;buildTeams();}
-  await loadStandings();await loadTeamOveralls();await loadSchedule();
+  await loadStandings();await loadPlayerAbilities();await loadTeamOveralls();await loadSchedule();
   renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
   renderTeamsGrid();renderFixtures();renderSchedule();renderRankings();renderBracket();renderHeroRink();renderLiveGames();
   if($("#membersBody"))loadMembers();
