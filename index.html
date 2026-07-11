@@ -160,7 +160,7 @@
   .tw-watch.live .tw-txt{color:#9146ff}
   .tw-own{display:flex;gap:8px;flex-wrap:wrap}
   .live-tag{display:inline-flex;align-items:center;gap:6px;border-color:var(--live)!important;color:#fff!important;background:var(--live);font-weight:700;text-decoration:none}
-  .ovr-tag{border-color:#ffe500!important;color:#0a0a0a!important;background:#ffe500}.ovr-tag b{font-size:14px}
+  .ovr-tag{border-color:#ffe500!important;color:#0a0a0a!important;background:#ffe500}.ovr-tag b{font-size:14px;color:#0a0a0a!important}
   .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;animation:livePulse 1.4s infinite}
   @keyframes livePulse{0%,100%{opacity:1}50%{opacity:.3}}
   @media(prefers-reduced-motion:reduce){.live-dot,.live-orb{animation:none}}
@@ -2142,13 +2142,30 @@ async function loadStandings(){
   const byCode={};rows.forEach(r=>{const c=idToCode[r.team_id];if(c)byCode[c]=r;});
   liveStandings=TEAM_KEYS.map(c=>{const r=byCode[c]||{};return [c,r.gp||0,r.wins||0,r.losses||0,r.otl||0,r.gf||0,r.ga||0,"—"];});
 }
-// Team overall = average of the overalls of every active player on the club's roster.
+// NHL-26-style team ratings: a position-weighted composite of the likely STARTERS
+// (top 3 forwards, top 2 D, No. 1 goalie), not a flat roster average — so depth doesn't
+// dilute it and goaltending/defense carry real weight. Exact EA formula + synergy aren't
+// public, so this is a principled approximation, not a clone.
+function posCat(pos){if(pos==="G")return "G";if(pos==="LD"||pos==="RD"||pos==="D")return "D";return "F";}
+function computeTeamRatings(players){ // players: [{ovr,pos}]
+  const withOvr=(players||[]).filter(p=>p.ovr>0);if(!withOvr.length)return null;
+  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  const grp=c=>withOvr.filter(p=>posCat(p.pos)===c).map(p=>p.ovr).sort((a,b)=>b-a);
+  const rosterAvg=avg(withOvr.map(p=>p.ovr));
+  const f=avg(grp("F").slice(0,3)), d=avg(grp("D").slice(0,2)), g=grp("G")[0];
+  const F=f!=null?f:rosterAvg, D=d!=null?d:rosterAvg, G=g!=null?g:rosterAvg;
+  return {
+    overall:Math.round(0.40*F+0.35*D+0.25*G), // forwards, defense, goalie
+    offense:Math.round(0.70*F+0.30*D),        // driven by forwards, D joins the rush
+    defense:Math.round(0.40*G+0.40*D+0.20*F)  // goalie + D anchor, F backcheck
+  };
+}
 let teamOvrByCode={};
 async function loadTeamOveralls(){
   if(!sb||!openSeason)return;
-  const {data}=await sb.from("roster_spots").select("team_id,profiles(overall)").eq("season_id",openSeason.id).eq("status","active");
-  const agg={};(data||[]).forEach(r=>{const o=r.profiles?+r.profiles.overall||0:0;if(o>0){const c=codeOfId(r.team_id);if(c)(agg[c]=agg[c]||[]).push(o);}});
-  const next={};Object.keys(agg).forEach(c=>{next[c]=Math.round(agg[c].reduce((a,b)=>a+b,0)/agg[c].length);});
+  const {data}=await sb.from("roster_spots").select("team_id,position,profiles(overall)").eq("season_id",openSeason.id).eq("status","active");
+  const byTeam={};(data||[]).forEach(r=>{const c=codeOfId(r.team_id);if(!c)return;(byTeam[c]=byTeam[c]||[]).push({ovr:r.profiles?+r.profiles.overall||0:0,pos:r.position});});
+  const next={};Object.keys(byTeam).forEach(c=>{const rt=computeTeamRatings(byTeam[c]);if(rt)next[c]=rt;});
   teamOvrByCode=next;
 }
 function standRow(r,rank,cut){
@@ -2509,7 +2526,7 @@ function renderTeamsGrid(){
         <div><div class="n">${r[2]}-${r[3]}-${r[4]}</div><div class="l">Record</div></div>
         <div><div class="n" style="color:var(--frost)">${pts(r)}</div><div class="l">Points</div></div>
         <div><div class="n">${diff>0?'+':''}${diff}</div><div class="l">Diff</div></div>
-        <div><div class="n">${teamOvrByCode[code]||'—'}</div><div class="l">Team OVR</div></div>
+        <div><div class="n">${teamOvrByCode[code]?teamOvrByCode[code].overall:'—'}</div><div class="l">Team OVR</div></div>
       </div></div>`;}).join("");
 }
 
@@ -2532,7 +2549,7 @@ async function renderTeamPage(code){
       <div class="tb-top"><div style="position:absolute;inset:0;background:${t.c};opacity:.14"></div>
         <span style="line-height:0;position:relative;z-index:1">${badge(code,82)}</span>
         <div class="tb-info"><h2>${t.name}</h2>
-          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
+          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" id="tbOff" style="display:none"></span><span class="ph-tag" id="tbDef" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
             <span class="ph-tag" id="tbManager">Manager · <b>TBD</b></span></div></div>
         <div class="tb-rec"><div class="v">${rec}</div><small>${pts_} pts</small></div></div>
       <div class="tb-stats">
@@ -2559,8 +2576,11 @@ async function renderTeamPage(code){
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
   const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,ovr:s.profiles?+s.profiles.overall||0:0,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
-  const _ovrs=roster.map(p=>p.ovr).filter(v=>v>0);const teamOvr=_ovrs.length?Math.round(_ovrs.reduce((a,b)=>a+b,0)/_ovrs.length):null;
-  const ovrEl=$("#tbOvr");if(ovrEl){if(teamOvr){ovrEl.innerHTML=`<b>${teamOvr}</b> TEAM OVR`;ovrEl.style.display="";}else ovrEl.style.display="none";}
+  const tRatings=computeTeamRatings(roster);
+  const ovrEl=$("#tbOvr"),offEl=$("#tbOff"),defEl=$("#tbDef");
+  if(ovrEl){if(tRatings){ovrEl.innerHTML=`<b>${tRatings.overall}</b> TEAM OVR`;ovrEl.style.display="";}else ovrEl.style.display="none";}
+  if(offEl){if(tRatings){offEl.innerHTML=`OFF <b>${tRatings.offense}</b>`;offEl.style.display="";}else offEl.style.display="none";}
+  if(defEl){if(tRatings){defEl.innerHTML=`DEF <b>${tRatings.defense}</b>`;defEl.style.display="";}else defEl.style.display="none";}
   const teamCapUsed=roster.reduce((s,p)=>s+(+p.salary||0),0);
   const teamSalCap=openSeason?(+openSeason.salary_cap||0):0;
   const _trow=(dbTeams||[]).find(x=>x.id===teamIdOf(code));
