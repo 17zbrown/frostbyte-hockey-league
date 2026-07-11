@@ -2023,6 +2023,10 @@ function badge(code,size){const t=teams[code];if(!t)return '';const s=size||26;
     <text x="20" y="30" text-anchor="middle" font-family="'Saira Condensed','Arial Narrow',sans-serif" font-weight="800" font-size="13" letter-spacing="-.4" fill="${tc}">${code}</text>
   </svg>`;}
 function initials(name){return name.replace(/[^a-zA-Z0-9]/g,'').slice(0,2).toUpperCase();}
+// Player list icon: shows the club's uploaded logo when it has one, else initials on the team color.
+function pAvatar(tc,name,cls){const t=teams[tc];const c=cls?(" "+cls):"";
+  if(t&&t.logo)return `<span class="av${c}" style="background:${t.c};padding:0;overflow:hidden"><img src="${esc(t.logo)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block"></span>`;
+  return `<span class="av${c}" style="background:${t?t.c:'#333'}">${initials(name)}</span>`;}
 function toast(title,msg){const w=$("#toasts");const el=document.createElement("div");el.className="toast";
   el.innerHTML=`<b>${title}</b>${msg}`;w.appendChild(el);
   setTimeout(()=>{el.style.opacity="0";el.style.transform="translateX(20px)";el.style.transition=".3s";setTimeout(()=>el.remove(),300);},2800);}
@@ -2508,7 +2512,7 @@ function renderLeaderList(el,key){
     const sub=key==="points"?`${t.name} · ${r.g}G ${r.a}A`:t.name;
     return `<div class="leader" data-go="player" data-param="${r.name}">
       <span class="pos ${i===0?'p1':''}">${i+1}</span>
-      <span class="av" style="background:${t.c}">${initials(r.name)}</span>
+      ${pAvatar(r.tc,r.name)}
       <div class="who"><b>${r.name}</b><small>${sub}</small></div>
       <div class="val">${r.disp}<small>${cat.unit}</small></div></div>`;}).join("");
 }
@@ -2518,7 +2522,7 @@ function renderLeaderGrid(el){
   if(!LEADER_CATS.some(c=>(leaders[c.k]||[]).length)){el.innerHTML='<div class="empty-note">No stats yet — leaderboards fill in automatically once games are reported.</div>';return;}
   const card=c=>{const rows=leaders[c.k]||[];if(!rows.length)return"";
     return `<div class="lc"><div class="lc-h"><span class="lc-title">${c.label}</span><span class="lc-unit">${c.unit}</span></div>
-      <ol class="lc-list">${rows.map((r,i)=>{const t=teams[r.tc];return `<li class="lc-row" data-go="player" data-param="${r.name}"><span class="lc-rk${i===0?' p1':''}">${i+1}</span><span class="av sm" style="background:${t?t.c:'#333'}">${initials(r.name)}</span><span class="lc-nm">${r.name}</span><span class="lc-tm">${r.tc}</span><span class="lc-v">${r.disp}</span></li>`;}).join("")}</ol></div>`;};
+      <ol class="lc-list">${rows.map((r,i)=>{const t=teams[r.tc];return `<li class="lc-row" data-go="player" data-param="${r.name}"><span class="lc-rk${i===0?' p1':''}">${i+1}</span>${pAvatar(r.tc,r.name,'sm')}<span class="lc-nm">${r.name}</span><span class="lc-tm">${r.tc}</span><span class="lc-v">${r.disp}</span></li>`;}).join("")}</ol></div>`;};
   const grp=(title,cats)=>{const cards=cats.map(card).filter(Boolean).join("");if(!cards)return"";return `<div class="lg-sec"><div class="lg-h">${title}</div><div class="lg-grid">${cards}</div></div>`;};
   el.innerHTML=grp("Skater Leaders",LEADER_CATS.filter(c=>!c.g))+grp("Goalie Leaders",LEADER_CATS.filter(c=>c.g));
 }
