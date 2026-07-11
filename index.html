@@ -437,6 +437,11 @@
   .mgr-panel{display:none}.mgr-panel.on{display:block;animation:fade .3s ease both}
   .susp-banner{background:rgba(224,122,154,.12);border:1px solid rgba(224,122,154,.4);border-radius:10px;padding:13px 16px;margin-bottom:18px;font-size:13.5px;color:var(--ice);line-height:1.5}
   .susp-banner b{color:#e07a9a}
+  #banScreen{position:fixed;inset:0;z-index:9999;background:rgba(8,8,10,.94);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)}
+  #banScreen .ban-card{max-width:440px;text-align:center;background:var(--panel);border:1px solid rgba(224,122,154,.4);border-radius:16px;padding:34px 30px;box-shadow:0 30px 80px -20px #000}
+  #banScreen .ban-x{font-size:44px;margin-bottom:8px}
+  #banScreen h2{font-family:var(--f-cond);font-size:24px;color:var(--ice);margin-bottom:10px;text-transform:uppercase;letter-spacing:.02em}
+  #banScreen p{color:var(--fog);font-size:14px;line-height:1.6;margin-bottom:20px}
   .roster-tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .roster-tbl th{font-family:var(--f-cond);font-weight:500;letter-spacing:.09em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);text-align:right;padding:12px 10px;border-bottom:1px solid var(--line)}
   .roster-tbl th:first-child,.roster-tbl td:first-child{text-align:left;padding-left:18px}
@@ -1826,8 +1831,11 @@
       <div class="mgr-panel" id="atab-poschanges"><div class="card"><div class="card-h"><h3>Filed Position Changes</h3><span class="pill" id="poschCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Position-change requests from players. Approve one and update their position under <b>Players → Player Directory</b>.</div>
         <div id="poschBody" style="padding:12px 20px 20px"></div></div></div>
-      <div class="mgr-panel" id="atab-bans"><div class="card"><div class="card-h"><h3>Ban Players</h3></div>
-        <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — permanently remove a member from the league <b>and</b> the Discord server, with no return. Will list active bans and let you lift one.</div></div></div>
+      <div class="mgr-panel" id="atab-bans">
+        <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 10px"><h3>Ban a Player</h3></div>
+          <p style="margin:0 0 14px;color:var(--fog);font-size:13px">Permanent. The player is removed from every roster and club front office, blocked from the site, and banned from the Discord server (within ~5 min).</p>
+          <button class="btn btn-frost btn-sm" id="banBtn" style="background:#e07a9a;color:#2a0812">Ban a player</button></div>
+        <div class="card"><div class="card-h"><h3>Banned Players</h3><span class="pill" id="banCount"></span></div><div id="banBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-suspensions">
         <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 10px"><h3>Suspend a Player</h3></div>
           <p style="margin:0 0 14px;color:var(--fog);font-size:13px">A suspended player keeps site &amp; Discord access, but can't be rostered or play, can't make management changes if they run a club, and may file up to 2 appeals.</p>
@@ -3049,8 +3057,21 @@ async function setAuth(session){
     authProfile=prof||null;
     await loadMyRegistration();
   }else{authProfile=null;myRegistration=null;}
+  enforceBan();
   renderAuthUI();
 }
+function enforceBan(){
+  const banned=authProfile&&authProfile.banned;
+  let ov=$("#banScreen");
+  if(banned){
+    if(!ov){ov=document.createElement("div");ov.id="banScreen";document.body.appendChild(ov);}
+    ov.innerHTML=`<div class="ban-card"><div class="ban-x">⛔</div><h2>You have been banned</h2>
+      <p>Your access to Chel Gaming has been permanently revoked${authProfile.ban_reason?` — <b>${esc(authProfile.ban_reason)}</b>`:""}. You've also been removed from the Discord server.</p>
+      <button class="btn btn-ghost" id="banSignOut">Sign Out</button></div>`;
+    ov.style.display="flex";document.body.style.overflow="hidden";
+  }else if(ov){ov.style.display="none";document.body.style.overflow="";}
+}
+document.addEventListener("click",e=>{if(e.target.closest("#banSignOut")){e.preventDefault();signOutSb();}});
 async function loadMyRegistration(){
   if(!sb||!authUser||!openSeason){myRegistration=null;return;}
   const {data}=await sb.from("season_registrations").select("*").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
@@ -3684,6 +3705,37 @@ document.addEventListener("click",e=>{
     const {error}=await sb.rpc("lift_suspension",{p_id:lift.dataset.id});
     if(error){toast("Couldn't lift",error.message);return;}toast("Suspension lifted","");loadSuspensions();});return;}
 });
+// Bans (commissioner)
+async function loadBans(){
+  const el=$("#banBody");if(!el||!sb)return;
+  const {data}=await sb.from("profiles").select("id,gamertag,ban_reason,banned_at").eq("banned",true).order("banned_at",{ascending:false});
+  const rows=data||[];const cnt=$("#banCount");if(cnt)cnt.textContent=rows.length+" banned";
+  if(!rows.length){el.innerHTML=ADMIN_EMPTY("No banned players","Banning a player removes them from the league and Discord — they appear here.");return;}
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Reason</th><th>Banned</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
+    rows.map(p=>`<tr><td><b>${esc(p.gamertag||'?')}</b></td><td style="color:var(--fog);font-size:12.5px">${p.ban_reason?esc(p.ban_reason):'—'}</td><td style="color:var(--fog);font-size:12.5px">${p.banned_at?fmtGameDate(p.banned_at):'—'}</td>
+      <td style="text-align:right"><button class="mini good ban-lift" data-id="${p.id}" data-name="${(p.gamertag||'').replace(/"/g,'&quot;')}">Unban</button></td></tr>`).join('')+'</tbody></table></div>';
+}
+function openBan(){
+  formModal("Ban a player",[
+    {key:"player",label:"Player",type:"player",value:"",options:suspNames,placeholder:"Search a member…"},
+    {key:"reason",label:"Reason (optional)",type:"textarea",value:""}
+  ],v=>{
+    const pid=suspIdByName[(v.player||"").trim().toLowerCase()];
+    if(!pid){toast("Player not found","Pick a name from the suggestions.");return;}
+    confirmModal("Ban "+v.player+"?","This is permanent — they're removed from all rosters + Discord and can't return.","Ban Player",async()=>{
+      const {error}=await sb.rpc("ban_player",{p_profile:pid,p_reason:(v.reason||"").trim()||null});
+      if(error){toast("Couldn't ban",error.message);return;}
+      toast("Player banned","Removed from the league; Discord ban applies within ~5 min.");loadBans();loadMembers();refreshTeamsEverywhere();
+    });
+  });
+}
+document.addEventListener("click",e=>{
+  if(e.target.closest("#banBtn")){openBan();return;}
+  const ub=e.target.closest(".ban-lift");
+  if(ub){confirmModal("Unban "+(ub.dataset.name||"this player")+"?","They regain site access. Re-add them to Discord manually if needed.","Unban",async()=>{
+    const {error}=await sb.rpc("unban_player",{p_profile:ub.dataset.id});
+    if(error){toast("Couldn't unban",error.message);return;}toast("Ban lifted","");loadBans();loadMembers();});return;}
+});
 // lineup — persisted per game night (Wed / Fri)
 const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
 const LINEUP_ROLES=[{key:"center",label:"Center",pool:["C"]},{key:"lw",label:"Left Wing",pool:["W","LW","RW"]},{key:"rw",label:"Right Wing",pool:["W","LW","RW"]},{key:"ld",label:"Left Defense",pool:["D","LD","RD"]},{key:"rd",label:"Right Defense",pool:["D","LD","RD"]},{key:"goalie",label:"Goalie",pool:["G"]}];
@@ -3884,7 +3936,7 @@ function renderCommissioner(){
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();loadSuspensions();
+    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();loadSuspensions();loadBans();
     if(typeof showAdminSection==="function")showAdminSection("league");
   }else{
     dash.style.display="none";gate.style.display="block";

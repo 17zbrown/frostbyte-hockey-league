@@ -50,6 +50,7 @@ export default async () => {
   }
 
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id");
+  const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
   const teams = await sbGet("teams?select=id,name,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
   // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
@@ -92,6 +93,12 @@ export default async () => {
   for (const m of links) {
     if (!m.discord_id) continue;
     try {
+      // banned players are removed from the server and kept out (no return)
+      if (bannedIds.has(m.profile_id)) {
+        const res = await dApi("PUT", `/guilds/${GUILD}/bans/${m.discord_id}`, { delete_message_seconds: 0 });
+        if (!(res && res.__notfound)) sum.banned = (sum.banned || 0) + 1;
+        continue;
+      }
       const mem = await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
       if (mem.__notfound) { sum.notInServer++; continue; }
       sum.checked++;
