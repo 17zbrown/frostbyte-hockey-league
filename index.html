@@ -2172,7 +2172,8 @@ function computeTeamRatings(players){ // players: [{ovr,pos,pid}]
   return {
     overall:Math.round(0.40*gm(Fs,"ovr")+0.35*gm(Ds,"ovr")+0.25*gm(Gs,"ovr")), // F, D, G
     offense:Math.round(0.70*gm(Fs,"off")+0.30*gm(Ds,"off")),                    // forwards drive, D joins rush
-    defense:Math.round(0.40*gm(Gs,"def")+0.40*gm(Ds,"def")+0.20*gm(Fs,"def"))   // goalie + D anchor, F backcheck
+    defense:Math.round(0.40*gm(Gs,"def")+0.40*gm(Ds,"def")+0.20*gm(Fs,"def")),  // goalie + D anchor, F backcheck
+    goaltending:Gs.length?Math.round(Gs[0].ovr):null                            // No.1 goalie's overall (built from save%/GAA)
   };
 }
 let teamOvrByCode={};
@@ -2564,7 +2565,7 @@ async function renderTeamPage(code){
       <div class="tb-top"><div style="position:absolute;inset:0;background:${t.c};opacity:.14"></div>
         <span style="line-height:0;position:relative;z-index:1">${badge(code,82)}</span>
         <div class="tb-info"><h2>${t.name}</h2>
-          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" id="tbOff" style="display:none"></span><span class="ph-tag" id="tbDef" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
+          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" id="tbOff" style="display:none"></span><span class="ph-tag" id="tbDef" style="display:none"></span><span class="ph-tag" id="tbGt" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
             <span class="ph-tag" id="tbManager">Manager · <b>TBD</b></span></div></div>
         <div class="tb-rec"><div class="v">${rec}</div><small>${pts_} pts</small></div></div>
       <div class="tb-stats">
@@ -2593,10 +2594,11 @@ async function renderTeamPage(code){
   const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,ovr:s.profiles?+s.profiles.overall||0:0,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
   if(sb&&!abilitiesLoaded)await loadPlayerAbilities();
   const tRatings=computeTeamRatings(roster);
-  const ovrEl=$("#tbOvr"),offEl=$("#tbOff"),defEl=$("#tbDef");
+  const ovrEl=$("#tbOvr"),offEl=$("#tbOff"),defEl=$("#tbDef"),gtEl=$("#tbGt");
   if(ovrEl){if(tRatings){ovrEl.innerHTML=`<b>${tRatings.overall}</b> TEAM OVR`;ovrEl.style.display="";}else ovrEl.style.display="none";}
   if(offEl){if(tRatings){offEl.innerHTML=`OFF <b>${tRatings.offense}</b>`;offEl.style.display="";}else offEl.style.display="none";}
   if(defEl){if(tRatings){defEl.innerHTML=`DEF <b>${tRatings.defense}</b>`;defEl.style.display="";}else defEl.style.display="none";}
+  if(gtEl){if(tRatings&&tRatings.goaltending){gtEl.innerHTML=`GOALIE <b>${tRatings.goaltending}</b>`;gtEl.style.display="";}else gtEl.style.display="none";}
   const teamCapUsed=roster.reduce((s,p)=>s+(+p.salary||0),0);
   const teamSalCap=openSeason?(+openSeason.salary_cap||0):0;
   const _trow=(dbTeams||[]).find(x=>x.id===teamIdOf(code));
