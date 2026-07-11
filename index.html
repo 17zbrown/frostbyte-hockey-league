@@ -438,6 +438,11 @@
   .susp-banner{background:rgba(224,122,154,.12);border:1px solid rgba(224,122,154,.4);border-radius:10px;padding:13px 16px;margin-bottom:18px;font-size:13.5px;color:var(--ice);line-height:1.5}
   .susp-banner b{color:#e07a9a}
   .bx-sub{font-family:var(--f-cond);font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:12px;color:var(--frost);margin:2px 0 8px}
+  .logo-drop{border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:.15s;background:var(--panel)}
+  .logo-drop:hover,.logo-drop.drag{border-color:var(--frost);background:var(--frost-glow)}
+  .logo-drop.busy{opacity:.7;pointer-events:none}
+  .logo-drop .logo-prev{display:flex;align-items:center;justify-content:center;min-height:60px;color:var(--fog);font-size:12.5px}
+  .logo-drop .logo-prev img{max-height:82px;max-width:100%;border-radius:6px;object-fit:contain}
   #banScreen{position:fixed;inset:0;z-index:9999;background:rgba(8,8,10,.94);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)}
   #banScreen .ban-card{max-width:440px;text-align:center;background:var(--panel);border:1px solid rgba(224,122,154,.4);border-radius:16px;padding:34px 30px;box-shadow:0 30px 80px -20px #000}
   #banScreen .ban-x{font-size:44px;margin-bottom:8px}
@@ -1895,7 +1900,7 @@ const TEAM_PALETTE = ["#ffe500","#8fb8d6","#c7d8e6","#7ce0a8","#ff8a5c","#ffd166
 function buildTeams(){
   teams={};TEAM_KEYS=[];
   (dbTeams||[]).forEach((t,i)=>{
-    teams[t.code]={id:t.id,code:t.code,name:t.name,c:t.color||TEAM_PALETTE[i%TEAM_PALETTE.length],div:t.division,conf:t.conference||"",city:t.city||"",arena:t.arena||"",est:t.founded_season||1};
+    teams[t.code]={id:t.id,code:t.code,name:t.name,c:t.color||TEAM_PALETTE[i%TEAM_PALETTE.length],div:t.division,conf:t.conference||"",city:t.city||"",arena:t.arena||"",est:t.founded_season||1,logo:t.logo_url||""};
     TEAM_KEYS.push(t.code);
   });
   if(typeof updateBranding==="function")updateBranding();
@@ -2007,7 +2012,9 @@ function textOn(hex){let c=hex.replace('#','');if(c.length===3)c=c.split('').map
   return (0.299*r+0.587*g+0.114*b)>148?'#03203c':'#ffffff';}
 let crestSeq=0;
 // team crest — a heraldic shield in the club's colours (replaces flat badges)
-function badge(code,size){const t=teams[code];if(!t)return '';const s=size||26;const tc=textOn(t.c);const id='cr'+(crestSeq++);
+function badge(code,size){const t=teams[code];if(!t)return '';const s=size||26;
+  if(t.logo)return `<img class="crest" src="${esc(t.logo)}" width="${s}" height="${Math.round(s*1.12)}" style="display:block;flex-shrink:0;object-fit:contain;border-radius:5px" alt="${esc(t.name)} logo">`;
+  const tc=textOn(t.c);const id='cr'+(crestSeq++);
   return `<svg class="crest" width="${s}" height="${Math.round(s*1.12)}" viewBox="0 0 40 44" style="display:block;flex-shrink:0" role="img" aria-label="${t.name} crest">
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${t.c}"/><stop offset="1" stop-color="${shade(t.c,-28)}"/></linearGradient></defs>
     <path d="M3 4 Q3 1.5 5.5 1.5 H34.5 Q37 1.5 37 4 V24 Q37 35 20 42 Q3 35 3 24 Z" fill="url(#${id})" stroke="#ffffff" stroke-width="2"/>
@@ -4539,6 +4546,7 @@ async function editTeam(btn){
     {key:"division",label:"Division",type:"select",value:t.division,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
     {key:"color",label:"Club color",type:"color",value:t.color||"#ffe500"},
     {key:"ea_club_id",label:"EA club ID (for auto stats — the CG… club's number)",value:t.ea_club_id||"",placeholder:"e.g. 1789231"},
+    {key:"logo_url",label:"Club logo (drag & drop — falls back to the crest)",type:"logo",value:t.logo_url||"",code:t.code},
     {key:"owner",label:"Owner — search a member (blank to clear)",type:"player",value:nameOf[t.owner_profile_id]||"",options:acOpts,placeholder:"Start typing a name…"},
     {key:"gm",label:"General Manager — search a member",type:"player",value:nameOf[t.gm_profile_id]||"",options:acOpts,placeholder:"Start typing a name…"},
     {key:"agm",label:"Assistant GM — search a member",type:"player",value:nameOf[t.agm_profile_id]||"",options:acOpts,placeholder:"Start typing a name…"}
@@ -4555,7 +4563,7 @@ async function editTeam(btn){
     if(bad){toast("Member not found",'No member named "'+bad.name+'". Pick a name from the suggestions.');return;}
     const chosen=[ro.id,rg.id,ra.id].filter(Boolean);
     if(new Set(chosen).size!==chosen.length){toast("Duplicate assignment","One person can't hold two front-office posts on the same club.");return;}
-    const {error}=await sb.from("teams").update({name,code,division:v.division,conference:(v.conference||"").trim()||null,color:v.color,ea_club_id:eaId||null}).eq("id",t.id);
+    const {error}=await sb.from("teams").update({name,code,division:v.division,conference:(v.conference||"").trim()||null,color:v.color,ea_club_id:eaId||null,logo_url:(v.logo_url||"").trim()||null}).eq("id",t.id);
     if(error){toast("Couldn't save",/duplicate|unique/i.test(error.message)?"That club code is already taken.":error.message);return;}
     // apply only the front-office slots that changed
     const cur={owner:t.owner_profile_id||null,gm:t.gm_profile_id||null,agm:t.agm_profile_id||null},want={owner:ro.id,gm:rg.id,agm:ra.id};
@@ -4694,20 +4702,47 @@ function wireAutocomplete(i,opts){
   menu.addEventListener('mousedown',e=>{const b=e.target.closest('.ac-opt');if(!b)return;e.preventDefault();inp.value=b.textContent;menu.classList.remove('on');});
   inp.addEventListener('blur',()=>setTimeout(()=>menu.classList.remove('on'),120));
 }
+async function uploadTeamLogo(file,code){
+  const ext=((file.name.split('.').pop()||'png').toLowerCase().replace(/[^a-z0-9]/g,''))||'png';
+  const path=(code||'logo').toLowerCase()+'-'+Date.now()+'.'+ext;
+  const {error}=await sb.storage.from('team-logos').upload(path,file,{upsert:true,contentType:file.type});
+  if(error)throw error;
+  return sb.storage.from('team-logos').getPublicUrl(path).data.publicUrl;
+}
+function wireLogoDrop(i){
+  const zone=$("#modalMsg").querySelector('.logo-drop[data-ef="'+i+'"]');if(!zone)return;
+  const file=zone.parentElement.querySelector('.logo-file');
+  const setPrev=url=>{zone.dataset.url=url||"";zone.querySelector('.logo-prev').innerHTML=url?`<img src="${esc(url)}">`:'<span>Drag a logo here, or click to upload (PNG/JPG, under 2 MB)</span>';};
+  const doUpload=async f=>{
+    if(!f)return;
+    if(!/^image\//.test(f.type)){toast("Not an image","Choose a PNG or JPG file.");return;}
+    if(f.size>2*1024*1024){toast("Too large","Keep the logo under 2 MB.");return;}
+    zone.classList.add("busy");zone.querySelector('.logo-prev').innerHTML='<span>Uploading…</span>';
+    try{const url=await uploadTeamLogo(f,zone.dataset.code);setPrev(url);toast("Logo uploaded","Save the club to apply it.");}
+    catch(e){toast("Upload failed",e.message||"Try again.");setPrev(zone.dataset.url);}
+    zone.classList.remove("busy");
+  };
+  zone.addEventListener("click",()=>file.click());
+  file.addEventListener("change",()=>{if(file.files[0])doUpload(file.files[0]);});
+  zone.addEventListener("dragover",e=>{e.preventDefault();zone.classList.add("drag");});
+  zone.addEventListener("dragleave",()=>zone.classList.remove("drag"));
+  zone.addEventListener("drop",e=>{e.preventDefault();zone.classList.remove("drag");if(e.dataTransfer.files[0])doUpload(e.dataTransfer.files[0]);});
+}
 function formModal(title,fields,onSave){
   $("#modalCard").classList.remove("wide");$("#modalTitle").textContent=title;
   const fieldHTML=f=>{const i=fields.indexOf(f);
     if(f.type==="select")return `<div class="ef-row"><label>${f.label}</label><select data-ef="${i}">${f.options.map(o=>`<option value="${esc(o.value)}" ${String(o.value)===String(f.value)?"selected":""}>${esc(o.label)}</option>`).join("")}</select></div>`;
     if(f.type==="player")return `<div class="ef-row ac-wrap"><label>${f.label}</label><input data-ef="${i}" class="ac-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder||"Start typing a name…")}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}"><div class="ac-menu"></div></div>`;
     if(f.type==="textarea")return `<div class="ef-row"><label>${f.label}</label><textarea data-ef="${i}" rows="4" placeholder="${esc(f.placeholder||"")}">${f.value??""}</textarea></div>`;
+    if(f.type==="logo")return `<div class="ef-row"><label>${f.label}</label><div class="logo-drop" data-ef="${i}" data-url="${(f.value||'').replace(/"/g,'&quot;')}" data-code="${esc(f.code||'')}"><div class="logo-prev">${f.value?`<img src="${esc(f.value)}">`:'<span>Drag a logo here, or click to upload (PNG/JPG, under 2 MB)</span>'}</div></div><input type="file" accept="image/*" class="logo-file" hidden></div>`;
     return `<div class="ef-row"><label>${f.label}</label><input data-ef="${i}" type="${f.type||"text"}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""} ${f.min!=null?`min="${f.min}"`:""} ${f.max!=null?`max="${f.max}"`:""} ${f.step!=null?`step="${f.step}"`:""}></div>`;};
   let html="",gridBuf=[];
   const flushGrid=()=>{if(gridBuf.length){html+=`<div class="ef-grid">${gridBuf.map(fieldHTML).join("")}</div>`;gridBuf=[];}};
   fields.forEach(f=>{if(f.grid){gridBuf.push(f);}else{flushGrid();html+=fieldHTML(f);}});flushGrid();
   $("#modalMsg").innerHTML=`<div class="edit-form">${html}</div>`;
-  fields.forEach((f,i)=>{if(f.type==="player")wireAutocomplete(i,f.options&&f.options.length?f.options:acPlayers);});
+  fields.forEach((f,i)=>{if(f.type==="player")wireAutocomplete(i,f.options&&f.options.length?f.options:acPlayers);if(f.type==="logo")wireLogoDrop(i);});
   $("#modalOk").textContent="Save Changes";$("#modalOk").style.display="";$("#modalCancel").textContent="Cancel";
-  modalCb=()=>{const v={};fields.forEach((f,i)=>{const el=$("#modalMsg").querySelector('[data-ef="'+i+'"]');if(!el)return;v[f.key]=f.type==="number"?(el.value===""?0:+el.value):el.value;});onSave(v);};
+  modalCb=()=>{const v={};fields.forEach((f,i)=>{const el=$("#modalMsg").querySelector('[data-ef="'+i+'"]');if(!el)return;v[f.key]=f.type==="number"?(el.value===""?0:+el.value):(f.type==="logo"?(el.dataset.url||""):el.value);});onSave(v);};
   $("#modalBg").classList.add("on");
 }
 // Rebuild the player lookup + leaders from the source arrays (rosters + freeAgents) after edits.
