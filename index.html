@@ -429,6 +429,11 @@
   .mgr-tab.active{color:var(--ice)}
   .mgr-tab.active::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;background:var(--frost)}
   .mgr-tab-sep{width:1px;background:var(--line);align-self:center;height:20px;margin:0 8px}
+  .adm-sections{margin-bottom:0}
+  .adm-subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 22px}
+  .sub-tab{font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--fog);padding:7px 14px;border:1px solid var(--line);border-radius:100px;cursor:pointer;background:transparent;transition:.15s}
+  .sub-tab:hover{color:var(--ice);border-color:var(--frost)}
+  .sub-tab.active{color:var(--ice);border-color:var(--frost);background:var(--frost-glow)}
   .mgr-panel{display:none}.mgr-panel.on{display:block;animation:fade .3s ease both}
   .roster-tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .roster-tbl th{font-family:var(--f-cond);font-weight:500;letter-spacing:.09em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);text-align:right;padding:12px 10px;border-bottom:1px solid var(--line)}
@@ -1727,24 +1732,15 @@
       <div class="mgr-bar"><span class="bd" style="background:#ffcf6b"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#04161c" stroke-width="2"><path d="M12 2l2.4 6.9H22l-6 4.6 2.3 7-6.3-4.4L5.7 20.5 8 13.5 2 8.9h7.6z"/></svg></span>
         <div><h2>League Office</h2><small id="admSeasonLabel">Commissioner</small></div>
         <button class="btn btn-ghost" id="admLogout" style="margin-left:auto">Sign Out</button></div>
-      <div class="mgr-tabs">
-        <!-- Season & Games -->
-        <button class="mgr-tab active" data-atab="season">Season &amp; Deadlines</button>
-        <button class="mgr-tab" data-atab="teams">Teams</button>
-        <button class="mgr-tab" data-atab="schedbuild">Schedule</button>
-        <button class="mgr-tab" data-atab="gamestats">Games &amp; Stats</button>
-        <span class="mgr-tab-sep"></span>
-        <!-- Players & Roster -->
-        <button class="mgr-tab" data-atab="registrations">Registrations</button>
-        <button class="mgr-tab" data-atab="owners">Owner Apps</button>
-        <button class="mgr-tab" data-atab="draft">Draft</button>
-        <button class="mgr-tab" data-atab="members">Members &amp; Roles</button>
-        <span class="mgr-tab-sep"></span>
-        <!-- Communication -->
-        <button class="mgr-tab" data-atab="actions">Action Center</button>
-        <button class="mgr-tab" data-atab="news">News</button>
-        <button class="mgr-tab" data-atab="discord">Discord</button>
+      <div class="mgr-tabs adm-sections" id="admSections">
+        <button class="mgr-tab sec-tab active" data-sec="league">League</button>
+        <button class="mgr-tab sec-tab" data-sec="teams">Teams</button>
+        <button class="mgr-tab sec-tab" data-sec="players">Players</button>
+        <button class="mgr-tab sec-tab" data-sec="enforce">Applications &amp; Enforcement</button>
+        <button class="mgr-tab sec-tab" data-sec="news">News</button>
+        <button class="mgr-tab sec-tab" data-sec="discord">Discord</button>
       </div>
+      <div class="adm-subtabs" id="admSubtabs"></div>
       <div class="mgr-panel on" id="atab-season"><div class="card"><div class="card-h"><h3>Season &amp; Deadlines</h3><span class="pill" id="seasonStatusPill"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Set the key dates for the season — registration, team-owner applications, draft night, and start/finish. Toggle registration open or closed.</div>
         <div id="seasonAdminBody" style="padding:16px 20px 22px"></div></div></div>
@@ -1754,9 +1750,6 @@
       <div class="mgr-panel" id="atab-owners"><div class="card"><div class="card-h"><h3>Owner Applications</h3><span class="pill" id="ownerAppCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Applications submitted on the Owner Application page. Approve to shortlist an owner, then assign them a club in Members &amp; Roles.</div>
         <div id="ownerAppsBody" style="padding:12px 20px 20px"></div></div></div>
-      <div class="mgr-panel" id="atab-actions"><div class="card"><div class="card-h"><h3>Action Center</h3><span class="pill" id="actionAdminCount"></span></div>
-        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Member complaints, appeals, and position-change requests. Trade requests route to the club's manager — you can see all of them here.</div>
-        <div id="actionAdminBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-schedbuild"><div class="card"><div class="card-h"><h3>Season Schedule</h3><span class="pill" id="schedCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Generate a full home-and-away round-robin for all 8 clubs (14 weeks), or clear it and start over.</div>
         <div style="padding:12px 20px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-frost btn-sm" id="genScheduleBtn">Auto-Generate Full Schedule</button><button class="btn btn-ghost btn-sm" id="clearScheduleBtn">Clear Schedule</button></div>
@@ -1811,6 +1804,30 @@
         <div class="card-h" style="padding:0 0 8px"><h3>Discord Integrations</h3></div>
         <p style="margin:0 0 4px;color:var(--fog);font-size:12.5px">Auto-post league activity to your Discord server. In Discord, open a channel's <b>Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL</b>, then paste it below. Leave a channel blank to route its events to the <b>Default</b> channel.</p>
         <div id="discordBody"></div></div></div>
+      <!-- League: Salary Cap + Roster Size -->
+      <div class="mgr-panel" id="atab-salarycap"><div class="card"><div class="card-h"><h3>Salary Cap</h3></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">The league-wide cap. Clubs can't trade for or sign a player that pushes them past it.</div>
+        <div id="salaryCapBody" style="padding:16px 20px 22px"></div></div></div>
+      <div class="mgr-panel" id="atab-rostersize"><div class="card"><div class="card-h"><h3>Roster Size</h3></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Maximum number of players each club can carry on its active roster.</div>
+        <div id="rosterSizeBody" style="padding:16px 20px 22px"></div></div></div>
+      <!-- Teams: Team Stats Editor -->
+      <div class="mgr-panel" id="atab-teamstats"><div class="card"><div class="card-h"><h3>Team Stats Editor</h3></div>
+        <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — manually correct a club's team totals (special teams, PP%/PK%, goals for/against) when the automatic EA import misses or misreads a game. For now, per-game results are entered under <b>Players → Player Stats Editor</b>.</div></div></div>
+      <!-- Applications & Enforcement -->
+      <div class="mgr-panel" id="atab-complaints"><div class="card"><div class="card-h"><h3>Filed Complaints</h3><span class="pill" id="complaintsCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Complaints submitted by members. Reply, resolve, or dismiss each one.</div>
+        <div id="complaintsBody" style="padding:12px 20px 20px"></div></div></div>
+      <div class="mgr-panel" id="atab-appeals"><div class="card"><div class="card-h"><h3>Filed Appeals</h3><span class="pill" id="appealsCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Appeals submitted by members — e.g. contesting a ruling or suspension.</div>
+        <div id="appealsBody" style="padding:12px 20px 20px"></div></div></div>
+      <div class="mgr-panel" id="atab-poschanges"><div class="card"><div class="card-h"><h3>Filed Position Changes</h3><span class="pill" id="poschCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Position-change requests from players. Approve one and update their position under <b>Players → Player Directory</b>.</div>
+        <div id="poschBody" style="padding:12px 20px 20px"></div></div></div>
+      <div class="mgr-panel" id="atab-bans"><div class="card"><div class="card-h"><h3>Ban Players</h3></div>
+        <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — permanently remove a member from the league <b>and</b> the Discord server, with no return. Will list active bans and let you lift one.</div></div></div>
+      <div class="mgr-panel" id="atab-suspensions"><div class="card"><div class="card-h"><h3>Suspend Players</h3></div>
+        <div style="padding:20px;color:var(--fog);font-size:13.5px;line-height:1.6">Coming in the next update — suspend a player until a set date or for a number of games, making them ineligible to play or manage until it lifts.</div></div></div>
     </div>
   </div></section></div>
 </main>
@@ -3586,12 +3603,18 @@ function openActionForm(type){
   });
 }
 document.addEventListener("click",e=>{const c=e.target.closest(".act-card");if(c)openActionForm(c.dataset.action);});
+// Split the member requests into their own enforcement views by type.
+const ENF_VIEWS=[["complaint","complaintsBody","complaintsCount","complaints"],["appeal","appealsBody","appealsCount","appeals"],["position_change","poschBody","poschCount","position-change requests"]];
 async function loadActionAdmin(){
-  const el=$("#actionAdminBody"),cnt=$("#actionAdminCount");if(!el||!sb)return;
+  if(!sb)return;
   const {data}=await sb.from("action_requests").select("*, profiles(gamertag)").order("created_at",{ascending:false});
-  if(cnt)cnt.textContent=(data?data.filter(a=>a.status==='open').length:0)+" open";
-  if(!data||!data.length){el.innerHTML=ADMIN_EMPTY("No requests yet","Member complaints, appeals, and requests appear here for review.");return;}
-  el.innerHTML=data.map(a=>{a._name=a.profiles?a.profiles.gamertag:'Member';return actionRow(a,true);}).join("");
+  const all=data||[];
+  ENF_VIEWS.forEach(([type,bodyId,countId,label])=>{
+    const el=$("#"+bodyId),cnt=$("#"+countId);if(!el)return;
+    const rows=all.filter(a=>a.type===type);
+    if(cnt)cnt.textContent=rows.filter(a=>a.status==='open').length+" open";
+    el.innerHTML=rows.length?rows.map(a=>{a._name=a.profiles?a.profiles.gamertag:'Member';return actionRow(a,true);}).join(""):ADMIN_EMPTY("Nothing filed","Member "+label+" appear here for review.");
+  });
 }
 async function renderTradeRequests(){
   const el=$("#tradeReqBody"),cnt=$("#tradeReqCount");if(!el||!sb)return;
@@ -3808,6 +3831,7 @@ function renderCommissioner(){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();});
     loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();
+    if(typeof showAdminSection==="function")showAdminSection("league");
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
@@ -3819,7 +3843,35 @@ function dtLocal(ts){if(!ts)return "";const d=new Date(ts);const p=n=>String(n).
 async function loadSeasonAdmin(){
   if(!sb)return;
   const {data}=await sb.from("seasons").select("*").order("number",{ascending:false}).limit(1).maybeSingle();
-  adminSeason=data||null;renderSeasonAdmin();
+  adminSeason=data||null;renderSeasonAdmin();renderSalaryCapAdmin();renderRosterSizeAdmin();
+}
+function renderSalaryCapAdmin(){
+  const el=$("#salaryCapBody");if(!el)return;const s=adminSeason;
+  if(!s){el.innerHTML='<div class="empty-note">No season found.</div>';return;}
+  el.innerHTML=`<div class="ef-row" style="max-width:340px"><label for="sc-val">Salary cap</label><input id="sc-val" type="text" value="${s.salary_cap?fmtMoney(s.salary_cap):""}" placeholder="e.g. 65M"><small style="color:var(--fog);font-size:11.5px">Accepts <b>65M</b>, <b>750K</b>, or a raw number.</small></div>
+    <button class="btn btn-frost" id="saveCapBtn" style="margin-top:16px">Save Salary Cap</button>`;
+}
+function renderRosterSizeAdmin(){
+  const el=$("#rosterSizeBody");if(!el)return;const s=adminSeason;
+  if(!s){el.innerHTML='<div class="empty-note">No season found.</div>';return;}
+  el.innerHTML=`<div class="ef-row" style="max-width:300px"><label for="rs-val">Roster size — max players per club</label><input id="rs-val" type="number" min="1" max="30" value="${s.roster_max}"></div>
+    <button class="btn btn-frost" id="saveRosterBtn" style="margin-top:16px">Save Roster Size</button>`;
+}
+async function saveSalaryCap(){
+  if(!sb||!adminSeason)return;
+  let cap=parseMoney(($("#sc-val")||{}).value);if(isNaN(cap)||cap<0){toast("Enter a cap","e.g. 65M, 750K, or a number.");return;}
+  const {error}=await sb.from("seasons").update({salary_cap:cap}).eq("id",adminSeason.id);
+  if(error){toast("Couldn't save",error.message);return;}
+  adminSeason.salary_cap=cap;if(openSeason&&openSeason.id===adminSeason.id)openSeason.salary_cap=cap;
+  renderSalaryCapAdmin();toast("Salary cap saved",fmtMoney(cap));
+}
+async function saveRosterSize(){
+  if(!sb||!adminSeason)return;
+  const n=Math.max(1,Math.min(30,+($("#rs-val")||{}).value||adminSeason.roster_max));
+  const {error}=await sb.from("seasons").update({roster_max:n}).eq("id",adminSeason.id);
+  if(error){toast("Couldn't save",error.message);return;}
+  adminSeason.roster_max=n;if(openSeason&&openSeason.id===adminSeason.id)openSeason.roster_max=n;
+  renderRosterSizeAdmin();toast("Roster size saved",n+" players per club");
 }
 function renderSeasonAdmin(){
   const el=$("#seasonAdminBody");if(!el)return;const s=adminSeason;
@@ -3828,13 +3880,10 @@ function renderSeasonAdmin(){
   const pill=$("#seasonStatusPill");if(pill)pill.textContent=s.registration_open?"Registration open":(s.status[0].toUpperCase()+s.status.slice(1));
   const dl=[["se-regdl","Registration deadline",s.registration_deadline],["se-ownerdl","Team-owner application deadline",s.owner_app_deadline],["se-draft","Draft night",s.draft_at],["se-start","Season start",s.starts_at],["se-end","Season finish",s.ends_at]];
   el.innerHTML=`
-    <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-bottom:6px">
-      <div class="ef-row"><label>Season status</label><select id="se-status">${["upcoming","active","complete"].map(x=>`<option value="${x}" ${x===s.status?"selected":""}>${x[0].toUpperCase()+x.slice(1)}</option>`).join("")}</select></div>
-      <div class="ef-row"><label>Roster cap (players)</label><input id="se-cap" type="number" min="1" max="30" value="${s.roster_max}"></div>
-    </div>
     <div class="ef-grid" style="grid-template-columns:1fr;margin-bottom:6px">
-      <div class="ef-row"><label for="se-salcap">Salary cap</label><input id="se-salcap" type="text" value="${s.salary_cap?fmtMoney(s.salary_cap):""}" placeholder="e.g. 65M"><small style="color:var(--fog);font-size:11.5px">Accepts values like <b>65M</b>, <b>750K</b>, or a raw number. Clubs can't trade or sign over this.</small></div>
+      <div class="ef-row"><label>Season status</label><select id="se-status">${["upcoming","active","complete"].map(x=>`<option value="${x}" ${x===s.status?"selected":""}>${x[0].toUpperCase()+x.slice(1)}</option>`).join("")}</select></div>
     </div>
+    <div style="font-size:12px;color:var(--fog);margin-bottom:6px">Salary cap and roster size have their own editors under <b>League</b>.</div>
     <label class="se-toggle"><span>Registration open</span><span class="switch"><input type="checkbox" id="se-regopen" ${s.registration_open?"checked":""}><span class="track"></span><span class="knob"></span></span></label>
     <div class="ef-grid" style="grid-template-columns:1fr 1fr;margin-top:6px">
       ${dl.map(([id,lab,val])=>`<div class="ef-row"><label for="${id}">${lab}</label><input id="${id}" type="datetime-local" value="${dtLocal(val)}"></div>`).join("")}
@@ -3861,9 +3910,7 @@ function seasonMovesLocked(s){s=s||openSeason;if(!s)return false;
 async function saveSeason(){
   if(!sb||!adminSeason)return;
   const iso=id=>{const v=($("#"+id)||{}).value;return v?new Date(v).toISOString():null;};
-  let salCap=parseMoney($("#se-salcap").value);if(isNaN(salCap)||salCap<0)salCap=adminSeason.salary_cap;
-  const payload={status:$("#se-status").value,roster_max:Math.max(1,Math.min(30,+$("#se-cap").value||12)),registration_open:$("#se-regopen").checked,
-    salary_cap:salCap,
+  const payload={status:$("#se-status").value,registration_open:$("#se-regopen").checked,
     registration_deadline:iso("se-regdl"),owner_app_deadline:iso("se-ownerdl"),draft_at:iso("se-draft"),starts_at:iso("se-start"),ends_at:iso("se-end"),
     trade_deadline_week:(+$("#se-deadline").value||null),moves_lock_override:$("#se-lock").value};
   const {error}=await sb.from("seasons").update(payload).eq("id",adminSeason.id);
@@ -3875,6 +3922,8 @@ async function saveSeason(){
 document.addEventListener("click",e=>{
   if(e.target.closest("#admLogout")){e.preventDefault();signOutSb();}
   else if(e.target.closest("#saveSeasonBtn")){e.preventDefault();saveSeason();}
+  else if(e.target.closest("#saveCapBtn")){e.preventDefault();saveSalaryCap();}
+  else if(e.target.closest("#saveRosterBtn")){e.preventDefault();saveRosterSize();}
 });
 function teamIdOf(code){const t=dbTeams.find(x=>x.code===code);return t?t.id:null;}
 function codeOfId(id){const t=dbTeams.find(x=>x.id===id);return t?t.code:null;}
@@ -4398,8 +4447,32 @@ $("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.t
   if(error){toast("Couldn't publish",error.message);return;}
   await loadNews();renderNews();renderNewsManage();
   toast("Article published","\""+t+"\" is live on the News page.");$("#an-title").value="";$("#an-body").value="";});
-$$(".mgr-tab[data-atab]").forEach(tab=>tab.addEventListener("click",()=>{$$("#view-admin .mgr-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");
-  $$("#view-admin .mgr-panel").forEach(p=>p.classList.remove("on"));$("#atab-"+tab.dataset.atab).classList.add("on");}));
+// Two-tier League Office nav: top-level sections, each with its own sub-tabs mapped to panels.
+const ADMIN_SECTIONS=[
+  ["league","League",[["season","Season Deadlines"],["salarycap","Salary Cap"],["rostersize","Roster Size"],["schedbuild","Scheduler"],["draft","Draft"]]],
+  ["teams","Teams",[["teams","Team Directory"],["teamstats","Team Stats Editor"]]],
+  ["players","Players",[["members","Player Directory"],["registrations","Registrations"],["gamestats","Player Stats Editor"]]],
+  ["enforce","Applications & Enforcement",[["complaints","Complaints"],["appeals","Appeals"],["poschanges","Position Changes"],["owners","Owner Apps"],["bans","Bans"],["suspensions","Suspensions"]]],
+  ["news","News",[["news","News"]]],
+  ["discord","Discord",[["discord","Discord"]]]
+];
+function showAdminPanel(atab){
+  $$("#view-admin .mgr-panel").forEach(p=>p.classList.remove("on"));
+  const panel=$("#atab-"+atab);if(panel)panel.classList.add("on");
+  $$("#admSubtabs .sub-tab").forEach(t=>t.classList.toggle("active",t.dataset.atab===atab));
+}
+function showAdminSection(sec){
+  const s=ADMIN_SECTIONS.find(x=>x[0]===sec);if(!s)return;
+  $$("#admSections .sec-tab").forEach(t=>t.classList.toggle("active",t.dataset.sec===sec));
+  const sub=$("#admSubtabs");if(!sub)return;
+  sub.innerHTML=s[2].map(([atab,label],i)=>`<button class="sub-tab${i===0?' active':''}" data-atab="${atab}">${esc(label)}</button>`).join("");
+  sub.style.display=s[2].length>1?"flex":"none";
+  showAdminPanel(s[2][0][0]);
+}
+document.addEventListener("click",e=>{
+  const sec=e.target.closest("#admSections .sec-tab");if(sec){showAdminSection(sec.dataset.sec);return;}
+  const sub=e.target.closest("#admSubtabs .sub-tab");if(sub){showAdminPanel(sub.dataset.atab);return;}
+});
 
 /* ------------------------------ MODAL ------------------------------ */
 let modalCb=null;
