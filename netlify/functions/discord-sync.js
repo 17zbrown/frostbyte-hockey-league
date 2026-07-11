@@ -4,6 +4,8 @@
 //  (2) Role sync: reconciles each member's MANAGED Discord roles with the DB —
 //      team role (from their roster spot), General Manager, Commissioner, Player,
 //      Free Agent. Never touches non-managed roles (boosters, custom, etc.).
+//  (3) Server resolution: once a game's 30-min pick-lock passes, compute its
+//      server from the teams' private veto/preference picks (auto-fills the match card).
 //
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // No-ops safely if the bot token / guild id aren't set. Node 18+ (global fetch).
@@ -115,6 +117,12 @@ export default async () => {
       sum.errors.push({ discord_id: m.discord_id, error: String(e.message || e) });
     }
   }
+  // (3) resolve the server for any game whose 30-min pick-lock has passed (auto-fills the match card)
+  try {
+    const rr = await fetch(`${SB_URL}/rest/v1/rpc/resolve_due_servers`, { method: "POST", headers: sbHead(), body: "{}" });
+    sum.serversResolved = rr.ok ? await rr.json() : `err ${rr.status}`;
+  } catch (e) { sum.errors.push({ rpc: "resolve_due_servers", error: String(e.message || e) }); }
+
   console.log("discord-sync:", JSON.stringify(sum));
   return new Response(JSON.stringify(sum), { status: 200, headers: { "content-type": "application/json" } });
 };

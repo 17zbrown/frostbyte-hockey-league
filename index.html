@@ -511,12 +511,19 @@
   .gn-ha.home{color:var(--frost);border-color:#8a6d00}
   .gn-code{margin-left:auto;font-size:12px;color:var(--fog);font-weight:700}
   .gn-mc{flex-shrink:0}
-  .gn-veto{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft)}
+  .gn-veto{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft)}
   .gn-veto-l{display:flex;align-items:center;gap:9px;font-family:var(--f-cond);font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:11px;color:var(--fog)}
-  .veto-in{width:184px;font-family:var(--f-body);font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice);text-transform:none;letter-spacing:0}
-  .veto-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #8a6d001f}
-  .gn-oppveto{font-family:var(--f-cond);font-size:12px;letter-spacing:.02em;color:var(--fog)}
-  .gn-oppveto b{color:var(--ice)}
+  .gn-pick{display:flex;flex-direction:column;gap:5px}
+  .gn-pick label{font-family:var(--f-cond);font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:10.5px;color:var(--fog)}
+  .srv-sel{width:168px;font-family:var(--f-body);font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ice)}
+  .srv-sel:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px #8a6d001f}
+  .srv-sel:disabled{opacity:.6;cursor:default}
+  .gn-picknote{font-family:var(--f-cond);font-size:11px;letter-spacing:.02em;color:var(--fog);display:flex;align-items:center;gap:6px}
+  .gn-picknote svg{width:12px;height:12px;flex-shrink:0}
+  .gn-locked{display:flex;align-items:center;gap:8px;font-family:var(--f-cond);letter-spacing:.03em;font-size:13px;color:var(--ice)}
+  .gn-locked svg{width:15px;height:15px;flex-shrink:0}
+  .gn-locked .srv{font-weight:700;color:var(--frost);white-space:nowrap}
+  .gn-locked .tag{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog);border:1px solid var(--line);border-radius:4px;padding:2px 6px}
   .gn-empty{color:var(--fog);font-size:13px;padding:14px;border:1px dashed var(--line);border-radius:8px;margin-bottom:18px}
   .owner-app{border:1px solid var(--line);border-radius:10px;padding:15px 17px;margin-bottom:13px;background:var(--panel-2)}
   .oa-head{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
@@ -2231,6 +2238,7 @@ function showMatchCard(g){
   const mine=myTeamCode;const homeYou=mine===g.a,awayYou=mine===g.b;
   const yourSide=homeYou?"HOME":(awayYou?"AWAY":null);
   const sideSel=yourSide==="HOME"?"Home":(yourSide==="AWAY"?"Away":"Home / Away");
+  const srvLocked=g.when&&(new Date(g.when).getTime()-VETO_LOCK_MS<=Date.now());
   $("#modalCard").classList.remove("wide");
   $("#modalTitle").textContent="Match Details";
   $("#modalMsg").innerHTML=`
@@ -2249,13 +2257,14 @@ function showMatchCard(g){
         <div class="mc-set"><span>Game Type</span><b>Private Game</b></div>
         <div class="mc-set"><span>Password</span><b class="mono">${g.code||"— pending —"}</b></div>
         <div class="mc-set"><span>Side Selection</span><b>${sideSel}</b></div>
-        <div class="mc-set"><span>Server Selection</span><b>North America East</b></div>
+        <div class="mc-set"><span>Server Selection</span><b id="mcServer">${srvLocked?"…":"Set 30 min before puck drop"}</b></div>
         <div class="mc-set"><span>Allow Replay Skipping</span><b class="on">Yes</b></div>
         <div class="mc-set"><span>Period Length</span><b>4 Minutes</b></div>
         <div class="mc-set"><span>Grudge Match Game</span><b class="off">Off</b></div>
         <div class="mc-set"><span>Use Best Game Location</span><b>Relaxed</b></div>
       </div>
     </div>`;
+  if(srvLocked&&g.id)gameServer(g.id).then(s=>{const el=$("#mcServer");if(el)el.textContent=s||"NA East";});
   modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
 }
 document.addEventListener("click",e=>{const el=e.target.closest("[data-match]");if(!el)return;showMatchCard(findGameById(el.dataset.match));});
@@ -3552,6 +3561,13 @@ let lineupRosterCache=[];
 // ET calendar parts (weekday + Y-M-D) for bucketing games into Wed/Fri nights.
 function etParts(iso){try{const p={};new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",weekday:"short"}).formatToParts(new Date(iso)).forEach(x=>p[x.type]=x.value);return p;}catch(e){return {};}}
 // This club's next upcoming games grouped into the next Wednesday and Friday night.
+const SERVERS=["NA East","NA Northeast","NA Central"];
+const VETO_LOCK_MS=30*60*1000; // picks lock 30 min before puck drop
+async function gameServer(gameId){ // resolved server after lock, else null
+  if(!sb||!gameId)return null;
+  const {data,error}=await sb.rpc("resolve_game_server",{p_game:gameId});
+  return error?null:(data||null);
+}
 function clubNightGames(){
   const buckets={Wed:{},Fri:{}};
   (liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{
@@ -3579,15 +3595,37 @@ async function renderLineup(){
   // saved lineups
   const saved={};
   if(sb&&openSeason&&tid){const {data}=await sb.from("lineups").select("*").eq("season_id",openSeason.id).eq("team_id",tid);(data||[]).forEach(r=>saved[r.night]=r);}
-  // this week's games per night + server vetoes
+  // this week's games per night + PRIVATE server picks (RLS returns only my club's rows)
   const nights=clubNightGames();
   const gameIds=[];[nights.wed,nights.fri].forEach(n=>{if(n)n.games.forEach(g=>gameIds.push(g.id));});
-  const vmap={};
-  if(sb&&gameIds.length){const {data}=await sb.from("game_vetoes").select("game_id,team_id,servers").in("game_id",gameIds);(data||[]).forEach(v=>{(vmap[v.game_id]=vmap[v.game_id]||{})[v.team_id]=v.servers;});}
+  const vmap={},srvMap={};
+  if(sb&&gameIds.length){
+    const {data}=await sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id",gameIds);
+    (data||[]).forEach(v=>{if(v.team_id===tid)vmap[v.game_id]=v;});
+    const locked=gameIds.filter(id=>{const g=[...(nights.wed?nights.wed.games:[]),...(nights.fri?nights.fri.games:[])].find(x=>x.id===id);return g&&new Date(g.when).getTime()-VETO_LOCK_MS<=Date.now();});
+    await Promise.all(locked.map(id=>gameServer(id).then(s=>{if(s)srvMap[id]=s;})));
+  }
+  const IC_LOCK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+  const IC_EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const srvOpts=sel=>SERVERS.map(s=>`<option value="${s}" ${s===sel?"selected":""}>${s}</option>`).join("");
   const gameRow=g=>{
-    const home=g.a===currentClub,oppCode=home?g.b:g.a,oppTid=teamIdOf(oppCode);
+    const home=g.a===currentClub,oppCode=home?g.b:g.a;
     const oppName=teams[oppCode]?teams[oppCode].name:oppCode;
-    const myVeto=(vmap[g.id]||{})[tid]||"",oppVeto=(vmap[g.id]||{})[oppTid]||"";
+    const locked=new Date(g.when).getTime()-VETO_LOCK_MS<=Date.now();
+    const my=vmap[g.id]||{};
+    let pickHtml;
+    if(locked){
+      const srv=srvMap[g.id];
+      pickHtml=`<div class="gn-locked">${IC_LOCK}<span>Server:</span> <span class="srv">${srv?esc(srv):"To be set"}</span> <span class="tag">Locked</span></div>`;
+    }else if(home){
+      pickHtml=`<div class="gn-pick"><label>1st choice</label><select class="srv-sel" data-game="${g.id}" data-ha="home" data-field="pref1"><option value="">— pick —</option>${srvOpts(my.pref1)}</select></div>
+        <div class="gn-pick"><label>2nd choice</label><select class="srv-sel" data-game="${g.id}" data-ha="home" data-field="pref2"><option value="">— pick —</option>${srvOpts(my.pref2)}</select></div>
+        <span class="gn-picknote">${IC_LOCK} Private &middot; both required &middot; locks 30 min before puck drop</span>`;
+    }else{
+      pickHtml=`<div class="gn-pick"><label>Veto — won't play</label><select class="srv-sel" data-game="${g.id}" data-ha="away" data-field="veto"><option value="">— pick —</option>${srvOpts(my.veto)}</select></div>
+        <div class="gn-pick"><label>Preferred</label><select class="srv-sel" data-game="${g.id}" data-ha="away" data-field="preferred"><option value="">— pick —</option>${srvOpts(my.preferred)}</select></div>
+        <span class="gn-picknote">${IC_EYE} Private &middot; preferred is used only if ${esc(oppName)} doesn't submit</span>`;
+    }
     return `<div class="gn-game">
       <div class="gn-game-top">
         <span class="gn-time">${fmtGameTime(g.when)} ET</span>
@@ -3596,10 +3634,7 @@ async function renderLineup(){
         <span class="gn-code mono">Lobby #${g.code||"—"}</span>
         <button class="mini gn-mc" data-match="${g.id}">Match card</button>
       </div>
-      <div class="gn-veto">
-        <label class="gn-veto-l">Your server vetoes<input class="veto-in" data-game="${g.id}" value="${esc(myVeto)}" placeholder="e.g. East 1, East 2"></label>
-        <span class="gn-oppveto">${esc(oppName)} vetoes: <b>${oppVeto?esc(oppVeto):"—"}</b></span>
-      </div>
+      <div class="gn-veto">${pickHtml}</div>
     </div>`;
   };
   const slotFor=(night,role)=>{
@@ -3616,19 +3651,32 @@ async function renderLineup(){
     const gamesHtml=nd&&nd.games.length?nd.games.map(gameRow).join(""):'<div class="gn-empty">No games scheduled for this night yet — they appear once the commissioner posts the schedule.</div>';
     const lineupHtml=roster.length?`<div class="gn-sub">Starting lineup</div><div class="lineup-grid">${LINEUP_ROLES.map(role=>slotFor(night,role)).join("")}</div>`:'<div class="gn-empty">Your lineup builder unlocks once players are assigned to your club.</div>';
     return `<div class="lineup-night"><div class="lineup-night-h">${night.label} <span>${dateLabel}</span></div>
-      <div class="gn-sub">Games &amp; server vetoes</div>
+      <div class="gn-sub">Games &amp; server selection</div>
       <div class="gn-games">${gamesHtml}</div>
       ${lineupHtml}</div>`;
   };
   grid.innerHTML=LINEUP_NIGHTS.map(nightCard).join("");
 }
 $("#lineupGrid").addEventListener("change",async e=>{
-  const v=e.target.closest(".veto-in");if(!v)return;
-  if(!sb||!currentClub){toast("Not connected","Sign in to save your vetoes.");return;}
+  const sel=e.target.closest(".srv-sel");if(!sel)return;
+  if(!sb||!currentClub){toast("Not connected","Sign in to save your server picks.");return;}
   const tid=teamIdOf(currentClub);if(!tid)return;
-  const {error}=await sb.from("game_vetoes").upsert({game_id:v.dataset.game,team_id:tid,servers:(v.value||"").trim()||null,updated_by:authUser?authUser.id:null,updated_at:new Date().toISOString()},{onConflict:"game_id,team_id"});
-  if(error){toast("Couldn't save veto",error.message);return;}
-  toast("Server vetoes saved","Recorded for this game.");
+  const gid=sel.dataset.game,ha=sel.dataset.ha,row=sel.closest(".gn-veto");
+  // gather this team's two picks for the game (write a complete row for its role)
+  const val=f=>{const el=row.querySelector('.srv-sel[data-field="'+f+'"]');return el&&el.value?el.value:null;};
+  const rec={game_id:gid,team_id:tid,updated_by:authUser?authUser.id:null,updated_at:new Date().toISOString()};
+  if(ha==="away"){
+    const veto=val("veto"),pref=val("preferred");
+    if(veto&&pref&&veto===pref){toast("Pick a different preferred","Your preferred server can't be the one you vetoed.");sel.value="";return;}
+    rec.veto=veto;rec.preferred=pref;
+  }else{
+    const p1=val("pref1"),p2=val("pref2");
+    if(p1&&p2&&p1===p2){toast("Pick two different servers","Your 1st and 2nd choices must differ.");sel.value="";return;}
+    rec.pref1=p1;rec.pref2=p2;
+  }
+  const {error}=await sb.from("game_vetoes").upsert(rec,{onConflict:"game_id,team_id"});
+  if(error){toast(error.message&&/lock/i.test(error.message)?"Picks are locked":"Couldn't save",error.message||"Try again.");return;}
+  toast("Server pick saved",ha==="away"?"Your veto & preferred are recorded.":"Your 1st & 2nd choices are recorded.");
 });
 $("#saveLineup").addEventListener("click",async()=>{
   if(!$("#lineupGrid").querySelector("select")){toast("No roster yet","Players must be assigned to your club before you can set a lineup.");return;}
