@@ -160,7 +160,7 @@
   .tw-watch.live .tw-txt{color:#9146ff}
   .tw-own{display:flex;gap:8px;flex-wrap:wrap}
   .live-tag{display:inline-flex;align-items:center;gap:6px;border-color:var(--live)!important;color:#fff!important;background:var(--live);font-weight:700;text-decoration:none}
-  .ovr-tag{border-color:var(--frost)!important;color:#fff!important;background:var(--frost)}.ovr-tag b{font-size:14px}
+  .ovr-tag{border-color:#ffe500!important;color:#0a0a0a!important;background:#ffe500}.ovr-tag b{font-size:14px}
   .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;animation:livePulse 1.4s infinite}
   @keyframes livePulse{0%,100%{opacity:1}50%{opacity:.3}}
   @media(prefers-reduced-motion:reduce){.live-dot,.live-orb{animation:none}}
@@ -569,9 +569,9 @@
   .team-card h3{font-family:var(--f-display);text-transform:uppercase;font-size:22px;line-height:.95}
   .team-card .tc-sub{font-family:var(--f-cond);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--fog);margin-top:3px}
   .team-card .tc-stats{display:flex;border-top:1px solid var(--line)}
-  .team-card .tc-stats div{flex:1;padding:12px;text-align:center;border-right:1px solid var(--line)}
+  .team-card .tc-stats div{flex:1;padding:12px 6px;text-align:center;border-right:1px solid var(--line)}
   .team-card .tc-stats div:last-child{border-right:0}
-  .team-card .tc-stats .n{font-family:var(--f-mono);font-weight:700;font-size:18px}
+  .team-card .tc-stats .n{font-family:var(--f-mono);font-weight:700;font-size:17px;white-space:nowrap}
   .team-card .tc-stats .l{font-family:var(--f-cond);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--fog-dim);margin-top:2px}
   .team-banner{border:1px solid var(--line);border-radius:var(--r-l);overflow:hidden;margin-bottom:24px;box-shadow:var(--sh-2)}
   .team-banner .tb-top{padding:34px 34px 28px;display:flex;align-items:center;gap:22px;position:relative;overflow:hidden}
@@ -2142,6 +2142,15 @@ async function loadStandings(){
   const byCode={};rows.forEach(r=>{const c=idToCode[r.team_id];if(c)byCode[c]=r;});
   liveStandings=TEAM_KEYS.map(c=>{const r=byCode[c]||{};return [c,r.gp||0,r.wins||0,r.losses||0,r.otl||0,r.gf||0,r.ga||0,"—"];});
 }
+// Team overall = average of the overalls of every active player on the club's roster.
+let teamOvrByCode={};
+async function loadTeamOveralls(){
+  if(!sb||!openSeason)return;
+  const {data}=await sb.from("roster_spots").select("team_id,profiles(overall)").eq("season_id",openSeason.id).eq("status","active");
+  const agg={};(data||[]).forEach(r=>{const o=r.profiles?+r.profiles.overall||0:0;if(o>0){const c=codeOfId(r.team_id);if(c)(agg[c]=agg[c]||[]).push(o);}});
+  const next={};Object.keys(agg).forEach(c=>{next[c]=Math.round(agg[c].reduce((a,b)=>a+b,0)/agg[c].length);});
+  teamOvrByCode=next;
+}
 function standRow(r,rank,cut){
   const [code,gp,w,l,otl,gf,ga]=r;const t=teams[code];const strk=r[7]||"—";const sc=strk[0]==="W"?"w":(strk[0]==="L"?"l":"");
   return `<tr class="rowlink${cut?' playoff-cut':''}" data-go="team" data-param="${code}">
@@ -2500,6 +2509,7 @@ function renderTeamsGrid(){
         <div><div class="n">${r[2]}-${r[3]}-${r[4]}</div><div class="l">Record</div></div>
         <div><div class="n" style="color:var(--frost)">${pts(r)}</div><div class="l">Points</div></div>
         <div><div class="n">${diff>0?'+':''}${diff}</div><div class="l">Diff</div></div>
+        <div><div class="n">${teamOvrByCode[code]||'—'}</div><div class="l">Team OVR</div></div>
       </div></div>`;}).join("");
 }
 
@@ -2522,7 +2532,7 @@ async function renderTeamPage(code){
       <div class="tb-top"><div style="position:absolute;inset:0;background:${t.c};opacity:.14"></div>
         <span style="line-height:0;position:relative;z-index:1">${badge(code,82)}</span>
         <div class="tb-info"><h2>${t.name}</h2>
-          <div class="tb-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
+          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
             <span class="ph-tag" id="tbManager">Manager · <b>TBD</b></span></div></div>
         <div class="tb-rec"><div class="v">${rec}</div><small>${pts_} pts</small></div></div>
       <div class="tb-stats">
@@ -2537,7 +2547,7 @@ async function renderTeamPage(code){
   let spots=[],stats=[],sptm=null,tstat=[];
   if(sb&&openSeason){const tid=teamIdOf(code);
     if(tid){
-      const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,role)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+      const r1=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,role,overall)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
       spots=r1.data||[];
       const r2=await sb.from("player_season_stats").select("*").eq("season_id",openSeason.id);
       stats=r2.data||[];
@@ -2548,7 +2558,9 @@ async function renderTeamPage(code){
     }}
   if(token!==teamPageToken)return;
   const statBy={};stats.forEach(s=>statBy[s.profile_id]=s);
-  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  const roster=spots.map(s=>{const st=statBy[s.profile_id]||{};return {pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",role:s.profiles?s.profiles.role:null,ovr:s.profiles?+s.profiles.overall||0:0,pos:s.position,num:s.jersey_number,salary:+s.salary||0,gp:st.gp||0,g:st.goals||0,a:st.assists||0,pts:st.points||0,saves:st.saves||0,ga:st.goals_against||0,sa:st.shots_against||0,is_goalie:!!st.is_goalie||s.position==="G"};});
+  const _ovrs=roster.map(p=>p.ovr).filter(v=>v>0);const teamOvr=_ovrs.length?Math.round(_ovrs.reduce((a,b)=>a+b,0)/_ovrs.length):null;
+  const ovrEl=$("#tbOvr");if(ovrEl){if(teamOvr){ovrEl.innerHTML=`<b>${teamOvr}</b> TEAM OVR`;ovrEl.style.display="";}else ovrEl.style.display="none";}
   const teamCapUsed=roster.reduce((s,p)=>s+(+p.salary||0),0);
   const teamSalCap=openSeason?(+openSeason.salary_cap||0):0;
   const _trow=(dbTeams||[]).find(x=>x.id===teamIdOf(code));
@@ -2954,7 +2966,7 @@ async function sbInit(){
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
     dbTeams=tms||[];buildTeams();
-    await loadStandings();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
+    await loadStandings();await loadTeamOveralls();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     updateBranding();renderTeamsGrid();renderHeroCarousel();renderHeroRink();
     renderFixtures();renderSchedule();renderTxns();renderNews();renderLiveGames();
@@ -4134,7 +4146,7 @@ $("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filter
 /* ---- Teams (add / remove clubs) ---- */
 async function refreshTeamsEverywhere(){
   const {data:tms}=await sb.from("teams").select("*").order("code");if(tms){dbTeams=tms;buildTeams();}
-  await loadStandings();await loadSchedule();
+  await loadStandings();await loadTeamOveralls();await loadSchedule();
   renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
   renderTeamsGrid();renderFixtures();renderSchedule();renderRankings();renderBracket();renderHeroRink();renderLiveGames();
   if($("#membersBody"))loadMembers();
