@@ -4705,6 +4705,10 @@ const DISCORD_CHANNELS=[
   {key:"discord_transactions_webhook",label:"Trades, signings & waives",desc:"Every roster move, the moment it happens."},
   {key:"discord_scores_webhook",label:"Final scores",desc:"Posts when a game is marked final."},
   {key:"discord_news_webhook",label:"Published news",desc:"Posts when you publish a news article."},
+  {key:"discord_schedule_webhook",label:"Weekly schedule",desc:"Auto-posts the week's slate + 3 featured matchups every Tuesday at 5pm ET."},
+  {key:"discord_standings_webhook",label:"Standings",desc:"Auto-posts a standings snapshot on Friday nights, once that week's games are all final."},
+  {key:"discord_freeagency_webhook",label:"Free agency",desc:"Free-agency channel — limited to team management on Discord."},
+  {key:"discord_tradeblock_webhook",label:"Trade block",desc:"Trade-block channel — limited to team management on Discord."},
 ];
 async function loadDiscordAdmin(){
   const el=$("#discordBody");if(!el||!sb)return;

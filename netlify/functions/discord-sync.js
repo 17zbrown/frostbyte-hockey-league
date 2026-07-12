@@ -85,6 +85,23 @@ export default async () => {
 
   const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0, errors: [] };
 
+  // Keep #free-agency and #trade-block private to team management — self-heals if the @everyone
+  // view permission ever gets re-added. VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608.
+  const MGMT_ALLOW = "68608";
+  const mgmtRoleIds = ["owner", "general manager", "assistant general manager", "commissioner"].map((n) => roleId[n]).filter(Boolean);
+  for (const cname of ["free-agency", "trade-block"]) {
+    const chan = guildChannels.find((c) => c.name === cname && c.type === 0);
+    if (!chan) continue;
+    const everyone = (chan.permission_overwrites || []).find((o) => o.id === GUILD);
+    const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
+    if (hidden) continue; // already locked down
+    try {
+      await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
+      for (const rid of mgmtRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+      sum.mgmtLocked = (sum.mgmtLocked || 0) + 1;
+    } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
+  }
+
   // (0) keep each team's Discord ROLE + CHANNEL name in sync with the site team name
   for (const t of teams) {
     try {
