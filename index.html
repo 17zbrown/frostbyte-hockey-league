@@ -152,6 +152,11 @@
     font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;transition:gap .15s}
   .twitch-bar:hover .tw-go{gap:9px}
   .twitch-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;padding:13px 18px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-l)}
+  .pf-connect{margin-top:16px}
+  .pfc-body{display:flex;flex-wrap:wrap;gap:16px 34px;padding:15px 20px}
+  .pfc-row{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .pfc-k{font-family:var(--f-cond);font-weight:500;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--fog)}
+  .pfc-v{font-family:var(--f-mono);font-size:14.5px;font-weight:600;color:var(--ice);word-break:break-word}
   .twitch-card .tw-ic{width:34px;height:34px;border-radius:8px;background:#9146ff;display:grid;place-items:center;color:#fff;flex-shrink:0}
   .tw-watch,.tw-empty{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:200px}
   .tw-watch .tw-txt,.tw-empty .tw-txt{display:flex;flex-direction:column;font-family:var(--f-cond);font-weight:600;letter-spacing:.03em;text-transform:uppercase;font-size:14px;color:var(--ice)}
@@ -2728,11 +2733,13 @@ async function renderPlayerPage(id){
   const teamRole=mgmtTeam?(mgmtTeam.owner_profile_id===prof.id?"owner":mgmtTeam.gm_profile_id===prof.id?"gm":"agm"):null;
   const roleTag=prof.role==="commissioner"?"Commissioner":(teamRole?ROLE_LABEL[teamRole]:(prof.role==="staff"?"Staff":null));
   const CATLBL={C:"Center",W:"Wing",D:"Defense",G:"Goalie"};
-  const [bdRes,poRes,logRes]=await Promise.all([
+  const [bdRes,poRes,logRes,contactRes]=await Promise.all([
     sb.rpc("overall_breakdown",{p_profile:prof.id}),
     sb.from("player_position_overalls").select("pos_cat,overall,gp").eq("profile_id",prof.id),
-    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,pp_goals,sh_goals,gwg,interceptions,passes_completed,passes_attempted,faceoffs_won,faceoffs_lost,takeaways,giveaways,shot_attempts,possession_seconds,penalties_drawn,time_on_ice_seconds,breakaway_shots,breakaway_saves,poke_checks,offense_rating,defense_rating,team_play_rating,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final")
+    sb.from("game_stats").select("game_id,team_id,is_goalie,goals,assists,shots,hits,pim,plus_minus,blocked_shots,saves,shots_against,goals_against,shutout,pp_goals,sh_goals,gwg,interceptions,passes_completed,passes_attempted,faceoffs_won,faceoffs_lost,takeaways,giveaways,shot_attempts,possession_seconds,penalties_drawn,time_on_ice_seconds,breakaway_shots,breakaway_saves,poke_checks,offense_rating,defense_rating,team_play_rating,games!inner(id,scheduled_at,home_team_id,away_team_id,home_score,away_score,went_ot,status,season_id,seasons(number))").eq("profile_id",prof.id).eq("games.status","final"),
+    sb.rpc("player_contact",{p_profile:prof.id})
   ]);
+  const contact=(contactRes&&contactRes.data&&contactRes.data[0])||null;
   const bd=bdRes&&bdRes.data;const posOvr=(poRes&&poRes.data)||[];
   const log=((logRes&&logRes.data)||[]).filter(r=>r.games).sort((a,b)=>new Date(b.games.scheduled_at)-new Date(a.games.scheduled_at));
   const isG=bd?bd.category==="G":(pos==="G");
@@ -2792,6 +2799,13 @@ async function renderPlayerPage(id){
       ${prev.map(([n,rows])=>`<details class="pf-season"><summary>Season ${n} <span class="pf-sn-ct">${rows.length} game${rows.length!==1?"s":""}</span></summary>${glTable(rows)}</details>`).join("")}
       <p class="gl-foot">Tap any game for the full box score.</p></div>`;
   }
+  // Connect card — platform, platform gamertag, EA ID from the player's latest registration
+  let connectCard="";
+  if(contact&&(contact.platform||contact.platform_gamertag||contact.ea_id)){
+    const pfc=(k,v)=>v?`<div class="pfc-row"><span class="pfc-k">${k}</span><span class="pfc-v">${esc(v)}</span></div>`:"";
+    const body=pfc("Platform",contact.platform)+pfc("Platform gamertag",contact.platform_gamertag)+pfc("EA ID",contact.ea_id);
+    if(body)connectCard=`<div class="card pf-connect"><div class="card-h"><h3>Connect</h3></div><div class="pfc-body">${body}</div></div>`;
+  }
   el.innerHTML=`
     <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}" style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${badge(tc,16)}${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
     <div class="player-hero">
@@ -2804,6 +2818,7 @@ async function renderPlayerPage(id){
           ${prof.overall?`<span class="ph-tag ovr-tag" title="Computed from career stats using ${posLbl} weights. Provisional until 5 games played."><b>${prof.overall}</b> OVR</span>`:''}
           ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div></div>
     </div>
+    ${connectCard}
     ${twitchBlock(prof)}
     ${posChips}
     ${statsCard}
