@@ -437,6 +437,11 @@
   .mgr-tag{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost-ink);background:var(--frost-glow);padding:4px 10px;border-radius:100px}
   .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
   .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px var(--frost-glow)}
+  /* pre-draft scouting */
+  .scout-link{color:var(--frost-ink);text-decoration:none;font-weight:600;white-space:nowrap}
+  .scout-link:hover{text-decoration:underline}
+  .scout-ovr{width:54px;text-align:center;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
+  .scout-ovr:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px var(--frost-glow)}
   /* salary field with ±$100K steppers */
   .sal-field{display:flex;align-items:stretch;max-width:220px}
   .sal-field>input{flex:1 1 auto;min-width:0;border-top-right-radius:0!important;border-bottom-right-radius:0!important;border-right:none}
@@ -2968,15 +2973,16 @@ async function renderDraft(){
   const cnt=$("#draftCount");
   if(!sb||!openSeason){el.innerHTML="";return;}
   if(!isManager()){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Managers only</h4><p>The draft pool is visible to club managers and the commissioner.</p></div>';if(cnt)cnt.textContent="";return;}
-  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,scout_ovr, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
   const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
   const taken=new Set((spots||[]).map(s=>s.profile_id));
-  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id));
+  // Rank by the commissioner's scout OVR (best available first); unrated players fall to the bottom in sign-up order.
+  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id)).sort((a,b)=>(b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr));
   if(cnt)cnt.textContent=pool.length+" available";
   if(!pool.length){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Draft pool is empty</h4><p>Registered players who haven\'t been assigned to a club yet will appear here.</p></div>';return;}
   el.innerHTML=pool.map((p,i)=>`<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${p.ea_id||"—"}</small></div>
-    <div class="pv-ovr" style="font-size:16px">${p.position}<small>Pos</small></div></div>`).join("");
+    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${p.ea_id?`<a href="${scoutUrl(p.ea_id)}" target="_blank" rel="noopener" class="scout-link">${esc(p.ea_id)} ↗</a>`:"—"}</small></div>
+    <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`).join("");
 }
 
 /* ------------------------------ RULEBOOK ------------------------------ */
@@ -2995,6 +3001,10 @@ const SB_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
 const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
 let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null,myTeamCode=null;
 const DISCORD_INVITE="https://discord.gg/UQYqKD8bd";
+// Pre-draft scouting: opens a player's EASHL 6v6 career stats so a commissioner can seed a scout OVR.
+// {q} is the URL-encoded EA ID. Swap this one line for a direct ChelHead/ChelClub deep-link once its format is confirmed.
+const SCOUT_URL_TEMPLATE="https://www.google.com/search?q=chelhead+eashl+{q}";
+function scoutUrl(id){return SCOUT_URL_TEMPLATE.replace("{q}",encodeURIComponent(id||""));}
 const DISCORD_GLYPH=`<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg>`;
 async function sbInit(){
   if(!sb){renderAuthUI();return;}
@@ -4039,10 +4049,11 @@ async function loadRegistrations(){
   const spotBy={};(spots||[]).forEach(s=>{spotBy[s.profile_id]=codeOfId(s.team_id);});
   const pc=$("#regCount");if(pc)pc.textContent=(regs?regs.length:0)+" signed up";
   if(!regs||!regs.length){el.innerHTML=ADMIN_EMPTY("No registrations yet","Players who sign up for the season appear here to be assigned to a club.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th>Pos</th><th>#</th><th>Club</th><th>Cap Hit</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th title="Pre-draft scouting overall from EASHL 6v6 career stats">Scout</th><th>Pos</th><th>#</th><th>Club</th><th>Cap Hit</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       const cur=spotBy[r.profile_id];const gq=g.replace(/"/g,'&quot;');
-      return `<tr><td><b>${esc(g)}</b></td><td class="mono">${esc(r.ea_id)||"—"}</td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
+      const eid=r.ea_id||g;
+      return `<tr><td><b>${esc(g)}</b></td><td class="mono">${r.ea_id?`<a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link" title="Scout ${esc(eid)} — opens their EASHL 6v6 career stats">${esc(r.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
       <td>${done
         ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
         :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
@@ -4051,6 +4062,16 @@ async function loadRegistrations(){
         ?`<button class="mini good rm-move" data-prof="${r.profile_id}" data-name="${gq}">Move</button><button class="mini rm-remove" data-prof="${r.profile_id}" data-name="${gq}">Off roster</button>`
         :`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${gq}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
+}
+async function saveScoutOvr(el){
+  if(!sb)return;
+  const v=el.value.trim();
+  let nv=v===""?null:Math.round(+v);
+  if(nv!=null&&(isNaN(nv)||nv<0||nv>99)){toast("Invalid OVR","Enter a scout overall from 0 to 99.");return;}
+  const {error}=await sb.from("season_registrations").update({scout_ovr:nv}).eq("id",el.dataset.reg);
+  if(error){toast("Couldn't save scout OVR",error.message);return;}
+  el.value=nv==null?"":nv;
+  if(typeof renderDraft==="function")renderDraft();   // keep the draft board's ranking in sync
 }
 async function deleteRegistration(btn){
   const name=btn.dataset.name||"this player";
@@ -4422,6 +4443,7 @@ function filterMembers(){
 $("#view-admin").addEventListener("change",e=>{
   if(e.target.id==="mbRoleFilter"||e.target.id==="mbPosFilter"){filterMembers();return;}
   if(e.target.id==="psPosFilter"){filterPlayerStats();return;}
+  if(e.target.classList&&e.target.classList.contains("scout-ovr")){saveScoutOvr(e.target);return;}
 });
 $("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers();else if(e.target.id==="psSearch")filterPlayerStats();});
 $("#view-admin").addEventListener("click",e=>{
