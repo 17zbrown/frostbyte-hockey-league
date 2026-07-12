@@ -1811,9 +1811,16 @@
           </div>
         </div>
         <div id="schedAdminBody"></div></div></div>
-      <div class="mgr-panel" id="atab-gamestats"><div class="card"><div class="card-h"><h3>Games &amp; Stats</h3><span class="pill" id="gamesCount"></span></div>
+      <div class="mgr-panel" id="atab-gamestats"><div class="card"><div class="card-h"><h3>Game Scores</h3><span class="pill" id="gamesCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Enter final scores — standings and points update automatically. Per-player box scores can be added after.</div>
         <div id="gamesAdminBody"></div></div></div>
+      <div class="mgr-panel" id="atab-playerstats"><div class="card"><div class="card-h"><h3>Player Stats Editor</h3><span class="pill" id="psCount"></span></div>
+        <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Pick a player, then correct their box score for every game this season. Stats normally arrive automatically from the EA import — edit here only to fix a mistake.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
+          <input class="adm-search" id="psSearch" placeholder="Search players…" style="margin:0;flex:1;min-width:160px;width:auto" />
+          <select id="psPosFilter" style="min-width:120px"><option value="">All positions</option><option>C</option><option>LW</option><option>RW</option><option>LD</option><option>RD</option><option>G</option></select>
+        </div>
+        <div id="psBody"></div></div></div>
       <div class="mgr-panel" id="atab-members"><div class="card"><div class="card-h"><h3>Members &amp; Roles</h3><span class="pill" id="membersCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office. Change a player's position with the dropdown — it saves instantly.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
@@ -4401,6 +4408,63 @@ async function openBoxEditor(gameId){
 }
 document.addEventListener("click",e=>{const b=e.target.closest(".gs-edit");if(b)openBoxEditor(b.dataset.game);});
 
+// Player Stats Editor — a Player-Directory-style list; Edit opens every game's box score for that player this season.
+function teamNameById(id){for(const c in teams){if(teams[c]&&teams[c].id===id)return teams[c].name||c;}return "";}
+async function loadPlayerStats(){
+  const el=$("#psBody");if(!el||!sb)return;
+  const {data:profs}=await sb.from("profiles").select("id,gamertag,role").order("gamertag");
+  const season=adminSeason||openSeason;const posOf={},clubOf={};
+  if(season){
+    const {data:regs}=await sb.from("season_registrations").select("profile_id,position").eq("season_id",season.id);
+    (regs||[]).forEach(r=>{posOf[r.profile_id]=r.position;});
+    const {data:spots}=await sb.from("roster_spots").select("profile_id,position,team_id,status").eq("season_id",season.id);
+    (spots||[]).forEach(s=>{posOf[s.profile_id]=s.position;if(s.status==="active")clubOf[s.profile_id]=s.team_id;});
+  }
+  const pc=$("#psCount");if(pc)pc.textContent=(profs?profs.length:0)+" player"+((profs&&profs.length===1)?"":"s");
+  if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No players yet","Players show up here once they've signed in with Discord.");return;}
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Club</th><th>Position</th><th style="text-align:right">Stats</th></tr></thead><tbody>'+
+    profs.map(p=>{const tid=clubOf[p.id];const tn=tid?teamNameById(tid):"";return `<tr class="ps-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b></td>`+
+      `<td>${tn?`<span style="color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(tn)}</span>`:'<span style="color:var(--fog)">Free agent</span>'}</td>`+
+      `<td>${posOf[p.id]?esc(posOf[p.id]):'<span style="color:var(--fog)">—</span>'}</td>`+
+      `<td style="text-align:right"><button class="mini ps-edit" data-pid="${p.id}" data-name="${(p.gamertag||'?').replace(/"/g,'&quot;')}">Edit stats</button></td></tr>`;}).join("")+"</tbody></table></div>";
+  filterPlayerStats();
+}
+function filterPlayerStats(){
+  const t=(($("#psSearch")||{}).value||"").trim().toLowerCase();
+  const pf=($("#psPosFilter")||{}).value||"";
+  document.querySelectorAll("#psBody .ps-row").forEach(row=>{
+    row.style.display=((!t||row.dataset.name.includes(t))&&(!pf||row.dataset.pos===pf))?"":"none";
+  });
+}
+async function openPlayerStats(pid,name){
+  if(!sb)return;
+  const season=adminSeason||openSeason;if(!season){toast("No season","Set the active season first.");return;}
+  const {data}=await sb.from("game_stats").select("id,team_id,is_goalie,position,goals,assists,shots,hits,pim,plus_minus,blocked_shots,pp_goals,sh_goals,gwg,saves,shots_against,goals_against,shutout,games!inner(scheduled_at,home_team_id,away_team_id,home_score,away_score,status,season_id)").eq("profile_id",pid).eq("games.status","final").eq("games.season_id",season.id);
+  const rows=(data||[]).slice().sort((a,b)=>new Date(a.games.scheduled_at)-new Date(b.games.scheduled_at));
+  if(!rows.length){toast("No game stats yet",name+" has no box scores this season — they arrive automatically after each game.");return;}
+  const gLabel=r=>{const g=r.games,home=r.team_id===g.home_team_id,oppTid=home?g.away_team_id:g.home_team_id;const mine=home?(g.home_score||0):(g.away_score||0),opp=home?(g.away_score||0):(g.home_score||0);const res=mine>opp?"W":(mine<opp?"L":"T");return `${fmtGameDate(g.scheduled_at)} · ${home?"vs":"@"} ${esc(teamNameById(oppTid)||"?")} · <b>${res}</b> ${mine}-${opp}`;};
+  const cell=(r,f)=>`<td><input type="number" class="box-in gsf" data-f="${f}" value="${r[f]==null?"":r[f]}" style="width:52px"></td>`;
+  const skaters=rows.filter(r=>!r.is_goalie),goalies=rows.filter(r=>r.is_goalie);
+  let html="";
+  if(skaters.length)html+=`<div class="bx-sub">Skater games</div><div style="overflow:auto;margin-bottom:14px"><table class="roster-tbl"><thead><tr><th>Game</th>${BX_SK.map(f=>`<th>${f[1]}</th>`).join("")}</tr></thead><tbody>`+
+    skaters.map(r=>`<tr data-id="${r.id}"><td style="white-space:nowrap">${gLabel(r)}</td>${BX_SK.map(f=>cell(r,f[0])).join("")}</tr>`).join("")+`</tbody></table></div>`;
+  if(goalies.length)html+=`<div class="bx-sub">Goalie games</div><div style="overflow:auto"><table class="roster-tbl"><thead><tr><th>Game</th>${BX_G.map(f=>`<th>${f[1]}</th>`).join("")}<th>SO</th></tr></thead><tbody>`+
+    goalies.map(r=>`<tr data-id="${r.id}"><td style="white-space:nowrap">${gLabel(r)}</td>${BX_G.map(f=>cell(r,f[0])).join("")}<td><input type="checkbox" class="gsf-so" ${r.shutout?"checked":""}></td></tr>`).join("")+`</tbody></table></div>`;
+  $("#modalCard").classList.add("wide");$("#modalTitle").textContent=name+" — season box scores";
+  $("#modalMsg").innerHTML=`<div style="max-height:62vh;overflow:auto">${html}</div>`;
+  $("#modalOk").textContent="Save Stats";$("#modalOk").style.display="";$("#modalCancel").textContent="Cancel";
+  modalCb=async()=>{
+    let n=0;
+    for(const tr of $("#modalMsg").querySelectorAll("tbody tr")){
+      const upd={};tr.querySelectorAll(".gsf").forEach(inp=>{upd[inp.dataset.f]=inp.value===""?0:+inp.value;});
+      const so=tr.querySelector(".gsf-so");if(so)upd.shutout=so.checked;
+      const {error}=await sb.from("game_stats").update(upd).eq("id",tr.dataset.id);if(!error)n++;
+    }
+    toast("Stats saved",n+" game"+(n===1?"":"s")+" updated for "+name+".");
+  };
+  $("#modalBg").classList.add("on");
+}
+
 /* ---- Members & Roles (grant Manager / Commissioner, assign a club) ---- */
 // Members & Roles = LEAGUE standing only. Owner/GM/AGM are per-club, assigned in the Teams tab.
 const ROLE_OPTS=[["member","Member"],["staff","Staff"],["commissioner","Commissioner"]];
@@ -4463,9 +4527,13 @@ function filterMembers(){
 }
 $("#view-admin").addEventListener("change",e=>{
   if(e.target.id==="mbRoleFilter"||e.target.id==="mbPosFilter"){filterMembers();return;}
+  if(e.target.id==="psPosFilter"){filterPlayerStats();return;}
 });
-$("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers();});
-$("#view-admin").addEventListener("click",e=>{const b=e.target.closest(".mb-edit");if(b)openMemberEdit(b.dataset.id);});
+$("#view-admin").addEventListener("input",e=>{if(e.target.id==="mbSearch")filterMembers();else if(e.target.id==="psSearch")filterPlayerStats();});
+$("#view-admin").addEventListener("click",e=>{
+  const mb=e.target.closest(".mb-edit");if(mb){openMemberEdit(mb.dataset.id);return;}
+  const ps=e.target.closest(".ps-edit");if(ps){openPlayerStats(ps.dataset.pid,ps.dataset.name);return;}
+});
 
 /* ---- Teams (add / remove clubs) ---- */
 async function refreshTeamsEverywhere(){
@@ -4703,7 +4771,7 @@ $("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.t
 const ADMIN_SECTIONS=[
   ["league","League",[["season","Season Deadlines"],["salarycap","Salary Cap"],["rostersize","Roster Size"],["schedbuild","Scheduler"],["draft","Draft"]]],
   ["teams","Teams",[["teams","Team Directory"],["teamstats","Team Stats Editor"]]],
-  ["players","Players",[["members","Player Directory"],["registrations","Registrations"],["gamestats","Player Stats Editor"]]],
+  ["players","Players",[["members","Player Directory"],["registrations","Registrations"],["playerstats","Player Stats Editor"],["gamestats","Game Scores"]]],
   ["enforce","Applications & Enforcement",[["complaints","Complaints"],["appeals","Appeals"],["poschanges","Position Changes"],["owners","Owner Apps"],["bans","Bans"],["suspensions","Suspensions"]]],
   ["news","News",[["news","News"]]],
   ["discord","Discord",[["discord","Discord"]]]
@@ -4712,6 +4780,7 @@ function showAdminPanel(atab){
   $$("#view-admin .mgr-panel").forEach(p=>p.classList.remove("on"));
   const panel=$("#atab-"+atab);if(panel)panel.classList.add("on");
   $$("#admSubtabs .sub-tab").forEach(t=>t.classList.toggle("active",t.dataset.atab===atab));
+  if(atab==="playerstats")loadPlayerStats();
 }
 function showAdminSection(sec){
   const s=ADMIN_SECTIONS.find(x=>x[0]===sec);if(!s)return;
