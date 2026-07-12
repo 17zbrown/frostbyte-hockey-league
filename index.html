@@ -346,39 +346,6 @@
   .mc-set b.off{background:rgba(224,122,154,.16);color:#c65b7d}
   .mc-set b.on{background:rgba(124,224,168,.16);color:#3f9d6f}
 
-  /* ============================ CHAT ============================ */
-  .chat-shell{display:grid;grid-template-columns:200px 1fr 250px;gap:18px;align-items:start}
-  .chan-list{padding:8px 0}
-  .chan{display:flex;align-items:center;gap:9px;padding:10px 18px;font-family:var(--f-cond);font-weight:500;font-size:14px;letter-spacing:.03em;color:var(--fog);cursor:pointer;border-left:2px solid transparent}
-  .chan:hover{color:var(--ice);background:#0e243619}
-  .chan.active{color:var(--frost-ink);border-left-color:var(--frost);background:#0e2436}
-  .chan .h{color:var(--fog-dim);font-family:var(--f-mono)}
-  .chan small{margin-left:auto;font-family:var(--f-mono);font-size:10px;background:#12293d;color:var(--fog);padding:1px 7px;border-radius:100px}
-  .chat-box{background:linear-gradient(180deg,#0c1e2f,#0a1826);border:1px solid var(--line);border-radius:var(--r-l);display:flex;flex-direction:column;height:min(66vh,620px);box-shadow:var(--sh-1)}
-  .chat-head{display:flex;align-items:center;gap:11px;padding:15px 20px;border-bottom:1px solid var(--line)}
-  .chat-head .glow{width:9px;height:9px;border-radius:50%;background:var(--win);box-shadow:0 0 10px var(--win)}
-  .chat-head b{font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:15px}
-  .chat-head small{margin-left:auto;color:var(--fog);font-family:var(--f-mono);font-size:12px}
-  .chat-log{flex:1;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
-  .chat-log::-webkit-scrollbar{width:8px}
-  .chat-log::-webkit-scrollbar-thumb{background:#1c3a4f;border-radius:100px}
-  .msg{display:flex;gap:11px;align-items:flex-start}
-  .msg .av{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;font-family:var(--f-display);font-size:12px;color:#052026}
-  .msg .body b{font-family:var(--f-cond);font-weight:600;font-size:13.5px;letter-spacing:.02em;margin-right:8px}
-  .msg .body .t{font-size:10.5px;color:var(--fog-dim);font-family:var(--f-mono)}
-  .msg .body p{margin:3px 0 0;font-size:14px;color:#d5e4ec;line-height:1.5}
-  .msg.me .body b{color:var(--frost-ink)}
-  .msg.sys{justify-content:center}
-  .msg.sys p{font-family:var(--f-cond);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--fog-dim);background:#0d2233;padding:5px 14px;border-radius:100px;margin:0}
-  .chat-input{display:flex;gap:10px;padding:14px 16px;border-top:1px solid var(--line)}
-  .chat-input input{flex:1;background:#08161f;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:11px 14px;font-family:var(--f-body);font-size:14px}
-  .chat-input input::placeholder{color:var(--fog-dim)}
-  .online-list{padding:8px 0}
-  .online-item{display:flex;align-items:center;gap:11px;padding:9px 20px}
-  .online-item .dot{width:8px;height:8px;border-radius:50%;background:var(--win);flex-shrink:0}
-  .online-item.away .dot{background:var(--fog-dim)}
-  .online-item b{font-family:var(--f-cond);font-weight:500;font-size:13.5px;letter-spacing:.02em}
-  .online-item small{margin-left:auto;font-family:var(--f-mono);font-size:11px;color:var(--fog-dim)}
 
   /* ============================ FORMS ============================ */
   .signup-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:26px;align-items:start}
@@ -876,7 +843,6 @@
     .hero-grid,.news-hero{grid-template-columns:1fr}
     .hero-copy::after{display:none}
     .hero-rink{min-height:340px}
-    .chat-shell{grid-template-columns:1fr}
     .rules-toc{position:static}
     .bracket{grid-template-columns:1fr;gap:14px}
     .stat-grid{grid-template-columns:repeat(3,1fr)}
@@ -1015,7 +981,7 @@
   .pill.live{background:#fbe3e7;color:var(--live)}
 
   /* CARDS everywhere → white */
-  .card,.stat,.game,.form-card,.info-card,.chat-box,.rules-toc,.rule-sec,.team-card,
+  .card,.stat,.game,.form-card,.info-card,.rules-toc,.rule-sec,.team-card,
   .news-card,.award-card,.gate,.series,.team-banner,.player-hero{background:#fff}
   .news-hero .nh-body{background:#fff}
   .mgr-bar{background:linear-gradient(120deg,#eef6fc,#ffffff)}
@@ -1025,14 +991,7 @@
   .bar{background:#e3ecf3}
   .gm.W{background:#dcf1e7} .gm.L{background:#f8e2de} .gm.OT{background:#f6edd4}
 
-  /* CHAT */
-  .chan:hover{background:#f1f6fb}
-  .chan.active{background:#eaf2f8}
-  .chan small{background:#e7edf2}
-  .chat-log::-webkit-scrollbar-thumb{background:#c9d7e1}
-  .msg .body p{color:#1c3049}
-  .msg.sys p{background:#eaf2f8;color:var(--fog-dim)}
-  .chat-input input,.field input,.field select,.field textarea,.slot select{background:#fff;color:var(--navy)}
+  .field input,.field select,.field textarea,.slot select{background:#fff;color:var(--navy)}
   .trade-col{background:#f5f9fc} .trade-item{background:#fff} .trade-item:hover{border-color:#b6c9d8}
   .slot{background:#f5f9fc} .next-game-bar{background:#eef4f9}
 
@@ -1319,7 +1278,7 @@
   html[data-theme="dark"] .theme-toggle{border-color:#3a3a3a;color:var(--ice)} html[data-theme="dark"] .theme-toggle:hover{background:#ffffff10}
   html[data-theme="dark"] .user-chip{background:var(--panel-2);border-color:var(--line)} html[data-theme="dark"] .user-chip small{color:var(--fog)}
   /* SURFACES → dark cards */
-  html[data-theme="dark"] .card,html[data-theme="dark"] .stat,html[data-theme="dark"] .game,html[data-theme="dark"] .form-card,html[data-theme="dark"] .info-card,html[data-theme="dark"] .chat-box,html[data-theme="dark"] .rules-toc,html[data-theme="dark"] .rule-sec,html[data-theme="dark"] .team-card,html[data-theme="dark"] .news-card,html[data-theme="dark"] .award-card,html[data-theme="dark"] .gate,html[data-theme="dark"] .series,html[data-theme="dark"] .team-banner,html[data-theme="dark"] .news-hero .nh-body,html[data-theme="dark"] .scoreboard,html[data-theme="dark"] .twitch-bar,html[data-theme="dark"] .hero-rink,html[data-theme="dark"] .modal,html[data-theme="dark"] .toast{background:var(--panel)}
+  html[data-theme="dark"] .card,html[data-theme="dark"] .stat,html[data-theme="dark"] .game,html[data-theme="dark"] .form-card,html[data-theme="dark"] .info-card,html[data-theme="dark"] .rules-toc,html[data-theme="dark"] .rule-sec,html[data-theme="dark"] .team-card,html[data-theme="dark"] .news-card,html[data-theme="dark"] .award-card,html[data-theme="dark"] .gate,html[data-theme="dark"] .series,html[data-theme="dark"] .team-banner,html[data-theme="dark"] .news-hero .nh-body,html[data-theme="dark"] .scoreboard,html[data-theme="dark"] .twitch-bar,html[data-theme="dark"] .hero-rink,html[data-theme="dark"] .modal,html[data-theme="dark"] .toast{background:var(--panel)}
   html[data-theme="dark"] .player-hero,html[data-theme="dark"] .mgr-bar,html[data-theme="dark"] .hero-copy{background:linear-gradient(135deg,#1a1a1a,#0b0b0b)}
   html[data-theme="dark"] .hero-copy{background-color:#0a0a0a;background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='260'%20height='260'%20viewBox='0%200%20100%20100'%3E%3Cg%20fill='none'%20stroke-width='7'%20stroke-linecap='round'%20opacity='0.09'%3E%3Cpath%20stroke='%23ffffff'%20d='M76%2034%20A31%2031%200%201%200%2076%2066'/%3E%3Cpath%20stroke='%23ffe500'%20d='M76%2050%20H56'/%3E%3C/g%3E%3C/svg%3E"),linear-gradient(135deg,#1a1a1a,#0b0b0b);background-repeat:no-repeat,no-repeat;background-position:top -46px right -44px,0 0;background-size:240px,cover}
   html[data-theme="dark"] .rink-eyebrow,html[data-theme="dark"] .twitch-bar:hover{background:var(--panel-2)}
@@ -1327,8 +1286,8 @@
   html[data-theme="dark"] .modal-bg{background:#020a1299}
   html[data-theme="dark"] .stat.accent{border-color:#2a5a80}
   /* TABLES / HOVERS / TINTS */
-  html[data-theme="dark"] table.tbl tbody tr:hover td,html[data-theme="dark"] .roster-tbl tr:hover td,html[data-theme="dark"] .leader:hover,html[data-theme="dark"] .chan:hover,html[data-theme="dark"] .rules-toc a:hover{background:#232323}
-  html[data-theme="dark"] .divlabel,html[data-theme="dark"] .chan.active,html[data-theme="dark"] .fx.final .vs,html[data-theme="dark"] .next-game-bar,html[data-theme="dark"] .msg.sys p,html[data-theme="dark"] .series .sr.wins{background:#1f1f1f}
+  html[data-theme="dark"] table.tbl tbody tr:hover td,html[data-theme="dark"] .roster-tbl tr:hover td,html[data-theme="dark"] .leader:hover,html[data-theme="dark"] .rules-toc a:hover{background:#232323}
+  html[data-theme="dark"] .divlabel,html[data-theme="dark"] .fx.final .vs,html[data-theme="dark"] .next-game-bar,html[data-theme="dark"] .series .sr.wins{background:#1f1f1f}
   html[data-theme="dark"] .trade-col,html[data-theme="dark"] .slot{background:#191919} html[data-theme="dark"] .trade-item{background:#1f1f1f} html[data-theme="dark"] .trade-item:hover{border-color:#3d3d3d}
   html[data-theme="dark"] .bar{background:#2a2a2a}
   /* INPUTS */
@@ -1336,9 +1295,9 @@
   html[data-theme="dark"] select option,html[data-theme="dark"] select optgroup{background:#202020;color:var(--ice)}
   html[data-theme="dark"] input::placeholder,html[data-theme="dark"] textarea::placeholder{color:#5f7488}
   /* TEXT BLOCKS */
-  html[data-theme="dark"] .msg .body p,html[data-theme="dark"] .txn .tx-desc,html[data-theme="dark"] .article-body,html[data-theme="dark"] .rule-sec ul{color:#cddced}
+  html[data-theme="dark"] .txn .tx-desc,html[data-theme="dark"] .article-body,html[data-theme="dark"] .rule-sec ul{color:#cddced}
   /* PILLS / BADGES / ICON TINTS */
-  html[data-theme="dark"] .pill.dim,html[data-theme="dark"] .chan small,html[data-theme="dark"] .posbadge{background:#1c3145;color:var(--fog)}
+  html[data-theme="dark"] .pill.dim,html[data-theme="dark"] .posbadge{background:#1c3145;color:var(--fog)}
   html[data-theme="dark"] .pill.win,html[data-theme="dark"] .posbadge.D,html[data-theme="dark"] .posbadge.LD,html[data-theme="dark"] .posbadge.RD,html[data-theme="dark"] .txn .ic.sign,html[data-theme="dark"] .gm.W{background:#123020;color:#5ad699}
   html[data-theme="dark"] .pill.gold,html[data-theme="dark"] .posbadge.G,html[data-theme="dark"] .txn .ic.callup,html[data-theme="dark"] .gm.OT,html[data-theme="dark"] .award-card .trophy,html[data-theme="dark"] .cup .trophy{background:#2f2814;color:#e0b653}
   html[data-theme="dark"] .pill.live,html[data-theme="dark"] .txn .ic.waive,html[data-theme="dark"] .gm.L{background:#331921;color:#ff6b83}
@@ -1348,7 +1307,6 @@
   html[data-theme="dark"] .empty-state{background:var(--panel)}
   /* FOOTER stays dark (its bg used --navy, now light) */
   html[data-theme="dark"] footer{background-color:#0a0a0a;border-top-color:#2a2a2a}
-  html[data-theme="dark"] .chat-log::-webkit-scrollbar-thumb{background:#2a4159}
 </style>
 </head>
 <body>
@@ -1395,7 +1353,6 @@
         <button class="navtop" aria-haspopup="true">Community <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1l4 4 4-4"/></svg></button>
         <div class="dropdown">
           <a data-go="news">News</a>
-          <a data-go="chat" data-feature="chat">League Chat</a>
           <a data-go="rulebook">Rulebook</a>
           <a data-go="owner">Owner Application</a>
           <a data-go="actions">Action Center</a>
@@ -1551,12 +1508,6 @@
   <div class="view" id="view-article"><section class="pad"><div class="wrap" id="articlePage"></div></section></div>
 
   <!-- CHAT -->
-  <div class="view" id="view-chat"><section class="pad"><div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Open to the whole league</span><h2>League <em>Chat</em></h2>
-      <p>Trash talk, line calls, and trade rumors across the channels — keep it clean, refs are watching.</p></div></div>
-    <div class="card" id="chatLog"></div>
-  </div></section></div>
-
   <!-- FREE AGENCY -->
   <div class="view" id="view-freeagency"><section class="pad"><div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">Roster Ops</span><h2>Free <em>Agency</em></h2>
@@ -1891,7 +1842,7 @@
       </div></div>
     <div class="foot-col"><h4>League</h4><a data-go="standings">Standings</a><a data-go="schedule">Schedule</a><a data-go="bracket">Playoffs</a><a data-go="rankings">Power Rankings</a><a data-go="records">Records</a></div>
     <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency">Free Agency</a><a data-go="draft" data-role="manager">Draft Board</a><a data-go="transactions">Transactions</a></div>
-    <div class="foot-col"><h4>Community</h4><a data-go="news">News</a><a data-go="chat">League Chat</a><a data-go="rulebook">Rulebook</a><a data-go="manager">Manager Portal</a><a data-go="admin">Commissioner</a></div>
+    <div class="foot-col"><h4>Community</h4><a data-go="news">News</a><a data-go="rulebook">Rulebook</a><a data-go="manager">Manager Portal</a><a data-go="admin">Commissioner</a></div>
   </div>
   <div class="foot-bottom"><span>© Season <span id="footSeason">1</span> · Chel Gaming Hockey League. Not affiliated with the NHL or EA Sports.</span>
     <span class="mono">STATUS: <span style="color:var(--win)">ALL SYSTEMS ON ICE</span></span></div>
@@ -2190,7 +2141,7 @@ function buildNav(){
     ["Main",[["home","Home"],["standings","Standings"],["teams","All Teams"],["signup","Sign Up"]]],
     ["League",[["schedule","Schedule"],["bracket","Playoff Bracket"],["rankings","Power Rankings"],["awards","Awards"],["records","Record Book"],["transactions","Transactions"]]],
     ["Players",[["stats","Stats & Leaders"],["freeagency","Free Agency"],["draft","Draft Board"]]],
-    ["Community",[["news","News"],["chat","League Chat"],["rulebook","Rulebook"],["owner","Owner Application"],["actions","Action Center"]]],
+    ["Community",[["news","News"],["rulebook","Rulebook"],["owner","Owner Application"],["actions","Action Center"]]],
     ["Front Office",[["manager","Manager Portal"],["admin","Commissioner"]]]
   ];
   $("#mobileMenu").innerHTML=groups.map(([g,items])=>
@@ -3037,16 +2988,6 @@ function renderRules(){
 
 /* ------------------------------ CHAT ------------------------------ */
 let currentChan="general";
-/* League chat runs in the Chel Gaming Discord server — the in-app view points there. */
-function renderChat(){
-  const log=$("#chatLog");if(!log)return;
-  log.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:52px 24px;color:var(--fog)">
-    <span style="width:56px;height:56px;border-radius:16px;background:#5865F2;display:grid;place-items:center">${DISCORD_GLYPH}</span>
-    <div><b style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--navy);font-size:19px;display:block;margin-bottom:5px">League chat lives in Discord</b>
-    Game coordination, trash talk, and trade talk all happen in the Chel Gaming Discord server.</div>
-    <a class="btn btn-frost" href="${DISCORD_INVITE}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">Join the Chel Gaming Discord →</a></div>`;
-}
-
 /* ------------------------------ SIGNUP ------------------------------ */
 /* ===================== SUPABASE — auth + persistence (Phase 2a) ===================== */
 const SB_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co";
@@ -3942,7 +3883,6 @@ let features=[
   {key:"aiImport",label:"AI Screenshot Import",desc:"Managers scan EA screenshots to auto-fill box scores",on:true},
   {key:"freeagency",label:"Free Agency",desc:"Free-agent pool, waivers and signings",on:true,view:"freeagency"},
   {key:"trades",label:"Trade Center",desc:"GM-to-GM trades in the manager portal",on:true},
-  {key:"chat",label:"League Chat",desc:"Multi-channel league chat",on:true,view:"chat"},
   {key:"draft",label:"Draft Board",desc:"Prospect draft board",on:true,view:"draft"},
   {key:"rankings",label:"Power Rankings",desc:"Weekly power rankings",on:true,view:"rankings"},
   {key:"awards",label:"Awards Race",desc:"Season awards tracker",on:true,view:"awards"},
@@ -4856,7 +4796,6 @@ renderNews();
 renderFA();
 renderDraft();
 renderRules();
-renderChat();
 sbInit();   // connect Supabase: load teams/open season, restore session, wire auth UI
 renderLiveGames();
 setInterval(renderLiveGames, 60000);   // keep the Live Now module current as games start/end and streamers go live
