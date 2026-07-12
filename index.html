@@ -402,6 +402,28 @@
   .mgr-tab.active{color:var(--ice)}
   .mgr-tab.active::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;background:var(--frost)}
   .mgr-tab-sep{width:1px;background:var(--line);align-self:center;height:20px;margin:0 8px}
+  /* manager draft board */
+  .draft-topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;padding:16px 20px;margin-bottom:16px}
+  .draft-topbar h3{margin:0}
+  .draft-topbar small{display:block;color:var(--fog);font-size:12.5px;margin-top:4px;max-width:560px;line-height:1.5}
+  .draft-topbar-right{display:flex;align-items:center;gap:10px;flex-shrink:0}
+  .md-otc{padding:12px 18px;border-radius:11px;background:var(--panel-2);border:1px solid var(--line);margin-bottom:16px;font-family:var(--f-cond);font-size:14px;letter-spacing:.02em}
+  .md-otc.mine{border-color:var(--frost);background:var(--frost-glow)}
+  .md-otc-you{color:var(--frost-ink);font-weight:600}
+  .draft-grid2{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
+  @media(max-width:820px){.draft-grid2{grid-template-columns:1fr}}
+  .draft-pad{padding:6px 6px}
+  .md-pick{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .md-pick:last-child{border-bottom:0}
+  .md-pick.open{background:var(--frost-glow);border-radius:8px}
+  .md-rd{font-family:var(--f-display);font-weight:700;color:var(--frost-ink);width:40px;flex-shrink:0}
+  .md-avail{color:var(--fog)}
+  .md-log{display:flex;align-items:center;gap:11px;padding:9px 10px;border-bottom:1px solid var(--line)}
+  .md-log:last-child{border-bottom:0}
+  .md-log-rd{font-family:var(--f-display);font-weight:700;color:var(--fog);width:34px;flex-shrink:0}
+  .md-log-info{min-width:0}
+  .md-log-info b{font-family:var(--f-cond);font-weight:600;text-transform:uppercase;font-size:13.5px;display:block;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .md-log-info small{color:var(--fog);font-size:11.5px}
   .adm-sections{margin-bottom:0}
   .adm-subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 22px}
   .sub-tab{font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--fog);padding:7px 14px;border:1px solid var(--line);border-radius:100px;cursor:pointer;background:transparent;transition:.15s}
@@ -1661,6 +1683,7 @@
         <button class="mgr-tab active" data-mtab="roster">Roster</button>
         <button class="mgr-tab" data-mtab="trade" data-feature="trades">Trade Center</button>
         <button class="mgr-tab" data-mtab="fa" data-feature="freeagency">Free Agents</button>
+        <button class="mgr-tab" data-mtab="draft" data-feature="draft">Draft</button>
         <button class="mgr-tab" data-mtab="lineup">Game Night Info</button>
         <button class="mgr-tab" data-mtab="reports">Game Reports</button>
       </div>
@@ -1700,6 +1723,20 @@
         <div style="padding:14px 20px 8px;color:var(--fog);font-size:13.5px;border-bottom:1px solid var(--line)">After each scheduled game, your full box score — goals, assists, shots, hits, PIM and goalie saves — is pulled in <b style="color:var(--win)">automatically from EA</b> and posted here, usually within a few minutes on game nights. <b>You don't need to submit anything.</b> If a game ever doesn't import (played off-schedule, or a club isn't linked to its EA club yet), send your EA <b>end-of-game</b> screenshots to the commissioners and they'll add it.</div>
         <div id="reportsBody"></div>
       </div></div>
+      <div class="mgr-panel" id="mtab-draft">
+        <div class="card draft-topbar">
+          <div><h3 id="mdTitle">Draft Board</h3><small id="mdSub">The commissioner records picks live during the draft — this board follows along and refreshes on its own.</small></div>
+          <div class="draft-topbar-right"><span class="pill frost" id="mdCount"></span><button class="mini" id="mdRefresh">↻ Refresh</button></div>
+        </div>
+        <div id="mdOnClock"></div>
+        <div class="draft-grid2">
+          <div class="draft-col-l">
+            <div class="card"><div class="card-h"><h3>Your Picks</h3><span class="pill" id="mdMyCount"></span></div><div id="mdMyPicks" class="draft-pad"></div></div>
+            <div class="card" style="margin-top:16px"><div class="card-h"><h3>Best Available</h3><span class="pill" id="mdPoolCount"></span></div><div id="mdPool"></div></div>
+          </div>
+          <aside class="card draft-col-r"><div class="card-h"><h3>Draft Log</h3></div><div id="mdLog" class="draft-pad"></div></aside>
+        </div>
+      </div>
     </div>
   </div></section></div>
 
@@ -2018,6 +2055,7 @@ function go(view,param,fromPop){
   const fk=viewFeature(view);if(fk&&!featureOn(fk)){toast("Feature unavailable","The commissioner has turned off "+features.find(x=>x.key===fk).label+".");view="home";}
   if(MANAGER_VIEWS.has(view)&&!isManager()){toast("Managers only","The draft pool is available to club managers.");view="home";}
   currentParam=param!==undefined?param:null;
+  if(view!=="manager"&&typeof stopMgrDraftPoll==="function")stopMgrDraftPoll();  // stop the draft poll when leaving the front office
   $$(".view").forEach(v=>v.classList.remove("on"));
   const el=$("#view-"+view);if(el)el.classList.add("on");
   const navMatch=view; // group parameterized views under their parent for highlight
@@ -3314,6 +3352,56 @@ function parseSalary(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]
 // Clean salary display that round-trips exactly through parseSalary (unlike fmtMoney, which rounds at the $M boundary). Used by the ±$100K steppers.
 function fmtSalField(n){n=Math.max(0,Math.round(+n||0));if(n>=1e6)return "$"+(+(n/1e6).toFixed(3))+"M";if(n>=1e3)return "$"+(+(n/1e3).toFixed(3))+"K";return "$"+n;}
 function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();renderTradeRequests();}
+
+/* ---- Manager Draft board: live follow-along of the commissioner-run draft ---- */
+const MD_POS={C:"Center",LW:"Left Wing",RW:"Right Wing",LD:"Left Defense",RD:"Right Defense",G:"Goalie"};
+async function renderMgrDraft(){
+  const panel=$("#mtab-draft");if(!panel||!sb)return;
+  if(!openSeason){$("#mdPool").innerHTML="";$("#mdMyPicks").innerHTML="";$("#mdLog").innerHTML="";return;}
+  const myTid=teamIdOf(currentClub);
+  const {data:allPicks}=await sb.from("draft_picks").select("id,season_number,round,current_team_id,player_id,used,created_at").order("round");
+  const picks=allPicks||[];
+  if(!picks.length){
+    $("#mdTitle").textContent="Draft Board";$("#mdCount").textContent="No draft yet";$("#mdOnClock").innerHTML="";
+    $("#mdMyPicks").innerHTML='<div class="empty-note">No draft has been set up yet. When the commissioner builds the board, your picks appear here.</div>';
+    $("#mdMyCount").textContent="";$("#mdPool").innerHTML="";$("#mdPoolCount").textContent="";$("#mdLog").innerHTML="";return;
+  }
+  const maxSn=Math.max.apply(null,picks.map(p=>p.season_number));
+  const cur=picks.filter(p=>p.season_number===maxSn);
+  const total=cur.length,made=cur.filter(p=>p.used).length;
+  $("#mdTitle").textContent="Season "+maxSn+" Draft";
+  $("#mdCount").textContent=made+" / "+total+" picks made";
+  const usedIds=[...new Set(cur.filter(p=>p.player_id).map(p=>p.player_id))];
+  const nameOf={};
+  if(usedIds.length){const {data:profs}=await sb.from("profiles").select("id,gamertag").in("id",usedIds);(profs||[]).forEach(p=>nameOf[p.id]=p.gamertag);}
+  // your picks
+  const mine=cur.filter(p=>p.current_team_id===myTid).sort((a,b)=>a.round-b.round);
+  const myOpen=mine.filter(p=>!p.used);
+  $("#mdMyCount").textContent=mine.length?myOpen.length+" open":"none";
+  $("#mdMyPicks").innerHTML=mine.length?mine.map(p=>`<div class="md-pick${p.used?"":" open"}"><span class="md-rd">R${p.round}</span><span class="md-res">${p.used?`Drafted <b>${esc(nameOf[p.player_id]||"a player")}</b>`:'<span class="md-avail">Still on the board</span>'}</span></div>`).join(""):'<div class="empty-note">Your club holds no picks in this draft.</div>';
+  $("#mdOnClock").innerHTML=`<div class="md-otc${myOpen.length?" mine":""}"><b>${made} of ${total}</b> picks made${myOpen.length?` · <span class="md-otc-you">You still have ${myOpen.length} pick${myOpen.length>1?"s":""} (${myOpen.map(p=>"R"+p.round).join(", ")})</span>`:' · <span style="color:var(--fog)">all your picks are in</span>'}</div>`;
+  // best available pool (scout-OVR ranked), shared with the public board
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,scout_ovr, profiles(gamertag)").eq("season_id",openSeason.id);
+  const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
+  const taken=new Set((spots||[]).map(s=>s.profile_id));
+  const pool=(regs||[]).filter(r=>!taken.has(r.profile_id)).sort((a,b)=>(b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr));
+  $("#mdPoolCount").textContent=pool.length+" available";
+  $("#mdPool").innerHTML=pool.length?pool.map((p,i)=>`<div class="prospect"><span class="pk">${i+1}</span>
+    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:""}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${p.ea_id?` · EA: <a href="${scoutUrl(p.ea_id)}" target="_blank" rel="noopener" class="scout-link">${esc(p.ea_id)} ↗</a>`:""}</small></div>
+    <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`).join(""):'<div class="empty-note">No players available — everyone registered has been drafted or rostered.</div>';
+  // draft log — most recent picks first
+  const log=cur.filter(p=>p.used).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  $("#mdLog").innerHTML=log.length?log.map(p=>{const c=codeOfId(p.current_team_id),tn=c&&teams[c]?teams[c].name:"—";return `<div class="md-log"><span class="md-log-rd">R${p.round}</span><span class="md-log-info"><b>${esc(nameOf[p.player_id]||"a player")}</b><small>${esc(tn)}</small></span></div>`;}).join(""):'<div class="empty-note">No picks made yet — the board updates live as the commissioner drafts.</div>';
+}
+let mgrDraftPoll=null;
+function startMgrDraftPoll(){
+  stopMgrDraftPoll();renderMgrDraft();
+  mgrDraftPoll=setInterval(()=>{
+    const live=$("#view-manager")&&$("#view-manager").classList.contains("on")&&$("#mtab-draft")&&$("#mtab-draft").classList.contains("on");
+    if(live)renderMgrDraft();else stopMgrDraftPoll();
+  },12000);
+}
+function stopMgrDraftPoll(){if(mgrDraftPoll){clearInterval(mgrDraftPoll);mgrDraftPoll=null;}}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
   if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
@@ -3880,7 +3968,9 @@ $("#saveLineup").addEventListener("click",async()=>{
   toast("Lineups saved","Your Wednesday and Friday lineups are locked in.");
   $("#lineupNote").innerHTML='<span style="color:var(--win)">✓ Both game-night lineups saved.</span>';});
 $$(".mgr-tab").forEach(tab=>tab.addEventListener("click",()=>{$$("#view-manager .mgr-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");
-  $$("#view-manager .mgr-panel").forEach(p=>p.classList.remove("on"));$("#mtab-"+tab.dataset.mtab).classList.add("on");}));
+  $$("#view-manager .mgr-panel").forEach(p=>p.classList.remove("on"));$("#mtab-"+tab.dataset.mtab).classList.add("on");
+  if(tab.dataset.mtab==="draft")startMgrDraftPoll();else stopMgrDraftPoll();}));
+$("#mdRefresh")&&$("#mdRefresh").addEventListener("click",renderMgrDraft);
 
 /* ------------------------------ ADMIN / COMMISSIONER ------------------------------ */
 const pendingApprovals=[
