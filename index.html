@@ -157,6 +157,7 @@
   .pfc-row{display:flex;flex-direction:column;gap:3px;min-width:0}
   .pfc-k{font-family:var(--f-cond);font-weight:500;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--fog)}
   .pfc-v{font-family:var(--f-mono);font-size:14.5px;font-weight:600;color:var(--ice);word-break:break-word}
+  .ea-sub{display:block;font-family:var(--f-mono);font-size:11px;color:var(--fog);letter-spacing:.01em;margin-top:1px}
   .twitch-card .tw-ic{width:34px;height:34px;border-radius:8px;background:#9146ff;display:grid;place-items:center;color:#fff;flex-shrink:0}
   .tw-watch,.tw-empty{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:200px}
   .tw-watch .tw-txt,.tw-empty .tw-txt{display:flex;flex-direction:column;font-family:var(--f-cond);font-weight:600;letter-spacing:.03em;text-transform:uppercase;font-size:14px;color:var(--ice)}
@@ -3293,7 +3294,7 @@ function renderManager(){
   if(canEnter){
     if(club)currentClub=club.code;
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
-    loadFrontOffice();
+    loadEaIds().then(loadFrontOffice);
     const oldB=$("#mgrSuspBanner");if(oldB)oldB.remove();
     if(sb&&authUser)sb.rpc("is_suspended",{p_profile:authUser.id}).then(r=>{
       if(!r.error&&r.data){const d=$("#mgrDash");if(d&&!$("#mgrSuspBanner")){const b=document.createElement("div");b.id="mgrSuspBanner";b.className="susp-banner";
@@ -3309,6 +3310,10 @@ function renderManager(){
   }
 }
 document.addEventListener("click",e=>{if(e.target.closest("#mgrLogout")){e.preventDefault();signOutSb();}});
+// profile_id -> EA ID (from registrations), for showing EA IDs under names across the portals.
+let eaById={};
+async function loadEaIds(){if(!sb)return;try{const {data}=await sb.from("season_registrations").select("profile_id,ea_id,created_at").order("created_at");const m={};(data||[]).forEach(r=>{if(r.ea_id)m[r.profile_id]=r.ea_id;});eaById=m;}catch(e){}}
+function eaTag(pid){return pid&&eaById[pid]?`<small class="ea-sub">EA: ${esc(eaById[pid])}</small>`:"";}
 function loadFrontOffice(){const t=teams[currentClub];
   $("#mgrName").textContent=t.name;$("#mgrBadge").innerHTML=badge(currentClub,50);
   $("#tradeMyName").textContent=t.name;$("#tradeMyBadge").innerHTML=badge(currentClub,22);
@@ -3357,7 +3362,7 @@ function drawRoster(){
   const locked=seasonMovesLocked();
   const _ctm=dbTeams.find(t=>t.code===currentClub)||{};const mgrIds=[_ctm.owner_profile_id,_ctm.gm_profile_id,_ctm.agm_profile_id].filter(Boolean);
   body.innerHTML=rosterState.map((p,i)=>{const isMgr=mgrIds.includes(p.pid);return `<tr>
-    <td><div class="rp"><span class="num">${p.num}</span><div><b data-go="player" data-param="${p.name}" style="cursor:pointer">${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small></div></div></td>
+    <td><div class="rp"><span class="num">${p.num}</span><div><b data-go="player" data-param="${p.name}" style="cursor:pointer">${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small>${eaTag(p.pid)}</div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost-ink);font-weight:700">${p.pts}</td>
     <td style="text-align:right"><div class="caphit-cell"><span class="cap-hit"${isMgr?' title="Managers are locked to their club at $3M"':''}>${fmtMoney(p.salary)}</span><span class="term-tag" title="Contract term">${p.years} season${p.years===1?'':'s'}</span></div></td>
@@ -3395,7 +3400,7 @@ async function renderMgrDraft(){
   const mine=cur.filter(p=>p.current_team_id===myTid).sort((a,b)=>a.round-b.round);
   const myOpen=mine.filter(p=>!p.used);
   $("#mdMyCount").textContent=mine.length?myOpen.length+" open":"none";
-  $("#mdMyPicks").innerHTML=mine.length?mine.map(p=>`<div class="md-pick${p.used?"":" open"}"><span class="md-rd">R${p.round}</span><span class="md-res">${p.used?`Drafted <b>${esc(nameOf[p.player_id]||"a player")}</b>`:'<span class="md-avail">Still on the board</span>'}</span></div>`).join(""):'<div class="empty-note">Your club holds no picks in this draft.</div>';
+  $("#mdMyPicks").innerHTML=mine.length?mine.map(p=>`<div class="md-pick${p.used?"":" open"}"><span class="md-rd">R${p.round}</span><span class="md-res">${p.used?`Drafted <b>${esc(nameOf[p.player_id]||"a player")}</b>${eaTag(p.player_id)}`:'<span class="md-avail">Still on the board</span>'}</span></div>`).join(""):'<div class="empty-note">Your club holds no picks in this draft.</div>';
   $("#mdOnClock").innerHTML=`<div class="md-otc${myOpen.length?" mine":""}"><b>${made} of ${total}</b> picks made${myOpen.length?` · <span class="md-otc-you">You still have ${myOpen.length} pick${myOpen.length>1?"s":""} (${myOpen.map(p=>"R"+p.round).join(", ")})</span>`:' · <span style="color:var(--fog)">all your picks are in</span>'}</div>`;
   // best available pool (scout-OVR ranked), shared with the public board
   const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,scout_ovr, profiles(gamertag)").eq("season_id",openSeason.id);
@@ -3408,7 +3413,7 @@ async function renderMgrDraft(){
     <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`).join(""):'<div class="empty-note">No players available — everyone registered has been drafted or rostered.</div>';
   // draft log — most recent picks first
   const log=cur.filter(p=>p.used).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
-  $("#mdLog").innerHTML=log.length?log.map(p=>{const c=codeOfId(p.current_team_id),tn=c&&teams[c]?teams[c].name:"—";return `<div class="md-log"><span class="md-log-rd">R${p.round}</span><span class="md-log-info"><b>${esc(nameOf[p.player_id]||"a player")}</b><small>${esc(tn)}</small></span></div>`;}).join(""):'<div class="empty-note">No picks made yet — the board updates live as the commissioner drafts.</div>';
+  $("#mdLog").innerHTML=log.length?log.map(p=>{const c=codeOfId(p.current_team_id),tn=c&&teams[c]?teams[c].name:"—";return `<div class="md-log"><span class="md-log-rd">R${p.round}</span><span class="md-log-info"><b>${esc(nameOf[p.player_id]||"a player")}</b><small>${esc(tn)}</small>${eaTag(p.player_id)}</span></div>`;}).join(""):'<div class="empty-note">No picks made yet — the board updates live as the commissioner drafts.</div>';
 }
 let mgrDraftPoll=null;
 function startMgrDraftPoll(){
@@ -3465,7 +3470,7 @@ function renderAddedList(side){
   const players=side==='mine'?tradeMineList:tradeTheirsList,picks=side==='mine'?minePicksList:theirsPicksList;
   const rows=[];
   [...tradeSel[side]].forEach(i=>{const p=players[i];if(!p)return;
-    rows.push(`<div class="trade-chip"><span class="tc-num">${p.num}</span><span class="tc-nm"><b>${esc(p.name)}</b><small>${p.pos}${p.ovr?` · ${p.ovr} OVR`:''} · ${fmtMoney(p.salary)}</small></span>${side==='mine'?`<label class="tc-ret">Retain <select class="ret-pct" data-pid="${p.pid}">${[0,25,50].map(v=>`<option value="${v}" ${v===(retentionSel[p.pid]||0)?'selected':''}>${v}%</option>`).join('')}</select></label>`:''}<button class="tc-x" data-side="${side}" data-type="p" data-i="${i}" aria-label="Remove">×</button></div>`);});
+    rows.push(`<div class="trade-chip"><span class="tc-num">${p.num}</span><span class="tc-nm"><b>${esc(p.name)}</b><small>${p.pos}${p.ovr?` · ${p.ovr} OVR`:''} · ${fmtMoney(p.salary)}</small>${eaTag(p.pid)}</span>${side==='mine'?`<label class="tc-ret">Retain <select class="ret-pct" data-pid="${p.pid}">${[0,25,50].map(v=>`<option value="${v}" ${v===(retentionSel[p.pid]||0)?'selected':''}>${v}%</option>`).join('')}</select></label>`:''}<button class="tc-x" data-side="${side}" data-type="p" data-i="${i}" aria-label="Remove">×</button></div>`);});
   [...pickSel[side]].forEach(i=>{const p=picks[i];if(!p)return;
     rows.push(`<div class="trade-chip"><span class="pk-badge">PICK</span><span class="tc-nm"><b>${pickLabel(p)}</b></span><button class="tc-x" data-side="${side}" data-type="k" data-i="${i}" aria-label="Remove">×</button></div>`);});
   el.innerHTML=rows.length?rows.join(''):'<div class="trade-empty">Nothing added yet — use the dropdown above.</div>';
@@ -3577,7 +3582,7 @@ async function renderFAmgr(){
   const {data:spots}=await sb.from("roster_spots").select("profile_id,position").eq("season_id",openSeason.id);
   const posBy={};(spots||[]).forEach(s=>posBy[s.profile_id]=s.position);
   body.innerHTML=pool.map(c=>{const name=c.profiles?c.profiles.gamertag:"?";const cc=c.team_id?codeOfId(c.team_id):null;const club=cc&&teams[cc]?teams[cc].name:"Unsigned";const pos=posBy[c.profile_id]||"—";
-    return `<tr><td><b class="lk" data-go="player" data-param="${esc(name)}" style="cursor:pointer;font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.02em">${esc(name)}</b></td>
+    return `<tr><td><b class="lk" data-go="player" data-param="${esc(name)}" style="cursor:pointer;font-family:var(--f-cond);font-weight:600;text-transform:uppercase;letter-spacing:.02em">${esc(name)}</b>${eaTag(c.profile_id)}</td>
     <td style="text-align:center"><span class="posbadge ${pos}">${pos}</span></td><td style="font-size:12.5px;color:var(--fog)">${esc(club)}</td><td class="cap-hit">${fmtMoney(c.salary)}</td>
     <td style="text-align:right"><button class="mini good fa-offer" data-pid="${c.profile_id}" data-name="${esc(name).replace(/"/g,'&quot;')}">Offer</button></td></tr>`;}).join("");
 }
@@ -3676,6 +3681,7 @@ function actionRow(a,rev){
   const meta=[];
   if(a.type==='position_change'&&a.requested_position)meta.push((POS_NAME[a.current_position]||a.current_position||'?')+' → '+(POS_NAME[a.requested_position]||a.requested_position));
   if(a.target)meta.push(esc(a.target));
+  if(rev&&eaById[a.profile_id])meta.push('EA: '+esc(eaById[a.profile_id]));
   let btns='';
   if(rev){
     if(a.type==='trade_request'){ if(a.status==='open'||a.status==='reviewing') btns+=`<button class="mini good oa-set2" data-id="${a.id}" data-status="acknowledged">Acknowledge</button>`; }
@@ -3752,7 +3758,7 @@ async function loadSuspensions(){
     rows.map(s=>{const active=s.status==='active'&&eff[s.id];
       const len=s.mode==='date'?('Until '+(s.ends_at?fmtGameDate(s.ends_at):'—')):((s.games_total||0)+' team game'+((s.games_total||0)===1?'':'s'));
       const st=active?'<b style="color:var(--loss)">Active</b>':(s.status==='lifted'?'<span style="color:var(--fog)">Lifted</span>':'<span style="color:var(--win)">Served</span>');
-      return `<tr><td><b>${esc(nameById[s.profile_id]||'?')}</b></td><td>${len}</td><td style="color:var(--fog);font-size:12.5px">${s.reason?esc(s.reason):'—'}</td><td>${st}</td>
+      return `<tr><td><b>${esc(nameById[s.profile_id]||'?')}</b>${eaTag(s.profile_id)}</td><td>${len}</td><td style="color:var(--fog);font-size:12.5px">${s.reason?esc(s.reason):'—'}</td><td>${st}</td>
         <td style="text-align:right">${active?`<button class="mini danger susp-lift" data-id="${s.id}">Lift</button>`:''}</td></tr>`;}).join('')+'</tbody></table></div>';
 }
 function openSuspend(mode){
@@ -3823,7 +3829,7 @@ async function loadBans(){
   const rows=data||[];const cnt=$("#banCount");if(cnt)cnt.textContent=rows.length+" banned";
   if(!rows.length){el.innerHTML=ADMIN_EMPTY("No banned players","Banning a player removes them from the league and Discord — they appear here.");return;}
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Reason</th><th>Banned</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
-    rows.map(p=>`<tr><td><b>${esc(p.gamertag||'?')}</b></td><td style="color:var(--fog);font-size:12.5px">${p.ban_reason?esc(p.ban_reason):'—'}</td><td style="color:var(--fog);font-size:12.5px">${p.banned_at?fmtGameDate(p.banned_at):'—'}</td>
+    rows.map(p=>`<tr><td><b>${esc(p.gamertag||'?')}</b>${eaTag(p.id)}</td><td style="color:var(--fog);font-size:12.5px">${p.ban_reason?esc(p.ban_reason):'—'}</td><td style="color:var(--fog);font-size:12.5px">${p.banned_at?fmtGameDate(p.banned_at):'—'}</td>
       <td style="text-align:right"><button class="mini good ban-lift" data-id="${p.id}" data-name="${(p.gamertag||'').replace(/"/g,'&quot;')}">Unban</button></td></tr>`).join('')+'</tbody></table></div>';
 }
 function openBan(){
@@ -4047,8 +4053,9 @@ function renderCommissioner(){
   const gate=$("#admGate"),dash=$("#admDash");if(!gate||!dash)return;
   if(authProfile&&authProfile.role==="commissioner"){
     gate.style.display="none";gate.innerHTML="";dash.style.display="block";
+    loadEaIds().then(()=>{loadMembers();loadDraftAdmin();loadActionAdmin();loadSuspensions();loadBans();});
     loadSeasonAdmin().then(()=>{loadRegistrations();loadScheduleAdmin();loadGamesAdmin();loadTeamStats();});
-    loadMembers();loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();loadDraftAdmin();loadActionAdmin();loadSuspensions();loadBans();
+    loadTeamsAdmin();renderNewsManage();loadDiscordAdmin();loadOwnerApps();
     if(typeof showAdminSection==="function")showAdminSection("league");
   }else{
     dash.style.display="none";gate.style.display="block";
@@ -4445,7 +4452,7 @@ async function loadPlayerStats(){
   const pc=$("#psCount");if(pc)pc.textContent=(profs?profs.length:0)+" player"+((profs&&profs.length===1)?"":"s");
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No players yet","Players show up here once they've signed in with Discord.");return;}
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Club</th><th>Position</th><th style="text-align:right">Stats</th></tr></thead><tbody>'+
-    profs.map(p=>{const tid=clubOf[p.id];const tn=tid?teamNameById(tid):"";return `<tr class="ps-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b></td>`+
+    profs.map(p=>{const tid=clubOf[p.id];const tn=tid?teamNameById(tid):"";return `<tr class="ps-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${eaTag(p.id)}</td>`+
       `<td>${tn?`<span style="color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(tn)}</span>`:'<span style="color:var(--fog)">Free agent</span>'}</td>`+
       `<td>${posOf[p.id]?esc(posOf[p.id]):'<span style="color:var(--fog)">—</span>'}</td>`+
       `<td style="text-align:right"><button class="mini ps-edit" data-pid="${p.id}" data-name="${(p.gamertag||'?').replace(/"/g,'&quot;')}">Edit stats</button></td></tr>`;}).join("")+"</tbody></table></div>";
@@ -4508,7 +4515,7 @@ async function loadMembers(){
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
   memberById={};(profs||[]).forEach(p=>{memberById[p.id]={name:p.gamertag||"?",role:p.role,pos:posOf[p.id]||"",salary:salOf[p.id]||0,spotId:spotOf[p.id]||null};});
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>League role</th><th>Position</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
-    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-role="${p.role}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}</td>
+    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-role="${p.role}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}${eaTag(p.id)}</td>
       <td>${ROLE_LABEL[p.role]||esc(p.role)}</td>
       <td>${posOf[p.id]?esc(posOf[p.id]):'<span style="color:var(--fog)">—</span>'}</td>
       <td style="text-align:right"><button class="mini mb-edit" data-id="${p.id}">Edit</button></td></tr>`).join("")+"</tbody></table></div>";
@@ -4582,7 +4589,7 @@ async function loadDraftAdmin(){
     '<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Round</th><th>Owner</th><th>Origin</th><th>Result</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
     bySeason[sn].map(p=>{const oc=codeOfId(p.current_team_id),ocn=oc&&teams[oc]?teams[oc].name:'—';const orig=p.original_team_id&&p.original_team_id!==p.current_team_id?codeOfId(p.original_team_id):null;
       return `<tr><td>R${p.round}</td><td><b>${esc(ocn)}</b></td><td style="color:var(--fog)">${orig?'via '+esc(orig):'—'}</td>
-      <td>${p.used?'<span style="color:var(--win)">Drafted '+esc(nameOf[p.player_id]||'a player')+'</span>':'<span style="color:var(--fog)">Available</span>'}</td>
+      <td>${p.used?'<span style="color:var(--win)">Drafted '+esc(nameOf[p.player_id]||'a player')+'</span>'+eaTag(p.player_id):'<span style="color:var(--fog)">Available</span>'}</td>
       <td style="text-align:right">${p.used?'':`<button class="mini good dp-use" data-id="${p.id}">Make Pick</button>`}</td></tr>`;}).join('')+
     '</tbody></table></div>').join('');
 }
