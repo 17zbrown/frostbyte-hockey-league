@@ -1563,7 +1563,7 @@
   <!-- SIGN UP -->
   <div class="view" id="view-signup"><section class="pad"><div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">Registration Open</span><h2>Sign Up · <em>Season 1</em></h2>
-      <p>Sign in with Discord, claim your position and number, and lock in your spot for the season.</p></div></div>
+      <p>Sign in with Discord, claim your position, and lock in your spot for the season.</p></div></div>
     <div class="signup-grid">
       <form class="form-card" id="signupForm">
         <div id="signupAuthBanner"></div>
@@ -1576,8 +1576,8 @@
           <label><input type="radio" name="pos" value="RD" /><span>Right Defense</span></label>
           <label><input type="radio" name="pos" value="G" /><span>Goalie</span></label></div></div>
         <div class="field"><div class="row2">
-          <div><label for="su-num">Jersey Number</label><input id="su-num" type="number" min="1" max="99" placeholder="Pick your number (1–99)" /></div>
-          <div><label for="su-plat">Platform</label><select id="su-plat"><option>PlayStation 5</option><option>Xbox Series X|S</option></select></div></div></div>
+          <div><label for="su-plat">Platform</label><select id="su-plat"><option>PlayStation 5</option><option>Xbox Series X|S</option></select></div>
+          <div><label for="su-ptag">Platform Gamertag</label><input id="su-ptag" maxlength="60" placeholder="Your PSN ID or Xbox gamertag" /></div></div></div>
         <div class="field"><label for="su-twitch">Twitch <span style="color:var(--fog);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label><input id="su-twitch" placeholder="Your Twitch username — for stream links on your profile" /></div>
         <div class="field"><label for="su-note">Anything the commissioners should know?</label><textarea id="su-note" rows="3" placeholder="Availability, preferred club, past leagues…"></textarea></div>
         <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Registration</button>
@@ -2444,7 +2444,7 @@ function buildHeroSlides(){
   },{
     eyebrow:"Now Forming",
     title:`SEASON ${sn}<br>IS <span class="out">RECRUITING</span>`,
-    line:"Sign in with Discord, claim your position and jersey number, and get drafted to a club.",
+    line:"Sign in with Discord, claim your position and platform, and get drafted to a club.",
     cta:`<button class="btn btn-frost" data-go="signup">Register Now</button><button class="btn btn-light" data-go="standings">View Clubs</button>`
   }];
   try{if(leaders&&leaders.points&&leaders.points.length&&leaders.points[0]&&liveStandings.some(r=>(r[1]||0)>0)){const pw=slidePoW();if(pw)slides.push(pw);}
@@ -3163,6 +3163,8 @@ function renderSignupAuth(){
   const gl=document.querySelector("#signupGlanceTitle");if(gl&&openSeason)gl.textContent="Season "+openSeason.number+" At A Glance";
   if(authProfile){
     const g=document.querySelector("#su-gamer");if(g&&!g.value&&myRegistration&&myRegistration.ea_id)g.value=myRegistration.ea_id;
+    const pt=document.querySelector("#su-ptag");if(pt&&!pt.value&&myRegistration&&myRegistration.platform_gamertag)pt.value=myRegistration.platform_gamertag;
+    const pl=document.querySelector("#su-plat");if(pl&&myRegistration&&myRegistration.platform)pl.value=myRegistration.platform;
     const tw=document.querySelector("#su-twitch");if(tw&&!tw.value&&authProfile.twitch)tw.value=authProfile.twitch;
     const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+authProfile.gamertag+".");
     b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${authProfile.gamertag}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div></div></div>`;
@@ -3200,10 +3202,10 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
   if(!authUser){toast("Sign in to register","Use “Sign in with Discord” first.");signInDiscord();return;}
   if(!openSeason){toast("Registration closed","No season is open for registration right now.");return;}
   const pos=(document.querySelector('input[name="pos"]:checked')||{}).value||"C";
-  const prefNum=Math.max(0,Math.min(99,parseInt($("#su-num").value,10)||0))||null;
+  const ptag=($("#su-ptag").value||"").trim()||null;
   const eaId=($("#su-gamer").value||"").trim();
   if(!eaId){toast("EA ID required","Enter your EA account name so we can invite you to a club.");return;}
-  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,preferred_number:prefNum,platform:$("#su-plat").value,ea_id:eaId,note:($("#su-note").value||"").trim()||null};
+  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,platform:$("#su-plat").value,platform_gamertag:ptag,ea_id:eaId,note:($("#su-note").value||"").trim()||null};
   const {error}=await sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(error){toast("Couldn't register",error.message);return;}
   myRegistration=payload;
@@ -4143,7 +4145,7 @@ async function loadRegistrations(){
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       const cur=spotBy[r.profile_id];const gq=g.replace(/"/g,'&quot;');
       const eid=r.ea_id||g;
-      return `<tr><td><b>${esc(g)}</b></td><td class="mono">${r.ea_id?`<a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link" title="Scout ${esc(eid)} — opens their EASHL 6v6 career stats">${esc(r.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
+      return `<tr><td><b>${esc(g)}</b>${r.platform_gamertag?`<small style="display:block;color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(r.platform||'')} · ${esc(r.platform_gamertag)}</small>`:''}</td><td class="mono">${r.ea_id?`<a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link" title="Scout ${esc(eid)} — opens their EASHL 6v6 career stats">${esc(r.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
       <td>${done
         ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
         :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
