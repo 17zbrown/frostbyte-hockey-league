@@ -511,14 +511,6 @@
   .trade-chip .tc-ret+.tc-x{margin-left:8px}
   .trade-chip .tc-x:hover{border-color:var(--loss);color:var(--loss)}
   .trade-col h4{font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:13px;margin:0 0 12px;display:flex;align-items:center;gap:9px}
-  .trade-mid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-  .swap-ic{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;color:var(--frost-ink)}
-  .trade-item{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r-s);margin-bottom:8px;cursor:pointer;transition:.15s;background:#0a1a28}
-  .trade-item:hover{border-color:#2a536a}
-  .trade-item.sel{border-color:var(--frost);background:var(--frost-glow)}
-  .trade-item .num{font-family:var(--f-display);font-size:14px;color:var(--frost-ink);width:22px;text-align:center}
-  .trade-item b{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.02em;text-transform:uppercase}
-  .trade-item small{font-family:var(--f-mono);font-size:10px;color:var(--fog-dim);margin-left:auto}
   .trade-foot{margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
   .trade-count{font-family:var(--f-cond);letter-spacing:.03em;text-transform:uppercase;font-size:13px;color:var(--fog);margin-bottom:8px}
   .ret-list{display:flex;flex-direction:column;gap:7px}
@@ -539,9 +531,6 @@
   .off-wait{font-family:var(--f-cond);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--fog-dim)}
   .pick-head{font-family:var(--f-cond);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10.5px;color:var(--fog-dim);margin:13px 0 7px}
   .pick-list{display:flex;flex-direction:column;gap:6px}
-  .pick-chip{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;background:var(--panel);font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--ice);transition:.15s}
-  .pick-chip:hover{border-color:var(--frost)}
-  .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
   .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#0a0a0a;padding:2px 6px;border-radius:4px;flex-shrink:0}
   .pk-ovr{font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--win);letter-spacing:0}
   .pk-ovr-empty{font-weight:500;color:var(--fog-dim);text-transform:none}
@@ -895,7 +884,6 @@
   @media(max-width:820px){
     .foot-grid{grid-template-columns:1fr 1fr}
     .trade-grid{grid-template-columns:1fr}
-    .trade-mid{flex-direction:row}
     .mobile-menu.on{display:flex}
     .player-hero{grid-template-columns:1fr;text-align:center;justify-items:center}
     .team-banner .tb-top{flex-wrap:wrap}
@@ -1566,18 +1554,7 @@
   <div class="view" id="view-chat"><section class="pad"><div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">Open to the whole league</span><h2>League <em>Chat</em></h2>
       <p>Trash talk, line calls, and trade rumors across the channels — keep it clean, refs are watching.</p></div></div>
-    <div class="chat-shell">
-      <aside class="card"><div class="card-h"><h3>Channels</h3></div><div class="chan-list" id="chanList"></div></aside>
-      <div class="chat-box">
-        <div class="chat-head"><span class="glow"></span><b id="chatChanName">#general</b><small><span id="onlineCount">28</span> online</small></div>
-        <div class="chat-log" id="chatLog"></div>
-        <form class="chat-input" id="chatForm">
-          <input id="chatInput" placeholder="Message the league…" autocomplete="off" aria-label="Message" maxlength="240" />
-          <button class="btn btn-frost" type="submit">Send</button>
-        </form>
-      </div>
-      <aside class="card"><div class="card-h"><h3>Online Now</h3><span class="pill frost" id="onlinePill">28</span></div><div class="online-list" id="onlineList"></div></aside>
-    </div>
+    <div class="card" id="chatLog"></div>
   </div></section></div>
 
   <!-- FREE AGENCY -->
@@ -3061,21 +3038,14 @@ function renderRules(){
 /* ------------------------------ CHAT ------------------------------ */
 let currentChan="general";
 /* League chat runs in the Chel Gaming Discord server — the in-app view points there. */
-function renderChannels(){const el=$("#chanList");if(el)el.innerHTML='<div class="chan active"><span class="h">#</span>discord<small>live</small></div>';}
-function renderOnline(){const el=$("#onlineList");if(el)el.innerHTML='<div style="padding:16px;color:var(--fog);font-size:12.5px">Members hang out in the Discord server.</div>';}
 function renderChat(){
-  const name=$("#chatChanName");if(name)name.textContent="#discord";
-  const oc=$("#onlineCount");if(oc)oc.textContent="—";const op=$("#onlinePill");if(op)op.textContent="Discord";
-  const log=$("#chatLog");
-  if(log)log.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:52px 24px;color:var(--fog)">
+  const log=$("#chatLog");if(!log)return;
+  log.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:52px 24px;color:var(--fog)">
     <span style="width:56px;height:56px;border-radius:16px;background:#5865F2;display:grid;place-items:center">${DISCORD_GLYPH}</span>
     <div><b style="font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.03em;color:var(--navy);font-size:19px;display:block;margin-bottom:5px">League chat lives in Discord</b>
     Game coordination, trash talk, and trade talk all happen in the Chel Gaming Discord server.</div>
     <a class="btn btn-frost" href="${DISCORD_INVITE}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">Join the Chel Gaming Discord →</a></div>`;
-  const inp=$("#chatInput");if(inp){inp.disabled=true;inp.placeholder="Chat happens in the Discord server";}
-  const form=$("#chatForm");if(form){const btn=form.querySelector("button");if(btn)btn.disabled=true;}
 }
-$("#chatForm").addEventListener("submit",e=>{e.preventDefault();toast("Chat is in Discord","The league chats in the Chel Gaming Discord server.");});
 
 /* ------------------------------ SIGNUP ------------------------------ */
 /* ===================== SUPABASE — auth + persistence (Phase 2a) ===================== */
@@ -3340,11 +3310,7 @@ function loadFrontOffice(){const t=teams[currentClub];
   const sel=$("#tradePartner");if(sel)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
   renderRoster();renderTrade();renderLineup();renderFAmgr();renderReports();}
 
-/* ---- Game Reports: full per-player box score for BOTH clubs; must mirror opponent to publish ---- */
-let gameReports=[];
-const AI_SCAN_IC=`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.3L18 9l-4.1 1.7L12 15l-1.9-4.3L6 9l4.1-1.7z"/><path d="M19 14l.8 1.9L22 17l-2.2.9L19 20l-.8-2.1L16 17l2.2-1.1z"/></svg>`;
-const AI_UP_IC=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v13"/></svg>`;
-const scanImages={};
+/* ---- Game Reports: lists the club's fixtures; box scores import automatically from EA (no manual submission) ---- */
 function renderReports(){const el=$("#reportsBody");if(!el)return;
   const byWeek=[];(liveSchedule||[]).forEach(wk=>{const g=wk.games.filter(x=>x.a===currentClub||x.b===currentClub);if(g.length)byWeek.push({wk:wk.wk,games:g});});
   if(!byWeek.length){el.innerHTML='<div class="empty-note">No games yet — your fixtures appear here once the commissioner posts the schedule. After each game, your box score imports automatically from EA — nothing to submit.</div>';return;}
@@ -3356,16 +3322,6 @@ function renderReports(){const el=$("#reportsBody");if(!el)return;
 }
 const MISMATCH_WINDOW_MS=24*60*60*1000; // 24 hours to align before a forfeit is ruled
 let reportTimer=null;
-$("#reportsBody").addEventListener("click",e=>{
-  const t=e.target.closest(".rr-toggle");if(t){const gr=gameReports.find(x=>x.id===t.dataset.id);if(gr){gr.expanded=!gr.expanded;renderReports();}return;}
-  const sc=e.target.closest(".ai-scan");if(sc){aiScan(sc.dataset.id);return;}
-  const rm=e.target.closest(".ai-rm");if(rm){e.preventDefault();const g=rm.dataset.gid;if(scanImages[g])scanImages[g].splice(+rm.dataset.i,1);aiRenderThumbs(g);return;}
-  const s=e.target.closest(".rr-submit");if(s){const gr=gameReports.find(x=>x.id===s.dataset.id);if(gr)submitBox(gr);}
-});
-$("#reportsBody").addEventListener("change",e=>{const f=e.target.closest(".ai-file");if(f)aiAddFiles(f.dataset.gid,f.files);});
-$("#reportsBody").addEventListener("dragover",e=>{const d=e.target.closest(".ai-drop");if(d){e.preventDefault();d.classList.add("drag");}});
-$("#reportsBody").addEventListener("dragleave",e=>{const d=e.target.closest(".ai-drop");if(d)d.classList.remove("drag");});
-$("#reportsBody").addEventListener("drop",e=>{const d=e.target.closest(".ai-drop");if(d){e.preventDefault();d.classList.remove("drag");aiAddFiles(d.dataset.gid,e.dataTransfer.files);}});
 let rosterState=[];
 async function renderRoster(){
   if(!sb||!openSeason){rosterState=[];drawRoster();return;}
@@ -3431,7 +3387,6 @@ function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;co
     ? ` <span class="pk-ovr" title="Live average overall of every player drafted in round ${p.round} (${rd.n} drafted)">(~${rd.avg} OVR)</span>`
     : ` <span class="pk-ovr pk-ovr-empty" title="No players have been drafted in round ${p.round} yet — this fills in as picks are made">(no draft data yet)</span>`;
   return `’${String(p.season).slice(-2)} R${p.round}${ovr}`+(oc?` · via ${oc}`:"");}
-function pickCard(list,side){return list.map((p,i)=>`<div class="pick-chip" data-pside="${side}" data-i="${i}"><span class="pk-badge">PICK</span>${pickLabel(p)}</div>`).join("");}
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
   const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,overall)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
@@ -3538,11 +3493,10 @@ async function adjustTrade(id){
   const reqSet=new Set(t.requested_profile_ids),offSet=new Set(t.offered_profile_ids);
   tradeMineList.forEach((p,i)=>{if(reqSet.has(p.pid))tradeSel.mine.add(i);});       // my players they wanted
   tradeTheirsList.forEach((p,i)=>{if(offSet.has(p.pid))tradeSel.theirs.add(i);});    // their players they offered
-  document.querySelectorAll('#tradeMine .trade-item').forEach(el=>{if(tradeSel.mine.has(+el.dataset.i))el.classList.add('sel');});
-  document.querySelectorAll('#tradeTheirs .trade-item').forEach(el=>{if(tradeSel.theirs.has(+el.dataset.i))el.classList.add('sel');});
+  refreshTradeSide('mine');refreshTradeSide('theirs');   // render the pre-filled player chips + rebuild the add-dropdowns
   updateTradeSummary();
   counteringTradeId=id;
-  const builder=($("#tradeMine")&&$("#tradeMine").closest(".card"))||$("#proposeTrade");if(builder)builder.scrollIntoView({behavior:"smooth",block:"center"});
+  const builder=($("#tradeMineList")&&$("#tradeMineList").closest(".card"))||$("#proposeTrade");if(builder)builder.scrollIntoView({behavior:"smooth",block:"center"});
   toast("Adjust the offer","Tweak the players, then hit Propose to send a counter — the original offer is declined.");
 }
 $("#tradesPending").addEventListener("click",async e=>{
@@ -4754,7 +4708,6 @@ $("#view-admin").addEventListener("click",e=>{
   if(e.target.closest("#addGameBtn")){e.preventDefault();addSingleGame();return;}
   if(e.target.closest("#clearScheduleBtn")){e.preventDefault();clearSchedule();return;}
   const gs=e.target.closest(".ga-save");if(gs){e.preventDefault();saveGameResult(gs);return;}
-  const mb=e.target.closest(".mb-save");if(mb){e.preventDefault();saveMember(mb);return;}
 });
 $("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.trim();if(!t){toast("Missing headline","Give the story a headline first.");return;}
   if(!sb){toast("Not connected","Sign in to publish news.");return;}
@@ -4903,9 +4856,7 @@ renderNews();
 renderFA();
 renderDraft();
 renderRules();
-renderChannels();
 renderChat();
-renderOnline();
 sbInit();   // connect Supabase: load teams/open season, restore session, wire auth UI
 renderLiveGames();
 setInterval(renderLiveGames, 60000);   // keep the Live Now module current as games start/end and streamers go live
