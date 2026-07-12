@@ -1713,7 +1713,7 @@
         <div class="cap"><div class="v" id="capSpace">—</div><small>Cap Space</small></div>
         <button class="btn btn-ghost" id="mgrLogout">Sign Out</button></div>
       <div class="mgr-tabs">
-        <button class="mgr-tab active" data-mtab="roster">Roster &amp; Waivers</button>
+        <button class="mgr-tab active" data-mtab="roster">Roster</button>
         <button class="mgr-tab" data-mtab="trade" data-feature="trades">Trade Center</button>
         <button class="mgr-tab" data-mtab="fa" data-feature="freeagency">Free Agents</button>
         <button class="mgr-tab" data-mtab="lineup">Game Night Info</button>
@@ -3379,18 +3379,10 @@ function drawRoster(){
     <td><div class="rp"><span class="num">${p.num}</span><div><b data-go="player" data-param="${p.name}" style="cursor:pointer">${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small></div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost-ink);font-weight:700">${p.pts}</td>
-    <td style="text-align:right"><div class="caphit-cell">${isMgr?`<span class="cap-hit" title="Managers are locked to their club at $3M">${fmtMoney(p.salary)}</span>`:(isComm?`<input class="sal-in" data-salspot="${p.spotId}" value="${p.salary?esc(fmtMoney(p.salary)):""}" placeholder="$0" aria-label="Cap hit for ${esc(p.name)}">`:`<span class="cap-hit">${fmtMoney(p.salary)}</span>`)}<span class="term-tag" title="Contract term">${p.years} season${p.years===1?'':'s'}</span></div></td>
+    <td style="text-align:right"><div class="caphit-cell"><span class="cap-hit"${isMgr?' title="Managers are locked to their club at $3M"':''}>${fmtMoney(p.salary)}</span><span class="term-tag" title="Contract term">${p.years} season${p.years===1?'':'s'}</span></div></td>
     <td style="text-align:right"><div class="act">${isMgr?'<span class="mgr-tag">Manager</span>':(locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`)}</div></td></tr>`;}).join("");
 }
 function parseMoney(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="m")v*=1e6;else if(u==="k")v*=1e3;return Math.round(v);}
-$("#rosterBody").addEventListener("change",async e=>{
-  const inp=e.target.closest(".sal-in");if(!inp||!sb)return;
-  const v=parseMoney(inp.value);
-  if(isNaN(v)||v<0){toast("Invalid salary","Use a value like 3M, 750K, or 3000000.");renderRoster();return;}
-  const {error}=await sb.from("roster_spots").update({salary:v}).eq("id",inp.dataset.salspot);
-  if(error){toast("Couldn't save salary",error.message);return;}
-  renderRoster();
-});
 function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();renderTradeRequests();}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
@@ -4403,16 +4395,16 @@ async function loadMembers(){
   const {data:tms}=await sb.from("teams").select("id,code,name,owner_profile_id,gm_profile_id,agm_profile_id").order("code");
   const clubOf={};(tms||[]).forEach(t=>{[t.owner_profile_id,t.gm_profile_id,t.agm_profile_id].forEach(pid=>{if(pid)clubOf[pid]=t.code;});});
   // current position per player: roster spot (this season) first, else their sign-up position
-  const season=adminSeason||openSeason;const posOf={};
+  const season=adminSeason||openSeason;const posOf={},salOf={},spotOf={};
   if(season){
     const {data:regs}=await sb.from("season_registrations").select("profile_id,position").eq("season_id",season.id);
     (regs||[]).forEach(r=>{posOf[r.profile_id]=r.position;});
-    const {data:spots}=await sb.from("roster_spots").select("profile_id,position").eq("season_id",season.id);
-    (spots||[]).forEach(s=>{posOf[s.profile_id]=s.position;});
+    const {data:spots}=await sb.from("roster_spots").select("id,profile_id,position,salary,status").eq("season_id",season.id);
+    (spots||[]).forEach(s=>{posOf[s.profile_id]=s.position;if(s.status==="active"){spotOf[s.profile_id]=s.id;salOf[s.profile_id]=+s.salary||0;}});
   }
   const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
-  memberById={};(profs||[]).forEach(p=>{memberById[p.id]={name:p.gamertag||"?",role:p.role,pos:posOf[p.id]||""};});
+  memberById={};(profs||[]).forEach(p=>{memberById[p.id]={name:p.gamertag||"?",role:p.role,pos:posOf[p.id]||"",salary:salOf[p.id]||0,spotId:spotOf[p.id]||null};});
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>League role</th><th>Position</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
     profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-role="${p.role}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}</td>
       <td>${ROLE_LABEL[p.role]||esc(p.role)}</td>
@@ -4423,12 +4415,18 @@ async function loadMembers(){
 let memberById={};
 function openMemberEdit(id){
   const m=memberById[id];if(!m||!sb)return;
-  formModal("Edit "+m.name,[
+  const fields=[
     {key:"role",label:"League role",type:"select",value:m.role,options:ROLE_OPTS.map(([v,l])=>({value:v,label:l}))},
     {key:"pos",label:"Position",type:"select",value:m.pos||"C",options:AC_POS.map(([v,l])=>({value:v,label:l}))}
-  ],async v=>{
+  ];
+  if(m.spotId)fields.push({key:"salary",label:"Salary / cap hit (rostered players only)",value:m.salary?fmtMoney(m.salary):"",placeholder:"e.g. 3M, 750K"});
+  formModal("Edit "+m.name,fields,async v=>{
     if(v.role!==m.role){const {error}=await sb.rpc("set_member_role",{p_target:id,p_role:v.role});if(error){toast("Couldn't save role",error.message);return;}}
     if((v.pos||"")!==(m.pos||""))await saveMemberPosition(id,v.pos);
+    if(m.spotId&&v.salary!=null){const nv=parseMoney(v.salary);
+      if(isNaN(nv)||nv<0){toast("Invalid salary","Use a value like 3M, 750K, or 3000000.");return;}
+      if(nv!==(m.salary||0)){const {error}=await sb.from("roster_spots").update({salary:nv}).eq("id",m.spotId);if(error){toast("Couldn't save salary",error.message);return;}}
+    }
     toast("Member updated",m.name);loadMembers();refreshTeamsEverywhere&&refreshTeamsEverywhere();
   });
 }
