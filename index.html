@@ -386,6 +386,8 @@
   .field{margin-bottom:18px}
   .field label{font-family:var(--f-cond);font-weight:500;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--fog);display:block;margin-bottom:7px}
   .field input,.field select,.field textarea{width:100%;background:#08161f;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:12px 14px;font-family:var(--f-body);font-size:14.5px}
+  /* base dropdown look — rounded corners so bare selects (filters, etc.) match the nice ones; class rules below can override */
+  select{border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-family:var(--f-body);font-size:14px;background:#fff;color:var(--navy);cursor:pointer}
   .field input::placeholder,.field textarea::placeholder{color:var(--fog-dim)}
   .field .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .pos-pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
@@ -1332,8 +1334,8 @@
   html[data-theme="dark"] .trade-col,html[data-theme="dark"] .slot{background:#191919} html[data-theme="dark"] .trade-item{background:#1f1f1f} html[data-theme="dark"] .trade-item:hover{border-color:#3d3d3d}
   html[data-theme="dark"] .bar{background:#2a2a2a}
   /* INPUTS */
-  html[data-theme="dark"] input:not([type=color]):not([type=checkbox]):not([type=radio]),html[data-theme="dark"] select,html[data-theme="dark"] textarea,html[data-theme="dark"] .box-in,html[data-theme="dark"] .adm-search{background:#0c1e2b;color:var(--ice);border-color:var(--line);color-scheme:dark}
-  html[data-theme="dark"] select option,html[data-theme="dark"] select optgroup{background:#0c1e2b;color:var(--ice)}
+  html[data-theme="dark"] input:not([type=color]):not([type=checkbox]):not([type=radio]),html[data-theme="dark"] select,html[data-theme="dark"] textarea,html[data-theme="dark"] .box-in,html[data-theme="dark"] .adm-search{background:#202020;color:var(--ice);border-color:var(--line);color-scheme:dark}
+  html[data-theme="dark"] select option,html[data-theme="dark"] select optgroup{background:#202020;color:var(--ice)}
   html[data-theme="dark"] input::placeholder,html[data-theme="dark"] textarea::placeholder{color:#5f7488}
   /* TEXT BLOCKS */
   html[data-theme="dark"] .msg .body p,html[data-theme="dark"] .txn .tx-desc,html[data-theme="dark"] .article-body,html[data-theme="dark"] .rule-sec ul{color:#cddced}
