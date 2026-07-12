@@ -481,8 +481,23 @@
   .mini:hover{border-color:var(--frost);color:var(--frost-ink)}
   .mini.danger:hover{border-color:var(--loss);color:var(--loss)}
   .mini.good:hover{border-color:var(--win);color:var(--win)}
-  .trade-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:stretch}
+  .trade-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
   .trade-col{background:#08161f;border:1px solid var(--line);border-radius:var(--r-m);padding:16px}
+  .trade-add,.trade-partner{width:100%;font-family:var(--f-cond);font-weight:600;letter-spacing:.03em;font-size:13px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r-s);background:var(--panel);color:var(--ice)}
+  .trade-partner{text-transform:uppercase;width:auto;min-width:150px;padding:6px 9px}
+  .trade-add:focus,.trade-partner:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px var(--frost-glow)}
+  .trade-added{display:flex;flex-direction:column;gap:7px;margin-top:11px}
+  .trade-empty{color:var(--fog);font-size:12.5px;padding:12px;border:1px dashed var(--line);border-radius:var(--r-s);text-align:center}
+  .trade-chip{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-s);background:var(--panel-2)}
+  .trade-chip .tc-num{font-family:var(--f-display);font-size:15px;color:var(--frost-ink);width:24px;text-align:center;flex-shrink:0}
+  .trade-chip .tc-nm{display:flex;flex-direction:column;min-width:0}
+  .trade-chip .tc-nm b{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.02em;text-transform:uppercase;line-height:1.1}
+  .trade-chip .tc-nm small{font-family:var(--f-mono);font-size:10.5px;color:var(--fog)}
+  .trade-chip .tc-ret{margin-left:auto;font-family:var(--f-cond);font-size:11px;color:var(--fog);display:flex;align-items:center;gap:5px}
+  .trade-chip .tc-ret select{font-size:11px;padding:3px 5px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ice)}
+  .trade-chip .tc-x{margin-left:auto;width:24px;height:24px;flex-shrink:0;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--fog);font-size:16px;line-height:1;cursor:pointer}
+  .trade-chip .tc-ret+.tc-x{margin-left:8px}
+  .trade-chip .tc-x:hover{border-color:var(--loss);color:var(--loss)}
   .trade-col h4{font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:13px;margin:0 0 12px;display:flex;align-items:center;gap:9px}
   .trade-mid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
   .swap-ic{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;color:var(--frost-ink)}
@@ -515,7 +530,7 @@
   .pick-chip{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;background:var(--panel);font-family:var(--f-cond);font-weight:600;font-size:12.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--ice);transition:.15s}
   .pick-chip:hover{border-color:var(--frost)}
   .pick-chip.sel{border-color:var(--frost);background:var(--frost-glow)}
-  .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#fff;padding:2px 6px;border-radius:4px;flex-shrink:0}
+  .pk-badge{font-family:var(--f-cond);font-weight:700;font-size:9px;letter-spacing:.07em;background:var(--frost);color:#0a0a0a;padding:2px 6px;border-radius:4px;flex-shrink:0}
   .pk-ovr{font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--win);letter-spacing:0}
   .pk-ovr-empty{font-weight:500;color:var(--fog-dim);text-transform:none}
   .lineup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
@@ -1713,13 +1728,14 @@
         <div class="card" style="padding:22px 24px">
         <div class="next-game-bar" style="margin-bottom:22px"><b style="font-family:var(--f-cond);letter-spacing:.05em;text-transform:uppercase;font-size:14px">Propose a trade</b><span style="color:var(--fog);font-size:13.5px">Pick players from each side and send it — a trade goes through the moment the other GM accepts. No commissioner approval.</span></div>
         <div class="trade-grid">
-          <div class="trade-col"><h4><span id="tradeMyBadge" style="line-height:0"></span> <span id="tradeMyName">Glacier Kings</span> send</h4><div id="tradeMine"></div>
-            <div class="pick-head" id="tradeMinePicksHead" hidden>Draft picks</div><div class="pick-list" id="tradeMinePicks"></div></div>
-          <div class="trade-mid"><div class="swap-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13l-3-3M17 16H4l3 3"/></svg></div><span class="pill dim">Swap</span></div>
-          <div class="trade-col"><h4><select id="tradePartner" aria-label="Trade partner club" style="background:#fff;border:1px solid var(--line);border-radius:4px;color:var(--ice);font-family:var(--f-cond);font-size:13px;letter-spacing:.04em;text-transform:uppercase;padding:5px 8px"></select> send</h4><div id="tradeTheirs"></div>
-            <div class="pick-head" id="tradeTheirsPicksHead" hidden>Draft picks</div><div class="pick-list" id="tradeTheirsPicks"></div></div>
+          <div class="trade-col"><h4><span id="tradeMyBadge" style="line-height:0"></span> <span id="tradeMyName">Glacier Kings</span> send</h4>
+            <select id="tradeMineAdd" class="trade-add" aria-label="Add one of your players or picks"><option value="">+ Add a player or pick…</option></select>
+            <div id="tradeMineList" class="trade-added"></div></div>
+          <div class="trade-col"><h4><select id="tradePartner" class="trade-partner" aria-label="Trade partner club"></select> send</h4>
+            <select id="tradeTheirsAdd" class="trade-add" aria-label="Add one of their players or picks"><option value="">+ Add a player or pick…</option></select>
+            <div id="tradeTheirsList" class="trade-added"></div></div>
         </div>
-        <div class="trade-foot"><div class="mono" style="color:var(--fog);font-size:13px" id="tradeSummary">Select at least one player from each side.</div><button class="btn btn-frost" id="proposeTrade">Propose Trade</button></div>
+        <div class="trade-foot"><div class="mono" style="color:var(--fog);font-size:13px" id="tradeSummary">Add players or picks from each side.</div><button class="btn btn-frost" id="proposeTrade">Propose Trade</button></div>
       </div></div>
       <div class="mgr-panel" id="mtab-fa">
         <div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Your Contract Offers</h3><span class="pill" id="faOffersCount"></span></div>
@@ -3403,12 +3419,33 @@ function pickLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;co
 function pickCard(list,side){return list.map((p,i)=>`<div class="pick-chip" data-pside="${side}" data-i="${i}"><span class="pk-badge">PICK</span>${pickLabel(p)}</div>`).join("");}
 async function loadRosterFor(code){
   const tid=teamIdOf(code);if(!tid||!openSeason||!sb)return [];
-  const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
+  const {data}=await sb.from("roster_spots").select("profile_id,jersey_number,position,salary, profiles(gamertag,overall)").eq("season_id",openSeason.id).eq("team_id",tid).eq("status","active").order("jersey_number");
   const _tt=dbTeams.find(t=>t.id===tid)||{};const mgrIds=[_tt.owner_profile_id,_tt.gm_profile_id,_tt.agm_profile_id].filter(Boolean);  // owner/gm/agm can't be traded
-  return (data||[]).filter(s=>!mgrIds.includes(s.profile_id)).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position,salary:+s.salary||0}));
+  return (data||[]).filter(s=>!mgrIds.includes(s.profile_id)).map(s=>({pid:s.profile_id,name:s.profiles?s.profiles.gamertag:"?",num:s.jersey_number,pos:s.position,salary:+s.salary||0,ovr:s.profiles?+s.profiles.overall||0:0}));
 }
-function tradeCard(list,side){if(!list.length)return '<div style="padding:16px;color:var(--fog);font-size:13px">No players on this roster yet.</div>';
-  return list.map((p,i)=>`<div class="trade-item" data-side="${side}" data-i="${i}"><span class="num">${p.num}</span><b>${p.name}</b><small>${p.pos}</small></div>`).join("");}
+function playerOpt(p){return `#${p.num} ${p.name} · ${p.pos}${p.ovr?` · ${p.ovr} OVR`:''}`;}
+function pickPlainLabel(p){const oc=p.orig&&p.orig!==p.owner?codeOfId(p.orig):null;const rd=roundOvrAvg[p.round];const ovr=(rd&&rd.avg!=null)?` (~${rd.avg} OVR)`:'';return `’${String(p.season).slice(-2)} R${p.round}${ovr}`+(oc?` · via ${oc}`:'');}
+function buildAddSelect(side){
+  const players=side==='mine'?tradeMineList:tradeTheirsList,picks=side==='mine'?minePicksList:theirsPicksList;
+  let html='<option value="">+ Add a player or pick…</option>';
+  const ap=players.map((p,i)=>({p,i})).filter(o=>!tradeSel[side].has(o.i));
+  const ak=picks.map((p,i)=>({p,i})).filter(o=>!pickSel[side].has(o.i));
+  if(ap.length)html+='<optgroup label="Players">'+ap.map(o=>`<option value="p:${o.i}">${esc(playerOpt(o.p))}</option>`).join('')+'</optgroup>';
+  if(ak.length)html+='<optgroup label="Draft picks">'+ak.map(o=>`<option value="k:${o.i}">${esc(pickPlainLabel(o.p))}</option>`).join('')+'</optgroup>';
+  return html;
+}
+function renderAddedList(side){
+  const el=$(side==='mine'?'#tradeMineList':'#tradeTheirsList');if(!el)return;
+  const players=side==='mine'?tradeMineList:tradeTheirsList,picks=side==='mine'?minePicksList:theirsPicksList;
+  const rows=[];
+  [...tradeSel[side]].forEach(i=>{const p=players[i];if(!p)return;
+    rows.push(`<div class="trade-chip"><span class="tc-num">${p.num}</span><span class="tc-nm"><b>${esc(p.name)}</b><small>${p.pos}${p.ovr?` · ${p.ovr} OVR`:''} · ${fmtMoney(p.salary)}</small></span>${side==='mine'?`<label class="tc-ret">Retain <select class="ret-pct" data-pid="${p.pid}">${[0,25,50].map(v=>`<option value="${v}" ${v===(retentionSel[p.pid]||0)?'selected':''}>${v}%</option>`).join('')}</select></label>`:''}<button class="tc-x" data-side="${side}" data-type="p" data-i="${i}" aria-label="Remove">×</button></div>`);});
+  [...pickSel[side]].forEach(i=>{const p=picks[i];if(!p)return;
+    rows.push(`<div class="trade-chip"><span class="pk-badge">PICK</span><span class="tc-nm"><b>${pickLabel(p)}</b></span><button class="tc-x" data-side="${side}" data-type="k" data-i="${i}" aria-label="Remove">×</button></div>`);});
+  el.innerHTML=rows.length?rows.join(''):'<div class="trade-empty">Nothing added yet — use the dropdown above.</div>';
+}
+function refreshTradeSide(side){const a=$(side==='mine'?'#tradeMineAdd':'#tradeTheirsAdd');if(a)a.innerHTML=buildAddSelect(side);renderAddedList(side);}
+let retentionSel={};   // pid -> retained percent (on players I'm sending)
 async function renderTrade(){
   if(!sb||!openSeason)return;
   tradeSel={mine:new Set(),theirs:new Set()};pickSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;retentionSel={};
@@ -3417,39 +3454,29 @@ async function renderTrade(){
   tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
   minePicksList=await loadPicksFor(currentClub);theirsPicksList=await loadPicksFor(partner);
   await loadRoundOvrAvg();
-  const me=$("#tradeMine");if(me)me.innerHTML=tradeCard(tradeMineList,"mine");
-  const th=$("#tradeTheirs");if(th)th.innerHTML=tradeCard(tradeTheirsList,"theirs");
-  const mp=$("#tradeMinePicks");if(mp)mp.innerHTML=pickCard(minePicksList,"mine");
-  const tp=$("#tradeTheirsPicks");if(tp)tp.innerHTML=pickCard(theirsPicksList,"theirs");
-  if($("#tradeMinePicksHead"))$("#tradeMinePicksHead").hidden=!minePicksList.length;
-  if($("#tradeTheirsPicksHead"))$("#tradeTheirsPicksHead").hidden=!theirsPicksList.length;
+  refreshTradeSide("mine");refreshTradeSide("theirs");
   updateTradeSummary();loadMyTrades();
 }
 $("#tradePartner").addEventListener("change",renderTrade);
-document.addEventListener("click",e=>{const it=e.target.closest(".trade-item");if(!it)return;const side=it.dataset.side,i=+it.dataset.i;
-  if(tradeSel[side].has(i)){tradeSel[side].delete(i);it.classList.remove("sel");}else{tradeSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
-document.addEventListener("click",e=>{const it=e.target.closest(".pick-chip");if(!it)return;const side=it.dataset.pside,i=+it.dataset.i;
-  if(pickSel[side].has(i)){pickSel[side].delete(i);it.classList.remove("sel");}else{pickSel[side].add(i);it.classList.add("sel");}updateTradeSummary();});
-let retentionSel={};   // pid -> retained percent (on players I'm sending)
+$("#view-manager").addEventListener("change",e=>{
+  const rp=e.target.closest(".ret-pct");if(rp){retentionSel[rp.dataset.pid]=+rp.value;updateTradeSummary();return;}
+  const sel=e.target.closest("#tradeMineAdd,#tradeTheirsAdd");if(!sel||!sel.value)return;
+  const side=sel.id==="tradeMineAdd"?"mine":"theirs",parts=sel.value.split(":"),idx=+parts[1];
+  if(parts[0]==="p")tradeSel[side].add(idx);else pickSel[side].add(idx);
+  sel.value="";refreshTradeSide(side);updateTradeSummary();
+});
+document.addEventListener("click",e=>{const x=e.target.closest(".tc-x");if(!x)return;
+  const side=x.dataset.side,i=+x.dataset.i;
+  if(x.dataset.type==="p")tradeSel[side].delete(i);else pickSel[side].delete(i);
+  refreshTradeSide(side);updateTradeSummary();});
 function updateTradeSummary(){const el=$("#tradeSummary");if(!el)return;
   const pb=$("#proposeTrade");const locked=seasonMovesLocked();if(pb)pb.disabled=locked;
   if(locked){el.innerHTML='<b style="color:var(--loss)">Roster moves are locked</b> — the trade deadline has passed or a commissioner locked moves.';return;}
-  const mineSel=[...tradeSel.mine].map(i=>tradeMineList[i]).filter(Boolean);
-  const mineP=pickSel.mine.size,theirsP=pickSel.theirs.size;
-  const t=tradeSel.theirs.size;
-  if(!mineSel.length&&!t&&!mineP&&!theirsP){el.innerHTML="Add at least one player or draft pick on each side.";return;}
+  const mineP=tradeSel.mine.size,mineK=pickSel.mine.size,theirP=tradeSel.theirs.size,theirK=pickSel.theirs.size;
+  if(!mineP&&!mineK&&!theirP&&!theirK){el.innerHTML="Add players or picks from each side.";return;}
   const fmtSide=(pl,pk)=>{const a=[];if(pl)a.push(pl+" player"+(pl===1?"":"s"));if(pk)a.push(pk+" pick"+(pk===1?"":"s"));return a.length?a.join(" + "):"nothing";};
-  let html=`<div class="trade-count">Sending <b>${fmtSide(mineSel.length,mineP)}</b> · Receiving <b>${fmtSide(t,theirsP)}</b></div>`;
-  if(mineSel.length){
-    html+='<div class="ret-list">'+mineSel.map(p=>{
-      const pct=retentionSel[p.pid]||0,retained=Math.round((p.salary||0)*pct/100),net=(p.salary||0)-retained;
-      return `<div class="ret-row"><span class="ret-name">${esc(p.name)} <small>${fmtMoney(p.salary)}</small></span>
-        <label class="ret-ctl">Retain <select class="ret-pct" data-pid="${p.pid}">${[0,25,50].map(v=>`<option value="${v}" ${v===pct?"selected":""}>${v}%</option>`).join("")}</select></label>
-        <span class="ret-info">${pct?`you keep ${fmtMoney(retained)} · they take ${fmtMoney(net)}`:`they take ${fmtMoney(p.salary)}`}</span></div>`;
-    }).join("")+'</div>';
-  }
-  el.innerHTML=html;}
-$("#tradeSummary").addEventListener("change",e=>{const s=e.target.closest(".ret-pct");if(!s)return;retentionSel[s.dataset.pid]=+s.value;updateTradeSummary();});
+  el.innerHTML=`<div class="trade-count">Sending <b>${fmtSide(mineP,mineK)}</b> · Receiving <b>${fmtSide(theirP,theirK)}</b></div>`;
+}
 $("#proposeTrade").addEventListener("click",async()=>{
   if(!sb||!authUser){toast("Sign in first","");return;}
   if(seasonMovesLocked()){toast("Moves locked","The trade deadline has passed or a commissioner locked roster moves.");return;}
