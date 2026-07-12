@@ -3385,6 +3385,8 @@ function drawRoster(){
     <td style="text-align:right"><div class="act">${isMgr?'<span class="mgr-tag">Manager</span>':(locked?'<span style="color:var(--fog);font-size:12px">Locked</span>':`<button class="mini danger" data-waive="${i}">Waive</button>`)}</div></td></tr>`;}).join("");
 }
 function parseMoney(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="m")v*=1e6;else if(u==="k")v*=1e3;return Math.round(v);}
+// Salary boxes are in $M increments: a bare number reads as millions (1 => $1M, .75 => $750K, 7.5 => $7.5M); explicit K/M suffixes still honored.
+function parseSalary(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="k")v*=1e3;else v*=1e6;return Math.round(v);}
 function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();renderTradeRequests();}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
@@ -3587,10 +3589,10 @@ function makeOffer(pid,name){
   if(!sb||!currentClub){toast("Managers only","Sign in as a club manager to make offers.");return;}
   const myTid=teamIdOf(currentClub);if(!myTid)return;
   formModal("Offer "+name+" a contract",[
-    {key:"salary",label:"Salary per season",value:"1M"},
+    {key:"salary",label:"Salary per season ($M)",value:"1",placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"},
     {key:"years",label:"Term (seasons)",type:"select",value:"2",options:[1,2,3,4].map(v=>({value:String(v),label:v+" season"+(v>1?'s':'')}))}
   ],async v=>{
-    const sal=parseMoney(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","The league minimum salary is $750K.");return;}
+    const sal=parseSalary(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","The league minimum salary is $750K.");return;}
     const {error}=await sb.rpc("make_contract_offer",{p_player:pid,p_team:myTid,p_salary:sal,p_years:+v.years,p_note:null});
     if(error){toast("Couldn't send offer",error.message);return;}
     toast("Offer sent",name+" will receive your contract offer.");renderFAoffers();
@@ -3598,10 +3600,10 @@ function makeOffer(pid,name){
 }
 function editOffer(id,salary,years,asPlayer){
   formModal(asPlayer?"Counter the offer":"Revise your offer",[
-    {key:"salary",label:"Salary per season",value:fmtMoney(salary)},
+    {key:"salary",label:"Salary per season ($M)",value:fmtMoney(salary),placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"},
     {key:"years",label:"Term (seasons)",type:"select",value:String(years),options:[1,2,3,4].map(v=>({value:String(v),label:v+" season"+(v>1?'s':'')}))}
   ],async v=>{
-    const sal=parseMoney(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","");return;}
+    const sal=parseSalary(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","");return;}
     respondOffer(id,'edit',sal,+v.years);
   });
 }
@@ -4131,7 +4133,7 @@ async function loadRegistrations(){
       <td>${done
         ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
         :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
-      <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="$750K" aria-label="Cap hit">`}</td>
+      <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="1 = $1M" title="In $M — 1 = $1M, .75 = $750K, 7.5 = $7.5M" aria-label="Cap hit ($M)">`}</td>
       <td style="text-align:right"><div class="act">${done
         ?`<button class="mini good rm-move" data-prof="${r.profile_id}" data-name="${gq}">Move</button><button class="mini rm-remove" data-prof="${r.profile_id}" data-name="${gq}">Off roster</button>`
         :`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${gq}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
@@ -4188,7 +4190,7 @@ async function assignRegistration(btn){
   const used=new Set((existing||[]).map(x=>x.jersey_number));
   let num=+btn.dataset.num||0;if(!num||used.has(num)){num=0;for(let n=1;n<=99;n++)if(!used.has(n)){num=n;break;}}
   const salEl=document.querySelector('.ra-sal[data-reg="'+btn.dataset.reg+'"]');
-  let salary=salEl?parseMoney(salEl.value):0;if(isNaN(salary)||salary<0)salary=0;
+  let salary=salEl?parseSalary(salEl.value):0;if(isNaN(salary)||salary<0)salary=0;
   const {error}=await sb.from("roster_spots").insert({season_id:adminSeason.id,team_id:teamId,profile_id:btn.dataset.prof,jersey_number:num,position:btn.dataset.pos,salary});
   if(error){toast("Couldn't add player",error.message);return;}
   await sb.from("season_registrations").update({status:"assigned"}).eq("id",btn.dataset.reg);
@@ -4421,12 +4423,12 @@ function openMemberEdit(id){
     {key:"role",label:"League role",type:"select",value:m.role,options:ROLE_OPTS.map(([v,l])=>({value:v,label:l}))},
     {key:"pos",label:"Position",type:"select",value:m.pos||"C",options:AC_POS.map(([v,l])=>({value:v,label:l}))}
   ];
-  if(m.spotId)fields.push({key:"salary",label:"Salary / cap hit (rostered players only)",value:m.salary?fmtMoney(m.salary):"",placeholder:"e.g. 3M, 750K"});
+  if(m.spotId)fields.push({key:"salary",label:"Salary / cap hit ($M, rostered players only)",value:m.salary?fmtMoney(m.salary):"",placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"});
   formModal("Edit "+m.name,fields,async v=>{
     if(v.role!==m.role){const {error}=await sb.rpc("set_member_role",{p_target:id,p_role:v.role});if(error){toast("Couldn't save role",error.message);return;}}
     if((v.pos||"")!==(m.pos||""))await saveMemberPosition(id,v.pos);
-    if(m.spotId&&v.salary!=null){const nv=parseMoney(v.salary);
-      if(isNaN(nv)||nv<0){toast("Invalid salary","Use a value like 3M, 750K, or 3000000.");return;}
+    if(m.spotId&&v.salary!=null){const nv=parseSalary(v.salary);
+      if(isNaN(nv)||nv<0){toast("Invalid salary","Type 1 for $1M, .75 for $750K, or 7.5 for $7.5M.");return;}
       if(nv!==(m.salary||0)){const {error}=await sb.from("roster_spots").update({salary:nv}).eq("id",m.spotId);if(error){toast("Couldn't save salary",error.message);return;}}
     }
     toast("Member updated",m.name);loadMembers();refreshTeamsEverywhere&&refreshTeamsEverywhere();
