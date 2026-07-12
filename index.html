@@ -470,6 +470,16 @@
   .mgr-tag{font-family:var(--f-cond);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--frost-ink);background:var(--frost-glow);padding:4px 10px;border-radius:100px}
   .sal-in{width:92px;text-align:right;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--ice)}
   .sal-in:focus{outline:none;border-color:var(--frost);box-shadow:0 0 0 3px var(--frost-glow)}
+  /* salary field with ±$100K steppers */
+  .sal-field{display:flex;align-items:stretch;max-width:220px}
+  .sal-field>input{flex:1 1 auto;min-width:0;border-top-right-radius:0!important;border-bottom-right-radius:0!important;border-right:none}
+  .sal-steps{display:flex;flex-direction:column;flex:0 0 auto}
+  .sal-steps button{width:30px;flex:1;padding:0;border:1px solid var(--line);background:var(--panel-2);color:var(--fog);cursor:pointer;font-size:9px;line-height:1;display:flex;align-items:center;justify-content:center;font-family:var(--f-body)}
+  .sal-steps .sal-up{border-top-right-radius:7px;border-bottom:none}
+  .sal-steps .sal-down{border-bottom-right-radius:7px}
+  .sal-steps button:hover{background:var(--frost);color:#04121e;border-color:var(--frost)}
+  .sal-steps button:active{background:var(--frost-deep)}
+  td .sal-field{max-width:150px}
   .cap-bar-wrap{padding:14px 18px 4px}
   .cap-bar{height:8px;border-radius:5px;background:var(--line-soft,#232323);overflow:hidden}
   .cap-bar span{display:block;height:100%;border-radius:5px;transition:width .35s ease}
@@ -3387,6 +3397,8 @@ function drawRoster(){
 function parseMoney(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="m")v*=1e6;else if(u==="k")v*=1e3;return Math.round(v);}
 // Salary boxes are in $M increments: a bare number reads as millions (1 => $1M, .75 => $750K, 7.5 => $7.5M); explicit K/M suffixes still honored.
 function parseSalary(s){if(s==null)return NaN;s=String(s).trim().replace(/[$,\s]/g,"");if(!s)return 0;const m=s.match(/^([0-9]*\.?[0-9]+)([mMkK]?)$/);if(!m)return NaN;let v=parseFloat(m[1]);const u=m[2].toLowerCase();if(u==="k")v*=1e3;else v*=1e6;return Math.round(v);}
+// Clean salary display that round-trips exactly through parseSalary (unlike fmtMoney, which rounds at the $M boundary). Used by the ±$100K steppers.
+function fmtSalField(n){n=Math.max(0,Math.round(+n||0));if(n>=1e6)return "$"+(+(n/1e6).toFixed(3))+"M";if(n>=1e3)return "$"+(+(n/1e3).toFixed(3))+"K";return "$"+n;}
 function refreshFrontOffice(){renderRoster();renderTrade();renderFAmgr();renderLineup();renderTradeRequests();}
 $("#rosterBody").addEventListener("click",e=>{
   const w=e.target.closest("[data-waive]");if(!w)return;const p=rosterState[+w.dataset.waive];if(!p||!sb)return;
@@ -3589,7 +3601,7 @@ function makeOffer(pid,name){
   if(!sb||!currentClub){toast("Managers only","Sign in as a club manager to make offers.");return;}
   const myTid=teamIdOf(currentClub);if(!myTid)return;
   formModal("Offer "+name+" a contract",[
-    {key:"salary",label:"Salary per season ($M)",value:"1",placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"},
+    {key:"salary",label:"Salary per season ($M)",type:"salary",value:"$1M",placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"},
     {key:"years",label:"Term (seasons)",type:"select",value:"2",options:[1,2,3,4].map(v=>({value:String(v),label:v+" season"+(v>1?'s':'')}))}
   ],async v=>{
     const sal=parseSalary(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","The league minimum salary is $750K.");return;}
@@ -3600,7 +3612,7 @@ function makeOffer(pid,name){
 }
 function editOffer(id,salary,years,asPlayer){
   formModal(asPlayer?"Counter the offer":"Revise your offer",[
-    {key:"salary",label:"Salary per season ($M)",value:fmtMoney(salary),placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"},
+    {key:"salary",label:"Salary per season ($M)",type:"salary",value:fmtSalField(salary),placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"},
     {key:"years",label:"Term (seasons)",type:"select",value:String(years),options:[1,2,3,4].map(v=>({value:String(v),label:v+" season"+(v>1?'s':'')}))}
   ],async v=>{
     const sal=parseSalary(v.salary);if(isNaN(sal)||sal<750000){toast("Minimum $750K","");return;}
@@ -4133,7 +4145,7 @@ async function loadRegistrations(){
       <td>${done
         ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
         :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
-      <td>${done?"—":`<input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="1 = $1M" title="In $M — 1 = $1M, .75 = $750K, 7.5 = $7.5M" aria-label="Cap hit ($M)">`}</td>
+      <td>${done?"—":`<div class="sal-field"><input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="1 = $1M" title="In $M — 1 = $1M, .75 = $750K, 7.5 = $7.5M" aria-label="Cap hit ($M)"><span class="sal-steps"><button type="button" class="sal-up" tabindex="-1" aria-label="Increase by $100K">▲</button><button type="button" class="sal-down" tabindex="-1" aria-label="Decrease by $100K">▼</button></span></div>`}</td>
       <td style="text-align:right"><div class="act">${done
         ?`<button class="mini good rm-move" data-prof="${r.profile_id}" data-name="${gq}">Move</button><button class="mini rm-remove" data-prof="${r.profile_id}" data-name="${gq}">Off roster</button>`
         :`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${gq}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
@@ -4423,7 +4435,7 @@ function openMemberEdit(id){
     {key:"role",label:"League role",type:"select",value:m.role,options:ROLE_OPTS.map(([v,l])=>({value:v,label:l}))},
     {key:"pos",label:"Position",type:"select",value:m.pos||"C",options:AC_POS.map(([v,l])=>({value:v,label:l}))}
   ];
-  if(m.spotId)fields.push({key:"salary",label:"Salary / cap hit ($M, rostered players only)",value:m.salary?fmtMoney(m.salary):"",placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"});
+  if(m.spotId)fields.push({key:"salary",label:"Salary / cap hit ($M, rostered players only)",type:"salary",value:m.salary?fmtSalField(m.salary):"",placeholder:"1 = $1M · .75 = $750K · 7.5 = $7.5M"});
   formModal("Edit "+m.name,fields,async v=>{
     if(v.role!==m.role){const {error}=await sb.rpc("set_member_role",{p_target:id,p_role:v.role});if(error){toast("Couldn't save role",error.message);return;}}
     if((v.pos||"")!==(m.pos||""))await saveMemberPosition(id,v.pos);
@@ -4767,6 +4779,7 @@ function formModal(title,fields,onSave){
   const fieldHTML=f=>{const i=fields.indexOf(f);
     if(f.type==="select")return `<div class="ef-row"><label>${f.label}</label><select data-ef="${i}">${f.options.map(o=>`<option value="${esc(o.value)}" ${String(o.value)===String(f.value)?"selected":""}>${esc(o.label)}</option>`).join("")}</select></div>`;
     if(f.type==="player")return `<div class="ef-row ac-wrap"><label>${f.label}</label><input data-ef="${i}" class="ac-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder||"Start typing a name…")}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}"><div class="ac-menu"></div></div>`;
+    if(f.type==="salary")return `<div class="ef-row"><label>${f.label}</label><div class="sal-field"><input data-ef="${i}" class="sal-field-in" type="text" inputmode="decimal" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""}><span class="sal-steps"><button type="button" class="sal-up" tabindex="-1" aria-label="Increase by $100K">▲</button><button type="button" class="sal-down" tabindex="-1" aria-label="Decrease by $100K">▼</button></span></div></div>`;
     if(f.type==="textarea")return `<div class="ef-row"><label>${f.label}</label><textarea data-ef="${i}" rows="4" placeholder="${esc(f.placeholder||"")}">${f.value??""}</textarea></div>`;
     if(f.type==="logo")return `<div class="ef-row"><label>${f.label}</label><div class="logo-drop" data-ef="${i}" data-url="${(f.value||'').replace(/"/g,'&quot;')}" data-code="${esc(f.code||'')}"><div class="logo-prev">${f.value?`<img src="${esc(f.value)}">`:'<span>Drag a logo here, or click to upload (PNG/JPG, under 2 MB)</span>'}</div></div><input type="file" accept="image/*" class="logo-file" hidden></div>`;
     return `<div class="ef-row"><label>${f.label}</label><input data-ef="${i}" type="${f.type||"text"}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""} ${f.min!=null?`min="${f.min}"`:""} ${f.max!=null?`max="${f.max}"`:""} ${f.step!=null?`step="${f.step}"`:""}></div>`;};
@@ -4781,6 +4794,15 @@ function formModal(title,fields,onSave){
 }
 // Rebuild the player lookup + leaders from the source arrays (rosters + freeAgents) after edits.
 $("#modalOk").addEventListener("click",()=>{$("#modalBg").classList.remove("on");if(modalCb)modalCb();});
+// ±$100K salary steppers (works in the edit modal and the inline registration row)
+document.addEventListener("click",e=>{
+  const up=e.target.closest(".sal-up"),down=e.target.closest(".sal-down");
+  if(!up&&!down)return;
+  const wrap=e.target.closest(".sal-field");const inp=wrap&&wrap.querySelector("input");if(!inp)return;
+  let n=parseSalary(inp.value);if(isNaN(n))n=0;
+  n+=up?1e5:-1e5;if(n<0)n=0;
+  inp.value=fmtSalField(n);inp.dispatchEvent(new Event("input",{bubbles:true}));inp.focus();
+});
 $("#modalCancel").addEventListener("click",()=>$("#modalBg").classList.remove("on"));
 $("#modalBg").addEventListener("click",e=>{if(e.target===$("#modalBg"))$("#modalBg").classList.remove("on");});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")$("#modalBg").classList.remove("on");});
