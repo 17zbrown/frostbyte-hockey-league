@@ -278,6 +278,24 @@
   .div-col.dragover{outline:2px dashed var(--frost);outline-offset:-3px}
   .div-col.dragover .div-col-body{background:var(--frost-glow)}
   .dc-empty{color:var(--fog);font-size:12px;text-align:center;padding:14px 8px;border:1px dashed var(--line);border-radius:8px}
+  /* public player directory */
+  .dir-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:2px 0 16px}
+  .dir-toolbar .adm-search{margin:0;flex:1;min-width:180px;width:auto}
+  .dir-toolbar select{min-width:150px}
+  .dir-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+  .dir-card{display:flex;align-items:center;gap:12px;text-align:left;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-m);padding:12px 14px;cursor:pointer;transition:border-color .14s,background .14s,transform .06s}
+  .dir-card:hover{border-color:var(--frost);background:var(--panel-2)}
+  .dir-card:active{transform:translateY(1px)}
+  .dir-av{width:46px;height:46px;border-radius:50%;flex-shrink:0;object-fit:cover;background:var(--panel-3);display:grid;place-items:center;font-family:var(--f-cond);font-weight:700;font-size:15px;color:var(--navy);overflow:hidden}
+  .dir-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+  .dir-main b{font-family:var(--f-cond);font-weight:700;font-size:15px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dir-sub{font-family:var(--f-cond);font-size:12.5px;color:var(--fog);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dir-team{display:inline-flex;align-items:center;gap:4px;color:var(--navy);font-weight:600;vertical-align:middle}
+  .dir-ea{font-family:var(--f-mono);font-size:10.5px;color:var(--fog-dim);margin-top:1px}
+  .dir-role{font-family:var(--f-cond);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--frost-ink);border:1px solid var(--frost);border-radius:20px;padding:1px 7px;flex-shrink:0;align-self:flex-start}
+  .dir-ovr{font-family:var(--f-mono);font-weight:700;font-size:17px;color:var(--frost-ink);flex-shrink:0;display:flex;flex-direction:column;align-items:center;line-height:1}
+  .dir-ovr small{font-size:8px;color:var(--fog);letter-spacing:.06em;font-weight:500}
+  @media(max-width:520px){.dir-grid{grid-template-columns:1fr}}
 
   /* leaders */
   .leaders{padding:6px 0}
@@ -1467,10 +1485,6 @@
       <button data-go="home" class="active">Home</button>
       <button data-go="standings">Standings</button>
       <div class="navgrp">
-        <button class="navtop" aria-haspopup="true">Teams <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1l4 4 4-4"/></svg></button>
-        <div class="dropdown" id="teamsDropdown"></div>
-      </div>
-      <div class="navgrp">
         <button class="navtop" aria-haspopup="true">League <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1l4 4 4-4"/></svg></button>
         <div class="dropdown">
           <a data-go="schedule">Schedule</a>
@@ -1482,10 +1496,15 @@
         </div>
       </div>
       <div class="navgrp">
+        <button class="navtop" data-go="teams" aria-haspopup="true">Teams <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1l4 4 4-4"/></svg></button>
+        <div class="dropdown" id="teamsDropdown"></div>
+      </div>
+      <div class="navgrp">
         <button class="navtop" aria-haspopup="true">Players <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1l4 4 4-4"/></svg></button>
         <div class="dropdown">
           <a data-go="stats">Stats &amp; Leaders</a>
-          <a data-go="freeagency" data-feature="freeagency">Free Agency</a>
+          <a data-go="directory">Player Directory</a>
+          <a data-go="freeagency" data-feature="freeagency" data-role="manager">Free Agency</a>
           <a data-go="draft" data-feature="draft" data-role="manager">Draft Board</a>
         </div>
       </div>
@@ -1596,6 +1615,19 @@
 
   <!-- PLAYER PROFILE -->
   <div class="view" id="view-player"><section class="pad"><div class="wrap" id="playerPage"></div></section></div>
+
+  <!-- PLAYER DIRECTORY -->
+  <div class="view" id="view-directory"><section class="pad"><div class="wrap">
+    <div class="sec-head"><div><span class="eyebrow">The League</span><h2>Player <em>Directory</em></h2>
+      <p>Every player in the league — search by name, filter by position or club, and tap through to a full profile.</p></div></div>
+    <div class="dir-toolbar">
+      <input class="adm-search" id="dirSearch" placeholder="Search players…" autocomplete="off" />
+      <select id="dirPosFilter" aria-label="Filter by position"><option value="">All positions</option></select>
+      <select id="dirTeamFilter" aria-label="Filter by club"><option value="">All clubs</option></select>
+      <span class="pill" id="dirCount"></span>
+    </div>
+    <div id="directoryGrid"></div>
+  </div></section></div>
 
   <!-- MESSAGES -->
   <div class="view" id="view-messages"><section class="pad"><div class="wrap">
@@ -2011,7 +2043,7 @@
         <a href="https://discord.gg/EC4nGQnCEE" target="_blank" rel="noopener noreferrer" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg></a>
       </div></div>
     <div class="foot-col"><h4>League</h4><a data-go="standings">Standings</a><a data-go="schedule">Schedule</a><a data-go="bracket">Playoffs</a><a data-go="rankings">Power Rankings</a><a data-go="records">Records</a></div>
-    <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency">Free Agency</a><a data-go="draft" data-role="manager">Draft Board</a><a data-go="transactions">Transactions</a></div>
+    <div class="foot-col"><h4>Clubs &amp; Players</h4><a data-go="teams">All Teams</a><a data-go="directory">Player Directory</a><a data-go="stats">Stats &amp; Leaders</a><a data-go="freeagency" data-role="manager">Free Agency</a><a data-go="draft" data-role="manager">Draft Board</a><a data-go="transactions">Transactions</a></div>
     <div class="foot-col"><h4>Community</h4><a data-go="news">News</a><a data-go="rulebook">Rulebook</a><a data-go="manager">Manager Portal</a><a data-go="admin">Commissioner</a></div>
   </div>
   <div class="foot-bottom"><span>© Season <span id="footSeason">1</span> · Chel Gaming Hockey League. Not affiliated with the NHL or EA Sports.</span>
@@ -2183,7 +2215,7 @@ const goalieStats={
 let currentParam=null;
 function go(view,param,fromPop){
   const fk=viewFeature(view);if(fk&&!featureOn(fk)){toast("Feature unavailable","The commissioner has turned off "+features.find(x=>x.key===fk).label+".");view="home";}
-  if(MANAGER_VIEWS.has(view)&&!isManager()){toast("Managers only","The draft pool is available to club managers.");view="home";}
+  if(MANAGER_VIEWS.has(view)&&!isManager()){toast("Managers only","That section is for club managers and commissioners.");view="home";}
   currentParam=param!==undefined?param:null;
   if(view!=="manager"&&typeof stopMgrDraftPoll==="function")stopMgrDraftPoll();  // stop the draft poll when leaving the front office
   $$(".view").forEach(v=>v.classList.remove("on"));
@@ -2194,6 +2226,7 @@ function go(view,param,fromPop){
   if(view==="team")renderTeamPage(param);
   if(view==="player")renderPlayerPage(param);
   if(view==="messages"&&typeof renderMessages==="function")renderMessages(param);
+  if(view==="directory"&&typeof renderDirectory==="function")renderDirectory();
   if(view==="article")renderArticle(param);
   if(view==="admin"&&typeof renderCommissioner==="function")renderCommissioner();
   if(view==="manager"&&typeof renderManager==="function")renderManager();
@@ -2499,7 +2532,7 @@ function buildNav(){
   const groups=[
     ["Main",[["home","Home"],["standings","Standings"],["teams","All Teams"],["signup","Sign Up"]]],
     ["League",[["schedule","Schedule"],["bracket","Playoff Bracket"],["rankings","Power Rankings"],["awards","Awards"],["records","Record Book"],["transactions","Transactions"]]],
-    ["Players",[["stats","Stats & Leaders"],["freeagency","Free Agency"],["draft","Draft Board"]]],
+    ["Players",[["stats","Stats & Leaders"],["directory","Player Directory"],["freeagency","Free Agency"],["draft","Draft Board"]]],
     ["Community",[["news","News"],["rulebook","Rulebook"],["owner","Owner Application"],["actions","Action Center"]]],
     ["Front Office",[["manager","Manager Portal"],["admin","Commissioner"]]]
   ];
@@ -3348,6 +3381,60 @@ async function renderFA(){
       <div class="fa-ovr" style="font-size:15px">${r.position}</div></div>`;};
   skEl.innerHTML=skaters.length?skaters.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available skaters right now — registered players show up here until they\'re drafted to a club.</div>';
   gEl.innerHTML=goalies.length?goalies.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available goalies right now.</div>';
+}
+/* ------------------------------ PLAYER DIRECTORY (public) ------------------------------ */
+let dirData=[];
+async function renderDirectory(){
+  const grid=$("#directoryGrid");if(!grid)return;
+  if(!sb){grid.innerHTML='<div class="empty-note">Player data loads on the live site.</div>';return;}
+  grid.innerHTML='<div class="empty-note" style="margin:10px 0">Loading players…</div>';
+  const {data:profs}=await sb.from("profiles").select("id,gamertag,avatar_url,ea_id,overall,role,banned").order("gamertag");
+  const list=(profs||[]).filter(p=>!p.banned&&p.gamertag);
+  const posOf={},teamOf={};
+  if(openSeason){
+    const {data:spots}=await sb.from("roster_spots").select("profile_id,team_id,position").eq("season_id",openSeason.id).eq("status","active");
+    (spots||[]).forEach(s=>{posOf[s.profile_id]=s.position;teamOf[s.profile_id]=codeOfId(s.team_id);});
+    const {data:regs}=await sb.from("season_registrations").select("profile_id,position").eq("season_id",openSeason.id);
+    (regs||[]).forEach(r=>{if(!posOf[r.profile_id])posOf[r.profile_id]=r.position;});
+  }
+  dirData=list.map(p=>({...p,pos:posOf[p.id]||"",tc:teamOf[p.id]||""}));
+  // build filters from the data actually present
+  const tf=$("#dirTeamFilter");
+  if(tf){const cur=tf.value;tf.innerHTML='<option value="">All clubs</option>'+TEAM_KEYS.filter(c=>dirData.some(p=>p.tc===c)).map(c=>`<option value="${c}"${c===cur?" selected":""}>${esc(teams[c].name)}</option>`).join("");}
+  const pf=$("#dirPosFilter");
+  if(pf){const cur=pf.value;const poss=[...new Set(dirData.map(p=>p.pos).filter(Boolean))].sort();
+    pf.innerHTML='<option value="">All positions</option>'+poss.map(p=>`<option value="${esc(p)}"${p===cur?" selected":""}>${esc(POS_NAME[p]||p)}</option>`).join("");}
+  renderDirGrid();
+}
+function dirCard(p){
+  const t=p.tc?teams[p.tc]:null;
+  const av=p.avatar_url?`<img class="dir-av" src="${esc(p.avatar_url)}" alt="">`:`<span class="dir-av">${esc(initials(p.gamertag||"?"))}</span>`;
+  const roleTag=p.role==="commissioner"?'<span class="dir-role">Commissioner</span>':(p.role==="staff"?'<span class="dir-role">Staff</span>':"");
+  const sub=`${p.pos?esc(POS_NAME[p.pos]||p.pos):"Player"}`;
+  return `<button class="dir-card" data-go="player" data-param="${esc(p.gamertag)}" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-pos="${esc(p.pos)}" data-tc="${esc(p.tc)}">
+    ${av}
+    <div class="dir-main"><b>${esc(p.gamertag)}</b><span class="dir-sub">${sub}${t?` · <span class="dir-team">${badge(p.tc,15)}${esc(t.name)}</span>`:' · Free Agent'}</span>${p.ea_id?`<small class="dir-ea">EA · ${esc(p.ea_id)}</small>`:""}</div>
+    ${roleTag}${p.overall?`<span class="dir-ovr">${p.overall}<small>OVR</small></span>`:""}</button>`;
+}
+function renderDirGrid(){
+  const grid=$("#directoryGrid");if(!grid)return;
+  if(!dirData.length){grid.innerHTML=ADMIN_EMPTY("No players yet","Players appear here the moment they sign in with Discord.");const c=$("#dirCount");if(c)c.textContent="";return;}
+  grid.innerHTML=`<div class="dir-grid">${dirData.map(dirCard).join("")}</div>`;
+  filterDirectory();
+}
+function filterDirectory(){
+  const q=(($("#dirSearch")||{}).value||"").trim().toLowerCase();
+  const pf=($("#dirPosFilter")||{}).value||"",tf=($("#dirTeamFilter")||{}).value||"";
+  let shown=0;
+  document.querySelectorAll("#directoryGrid .dir-card").forEach(c=>{
+    const ok=(!q||c.dataset.name.includes(q))&&(!pf||c.dataset.pos===pf)&&(!tf||c.dataset.tc===tf);
+    c.style.display=ok?"":"none";if(ok)shown++;
+  });
+  const cnt=$("#dirCount");if(cnt)cnt.textContent=shown+" player"+(shown===1?"":"s");
+}
+if($("#view-directory")){
+  $("#view-directory").addEventListener("input",e=>{if(e.target.id==="dirSearch")filterDirectory();});
+  $("#view-directory").addEventListener("change",e=>{if(e.target.id==="dirPosFilter"||e.target.id==="dirTeamFilter")filterDirectory();});
 }
 async function renderDraft(){
   const el=$("#draftBody");if(!el)return;
@@ -4368,8 +4455,8 @@ const MGMT_ROLES=["owner","gm","agm"];
 // Team role now lives on the team's slot, not profiles.role. Find which post (if any) the signed-in user holds.
 function myTeamRole(){if(!authUser)return null;const t=(dbTeams||[]).find(x=>x.owner_profile_id===authUser.id||x.gm_profile_id===authUser.id||x.agm_profile_id===authUser.id);return t?(t.owner_profile_id===authUser.id?"owner":t.gm_profile_id===authUser.id?"gm":"agm"):null;}
 function isManager(){return !!authProfile&&(authProfile.role==="commissioner"||!!myTeamRole());}
-const MANAGER_VIEWS=new Set(["draft"]);
-function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{el.style.display=isManager()?"":"none";});}
+const MANAGER_VIEWS=new Set(["draft","freeagency"]);
+function applyRoleVisibility(){document.querySelectorAll('[data-role="manager"]').forEach(el=>{const featOk=!el.dataset.feature||featureOn(el.dataset.feature);el.style.display=(isManager()&&featOk)?"":"none";});}
 
 /* -------------------- COMMISSIONER: NEWS EDITOR -------------------- */
 function renderNewsManage(){const el=$("#newsManageBody");if(!el)return;
