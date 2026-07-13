@@ -33,13 +33,13 @@ async function claim(kind, ref) {
 async function postWebhook(url, content) {
   if (!url) return;
   await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: content.slice(0, 1990), allowed_mentions: { parse: [] } }) });
+    body: JSON.stringify({ content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } }) });
 }
 async function postChannel(channelId, content) {
   if (!BOT || !channelId) return;
   await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-    body: JSON.stringify({ content: content.slice(0, 1990), allowed_mentions: { parse: [] } }) });
+    body: JSON.stringify({ content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } }) });
 }
 
 // ---- America/New_York time helpers (DST-safe: everything is evaluated in ET) ----
@@ -61,7 +61,7 @@ export default async () => {
     const seasons = await sbGet("seasons?select=id,number&order=number.desc&limit=1");
     const season = seasons[0];
     if (!season) return json({ skipped: "no season" });
-    const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id");
+    const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id,discord_role_id");
     const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
     const cfg = Object.fromEntries((await sbGet("app_config?select=key,value")).map((c) => [c.key, c.value]));
     const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code&order=scheduled_at`);
@@ -91,6 +91,8 @@ function computeStandings(games, teamById) {
   return t;
 }
 const nameOf = (teamById, id) => (teamById[id] || {}).name || "?";
+// A club's role mention (pings everyone on the club) when we know its Discord role, else the plain name.
+const teamTag = (teamById, id) => { const t = teamById[id] || {}; return t.discord_role_id ? `<@&${t.discord_role_id}>` : (t.name || "?"); };
 
 function pickFeatured(weekGames, allGames, teamById) {
   const st = computeStandings(allGames, teamById);
@@ -124,20 +126,20 @@ async function weeklySchedule(games, teamById, cfg) {
   if (!wk.length) return "no upcoming games this week";
   const ref = "sched-" + etParts(new Date(wk[0].scheduled_at)).ymd;
   if (!(await claim("weekly_schedule", ref))) return "already posted";
-  const nm = (id) => nameOf(teamById, id);
+  const tag = (id) => teamTag(teamById, id);
   const byDay = {};
   for (const g of wk) (byDay[fmtDay(g.scheduled_at)] = byDay[fmtDay(g.scheduled_at)] || []).push(g);
   const lines = ["📅 **This Week in the Chel Gaming League**", ""];
   for (const day of Object.keys(byDay)) {
     lines.push(`__${day}__`);
     for (const g of byDay[day].sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)))
-      lines.push(`• ${nm(g.away_team_id)} @ ${nm(g.home_team_id)} — ${fmtTime(g.scheduled_at)}`);
+      lines.push(`• ${tag(g.away_team_id)} @ ${tag(g.home_team_id)} — ${fmtTime(g.scheduled_at)}`);
     lines.push("");
   }
   const feat = pickFeatured(wk, games, teamById);
   if (feat.length) {
     lines.push("⭐ **Featured Matchups**");
-    for (const f of feat) lines.push(`• **${nm(f.g.away_team_id)} @ ${nm(f.g.home_team_id)}** — ${f.why}`);
+    for (const f of feat) lines.push(`• ${tag(f.g.away_team_id)} @ ${tag(f.g.home_team_id)} — **${f.why}**`);
   }
   await postWebhook(cfg.discord_schedule_webhook || cfg.discord_default_webhook, lines.join("\n"));
   return `posted ${wk.length} games`;
@@ -179,7 +181,7 @@ async function gameReminders(games, teamById, now) {
     const tonight = list.filter((g) => etParts(new Date(g.scheduled_at)).ymd === nightYmd);
     if (!(await claim("game_reminder", `${tid}:${nightYmd}`))) continue;
     const nm = (id) => nameOf(teamById, id);
-    const lines = [`🚨 **Game night!** You've got ${tonight.length} matchup${tonight.length > 1 ? "s" : ""} tonight:`, ""];
+    const lines = [`${teamTag(teamById, tid)} 🚨 **Game night!** You've got ${tonight.length} matchup${tonight.length > 1 ? "s" : ""} tonight:`, ""];
     for (const g of tonight) {
       const opp = g.home_team_id === tid ? nm(g.away_team_id) : nm(g.home_team_id);
       const ha = g.home_team_id === tid ? "vs" : "@";
