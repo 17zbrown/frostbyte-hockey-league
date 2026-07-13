@@ -158,6 +158,10 @@
   .pfc-k{font-family:var(--f-cond);font-weight:500;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--fog)}
   .pfc-v{font-family:var(--f-mono);font-size:14.5px;font-weight:600;color:var(--ice);word-break:break-word}
   .ea-sub{display:block;font-family:var(--f-mono);font-size:11px;color:var(--fog);letter-spacing:.01em;margin-top:1px}
+  .su-profnote{font-size:13px;color:var(--fog);line-height:1.5;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-l);padding:11px 14px}
+  .su-profnote b{color:var(--ice)}
+  .su-profnote a{color:var(--frost-ink);cursor:pointer;font-weight:600;white-space:nowrap}
+  .su-profnote a:hover{text-decoration:underline}
   .twitch-card .tw-ic{width:34px;height:34px;border-radius:8px;background:#9146ff;display:grid;place-items:center;color:#fff;flex-shrink:0}
   .tw-watch,.tw-empty{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:200px}
   .tw-watch .tw-txt,.tw-empty .tw-txt{display:flex;flex-direction:column;font-family:var(--f-cond);font-weight:600;letter-spacing:.03em;text-transform:uppercase;font-size:14px;color:var(--ice)}
@@ -1573,7 +1577,6 @@
     <div class="signup-grid">
       <form class="form-card" id="signupForm">
         <div id="signupAuthBanner"></div>
-        <div class="field"><label for="su-gamer">EA ID</label><input id="su-gamer" required placeholder="Your EA account name (used to invite you to a club)" /></div>
         <div class="field"><label>Primary Position</label><div class="pos-pick">
           <label><input type="radio" name="pos" value="C" checked /><span>Center</span></label>
           <label><input type="radio" name="pos" value="LW" /><span>Left Wing</span></label>
@@ -1581,10 +1584,7 @@
           <label><input type="radio" name="pos" value="LD" /><span>Left Defense</span></label>
           <label><input type="radio" name="pos" value="RD" /><span>Right Defense</span></label>
           <label><input type="radio" name="pos" value="G" /><span>Goalie</span></label></div></div>
-        <div class="field"><div class="row2">
-          <div><label for="su-plat">Platform</label><select id="su-plat"><option>PlayStation 5</option><option>Xbox Series X|S</option></select></div>
-          <div><label for="su-ptag">Platform Gamertag</label><input id="su-ptag" maxlength="60" placeholder="Your PSN ID or Xbox gamertag" /></div></div></div>
-        <div class="field"><label for="su-twitch">Twitch <span style="color:var(--fog);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label><input id="su-twitch" placeholder="Your Twitch username — for stream links on your profile" /></div>
+        <div class="field su-profnote">Your <b>EA ID, platform, gamertag, Twitch, and jersey number</b> now live on your profile. <a id="su-editprof">Edit your profile →</a></div>
         <div class="field"><label for="su-note">Anything the commissioners should know?</label><textarea id="su-note" rows="3" placeholder="Availability, preferred club, past leagues…"></textarea></div>
         <button class="btn btn-frost" type="submit" style="width:100%;justify-content:center;padding:13px">Submit Registration</button>
       </form>
@@ -3008,7 +3008,7 @@ async function renderFA(){
   const skEl=$("#faSkaters"),gEl=$("#faGoalies"),skc=$("#faSkCount"),gc=$("#faGCount");
   if(!skEl||!gEl)return;
   if(!sb||!openSeason){skEl.innerHTML='';gEl.innerHTML='';if(skc)skc.textContent=0;if(gc)gc.textContent=0;return;}
-  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position, profiles(gamertag,ea_id)").eq("season_id",openSeason.id).order("created_at");
   const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
   const taken=new Set((spots||[]).map(s=>s.profile_id));
   const pool=(regs||[]).filter(r=>!taken.has(r.profile_id));
@@ -3016,7 +3016,7 @@ async function renderFA(){
   if(skc)skc.textContent=skaters.length;if(gc)gc.textContent=goalies.length;
   const faItem=(r)=>{const name=r.profiles?r.profiles.gamertag:"?";
     return `<div class="fa-item"><span class="av clickable" data-go="player" data-param="${name}">${initials(name)}</span>
-      <div class="fa-info"><b class="clickable" data-go="player" data-param="${name}">${name}</b><small>${POS_NAME[r.position]||r.position} · EA: ${r.ea_id||'—'} · available</small></div>
+      <div class="fa-info"><b class="clickable" data-go="player" data-param="${name}">${name}</b><small>${POS_NAME[r.position]||r.position} · EA: ${(r.profiles&&r.profiles.ea_id)||'—'} · available</small></div>
       <div class="fa-ovr" style="font-size:15px">${r.position}</div></div>`;};
   skEl.innerHTML=skaters.length?skaters.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available skaters right now — registered players show up here until they\'re drafted to a club.</div>';
   gEl.innerHTML=goalies.length?goalies.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available goalies right now.</div>';
@@ -3027,16 +3027,16 @@ async function renderDraft(){
   const cnt=$("#draftCount");
   if(!sb||!openSeason){el.innerHTML="";return;}
   if(!isManager()){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Managers only</h4><p>The draft pool is visible to club managers and the commissioner.</p></div>';if(cnt)cnt.textContent="";return;}
-  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,scout_ovr, profiles(gamertag)").eq("season_id",openSeason.id).order("created_at");
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,scout_ovr, profiles(gamertag,ea_id)").eq("season_id",openSeason.id).order("created_at");
   const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
   const taken=new Set((spots||[]).map(s=>s.profile_id));
   // Rank by the commissioner's scout OVR (best available first); unrated players fall to the bottom in sign-up order.
   const pool=(regs||[]).filter(r=>!taken.has(r.profile_id)).sort((a,b)=>(b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr));
   if(cnt)cnt.textContent=pool.length+" available";
   if(!pool.length){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Draft pool is empty</h4><p>Registered players who haven\'t been assigned to a club yet will appear here.</p></div>';return;}
-  el.innerHTML=pool.map((p,i)=>`<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${p.ea_id?`<a href="${scoutUrl(p.ea_id)}" target="_blank" rel="noopener" class="scout-link">${esc(p.ea_id)} ↗</a>`:"—"}</small></div>
-    <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`).join("");
+  el.innerHTML=pool.map((p,i)=>{const eid=p.profiles&&p.profiles.ea_id;return `<div class="prospect"><span class="pk">${i+1}</span>
+    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${eid?`<a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link">${esc(eid)} ↗</a>`:"—"}</small></div>
+    <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`;}).join("");
 }
 
 /* ------------------------------ RULEBOOK ------------------------------ */
@@ -3178,12 +3178,11 @@ function renderSignupAuth(){
   const hdr=document.querySelector("#view-signup .sec-head h2 em");if(hdr&&openSeason)hdr.textContent="Season "+openSeason.number;
   const gl=document.querySelector("#signupGlanceTitle");if(gl&&openSeason)gl.textContent="Season "+openSeason.number+" At A Glance";
   if(authProfile){
-    const g=document.querySelector("#su-gamer");if(g&&!g.value&&myRegistration&&myRegistration.ea_id)g.value=myRegistration.ea_id;
-    const pt=document.querySelector("#su-ptag");if(pt&&!pt.value&&myRegistration&&myRegistration.platform_gamertag)pt.value=myRegistration.platform_gamertag;
-    const pl=document.querySelector("#su-plat");if(pl&&myRegistration&&myRegistration.platform)pl.value=myRegistration.platform;
-    const tw=document.querySelector("#su-twitch");if(tw&&!tw.value&&authProfile.twitch)tw.value=authProfile.twitch;
-    const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+authProfile.gamertag+".");
-    b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${authProfile.gamertag}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div></div></div>`;
+    if(myRegistration&&myRegistration.position){const pr=document.querySelector('input[name="pos"][value="'+myRegistration.position+'"]');if(pr)pr.checked=true;}
+    const nt=document.querySelector("#su-note");if(nt&&!nt.value&&myRegistration&&myRegistration.note)nt.value=myRegistration.note;
+    const msg=myRegistration?("You are registered for "+seasonLabel+" — resubmit below to update it.") :("Registering for "+seasonLabel+" as "+esc(authProfile.gamertag)+".");
+    const idline=authProfile.ea_id?("EA: "+esc(authProfile.ea_id)+(authProfile.platform?" · "+esc(authProfile.platform):"")):'<span style="color:var(--loss)">Add your EA ID on your profile before registering.</span>';
+    b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${esc(authProfile.gamertag)}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div><div style="font-size:11.5px;margin-top:3px;font-family:var(--f-mono);color:var(--fog)">${idline}</div></div></div>`;
   }else{
     b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to register</b><div style="color:var(--fog);font-size:12.5px">Registration is tied to your Discord so your roster spot is saved.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
   }
@@ -3193,15 +3192,20 @@ function toggleAcctMenu(open){const w=$("#acctWrap");if(!w)return;const btn=$("#
 function openEditProfile(){
   if(!authProfile||!sb){toast("Sign in first","Sign in with Discord to edit your profile.");return;}
   formModal("Edit Profile",[
-    {key:"twitch",label:"Twitch handle — your LIVE badge turns on automatically when you stream",value:authProfile.twitch||"",placeholder:"your_twitch_username"}
+    {key:"ea_id",label:"EA ID — your EA account name (used to invite you to a club)",value:authProfile.ea_id||"",placeholder:"Your EA account name"},
+    {key:"platform",label:"Platform",type:"select",value:authProfile.platform||"PlayStation 5",options:[{value:"PlayStation 5",label:"PlayStation 5"},{value:"Xbox Series X|S",label:"Xbox Series X|S"}]},
+    {key:"ptag",label:"Platform gamertag — so clubs can add you on console",value:authProfile.platform_gamertag||"",placeholder:"Your PSN ID or Xbox gamertag"},
+    {key:"twitch",label:"Twitch (optional) — your LIVE badge turns on automatically when you stream",value:authProfile.twitch||"",placeholder:"your_twitch_username"},
+    {key:"jersey",label:"Preferred jersey number (1–99)",value:authProfile.jersey_number||"",placeholder:"Your number"}
   ],async v=>{
-    let tw=(v.twitch||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
-    const handle=tw||null;
-    const {error}=await sb.from("profiles").update({twitch:handle}).eq("id",authUser.id);
+    const tw=(v.twitch||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"")||null;
+    let jn=parseInt(v.jersey,10);if(isNaN(jn)||jn<1||jn>99)jn=null;
+    const upd={ea_id:(v.ea_id||"").trim()||null,platform:v.platform||null,platform_gamertag:(v.ptag||"").trim()||null,twitch:tw,jersey_number:jn};
+    const {error}=await sb.from("profiles").update(upd).eq("id",authUser.id);
     if(error){toast("Couldn't save",error.message);return;}
-    authProfile.twitch=handle;
+    Object.assign(authProfile,upd);
     toast("Profile updated","Your profile changes are saved.");
-    renderPlayerPage(authProfile.gamertag);renderSignupAuth();
+    renderPlayerPage(authProfile.gamertag);renderSignupAuth();if(typeof loadEaIds==="function")loadEaIds();
   });
 }
 document.addEventListener("click",e=>{
@@ -3209,6 +3213,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#acctBtn")){e.preventDefault();toggleAcctMenu();return;}
   if(e.target.closest("#acctSignOut")){e.preventDefault();toggleAcctMenu(false);signOutSb();return;}
   if(e.target.closest("#acctEditProfile")){e.preventDefault();toggleAcctMenu(false);openEditProfile();return;}
+  if(e.target.closest("#su-editprof")){e.preventDefault();openEditProfile();return;}
   if(e.target.closest("#acctMenu [data-go]")){toggleAcctMenu(false);return;}  // let go() navigate, close the menu
   if(!e.target.closest("#acctWrap"))toggleAcctMenu(false);
 });
@@ -3217,21 +3222,12 @@ $("#signupForm").addEventListener("submit",async e=>{e.preventDefault();
   if(!sb){toast("Backend unavailable","Open the deployed site to register.");return;}
   if(!authUser){toast("Sign in to register","Use “Sign in with Discord” first.");signInDiscord();return;}
   if(!openSeason){toast("Registration closed","No season is open for registration right now.");return;}
+  if(!authProfile||!authProfile.ea_id){toast("Add your EA ID first","Your EA ID lives on your profile now — add it, then register.");openEditProfile();return;}
   const pos=(document.querySelector('input[name="pos"]:checked')||{}).value||"C";
-  const ptag=($("#su-ptag").value||"").trim()||null;
-  const eaId=($("#su-gamer").value||"").trim();
-  if(!eaId){toast("EA ID required","Enter your EA account name so we can invite you to a club.");return;}
-  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,platform:$("#su-plat").value,platform_gamertag:ptag,ea_id:eaId,note:($("#su-note").value||"").trim()||null};
+  const payload={season_id:openSeason.id,profile_id:authUser.id,position:pos,note:($("#su-note").value||"").trim()||null};
   const {error}=await sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(error){toast("Couldn't register",error.message);return;}
   myRegistration=payload;
-  // save Twitch handle onto the profile (optional)
-  let tw=($("#su-twitch").value||"").trim().replace(/^@/,"").replace(/^https?:\/\/(www\.)?twitch\.tv\//i,"").replace(/\/.*$/,"");
-  const twHandle=tw||null;
-  if((authProfile&&authProfile.twitch||null)!==twHandle){
-    const {error:twErr}=await sb.from("profiles").update({twitch:twHandle}).eq("id",authUser.id);
-    if(!twErr&&authProfile)authProfile.twitch=twHandle;
-  }
   renderSignupAuth();
   toast("You're registered!","Season "+openSeason.number+" registration received — the commissioner assigns roster spots.");
 });
@@ -3312,7 +3308,7 @@ function renderManager(){
 document.addEventListener("click",e=>{if(e.target.closest("#mgrLogout")){e.preventDefault();signOutSb();}});
 // profile_id -> EA ID (from registrations), for showing EA IDs under names across the portals.
 let eaById={};
-async function loadEaIds(){if(!sb)return;try{const {data}=await sb.from("season_registrations").select("profile_id,ea_id,created_at").order("created_at");const m={};(data||[]).forEach(r=>{if(r.ea_id)m[r.profile_id]=r.ea_id;});eaById=m;}catch(e){}}
+async function loadEaIds(){if(!sb)return;try{const {data}=await sb.from("profiles").select("id,ea_id");const m={};(data||[]).forEach(p=>{if(p.ea_id)m[p.id]=p.ea_id;});eaById=m;}catch(e){}}
 function eaTag(pid){return pid&&eaById[pid]?`<small class="ea-sub">EA: ${esc(eaById[pid])}</small>`:"";}
 function loadFrontOffice(){const t=teams[currentClub];
   $("#mgrName").textContent=t.name;$("#mgrBadge").innerHTML=badge(currentClub,50);
@@ -3403,14 +3399,14 @@ async function renderMgrDraft(){
   $("#mdMyPicks").innerHTML=mine.length?mine.map(p=>`<div class="md-pick${p.used?"":" open"}"><span class="md-rd">R${p.round}</span><span class="md-res">${p.used?`Drafted <b>${esc(nameOf[p.player_id]||"a player")}</b>${eaTag(p.player_id)}`:'<span class="md-avail">Still on the board</span>'}</span></div>`).join(""):'<div class="empty-note">Your club holds no picks in this draft.</div>';
   $("#mdOnClock").innerHTML=`<div class="md-otc${myOpen.length?" mine":""}"><b>${made} of ${total}</b> picks made${myOpen.length?` · <span class="md-otc-you">You still have ${myOpen.length} pick${myOpen.length>1?"s":""} (${myOpen.map(p=>"R"+p.round).join(", ")})</span>`:' · <span style="color:var(--fog)">all your picks are in</span>'}</div>`;
   // best available pool (scout-OVR ranked), shared with the public board
-  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,ea_id,scout_ovr, profiles(gamertag)").eq("season_id",openSeason.id);
+  const {data:regs}=await sb.from("season_registrations").select("profile_id,position,scout_ovr, profiles(gamertag,ea_id)").eq("season_id",openSeason.id);
   const {data:spots}=await sb.from("roster_spots").select("profile_id").eq("season_id",openSeason.id);
   const taken=new Set((spots||[]).map(s=>s.profile_id));
   const pool=(regs||[]).filter(r=>!taken.has(r.profile_id)).sort((a,b)=>(b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr));
   $("#mdPoolCount").textContent=pool.length+" available";
-  $("#mdPool").innerHTML=pool.length?pool.map((p,i)=>`<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:""}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${p.ea_id?` · EA: <a href="${scoutUrl(p.ea_id)}" target="_blank" rel="noopener" class="scout-link">${esc(p.ea_id)} ↗</a>`:""}</small></div>
-    <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`).join(""):'<div class="empty-note">No players available — everyone registered has been drafted or rostered.</div>';
+  $("#mdPool").innerHTML=pool.length?pool.map((p,i)=>{const eid=p.profiles&&p.profiles.ea_id;return `<div class="prospect"><span class="pk">${i+1}</span>
+    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:""}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${eid?` · EA: <a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link">${esc(eid)} ↗</a>`:""}</small></div>
+    <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`;}).join(""):'<div class="empty-note">No players available — everyone registered has been drafted or rostered.</div>';
   // draft log — most recent picks first
   const log=cur.filter(p=>p.used).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
   $("#mdLog").innerHTML=log.length?log.map(p=>{const c=codeOfId(p.current_team_id),tn=c&&teams[c]?teams[c].name:"—";return `<div class="md-log"><span class="md-log-rd">R${p.round}</span><span class="md-log-info"><b>${esc(nameOf[p.player_id]||"a player")}</b><small>${esc(tn)}</small>${eaTag(p.player_id)}</span></div>`;}).join(""):'<div class="empty-note">No picks made yet — the board updates live as the commissioner drafts.</div>';
@@ -4157,7 +4153,7 @@ const ADMIN_EMPTY=(h,p)=>`<div class="empty-state"><div class="es-ic"><svg width
 /* ---- Registrations → roster assignment (add players) ---- */
 async function loadRegistrations(){
   const el=$("#regAdminBody");if(!el||!sb||!adminSeason)return;
-  const {data:regs}=await sb.from("season_registrations").select("*, profiles(gamertag)").eq("season_id",adminSeason.id).order("created_at");
+  const {data:regs}=await sb.from("season_registrations").select("*, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number)").eq("season_id",adminSeason.id).order("created_at");
   const {data:spots}=await sb.from("roster_spots").select("profile_id,team_id").eq("season_id",adminSeason.id);
   const assigned=new Set((spots||[]).map(s=>s.profile_id));
   const spotBy={};(spots||[]).forEach(s=>{spotBy[s.profile_id]=codeOfId(s.team_id);});
@@ -4166,15 +4162,15 @@ async function loadRegistrations(){
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>EA ID</th><th title="Pre-draft scouting overall from EASHL 6v6 career stats">Scout</th><th>Pos</th><th>#</th><th>Club</th><th>Cap Hit</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       const cur=spotBy[r.profile_id];const gq=g.replace(/"/g,'&quot;');
-      const eid=r.ea_id||g;
-      return `<tr><td><b>${esc(g)}</b>${r.platform_gamertag?`<small style="display:block;color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(r.platform||'')} · ${esc(r.platform_gamertag)}</small>`:''}</td><td class="mono">${r.ea_id?`<a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link" title="Scout ${esc(eid)} — opens their EASHL 6v6 career stats">${esc(r.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${r.preferred_number||"—"}</td>
+      const pf=r.profiles||{};const eid=pf.ea_id||g;
+      return `<tr><td><b>${esc(g)}</b>${pf.platform_gamertag?`<small style="display:block;color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(pf.platform||'')} · ${esc(pf.platform_gamertag)}</small>`:''}</td><td class="mono">${pf.ea_id?`<a href="${scoutUrl(eid)}" target="_blank" rel="noopener" class="scout-link" title="Scout ${esc(eid)} — opens their EASHL 6v6 career stats">${esc(pf.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${pf.jersey_number||"—"}</td>
       <td>${done
         ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
         :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
       <td>${done?"—":`<div class="sal-field"><input class="sal-in ra-sal" data-reg="${r.id}" value="750K" placeholder="1 = $1M" title="In $M — 1 = $1M, .75 = $750K, 7.5 = $7.5M" aria-label="Cap hit ($M)"><span class="sal-steps"><button type="button" class="sal-up" tabindex="-1" aria-label="Increase by $100K">▲</button><button type="button" class="sal-down" tabindex="-1" aria-label="Decrease by $100K">▼</button></span></div>`}</td>
       <td style="text-align:right"><div class="act">${done
         ?`<button class="mini good rm-move" data-prof="${r.profile_id}" data-name="${gq}">Move</button><button class="mini rm-remove" data-prof="${r.profile_id}" data-name="${gq}">Off roster</button>`
-        :`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${r.preferred_number||""}" data-pos="${r.position}" data-name="${gq}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
+        :`<button class="mini good ra-assign" data-reg="${r.id}" data-prof="${r.profile_id}" data-num="${pf.jersey_number||""}" data-pos="${r.position}" data-name="${gq}">Add</button>`}<button class="mini danger ra-del" data-reg="${r.id}" data-name="${esc(g)}">Delete</button></div></td></tr>`;}).join("")+
     "</tbody></table></div>";
 }
 async function saveScoutOvr(el){
