@@ -31,14 +31,19 @@ async function sbPatch(path, body) {
   if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
 }
 async function dApi(method, path, body) {
-  const r = await fetch(`https://discord.com/api/v10${path}`, {
-    method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
-  if (r.status === 404) return { __notfound: true };
-  if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
-  const t = await r.text();
-  return t ? JSON.parse(t) : null;
+  // Retry on 429 (respect Retry-After) so a busy run doesn't skip members and mis-flag them.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const r = await fetch(`https://discord.com/api/v10${path}`, {
+      method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if (r.status === 404) return { __notfound: true };
+    if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
+    if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
+    const t = await r.text();
+    return t ? JSON.parse(t) : null;
+  }
+  throw new Error(`${method} ${path} -> rate-limited after retries`);
 }
 
 // Discord channel-name slug (lowercase, hyphens) to compare against team names
