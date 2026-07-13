@@ -354,6 +354,14 @@
   .pill{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:3px 9px;border-radius:100px;display:inline-flex;align-items:center;gap:5px}
   .pill.live{background:#ff57471f;color:var(--live)}
   .pill.frost{background:var(--frost-glow);color:var(--frost-ink)}
+  /* enforcement open/resolved/all filter */
+  .enf-seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-s);overflow:hidden;flex-shrink:0}
+  .enf-seg button{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:4px 10px;background:none;border:0;border-left:1px solid var(--line);color:var(--fog);cursor:pointer;transition:background .12s,color .12s}
+  .enf-seg button:first-child{border-left:0}
+  .enf-seg button:hover{color:var(--navy)}
+  .enf-seg button.on{background:var(--frost);color:#111}
+  .ban-act{font-family:var(--f-cond);font-weight:600;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:100px}
+  .ban-act.ban{background:#ff57471f;color:var(--loss)} .ban-act.unban{background:var(--frost-glow);color:var(--win)}
   .pill.dim{background:#12293d;color:var(--fog)}
   .pill.win{background:#1a3a2c;color:var(--win)}
   .pill.gold{background:#3a2f14;color:var(--gold)}
@@ -1932,7 +1940,7 @@
       <div class="mgr-panel" id="atab-registrations"><div class="card"><div class="card-h"><h3>Registrations</h3><span class="pill" id="regCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Assign each signed-up player to a club to add them to a roster. Players already on a roster can be <b>moved</b> to another club or taken <b>off roster</b> here too.</div>
         <div id="regAdminBody"></div></div></div>
-      <div class="mgr-panel" id="atab-owners"><div class="card"><div class="card-h"><h3>Owner Applications</h3><span class="pill" id="ownerAppCount"></span></div>
+      <div class="mgr-panel" id="atab-owners"><div class="card"><div class="card-h"><h3>Owner Applications</h3><div style="display:flex;align-items:center;gap:9px"><div class="enf-seg" data-enf="owners"><button type="button" data-f="open" class="on">Open</button><button type="button" data-f="resolved">Resolved</button><button type="button" data-f="all">All</button></div><span class="pill" id="ownerAppCount"></span></div></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Applications submitted on the Owner Application page. Approve to shortlist an owner, then assign them a club in Members &amp; Roles.</div>
         <div id="ownerAppsBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-schedbuild"><div class="card"><div class="card-h"><h3>Season Schedule</h3><span class="pill" id="schedCount"></span></div>
@@ -2022,25 +2030,25 @@
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Correct a club's special-teams totals if the automatic EA import is off. PP% and PK% recalculate automatically on save.</div>
         <div id="teamStatsBody" style="padding:12px 20px 20px"></div></div></div>
       <!-- Applications & Enforcement -->
-      <div class="mgr-panel" id="atab-complaints"><div class="card"><div class="card-h"><h3>Filed Complaints</h3><span class="pill" id="complaintsCount"></span></div>
+      <div class="mgr-panel" id="atab-complaints"><div class="card"><div class="card-h"><h3>Filed Complaints</h3><div style="display:flex;align-items:center;gap:9px"><div class="enf-seg" data-enf="complaints"><button type="button" data-f="open" class="on">Open</button><button type="button" data-f="resolved">Resolved</button><button type="button" data-f="all">All</button></div><span class="pill" id="complaintsCount"></span></div></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Complaints submitted by members. Reply, resolve, or dismiss each one.</div>
         <div id="complaintsBody" style="padding:12px 20px 20px"></div></div></div>
-      <div class="mgr-panel" id="atab-appeals"><div class="card"><div class="card-h"><h3>Filed Appeals</h3><span class="pill" id="appealsCount"></span></div>
+      <div class="mgr-panel" id="atab-appeals"><div class="card"><div class="card-h"><h3>Filed Appeals</h3><div style="display:flex;align-items:center;gap:9px"><div class="enf-seg" data-enf="appeals"><button type="button" data-f="open" class="on">Open</button><button type="button" data-f="resolved">Resolved</button><button type="button" data-f="all">All</button></div><span class="pill" id="appealsCount"></span></div></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Appeals submitted by members — e.g. contesting a ruling or suspension.</div>
         <div id="appealsBody" style="padding:12px 20px 20px"></div></div></div>
-      <div class="mgr-panel" id="atab-poschanges"><div class="card"><div class="card-h"><h3>Filed Position Changes</h3><span class="pill" id="poschCount"></span></div>
+      <div class="mgr-panel" id="atab-poschanges"><div class="card"><div class="card-h"><h3>Filed Position Changes</h3><div style="display:flex;align-items:center;gap:9px"><div class="enf-seg" data-enf="poschanges"><button type="button" data-f="open" class="on">Open</button><button type="button" data-f="resolved">Resolved</button><button type="button" data-f="all">All</button></div><span class="pill" id="poschCount"></span></div></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Position-change requests from players. Approve one and update their position under <b>Players → Player Directory</b>.</div>
         <div id="poschBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-bans">
         <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 10px"><h3>Ban a Player</h3></div>
           <p style="margin:0 0 14px;color:var(--fog);font-size:13px">Permanent. The player is removed from every roster and club front office, blocked from the site, and banned from the Discord server (within ~5 min).</p>
           <button class="btn btn-frost btn-sm" id="banBtn" style="background:#e07a9a;color:#2a0812">Ban a player</button></div>
-        <div class="card"><div class="card-h"><h3>Banned Players</h3><span class="pill" id="banCount"></span></div><div id="banBody" style="padding:12px 20px 20px"></div></div></div>
+        <div class="card"><div class="card-h"><h3>Banned Players</h3><div style="display:flex;align-items:center;gap:9px"><div class="enf-seg" data-enf="bans"><button type="button" data-f="open" class="on">Active</button><button type="button" data-f="resolved">History</button><button type="button" data-f="all">All</button></div><span class="pill" id="banCount"></span></div></div><div id="banBody" style="padding:12px 20px 20px"></div></div></div>
       <div class="mgr-panel" id="atab-suspensions">
         <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 10px"><h3>Suspend a Player</h3></div>
           <p style="margin:0 0 14px;color:var(--fog);font-size:13px">A suspended player keeps site &amp; Discord access, but can't be rostered or play, can't make management changes if they run a club, and may file up to 2 appeals.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-frost btn-sm" id="suspDateBtn">Suspend until a date</button><button class="btn btn-ghost btn-sm" id="suspGamesBtn">Suspend for N games</button></div></div>
-        <div class="card"><div class="card-h"><h3>Suspensions</h3><span class="pill" id="suspCount"></span></div><div id="suspBody" style="padding:12px 20px 20px"></div></div></div>
+        <div class="card"><div class="card-h"><h3>Suspensions</h3><div style="display:flex;align-items:center;gap:9px"><div class="enf-seg" data-enf="suspensions"><button type="button" data-f="open" class="on">Active</button><button type="button" data-f="resolved">History</button><button type="button" data-f="all">All</button></div><span class="pill" id="suspCount"></span></div></div><div id="suspBody" style="padding:12px 20px 20px"></div></div></div>
     </div>
   </div></section></div>
 </main>
@@ -4175,15 +4183,28 @@ function openActionForm(type){
 document.addEventListener("click",e=>{const c=e.target.closest(".act-card");if(c)openActionForm(c.dataset.action);});
 // Split the member requests into their own enforcement views by type.
 const ENF_VIEWS=[["complaint","complaintsBody","complaintsCount","complaints"],["appeal","appealsBody","appealsCount","appeals"],["position_change","poschBody","poschCount","position-change requests"]];
+// Open / Resolved / All filter for each enforcement panel (default: open, so it stays decluttered).
+const enfFilter={complaints:'open',appeals:'open',poschanges:'open',owners:'open',bans:'open',suspensions:'open'};
+$("#view-admin").addEventListener("click",e=>{
+  const b=e.target.closest(".enf-seg button");if(!b)return;
+  const seg=b.closest(".enf-seg"),key=seg.dataset.enf;
+  seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+  enfFilter[key]=b.dataset.f;
+  if(key==='owners')loadOwnerApps();else if(key==='bans')loadBans();else if(key==='suspensions')loadSuspensions();else loadActionAdmin();
+});
 async function loadActionAdmin(){
   if(!sb)return;
   const {data}=await sb.from("action_requests").select("*, profiles(gamertag)").order("created_at",{ascending:false});
   const all=data||[];
+  const arOpen=a=>a.status==='open'||a.status==='reviewing';
   ENF_VIEWS.forEach(([type,bodyId,countId,label])=>{
     const el=$("#"+bodyId),cnt=$("#"+countId);if(!el)return;
+    const key=type==='complaint'?'complaints':(type==='appeal'?'appeals':'poschanges');
+    const f=enfFilter[key]||'open';
     const rows=all.filter(a=>a.type===type);
-    if(cnt)cnt.textContent=rows.filter(a=>a.status==='open').length+" open";
-    el.innerHTML=rows.length?rows.map(a=>{a._name=a.profiles?a.profiles.gamertag:'Member';return actionRow(a,true);}).join(""):ADMIN_EMPTY("Nothing filed","Member "+label+" appear here for review.");
+    const shown=f==='all'?rows:(f==='open'?rows.filter(arOpen):rows.filter(a=>!arOpen(a)));
+    if(cnt)cnt.textContent=rows.filter(arOpen).length+" open";
+    el.innerHTML=shown.length?shown.map(a=>{a._name=a.profiles?a.profiles.gamertag:'Member';return actionRow(a,true);}).join(""):ADMIN_EMPTY(f==='resolved'?"No resolved "+label+" yet":(f==='open'?"Nothing open":"Nothing filed"),"Member "+label+" appear here for review.");
   });
 }
 async function renderTradeRequests(){
@@ -4211,9 +4232,12 @@ async function loadSuspensions(){
   const rows=data||[];const eff={};
   await Promise.all(rows.filter(s=>s.status==='active').map(s=>sb.rpc("is_suspended",{p_profile:s.profile_id}).then(r=>{eff[s.id]=!r.error&&!!r.data;})));
   const cnt=$("#suspCount");if(cnt)cnt.textContent=rows.filter(s=>eff[s.id]).length+" active";
-  if(!rows.length){el.innerHTML=ADMIN_EMPTY("No suspensions","Suspend a player above — active and past suspensions appear here.");return;}
+  const suOpen=s=>s.status==='active'&&eff[s.id];
+  const f=enfFilter.suspensions||'open';
+  const shown=f==='all'?rows:(f==='open'?rows.filter(suOpen):rows.filter(s=>!suOpen(s)));
+  if(!shown.length){el.innerHTML=ADMIN_EMPTY(f==='resolved'?"No past suspensions yet":(f==='open'?"No active suspensions":"No suspensions"),"Suspend a player above — active and past suspensions appear here.");return;}
   el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Length</th><th>Reason</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
-    rows.map(s=>{const active=s.status==='active'&&eff[s.id];
+    shown.map(s=>{const active=s.status==='active'&&eff[s.id];
       const len=s.mode==='date'?('Until '+(s.ends_at?fmtGameDate(s.ends_at):'—')):((s.games_total||0)+' team game'+((s.games_total||0)===1?'':'s'));
       const st=active?'<b style="color:var(--loss)">Active</b>':(s.status==='lifted'?'<span style="color:var(--fog)">Lifted</span>':'<span style="color:var(--win)">Served</span>');
       return `<tr><td><b>${esc(nameById[s.profile_id]||'?')}</b>${eaTag(s.profile_id)}</td><td>${len}</td><td style="color:var(--fog);font-size:12.5px">${s.reason?esc(s.reason):'—'}</td><td>${st}</td>
@@ -4283,12 +4307,24 @@ document.addEventListener("click",e=>{const b=e.target.closest(".tstat-edit");if
 // Bans (commissioner)
 async function loadBans(){
   const el=$("#banBody");if(!el||!sb)return;
-  const {data}=await sb.from("profiles").select("id,gamertag,ban_reason,banned_at").eq("banned",true).order("banned_at",{ascending:false});
-  const rows=data||[];const cnt=$("#banCount");if(cnt)cnt.textContent=rows.length+" banned";
-  if(!rows.length){el.innerHTML=ADMIN_EMPTY("No banned players","Banning a player removes them from the league and Discord — they appear here.");return;}
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Reason</th><th>Banned</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
-    rows.map(p=>`<tr><td><b>${esc(p.gamertag||'?')}</b>${eaTag(p.id)}</td><td style="color:var(--fog);font-size:12.5px">${p.ban_reason?esc(p.ban_reason):'—'}</td><td style="color:var(--fog);font-size:12.5px">${p.banned_at?fmtGameDate(p.banned_at):'—'}</td>
-      <td style="text-align:right"><button class="mini good ban-lift" data-id="${p.id}" data-name="${(p.gamertag||'').replace(/"/g,'&quot;')}">Unban</button></td></tr>`).join('')+'</tbody></table></div>';
+  const cnt=$("#banCount"),f=enfFilter.bans||'open';
+  let activeCount=0;try{const {count}=await sb.from("profiles").select("*",{count:'exact',head:true}).eq("banned",true);activeCount=count||0;}catch(_){}
+  if(cnt)cnt.textContent=activeCount+" banned";
+  if(f==='open'){
+    const {data}=await sb.from("profiles").select("id,gamertag,ban_reason,banned_at").eq("banned",true).order("banned_at",{ascending:false});
+    const rows=data||[];
+    if(!rows.length){el.innerHTML=ADMIN_EMPTY("No banned players","Banning a player removes them from the league and Discord — they appear here.");return;}
+    el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Reason</th><th>Banned</th><th style="text-align:right">Action</th></tr></thead><tbody>'+
+      rows.map(p=>`<tr><td><b>${esc(p.gamertag||'?')}</b>${eaTag(p.id)}</td><td style="color:var(--fog);font-size:12.5px">${p.ban_reason?esc(p.ban_reason):'—'}</td><td style="color:var(--fog);font-size:12.5px">${p.banned_at?fmtGameDate(p.banned_at):'—'}</td>
+        <td style="text-align:right"><button class="mini good ban-lift" data-id="${p.id}" data-name="${(p.gamertag||'').replace(/"/g,'&quot;')}">Unban</button></td></tr>`).join('')+'</tbody></table></div>';
+  }else{
+    const {data}=await sb.from("ban_events").select("*, profiles(gamertag)").order("at",{ascending:false}).limit(200);
+    let rows=data||[];
+    if(f==='resolved')rows=rows.filter(e=>e.action==='unban');
+    if(!rows.length){el.innerHTML=ADMIN_EMPTY(f==='resolved'?"No lifted bans yet":"No ban history yet","Every ban and unban is logged here as it happens.");return;}
+    el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Action</th><th>Reason</th><th style="text-align:right">When</th></tr></thead><tbody>'+
+      rows.map(e=>`<tr><td><b>${esc(e.profiles?e.profiles.gamertag:'?')}</b></td><td><span class="ban-act ${e.action==='ban'?'ban':'unban'}">${e.action==='ban'?'Banned':'Unbanned'}</span></td><td style="color:var(--fog);font-size:12.5px">${e.reason?esc(e.reason):'—'}</td><td style="text-align:right;color:var(--fog);font-size:12.5px">${e.at?fmtGameDate(e.at):'—'}</td></tr>`).join('')+'</tbody></table></div>';
+  }
 }
 function openBan(){
   formModal("Ban a player",[
@@ -4658,9 +4694,13 @@ async function deleteRegistration(btn){
 async function loadOwnerApps(){
   const el=$("#ownerAppsBody");if(!el||!sb)return;
   const {data}=await sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
-  const pc=$("#ownerAppCount");if(pc)pc.textContent=(data?data.length:0)+" total";
-  if(!data||!data.length){el.innerHTML=ADMIN_EMPTY("No applications yet","Owner applications submitted on the site appear here for review.");return;}
-  el.innerHTML=data.map(a=>{const g=a.profiles?a.profiles.gamertag:"?";
+  const oaOpen=a=>!a.status||a.status==='pending';
+  const f=enfFilter.owners||'open';
+  const list=data||[];
+  const shown=f==='all'?list:(f==='open'?list.filter(oaOpen):list.filter(a=>!oaOpen(a)));
+  const pc=$("#ownerAppCount");if(pc)pc.textContent=list.filter(oaOpen).length+" open";
+  if(!shown.length){el.innerHTML=ADMIN_EMPTY(f==='resolved'?"No decided applications yet":"No applications yet","Owner applications submitted on the site appear here for review.");return;}
+  el.innerHTML=shown.map(a=>{const g=a.profiles?a.profiles.gamertag:"?";
     const club=a.preferred_club&&teams[a.preferred_club]?teams[a.preferred_club].name:(a.preferred_club||"No preference");
     const sc=a.status==="approved"?"var(--win)":(a.status==="denied"?"var(--loss)":"var(--frost)");
     const build=a.team_choice==="build";
