@@ -2199,11 +2199,21 @@ function buildNav(){
   ];
   $("#mobileMenu").innerHTML=groups.map(([g,items])=>
     `<div class="mm-group">${g}</div>`+items.map(([v,l])=>{const fk=viewFeature(v);return `<button data-go="${v}"${fk?` data-feature="${fk}"`:""}${MANAGER_VIEWS.has(v)?' data-role="manager"':""}>${l}</button>`;}).join("")).join("");
-  if(typeof authProfile!=="undefined"&&authProfile)$("#mobileMenu").insertAdjacentHTML("beforeend",MM_ACCOUNT_HTML);
+  if(typeof authProfile!=="undefined"&&authProfile)$("#mobileMenu").insertAdjacentHTML("beforeend",mmAccountHtml());
   applyFeatures();
 }
-const MM_ACCOUNT_HTML='<div class="mm-group" id="mmAccount">Account</div><button type="button" id="mmSignOut">Sign out</button>';
-$("#mobileMenu").addEventListener("click",e=>{if(e.target.closest("#mmSignOut")){e.preventDefault();closeMobile();signOutSb();}});
+function mmAccountHtml(){
+  const gt=(typeof authProfile!=="undefined"&&authProfile&&authProfile.gamertag)||"";
+  return '<div class="mm-group" id="mmAccount">Account</div>'
+    +'<button type="button" data-go="player" data-param="'+esc(gt)+'">My Profile</button>'
+    +'<button type="button" id="mmEditProfile">Edit Profile</button>'
+    +'<button type="button" data-go="offers">Contract Offers</button>'
+    +'<button type="button" id="mmSignOut">Sign out</button>';
+}
+$("#mobileMenu").addEventListener("click",e=>{
+  if(e.target.closest("#mmEditProfile")){e.preventDefault();closeMobile();openEditProfile();return;}
+  if(e.target.closest("#mmSignOut")){e.preventDefault();closeMobile();signOutSb();return;}
+});
 
 /* ------------------------------ STANDINGS ------------------------------ */
 let liveStandings=[];
@@ -3177,7 +3187,7 @@ function renderAuthUI(){
   else{if(nw)nw.style.display="none";teardownNotifs();}
   // mobile sign-out lives in the hamburger menu (keeps the top bar to icons)
   const mm=$("#mobileMenu"),acc=$("#mmAccount");
-  if(authProfile){if(mm&&!acc)mm.insertAdjacentHTML("beforeend",MM_ACCOUNT_HTML);}
+  if(authProfile){if(mm&&!acc)mm.insertAdjacentHTML("beforeend",mmAccountHtml());}
   else if(acc){const so=$("#mmSignOut");if(so)so.remove();acc.remove();}
 }
 function renderSignupAuth(){
