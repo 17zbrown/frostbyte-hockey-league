@@ -11,8 +11,22 @@
 
 const BOT = process.env.DISCORD_BOT_TOKEN;
 const GUILD = process.env.DISCORD_GUILD_ID;
+const SB_URL = process.env.SUPABASE_URL;
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 const json = (o, s = 200) => ({ statusCode: s, headers: { "content-type": "application/json" }, body: JSON.stringify(o) });
+
+// Flip profiles.in_guild for the member with this Discord id (so registration can require it).
+async function setInGuild(discordId, value) {
+  if (!SB_URL || !SB_KEY || !discordId) return;
+  try {
+    await fetch(`${SB_URL}/rest/v1/profiles?discord_id=eq.${discordId}`, {
+      method: "PATCH",
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ in_guild: value }),
+    });
+  } catch (e) { /* best effort — the 5-min sync will also set it */ }
+}
 
 export const handler = async (event) => {
   if (event.httpMethod !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -36,8 +50,8 @@ export const handler = async (event) => {
     headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
     body: JSON.stringify({ access_token: token }),
   });
-  if (put.status === 201) return json({ joined: true, user: user.id });
-  if (put.status === 204) return json({ alreadyMember: true, user: user.id });
+  if (put.status === 201) { await setInGuild(user.id, true); return json({ joined: true, inGuild: true, user: user.id }); }
+  if (put.status === 204) { await setInGuild(user.id, true); return json({ alreadyMember: true, inGuild: true, user: user.id }); }
   const detail = (await put.text()).slice(0, 200);
-  return json({ error: "Join failed", status: put.status, detail }, 200);
+  return json({ error: "Join failed", inGuild: false, status: put.status, detail }, 200);
 };

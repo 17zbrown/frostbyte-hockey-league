@@ -52,6 +52,10 @@ export default async () => {
 
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id");
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
+  // current in_guild per profile, so we only write when it changes
+  const inGuildById = {};
+  for (const p of await sbGet("profiles?select=id,in_guild")) inGuildById[p.id] = p.in_guild;
+  const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
   const teams = await sbGet("teams?select=id,name,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
   // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
@@ -138,11 +142,13 @@ export default async () => {
       if (bannedIds.has(m.profile_id)) {
         const res = await dApi("PUT", `/guilds/${GUILD}/bans/${m.discord_id}`, { delete_message_seconds: 0 });
         if (!(res && res.__notfound)) sum.banned = (sum.banned || 0) + 1;
+        await markGuild(m.profile_id, false);
         continue;
       }
       const mem = await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
-      if (mem.__notfound) { sum.notInServer++; continue; }
+      if (mem.__notfound) { sum.notInServer++; await markGuild(m.profile_id, false); continue; }
       sum.checked++;
+      await markGuild(m.profile_id, true);
 
       // (1) username sync — site gamertag follows Discord display name
       const disp = mem.nick || (mem.user && (mem.user.global_name || mem.user.username));
