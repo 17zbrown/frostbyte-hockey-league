@@ -2088,6 +2088,7 @@ function buildTeams(){
     TEAM_KEYS.push(t.code);
   });
   if(typeof updateBranding==="function")updateBranding();
+  if(typeof buildNav==="function")buildNav();  // refresh the CGHL club list + mobile menu once teams are loaded
 }
 
 // standings: code, gp, w, l, otl, gf, ga, streak
