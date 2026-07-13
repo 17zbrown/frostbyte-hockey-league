@@ -1270,6 +1270,10 @@
   .dm-sopt small{color:var(--fog);font-family:var(--f-mono);font-size:10.5px}
   .dm-sempty{padding:14px;color:var(--fog);font-size:12px;text-align:center}
   .dm-convos{flex:1;overflow-y:auto}
+  .dm-newpick input{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--ice);font:inherit;font-size:14px;padding:10px 12px}
+  .dm-newpick input:focus{outline:none;border-color:var(--frost)}
+  .dm-newlist{margin-top:10px;max-height:min(340px,48vh);overflow-y:auto;border:1px solid var(--line);border-radius:10px}
+  .dm-newlist:empty{display:none}
   .dm-convo{display:flex;gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .15s}
   .dm-convo:hover{background:var(--panel-2)}
   .dm-convo.active{background:var(--frost-glow)}
@@ -2328,9 +2332,11 @@ function dmRender(){
       <div class="dm-msgs" id="dmMsgs">${body}</div>
       <div class="dm-composer"><textarea id="dmInput" rows="1" placeholder="Message ${esc(dmName(dmActive))}…" maxlength="2000"></textarea><button class="btn btn-frost btn-sm" id="dmSend" type="button">Send</button></div>`;
   }
-  shell.innerHTML=`<div class="dm-list"><div class="dm-search"><input id="dmSearch" type="text" autocomplete="off" placeholder="Search players to message…"><div class="dm-search-menu" id="dmSearchMenu"></div></div><div class="dm-convos">${listHtml}</div></div><div class="dm-thread">${threadHtml}</div>`;
+  const searchBox=list.length?`<div class="dm-search"><input id="dmSearch" type="text" autocomplete="off" placeholder="Search messages…" value="${esc(dmConvoFilter)}"></div>`:"";
+  shell.innerHTML=`<div class="dm-list">${searchBox}<div class="dm-convos" id="dmConvos">${listHtml}</div></div><div class="dm-thread">${threadHtml}</div>`;
   shell.setAttribute("data-mobile-thread",dmActive?"1":"0");
   const mv=$("#dmMsgs");if(mv)mv.scrollTop=mv.scrollHeight;
+  if(dmConvoFilter)dmFilterConvos(dmConvoFilter);
   if(dmActive)dmMarkRead(dmActive);
 }
 async function dmMarkRead(other){
@@ -2371,46 +2377,71 @@ async function loadDmDir(){
   dmDir.forEach(p=>{if(!dmProfiles[p.id])dmProfiles[p.id]=p;});
   return dmDir;
 }
-function dmSearchRender(q){
-  const menu=$("#dmSearchMenu");if(!menu)return;
-  const s=(q||"").trim().toLowerCase();
-  if(!s){menu.classList.remove("on");menu.innerHTML="";return;}
-  const hits=(dmDir||[]).filter(p=>(p.gamertag||"").toLowerCase().includes(s)||(p.discord_username||"").toLowerCase().includes(s)).slice(0,10);
-  menu.innerHTML=hits.length
-    ? hits.map((p,k)=>`<button type="button" class="dm-sopt${k===0?" act":""}" data-id="${p.id}">${dmAvaHtml(p.id)}<span class="dm-sopt-main"><b>${esc(p.gamertag)}</b>${p.discord_username?`<small>@${esc(p.discord_username)}</small>`:""}</span></button>`).join("")
-    : `<div class="dm-sempty">No players match “${esc(q)}”.</div>`;
-  menu.classList.add("on");
+// Top bar filters EXISTING conversations (by name, @username, or message text)
+let dmConvoFilter="";
+function dmFilterConvos(q){
+  dmConvoFilter=q||"";
+  const s=dmConvoFilter.trim().toLowerCase();
+  const rows=[...document.querySelectorAll("#dmShell .dm-convo")];let shown=0;
+  rows.forEach(row=>{
+    const other=row.dataset.other,p=dmProfiles[other]||{};
+    const hay=((p.gamertag||"")+" "+(p.discord_username||"")+" "+dmMsgs.filter(m=>dmOtherId(m)===other).map(m=>m.body).join(" ")).toLowerCase();
+    const ok=!s||hay.includes(s);row.style.display=ok?"":"none";if(ok)shown++;
+  });
+  const box=$("#dmConvos"),empty=$("#dmNoMatch");
+  if(box){if(!shown&&s){if(!empty){box.insertAdjacentHTML("beforeend",`<div class="dm-sempty" id="dmNoMatch">No conversations match “${esc(dmConvoFilter)}”.</div>`);}else empty.textContent=`No conversations match “${dmConvoFilter}”.`;}
+    else if(empty)empty.remove();}
 }
-function dmSearchPick(id){const inp=$("#dmSearch");if(inp)inp.value="";const menu=$("#dmSearchMenu");if(menu){menu.classList.remove("on");menu.innerHTML="";}dmOpen(id);}
+// "New message" — modal picker to start a fresh conversation with anyone
+function dmRenderNewMenu(q){
+  const menu=$("#dmNewMenu");if(!menu)return;
+  const s=(q||"").trim().toLowerCase();
+  const all=dmDir||[];
+  const hits=(s?all.filter(p=>(p.gamertag||"").toLowerCase().includes(s)||(p.discord_username||"").toLowerCase().includes(s)):all).slice(0,60);
+  menu.innerHTML=hits.length
+    ? hits.map((p,k)=>`<button type="button" class="dm-sopt${k===0&&s?" act":""}" data-id="${p.id}">${dmAvaHtml(p.id)}<span class="dm-sopt-main"><b>${esc(p.gamertag)}</b>${p.discord_username?`<small>@${esc(p.discord_username)}</small>`:""}</span></button>`).join("")
+    : `<div class="dm-sempty">${all.length?`No players match “${esc(q)}”.`:"Loading players…"}</div>`;
+}
+function dmOpenNew(){
+  $("#modalCard").classList.remove("wide");
+  $("#modalTitle").textContent="New message";
+  $("#modalMsg").innerHTML=`<div class="dm-newpick"><input id="dmNewSearch" type="text" autocomplete="off" placeholder="Search players by name or @username…"><div class="dm-newlist" id="dmNewMenu"></div></div>`;
+  $("#modalOk").style.display="none";$("#modalCancel").textContent="Cancel";modalCb=null;
+  $("#modalBg").classList.add("on");
+  loadDmDir().then(()=>dmRenderNewMenu(($("#dmNewSearch")||{}).value||""));
+  setTimeout(()=>{const i=$("#dmNewSearch");if(i)i.focus();},40);
+}
+function dmSearchPick(id){
+  const mb=$("#modalBg");if(mb)mb.classList.remove("on");
+  go("messages");dmOpen(id);
+}
 if($("#msgBell"))$("#msgBell").addEventListener("click",e=>{e.stopPropagation();go("messages");});
-if($("#dmNewBtn"))$("#dmNewBtn").addEventListener("click",()=>{loadDmDir();const inp=$("#dmSearch");if(inp){inp.focus();}});
+if($("#dmNewBtn"))$("#dmNewBtn").addEventListener("click",dmOpenNew);
 document.addEventListener("click",e=>{
   const conv=e.target.closest(".dm-convo");if(conv){dmOpen(conv.dataset.other);return;}
   if(e.target.closest("#dmBack")){dmActive=null;dmRender();return;}
   if(e.target.closest("#dmSend")){dmSend();return;}
 });
-// pick a search result — mousedown so it beats the input's blur that closes the menu
+// pick a player from the New-message list — mousedown so it beats the input blur
 document.addEventListener("mousedown",e=>{const opt=e.target.closest(".dm-sopt");if(opt){e.preventDefault();dmSearchPick(opt.dataset.id);}});
 document.addEventListener("keydown",e=>{
   if(!e.target)return;
   if(e.target.id==="dmInput"&&e.key==="Enter"&&!e.shiftKey){e.preventDefault();dmSend();return;}
-  if(e.target.id==="dmSearch"){
-    const menu=$("#dmSearchMenu");if(!menu||!menu.classList.contains("on"))return;
+  if(e.target.id==="dmNewSearch"){
+    const menu=$("#dmNewMenu");if(!menu)return;
     const opts=[...menu.querySelectorAll(".dm-sopt")];if(!opts.length)return;
     let i=opts.findIndex(o=>o.classList.contains("act"));
     if(e.key==="ArrowDown"){e.preventDefault();i=(i+1)%opts.length;opts.forEach(o=>o.classList.remove("act"));opts[i].classList.add("act");opts[i].scrollIntoView({block:"nearest"});}
     else if(e.key==="ArrowUp"){e.preventDefault();i=(i-1+opts.length)%opts.length;opts.forEach(o=>o.classList.remove("act"));opts[i].classList.add("act");opts[i].scrollIntoView({block:"nearest"});}
-    else if(e.key==="Enter"){e.preventDefault();const t=opts[i]||opts[0];if(t)dmSearchPick(t.dataset.id);}
-    else if(e.key==="Escape"){menu.classList.remove("on");}
+    else if(e.key==="Enter"){e.preventDefault();const t=i>=0?opts[i]:opts[0];if(t)dmSearchPick(t.dataset.id);}
   }
 });
 document.addEventListener("input",e=>{
   if(!e.target)return;
   if(e.target.id==="dmInput"){e.target.style.height="auto";e.target.style.height=Math.min(120,e.target.scrollHeight)+"px";return;}
-  if(e.target.id==="dmSearch"){loadDmDir().then(()=>dmSearchRender(e.target.value));}
+  if(e.target.id==="dmSearch"){dmFilterConvos(e.target.value);return;}
+  if(e.target.id==="dmNewSearch"){loadDmDir().then(()=>dmRenderNewMenu(e.target.value));}
 });
-document.addEventListener("focusin",e=>{if(e.target&&e.target.id==="dmSearch"){loadDmDir().then(()=>{if(e.target.value.trim())dmSearchRender(e.target.value);});}});
-document.addEventListener("focusout",e=>{if(e.target&&e.target.id==="dmSearch"){const m=$("#dmSearchMenu");if(m)setTimeout(()=>m.classList.remove("on"),150);}});
 
 /* ------------------------------ NAV BUILD ------------------------------ */
 function buildNav(){
