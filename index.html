@@ -3042,7 +3042,7 @@ async function renderDraft(){
   if(cnt)cnt.textContent=pool.length+" available";
   if(!pool.length){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Draft pool is empty</h4><p>Registered players who haven\'t been assigned to a club yet will appear here.</p></div>';return;}
   el.innerHTML=pool.map((p,i)=>{const eid=p.profiles&&p.profiles.ea_id;return `<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${eid?`<a href="${scoutUrl(eid,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:"—"}</small></div>
+    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${eid?`<a href="${scoutUrl(p.profile_id,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:"—"}</small></div>
     <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`;}).join("");
 }
 
@@ -3064,8 +3064,10 @@ let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=nul
 const DISCORD_INVITE="https://discord.gg/UQYqKD8bd";
 // Pre-draft scouting: opens a player's EASHL 6v6 career stats so a commissioner can seed a scout OVR.
 // {q} is the URL-encoded EA ID. Swap this one line for a direct ChelHead/ChelClub deep-link once its format is confirmed.
-// Direct ChelHead player profile (gamertag-based). Goalies open on the goalie tab.
-function scoutUrl(id,pos){const u="https://chelhead.com/view-player/common-gen5/"+encodeURIComponent(String(id||"").trim());return pos==="G"?u+"?tab=goalie":u;}
+// ChelHead scout link → redirect fn that tries the EA ID, then falls back to the PSN/Xbox gamertag
+// if ChelHead has no such player. Goalies open on the goalie tab. Pass the profile id so the
+// function can resolve both handles server-side.
+function scoutUrl(pid,pos){return "/.netlify/functions/scout-redirect?pid="+encodeURIComponent(pid||"")+(pos?"&pos="+encodeURIComponent(pos):"");}
 const DISCORD_GLYPH=`<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M20 5a19 19 0 0 0-4.7-1.4l-.2.4a13 13 0 0 1 4 2 16 16 0 0 0-13.4 0 13 13 0 0 1 4-2l-.2-.4A19 19 0 0 0 4 5C1.5 8.7.8 12.3 1 15.8A19 19 0 0 0 6.9 19l.9-1.3a12 12 0 0 1-2-1l.5-.4a13 13 0 0 0 11.2 0l.5.4-2 1L18 19a19 19 0 0 0 5.9-3.2c.3-4-.8-7.6-3.9-10.8ZM8.5 14c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Zm7 0c-.9 0-1.7-.9-1.7-2s.8-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2Z"/></svg>`;
 async function sbInit(){
   if(!sb){renderAuthUI();return;}
@@ -3412,7 +3414,7 @@ async function renderMgrDraft(){
   const pool=(regs||[]).filter(r=>!taken.has(r.profile_id)).sort((a,b)=>(b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr));
   $("#mdPoolCount").textContent=pool.length+" available";
   $("#mdPool").innerHTML=pool.length?pool.map((p,i)=>{const eid=p.profiles&&p.profiles.ea_id;return `<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:""}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${eid?` · EA: <a href="${scoutUrl(eid,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:""}</small></div>
+    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:""}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${eid?` · EA: <a href="${scoutUrl(p.profile_id,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:""}</small></div>
     <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`;}).join(""):'<div class="empty-note">No players available — everyone registered has been drafted or rostered.</div>';
   // draft log — most recent picks first
   const log=cur.filter(p=>p.used).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
@@ -4170,7 +4172,7 @@ async function loadRegistrations(){
     regs.map(r=>{const g=r.profiles?r.profiles.gamertag:"?";const done=assigned.has(r.profile_id);
       const cur=spotBy[r.profile_id];const gq=g.replace(/"/g,'&quot;');
       const pf=r.profiles||{};const eid=pf.ea_id||g;
-      return `<tr><td><b>${esc(g)}</b>${pf.platform_gamertag?`<small style="display:block;color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(pf.platform||'')} · ${esc(pf.platform_gamertag)}</small>`:''}</td><td class="mono">${pf.ea_id?`<a href="${scoutUrl(eid,r.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead${r.position==='G'?' (goalie tab)':''}">${esc(pf.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${pf.jersey_number||"—"}</td>
+      return `<tr><td><b>${esc(g)}</b>${pf.platform_gamertag?`<small style="display:block;color:var(--fog);font-family:var(--f-mono);font-size:11px">${esc(pf.platform||'')} · ${esc(pf.platform_gamertag)}</small>`:''}</td><td class="mono">${pf.ea_id?`<a href="${scoutUrl(r.profile_id,r.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead${r.position==='G'?' (goalie tab)':''}">${esc(pf.ea_id)} ↗</a>`:'—'}</td><td style="text-align:center"><input class="scout-ovr" type="number" min="0" max="99" inputmode="numeric" data-reg="${r.id}" value="${r.scout_ovr==null?'':r.scout_ovr}" placeholder="—" aria-label="Scout overall for ${esc(g)}"></td><td style="text-align:center"><span class="posbadge ${r.position}">${r.position}</span></td><td>${pf.jersey_number||"—"}</td>
       <td>${done
         ?`<select class="rm-team" data-prof="${r.profile_id}">${TEAM_KEYS.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${esc(teams[k].name)}</option>`).join("")}</select>`
         :`<select class="ra-team" data-reg="${r.id}">${TEAM_KEYS.map(k=>`<option value="${k}">${esc(teams[k].name)}</option>`).join("")}</select>`}</td>
