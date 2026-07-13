@@ -1255,8 +1255,21 @@
 
   /* Direct messages */
   .dm-shell{display:grid;grid-template-columns:290px 1fr;gap:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-m);overflow:hidden;height:min(640px,72vh);min-height:420px}
-  .dm-list{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel)}
-  .dm-list-head{padding:12px 15px;border-bottom:1px solid var(--line);font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px;color:var(--navy);position:sticky;top:0;background:var(--panel);z-index:1}
+  .dm-list{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+  .dm-search{position:relative;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+  .dm-search input{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--ice);font:inherit;font-size:13px;padding:8px 11px}
+  .dm-search input:focus{outline:none;border-color:var(--frost)}
+  .dm-search-menu{position:absolute;left:12px;right:12px;top:calc(100% - 3px);background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh-2);z-index:6;max-height:288px;overflow-y:auto;display:none}
+  .dm-search-menu.on{display:block}
+  .dm-sopt{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-soft);padding:8px 11px;cursor:pointer}
+  .dm-sopt:last-child{border-bottom:0}
+  .dm-sopt:hover,.dm-sopt.act{background:var(--panel-2)}
+  .dm-sopt .dm-ava{width:28px;height:28px;font-size:11px}
+  .dm-sopt-main{min-width:0;flex:1}
+  .dm-sopt b{font-family:var(--f-cond);font-weight:600;font-size:13.5px;color:var(--navy);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dm-sopt small{color:var(--fog);font-family:var(--f-mono);font-size:10.5px}
+  .dm-sempty{padding:14px;color:var(--fog);font-size:12px;text-align:center}
+  .dm-convos{flex:1;overflow-y:auto}
   .dm-convo{display:flex;gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .15s}
   .dm-convo:hover{background:var(--panel-2)}
   .dm-convo.active{background:var(--frost-glow)}
@@ -2284,6 +2297,7 @@ async function renderMessages(param){
   const shell=$("#dmShell");if(!shell)return;
   if(!authUser){shell.innerHTML=`<div class="dm-empty" style="grid-column:1/-1">Sign in with Discord to send messages.</div>`;return;}
   if(!dmLoaded){shell.innerHTML=`<div class="dm-empty" style="grid-column:1/-1">Loading…</div>`;await loadDMs();}
+  loadDmDir();
   if(param){const pid=await dmResolve(param);if(pid&&pid!==authUser.id)dmActive=pid;}
   dmRender();
 }
@@ -2314,7 +2328,7 @@ function dmRender(){
       <div class="dm-msgs" id="dmMsgs">${body}</div>
       <div class="dm-composer"><textarea id="dmInput" rows="1" placeholder="Message ${esc(dmName(dmActive))}…" maxlength="2000"></textarea><button class="btn btn-frost btn-sm" id="dmSend" type="button">Send</button></div>`;
   }
-  shell.innerHTML=`<div class="dm-list"><div class="dm-list-head">Messages</div>${listHtml}</div><div class="dm-thread">${threadHtml}</div>`;
+  shell.innerHTML=`<div class="dm-list"><div class="dm-search"><input id="dmSearch" type="text" autocomplete="off" placeholder="Search players to message…"><div class="dm-search-menu" id="dmSearchMenu"></div></div><div class="dm-convos">${listHtml}</div></div><div class="dm-thread">${threadHtml}</div>`;
   shell.setAttribute("data-mobile-thread",dmActive?"1":"0");
   const mv=$("#dmMsgs");if(mv)mv.scrollTop=mv.scrollHeight;
   if(dmActive)dmMarkRead(dmActive);
@@ -2335,14 +2349,6 @@ async function dmSend(){
   if(error){toast("Couldn't send",/banned/i.test(error.message)?"That player can't receive messages.":error.message);inp.value=body;return;}
   dmMsgs.push(data);dmRender();
 }
-function dmNew(){
-  const start=async v=>{const id=await dmResolve(v.who);if(!id){toast("No such player","Pick a name from the list.");return;}
-    if(id===authUser.id){toast("That's you","Pick someone else to message.");return;}
-    go("messages");dmOpen(id);};
-  const open=()=>formModal("New message",[{key:"who",label:"To",type:"player",value:"",placeholder:"Start typing a name…"}],start);
-  if(sb&&!acPlayers.length){sb.from("profiles").select("gamertag").order("gamertag").then(({data})=>{acPlayers=(data||[]).map(p=>p.gamertag).filter(Boolean);open();});}
-  else open();
-}
 function subscribeDMs(){
   if(!sb||!authUser||dmChannel)return;
   dmChannel=sb.channel("dm-"+authUser.id)
@@ -2355,18 +2361,56 @@ function subscribeDMs(){
       else finish();
     }).subscribe();
 }
-function teardownDMs(){dmMsgs=[];dmProfiles={};dmActive=null;dmLoaded=false;renderMsgBadge();if(dmChannel){try{sb.removeChannel(dmChannel);}catch(e){}dmChannel=null;}}
+function teardownDMs(){dmMsgs=[];dmProfiles={};dmActive=null;dmLoaded=false;dmDir=null;renderMsgBadge();if(dmChannel){try{sb.removeChannel(dmChannel);}catch(e){}dmChannel=null;}}
+// searchable player directory for starting new chats (everyone but you, minus banned)
+let dmDir=null;
+async function loadDmDir(){
+  if(dmDir||!sb||!authUser)return dmDir;
+  const {data}=await sb.from("profiles").select(DM_PSEL).neq("id",authUser.id).order("gamertag");
+  dmDir=(data||[]).filter(p=>p.gamertag&&!p.banned);
+  dmDir.forEach(p=>{if(!dmProfiles[p.id])dmProfiles[p.id]=p;});
+  return dmDir;
+}
+function dmSearchRender(q){
+  const menu=$("#dmSearchMenu");if(!menu)return;
+  const s=(q||"").trim().toLowerCase();
+  if(!s){menu.classList.remove("on");menu.innerHTML="";return;}
+  const hits=(dmDir||[]).filter(p=>(p.gamertag||"").toLowerCase().includes(s)||(p.discord_username||"").toLowerCase().includes(s)).slice(0,10);
+  menu.innerHTML=hits.length
+    ? hits.map((p,k)=>`<button type="button" class="dm-sopt${k===0?" act":""}" data-id="${p.id}">${dmAvaHtml(p.id)}<span class="dm-sopt-main"><b>${esc(p.gamertag)}</b>${p.discord_username?`<small>@${esc(p.discord_username)}</small>`:""}</span></button>`).join("")
+    : `<div class="dm-sempty">No players match “${esc(q)}”.</div>`;
+  menu.classList.add("on");
+}
+function dmSearchPick(id){const inp=$("#dmSearch");if(inp)inp.value="";const menu=$("#dmSearchMenu");if(menu){menu.classList.remove("on");menu.innerHTML="";}dmOpen(id);}
 if($("#msgBell"))$("#msgBell").addEventListener("click",e=>{e.stopPropagation();go("messages");});
-if($("#dmNewBtn"))$("#dmNewBtn").addEventListener("click",dmNew);
+if($("#dmNewBtn"))$("#dmNewBtn").addEventListener("click",()=>{loadDmDir();const inp=$("#dmSearch");if(inp){inp.focus();}});
 document.addEventListener("click",e=>{
   const conv=e.target.closest(".dm-convo");if(conv){dmOpen(conv.dataset.other);return;}
   if(e.target.closest("#dmBack")){dmActive=null;dmRender();return;}
   if(e.target.closest("#dmSend")){dmSend();return;}
 });
+// pick a search result — mousedown so it beats the input's blur that closes the menu
+document.addEventListener("mousedown",e=>{const opt=e.target.closest(".dm-sopt");if(opt){e.preventDefault();dmSearchPick(opt.dataset.id);}});
 document.addEventListener("keydown",e=>{
-  if(e.target&&e.target.id==="dmInput"&&e.key==="Enter"&&!e.shiftKey){e.preventDefault();dmSend();}
+  if(!e.target)return;
+  if(e.target.id==="dmInput"&&e.key==="Enter"&&!e.shiftKey){e.preventDefault();dmSend();return;}
+  if(e.target.id==="dmSearch"){
+    const menu=$("#dmSearchMenu");if(!menu||!menu.classList.contains("on"))return;
+    const opts=[...menu.querySelectorAll(".dm-sopt")];if(!opts.length)return;
+    let i=opts.findIndex(o=>o.classList.contains("act"));
+    if(e.key==="ArrowDown"){e.preventDefault();i=(i+1)%opts.length;opts.forEach(o=>o.classList.remove("act"));opts[i].classList.add("act");opts[i].scrollIntoView({block:"nearest"});}
+    else if(e.key==="ArrowUp"){e.preventDefault();i=(i-1+opts.length)%opts.length;opts.forEach(o=>o.classList.remove("act"));opts[i].classList.add("act");opts[i].scrollIntoView({block:"nearest"});}
+    else if(e.key==="Enter"){e.preventDefault();const t=opts[i]||opts[0];if(t)dmSearchPick(t.dataset.id);}
+    else if(e.key==="Escape"){menu.classList.remove("on");}
+  }
 });
-document.addEventListener("input",e=>{if(e.target&&e.target.id==="dmInput"){e.target.style.height="auto";e.target.style.height=Math.min(120,e.target.scrollHeight)+"px";}});
+document.addEventListener("input",e=>{
+  if(!e.target)return;
+  if(e.target.id==="dmInput"){e.target.style.height="auto";e.target.style.height=Math.min(120,e.target.scrollHeight)+"px";return;}
+  if(e.target.id==="dmSearch"){loadDmDir().then(()=>dmSearchRender(e.target.value));}
+});
+document.addEventListener("focusin",e=>{if(e.target&&e.target.id==="dmSearch"){loadDmDir().then(()=>{if(e.target.value.trim())dmSearchRender(e.target.value);});}});
+document.addEventListener("focusout",e=>{if(e.target&&e.target.id==="dmSearch"){const m=$("#dmSearchMenu");if(m)setTimeout(()=>m.classList.remove("on"),150);}});
 
 /* ------------------------------ NAV BUILD ------------------------------ */
 function buildNav(){
