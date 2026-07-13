@@ -2028,10 +2028,12 @@ function textOn(hex){let c=hex.replace('#','');if(c.length===3)c=c.split('').map
   return (0.299*r+0.587*g+0.114*b)>148?'#03203c':'#ffffff';}
 let crestSeq=0;
 // team crest — a heraldic shield in the club's colours (replaces flat badges)
-function badge(code,size){const t=teams[code];if(!t)return '';const s=size||26;
-  if(t.logo)return `<img class="crest" src="${esc(t.logo)}" width="${s}" height="${Math.round(s*1.12)}" style="display:block;flex-shrink:0;object-fit:contain;border-radius:5px" alt="${esc(t.name)} logo">`;
+function badge(code,size){const t=teams[code];if(!t)return '';
+  // team logos are shown larger: scale the requested size up, floor so nothing shrinks below the old fixed size, cap so heroes stay sane
+  const s=Math.min(112,Math.max(38,Math.round((size||26)*1.55)));
+  if(t.logo)return `<img class="tbadge" src="${esc(t.logo)}" width="${s}" height="${Math.round(s*1.12)}" style="display:block;flex-shrink:0;object-fit:contain;border-radius:5px" alt="${esc(t.name)} logo">`;
   const tc=textOn(t.c);const id='cr'+(crestSeq++);
-  return `<svg class="crest" width="${s}" height="${Math.round(s*1.12)}" viewBox="0 0 40 44" style="display:block;flex-shrink:0" role="img" aria-label="${t.name} crest">
+  return `<svg class="tbadge" width="${s}" height="${Math.round(s*1.12)}" viewBox="0 0 40 44" style="display:block;flex-shrink:0" role="img" aria-label="${t.name} crest">
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${t.c}"/><stop offset="1" stop-color="${shade(t.c,-28)}"/></linearGradient></defs>
     <path d="M3 4 Q3 1.5 5.5 1.5 H34.5 Q37 1.5 37 4 V24 Q37 35 20 42 Q3 35 3 24 Z" fill="url(#${id})" stroke="#ffffff" stroke-width="2"/>
     <path d="M3.4 12.4 H36.6" stroke="${tc}" stroke-opacity=".2" stroke-width="1"/>
