@@ -1216,8 +1216,8 @@
   .auth-banner.in{border-color:#a9cfe8}
   .auth-banner .dcirc{width:30px;height:30px;border-radius:8px;background:#5865F2;display:grid;place-items:center;flex-shrink:0}
   /* Sign-in-with-Discord buttons always use Discord brand colors (both themes) */
-  #signInBtn,#signInBtn2{background:#5865F2;color:#fff;border-color:#5865F2}
-  #signInBtn:hover,#signInBtn2:hover{background:#4752c4;border-color:#4752c4;color:#fff}
+  #signInBtn,.signin-discord{background:#5865F2;color:#fff;border-color:#5865F2;font-weight:700}
+  #signInBtn:hover,.signin-discord:hover{background:#4752c4;border-color:#4752c4;color:#fff}
 
   /* =========================================================================
      THEME TOGGLE + DARK MODE
@@ -1852,10 +1852,10 @@
           <div style="font-family:var(--f-cond);font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:13px;color:var(--ice);margin-bottom:4px">Schedule a single game</div>
           <div style="color:var(--fog);font-size:12.5px;margin-bottom:12px">Add one game — useful for makeups, exhibitions, or a quick test. Time is Eastern; a 6-digit lobby code is assigned automatically.</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-            <div class="ef-row" style="min-width:150px;flex:1"><label>Home club</label><select id="sg-home"></select></div>
-            <div class="ef-row" style="min-width:150px;flex:1"><label>Away club</label><select id="sg-away"></select></div>
-            <div class="ef-row" style="min-width:200px"><label>Date &amp; time (ET)</label><input type="datetime-local" id="sg-time"></div>
-            <div class="ef-row" style="width:80px"><label>Week</label><input type="number" id="sg-week" min="1" value="1"></div>
+            <div class="ef-row" style="min-width:150px;flex:1"><label>Home club</label><select id="sg-home" aria-label="Home team"></select></div>
+            <div class="ef-row" style="min-width:150px;flex:1"><label>Away club</label><select id="sg-away" aria-label="Away team"></select></div>
+            <div class="ef-row" style="min-width:200px"><label>Date &amp; time (ET)</label><input type="datetime-local" id="sg-time" aria-label="Game date and time"></div>
+            <div class="ef-row" style="width:80px"><label>Week</label><input type="number" id="sg-week" min="1" value="1" aria-label="Week number"></div>
             <button class="btn btn-frost btn-sm" id="addGameBtn">Add game</button>
           </div>
         </div>
@@ -1867,15 +1867,15 @@
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Pick a player, then correct their box score for every game this season. Stats normally arrive automatically from the EA import — edit here only to fix a mistake.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
           <input class="adm-search" id="psSearch" placeholder="Search players…" style="margin:0;flex:1;min-width:160px;width:auto" />
-          <select id="psPosFilter" style="min-width:120px"><option value="">All positions</option><option>C</option><option>LW</option><option>RW</option><option>LD</option><option>RD</option><option>G</option></select>
+          <select id="psPosFilter" style="min-width:120px" aria-label="Filter by position"><option value="">All positions</option><option>C</option><option>LW</option><option>RW</option><option>LD</option><option>RD</option><option>G</option></select>
         </div>
         <div id="psBody"></div></div></div>
       <div class="mgr-panel" id="atab-members"><div class="card"><div class="card-h"><h3>Members &amp; Roles</h3><span class="pill" id="membersCount"></span></div>
         <div style="padding:8px 20px 2px;color:var(--fog);font-size:13px">Grant roles to anyone who has signed in. <b>Manager</b> unlocks that player's front office (roster, lineup, trades) for the club you assign them. <b>Commissioner</b> unlocks the League Office. Change a player's position with the dropdown — it saves instantly.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
           <input class="adm-search" id="mbSearch" placeholder="Search members…" style="margin:0;flex:1;min-width:160px;width:auto" />
-          <select id="mbRoleFilter" style="min-width:130px"><option value="">All roles</option><option value="member">Member</option><option value="staff">Staff</option><option value="commissioner">Commissioner</option></select>
-          <select id="mbPosFilter" style="min-width:120px"><option value="">All positions</option><option>C</option><option>LW</option><option>RW</option><option>LD</option><option>RD</option><option>G</option></select>
+          <select id="mbRoleFilter" style="min-width:130px" aria-label="Filter by league role"><option value="">All roles</option><option value="member">Member</option><option value="staff">Staff</option><option value="commissioner">Commissioner</option></select>
+          <select id="mbPosFilter" style="min-width:120px" aria-label="Filter by position"><option value="">All positions</option><option>C</option><option>LW</option><option>RW</option><option>LD</option><option>RD</option><option>G</option></select>
         </div>
         <div id="membersBody"></div></div></div>
       <div class="mgr-panel" id="atab-teams">
@@ -1886,14 +1886,14 @@
           </div>
           <div class="ef-grid" style="grid-template-columns:1fr 1fr 120px;gap:12px;margin-top:10px">
             <div class="ef-row"><label>Conference</label><input id="tm-conf" placeholder="Optional" /></div>
-            <div class="ef-row"><label>Division</label><select id="tm-div"><option value="Frost">Frost</option><option value="Byte">Byte</option></select></div>
-            <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#ffe500" style="height:38px;padding:2px" /></div>
+            <div class="ef-row"><label>Division</label><select id="tm-div" aria-label="Team division"><option value="Frost">Frost</option><option value="Byte">Byte</option></select></div>
+            <div class="ef-row"><label>Color</label><input id="tm-color" type="color" value="#ffe500" style="height:38px;padding:2px" aria-label="Team color" /></div>
           </div>
           <button class="btn btn-frost" id="addTeamBtn" style="margin-top:16px">Add Club</button></div>
         <div class="card" style="margin-top:16px"><div class="card-h"><h3>Current Clubs</h3><span class="pill" id="teamsAdminCount"></span></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 20px">
             <input class="adm-search" id="tmSearch" placeholder="Search clubs…" style="margin:0;flex:1;min-width:160px;width:auto" />
-            <select id="tmDivFilter" style="min-width:130px"><option value="">All divisions</option><option>Frost</option><option>Byte</option></select>
+            <select id="tmDivFilter" style="min-width:130px" aria-label="Filter by division"><option value="">All divisions</option><option>Frost</option><option>Byte</option></select>
           </div>
           <div id="teamsAdminBody"></div></div></div>
       <div class="mgr-panel" id="atab-draft">
@@ -3138,7 +3138,7 @@ document.addEventListener("click",async e=>{
 });
 async function renderMyStats(){
   const el=$("#myStatsCard");if(!el)return;
-  if(!authProfile){el.innerHTML=`<div class="auth-banner"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your stats</b><div style="color:var(--fog);font-size:12.5px">Your profile and season numbers appear once you sign in with Discord.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;return;}
+  if(!authProfile){el.innerHTML=`<div class="auth-banner"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your stats</b><div style="color:var(--fog);font-size:12.5px">Your profile and season numbers appear once you sign in with Discord.</div></div><button type="button" class="btn btn-sm signin-discord">Sign in with Discord</button></div>`;return;}
   let tc=null,num="—",pos=null,st={gp:0,points:0,goals:0,assists:0};
   if(sb&&openSeason&&authUser){
     const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",authUser.id).maybeSingle();
@@ -3471,7 +3471,7 @@ function renderSignupAuth(){
     const guildLine=authProfile.in_guild?"":`<div style="font-size:12px;margin-top:5px;color:var(--loss)">⚠ You're not in the Chel Gaming Discord — <a href="${DISCORD_INVITE}" target="_blank" rel="noopener" style="color:var(--frost-ink);font-weight:600">join the server</a> to register.</div>`;
     b.innerHTML=`<div class="auth-banner in">${glyph}<div><b>Signed in as ${esc(authProfile.gamertag)}</b><div style="color:var(--fog);font-size:12.5px">${msg}</div><div style="font-size:11.5px;margin-top:3px;font-family:var(--f-mono);color:var(--fog)">${idline}</div>${guildLine}</div></div>`;
   }else{
-    b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to register</b><div style="color:var(--fog);font-size:12.5px">Registration is tied to your Discord so your roster spot is saved.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
+    b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to register</b><div style="color:var(--fog);font-size:12.5px">Registration is tied to your Discord so your roster spot is saved.</div></div><button type="button" class="btn btn-sm signin-discord">Sign in with Discord</button></div>`;
   }
 }
 function toggleAcctMenu(open){const w=$("#acctWrap");if(!w)return;const btn=$("#acctBtn"),menu=$("#acctMenu");if(!menu)return;
@@ -3496,7 +3496,7 @@ function openEditProfile(){
   });
 }
 document.addEventListener("click",e=>{
-  if(e.target.closest("#signInBtn")||e.target.closest("#signInBtn2")){e.preventDefault();signInDiscord();return;}
+  if(e.target.closest("#signInBtn")||e.target.closest(".signin-discord")){e.preventDefault();signInDiscord();return;}
   if(e.target.closest("#acctBtn")){e.preventDefault();toggleAcctMenu();return;}
   if(e.target.closest("#acctSignOut")){e.preventDefault();toggleAcctMenu(false);signOutSb();return;}
   if(e.target.closest("#acctEditProfile")){e.preventDefault();toggleAcctMenu(false);openEditProfile();return;}
@@ -3549,7 +3549,7 @@ function renderOwnerAuth(){
       ownerToggleChoice();
     });
   }else{
-    b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to apply</b><div style="color:var(--fog);font-size:12.5px">Owner applications are tied to your Discord so the commissioners know who applied.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
+    b.innerHTML=`<div class="auth-banner">${glyph}<div style="flex:1"><b>Sign in to apply</b><div style="color:var(--fog);font-size:12.5px">Owner applications are tied to your Discord so the commissioners know who applied.</div></div><button type="button" class="btn btn-sm signin-discord">Sign in with Discord</button></div>`;
   }
 }
 $("#ownerForm").addEventListener("submit",async e=>{e.preventDefault();
@@ -3597,7 +3597,7 @@ function renderManager(){
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
       ? `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Manager access needed</h2><p>You're signed in as <b>${esc(authProfile.gamertag)}</b>. A commissioner grants <b>Manager</b> access and assigns your club in the League Office → Members &amp; Roles.</p></div>`
-      : `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Front Office Access</h2><p>Sign in with Discord. Managers — assigned by the commissioner — run their club's roster, game-night lineup, and trades.</p><button class="btn btn-frost" id="signInBtn2" style="margin-top:14px">Sign in with Discord</button></div>`;
+      : `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Front Office Access</h2><p>Sign in with Discord. Managers — assigned by the commissioner — run their club's roster, game-night lineup, and trades.</p><button class="btn signin-discord" style="margin-top:14px">Sign in with Discord</button></div>`;
   }
 }
 document.addEventListener("click",e=>{if(e.target.closest("#mgrLogout")){e.preventDefault();signOutSb();}});
@@ -3897,7 +3897,7 @@ async function renderFAoffers(){
 }
 async function renderMyOffers(){
   const gate=$("#offersGate"),body=$("#myOffersBody"),cnt=$("#myOffersCount");if(!body)return;
-  if(!authProfile||!authUser){if(gate)gate.innerHTML=`<div class="auth-banner" style="margin-bottom:16px"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your offers</b><div style="color:var(--fog);font-size:12.5px">Contract offers are tied to your Discord.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;body.innerHTML='';if(cnt)cnt.textContent='';return;}
+  if(!authProfile||!authUser){if(gate)gate.innerHTML=`<div class="auth-banner" style="margin-bottom:16px"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to see your offers</b><div style="color:var(--fog);font-size:12.5px">Contract offers are tied to your Discord.</div></div><button type="button" class="btn btn-sm signin-discord">Sign in with Discord</button></div>`;body.innerHTML='';if(cnt)cnt.textContent='';return;}
   if(gate)gate.innerHTML='';
   const {data}=await sb.from("contract_offers").select("*").eq("player_id",authUser.id).in("status",["pending","countered"]).order("updated_at",{ascending:false});
   if(cnt)cnt.textContent=(data?data.length:0)+" open";
@@ -3950,7 +3950,7 @@ const selOpts=arr=>[{value:"",label:"Select one…"}].concat(arr.map(s=>({value:
 let myClubInfo={team_id:null,team_name:null,position:null};
 async function renderActionCenter(){
   const gate=$("#actionsGate");if(!gate)return;
-  if(!authProfile||!authUser){gate.innerHTML=`<div class="auth-banner" style="margin-bottom:16px"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to use the Action Center</b><div style="color:var(--fog);font-size:12.5px">Requests are tied to your Discord account.</div></div><button type="button" class="btn btn-frost btn-sm" id="signInBtn2">Sign in with Discord</button></div>`;
+  if(!authProfile||!authUser){gate.innerHTML=`<div class="auth-banner" style="margin-bottom:16px"><span class="dcirc">${DISCORD_GLYPH}</span><div style="flex:1"><b>Sign in to use the Action Center</b><div style="color:var(--fog);font-size:12.5px">Requests are tied to your Discord account.</div></div><button type="button" class="btn btn-sm signin-discord">Sign in with Discord</button></div>`;
     if($("#myActionsBody"))$("#myActionsBody").innerHTML='';if($("#myActionsCount"))$("#myActionsCount").textContent='';return;}
   gate.innerHTML='';
   myClubInfo={team_id:null,team_name:null,position:null};
@@ -4352,7 +4352,7 @@ function renderCommissioner(){
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
       ? `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioners only</h2><p>You're signed in as <b>${esc(authProfile.gamertag)}</b> (${esc(authProfile.role)}). The League Office is limited to league commissioners.</p></div>`
-      : `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioner access</h2><p>Sign in with Discord to enter the League Office — only league commissioners can access it.</p><button class="btn btn-frost" id="signInBtn2" style="margin-top:14px">Sign in with Discord</button></div>`;
+      : `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioner access</h2><p>Sign in with Discord to enter the League Office — only league commissioners can access it.</p><button class="btn signin-discord" style="margin-top:14px">Sign in with Discord</button></div>`;
   }
 }
 function dtLocal(ts){if(!ts)return "";const d=new Date(ts);const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;}
@@ -5176,12 +5176,12 @@ function wireLogoDrop(i){
 function formModal(title,fields,onSave){
   $("#modalCard").classList.remove("wide");$("#modalTitle").textContent=title;
   const fieldHTML=f=>{const i=fields.indexOf(f);
-    if(f.type==="select")return `<div class="ef-row"><label>${f.label}</label><select data-ef="${i}">${f.options.map(o=>`<option value="${esc(o.value)}" ${String(o.value)===String(f.value)?"selected":""}>${esc(o.label)}</option>`).join("")}</select></div>`;
-    if(f.type==="player")return `<div class="ef-row ac-wrap"><label>${f.label}</label><input data-ef="${i}" class="ac-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder||"Start typing a name…")}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}"><div class="ac-menu"></div></div>`;
-    if(f.type==="salary")return `<div class="ef-row"><label>${f.label}</label><div class="sal-field"><input data-ef="${i}" class="sal-field-in" type="text" inputmode="decimal" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""}><span class="sal-steps"><button type="button" class="sal-up" tabindex="-1" aria-label="Increase by $100K">▲</button><button type="button" class="sal-down" tabindex="-1" aria-label="Decrease by $100K">▼</button></span></div></div>`;
-    if(f.type==="textarea")return `<div class="ef-row"><label>${f.label}</label><textarea data-ef="${i}" rows="4" placeholder="${esc(f.placeholder||"")}">${f.value??""}</textarea></div>`;
+    if(f.type==="select")return `<div class="ef-row"><label>${f.label}</label><select data-ef="${i}" aria-label="${esc(f.label)}">${f.options.map(o=>`<option value="${esc(o.value)}" ${String(o.value)===String(f.value)?"selected":""}>${esc(o.label)}</option>`).join("")}</select></div>`;
+    if(f.type==="player")return `<div class="ef-row ac-wrap"><label>${f.label}</label><input data-ef="${i}" aria-label="${esc(f.label)}" class="ac-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder||"Start typing a name…")}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}"><div class="ac-menu"></div></div>`;
+    if(f.type==="salary")return `<div class="ef-row"><label>${f.label}</label><div class="sal-field"><input data-ef="${i}" aria-label="${esc(f.label)}" class="sal-field-in" type="text" inputmode="decimal" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""}><span class="sal-steps"><button type="button" class="sal-up" tabindex="-1" aria-label="Increase by $100K">▲</button><button type="button" class="sal-down" tabindex="-1" aria-label="Decrease by $100K">▼</button></span></div></div>`;
+    if(f.type==="textarea")return `<div class="ef-row"><label>${f.label}</label><textarea data-ef="${i}" aria-label="${esc(f.label)}" rows="4" placeholder="${esc(f.placeholder||"")}">${f.value??""}</textarea></div>`;
     if(f.type==="logo")return `<div class="ef-row"><label>${f.label}</label><div class="logo-drop" data-ef="${i}" data-url="${(f.value||'').replace(/"/g,'&quot;')}" data-code="${esc(f.code||'')}"><div class="logo-prev">${f.value?`<img src="${esc(f.value)}">`:'<span>Drag a logo here, or click to upload (PNG/JPG, under 2 MB)</span>'}</div></div><input type="file" accept="image/*" class="logo-file" hidden></div>`;
-    return `<div class="ef-row"><label>${f.label}</label><input data-ef="${i}" type="${f.type||"text"}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""} ${f.min!=null?`min="${f.min}"`:""} ${f.max!=null?`max="${f.max}"`:""} ${f.step!=null?`step="${f.step}"`:""}></div>`;};
+    return `<div class="ef-row"><label>${f.label}</label><input data-ef="${i}" aria-label="${esc(f.label)}" type="${f.type||"text"}" value="${(f.value??"").toString().replace(/"/g,"&quot;")}" ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:""} ${f.min!=null?`min="${f.min}"`:""} ${f.max!=null?`max="${f.max}"`:""} ${f.step!=null?`step="${f.step}"`:""}></div>`;};
   let html="",gridBuf=[];
   const flushGrid=()=>{if(gridBuf.length){html+=`<div class="ef-grid">${gridBuf.map(fieldHTML).join("")}</div>`;gridBuf=[];}};
   fields.forEach(f=>{if(f.grid){gridBuf.push(f);}else{flushGrid();html+=fieldHTML(f);}});flushGrid();
