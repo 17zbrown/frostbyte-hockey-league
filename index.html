@@ -248,6 +248,36 @@
   .strk{font-weight:600}.strk.w{color:var(--win)}.strk.l{color:var(--loss)}
   .divlabel{font-family:var(--f-cond);font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:var(--frost-ink);padding:14px 20px 8px;background:#0a1b2a}
   .playoff-cut td{border-bottom:2px solid var(--frost-deep) !important}
+  /* standings: one column (card + table) per division, side by side */
+  .stand-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(470px,1fr));gap:18px;margin-top:6px;align-items:start}
+  .stand-col{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-m);overflow:hidden}
+  .stand-col-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);background:var(--panel-2);font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.08em;font-weight:700;font-size:14.5px;color:var(--navy)}
+  .stand-col-h span{font-family:var(--f-mono);font-size:10.5px;color:var(--fog);font-weight:500;letter-spacing:0;flex-shrink:0}
+  .stand-col .tbl-scroll{overflow-x:auto}
+  table.stand-tbl th,table.stand-tbl td{padding:9px 7px;font-size:12.5px}
+  table.stand-tbl th:first-child,table.stand-tbl td:first-child{padding-left:16px}
+  @media(max-width:560px){.stand-cols{grid-template-columns:1fr;gap:14px}}
+  /* divisions editor — kanban board (dark division columns, drag clubs between them) */
+  .div-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:16px;align-items:start}
+  .div-col{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:outline .12s}
+  .div-col-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 13px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+  .dch-title{display:flex;align-items:center;gap:8px;min-width:0}
+  .dch-title b{font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.08em;font-weight:700;font-size:13.5px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dch-n{font-family:var(--f-mono);font-size:10px;color:var(--fog);background:var(--panel-3);border-radius:20px;padding:1px 7px;flex-shrink:0}
+  .dch-act{display:flex;gap:1px;flex-shrink:0}
+  .dch-act button{background:none;border:0;color:var(--fog);cursor:pointer;font-size:13px;line-height:1;padding:4px 6px;border-radius:6px}
+  .dch-act button:hover{background:var(--panel-3);color:var(--navy)}
+  .div-del:hover{color:var(--loss)!important}
+  .div-col-body{padding:8px;display:flex;flex-direction:column;gap:5px;min-height:64px}
+  .div-team{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;background:var(--panel-2);cursor:grab;user-select:none;transition:background .12s,transform .06s}
+  .div-team:hover{background:var(--panel-3)}
+  .div-team:active{cursor:grabbing}
+  .div-team.dragging{opacity:.35}
+  .dt-name{flex:1;min-width:0;font-family:var(--f-cond);font-weight:600;font-size:13.5px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dt-code{font-family:var(--f-mono);font-size:10px;color:var(--fog);flex-shrink:0}
+  .div-col.dragover{outline:2px dashed var(--frost);outline-offset:-3px}
+  .div-col.dragover .div-col-body{background:var(--frost-glow)}
+  .dc-empty{color:var(--fog);font-size:12px;text-align:center;padding:14px 8px;border:1px dashed var(--line);border-radius:8px}
 
   /* leaders */
   .leaders{padding:6px 0}
@@ -1910,6 +1940,11 @@
             <select id="tmDivFilter" style="min-width:130px" aria-label="Filter by division"><option value="">All divisions</option><option>Frost</option><option>Byte</option></select>
           </div>
           <div id="teamsAdminBody"></div></div></div>
+      <div class="mgr-panel" id="atab-divisions">
+        <div class="card" style="padding:22px 26px">
+          <div class="card-h" style="padding:0 0 6px"><h3>Divisions</h3><button class="btn btn-frost btn-sm" id="addDivisionBtn" type="button">+ New division</button></div>
+          <div style="color:var(--fog);font-size:12.5px;margin-bottom:2px">Drag a club into any division to reassign it. Rename or remove a division from its header. Standings, team pages, and the schedule update automatically.</div>
+          <div id="divisionsBoard"></div></div></div>
       <div class="mgr-panel" id="atab-draft">
         <div class="card" style="padding:22px 26px;margin-bottom:16px"><div class="card-h" style="padding:0 0 14px"><h3>Generate Draft Picks</h3></div>
           <p style="margin:0 0 12px;color:var(--fog);font-size:13px">Mint a full set of picks — one per club per round — for a draft. Clubs can then trade them in the Trade Center.</p>
@@ -2555,18 +2590,21 @@ function renderStandings(el,full){
   const ey=document.querySelector("#standingsEyebrow");if(ey&&openSeason)ey.textContent="Season "+openSeason.number+" · Regular Season";
   const pl=document.querySelector("#standingsPill");if(pl)pl.textContent=noGames?"Pre-season":"Live";
   const note=noGames?`<div class="empty-note">Season ${openSeason?openSeason.number:1} hasn't dropped the puck yet — standings update automatically as game results are reported.</div>`:"";
-  let html=head+"<tbody>";
   // Group by conference only if EVERY club has one (a real partition), otherwise by division.
-  // (A single stray conference value must not orphan all other clubs into "Unassigned".)
+  // Each group renders as its own column (card + table), side by side; they stack on mobile.
   const useConf=rows.length>0&&rows.every(r=>teams[r[0]]&&teams[r[0]].conf);
-  const groupOf=r=>useConf?(teams[r[0]].conf||"Unassigned"):((teams[r[0]].div||"")+(teams[r[0]].div?" Division":"League"));
-  const order=[];rows.forEach(r=>{const g=groupOf(r);if(!order.includes(g))order.push(g);});
-  order.sort((a,b)=>a.localeCompare(b));
-  order.forEach(g=>{
-    html+=`<tr><td colspan="10" class="divlabel">${esc(g)}</td></tr>`;
+  const groupOf=r=>useConf?(teams[r[0]].conf||"Unassigned"):(teams[r[0]].div||"Unassigned");
+  const order=[];
+  if(!useConf)divisionOrder().forEach(n=>{if(rows.some(r=>groupOf(r)===n))order.push(n);});
+  rows.forEach(r=>{const g=groupOf(r);if(!order.includes(g))order.push(g);});
+  const colHead=`<table class="tbl stand-tbl"><thead><tr><th class="team">Club</th><th>GP</th><th>W</th><th>L</th><th>OTL</th><th>GF</th><th>GA</th><th>DIFF</th><th>STRK</th><th>PTS</th></tr></thead>`;
+  const cols=order.map(g=>{
     const d=rows.filter(r=>groupOf(r)===g).sort((a,b)=>pts(b)-pts(a));
-    html+=d.map((r,i)=>standRow(r,i+1,false)).join("");});
-  el.innerHTML=note+html+"</tbody></table>";
+    const label=useConf?g:(g==="Unassigned"?"Unassigned":g+" Division");
+    return `<div class="stand-col"><div class="stand-col-h">${esc(label)}<span>${d.length} club${d.length!==1?"s":""}</span></div>
+      <div class="tbl-scroll">${colHead}<tbody>${d.map((r,i)=>standRow(r,i+1,!noGames&&i<3)).join("")}</tbody></table></div></div>`;
+  }).join("");
+  el.innerHTML=note+`<div class="stand-cols">${cols}</div>`;
 }
 
 /* ------------------------------ FIXTURES / RESULTS ------------------------------ */
@@ -3343,7 +3381,14 @@ let currentChan="general";
 const SB_URL="https://bzbuyclwdhmhdzujxeqd.supabase.co";
 const SB_KEY="sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
 const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
-let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null,myTeamCode=null;
+let authUser=null,authProfile=null,openSeason=null,dbTeams=[],myRegistration=null,myTeamCode=null,dbDivisions=[];
+async function loadDivisions(){if(!sb)return;try{const {data}=await sb.from("divisions").select("*").order("sort_order").order("name");dbDivisions=data||[];}catch(e){dbDivisions=[];}}
+// division names in display order, plus any divisions a team uses that aren't in the table yet (safety)
+function divisionOrder(){
+  const names=dbDivisions.map(d=>d.name);
+  (dbTeams||[]).forEach(t=>{if(t.division&&!names.includes(t.division))names.push(t.division);});
+  return names;
+}
 const DISCORD_INVITE="https://discord.gg/EC4nGQnCEE";
 // Pre-draft scouting: opens a player's EASHL 6v6 career stats so a commissioner can seed a scout OVR.
 // {q} is the URL-encoded EA ID. Swap this one line for a direct ChelHead/ChelClub deep-link once its format is confirmed.
@@ -3358,7 +3403,7 @@ async function sbInit(){
     const {data:seasons}=await sb.from("seasons").select("*").eq("registration_open",true).order("number",{ascending:false}).limit(1);
     openSeason=(seasons&&seasons[0])||null;
     const {data:tms}=await sb.from("teams").select("*").order("code");
-    dbTeams=tms||[];buildTeams();
+    dbTeams=tms||[];await loadDivisions();buildTeams();
     await loadStandings();await loadPlayerAbilities();await loadTeamOveralls();await loadLeaders();await loadSchedule();await loadTxns();await loadNews();
     renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
     updateBranding();renderTeamsGrid();renderHeroCarousel();renderHeroRink();
@@ -4932,6 +4977,10 @@ $("#genPicksBtn")&&$("#genPicksBtn").addEventListener("click",async()=>{
 document.addEventListener("click",e=>{const b=e.target.closest(".dp-use");if(b)makeDraftPick(b.dataset.id);});
 async function loadTeamsAdmin(){
   const el=$("#teamsAdminBody");if(!el||!sb)return;
+  await loadDivisions();
+  const dvOpts=(dbDivisions.length?dbDivisions.map(d=>d.name):["Frost","Byte"]);
+  const tmDiv=$("#tm-div");if(tmDiv)tmDiv.innerHTML=dvOpts.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  const tmFilter=$("#tmDivFilter");if(tmFilter){const cur=tmFilter.value;tmFilter.innerHTML='<option value="">All divisions</option>'+dvOpts.map(n=>`<option${n===cur?" selected":""}>${esc(n)}</option>`).join("");}
   const {data:tms}=await sb.from("teams").select("*").order("division").order("code");
   const cnt=$("#teamsAdminCount");if(cnt)cnt.textContent=(tms?tms.length:0)+" clubs";
   if(!tms||!tms.length){el.innerHTML=ADMIN_EMPTY("No clubs yet","Add your league's clubs above — they appear across standings, schedule, teams, and rosters.");return;}
@@ -4963,6 +5012,77 @@ function filterTeams(){
 }
 $("#view-admin").addEventListener("input",e=>{if(e.target.id==="tmSearch")filterTeams();});
 $("#view-admin").addEventListener("change",e=>{if(e.target.id==="tmDivFilter")filterTeams();});
+
+/* ------------------------------ DIVISIONS EDITOR (drag & drop) ------------------------------ */
+let dragTeamCode=null;
+async function loadDivisionsEditor(){
+  const board=$("#divisionsBoard");if(!board||!sb)return;
+  board.innerHTML='<div class="empty-note" style="margin:14px 0">Loading…</div>';
+  await loadDivisions();
+  const {data:tms}=await sb.from("teams").select("id,code,name,division,color,logo_url").order("code");
+  const teamsList=tms||[];
+  const known=new Set(dbDivisions.map(d=>d.name));
+  const unassigned=teamsList.filter(t=>!t.division||!known.has(t.division));
+  const card=t=>`<div class="div-team" draggable="true" data-code="${esc(t.code)}" title="Drag to a division, or click to move">${badge(t.code,26)}<span class="dt-name">${esc(t.name)}</span><span class="dt-code">${esc(t.code)}</span></div>`;
+  const col=(divName,label,list,id)=>`<div class="div-col" data-div="${divName==null?'':esc(divName)}" data-unassigned="${divName==null?1:0}">
+    <div class="div-col-h"><div class="dch-title"><b>${esc(label)}</b><span class="dch-n">${list.length}</span></div>
+      ${id?`<div class="dch-act"><button class="div-ren" title="Rename division" data-id="${id}">✎</button><button class="div-del" title="Delete division" data-id="${id}" data-name="${esc(divName)}">✕</button></div>`:''}</div>
+    <div class="div-col-body">${list.map(card).join("")||'<div class="dc-empty">Drop clubs here</div>'}</div></div>`;
+  let html=dbDivisions.map(d=>col(d.name,d.name,teamsList.filter(t=>t.division===d.name),d.id)).join("");
+  if(unassigned.length)html+=col(null,"Unassigned",unassigned,null);
+  board.innerHTML=`<div class="div-board">${html}</div>`;
+}
+async function assignTeamDivision(code,newDiv){
+  const {error}=await sb.from("teams").update({division:newDiv}).eq("code",code);
+  if(error){toast("Couldn't move club",error.message);return;}
+  toast("Club moved",code+" → "+(newDiv||"Unassigned"));
+  await refreshTeamsEverywhere();loadDivisionsEditor();
+}
+function pickDivisionFor(code){
+  const t=dbTeams.find(x=>x.code===code);if(!t)return;
+  const opts=dbDivisions.map(d=>({value:d.name,label:d.name}));opts.push({value:"__none__",label:"Unassigned"});
+  formModal("Move "+(t.name||code),[{key:"div",label:"Division",type:"select",value:t.division||"__none__",options:opts}],v=>{
+    assignTeamDivision(code,v.div==="__none__"?null:v.div);});
+}
+function addDivision(){
+  formModal("New division",[{key:"name",label:"Division name",type:"text",value:"",placeholder:"e.g. Atlantic"}],async v=>{
+    const name=(v.name||"").trim();if(!name){toast("Name required","");return;}
+    const {error}=await sb.from("divisions").insert({name,sort_order:dbDivisions.length});
+    if(error){toast("Couldn't add division",/duplicate|unique/i.test(error.message||"")?"A division with that name already exists.":error.message);return;}
+    toast("Division added",name);await loadDivisions();loadDivisionsEditor();});
+}
+function renameDivision(id){
+  const d=dbDivisions.find(x=>x.id===id);if(!d)return;
+  formModal("Rename “"+d.name+"”",[{key:"name",label:"Division name",type:"text",value:d.name}],async v=>{
+    const name=(v.name||"").trim();if(!name||name===d.name){return;}
+    const {error}=await sb.rpc("rename_division",{p_id:id,p_name:name});
+    if(error){toast("Couldn't rename",/already exists/i.test(error.message||"")?"A division with that name already exists.":error.message);return;}
+    toast("Division renamed",name);await loadDivisions();await refreshTeamsEverywhere();loadDivisionsEditor();});
+}
+function deleteDivision(id,name){
+  const cnt=dbTeams.filter(t=>t.division===name).length;
+  confirmModal("Delete “"+name+"”?",cnt?`Its ${cnt} club${cnt===1?"":"s"} become Unassigned — drag them into another division after.`:"This division has no clubs.","Delete division",async()=>{
+    const {error}=await sb.rpc("delete_division",{p_id:id,p_reassign_to:null});
+    if(error){toast("Couldn't delete",error.message);return;}
+    toast("Division deleted",name);await loadDivisions();await refreshTeamsEverywhere();loadDivisionsEditor();});
+}
+// drag & drop (desktop) — click a card as a touch/mobile fallback
+document.addEventListener("dragstart",e=>{const c=e.target.closest&&e.target.closest(".div-team");if(!c)return;dragTeamCode=c.dataset.code;c.classList.add("dragging");if(e.dataTransfer){e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",c.dataset.code);}catch(_){}}});
+document.addEventListener("dragend",e=>{const c=e.target.closest&&e.target.closest(".div-team");if(c)c.classList.remove("dragging");document.querySelectorAll(".div-col.dragover").forEach(x=>x.classList.remove("dragover"));});
+document.addEventListener("dragover",e=>{if(!dragTeamCode)return;const col=e.target.closest&&e.target.closest(".div-col");if(!col)return;e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect="move";});
+document.addEventListener("dragenter",e=>{if(!dragTeamCode)return;const col=e.target.closest&&e.target.closest(".div-col");if(col)col.classList.add("dragover");});
+document.addEventListener("dragleave",e=>{const col=e.target.closest&&e.target.closest(".div-col");if(col&&!col.contains(e.relatedTarget))col.classList.remove("dragover");});
+document.addEventListener("drop",e=>{if(!dragTeamCode)return;const col=e.target.closest&&e.target.closest(".div-col");if(!col)return;e.preventDefault();
+  const code=dragTeamCode;dragTeamCode=null;col.classList.remove("dragover");
+  const newDiv=col.dataset.unassigned==="1"?null:col.dataset.div;
+  const t=dbTeams.find(x=>x.code===code);if(t&&(t.division||"")===(newDiv||""))return; // no-op if unchanged
+  assignTeamDivision(code,newDiv);});
+$("#view-admin").addEventListener("click",e=>{
+  if(e.target.closest("#addDivisionBtn")){e.preventDefault();addDivision();return;}
+  const rn=e.target.closest(".div-ren");if(rn){e.preventDefault();renameDivision(rn.dataset.id);return;}
+  const dl=e.target.closest(".div-del");if(dl){e.preventDefault();deleteDivision(dl.dataset.id,dl.dataset.name);return;}
+  const tc=e.target.closest(".div-team");if(tc){pickDivisionFor(tc.dataset.code);return;}
+});
 async function addTeam(){
   if(!sb){toast("Not connected","Sign in to add a club.");return;}
   const code=($("#tm-code").value||"").trim().toUpperCase();
@@ -4998,7 +5118,7 @@ async function editTeam(btn){
     {key:"name",label:"Club name",value:t.name},
     {key:"code",label:"Code (2–3 letters)",value:t.code},
     {key:"conference",label:"Conference (optional)",value:t.conference||""},
-    {key:"division",label:"Division",type:"select",value:t.division,options:[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}]},
+    {key:"division",label:"Division",type:"select",value:t.division,options:(dbDivisions.length?dbDivisions.map(d=>({value:d.name,label:d.name})):[{value:"Frost",label:"Frost"},{value:"Byte",label:"Byte"}])},
     {key:"color",label:"Club color",type:"color",value:t.color||"#ffe500"},
     {key:"ea_club_id",label:"EA club ID (for auto stats — the CG… club's number)",value:t.ea_club_id||"",placeholder:"e.g. 1789231"},
     {key:"logo_url",label:"Club logo (drag & drop — falls back to the crest)",type:"logo",value:t.logo_url||"",code:t.code},
@@ -5114,7 +5234,7 @@ $("#postNews").addEventListener("click",async()=>{const t=$("#an-title").value.t
 // Two-tier League Office nav: top-level sections, each with its own sub-tabs mapped to panels.
 const ADMIN_SECTIONS=[
   ["league","League",[["season","Season Deadlines"],["salarycap","Salary Cap"],["rostersize","Roster Size"],["schedbuild","Scheduler"],["draft","Draft"]]],
-  ["teams","Teams",[["teams","Team Directory"],["teamstats","Team Stats Editor"]]],
+  ["teams","Teams",[["teams","Team Directory"],["divisions","Divisions"],["teamstats","Team Stats Editor"]]],
   ["players","Players",[["members","Player Directory"],["registrations","Registrations"],["playerstats","Player Stats Editor"],["gamestats","Game Scores"]]],
   ["enforce","Applications & Enforcement",[["complaints","Complaints"],["appeals","Appeals"],["poschanges","Position Changes"],["owners","Owner Apps"],["bans","Bans"],["suspensions","Suspensions"]]],
   ["news","News",[["news","News"]]],
@@ -5125,6 +5245,7 @@ function showAdminPanel(atab){
   const panel=$("#atab-"+atab);if(panel)panel.classList.add("on");
   $$("#admSubtabs .sub-tab").forEach(t=>t.classList.toggle("active",t.dataset.atab===atab));
   if(atab==="playerstats")loadPlayerStats();
+  if(atab==="divisions")loadDivisionsEditor();
 }
 function showAdminSection(sec){
   const s=ADMIN_SECTIONS.find(x=>x[0]===sec);if(!s)return;
