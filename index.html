@@ -2106,7 +2106,7 @@ function badge(code,size){const t=teams[code];if(!t)return '';
   const s=Math.min(112,Math.max(38,Math.round((size||26)*1.55)));
   if(t.logo)return `<img class="tbadge" src="${esc(t.logo)}" width="${s}" height="${Math.round(s*1.12)}" style="display:block;flex-shrink:0;object-fit:contain;border-radius:5px" alt="${esc(t.name)} logo">`;
   const tc=textOn(t.c);const id='cr'+(crestSeq++);
-  return `<svg class="tbadge" width="${s}" height="${Math.round(s*1.12)}" viewBox="0 0 40 44" style="display:block;flex-shrink:0" role="img" aria-label="${t.name} crest">
+  return `<svg class="tbadge" width="${s}" height="${Math.round(s*1.12)}" viewBox="0 0 40 44" style="display:block;flex-shrink:0" role="img" aria-label="${esc(t.name)} crest">
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${t.c}"/><stop offset="1" stop-color="${shade(t.c,-28)}"/></linearGradient></defs>
     <path d="M3 4 Q3 1.5 5.5 1.5 H34.5 Q37 1.5 37 4 V24 Q37 35 20 42 Q3 35 3 24 Z" fill="url(#${id})" stroke="#ffffff" stroke-width="2"/>
     <path d="M3.4 12.4 H36.6" stroke="${tc}" stroke-opacity=".2" stroke-width="1"/>
@@ -2119,7 +2119,7 @@ function pAvatar(tc,name,cls){const t=teams[tc];const c=cls?(" "+cls):"";
   if(t&&t.logo)return `<span class="av${c}" style="background:${t.c};padding:0;overflow:hidden"><img src="${esc(t.logo)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block"></span>`;
   return `<span class="av${c}" style="background:${t?t.c:'#333'}">${initials(name)}</span>`;}
 function toast(title,msg){const w=$("#toasts");const el=document.createElement("div");el.className="toast";
-  el.innerHTML=`<b>${title}</b>${msg}`;w.appendChild(el);
+  el.innerHTML=`<b>${esc(title)}</b>${esc(msg)}`;w.appendChild(el);
   setTimeout(()=>{el.style.opacity="0";el.style.transform="translateX(20px)";el.style.transition=".3s";setTimeout(()=>el.remove(),300);},2800);}
 
 // authored starter goalie lines — single source of truth for SV%/GAA/SO
@@ -2446,7 +2446,7 @@ document.addEventListener("input",e=>{
 /* ------------------------------ NAV BUILD ------------------------------ */
 function buildNav(){
   $("#teamsDropdown").innerHTML=`<a data-go="teams" style="color:var(--frost-ink)">All Teams →</a>`+
-    TEAM_KEYS.map(c=>`<a class="dd-team" data-go="team" data-param="${c}">${badge(c,22)} ${teams[c].name}</a>`).join("");
+    TEAM_KEYS.map(c=>`<a class="dd-team" data-go="team" data-param="${c}">${badge(c,22)} ${esc(teams[c].name)}</a>`).join("");
   const groups=[
     ["Main",[["home","Home"],["standings","Standings"],["teams","All Teams"],["signup","Sign Up"]]],
     ["League",[["schedule","Schedule"],["bracket","Playoff Bracket"],["rankings","Power Rankings"],["awards","Awards"],["records","Record Book"],["transactions","Transactions"]]],
@@ -2528,7 +2528,7 @@ async function loadTeamOveralls(){
 function standRow(r,rank,cut){
   const [code,gp,w,l,otl,gf,ga]=r;const t=teams[code];const strk=r[7]||"—";const sc=strk[0]==="W"?"w":(strk[0]==="L"?"l":"");
   return `<tr class="rowlink${cut?' playoff-cut':''}" data-go="team" data-param="${code}">
-    <td class="team"><div class="team-cell"><span class="rank mono">${rank}</span>${badge(code,26)}<div><b>${t.name}</b><small>${t.div} Division</small></div></div></td>
+    <td class="team"><div class="team-cell"><span class="rank mono">${rank}</span>${badge(code,26)}<div><b>${esc(t.name)}</b><small>${esc(t.div)} Division</small></div></div></td>
     <td>${gp}</td><td>${w}</td><td>${l}</td><td>${otl}</td><td>${gf}</td><td>${ga}</td><td>${gf-ga>0?"+":""}${gf-ga}</td>
     <td class="strk ${sc}">${strk}</td><td class="pts">${pts(r)}</td></tr>`;
 }
@@ -2628,9 +2628,9 @@ function showMatchCard(g){
   $("#modalMsg").innerHTML=`
     <div class="match-card">
       <div class="mc-teams">
-        <div class="mc-team">${badge(g.a,44)}<div><b>${home.name}</b><small>HOME</small></div></div>
+        <div class="mc-team">${badge(g.a,44)}<div><b>${esc(home.name)}</b><small>HOME</small></div></div>
         <span class="mc-vs">vs</span>
-        <div class="mc-team away">${badge(g.b,44)}<div><b>${away.name}</b><small>AWAY</small></div></div>
+        <div class="mc-team away">${badge(g.b,44)}<div><b>${esc(away.name)}</b><small>AWAY</small></div></div>
       </div>
       <div class="mc-time">${g.when?fmtGameDateTime(g.when):"⏱ Game time to be set by the commissioner"}</div>
       ${yourSide?`<div class="mc-you">Your club plays <b>${yourSide}</b></div>`:""}
@@ -2661,13 +2661,13 @@ function renderFixtures(){
   const emptyF='<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet — fixtures appear once the commissioner posts the schedule.</div>';
   const emptyR='<div class="empty-note" style="margin:0;padding:20px">No results yet — recent finals show up here once games are reported.</div>';
   const fe=$("#homeFixtures");if(fe)fe.innerHTML=upcoming.length?upcoming.map(g=>`<div class="fx">
-    <div class="side clickable" data-go="team" data-param="${g.a}">${badge(g.a,24)}${teams[g.a].name}</div>
+    <div class="side clickable" data-go="team" data-param="${g.a}">${badge(g.a,24)}${esc(teams[g.a].name)}</div>
     <div class="vs"><b>${fmtGameDate(g.when).split(" ")[0]}</b>${fmtGameTime(g.when)}</div>
-    <div class="side away clickable" data-go="team" data-param="${g.b}">${teams[g.b].name}${badge(g.b,24)}</div></div>`).join(""):emptyF;
+    <div class="side away clickable" data-go="team" data-param="${g.b}">${esc(teams[g.b].name)}${badge(g.b,24)}</div></div>`).join(""):emptyF;
   const re=$("#homeResults");if(re)re.innerHTML=recent.length?recent.map(g=>`<div class="fx final">
-    <div class="side" style="${g.as>g.bs?'':'opacity:.6'}">${badge(g.a,24)}${teams[g.a].name}</div>
+    <div class="side" style="${g.as>g.bs?'':'opacity:.6'}">${badge(g.a,24)}${esc(teams[g.a].name)}</div>
     <div class="vs" data-box="${g.id}"><b>${g.as} - ${g.bs}</b>${g.ot?"OT/SO":"Final"}</div>
-    <div class="side away" style="${g.bs>g.as?'':'opacity:.6'}">${teams[g.b].name}${badge(g.b,24)}</div></div>`).join(""):emptyR;
+    <div class="side away" style="${g.bs>g.as?'':'opacity:.6'}">${esc(teams[g.b].name)}${badge(g.b,24)}</div></div>`).join(""):emptyR;
   const pill=$("#nextFixWeek");if(pill)pill.textContent=upcoming.length?`Week ${liveSchedule.find(w=>w.games.some(x=>!x.done)).n}`:"Pre-season";
 }
 
@@ -2695,11 +2695,11 @@ const HERO_SLIDE_CAP=7;
 const numWord=n=>["zero","one","two","three","four","five","six","seven","eight","nine","ten"][n]||n;
 function slidePoW(){const p=leaders.points[0];const name=p.name,tc=p.tc,g=p.g,a=p.a,pts=p.pts;const t=teams[tc];if(!t)return null;
   return{eyebrow:"Player of the Week",title:name.toUpperCase(),
-    line:`Leads the league with ${pts} points (${g}G, ${a}A) — the engine driving the ${t.name}.`,
+    line:`Leads the league with ${pts} points (${g}G, ${a}A) — the engine driving the ${esc(t.name)}.`,
     cta:`<button class="btn btn-frost" data-go="player" data-param="${name}">View Profile</button><button class="btn btn-light" data-go="stats">All Leaders</button>`};}
 function slideGoalie(){const p=leaders.save[0];const name=p.name,tc=p.tc;const t=teams[tc];if(!t)return null;
   return{eyebrow:"Between the Pipes",title:`${name.toUpperCase()} IS A WALL`,
-    line:`A league-best ${p.disp} save percentage for the ${t.name}.`,
+    line:`A league-best ${p.disp} save percentage for the ${esc(t.name)}.`,
     cta:`<button class="btn btn-frost" data-go="player" data-param="${name}">View Profile</button><button class="btn btn-light" data-go="stats">Leaders</button>`};}
 let heroSlides=[];
 // Data-driven slides (player of the week, hot streak, goalie, news) are added back
@@ -2801,11 +2801,11 @@ function renderLeaderList(el,key){
   const rows=(leaders&&leaders[key])||[];const cat=LEADER_CATS.find(c=>c.k===key)||{unit:""};
   if(!rows.length){el.innerHTML='<div style="padding:24px;text-align:center;color:var(--fog);font-size:13.5px">No stats yet — leaders appear once games are reported.</div>';return;}
   el.innerHTML=rows.map((r,i)=>{const t=teams[r.tc];if(!t)return"";
-    const sub=key==="points"?`${t.name} · ${r.g}G ${r.a}A`:t.name;
-    return `<div class="leader" data-go="player" data-param="${r.name}">
+    const sub=key==="points"?`${esc(t.name)} · ${r.g}G ${r.a}A`:esc(t.name);
+    return `<div class="leader" data-go="player" data-param="${esc(r.name)}">
       <span class="pos ${i===0?'p1':''}">${i+1}</span>
       ${pAvatar(r.tc,r.name)}
-      <div class="who"><b>${r.name}</b><small>${sub}</small></div>
+      <div class="who"><b>${esc(r.name)}</b><small>${sub}</small></div>
       <div class="val">${r.disp}<small>${cat.unit}</small></div></div>`;}).join("");
 }
 // Full Stats-page leaderboards: a grid of category cards (Skaters + Goalies).
@@ -2814,7 +2814,7 @@ function renderLeaderGrid(el){
   if(!LEADER_CATS.some(c=>(leaders[c.k]||[]).length)){el.innerHTML='<div class="empty-note">No stats yet — leaderboards fill in automatically once games are reported.</div>';return;}
   const card=c=>{const rows=leaders[c.k]||[];if(!rows.length)return"";
     return `<div class="lc"><div class="lc-h"><span class="lc-title">${c.label}</span><span class="lc-unit">${c.unit}</span></div>
-      <ol class="lc-list">${rows.map((r,i)=>{const t=teams[r.tc];return `<li class="lc-row" data-go="player" data-param="${r.name}"><span class="lc-rk${i===0?' p1':''}">${i+1}</span>${pAvatar(r.tc,r.name,'sm')}<span class="lc-nm">${r.name}</span><span class="lc-tm">${r.tc}</span><span class="lc-v">${r.disp}</span></li>`;}).join("")}</ol></div>`;};
+      <ol class="lc-list">${rows.map((r,i)=>{const t=teams[r.tc];return `<li class="lc-row" data-go="player" data-param="${esc(r.name)}"><span class="lc-rk${i===0?' p1':''}">${i+1}</span>${pAvatar(r.tc,r.name,'sm')}<span class="lc-nm">${esc(r.name)}</span><span class="lc-tm">${esc(r.tc)}</span><span class="lc-v">${r.disp}</span></li>`;}).join("")}</ol></div>`;};
   const grp=(title,cats)=>{const cards=cats.map(card).filter(Boolean).join("");if(!cards)return"";return `<div class="lg-sec"><div class="lg-h">${title}</div><div class="lg-grid">${cards}</div></div>`;};
   el.innerHTML=grp("Skater Leaders",LEADER_CATS.filter(c=>!c.g))+grp("Goalie Leaders",LEADER_CATS.filter(c=>c.g));
 }
@@ -2829,8 +2829,8 @@ function renderSchedule(){
       return `<div class="game ${done?'done':''}" ${done?`data-box="${g.id}"`:`data-match="${g.id}" style="cursor:pointer"`}>
         <div class="game-top"><span class="game-date">${done?(g.ot?'Final / OT':'Final'):fmtGameDate(g.when)}</span>
           ${done?'<span class="pill dim">Final</span>':'<span class="pill live"><span class="dot-mini" style="background:var(--live)"></span>Scheduled</span>'}</div>
-        <div class="g-row ${aWin?'win':(bWin?'lose':'')}">${badge(g.a,28)}<span class="gn">${teams[g.a].name}</span>${done?`<span class="gs">${g.as}</span>`:`<span class="g-time">${fmtGameTime(g.when)}</span>`}</div>
-        <div class="g-row ${bWin?'win':(aWin?'lose':'')}">${badge(g.b,28)}<span class="gn">${teams[g.b].name}</span>${done?`<span class="gs">${g.bs}</span>`:'<span class="g-time" style="opacity:.5">—</span>'}</div>
+        <div class="g-row ${aWin?'win':(bWin?'lose':'')}">${badge(g.a,28)}<span class="gn">${esc(teams[g.a].name)}</span>${done?`<span class="gs">${g.as}</span>`:`<span class="g-time">${fmtGameTime(g.when)}</span>`}</div>
+        <div class="g-row ${bWin?'win':(aWin?'lose':'')}">${badge(g.b,28)}<span class="gn">${esc(teams[g.b].name)}</span>${done?`<span class="gs">${g.bs}</span>`:'<span class="g-time" style="opacity:.5">—</span>'}</div>
         ${done?'':`<div class="game-foot"><span class="gf-code">Code <b>${g.code||'—'}</b></span><span class="gf-link">Match card →</span></div>`}
       </div>`;}).join("")}</div></div>`).join("");
 }
@@ -2880,7 +2880,7 @@ function renderTeamsGrid(){
     const diff=r[5]-r[6];
     return `<div class="team-card" data-go="team" data-param="${code}">
       <div class="tc-top">${badge(code,50)}
-        <div><h3>${t.name}</h3><div class="tc-sub">${t.conf?esc(t.conf)+" · ":""}${t.div} Division${t.city?" · "+esc(t.city):""}</div></div>
+        <div><h3>${esc(t.name)}</h3><div class="tc-sub">${t.conf?esc(t.conf)+" · ":""}${esc(t.div)} Division${t.city?" · "+esc(t.city):""}</div></div>
         <div style="position:absolute;right:-30px;top:-30px;width:120px;height:120px;border-radius:50%;background:${t.c};opacity:.14"></div></div>
       <div class="tc-stats">
         <div><div class="n">${r[2]}-${r[3]}-${r[4]}</div><div class="l">Record</div></div>
@@ -2904,12 +2904,12 @@ async function renderTeamPage(code){
   const gp=sr[1]||0,w=sr[2]||0,l=sr[3]||0,otl=sr[4]||0,gf=sr[5]||0,ga=sr[6]||0;
   const pts_=w*2+otl,diff=gf-ga,rec=`${w}-${l}-${otl}`;
   el.innerHTML=`
-    <div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${t.name}</div>
+    <div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${esc(t.name)}</div>
     <div class="team-banner">
       <div class="tb-top"><div style="position:absolute;inset:0;background:${t.c};opacity:.14"></div>
         <span style="line-height:0;position:relative;z-index:1">${badge(code,82)}</span>
-        <div class="tb-info"><h2>${t.name}</h2>
-          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" id="tbOff" style="display:none"></span><span class="ph-tag" id="tbDef" style="display:none"></span><span class="ph-tag" id="tbGt" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost-ink)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${t.div} Division</span>
+        <div class="tb-info"><h2>${esc(t.name)}</h2>
+          <div class="tb-meta"><span class="ph-tag ovr-tag" id="tbOvr" style="display:none"></span><span class="ph-tag" id="tbOff" style="display:none"></span><span class="ph-tag" id="tbDef" style="display:none"></span><span class="ph-tag" id="tbGt" style="display:none"></span><span class="ph-tag" style="border-color:var(--frost);color:var(--frost-ink)">Season ${openSeason?openSeason.number:1}</span><span class="ph-tag">${esc(t.div)} Division</span>
             <span class="ph-tag" id="tbManager">Manager · <b>TBD</b></span></div></div>
         <div class="tb-rec"><div class="v">${rec}</div><small>${pts_} pts</small></div></div>
       <div class="tb-stats">
@@ -2970,13 +2970,13 @@ async function renderTeamPage(code){
     ${(tt.sf&&tt.saAg)?tSec("Advanced",tCell((shPct+svPct).toFixed(1),"PDO")):""}
   </div>`:"";
   const bodyEl=$("#teamBody");if(!bodyEl)return;
-  if(!roster.length&&!teamGames.length){bodyEl.innerHTML=`<div class="empty-note">No players assigned to ${t.name} yet — rosters fill in during the draft. Check back once the season forms.</div>`;return;}
+  if(!roster.length&&!teamGames.length){bodyEl.innerHTML=`<div class="empty-note">No players assigned to ${esc(t.name)} yet — rosters fill in during the draft. Check back once the season forms.</div>`;return;}
   bodyEl.innerHTML=`
     <div class="grid-2" style="align-items:start">
       <div class="card"><div class="card-h"><h3>Roster</h3>${teamSalCap?`<span class="pill" title="Salary committed vs cap">${fmtMoney(teamCapUsed)} / ${fmtMoney(teamSalCap)}</span>`:""}<span class="pill frost">${roster.length}</span></div>
         ${roster.length?`<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Player</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>PTS</th><th>Cap Hit</th></tr></thead>
-        <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td>
-          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost-ink);font-weight:700">${p.pts}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}${goalies.length?`<tr class="rt-sub"><td colspan="7">Goaltending</td></tr>`+goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${p.name}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${p.name}</b></div></div></td><td style="text-align:center"><span class="posbadge G">G</span></td><td>${p.gp}</td><td colspan="3" style="text-align:center;color:var(--fog)">GAA <b style="color:var(--ice)">${gaaFmt(p)}</b> &nbsp;·&nbsp; SV% <b style="color:var(--ice)">${svpFmt(p)}</b></td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join(""):""}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No players on the roster yet.</div>'}</div>
+        <tbody>${skaters.map(p=>`<tr class="rowlink" data-go="player" data-param="${esc(p.name)}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${esc(p.name)}</b></div></div></td>
+          <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td><td style="color:var(--frost-ink);font-weight:700">${p.pts}</td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join("")}${goalies.length?`<tr class="rt-sub"><td colspan="7">Goaltending</td></tr>`+goalies.map(p=>`<tr class="rowlink" data-go="player" data-param="${esc(p.name)}"><td><div class="rp lk"><span class="num">${p.num}</span><div><b>${esc(p.name)}</b></div></div></td><td style="text-align:center"><span class="posbadge G">G</span></td><td>${p.gp}</td><td colspan="3" style="text-align:center;color:var(--fog)">GAA <b style="color:var(--ice)">${gaaFmt(p)}</b> &nbsp;·&nbsp; SV% <b style="color:var(--ice)">${svpFmt(p)}</b></td><td class="cap-hit">${fmtMoney(p.salary)}</td></tr>`).join(""):""}</tbody></table></div>`:'<div class="empty-note" style="margin:0;padding:20px">No players on the roster yet.</div>'}</div>
       <div class="stack">
         ${sptm?`<div class="card"><div class="card-h"><h3>Special Teams</h3></div>
           <div class="st-grid">
@@ -2988,7 +2988,7 @@ async function renderTeamPage(code){
             const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
             return `<div class="fx ${done?'final':''}"><div class="side">${badge(code,22)}${home?'vs':'@'} </div>
               <div class="vs" ${done?`data-box="${g.id}"`:''}>${done?`<b style="color:${win?'var(--win)':'var(--loss)'}">${us}-${them} ${win?'W':'L'}</b>`:`<b>${fmtGameDate(g.when).split(' ')[0]}</b>`}</div>
-              <div class="side away clickable" data-go="team" data-param="${opp}">${teams[opp].name}${badge(opp,22)}</div></div>`;}).join("")}</div>`:'<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet.</div>'}</div>
+              <div class="side away clickable" data-go="team" data-param="${opp}">${esc(teams[opp].name)}${badge(opp,22)}</div></div>`;}).join("")}</div>`:'<div class="empty-note" style="margin:0;padding:20px">No games scheduled yet.</div>'}</div>
       </div>
     </div>
     ${teamStatsCard}`;
@@ -3000,7 +3000,7 @@ async function renderPlayerPage(id){
   const el=$("#playerPage");if(!el)return;
   if(!sb){el.innerHTML='<div class="empty-note">Player data will load on the live site.</div>';return;}
   const {data:prof}=await sb.from("profiles").select("id,gamertag,role,twitch,live,overall").eq("gamertag",id).maybeSingle();
-  if(!prof){el.innerHTML=`<div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${id}</div><div class="empty-state"><h4>Player not found</h4><p>No registered player by that name.</p></div>`;return;}
+  if(!prof){el.innerHTML=`<div class="breadcrumb"><a data-go="teams">Teams</a> <span>›</span> ${esc(id)}</div><div class="empty-state"><h4>Player not found</h4><p>No registered player by that name.</p></div>`;return;}
   let spot=null,tc=null;
   if(openSeason){const {data:rs}=await sb.from("roster_spots").select("team_id,jersey_number,position").eq("season_id",openSeason.id).eq("profile_id",prof.id).maybeSingle();spot=rs;tc=rs?codeOfId(rs.team_id):null;}
   const t=tc?teams[tc]:null;const pos=spot?spot.position:null;
@@ -3058,7 +3058,7 @@ async function renderPlayerPage(id){
     const cells=isG
       ? `<td>${r.saves||0}</td><td>${r.goals_against||0}</td><td>${r.shots_against?((r.saves/r.shots_against).toFixed(3).replace(/^0/,"")):"—"}</td><td>${r.shutout?"1":"0"}</td>`
       : `<td>${r.goals||0}</td><td>${r.assists||0}</td><td class="bx-pt">${(r.goals||0)+(r.assists||0)}</td><td>${(r.plus_minus>0?"+":"")+(r.plus_minus||0)}</td><td>${r.shots||0}</td><td>${r.hits||0}</td><td>${r.pim||0}</td>`;
-    return `<tr class="gl-row" data-box="${gg.id}"><td class="gl-date">${fmtGameDate(gg.scheduled_at)}</td><td class="gl-opp">${home?"vs":"@"} ${oppCode&&teams[oppCode]?`<span class="gl-team" data-go="team" data-param="${oppCode}">${badge(oppCode,18)}${teams[oppCode].name}</span>`:esc(oppCode||"?")}</td><td class="gl-res ${win?"w":"l"}">${win?"W":"L"} ${mine}-${opp}${gg.went_ot?" OT":""}</td>${cells}</tr>`;
+    return `<tr class="gl-row" data-box="${gg.id}"><td class="gl-date">${fmtGameDate(gg.scheduled_at)}</td><td class="gl-opp">${home?"vs":"@"} ${oppCode&&teams[oppCode]?`<span class="gl-team" data-go="team" data-param="${oppCode}">${badge(oppCode,18)}${esc(teams[oppCode].name)}</span>`:esc(oppCode||"?")}</td><td class="gl-res ${win?"w":"l"}">${win?"W":"L"} ${mine}-${opp}${gg.went_ot?" OT":""}</td>${cells}</tr>`;
   };
   const glHead=isG?`<th>SV</th><th>GA</th><th>SV%</th><th>SO</th>`:`<th>G</th><th>A</th><th>P</th><th>+/-</th><th>S</th><th>H</th><th>PIM</th>`;
   const glTable=rows=>`<div class="gl-scroll"><table class="gl-tbl"><thead><tr><th>Date</th><th>Matchup</th><th>Result</th>${glHead}</tr></thead><tbody>${rows.map(glRow).join("")}</tbody></table></div>`;
@@ -3083,13 +3083,13 @@ async function renderPlayerPage(id){
     if(body)connectCard=`<div class="card pf-connect"><div class="card-h"><h3>Connect</h3></div><div class="pfc-body">${body}</div></div>`;
   }
   el.innerHTML=`
-    <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}" style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${badge(tc,16)}${t.name}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${prof.gamertag}</div>
+    <div class="breadcrumb">${t?`<a data-go="team" data-param="${tc}" style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${badge(tc,16)}${esc(t.name)}</a>`:'<a data-go="teams">Teams</a>'} <span>›</span> ${esc(prof.gamertag)}</div>
     <div class="player-hero">
       <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},${shade(t?t.c:'#ffe500',-22)})">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
-      <div class="ph-info"><h2>${prof.gamertag}</h2>
+      <div class="ph-info"><h2>${esc(prof.gamertag)}</h2>
         <div class="ph-meta">
           <span class="ph-tag" style="border-color:var(--frost);color:var(--frost-ink)">Season ${openSeason?openSeason.number:1}</span>
-          ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
+          ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${esc(t.name)}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
           ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}
           ${prof.overall?`<span class="ph-tag ovr-tag" title="Computed from career stats using ${posLbl} weights. Provisional until 5 games played."><b>${prof.overall}</b> OVR</span>`:''}
           ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div>
@@ -3149,11 +3149,11 @@ async function renderMyStats(){
   const t=tc?teams[tc]:null;
   el.innerHTML=`<div class="player-hero">
     <div class="jersey" style="background:linear-gradient(150deg,${t?t.c:'#ffe500'},${shade(t?t.c:'#ffe500',-22)})">${t&&t.logo?`<img class="jersey-logo" src="${esc(t.logo)}" alt="">`:`<b>${num}</b>`}<small>${tc||'FA'}</small></div>
-    <div class="ph-info"><h2>${authProfile.gamertag}</h2>
+    <div class="ph-info"><h2>${esc(authProfile.gamertag)}</h2>
       <div class="ph-meta"><span class="ph-tag" style="border-color:var(--frost);color:var(--frost-ink)">Season ${openSeason?openSeason.number:1}</span>
-        ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">Not on a roster yet</span>`}
+        ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${esc(t.name)}</b></span>`:`<span class="ph-tag">Not on a roster yet</span>`}
         <span class="ph-tag">${st.points} PTS · ${st.goals}G ${st.assists}A · ${st.gp} GP</span></div>
-      <div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-go="player" data-param="${authProfile.gamertag}">View Full Profile →</button></div>
+      <div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-go="player" data-param="${esc(authProfile.gamertag)}">View Full Profile →</button></div>
     </div></div>`;
 }
 
@@ -3166,7 +3166,7 @@ function renderBracket(){
   const seeds=rows.sort((a,b)=>pts(b)-pts(a)).map(r=>r[0]).slice(0,8);
   while(seeds.length<8)seeds.push(null);
   const S={};seeds.forEach((c,i)=>{if(c)S[c]=i+1;});
-  const sr=(c)=>c?`<div class="sr">${badge(c,28)}<span class="sn">${teams[c].name}</span><span class="seed">(${S[c]})</span><span class="sw">—</span></div>`
+  const sr=(c)=>c?`<div class="sr">${badge(c,28)}<span class="sn">${esc(teams[c].name)}</span><span class="seed">(${S[c]})</span><span class="sw">—</span></div>`
     :`<div class="sr"><span class="sn" style="color:var(--fog)">TBD</span><span class="sw">—</span></div>`;
   const series=(c1,c2)=>`<div class="series">${sr(c1)}${sr(c2)}</div>`;
   const s=seeds;
@@ -3189,7 +3189,7 @@ function renderRankings(){
   el.innerHTML=rows.map((r,i)=>{const code=r[0];const rank=i+1;const w=r[2]||0,l=r[3]||0,otl=r[4]||0,gf=r[5]||0,ga=r[6]||0;
     return `<div class="rank-row"><span class="rk">${rank}</span><span class="mv same">—</span>
       <span class="clickable" style="line-height:0" data-go="team" data-param="${code}">${badge(code,44)}</span>
-      <div class="rr-info"><b data-go="team" data-param="${code}">${teams[code].name}</b><p>${teams[code].div} Division · ${gf} GF / ${ga} GA</p></div>
+      <div class="rr-info"><b data-go="team" data-param="${code}">${esc(teams[code].name)}</b><p>${esc(teams[code].div)} Division · ${gf} GF / ${ga} GA</p></div>
       <span class="rr-rec">${w}-${l}-${otl}<br><span style="font-size:11px;color:var(--fog-dim)">${pts(r)} pts</span></span></div>`;}).join("");
 }
 
@@ -3227,11 +3227,11 @@ function renderTxns(){
   const type1=t=>svg[t.type]?t.type:"sign";
   const tb=$("#txnBody");
   if(tb)tb.innerHTML=rows.length?rows.map(t=>`<div class="txn"><div class="ic ${type1(t)}">${svg[type1(t)]}</div>
-    <div class="tx-body"><div class="tx-type">${t.type}</div><div class="tx-desc">${t.desc}</div></div><div class="tx-date">${t.date}</div></div>`).join("")
+    <div class="tx-body"><div class="tx-type">${esc(t.type)}</div><div class="tx-desc">${esc(t.desc)}</div></div><div class="tx-date">${esc(t.date)}</div></div>`).join("")
     :'<div class="empty-note">No transactions yet — trades and roster moves post here automatically as they happen.</div>';
   const ht=$("#homeTxns");
   if(ht)ht.innerHTML=rows.length?rows.slice(0,4).map(t=>`<div class="txn" style="padding:13px 20px"><div class="ic ${type1(t)}" style="width:30px;height:30px">${svg[type1(t)]}</div>
-    <div class="tx-body"><div class="tx-desc" style="font-size:13px">${t.desc}</div></div><div class="tx-date">${t.date}</div></div>`).join("")
+    <div class="tx-body"><div class="tx-desc" style="font-size:13px">${esc(t.desc)}</div></div><div class="tx-date">${esc(t.date)}</div></div>`).join("")
     :'<div class="empty-note" style="margin:0;padding:20px">No transactions yet.</div>';
 }
 
@@ -3258,24 +3258,24 @@ function renderNews(){
   const feat=rows[0];const teamColor="#ffe500";
   if(hero)hero.innerHTML=`<div class="news-hero" data-go="article" data-param="${feat.id}">
     <div class="nh-art" style="${newsArt(teamColor)}"><span class="pill frost">Featured</span></div>
-    <div class="nh-body"><span class="news-cat">${feat.cat}</span><h3>${feat.title}</h3><p>${feat.excerpt}</p>
-      <div class="news-meta">${feat.author} · ${feat.date}</div></div></div>`;
+    <div class="nh-body"><span class="news-cat">${esc(feat.cat)}</span><h3>${esc(feat.title)}</h3><p>${esc(feat.excerpt)}</p>
+      <div class="news-meta">${esc(feat.author)} · ${esc(feat.date)}</div></div></div>`;
   const colors=["#ff8a5c","#ffd166","#8fb8d6","#7ce0a8","#a99cf0"];
   if(grid)grid.innerHTML=rows.slice(1).map((n,i)=>`<div class="news-card" data-go="article" data-param="${n.id}">
-    <div class="nc-art" style="${newsArt(colors[i%colors.length])}"><span class="news-cat">${n.cat}</span></div>
-    <div class="nc-body"><h4>${n.title}</h4><p>${n.excerpt}</p><div class="news-meta">${n.date}</div></div></div>`).join("");
+    <div class="nc-art" style="${newsArt(colors[i%colors.length])}"><span class="news-cat">${esc(n.cat)}</span></div>
+    <div class="nc-body"><h4>${esc(n.title)}</h4><p>${esc(n.excerpt)}</p><div class="news-meta">${esc(n.date)}</div></div></div>`).join("");
   if(home)home.innerHTML=rows.slice(0,3).map(n=>`<div class="txn" style="padding:14px 20px;cursor:pointer" data-go="article" data-param="${n.id}">
-    <div class="tx-body"><div class="tx-type" style="color:var(--frost-ink)">${n.cat}</div><div class="tx-desc" style="font-size:14px;font-weight:600">${n.title}</div></div></div>`).join("");
+    <div class="tx-body"><div class="tx-type" style="color:var(--frost-ink)">${esc(n.cat)}</div><div class="tx-desc" style="font-size:14px;font-weight:600">${esc(n.title)}</div></div></div>`).join("");
 }
 function renderArticle(id){
   const n=liveNews.find(x=>x.id===id)||liveNews[0];
   if(!n){$("#articlePage").innerHTML='<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> Article</div><div class="empty-note">This story is no longer available.</div><div style="margin-top:24px"><button class="btn btn-ghost" data-go="news">← Back to News</button></div>';return;}
   const colors={"Game Recap":"#ffe500","Feature":"#ff8a5c","Trade Buzz":"#ffd166","League News":"#8fb8d6"};
-  $("#articlePage").innerHTML=`<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> ${n.cat}</div>
-    <div class="art-hero" style="${newsArt(colors[n.cat]||"#ffe500")}"><div><span class="news-cat">${n.cat}</span>
-      <h2 style="font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4.4vw,48px);line-height:.92;margin:10px 0 0;max-width:20ch">${n.title}</h2></div></div>
-    <div class="news-meta" style="margin-bottom:22px">By ${n.author} · ${n.date}</div>
-    <div class="article-body">${n.body.map((para,i)=>i===2?`<blockquote>${para.replace(/^"|"$/g,'')}</blockquote>`:`<p>${para}</p>`).join("")}</div>
+  $("#articlePage").innerHTML=`<div class="breadcrumb"><a data-go="news">News</a> <span>›</span> ${esc(n.cat)}</div>
+    <div class="art-hero" style="${newsArt(colors[n.cat]||"#ffe500")}"><div><span class="news-cat">${esc(n.cat)}</span>
+      <h2 style="font-family:var(--f-display);text-transform:uppercase;font-size:clamp(28px,4.4vw,48px);line-height:.92;margin:10px 0 0;max-width:20ch">${esc(n.title)}</h2></div></div>
+    <div class="news-meta" style="margin-bottom:22px">By ${esc(n.author)} · ${esc(n.date)}</div>
+    <div class="article-body">${n.body.map((para,i)=>i===2?`<blockquote>${esc(para.replace(/^"|"$/g,''))}</blockquote>`:`<p>${esc(para)}</p>`).join("")}</div>
     <div style="margin-top:30px"><button class="btn btn-ghost" data-go="news">← Back to News</button></div>`;
 }
 
@@ -3291,8 +3291,8 @@ async function renderFA(){
   const skaters=pool.filter(r=>r.position!=="G"),goalies=pool.filter(r=>r.position==="G");
   if(skc)skc.textContent=skaters.length;if(gc)gc.textContent=goalies.length;
   const faItem=(r)=>{const name=r.profiles?r.profiles.gamertag:"?";
-    return `<div class="fa-item"><span class="av clickable" data-go="player" data-param="${name}">${initials(name)}</span>
-      <div class="fa-info"><b class="clickable" data-go="player" data-param="${name}">${name}</b><small>${POS_NAME[r.position]||r.position} · EA: ${(r.profiles&&r.profiles.ea_id)||'—'} · available</small></div>
+    return `<div class="fa-item"><span class="av clickable" data-go="player" data-param="${esc(name)}">${initials(name)}</span>
+      <div class="fa-info"><b class="clickable" data-go="player" data-param="${esc(name)}">${esc(name)}</b><small>${POS_NAME[r.position]||r.position} · EA: ${esc((r.profiles&&r.profiles.ea_id)||'—')} · available</small></div>
       <div class="fa-ovr" style="font-size:15px">${r.position}</div></div>`;};
   skEl.innerHTML=skaters.length?skaters.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available skaters right now — registered players show up here until they\'re drafted to a club.</div>';
   gEl.innerHTML=goalies.length?goalies.map(faItem).join(""):'<div class="empty-note" style="margin:0;padding:20px">No available goalies right now.</div>';
@@ -3311,7 +3311,7 @@ async function renderDraft(){
   if(cnt)cnt.textContent=pool.length+" available";
   if(!pool.length){el.innerHTML='<div style="padding:40px 24px;text-align:center;color:var(--fog)"><h4 style="font-family:var(--f-cond);color:var(--navy);margin-bottom:6px">Draft pool is empty</h4><p>Registered players who haven\'t been assigned to a club yet will appear here.</p></div>';return;}
   el.innerHTML=pool.map((p,i)=>{const eid=p.profiles&&p.profiles.ea_id;return `<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:''}" style="cursor:pointer">${p.profiles?p.profiles.gamertag:"?"}</b><small>${posName[p.position]||p.position} · EA: ${eid?`<a href="${scoutUrl(p.profile_id,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:"—"}</small></div>
+    <div class="pv-info"><b data-go="player" data-param="${esc(p.profiles?p.profiles.gamertag:'')}" style="cursor:pointer">${esc(p.profiles?p.profiles.gamertag:"?")}</b><small>${posName[p.position]||p.position} · EA: ${eid?`<a href="${scoutUrl(p.profile_id,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:"—"}</small></div>
     <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`;}).join("");
 }
 
@@ -3574,7 +3574,7 @@ $("#ownerForm").addEventListener("submit",async e=>{e.preventDefault();
 /* ------------------------------ MANAGER PORTAL ------------------------------ */
 let currentClub="GLK";
 const clubByName=n=>TEAM_KEYS.find(k=>teams[k].name===n);
-function fillClubSelect(sel){sel.innerHTML=TEAM_KEYS.map(k=>`<option>${teams[k].name}</option>`).join("");}
+function fillClubSelect(sel){sel.innerHTML=TEAM_KEYS.map(k=>`<option>${esc(teams[k].name)}</option>`).join("");}
 const MGR_LOCK=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffe500" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
 function renderManager(){
   const gate=$("#mgrGate"),dash=$("#mgrDash");if(!gate||!dash)return;
@@ -3595,7 +3595,7 @@ function renderManager(){
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
-      ? `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Manager access needed</h2><p>You're signed in as <b>${authProfile.gamertag}</b>. A commissioner grants <b>Manager</b> access and assigns your club in the League Office → Members &amp; Roles.</p></div>`
+      ? `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Manager access needed</h2><p>You're signed in as <b>${esc(authProfile.gamertag)}</b>. A commissioner grants <b>Manager</b> access and assigns your club in the League Office → Members &amp; Roles.</p></div>`
       : `<div class="gate"><div class="lock">${MGR_LOCK}</div><h2>Front Office Access</h2><p>Sign in with Discord. Managers — assigned by the commissioner — run their club's roster, game-night lineup, and trades.</p><button class="btn btn-frost" id="signInBtn2" style="margin-top:14px">Sign in with Discord</button></div>`;
   }
 }
@@ -3608,7 +3608,7 @@ function loadFrontOffice(){const t=teams[currentClub];
   $("#mgrName").textContent=t.name;$("#mgrBadge").innerHTML=badge(currentClub,50);
   $("#tradeMyName").textContent=t.name;$("#tradeMyBadge").innerHTML=badge(currentClub,22);
   const lb=$("#lineupBadge");if(lb)lb.innerHTML=badge(currentClub,32);
-  const sel=$("#tradePartner");if(sel)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
+  const sel=$("#tradePartner");if(sel)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${esc(teams[k].name)}</option>`).join("");
   renderRoster();renderTrade();renderLineup();renderFAmgr();renderReports();}
 
 /* ---- Game Reports: lists the club's fixtures; box scores import automatically from EA (no manual submission) ---- */
@@ -3619,7 +3619,7 @@ function renderReports(){const el=$("#reportsBody");if(!el)return;
     const done=g.done;const us=home?g.as:g.bs,them=home?g.bs:g.as;const win=done&&us>them;
     const right=done?`<span class="rr-state ok">✓ Final · ${us}–${them} ${win?"W":"L"}</span>`
       :`<span class="rr-state sched" style="margin-right:8px">${home?"HOME":"AWAY"} · Code <b class="mono">${g.code||"—"}</b> · ${g.when?fmtGameTime(g.when):"time TBD"}</span><button class="mini" data-match="${g.id}">Match card</button>`;
-    return `<div class="rr-game"><div class="rr-teams">${badge(currentClub,26)}<span class="rr-vs">${home?"vs":"@"}</span>${badge(opp,26)}<span class="rr-opp">${teams[opp].name}</span></div><div class="rr-actions">${right}</div></div>`;}).join("")).join("");
+    return `<div class="rr-game"><div class="rr-teams">${badge(currentClub,26)}<span class="rr-vs">${home?"vs":"@"}</span>${badge(opp,26)}<span class="rr-opp">${esc(teams[opp].name)}</span></div><div class="rr-actions">${right}</div></div>`;}).join("")).join("");
 }
 const MISMATCH_WINDOW_MS=24*60*60*1000; // 24 hours to align before a forfeit is ruled
 let reportTimer=null;
@@ -3652,7 +3652,7 @@ function drawRoster(){
   const locked=seasonMovesLocked();
   const _ctm=dbTeams.find(t=>t.code===currentClub)||{};const mgrIds=[_ctm.owner_profile_id,_ctm.gm_profile_id,_ctm.agm_profile_id].filter(Boolean);
   body.innerHTML=rosterState.map((p,i)=>{const isMgr=mgrIds.includes(p.pid);return `<tr>
-    <td><div class="rp"><span class="num">${p.num}</span><div><b data-go="player" data-param="${p.name}" style="cursor:pointer">${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small>${eaTag(p.pid)}</div></div></td>
+    <td><div class="rp"><span class="num">${p.num}</span><div><b data-go="player" data-param="${esc(p.name)}" style="cursor:pointer">${esc(p.name)}</b><small>${esc(teams[currentClub].name)}${isMgr?" · Manager":""}</small>${eaTag(p.pid)}</div></div></td>
     <td style="text-align:center"><span class="posbadge ${p.pos}">${p.pos}</span></td><td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
     <td style="color:var(--frost-ink);font-weight:700">${p.pts}</td>
     <td style="text-align:right"><div class="caphit-cell"><span class="cap-hit"${isMgr?' title="Managers are locked to their club at $3M"':''}>${fmtMoney(p.salary)}</span><span class="term-tag" title="Contract term">${p.years} season${p.years===1?'':'s'}</span></div></td>
@@ -3699,7 +3699,7 @@ async function renderMgrDraft(){
   const pool=(regs||[]).filter(r=>!taken.has(r.profile_id)).sort((a,b)=>(b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr));
   $("#mdPoolCount").textContent=pool.length+" available";
   $("#mdPool").innerHTML=pool.length?pool.map((p,i)=>{const eid=p.profiles&&p.profiles.ea_id;return `<div class="prospect"><span class="pk">${i+1}</span>
-    <div class="pv-info"><b data-go="player" data-param="${p.profiles?p.profiles.gamertag:""}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${eid?` · EA: <a href="${scoutUrl(p.profile_id,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:""}</small></div>
+    <div class="pv-info"><b data-go="player" data-param="${esc(p.profiles?p.profiles.gamertag:'')}" style="cursor:pointer">${p.profiles?esc(p.profiles.gamertag):"?"}</b><small>${MD_POS[p.position]||p.position}${eid?` · EA: <a href="${scoutUrl(p.profile_id,p.position)}" target="_blank" rel="noopener" class="scout-link" title="View ${esc(eid)} on ChelHead">${esc(eid)} ↗</a>`:""}</small></div>
     <div class="pv-ovr" style="font-size:16px">${p.scout_ovr!=null?`${p.scout_ovr}<small>OVR</small>`:`${p.position}<small>Pos</small>`}</div></div>`;}).join(""):'<div class="empty-note">No players available — everyone registered has been drafted or rostered.</div>';
   // draft log — most recent picks first
   const log=cur.filter(p=>p.used).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
@@ -3770,7 +3770,7 @@ let retentionSel={};   // pid -> retained percent (on players I'm sending)
 async function renderTrade(){
   if(!sb||!openSeason)return;
   tradeSel={mine:new Set(),theirs:new Set()};pickSel={mine:new Set(),theirs:new Set()};counteringTradeId=null;retentionSel={};
-  const sel=$("#tradePartner");if(sel&&!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");
+  const sel=$("#tradePartner");if(sel&&!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${esc(teams[k].name)}</option>`).join("");
   const partner=(sel&&clubByName(sel.value))||TEAM_KEYS.find(k=>k!==currentClub);
   tradeMineList=await loadRosterFor(currentClub);tradeTheirsList=await loadRosterFor(partner);
   minePicksList=await loadPicksFor(currentClub);theirsPicksList=await loadPicksFor(partner);
@@ -3829,8 +3829,8 @@ async function loadMyTrades(){
     const offP=(t.offered_pick_ids||[]).length,reqP=(t.requested_pick_ids||[]).length;
     const off=(t.offered_profile_ids.map(p=>nameOf[p]||"?").join(", ")||(offP?"":"—"))+pkTxt(offP),req=(t.requested_profile_ids.map(p=>nameOf[p]||"?").join(", ")||(reqP?"":"—"))+pkTxt(reqP);
     const ret=t.retention||{};const retNote=Object.keys(ret).length?`<div class="to-ret">${esc(teams[fC].name)} retains ${Object.entries(ret).map(([pid,pct])=>pct+"% of "+(nameOf[pid]||"?")).join(", ")}</div>`:"";
-    return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name}</div>
-      <div class="to-swap"><span><b>${teams[fC].name}:</b> ${off}</span><span><b>${teams[tC].name}:</b> ${req}</span></div>${retNote}</div>
+    return `<div class="trade-offer"><div class="to-body"><div class="to-dir">${esc(incoming?"Incoming · from "+teams[fC].name:"Sent · to "+teams[tC].name)}</div>
+      <div class="to-swap"><span><b>${esc(teams[fC].name)}:</b> ${off}</span><span><b>${esc(teams[tC].name)}:</b> ${req}</span></div>${retNote}</div>
       <div class="act">${incoming?`${locked?'<span style="color:var(--fog);font-size:12px;align-self:center">Locked</span>':`<button class="mini good tr-accept" data-id="${t.id}">Accept</button><button class="mini tr-adjust" data-id="${t.id}">Adjust</button>`}<button class="mini danger tr-decline" data-id="${t.id}">Decline</button>`:`<button class="mini tr-cancel" data-id="${t.id}">Cancel</button>`}</div></div>`;}).join("");
 }
 // Adjust an incoming offer: pre-fill the trade builder (flipped to our side) to send a counter.
@@ -3839,7 +3839,7 @@ async function adjustTrade(id){
   if(seasonMovesLocked()){toast("Moves locked","Roster moves are locked right now.");return;}
   const fromCode=codeOfId(t.from_team_id);if(!fromCode||!teams[fromCode]){toast("Can't adjust","The other club could not be found.");return;}
   const sel=$("#tradePartner");
-  if(sel){if(!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${teams[k].name}</option>`).join("");sel.value=teams[fromCode].name;}
+  if(sel){if(!sel.options.length)sel.innerHTML=TEAM_KEYS.filter(k=>k!==currentClub).map(k=>`<option>${esc(teams[k].name)}</option>`).join("");sel.value=teams[fromCode].name;}
   await renderTrade();  // loads my roster + partner roster, resets selection
   const reqSet=new Set(t.requested_profile_ids),offSet=new Set(t.offered_profile_ids);
   tradeMineList.forEach((p,i)=>{if(reqSet.has(p.pid))tradeSel.mine.add(i);});       // my players they wanted
@@ -4176,7 +4176,7 @@ async function renderLineup(){
   const teamGames=[];(liveSchedule||[]).forEach(wk=>wk.games.forEach(g=>{if((g.a===currentClub||g.b===currentClub)&&!g.done)teamGames.push(g);}));
   const ng=teamGames.slice().sort((a,b)=>new Date(a.when)-new Date(b.when))[0];
   if(nextText){if(ng){const opp=ng.a===currentClub?ng.b:ng.a,home=ng.a===currentClub;
-      nextText.innerHTML=`<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">${home?'vs':'@'} ${teams[opp].name}</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">${fmtGameDate(ng.when)} · ${fmtGameTime(ng.when)}</small>`;}
+      nextText.innerHTML=`<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">${home?'vs':'@'} ${esc(teams[opp].name)}</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">${fmtGameDate(ng.when)} · ${fmtGameTime(ng.when)}</small>`;}
     else nextText.innerHTML='<b style="font-family:var(--f-cond);letter-spacing:.04em;text-transform:uppercase;font-size:15px;display:block">No game scheduled</b><small style="color:var(--fog);font-family:var(--f-mono);font-size:12px">Your next fixture appears once the schedule is posted</small>';}
   const tid=teamIdOf(currentClub);
   let roster=[];if(sb&&openSeason&&currentClub)roster=await loadRosterFor(currentClub);
@@ -4316,7 +4316,7 @@ function renderNewsManage(){const el=$("#newsManageBody");if(!el)return;
   const rows=liveNews||[];
   const cnt=$("#newsCount");if(cnt)cnt.textContent=rows.length+" live";
   if(!rows.length){el.innerHTML=ADMIN_EMPTY("No stories yet","Articles you publish appear here to edit or delete.");return;}
-  el.innerHTML=rows.map(n=>`<div class="news-edit-row"><div class="ner-txt"><b>${n.title}</b><small>${n.cat} · ${n.author} · ${n.date}</small></div>
+  el.innerHTML=rows.map(n=>`<div class="news-edit-row"><div class="ner-txt"><b>${esc(n.title)}</b><small>${esc(n.cat)} · ${esc(n.author)} · ${esc(n.date)}</small></div>
     <div class="act"><button class="mini" data-editnews="${n.id}">Edit</button><button class="mini danger" data-delnews="${n.id}">Delete</button></div></div>`).join("");}
 $("#newsManageBody").addEventListener("click",e=>{
   const ed=e.target.closest("[data-editnews]"),del=e.target.closest("[data-delnews]");
@@ -4350,7 +4350,7 @@ function renderCommissioner(){
   }else{
     dash.style.display="none";gate.style.display="block";
     gate.innerHTML=authProfile
-      ? `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioners only</h2><p>You're signed in as <b>${authProfile.gamertag}</b> (${authProfile.role}). The League Office is limited to league commissioners.</p></div>`
+      ? `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioners only</h2><p>You're signed in as <b>${esc(authProfile.gamertag)}</b> (${esc(authProfile.role)}). The League Office is limited to league commissioners.</p></div>`
       : `<div class="gate"><div class="lock">${STAR_SVG}</div><h2>Commissioner access</h2><p>Sign in with Discord to enter the League Office — only league commissioners can access it.</p><button class="btn btn-frost" id="signInBtn2" style="margin-top:14px">Sign in with Discord</button></div>`;
   }
 }
@@ -4658,7 +4658,7 @@ async function loadScheduleAdmin(){
   el.innerHTML='<p style="padding:2px 2px 10px;color:var(--fog);font-size:12.5px">Set each game\'s start time below (entered &amp; shown in <b>Eastern Time</b>). Every game gets a unique 6-digit lobby code automatically.</p>'+
     Object.keys(byWeek).sort((a,b)=>a-b).map(w=>`<div class="gc-week">Week ${w}</div>`+byWeek[w].map(g=>{const h=codeOfId(g.home_team_id),a=codeOfId(g.away_team_id);
     return `<div class="gc-game" data-game="${g.id}" style="flex-wrap:wrap;gap:8px">
-      <div class="gc-teams" style="flex:1;min-width:180px">${badge(h,22)}<span class="gc-vs">vs</span>${badge(a,22)}<span class="gc-opp">${teams[h].name} · ${teams[a].name}</span></div>
+      <div class="gc-teams" style="flex:1;min-width:180px">${badge(h,22)}<span class="gc-vs">vs</span>${badge(a,22)}<span class="gc-opp">${esc(teams[h].name)} · ${esc(teams[a].name)}</span></div>
       <span class="gc-code mono" style="color:var(--fog);font-size:12px">#${g.game_code||"—"}</span>
       <input type="datetime-local" class="sc-time box-in" value="${isoToETInput(g.scheduled_at)}" aria-label="Game time (Eastern)">
       <button class="mini good sc-savetime" data-game="${g.id}">Set time</button>
@@ -4681,8 +4681,8 @@ async function loadGamesAdmin(){
   if(!games||!games.length){el.innerHTML=ADMIN_EMPTY("No games yet","Generate the schedule, then enter results here.");return;}
   el.innerHTML=games.map(g=>{const h=codeOfId(g.home_team_id),a=codeOfId(g.away_team_id);
     return `<div class="ga-row" data-game="${g.id}">
-      <div class="gc-teams" style="flex:1">${badge(h,20)}<span class="gc-vs">W${g.week||"?"}</span>${badge(a,20)}<span class="gc-opp">${teams[h].name} · ${teams[a].name}</span></div>
-      <div class="ga-score"><input type="number" min="0" max="30" class="box-in ga-hs" value="${g.home_score??""}" placeholder="—" aria-label="${teams[h].name} score"><span>–</span><input type="number" min="0" max="30" class="box-in ga-as" value="${g.away_score??""}" placeholder="—" aria-label="${teams[a].name} score">
+      <div class="gc-teams" style="flex:1">${badge(h,20)}<span class="gc-vs">W${g.week||"?"}</span>${badge(a,20)}<span class="gc-opp">${esc(teams[h].name)} · ${esc(teams[a].name)}</span></div>
+      <div class="ga-score"><input type="number" min="0" max="30" class="box-in ga-hs" value="${g.home_score??""}" placeholder="—" aria-label="${esc(teams[h].name)} score"><span>–</span><input type="number" min="0" max="30" class="box-in ga-as" value="${g.away_score??""}" placeholder="—" aria-label="${esc(teams[a].name)} score">
       <label class="ga-ot"><input type="checkbox" class="ga-otf" ${g.went_ot?"checked":""}>OT</label>
       <button class="mini good ga-save" data-game="${g.id}">Save</button>${g.status==="final"?`<button class="mini gs-edit" data-game="${g.id}">Player stats</button>`:""}</div></div>`;}).join("");
 }
