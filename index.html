@@ -1250,6 +1250,46 @@
   .notif-time{font-family:var(--f-mono);font-size:10.5px;color:var(--fog-dim);margin-top:4px}
   .notif-empty{padding:36px 22px;text-align:center;color:var(--fog);font-size:13px}
   @media(max-width:560px){.notif-panel{position:fixed;top:calc(var(--nav-h) + 6px);left:8px;right:8px;width:auto;max-width:none}}
+  .msg-wrap{position:relative;display:flex}
+  .msg-bell{position:relative}
+
+  /* Direct messages */
+  .dm-shell{display:grid;grid-template-columns:290px 1fr;gap:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-m);overflow:hidden;height:min(640px,72vh);min-height:420px}
+  .dm-list{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel)}
+  .dm-list-head{padding:12px 15px;border-bottom:1px solid var(--line);font-family:var(--f-cond);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px;color:var(--navy);position:sticky;top:0;background:var(--panel);z-index:1}
+  .dm-convo{display:flex;gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .15s}
+  .dm-convo:hover{background:var(--panel-2)}
+  .dm-convo.active{background:var(--frost-glow)}
+  .dm-ava{width:38px;height:38px;border-radius:50%;flex-shrink:0;object-fit:cover;background:var(--panel-3);display:grid;place-items:center;font-family:var(--f-cond);font-weight:700;font-size:13px;color:var(--navy);overflow:hidden}
+  .dm-convo-main{min-width:0;flex:1}
+  .dm-convo-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .dm-convo-name{font-family:var(--f-cond);font-weight:600;font-size:14px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dm-convo-time{font-family:var(--f-mono);font-size:10px;color:var(--fog-dim);flex-shrink:0}
+  .dm-convo-prev{font-size:12.5px;color:var(--fog);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .dm-convo-prev.unread{color:var(--navy);font-weight:600}
+  .dm-pip{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--live);color:#fff;font-family:var(--f-mono);font-size:10px;font-weight:700;display:grid;place-items:center;line-height:1;flex-shrink:0}
+  .dm-thread{display:flex;flex-direction:column;min-width:0;background:var(--panel-2)}
+  .dm-thread-head{display:flex;align-items:center;gap:10px;padding:11px 15px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+  .dm-thread-head .dm-th-name{font-family:var(--f-cond);font-weight:700;font-size:15px;color:var(--navy);letter-spacing:.01em}
+  .dm-thread-head .dm-th-sub{font-family:var(--f-mono);font-size:11px;color:var(--fog)}
+  .dm-back{display:none;background:none;border:0;color:var(--frost-ink);font-size:20px;line-height:1;padding:0 4px;cursor:pointer}
+  .dm-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
+  .dm-msg{max-width:74%;padding:8px 12px;border-radius:14px;font-size:13.5px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap}
+  .dm-msg.theirs{align-self:flex-start;background:var(--panel);border:1px solid var(--line);color:var(--ice);border-bottom-left-radius:4px}
+  .dm-msg.mine{align-self:flex-end;background:var(--frost);color:#111;border-bottom-right-radius:4px}
+  .dm-msg-time{display:block;font-family:var(--f-mono);font-size:9.5px;opacity:.6;margin-top:3px}
+  .dm-day{align-self:center;font-family:var(--f-mono);font-size:10px;color:var(--fog-dim);text-transform:uppercase;letter-spacing:.06em;margin:6px 0 2px}
+  .dm-composer{display:flex;gap:8px;padding:11px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0}
+  .dm-composer textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);color:var(--ice);font:inherit;font-size:13.5px;padding:9px 12px;max-height:120px;line-height:1.4}
+  .dm-composer textarea:focus{outline:none;border-color:var(--frost)}
+  .dm-empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--fog);font-size:13px;padding:30px}
+  @media(max-width:720px){
+    .dm-shell{grid-template-columns:1fr;height:min(640px,76vh)}
+    .dm-list{border-right:0}
+    .dm-shell[data-mobile-thread="1"] .dm-list{display:none}
+    .dm-shell:not([data-mobile-thread="1"]) .dm-thread{display:none}
+    .dm-back{display:block}
+  }
 
   /* Account bubble + dropdown */
   .acct-wrap{position:relative;display:flex}
@@ -1402,6 +1442,12 @@
 
     <div class="nav-right">
       <div class="auth-slot" id="authSlot"></div>
+      <div class="msg-wrap" id="msgWrap" style="display:none">
+        <button class="theme-toggle msg-bell" id="msgBell" type="button" aria-label="Messages" title="Messages">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H5.5L4 17.5z"/></svg>
+          <span class="notif-badge" id="msgBadge" hidden>0</span>
+        </button>
+      </div>
       <div class="notif-wrap" id="notifWrap" style="display:none">
         <button class="theme-toggle notif-bell" id="notifBell" type="button" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
@@ -1489,6 +1535,14 @@
 
   <!-- PLAYER PROFILE -->
   <div class="view" id="view-player"><section class="pad"><div class="wrap" id="playerPage"></div></section></div>
+
+  <!-- MESSAGES -->
+  <div class="view" id="view-messages"><section class="pad"><div class="wrap">
+    <div class="sec-head"><div><span class="eyebrow">Direct Messages</span><h2>Your <em>Inbox</em></h2>
+      <p>Private messages between you and anyone else in the league. Only you and the other person can see them.</p></div>
+      <button class="btn btn-frost btn-sm" id="dmNewBtn" type="button">New message</button></div>
+    <div class="dm-shell" id="dmShell"></div>
+  </div></section></div>
 
   <!-- SCHEDULE -->
   <div class="view" id="view-schedule"><section class="pad"><div class="wrap">
@@ -2073,6 +2127,7 @@ function go(view,param,fromPop){
   // render parameterized / dynamic views on entry
   if(view==="team")renderTeamPage(param);
   if(view==="player")renderPlayerPage(param);
+  if(view==="messages"&&typeof renderMessages==="function")renderMessages(param);
   if(view==="article")renderArticle(param);
   if(view==="admin"&&typeof renderCommissioner==="function")renderCommissioner();
   if(view==="manager"&&typeof renderManager==="function")renderManager();
@@ -2186,6 +2241,133 @@ if($("#notifPanel"))$("#notifPanel").addEventListener("click",e=>{
 if($("#notifPanel"))$("#notifPanel").addEventListener("keydown",e=>{if(e.key==="Enter"){const it=e.target.closest(".notif-item");if(it)it.click();}});
 document.addEventListener("click",e=>{if(!e.target.closest("#notifWrap"))toggleNotifPanel(false);});
 
+/* ------------------------------ DIRECT MESSAGES ------------------------------ */
+let dmMsgs=[],dmProfiles={},dmActive=null,dmChannel=null,dmLoaded=false;
+const DM_PSEL="id,gamertag,avatar_url,discord_username";
+function dmOtherId(m){return m.sender_id===authUser.id?m.recipient_id:m.sender_id;}
+function dmName(id){const p=dmProfiles[id];return (p&&p.gamertag)||"Player";}
+function dmUnreadTotal(){return authUser?dmMsgs.filter(m=>m.recipient_id===authUser.id&&!m.read_at).length:0;}
+function renderMsgBadge(){const b=$("#msgBadge");if(!b)return;const n=dmUnreadTotal();b.textContent=n>9?"9+":n;b.hidden=n===0;}
+function dmAvaHtml(id){const p=dmProfiles[id]||{};return p.avatar_url?`<img class="dm-ava" src="${esc(p.avatar_url)}" alt="">`:`<span class="dm-ava">${esc(initials(dmName(id)))}</span>`;}
+function dmClock(ts){return new Date(ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}
+function fmtDMTime(ts){const d=new Date(ts),now=new Date();
+  if(d.toDateString()===now.toDateString())return dmClock(ts);
+  if((now-d)/864e5<7)return d.toLocaleDateString([],{weekday:"short"});
+  return d.toLocaleDateString([],{month:"short",day:"numeric"});}
+function dmDayLabel(ts){const d=new Date(ts),now=new Date(),y=new Date(now);y.setDate(now.getDate()-1);
+  if(d.toDateString()===now.toDateString())return "Today";
+  if(d.toDateString()===y.toDateString())return "Yesterday";
+  return d.toLocaleDateString([],{weekday:"long",month:"short",day:"numeric"});}
+async function loadDMs(){
+  if(!sb||!authUser)return;
+  const {data}=await sb.from("direct_messages").select("*").or(`sender_id.eq.${authUser.id},recipient_id.eq.${authUser.id}`).order("created_at",{ascending:true});
+  dmMsgs=data||[];
+  const need=[...new Set(dmMsgs.map(dmOtherId))].filter(id=>id&&!dmProfiles[id]);
+  if(need.length){const {data:ps}=await sb.from("profiles").select(DM_PSEL).in("id",need);(ps||[]).forEach(p=>dmProfiles[p.id]=p);}
+  dmLoaded=true;renderMsgBadge();
+  if($("#view-messages")&&$("#view-messages").classList.contains("on"))dmRender();
+}
+function dmConvos(){
+  const map={};
+  dmMsgs.forEach(m=>{const o=dmOtherId(m);(map[o]=map[o]||{other:o,msgs:[]}).msgs.push(m);});
+  return Object.values(map).map(c=>{c.last=c.msgs[c.msgs.length-1];c.unread=c.msgs.filter(m=>m.recipient_id===authUser.id&&!m.read_at).length;return c;})
+    .sort((a,b)=>new Date(b.last.created_at)-new Date(a.last.created_at));
+}
+async function dmResolve(gamertag){
+  const g=(gamertag||"").trim().toLowerCase();if(!g)return null;
+  for(const id in dmProfiles){if((dmProfiles[id].gamertag||"").toLowerCase()===g)return id;}
+  const {data}=await sb.from("profiles").select(DM_PSEL).ilike("gamertag",gamertag).maybeSingle();
+  if(data){dmProfiles[data.id]=data;return data.id;}
+  return null;
+}
+async function renderMessages(param){
+  const shell=$("#dmShell");if(!shell)return;
+  if(!authUser){shell.innerHTML=`<div class="dm-empty" style="grid-column:1/-1">Sign in with Discord to send messages.</div>`;return;}
+  if(!dmLoaded){shell.innerHTML=`<div class="dm-empty" style="grid-column:1/-1">Loading…</div>`;await loadDMs();}
+  if(param){const pid=await dmResolve(param);if(pid&&pid!==authUser.id)dmActive=pid;}
+  dmRender();
+}
+function dmRender(){
+  const shell=$("#dmShell");if(!shell||!authUser)return;
+  const convos=dmConvos();
+  const list=convos.slice();
+  if(dmActive&&!list.find(c=>c.other===dmActive))list.unshift({other:dmActive,msgs:[],last:null,unread:0});
+  const listHtml=list.length?list.map(c=>{
+    const prev=c.last?((c.last.sender_id===authUser.id?"You: ":"")+c.last.body):"New conversation";
+    return `<div class="dm-convo${c.other===dmActive?" active":""}" data-other="${c.other}">${dmAvaHtml(c.other)}
+      <div class="dm-convo-main"><div class="dm-convo-top"><span class="dm-convo-name">${esc(dmName(c.other))}</span>${c.last?`<span class="dm-convo-time">${fmtDMTime(c.last.created_at)}</span>`:""}</div>
+      <div class="dm-convo-prev${c.unread?" unread":""}">${esc(prev)}</div></div>
+      ${c.unread?`<span class="dm-pip">${c.unread>9?"9+":c.unread}</span>`:""}</div>`;
+  }).join(""):`<div class="dm-empty">No conversations yet.<br>Tap “New message” to start one.</div>`;
+  let threadHtml;
+  if(!dmActive){threadHtml=`<div class="dm-empty">Pick a conversation, or start a new one.</div>`;}
+  else{
+    const msgs=dmMsgs.filter(m=>dmOtherId(m)===dmActive);
+    let body="",lastDay="";
+    msgs.forEach(m=>{const day=new Date(m.created_at).toDateString();
+      if(day!==lastDay){lastDay=day;body+=`<div class="dm-day">${dmDayLabel(m.created_at)}</div>`;}
+      const mine=m.sender_id===authUser.id;
+      body+=`<div class="dm-msg ${mine?"mine":"theirs"}">${esc(m.body)}<span class="dm-msg-time">${dmClock(m.created_at)}</span></div>`;});
+    if(!msgs.length)body=`<div class="dm-empty">No messages yet — say hi 👋</div>`;
+    const sub=(dmProfiles[dmActive]&&dmProfiles[dmActive].discord_username)?"@"+dmProfiles[dmActive].discord_username:"";
+    threadHtml=`<div class="dm-thread-head"><button class="dm-back" id="dmBack" aria-label="Back to conversations">‹</button>${dmAvaHtml(dmActive)}<div><div class="dm-th-name">${esc(dmName(dmActive))}</div>${sub?`<div class="dm-th-sub">${esc(sub)}</div>`:""}</div></div>
+      <div class="dm-msgs" id="dmMsgs">${body}</div>
+      <div class="dm-composer"><textarea id="dmInput" rows="1" placeholder="Message ${esc(dmName(dmActive))}…" maxlength="2000"></textarea><button class="btn btn-frost btn-sm" id="dmSend" type="button">Send</button></div>`;
+  }
+  shell.innerHTML=`<div class="dm-list"><div class="dm-list-head">Messages</div>${listHtml}</div><div class="dm-thread">${threadHtml}</div>`;
+  shell.setAttribute("data-mobile-thread",dmActive?"1":"0");
+  const mv=$("#dmMsgs");if(mv)mv.scrollTop=mv.scrollHeight;
+  if(dmActive)dmMarkRead(dmActive);
+}
+async function dmMarkRead(other){
+  const unread=dmMsgs.filter(m=>m.sender_id===other&&m.recipient_id===authUser.id&&!m.read_at);
+  if(!unread.length)return;
+  const nowIso=new Date().toISOString();unread.forEach(m=>m.read_at=nowIso);
+  renderMsgBadge();
+  try{await sb.rpc("mark_dm_read",{p_other:other});}catch(e){}
+}
+function dmOpen(other){dmActive=other;dmRender();const inp=$("#dmInput");if(inp&&window.matchMedia("(min-width:721px)").matches)inp.focus();}
+async function dmSend(){
+  const inp=$("#dmInput");if(!inp||!dmActive)return;
+  const body=inp.value.trim();if(!body)return;
+  inp.value="";inp.style.height="auto";
+  const {data,error}=await sb.from("direct_messages").insert({sender_id:authUser.id,recipient_id:dmActive,body}).select().single();
+  if(error){toast("Couldn't send",/banned/i.test(error.message)?"That player can't receive messages.":error.message);inp.value=body;return;}
+  dmMsgs.push(data);dmRender();
+}
+function dmNew(){
+  const start=async v=>{const id=await dmResolve(v.who);if(!id){toast("No such player","Pick a name from the list.");return;}
+    if(id===authUser.id){toast("That's you","Pick someone else to message.");return;}
+    go("messages");dmOpen(id);};
+  const open=()=>formModal("New message",[{key:"who",label:"To",type:"player",value:"",placeholder:"Start typing a name…"}],start);
+  if(sb&&!acPlayers.length){sb.from("profiles").select("gamertag").order("gamertag").then(({data})=>{acPlayers=(data||[]).map(p=>p.gamertag).filter(Boolean);open();});}
+  else open();
+}
+function subscribeDMs(){
+  if(!sb||!authUser||dmChannel)return;
+  dmChannel=sb.channel("dm-"+authUser.id)
+    .on("postgres_changes",{event:"INSERT",schema:"public",table:"direct_messages",filter:"recipient_id=eq."+authUser.id},payload=>{
+      const m=payload.new;if(!m||dmMsgs.find(x=>x.id===m.id))return;
+      dmMsgs.push(m);
+      const onView=$("#view-messages")&&$("#view-messages").classList.contains("on");
+      const finish=()=>{renderMsgBadge();if(onView)dmRender();else toast("💬 "+dmName(m.sender_id),m.body);};
+      if(!dmProfiles[m.sender_id]){sb.from("profiles").select(DM_PSEL).eq("id",m.sender_id).maybeSingle().then(({data})=>{if(data)dmProfiles[data.id]=data;finish();});}
+      else finish();
+    }).subscribe();
+}
+function teardownDMs(){dmMsgs=[];dmProfiles={};dmActive=null;dmLoaded=false;renderMsgBadge();if(dmChannel){try{sb.removeChannel(dmChannel);}catch(e){}dmChannel=null;}}
+if($("#msgBell"))$("#msgBell").addEventListener("click",e=>{e.stopPropagation();go("messages");});
+if($("#dmNewBtn"))$("#dmNewBtn").addEventListener("click",dmNew);
+document.addEventListener("click",e=>{
+  const conv=e.target.closest(".dm-convo");if(conv){dmOpen(conv.dataset.other);return;}
+  if(e.target.closest("#dmBack")){dmActive=null;dmRender();return;}
+  if(e.target.closest("#dmSend")){dmSend();return;}
+});
+document.addEventListener("keydown",e=>{
+  if(e.target&&e.target.id==="dmInput"&&e.key==="Enter"&&!e.shiftKey){e.preventDefault();dmSend();}
+});
+document.addEventListener("input",e=>{if(e.target&&e.target.id==="dmInput"){e.target.style.height="auto";e.target.style.height=Math.min(120,e.target.scrollHeight)+"px";}});
+
 /* ------------------------------ NAV BUILD ------------------------------ */
 function buildNav(){
   $("#teamsDropdown").innerHTML=`<a data-go="teams" style="color:var(--frost-ink)">All Teams →</a>`+
@@ -2206,6 +2388,7 @@ function mmAccountHtml(){
   const gt=(typeof authProfile!=="undefined"&&authProfile&&authProfile.gamertag)||"";
   return '<div class="mm-group" id="mmAccount">Account</div>'
     +'<button type="button" data-go="player" data-param="'+esc(gt)+'">My Profile</button>'
+    +'<button type="button" data-go="messages">Messages</button>'
     +'<button type="button" id="mmEditProfile">Edit Profile</button>'
     +'<button type="button" data-go="offers">Contract Offers</button>'
     +'<button type="button" id="mmSignOut">Sign out</button>';
@@ -2834,7 +3017,8 @@ async function renderPlayerPage(id){
           ${t?`<span class="ph-tag link" data-go="team" data-param="${tc}">${POS_NAME[pos]||'Player'} · <b>${t.name}</b></span>`:`<span class="ph-tag">${pos?POS_NAME[pos]:'Unassigned'} · <b>Free Agent</b></span>`}
           ${spot?`<span class="ph-tag">#<b>${num}</b></span>`:''}${roleTag?`<span class="ph-tag">${roleTag}</span>`:''}
           ${prof.overall?`<span class="ph-tag ovr-tag" title="Computed from career stats using ${posLbl} weights. Provisional until 5 games played."><b>${prof.overall}</b> OVR</span>`:''}
-          ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div></div>
+          ${prof.live&&prof.twitch?`<a class="ph-tag live-tag" href="https://twitch.tv/${encodeURIComponent(prof.twitch)}" target="_blank" rel="noopener noreferrer"><span class="live-dot"></span>LIVE</a>`:''}</div>
+        ${(authUser&&authUser.id!==prof.id&&!(authProfile&&authProfile.banned))?`<div style="margin-top:14px"><button class="btn btn-frost btn-sm" data-go="messages" data-param="${esc(prof.gamertag)}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M4 4h16v12H5.5L4 17.5z"/></svg>Message</button></div>`:''}</div></div>
     </div>
     ${connectCard}
     ${twitchBlock(prof)}
@@ -3159,6 +3343,7 @@ function renderAuthUI(){
       const IC_EDIT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
       const IC_OFFER='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>';
       const IC_OUT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>';
+      const IC_MSG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H5.5L4 17.5z"/></svg>';
       slot.innerHTML=`<div class="acct-wrap" id="acctWrap">
         <button class="user-chip" id="acctBtn" aria-haspopup="true" aria-expanded="false"><span class="av">${initials(authProfile.gamertag)}</span><div class="txt"><b>${esc(authProfile.gamertag)}</b><small>${rl}</small></div>${CARET}</button>
         <div class="acct-menu" id="acctMenu" role="menu" hidden>
@@ -3167,6 +3352,7 @@ function renderAuthUI(){
           ${comm?item('data-go="admin" role="menuitem"',IC_COMM,"Commissioner"):""}
           ${(mgr||comm)?'<div class="acct-sep"></div>':""}
           ${item('data-go="player" data-param="'+esc(authProfile.gamertag)+'" role="menuitem"',IC_USER,"My Profile")}
+          ${item('data-go="messages" role="menuitem"',IC_MSG,"Messages")}
           ${item('data-go="offers" role="menuitem"',IC_OFFER,"Contract Offers")}
           ${item('data-go="actions" role="menuitem"',IC_OFFER,"Action Center")}
           ${item('id="acctEditProfile" role="menuitem"',IC_EDIT,"Edit Profile")}
@@ -3187,6 +3373,9 @@ function renderAuthUI(){
   const nw=$("#notifWrap");
   if(authProfile&&authUser){if(nw)nw.style.display="";loadNotifications();subscribeNotifs();}
   else{if(nw)nw.style.display="none";teardownNotifs();}
+  const mw=$("#msgWrap");
+  if(authProfile&&authUser&&!authProfile.banned){if(mw)mw.style.display="";loadDMs();subscribeDMs();}
+  else{if(mw)mw.style.display="none";teardownDMs();}
   // mobile sign-out lives in the hamburger menu (keeps the top bar to icons)
   const mm=$("#mobileMenu"),acc=$("#mmAccount");
   if(authProfile){if(mm&&!acc)mm.insertAdjacentHTML("beforeend",mmAccountHtml());}
