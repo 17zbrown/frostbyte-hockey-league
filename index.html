@@ -198,6 +198,8 @@
   .live-stream:hover{background:#9146ff2b}
   .live-foot{display:flex;align-items:center;justify-content:space-between;margin-top:13px;padding-top:11px;border-top:1px solid var(--line-soft)}
   .live-lobby{font-size:12px;color:var(--fog);font-weight:600}
+  .mc-private{margin-top:8px;padding:14px 16px;border-radius:var(--r-l);background:var(--panel-2);border:1px solid var(--line);color:var(--fog);font-size:13.5px;line-height:1.5;text-align:center}
+  .mc-private .mc-lock{font-size:16px}
   .live-mc{background:none;border:0;color:var(--frost-ink);font-family:var(--f-cond);font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;padding:2px}
 
   /* ============================ CARDS / GRID ============================ */
@@ -2299,12 +2301,13 @@ function fmtGameDateTime(iso){if(!iso)return"Time TBD";return fmtGameDate(iso)+"
 async function loadSchedule(){
   liveSchedule=[];
   if(!sb||!openSeason||!dbTeams.length)return;
-  let g=[];try{const {data}=await sb.from("games").select("*").eq("season_id",openSeason.id)
+  // games_public redacts the private lobby code/server for anyone who isn't one of the two clubs (or a commissioner)
+  let g=[];try{const {data}=await sb.from("games_public").select("*").eq("season_id",openSeason.id)
     .order("week",{ascending:true}).order("scheduled_at",{ascending:true});g=data||[];}catch(e){}
   const byWk={};
   g.forEach(x=>{const a=codeOfId(x.home_team_id),b=codeOfId(x.away_team_id);if(!a||!b)return;
     const done=x.status==="final";const wk=x.week||1;
-    (byWk[wk]=byWk[wk]||[]).push({id:x.id,code:x.game_code||null,a,b,as:done?x.home_score:null,bs:done?x.away_score:null,ot:!!x.went_ot,done,when:x.scheduled_at,twitch:x.twitch_url});});
+    (byWk[wk]=byWk[wk]||[]).push({id:x.id,code:x.game_code||null,canView:!!x.can_view,a,b,as:done?x.home_score:null,bs:done?x.away_score:null,ot:!!x.went_ot,done,when:x.scheduled_at,twitch:x.twitch_url});});
   liveSchedule=Object.keys(byWk).map(Number).sort((a,b)=>a-b).map(wk=>({wk:"Week "+wk,n:wk,games:byWk[wk]}));
 }
 function findGameById(id){for(const wk of liveSchedule)for(const g of wk.games)if(g.id===id)return g;return null;}
@@ -2342,7 +2345,7 @@ async function renderLiveGames(){
         <div class="lm-team">${badge(g.b,28)}<b>${esc(teams[g.b].name)}</b><span class="lm-ha">AWAY</span></div>
       </div>
       ${hasLive?`<div class="live-streams">${s.map(p=>`<a class="live-stream" href="https://twitch.tv/${encodeURIComponent(p.twitch)}" target="_blank" rel="noopener noreferrer">${TWITCH_GLYPH}<span>${esc(p.gamertag)}</span></a>`).join("")}</div>`:""}
-      <div class="live-foot"><span class="live-lobby mono">Lobby #${g.code||"—"}</span><button class="live-mc" data-match="${g.id}">Match card →</button></div>
+      <div class="live-foot"><span class="live-lobby mono">${g.code?"Lobby #"+g.code:(g.canView?"Lobby # pending":"🔒 Private lobby")}</span><button class="live-mc" data-match="${g.id}">Match card →</button></div>
     </div>`;}).join("");
 }
 /* EA private-lobby "match card" for a scheduled game. */
@@ -2363,6 +2366,7 @@ function showMatchCard(g){
       </div>
       <div class="mc-time">${g.when?fmtGameDateTime(g.when):"⏱ Game time to be set by the commissioner"}</div>
       ${yourSide?`<div class="mc-you">Your club plays <b>${yourSide}</b></div>`:""}
+      ${g.canView?`
       <div class="mc-code-label">Private Lobby Code</div>
       <div class="mc-code">${g.code||"— pending —"}</div>
       <div class="mc-settings">
@@ -2375,9 +2379,10 @@ function showMatchCard(g){
         <div class="mc-set"><span>Period Length</span><b>4 Minutes</b></div>
         <div class="mc-set"><span>Grudge Match Game</span><b class="off">Off</b></div>
         <div class="mc-set"><span>Use Best Game Location</span><b>Relaxed</b></div>
-      </div>
+      </div>`:`
+      <div class="mc-private"><span class="mc-lock">🔒</span> The private lobby code and settings are visible only to the two clubs playing this game.</div>`}
     </div>`;
-  if(srvLocked&&g.id)gameServer(g.id).then(s=>{const el=$("#mcServer");if(el)el.textContent=s||"NA East";});
+  if(g.canView&&srvLocked&&g.id)gameServer(g.id).then(s=>{const el=$("#mcServer");if(el)el.textContent=s||"NA East";});
   modalCb=null;$("#modalOk").style.display="none";$("#modalCancel").textContent="Close";$("#modalBg").classList.add("on");
 }
 document.addEventListener("click",e=>{const el=e.target.closest("[data-match]");if(!el)return;showMatchCard(findGameById(el.dataset.match));});
