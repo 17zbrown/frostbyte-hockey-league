@@ -95,6 +95,18 @@
     letter-spacing:.03em;text-transform:uppercase;color:var(--fog);padding:9px 11px;border-radius:var(--r-s);transition:.14s}
   .dropdown a:hover{background:#12293d;color:var(--frost-ink)}
   .dropdown .dd-team{gap:10px}
+  /* nested flyout submenu (CGHL -> clubs) */
+  .navsub{position:relative}
+  .navsub-top{justify-content:space-between!important}
+  .navsub-caret{width:8px;height:11px;flex-shrink:0;opacity:.6;margin-left:6px}
+  .navsub:hover .navsub-caret{opacity:1}
+  .subdropdown{position:absolute;left:calc(100% + 8px);top:-8px;min-width:210px;max-height:min(74vh,460px);overflow-y:auto;
+    background:#0b1c2b;border:1px solid var(--line);border-radius:var(--r-m);padding:7px;box-shadow:var(--sh-2);
+    opacity:0;visibility:hidden;transform:translateX(-6px);transition:.16s;z-index:80}
+  .subdropdown::before{content:"";position:absolute;top:0;left:-12px;width:12px;height:100%}
+  .navsub:hover .subdropdown,.navsub:focus-within .subdropdown{opacity:1;visibility:visible;transform:none}
+  .subdropdown a{display:flex;align-items:center;gap:10px;font-family:var(--f-cond);font-weight:500;font-size:13.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--fog);padding:9px 11px;border-radius:var(--r-s);transition:.14s;white-space:nowrap}
+  .subdropdown a:hover{background:#12293d;color:var(--frost-ink)}
   .nav-right{margin-left:auto;display:flex;align-items:center;gap:10px}
   .btn{font-family:var(--f-cond);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:13.5px;
     padding:9px 16px;border-radius:var(--r-s);display:inline-flex;align-items:center;gap:8px;
@@ -1430,6 +1442,8 @@
   html[data-theme="dark"] .acct-item:hover,html[data-theme="dark"] .acct-item:focus-visible{background:#232323}
   html[data-theme="dark"] #acctSignOut{color:#ff6b52} html[data-theme="dark"] #acctSignOut .acct-ic{color:#ff6b52}
   html[data-theme="dark"] .dropdown a{color:var(--fog)} html[data-theme="dark"] .dropdown a:hover{background:var(--panel-2);color:var(--frost-ink)}
+  html[data-theme="dark"] .subdropdown{background:var(--panel);border-color:var(--line)}
+  html[data-theme="dark"] .subdropdown a{color:var(--fog)} html[data-theme="dark"] .subdropdown a:hover{background:var(--panel-2);color:var(--frost-ink)}
   html[data-theme="dark"] .btn-frost{background:var(--frost);color:#04121e} html[data-theme="dark"] .btn-frost:hover{background:#ffef66}
   html[data-theme="dark"] .btn-ghost{border-color:#3a3a3a;color:var(--ice)} html[data-theme="dark"] .btn-ghost:hover{border-color:var(--frost);background:#ffffff10;color:#fff}
   html[data-theme="dark"] .hamburger{border-color:#3a3a3a} html[data-theme="dark"] .hamburger span{background:#d2d2cc}
@@ -2527,17 +2541,18 @@ document.addEventListener("input",e=>{
 
 /* ------------------------------ NAV BUILD ------------------------------ */
 function buildNav(){
-  $("#teamsDropdown").innerHTML=`<a data-go="teams" style="color:var(--frost-ink)">All Teams →</a>`+
-    TEAM_KEYS.map(c=>`<a class="dd-team" data-go="team" data-param="${c}">${badge(c,22)} ${esc(teams[c].name)}</a>`).join("");
+  // "CGHL" — clicking it opens All Teams; hovering flies out the club list.
+  $("#teamsDropdown").innerHTML=`<div class="navsub"><a class="navsub-top" data-go="teams">CGHL <svg class="navsub-caret" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4-4 4"/></svg></a><div class="subdropdown">${TEAM_KEYS.map(c=>`<a class="dd-team" data-go="team" data-param="${c}">${badge(c,22)} ${esc(teams[c].name)}</a>`).join("")}</div></div>`;
   const groups=[
-    ["Main",[["home","Home"],["standings","Standings"],["teams","All Teams"],["signup","Sign Up"]]],
+    ["Main",[["home","Home"],["standings","Standings"],["signup","Sign Up"]]],
     ["League",[["schedule","Schedule"],["bracket","Playoff Bracket"],["rankings","Power Rankings"],["awards","Awards"],["records","Record Book"],["transactions","Transactions"]]],
     ["Players",[["stats","Stats & Leaders"],["directory","Player Directory"],["freeagency","Free Agency"],["draft","Draft Board"]]],
     ["Community",[["news","News"],["rulebook","Rulebook"],["owner","Owner Application"],["actions","Action Center"]]],
     ["Front Office",[["manager","Manager Portal"],["admin","Commissioner"]]]
   ];
-  $("#mobileMenu").innerHTML=groups.map(([g,items])=>
-    `<div class="mm-group">${g}</div>`+items.map(([v,l])=>{const fk=viewFeature(v);return `<button data-go="${v}"${fk?` data-feature="${fk}"`:""}${MANAGER_VIEWS.has(v)?' data-role="manager"':""}>${l}</button>`;}).join("")).join("");
+  const sectionHtml=([g,items])=>`<div class="mm-group">${g}</div>`+items.map(([v,l])=>{const fk=viewFeature(v);return `<button data-go="${v}"${fk?` data-feature="${fk}"`:""}${MANAGER_VIEWS.has(v)?' data-role="manager"':""}>${l}</button>`;}).join("");
+  const clubsHtml=`<div class="mm-group">Clubs · CGHL</div><button data-go="teams">All Clubs</button>`+TEAM_KEYS.map(c=>`<button data-go="team" data-param="${c}">${esc(teams[c].name)}</button>`).join("");
+  $("#mobileMenu").innerHTML=sectionHtml(groups[0])+clubsHtml+groups.slice(1).map(sectionHtml).join("");
   if(typeof authProfile!=="undefined"&&authProfile)$("#mobileMenu").insertAdjacentHTML("beforeend",mmAccountHtml());
   applyFeatures();
 }
