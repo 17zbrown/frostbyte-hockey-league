@@ -3866,7 +3866,7 @@ document.addEventListener("click",e=>{
   const ub=e.target.closest(".ban-lift");
   if(ub){confirmModal("Unban "+(ub.dataset.name||"this player")+"?","They regain site access. Re-add them to Discord manually if needed.","Unban",async()=>{
     const {error}=await sb.rpc("unban_player",{p_profile:ub.dataset.id});
-    if(error){toast("Couldn't unban",error.message);return;}toast("Ban lifted","");loadBans();loadMembers();});return;}
+    if(error){toast("Couldn't unban",error.message);return;}toast("Ban lifted","");loadBans();loadMembers();nudgeDiscordSync();});return;}
 });
 // lineup — persisted per game night (Wed / Fri)
 const LINEUP_NIGHTS=[{key:"wed",label:"Wednesday"},{key:"fri",label:"Friday"}];
@@ -4260,7 +4260,7 @@ async function assignRegistration(btn){
   const pname=btn.dataset.name||"a player";
   await sb.from("transactions").insert({season_id:adminSeason.id,type:"sign",description:teams[code].name+" signed <b>"+pname+"</b> ("+(btn.dataset.pos||"")+" #"+num+")"});
   toast("Player added","Assigned to "+teams[code].name+" · #"+num+".");
-  loadRegistrations();loadStandings();
+  loadRegistrations();loadStandings();nudgeDiscordSync();
 }
 async function moveRosterPlayer(profileId,name){
   const code=(document.querySelector('.rm-team[data-prof="'+profileId+'"]')||{}).value;
@@ -4275,7 +4275,7 @@ async function moveRosterPlayer(profileId,name){
   if(error){toast("Couldn't move",/manager|protect/i.test(error.message)?name+" is a club's manager — managers are locked to their own club.":error.message);return;}
   await sb.from("transactions").insert({season_id:adminSeason.id,type:"sign",description:teams[code].name+" acquired <b>"+esc(name)+"</b> (#"+num+")"});
   toast("Player moved",name+" → "+teams[code].name+" · #"+num+".");
-  loadRegistrations();loadStandings();
+  loadRegistrations();loadStandings();nudgeDiscordSync();
 }
 async function removeRosterPlayer(profileId,name){
   confirmModal("Take "+name+" off their roster?","This removes them from the club and back into the unassigned pool. Their season sign-up stays, so you can re-add them anytime.","Remove from roster",async()=>{
@@ -4284,7 +4284,7 @@ async function removeRosterPlayer(profileId,name){
     const {error}=await sb.from("roster_spots").delete().eq("id",cur.id);
     if(error){toast("Couldn't remove",/manager|protect/i.test(error.message)?name+" is a club's manager — reassign their manager role first.":error.message);return;}
     toast("Off roster",name+" is back in the unassigned pool.");
-    loadRegistrations();loadStandings();
+    loadRegistrations();loadStandings();nudgeDiscordSync();
   });
 }
 
@@ -4581,7 +4581,12 @@ $("#view-admin").addEventListener("click",e=>{
 });
 
 /* ---- Teams (add / remove clubs) ---- */
+// Ask the Discord role sync to run NOW instead of waiting for the 5-min cron, so role
+// adds/removes from a website change show up in seconds. Debounced + fire-and-forget.
+let _dsNudge=0;
+function nudgeDiscordSync(){const now=Date.now();if(now-_dsNudge<15000)return;_dsNudge=now;try{fetch("/.netlify/functions/discord-sync",{method:"POST",keepalive:true}).catch(()=>{});}catch(e){}}
 async function refreshTeamsEverywhere(){
+  nudgeDiscordSync();
   const {data:tms}=await sb.from("teams").select("*").order("code");if(tms){dbTeams=tms;buildTeams();}
   await loadStandings();await loadPlayerAbilities();await loadTeamOveralls();await loadSchedule();
   renderStandings($("#homeStandings"),false);renderStandings($("#fullStandings"),true);
@@ -4623,7 +4628,7 @@ async function makeDraftPick(pickId){
   ],async v=>{
     const {error}=await sb.rpc("use_draft_pick",{p_pick:pickId,p_player:v.player});
     if(error){toast("Couldn't make pick",error.message);return;}
-    toast("Pick made","Player drafted to the club.");loadDraftAdmin();loadTeamsAdmin();
+    toast("Pick made","Player drafted to the club.");loadDraftAdmin();loadTeamsAdmin();nudgeDiscordSync();
   });
 }
 $("#genPicksBtn")&&$("#genPicksBtn").addEventListener("click",async()=>{
