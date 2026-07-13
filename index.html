@@ -680,6 +680,32 @@
   .ar-resp{margin-top:9px;padding:9px 12px;border-left:3px solid var(--frost);background:var(--frost-glow);border-radius:4px;font-size:13px;color:var(--ice);white-space:pre-wrap}
   .ar-resp span{display:block;font-family:var(--f-cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px;color:var(--fog-dim);margin-bottom:2px}
   .ar-acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;padding-top:11px;border-top:1px solid var(--line-soft)}
+  /* ticket conversation thread + evidence */
+  .ar-thread{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:8px}
+  .ar-thread-empty{color:var(--fog);font-size:12.5px}
+  .amsg{max-width:82%;padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.45}
+  .amsg.theirs{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+  .amsg.mine{align-self:flex-end;background:var(--frost-glow);border:1px solid var(--frost)}
+  .amsg-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:3px}
+  .amsg-h b{font-family:var(--f-cond);font-weight:600;font-size:12px;color:var(--navy)}
+  .amsg-h span{font-family:var(--f-mono);font-size:10px;color:var(--fog-dim)}
+  .amsg-b{color:var(--ice);white-space:pre-wrap;word-wrap:break-word}
+  .amsg-att{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .att-thumb{display:block;width:74px;height:74px;border:1px solid var(--line);overflow:hidden;flex:none}
+  .att-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .att-file{font-family:var(--f-cond);font-weight:600;font-size:12px;color:var(--frost-ink);border:1px solid var(--line);padding:5px 9px;border-radius:6px}
+  .ar-reply{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+  .ar-reply-in{width:100%;resize:vertical;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ice);font:inherit;font-size:13px;padding:8px 11px}
+  .ar-reply-in:focus{outline:none;border-color:var(--frost)}
+  .ar-reply-att{display:flex;flex-wrap:wrap;gap:6px}
+  .ar-reply-att:empty{display:none}
+  .att-chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:11px;color:var(--fog);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 4px 3px 9px;max-width:180px}
+  .att-chip{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .att-x{background:none;border:0;color:var(--fog);cursor:pointer;font-size:15px;line-height:1;padding:0 3px}
+  .att-x:hover{color:var(--loss)}
+  .ar-reply-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .ar-attach{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-cond);font-weight:600;font-size:12px;letter-spacing:.02em;color:var(--fog);cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:6px 11px;transition:border-color .12s,color .12s}
+  .ar-attach:hover{border-color:var(--frost);color:var(--frost-ink)}
   .slot{background:#08161f;border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px;min-height:78px}
   .slot .role{font-family:var(--f-cond);font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:11px;color:var(--frost-ink);margin-bottom:8px}
   .slot select{width:100%;background:#0a1a28;border:1px solid var(--line);border-radius:var(--r-s);color:var(--ice);padding:9px 10px;font-family:var(--f-cond);font-size:13.5px;letter-spacing:.03em;text-transform:uppercase}
@@ -4137,6 +4163,7 @@ async function renderActionCenter(){
 async function loadMyActions(){
   const el=$("#myActionsBody"),cnt=$("#myActionsCount");if(!el||!sb||!authUser)return;
   const {data}=await sb.from("action_requests").select("*").eq("profile_id",authUser.id).order("created_at",{ascending:false});
+  await loadActionMessages();
   if(cnt)cnt.textContent=(data?data.length:0)+"";
   el.innerHTML=(data&&data.length)?data.map(a=>actionRow(a,false)).join(""):'<div style="color:var(--fog);font-size:13px">You haven\'t filed anything yet. Pick an option above to get started.</div>';
 }
@@ -4152,14 +4179,15 @@ function actionRow(a,rev){
   if(rev){
     if(a.type==='trade_request'){ if(a.status==='open'||a.status==='reviewing') btns+=`<button class="mini good oa-set2" data-id="${a.id}" data-status="acknowledged">Acknowledge</button>`; }
     else if(a.status!=='reviewing') btns+=`<button class="mini oa-set2" data-id="${a.id}" data-status="reviewing">Reviewing</button>`;
-    btns+=`<button class="mini good oa-set2" data-id="${a.id}" data-status="resolved">Resolve</button><button class="mini oa-set2" data-id="${a.id}" data-status="denied">Deny</button><button class="mini oa-reply" data-id="${a.id}">Respond</button>`;
+    btns+=`<button class="mini good oa-set2" data-id="${a.id}" data-status="resolved">Resolve</button><button class="mini oa-set2" data-id="${a.id}" data-status="denied">Deny</button>`;
     if(authProfile&&authProfile.role==='commissioner')btns+=`<button class="mini danger oa-del2" data-id="${a.id}">Delete</button>`;
   }
   return `<div class="ar-card"><div class="ar-head"><div>${who}<span class="ar-type">${ACTION_META[a.type]?ACTION_META[a.type].label:a.type}</span> <span class="ar-status" style="color:${sc};border-color:${sc}">${stLabel}</span></div><span class="ar-time">${timeAgo(a.created_at)}</span></div>
     ${a.subject?`<div class="ar-subj">${esc(a.subject)}</div>`:''}${meta.length?`<div class="ar-meta">${meta.join(' · ')}</div>`:''}
     <div class="ar-body">${esc(a.details)}</div>
-    ${a.response?`<div class="ar-resp"><span>Reviewer response</span>${esc(a.response)}</div>`:''}
+    ${a.response?`<div class="ar-resp"><span>Official response</span>${esc(a.response)}</div>`:''}
     ${rev?`<div class="ar-acts">${btns}</div>`:''}
+    ${(a.type!=='trade_request')?renderThread(a.id):''}
   </div>`;
 }
 function openActionForm(type){
@@ -4196,6 +4224,7 @@ async function loadActionAdmin(){
   if(!sb)return;
   const {data}=await sb.from("action_requests").select("*, profiles(gamertag)").order("created_at",{ascending:false});
   const all=data||[];
+  await loadActionMessages();
   const arOpen=a=>a.status==='open'||a.status==='reviewing';
   ENF_VIEWS.forEach(([type,bodyId,countId,label])=>{
     const el=$("#"+bodyId),cnt=$("#"+countId);if(!el)return;
@@ -4216,6 +4245,53 @@ async function renderTradeRequests(){
 }
 async function setActionStatus(id,status){const {error}=await sb.from("action_requests").update({status,updated_at:new Date().toISOString()}).eq("id",id);if(error){toast("Couldn't update",error.message);return;}toast("Request "+status,"");loadActionAdmin();renderTradeRequests();}
 function respondAction(id){formModal("Respond to request",[{key:"response",label:"Response to the member",type:"textarea",value:""}],async v=>{const {error}=await sb.from("action_requests").update({response:(v.response||"").trim()||null,updated_at:new Date().toISOString()}).eq("id",id);if(error){toast("Couldn't save",error.message);return;}toast("Response saved","The member sees it when you resolve or deny."); loadActionAdmin();renderTradeRequests();});}
+
+/* ---- two-way ticket thread + evidence attachments ---- */
+let actionMsgs={};const pendingAtt={};
+async function loadActionMessages(){actionMsgs={};if(!sb||!authUser)return;
+  try{const {data}=await sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true});
+    (data||[]).forEach(m=>{(actionMsgs[m.request_id]=actionMsgs[m.request_id]||[]).push(m);});}catch(e){}}
+function attHtml(u){const img=/\.(png|jpe?g|gif|webp|avif)$/i.test((u||'').split('?')[0]);
+  return img?`<a href="${esc(u)}" target="_blank" rel="noopener" class="att-thumb"><img src="${esc(u)}" alt="evidence" loading="lazy"></a>`:`<a href="${esc(u)}" target="_blank" rel="noopener" class="att-file">Attachment ↗</a>`;}
+function renderThread(reqId){
+  const msgs=actionMsgs[reqId]||[];
+  const bubbles=msgs.map(m=>{
+    const mine=authUser&&m.author_id===authUser.id;const role=m.profiles?m.profiles.role:null;
+    const name=mine?'You':(role==='commissioner'?'Commissioner':(role==='staff'?'Staff':(m.profiles?esc(m.profiles.gamertag):'Member')));
+    const atts=(m.attachments||[]).map(attHtml).join('');
+    return `<div class="amsg ${mine?'mine':'theirs'}"><div class="amsg-h"><b>${name}</b><span>${timeAgo(m.created_at)}</span></div>${m.body?`<div class="amsg-b">${esc(m.body)}</div>`:''}${atts?`<div class="amsg-att">${atts}</div>`:''}</div>`;
+  }).join('');
+  return `<div class="ar-thread">${bubbles||'<div class="ar-thread-empty">No replies yet — add a reply or evidence below.</div>'}</div>
+    <form class="ar-reply" data-req="${reqId}"><textarea class="ar-reply-in" rows="2" placeholder="Write a reply…" maxlength="2000"></textarea>
+      <div class="ar-reply-att"></div>
+      <div class="ar-reply-bar"><label class="ar-attach"><input type="file" accept="image/*,.pdf" multiple hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> Attach evidence</label><button type="submit" class="btn btn-frost btn-sm">Send reply</button></div>
+    </form>`;
+}
+function renderAttChips(reqId,form){const box=form.querySelector('.ar-reply-att');if(!box)return;
+  box.innerHTML=(pendingAtt[reqId]||[]).map((f,i)=>`<span class="att-chip">${esc(f.name)}<button type="button" class="att-x" data-req="${reqId}" data-i="${i}">×</button></span>`).join('');}
+document.addEventListener('change',e=>{const inp=e.target.closest&&e.target.closest('.ar-attach input[type=file]');if(!inp)return;
+  const form=inp.closest('.ar-reply');const reqId=form.dataset.req;
+  const files=[...inp.files].filter(f=>{if(f.size>6*1024*1024){toast("File too large","Keep evidence under 6 MB.");return false;}return true;});
+  pendingAtt[reqId]=(pendingAtt[reqId]||[]).concat(files).slice(0,4);inp.value='';renderAttChips(reqId,form);});
+document.addEventListener('click',e=>{const x=e.target.closest&&e.target.closest('.att-x');if(!x)return;
+  const reqId=x.dataset.req;(pendingAtt[reqId]||[]).splice(+x.dataset.i,1);renderAttChips(reqId,x.closest('.ar-reply'));});
+document.addEventListener('submit',async e=>{const form=e.target.closest&&e.target.closest('.ar-reply');if(!form)return;e.preventDefault();
+  if(!authUser){toast("Sign in first","");return;}
+  const reqId=form.dataset.req,ta=form.querySelector('.ar-reply-in'),body=(ta.value||'').trim(),files=pendingAtt[reqId]||[];
+  if(!body&&!files.length){toast("Nothing to send","Write a reply or attach evidence.");return;}
+  const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Sending…';
+  try{
+    const urls=[];
+    for(const f of files){const ext=(f.name.split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'')||'bin';
+      const path=`${reqId}/${crypto.randomUUID()}.${ext}`;
+      const {error:ue}=await sb.storage.from('evidence').upload(path,f,{contentType:f.type,upsert:false});
+      if(ue)throw ue;urls.push(sb.storage.from('evidence').getPublicUrl(path).data.publicUrl);}
+    const {error}=await sb.from('action_messages').insert({request_id:reqId,author_id:authUser.id,body:body||null,attachments:urls});
+    if(error)throw error;
+    ta.value='';pendingAtt[reqId]=[];toast("Reply sent","");
+    if($("#myActionsBody"))loadMyActions();if($("#complaintsBody"))loadActionAdmin();if(typeof renderTradeRequests==="function")renderTradeRequests();
+  }catch(err){toast("Couldn't send",err.message||'Try again.');btn.disabled=false;btn.textContent='Send reply';}
+});
 document.addEventListener("click",e=>{
   const s=e.target.closest(".oa-set2");if(s){setActionStatus(s.dataset.id,s.dataset.status);return;}
   const r=e.target.closest(".oa-reply");if(r){respondAction(r.dataset.id);return;}
