@@ -2542,9 +2542,9 @@ function renderStandings(el,full){
   const pl=document.querySelector("#standingsPill");if(pl)pl.textContent=noGames?"Pre-season":"Live";
   const note=noGames?`<div class="empty-note">Season ${openSeason?openSeason.number:1} hasn't dropped the puck yet — standings update automatically as game results are reported.</div>`:"";
   let html=head+"<tbody>";
-  // Group by conference if any club has one, otherwise by division — both derived
-  // dynamically so the table scales from a handful of clubs up to 32 / 4 conferences.
-  const useConf=rows.some(r=>teams[r[0]]&&teams[r[0]].conf);
+  // Group by conference only if EVERY club has one (a real partition), otherwise by division.
+  // (A single stray conference value must not orphan all other clubs into "Unassigned".)
+  const useConf=rows.length>0&&rows.every(r=>teams[r[0]]&&teams[r[0]].conf);
   const groupOf=r=>useConf?(teams[r[0]].conf||"Unassigned"):((teams[r[0]].div||"")+(teams[r[0]].div?" Division":"League"));
   const order=[];rows.forEach(r=>{const g=groupOf(r);if(!order.includes(g))order.push(g);});
   order.sort((a,b)=>a.localeCompare(b));
@@ -3355,7 +3355,8 @@ async function sbInit(){
     renderLeaderGrid($("#leaderboard"));
     if(openSeason){const {count}=await sb.from("season_registrations").select("*",{count:"exact",head:true}).eq("season_id",openSeason.id);
       const hs=$("#heroSkaters");if(hs)hs.textContent=count||0;}
-  }catch(err){console.warn("Supabase public load failed:",err&&err.message);}
+  }catch(err){console.warn("Supabase public load failed:",err&&err.message);
+    toast("Couldn't load league data","Check your connection and refresh the page to try again.");}
   const {data:{session}}=await sb.auth.getSession();
   await setAuth(session);
   sb.auth.onAuthStateChange((_evt,s)=>{setAuth(s);});
