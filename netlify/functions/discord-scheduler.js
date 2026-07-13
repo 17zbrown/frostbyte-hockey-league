@@ -154,13 +154,12 @@ async function weeklyStandings(games, teamById, cfg) {
   const ref = "standings-" + etParts(new Date(anchor)).ymd; // stable across the Fri-night / Sat-early window
   if (!(await claim("weekly_standings", ref))) return "already posted";
   const rows = Object.values(computeStandings(games, teamById)).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.gf - b.ga) - (a.gf - a.ga));
-  const lines = [`🏒 **Chel Gaming League Standings** — through ${fmtDay(anchor)}`, "```",
-    "#  CLUB                  GP  W  L OTL  PTS  DIFF"];
+  // Ranked list (not a code block) so the club role mentions render + ping.
+  const lines = [`🏒 **Chel Gaming League Standings** — through ${fmtDay(anchor)}`, ""];
   rows.forEach((t, i) => {
     const diff = (t.gf - t.ga >= 0 ? "+" : "") + (t.gf - t.ga);
-    lines.push(`${String(i + 1).padStart(2)} ${t.name.slice(0, 21).padEnd(21)} ${String(t.gp).padStart(2)} ${String(t.w).padStart(2)} ${String(t.l).padStart(2)} ${String(t.otl).padStart(3)} ${String(t.pts).padStart(4)}  ${diff.padStart(4)}`);
+    lines.push(`\`${String(i + 1).padStart(2)}\` ${teamTag(teamById, t.id)} — **${t.pts}** PTS · ${t.w}-${t.l}-${t.otl} · ${diff}`);
   });
-  lines.push("```");
   await postWebhook(cfg.discord_standings_webhook || cfg.discord_default_webhook, lines.join("\n"));
   return `posted standings (${rows.length} clubs)`;
 }
