@@ -30,16 +30,34 @@ async function claim(kind, ref) {
   console.error(`claim ${kind}/${ref} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
   return false; // on any other error, stay safe and don't post
 }
+// POST to Discord, honoring 429 Retry-After (bulk reminder loops can otherwise trip rate limits).
+async function postWithRetry(url, headers, payload) {
+  for (let i = 0; i < 4; i++) {
+    const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+    if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((s) => setTimeout(s, (ra + 0.3) * 1000)); continue; }
+    return r;
+  }
+}
 async function postWebhook(url, content) {
   if (!url) return;
-  await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } }) });
+  await postWithRetry(url, { "Content-Type": "application/json" }, { content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } });
 }
 async function postChannel(channelId, content) {
   if (!BOT || !channelId) return;
-  await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-    method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-    body: JSON.stringify({ content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } }) });
+  await postWithRetry(`https://discord.com/api/v10/channels/${channelId}/messages`,
+    { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+    { content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } });
+}
+// This endpoint is publicly HTTP-invocable; debounce anonymous floods (posts are already dedup'd by claim()).
+async function ranRecently(key, sec) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/app_config?key=eq.rl_${key}&select=value`, { headers: sbHead() });
+    const rows = await r.json();
+    const last = rows && rows[0] && rows[0].value ? Date.parse(rows[0].value) : 0;
+    if (Date.now() - last < sec * 1000) return true;
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: `rl_${key}`, value: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+    return false;
+  } catch (e) { return false; }
 }
 
 // ---- America/New_York time helpers (DST-safe: everything is evaluated in ET) ----
@@ -56,6 +74,7 @@ const fmtDay = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/Ne
 
 export default async () => {
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
+  if (await ranRecently("discord-scheduler", 60)) return json({ skipped: "ran moments ago" });
   const now = new Date(), et = etParts(now), sum = {};
   try {
     const seasons = await sbGet("seasons?select=id,number&order=number.desc&limit=1");

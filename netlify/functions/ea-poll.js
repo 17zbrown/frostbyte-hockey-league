@@ -30,11 +30,28 @@ async function sbGet(path) {
   return r.json();
 }
 
+// This endpoint is publicly HTTP-invocable; debounce so anonymous floods can't burn paid-proxy
+// bandwidth / hammer EA. Needs the service-role key to write the marker (SB_KEY here may be anon).
+const SB_SVC = process.env.SUPABASE_SERVICE_ROLE_KEY;
+async function ranRecently(key, sec) {
+  if (!SB_SVC) return false;
+  const h = { apikey: SB_SVC, Authorization: `Bearer ${SB_SVC}`, "Content-Type": "application/json" };
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/app_config?key=eq.rl_${key}&select=value`, { headers: h });
+    const rows = await r.json();
+    const last = rows && rows[0] && rows[0].value ? Date.parse(rows[0].value) : 0;
+    if (Date.now() - last < sec * 1000) return true;
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...h, Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: `rl_${key}`, value: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+    return false;
+  } catch (e) { return false; }
+}
+
 export default async () => {
   if (!SB_URL || !SB_KEY || !INGEST_KEY) {
     console.log("ea-poll: missing env (need SUPABASE_URL/ANON_KEY + INGEST_KEY) — skipping");
     return new Response("skipped: missing env", { status: 200 });
   }
+  if (await ranRecently("ea-poll", 90)) return json({ skipped: "ran moments ago" });
   try {
     // Only poll during the league's game window: Wed 6pm ET -> Sat 2am ET (continuous, every week).
     // Enforced in America/New_York so it stays correct across daylight saving (a fixed-UTC cron can't).

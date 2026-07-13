@@ -21,6 +21,19 @@ const GUILD = process.env.DISCORD_GUILD_ID;
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
+
+// This endpoint is publicly HTTP-invocable (the site pings it for instant sync). Debounce so a
+// flood of anonymous POSTs can't drive endless Discord/DB work. Fail-open on any guard error.
+async function ranRecently(key, sec) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/app_config?key=eq.rl_${key}&select=value`, { headers: sbHead() });
+    const rows = await r.json();
+    const last = rows && rows[0] && rows[0].value ? Date.parse(rows[0].value) : 0;
+    if (Date.now() - last < sec * 1000) return true;
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: `rl_${key}`, value: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+    return false;
+  } catch (e) { return false; }
+}
 async function sbGet(path) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
   if (!r.ok) throw new Error(`GET ${path} -> ${r.status} ${await r.text()}`);
@@ -54,6 +67,8 @@ export default async () => {
     console.log("discord-sync: missing env (need bot token + guild id + Supabase) — skipping");
     return new Response("skipped: missing env", { status: 200 });
   }
+  // collapse rapid repeat invocations (spam / abuse); scheduled runs are 5 min apart so this never blocks them
+  if (await ranRecently("discord-sync", 6)) return new Response("skipped: ran moments ago", { status: 200 });
 
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username");
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));

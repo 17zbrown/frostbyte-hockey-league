@@ -24,10 +24,15 @@
   to = "/.netlify/functions/discord-join"
   status = 200
 
-# Basic security headers for the static site.
+# Security headers for the static site.
 [[headers]]
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy = "geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    # Inline JS/CSS need 'unsafe-inline'; the app also loads supabase-js (jsDelivr), Google Fonts, and
+    # talks to Supabase over REST + realtime (wss). Images allow https (Discord avatars, Supabase logos).
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://bzbuyclwdhmhdzujxeqd.supabase.co wss://bzbuyclwdhmhdzujxeqd.supabase.co; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"

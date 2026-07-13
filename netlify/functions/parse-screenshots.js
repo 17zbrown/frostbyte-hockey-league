@@ -92,6 +92,13 @@ async function parseScreenshots(images) {
 
 export const handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+  // Paid vision-API endpoint — require a shared secret so it can't be run anonymously to burn quota.
+  // Fails closed if unconfigured. (Reuses INGEST_KEY; set PARSE_KEY to use a separate secret.)
+  const KEY = process.env.PARSE_KEY || process.env.INGEST_KEY;
+  if (!KEY || (event.headers["x-parse-key"] || event.headers["X-Parse-Key"]) !== KEY) {
+    return { statusCode: 403, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Forbidden" }) };
+  }
+  if ((event.body || "").length > 12_000_000) return { statusCode: 413, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Payload too large." }) };
   try {
     const { images } = JSON.parse(event.body || "{}");
     if (!Array.isArray(images) || !images.length) throw Object.assign(new Error("No images provided."), { status: 400 });

@@ -27,7 +27,10 @@ export default async (req) => {
   const dest = (name) => BASE + encodeURIComponent(String(name).trim()) + tab;
 
   let ea = q.get("ea"), gt = q.get("gt");
-  if (pid && SB_URL && SB_KEY) {
+  // pid is interpolated into a service-role PostgREST query (bypasses RLS), so it MUST be a
+  // strict UUID — otherwise a crafted value could inject extra filters and read other rows.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (pid && UUID_RE.test(pid) && SB_URL && SB_KEY) {
     try {
       const r = await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${pid}&select=ea_id,platform_gamertag`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } });
       const rows = await r.json();
