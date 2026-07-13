@@ -55,7 +55,7 @@ export default async () => {
     return new Response("skipped: missing env", { status: 200 });
   }
 
-  const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id");
+  const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username");
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
   // current in_guild per profile, so we only write when it changes
   const inGuildById = {};
@@ -158,6 +158,9 @@ export default async () => {
       // (1) username sync — site gamertag follows Discord display name
       const disp = mem.nick || (mem.user && (mem.user.global_name || mem.user.username));
       if (disp && disp !== m.gamertag) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { gamertag: disp }); sum.renamed++; }
+      // (1b) store the Discord @handle so the commissioner directory can show it
+      const handle = mem.user && mem.user.username;
+      if (handle && handle !== m.discord_username) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { discord_username: handle }); }
 
       // (2) role sync — desired managed roles for this member
       const desired = new Set();

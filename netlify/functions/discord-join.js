@@ -16,14 +16,17 @@ const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 const json = (o, s = 200) => ({ statusCode: s, headers: { "content-type": "application/json" }, body: JSON.stringify(o) });
 
-// Flip profiles.in_guild for the member with this Discord id (so registration can require it).
-async function setInGuild(discordId, value) {
+// Flip profiles.in_guild for the member with this Discord id (so registration can require it),
+// and record their Discord @handle so the commissioner directory can show it.
+async function setInGuild(discordId, value, username) {
   if (!SB_URL || !SB_KEY || !discordId) return;
+  const body = { in_guild: value };
+  if (username) body.discord_username = username;
   try {
     await fetch(`${SB_URL}/rest/v1/profiles?discord_id=eq.${discordId}`, {
       method: "PATCH",
       headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ in_guild: value }),
+      body: JSON.stringify(body),
     });
   } catch (e) { /* best effort — the 5-min sync will also set it */ }
 }
@@ -50,8 +53,8 @@ export const handler = async (event) => {
     headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
     body: JSON.stringify({ access_token: token }),
   });
-  if (put.status === 201) { await setInGuild(user.id, true); return json({ joined: true, inGuild: true, user: user.id }); }
-  if (put.status === 204) { await setInGuild(user.id, true); return json({ alreadyMember: true, inGuild: true, user: user.id }); }
+  if (put.status === 201) { await setInGuild(user.id, true, user.username); return json({ joined: true, inGuild: true, user: user.id }); }
+  if (put.status === 204) { await setInGuild(user.id, true, user.username); return json({ alreadyMember: true, inGuild: true, user: user.id }); }
   const detail = (await put.text()).slice(0, 200);
   return json({ error: "Join failed", inGuild: false, status: put.status, detail }, 200);
 };

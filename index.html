@@ -4526,7 +4526,7 @@ const ROLE_OPTS=[["member","Member"],["staff","Staff"],["commissioner","Commissi
 const ROLE_LABEL={owner:"Owner",gm:"General Manager",agm:"Assistant GM",commissioner:"Commissioner",staff:"Staff",member:"Member"};
 async function loadMembers(){
   const el=$("#membersBody");if(!el||!sb)return;
-  const {data:profs}=await sb.from("profiles").select("id,gamertag,role").order("role",{ascending:false}).order("gamertag");
+  const {data:profs}=await sb.from("profiles").select("id,gamertag,role,discord_username").order("role",{ascending:false}).order("gamertag");
   const {data:tms}=await sb.from("teams").select("id,code,name,owner_profile_id,gm_profile_id,agm_profile_id").order("code");
   const clubOf={};(tms||[]).forEach(t=>{[t.owner_profile_id,t.gm_profile_id,t.agm_profile_id].forEach(pid=>{if(pid)clubOf[pid]=t.code;});});
   // current position per player: roster spot (this season) first, else their sign-up position
@@ -4540,8 +4540,9 @@ async function loadMembers(){
   const pc=$("#membersCount");if(pc)pc.textContent=(profs?profs.length:0)+" members";
   if(!profs||!profs.length){el.innerHTML=ADMIN_EMPTY("No members yet","People appear here the moment they sign in with Discord — then you can grant them a role.");return;}
   memberById={};(profs||[]).forEach(p=>{memberById[p.id]={name:p.gamertag||"?",role:p.role,pos:posOf[p.id]||"",salary:salOf[p.id]||0,spotId:spotOf[p.id]||null};});
-  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>League role</th><th>Position</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
-    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-role="${p.role}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}${eaTag(p.id)}</td>
+  el.innerHTML='<div style="overflow-x:auto"><table class="roster-tbl"><thead><tr><th>Member</th><th>Discord</th><th>League role</th><th>Position</th><th style="text-align:right">Edit</th></tr></thead><tbody>'+
+    profs.map(p=>`<tr class="mb-row" data-name="${(p.gamertag||'').toLowerCase().replace(/"/g,'&quot;')}" data-discord="${(p.discord_username||'').toLowerCase().replace(/"/g,'&quot;')}" data-role="${p.role}" data-pos="${posOf[p.id]||''}"><td><b>${esc(p.gamertag)}</b>${clubOf[p.id]?`<small style="color:var(--fog);display:block;font-family:var(--f-mono);font-size:11px">${esc((teams[clubOf[p.id]]||{}).name||clubOf[p.id])} front office</small>`:""}${eaTag(p.id)}</td>
+      <td>${p.discord_username?`<span style="font-family:var(--f-mono);font-size:12px">@${esc(p.discord_username)}</span>`:'<span style="color:var(--fog)">—</span>'}</td>
       <td>${ROLE_LABEL[p.role]||esc(p.role)}</td>
       <td>${posOf[p.id]?esc(posOf[p.id]):'<span style="color:var(--fog)">—</span>'}</td>
       <td style="text-align:right"><button class="mini mb-edit" data-id="${p.id}">Edit</button></td></tr>`).join("")+"</tbody></table></div>";
@@ -4576,7 +4577,7 @@ function filterMembers(){
   const t=(($("#mbSearch")||{}).value||"").trim().toLowerCase();
   const rf=($("#mbRoleFilter")||{}).value||"",pf=($("#mbPosFilter")||{}).value||"";
   document.querySelectorAll("#membersBody .mb-row").forEach(row=>{
-    const ok=(!t||row.dataset.name.includes(t))&&(!rf||row.dataset.role===rf)&&(!pf||row.dataset.pos===pf);
+    const ok=(!t||row.dataset.name.includes(t)||(row.dataset.discord||"").includes(t))&&(!rf||row.dataset.role===rf)&&(!pf||row.dataset.pos===pf);
     row.style.display=ok?"":"none";
   });
 }
