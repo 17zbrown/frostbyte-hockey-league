@@ -2349,7 +2349,11 @@ const SUN_ICON=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strok
 const MOON_ICON=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>`;
 function applyTheme(t){t=(t==="dark")?"dark":"light";document.documentElement.setAttribute("data-theme",t);
   try{localStorage.setItem("fb-theme",t);}catch(e){}
-  const b=$("#themeToggle");if(b){b.innerHTML=(t==="dark")?SUN_ICON:MOON_ICON;b.setAttribute("aria-label",(t==="dark")?"Switch to light theme":"Switch to dark theme");}}
+  const dark=(t==="dark"),ic=dark?SUN_ICON:MOON_ICON,lbl=dark?"Light mode":"Dark mode";
+  const b=$("#themeToggle");if(b){b.innerHTML=ic;b.setAttribute("aria-label",dark?"Switch to light theme":"Switch to dark theme");}
+  const a=$("#acctTheme");if(a)a.innerHTML='<span class="acct-ic">'+ic+'</span>'+lbl;
+  const m=$("#mmTheme");if(m)m.textContent=lbl;}
+function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");}
 $("#themeToggle")&&$("#themeToggle").addEventListener("click",()=>{
   applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");});
 applyTheme(document.documentElement.getAttribute("data-theme")||"dark");
@@ -2603,10 +2607,12 @@ function mmAccountHtml(){
     +'<button type="button" data-go="messages">Messages</button>'
     +'<button type="button" id="mmEditProfile">Edit Profile</button>'
     +'<button type="button" data-go="offers">Contract Offers</button>'
+    +'<button type="button" id="mmTheme">'+((document.documentElement.getAttribute("data-theme")==="dark")?"Light mode":"Dark mode")+'</button>'
     +'<button type="button" id="mmSignOut">Sign out</button>';
 }
 $("#mobileMenu").addEventListener("click",e=>{
   if(e.target.closest("#mmEditProfile")){e.preventDefault();closeMobile();openEditProfile();return;}
+  if(e.target.closest("#mmTheme")){e.preventDefault();toggleTheme();return;}
   if(e.target.closest("#mmSignOut")){e.preventDefault();closeMobile();signOutSb();return;}
 });
 
@@ -3612,6 +3618,7 @@ function renderAuthUI(){
     if(authProfile){
       const _tr=myTeamRole();const rl=authProfile.role==="commissioner"?"Commissioner":(_tr?ROLE_LABEL[_tr]:(authProfile.role==="staff"?"Staff":"Member"));
       const mgr=isManager(),comm=authProfile.role==="commissioner";
+      const THEME_DARK=document.documentElement.getAttribute("data-theme")==="dark";
       const CARET='<svg class="acct-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
       const item=(attrs,ic,label)=>`<button class="acct-item" ${attrs}><span class="acct-ic">${ic}</span>${label}</button>`;
       const IC_MGR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20v-1a4 4 0 0 1 4-4h3M15 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="m16 11 2 2 4-4"/></svg>';
@@ -3633,6 +3640,7 @@ function renderAuthUI(){
           ${item('data-go="offers" role="menuitem"',IC_OFFER,"Contract Offers")}
           ${item('data-go="actions" role="menuitem"',IC_OFFER,"Action Center")}
           ${item('id="acctEditProfile" role="menuitem"',IC_EDIT,"Edit Profile")}
+          <button class="acct-item" id="acctTheme" role="menuitem" type="button"><span class="acct-ic">${THEME_DARK?SUN_ICON:MOON_ICON}</span>${THEME_DARK?"Light mode":"Dark mode"}</button>
           <div class="acct-sep"></div>
           ${item('id="acctSignOut" role="menuitem"',IC_OUT,"Sign out")}
         </div>
@@ -3641,6 +3649,8 @@ function renderAuthUI(){
       slot.innerHTML=`<button class="btn btn-frost btn-sm" id="signInBtn"><span style="display:inline-flex;vertical-align:-3px;margin-right:5px">${DISCORD_GLYPH}</span>Sign in</button>`;
     }
   }
+  // Signed-in users toggle theme from the profile menu; signed-out visitors keep the header button.
+  const tt=$("#themeToggle");if(tt)tt.style.display=authProfile?"none":"";
   renderSignupAuth();
   if(typeof renderOwnerAuth==="function")renderOwnerAuth();
   renderCommissioner();
@@ -3701,6 +3711,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#acctBtn")){e.preventDefault();toggleAcctMenu();return;}
   if(e.target.closest("#acctSignOut")){e.preventDefault();toggleAcctMenu(false);signOutSb();return;}
   if(e.target.closest("#acctEditProfile")){e.preventDefault();toggleAcctMenu(false);openEditProfile();return;}
+  if(e.target.closest("#acctTheme")){e.preventDefault();toggleTheme();return;}
   if(e.target.closest("#su-editprof")){e.preventDefault();openEditProfile();return;}
   if(e.target.closest("#acctMenu [data-go]")){toggleAcctMenu(false);return;}  // let go() navigate, close the menu
   if(!e.target.closest("#acctWrap"))toggleAcctMenu(false);
