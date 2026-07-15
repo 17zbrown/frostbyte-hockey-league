@@ -5533,13 +5533,19 @@ CG.buildLiveLeague = async function(){
     sb.from("contracts").select("*"),
     sb.from("games").select("*").order("scheduled_at"),
     sb.from("transactions").select("*").order("occurred_at", { ascending:false }),
-    sb.from("news").select("*").order("published_at", { ascending:false })
+    sb.from("news").select("*").order("published_at", { ascending:false }),
+    sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used").order("season_number").order("round"),
+    sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)")
   ]);
-  var bad = q.find(function(r){ return r.error; });
+  /* first 9 are public-readable and required; the last two (draft_picks,
+     season_registrations) are manager-gated by RLS and fail for guests —
+     they're optional here and reloaded after auth for managers. */
+  var bad = q.slice(0,9).find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=(q[2].data||[])[0]||null,
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
-      games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[];
+      games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
+      draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[];
 
   /* ---- team registry (rebuilt from the DB: real logos, ids, management) ---- */
   var teamById={}, id2code={};
@@ -5666,6 +5672,13 @@ CG.buildLiveLeague = async function(){
     });
   }
 
+  /* draft board + pool (parity with the live site). Maps stored on lg so the
+     manager-only data can be re-mapped after auth via CG.mapDraftData. */
+  lg._idToCode = {}; teamsRaw.forEach(function(t){ lg._idToCode[t.id] = t.code; });
+  lg._profName = {}; profiles.forEach(function(pr){ lg._profName[pr.id] = pr.gamertag || pr.display_name || "player"; });
+  lg._rosteredIds = {}; roster.forEach(function(rs){ lg._rosteredIds[rs.profile_id] = true; });
+  CG.mapDraftData(lg, draftPicks, registrations);
+
   CG.LIVE.loaded = true;
   return lg;
 };
@@ -5708,7 +5721,36 @@ CG.applySession = async function(session){
     catch(e){ CG.auth.ownerApp = null; }
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
+  await CG.loadManagerData();
   CG.enforceBan();
+};
+/* re-map the draft board/pool with the same maps the adapter built */
+CG.mapDraftData = function(lg, draftPicks, registrations){
+  var idToCode = lg._idToCode||{}, profName = lg._profName||{}, rostered = lg._rosteredIds||{};
+  lg.draftPicks = (draftPicks||[]).map(function(p){
+    return { id:p.id, season:p.season_number, round:p.round,
+      ownerCode: idToCode[p.current_team_id]||null, origCode: idToCode[p.original_team_id]||null,
+      playerId:p.player_id, playerName: p.player_id?(profName[p.player_id]||"a player"):null, used:!!p.used };
+  });
+  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id]; })
+    .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(r.scout_ovr==null?null:r.scout_ovr), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
+    .sort(function(a,b){ return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr); });
+  lg.registrationsCount = (registrations||[]).length;
+};
+/* manager-gated data (draft board + registrations) — loaded after auth for management */
+CG.loadManagerData = async function(){
+  if (!CG.sb || !CG.lg) return;
+  var role = CG.auth.role;
+  if (role!=="mgmt" && role!=="commish" && role!=="staff") return;
+  try {
+    var q = await Promise.all([
+      CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used").order("season_number").order("round"),
+      CG.sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)")
+    ]);
+    if ((q[0]&&!q[0].error) || (q[1]&&!q[1].error)){
+      CG.mapDraftData(CG.lg, (q[0]&&!q[0].error&&q[0].data)||[], (q[1]&&!q[1].error&&q[1].data)||[]);
+    }
+  } catch(e){}
 };
 CG.initAuth = async function(){
   if (!CG.sb || !CG.sb.auth) return;
@@ -5921,6 +5963,63 @@ CG.submitOwnerApp = async function(){
   var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
   CG.auth.ownerApp=payload; CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
+};
+
+/* ================================================================
+   PARITY: DRAFT ROOM (draft_picks + season_registrations pool)
+   Management/commish watch view; the commissioner runs picks from
+   the Control Center via the use_draft_pick RPC.
+   ================================================================ */
+CG.ROUTES.draft = function(){
+  var lg = CG.lg, role = CG.role();
+  var head = CG.pageHead("The draft room","Draft board","The commissioner runs the draft live — the board, prospect pool, and results update as picks are made.");
+  if (role!=="mgmt" && role!=="commish" && role!=="staff"){
+    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("lock",22)+'</div><b>Managers only</b><p>The draft board and prospect pool are visible to club management and the league office.</p></div></div></div>';
+  }
+  var picks = lg.draftPicks||[];
+  if (!picks.length){
+    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("users",22)+'</div><b>No draft has been set up yet</b><p>When the commissioner builds the board, the picks, prospect pool, and live results appear here.</p></div></div></div>';
+  }
+  var maxSn = Math.max.apply(null, picks.map(function(p){ return p.season; }));
+  var cur = picks.filter(function(p){ return p.season===maxSn; });
+  var total = cur.length, made = cur.filter(function(p){ return p.used; }).length;
+  var myClub = CG.myClub && CG.myClub();
+  var mine = cur.filter(function(p){ return p.ownerCode===myClub; }).sort(function(a,b){ return a.round-b.round; });
+  var myOpen = mine.filter(function(p){ return !p.used; });
+  var pool = lg.draftPool||[];
+  var rounds = {}; cur.forEach(function(p){ (rounds[p.round]=rounds[p.round]||[]).push(p); });
+  var roundNums = Object.keys(rounds).map(Number).sort(function(a,b){ return a-b; });
+
+  var summary = '<div class="grid g3" style="margin-bottom:20px">'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+made+' / '+total+'</b><span>picks made</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+pool.length+'</b><span>prospects available</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px'+(myOpen.length?';color:var(--chrome-deep)':'')+'">'+(role==="mgmt"?myOpen.length:"—")+'</b><span>'+(role==="mgmt"?"your open picks":"Season "+maxSn+" draft")+'</span></div></div>';
+
+  var board = '<div class="card"><div class="card-h"><h3>Season '+maxSn+' board</h3><span class="chip">'+roundNums.length+' rounds</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Draft board by round</caption><thead><tr><th>Rd</th><th class="tleft">Club</th><th class="tleft">Origin</th><th class="tleft">Result</th></tr></thead><tbody>'+
+    roundNums.map(function(rd){
+      return rounds[rd].slice().sort(function(a,b){ return (a.ownerCode||"").localeCompare(b.ownerCode||""); }).map(function(p){
+        var isMine = p.ownerCode===myClub;
+        return '<tr'+(isMine?' style="background:var(--chrome-tint)"':"")+'><td class="tnum">R'+p.round+'</td>'+
+          '<td class="tleft"><span class="teamcell">'+(p.ownerCode?CG.crest(p.ownerCode,18):"")+'<span class="mono" style="font-size:11px">'+esc(p.ownerCode||"—")+'</span></span></td>'+
+          '<td class="tleft small" style="color:var(--steel)">'+(p.origCode&&p.origCode!==p.ownerCode?"via "+esc(p.origCode):"—")+'</td>'+
+          '<td class="tleft">'+(p.used?'<span class="chip chip-win">'+esc(p.playerName||"Drafted")+'</span>':'<span class="caption">On the board</span>')+'</td></tr>';
+      }).join("");
+    }).join("")+'</tbody></table></div></div>';
+
+  var poolCard = '<div class="card"><div class="card-h"><h3>Prospect pool</h3><span class="chip">'+pool.length+' available</span></div>'+
+    (pool.length ? '<div class="card-b" style="padding-top:8px"><p class="caption" style="margin-bottom:10px">Registered players not yet on a roster, ranked by the commissioner’s scouted overall.</p>'+
+      pool.slice(0,40).map(function(pr,i){
+        return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
+          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b><small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+'</small></span>'+
+          '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
+      }).join("")+'</div>'
+      : '<div class="card-b"><p class="caption">No prospects available yet — the pool fills from season registrations that haven’t been assigned to a club.</p></div>')+'</div>';
+
+  return head + '<div class="shell" style="padding-bottom:48px">'+summary+
+    '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
 
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
