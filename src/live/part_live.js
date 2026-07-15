@@ -204,12 +204,14 @@ CG.applySession = async function(session){
     try { var r = await CG.sb.from("profiles").select("*").eq("id", CG.auth.user.id).maybeSingle(); CG.auth.profile = r.data || null; }
     catch(e){ CG.auth.profile = null; }
     /* the user's registration for the open season (for the Register flow) */
-    CG.auth.registration = null;
+    CG.auth.registration = null; CG.auth.ownerApp = null;
     if (CG.auth.user && CG.SEASON && CG.SEASON.id){
       try { var rg = await CG.sb.from("season_registrations").select("*").eq("season_id", CG.SEASON.id).eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.registration = rg.data || null; }
       catch(e){ CG.auth.registration = null; }
     }
-  } else { CG.auth.profile = null; CG.auth.registration = null; }
+    try { var oa = await CG.sb.from("owner_applications").select("*").eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.ownerApp = oa.data || null; }
+    catch(e){ CG.auth.ownerApp = null; }
+  } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   CG.enforceBan();
 };
@@ -366,6 +368,64 @@ CG.registerForSeason = async function(position, note){
   if(r.error){ CG.toast("Couldn’t register: "+r.error.message,"err"); return; }
   CG.auth.registration=payload;
   CG.toast("You’re registered for Season "+(s.number||1)+"!","ok"); CG.router();
+};
+
+/* ================================================================
+   PARITY: OWNER APPLICATIONS (owner_applications)
+   ================================================================ */
+CG.ROUTES.owner = function(){
+  var head = CG.pageHead("Run a club","Apply to own a team",
+    "Owners set their club’s identity, hire a GM, and build the roster. Applications are tied to your Discord so the commissioners know who applied.");
+  if (!CG.auth.profile){
+    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("shield",22)+'</div><b>Sign in to apply</b>'+
+      '<p>Owner applications are tied to your Discord account so the commissioners know who applied.</p>'+
+      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
+  }
+  var p = CG.auth.profile, a = CG.auth.ownerApp||{};
+  var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
+  var clubOpts = '<option value="">No preference</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(a.preferred_club===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("");
+  var build = a.team_choice==="build";
+  var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
+    '<div class="grid g2"><label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
+      '<label class="fld"><span>Time zone</span><input id="ow-tz" placeholder="e.g. Eastern" value="'+esc(a.timezone||"")+'"></label></div>'+
+    '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
+    '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
+    '<label class="fld"><span>Club preference</span><select id="ow-choice"><option value="assigned"'+(!build?" selected":"")+'>Take an existing / assigned club</option><option value="build"'+(build?" selected":"")+'>Propose a brand-new club</option></select></label>'+
+    '<div id="ow-assignedwrap" style="'+(build?"display:none":"")+'"><label class="fld"><span>Preferred club</span><select id="ow-club">'+clubOpts+'</select></label></div>'+
+    '<div id="ow-buildwrap" class="grid g2" style="'+(build?"":"display:none")+'"><label class="fld"><span>Proposed team name</span><input id="ow-name" placeholder="e.g. Harbor Kraken" value="'+esc(a.proposed_name||"")+'"></label>'+
+      '<label class="fld"><span>Proposed city / location</span><input id="ow-loc" placeholder="e.g. Nord Harbor" value="'+esc(a.proposed_location||"")+'"></label></div>'+
+    '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
+    '<button class="btn btn-chrome" id="ow-submit">'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
+  '</div></div>';
+  return head + '<div class="shell" style="max-width:720px;padding-bottom:48px">'+statusCard+body+'</div>';
+};
+CG.AFTER.owner = function(){
+  var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
+  var ch=document.getElementById("ow-choice");
+  if(ch) ch.addEventListener("change", function(){
+    var build=this.value==="build";
+    var aw=document.getElementById("ow-assignedwrap"), bw=document.getElementById("ow-buildwrap");
+    if(aw) aw.style.display=build?"none":""; if(bw) bw.style.display=build?"":"none";
+  });
+  var sub=document.getElementById("ow-submit"); if(sub) sub.addEventListener("click", CG.submitOwnerApp);
+};
+CG.submitOwnerApp = async function(){
+  if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
+  var ea=v("ow-ea"), pitch=v("ow-pitch"), choice=(document.getElementById("ow-choice")||{}).value||"assigned";
+  if(!ea){ CG.toast("EA ID is required","err"); return; }
+  if(!pitch){ CG.toast("Add a short pitch","err"); return; }
+  var propName = choice==="build" ? (v("ow-name")||null) : null;
+  if(choice==="build" && !propName){ CG.toast("Name your proposed team (or pick an assigned club)","err"); return; }
+  var payload={ season_id: CG.SEASON?CG.SEASON.id:null, profile_id: CG.auth.user.id, ea_id:ea,
+    timezone:v("ow-tz")||null, availability:v("ow-avail")||null, experience:v("ow-exp")||null,
+    team_choice:choice, preferred_club: choice==="build"?null:((document.getElementById("ow-club")||{}).value||null),
+    proposed_name:propName, proposed_location: choice==="build"?(v("ow-loc")||null):null,
+    pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
+  var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
+  if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+  CG.auth.ownerApp=payload; CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
 };
 
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
