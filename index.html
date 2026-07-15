@@ -5759,10 +5759,16 @@ CG.loadManagerData = async function(){
   try {
     var q = await Promise.all([
       CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used").order("season_number").order("round"),
-      CG.sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)")
+      CG.sb.from("season_registrations").select("id,profile_id,position,scout_ovr,note, profiles(gamertag,ea_id,platform,jersey_number)")
     ]);
+    var regs = (q[1]&&!q[1].error&&q[1].data)||[];
+    CG.lg._registrationsRaw = regs;
     if ((q[0]&&!q[0].error) || (q[1]&&!q[1].error)){
-      CG.mapDraftData(CG.lg, (q[0]&&!q[0].error&&q[0].data)||[], (q[1]&&!q[1].error&&q[1].data)||[]);
+      CG.mapDraftData(CG.lg, (q[0]&&!q[0].error&&q[0].data)||[], regs);
+    }
+    if (role==="commish"){
+      var oa = await CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
+      CG.lg._ownerApps = (oa && !oa.error && oa.data) || [];
     }
   } catch(e){}
 };
@@ -6149,6 +6155,85 @@ CG.AFTER.messages = function(param){
   if (CG._dm.active) CG.dmMarkRead(CG._dm.active);
 };
 
+/* ================================================================
+   LIVE ADMIN: PRE-SEASON CENTRAL (registrations + owner apps + roster fill)
+   Real data; reversible writes (scout_ovr, owner-app status).
+   ================================================================ */
+CG.admPreseason = function(){
+  var lg=CG.lg, s=CG.SEASON||{};
+  var regs=(lg._registrationsRaw||[]).slice(), apps=lg._ownerApps||[];
+  var rosterMax=s.roster_max||15, rosteredIds=lg._rosteredIds||{};
+  var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
+  var pendingApps=apps.filter(function(a){ return a.status==="pending"; }).length;
+  var h='<div style="margin-bottom:18px"><h2 class="h-sec">Pre-season central</h2>'+
+    '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>';
+  var kpis=[[regs.length,"Registered players",""],[assigned+" / "+regs.length,"Assigned to a club",""],[pendingApps,"Owner apps pending",pendingApps>0?"alert":""],[s.registration_open?"Open":"Closed","Registration",""]];
+  h+='<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-bottom:20px">'+
+    kpis.map(function(k){ return '<div class="kpi'+(k[2]==="alert"?" alert":"")+'" style="cursor:default"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'; }).join("")+'</div>';
+  var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  h+='<div class="card"><div class="card-h"><h3>Registered players</h3><span class="chip">'+regs.length+'</span></div>'+
+    (regs.length?'<div class="tblwrap"><table class="tbl keepcols"><caption>Season registrations</caption><thead><tr>'+
+      '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Status</th></tr></thead><tbody>'+
+      sortedRegs.map(function(r){ var prof=r.profiles||{}, on=rosteredIds[r.profile_id];
+        return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
+          '<td class="tnum">'+esc(r.position||"—")+'</td><td class="tleft small" style="color:var(--steel)">'+esc(prof.ea_id||"—")+'</td>'+
+          '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" style="width:64px;text-align:center;padding:5px" placeholder="—"></td>'+
+          '<td>'+(on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td></tr>';
+      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool — saves as you edit. Player assignment to clubs runs from the draft and the classic tools.</span></div>'
+      :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
+  h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
+  if (apps.length){
+    h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+        '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
+        '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.team_choice==="build"?'<span>Wants to build <b>'+esc(a.proposed_name||"a new club")+'</b>'+(a.proposed_location?" ("+esc(a.proposed_location)+")":""):'<span>Preferred club: <b>'+esc(a.preferred_club||"no preference")+'</b>')+'</span>'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+'</div>'+
+        (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
+        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-app-approve="'+a.id+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
+        '<button class="btn btn-ghost btn-sm" data-app-deny="'+a.id+'"'+(a.status==="denied"?" disabled":"")+'>Deny</button></div></div>';
+    }).join("");
+  } else { h+='<div class="card-b"><p class="caption">No owner applications yet. They appear here when members apply from the “Apply to own a team” page.</p></div>'; }
+  h+='</div>';
+  h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Roster fill</h3><span class="chip">max '+rosterMax+' per club</span></div><div class="card-b">'+
+    CG.TEAMS.map(function(t){ var n=(lg.byTeam[t.code]||[]).length, pct=Math.round(100*n/rosterMax);
+      return '<div style="display:flex;align-items:center;gap:12px;padding:7px 0">'+CG.crest(t.code,20)+'<span style="width:140px;font-size:13px">'+esc(t.name)+'</span>'+
+        '<span class="rb-track" style="flex:1"><span class="rb-fill" style="width:'+Math.min(100,pct)+'%"></span></span>'+
+        '<b class="num" style="width:56px;text-align:right;font-size:13px">'+n+'/'+rosterMax+'</b></div>';
+    }).join("")+'</div></div>';
+  return h;
+};
+CG.AFTER._preseason = function(){
+  document.querySelectorAll("[data-scout]").forEach(function(el){
+    el.addEventListener("change", function(){
+      var id=this.getAttribute("data-scout"), v=(this.value||"").trim();
+      var nv = v===""?null:Math.max(40,Math.min(99,parseInt(v,10)||0));
+      CG.sb.from("season_registrations").update({scout_ovr:nv}).eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); }
+        else { CG.toast("Scout OVR saved","ok"); var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===id;}); if(reg)reg.scout_ovr=nv; }
+      });
+    });
+  });
+  document.querySelectorAll("[data-app-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-approve"),"approved"); }); });
+  document.querySelectorAll("[data-app-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-deny"),"denied"); }); });
+};
+CG.setOwnerAppStatus = async function(id, status){
+  var r = await CG.sb.from("owner_applications").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id);
+  if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+  var app=(CG.lg._ownerApps||[]).find(function(x){ return x.id===id; }); if(app) app.status=status;
+  CG.toast("Application "+status,"ok"); CG.router();
+};
+/* register Pre-season central in the Control Center */
+CG._origAdminRoute = CG.ROUTES.admin;
+CG.ROUTES.admin = function(param, qs){
+  if (CG.role()!=="commish") return CG.unauthorized("The Control Center is commissioner-only.");
+  if (param==="preseason") return CG.adminShell("preseason", CG.admPreseason(qs||{}));
+  return CG._origAdminRoute(param, qs);
+};
+CG._origAdminAfter = CG.AFTER.admin;
+CG.AFTER.admin = function(param, qs){
+  if (param==="preseason"){ CG.AFTER._preseason(); return; }
+  if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
+};
+
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
 CG.bootLive = async function(){
   var app = document.getElementById("app");
@@ -6166,6 +6251,10 @@ CG.bootLive = async function(){
     /* signed-in extras: Messages in the account drawer's reach (nav link) */
     if (CG.auth.user && CG.NAV && !CG.NAV.some(function(n){ return n[1]==="#/messages"; })){
       CG.NAV.push(["Messages","#/messages"]);
+    }
+    /* Pre-season central in the Control Center (commissioner) */
+    if (CG.ADMIN_NAV && CG.ADMIN_NAV[0] && !CG.ADMIN_NAV[0][1].some(function(it){ return it[0]==="preseason"; })){
+      CG.ADMIN_NAV[0][1].splice(1, 0, ["preseason","Pre-season","users"]);
     }
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
