@@ -181,6 +181,7 @@ CG.buildLiveLeague = async function(){
      manager-only data can be re-mapped after auth via CG.mapDraftData. */
   lg._idToCode = {}; lg._codeToId = {}; teamsRaw.forEach(function(t){ lg._idToCode[t.id] = t.code; lg._codeToId[t.code] = t.id; });
   lg._profName = {}; profiles.forEach(function(pr){ lg._profName[pr.id] = pr.gamertag || pr.display_name || "player"; });
+  lg._profilesRaw = profiles;
   lg._rosteredIds = {}; roster.forEach(function(rs){ lg._rosteredIds[rs.profile_id] = true; });
   CG.mapDraftData(lg, draftPicks, registrations);
 
@@ -857,16 +858,107 @@ CG.setOwnerAppStatus = async function(id, status){
   var app=(CG.lg._ownerApps||[]).find(function(x){ return x.id===id; }); if(app) app.status=status;
   CG.toast("Application "+status,"ok"); CG.router();
 };
-/* register Pre-season central in the Control Center */
+/* ================================================================
+   LIVE ADMIN: USERS & ROLES (set_member_role / set_team_manager / ban)
+   ================================================================ */
+CG.admUsersLive = function(){
+  var lg=CG.lg;
+  var profs=(lg._profilesRaw||[]).slice().sort(function(a,b){ return (a.gamertag||a.display_name||"").localeCompare(b.gamertag||b.display_name||""); });
+  var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
+  var banned=profs.filter(function(p){ return p.banned; }).length;
+  function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
+  h+='<div class="grid g3" style="margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+profs.filter(function(p){return p.role==="commissioner";}).length+'</b><span>commissioners</span></div>'+
+    '<div class="kpi'+(banned?" alert":"")+'" style="cursor:default"><b class="num">'+banned+'</b><span>banned</span></div></div>';
+  h+='<input type="search" id="userSearch" placeholder="Search players…" style="margin-bottom:16px" aria-label="Search users">';
+  h+='<div class="card"><div class="card-h"><h3>Members</h3><span class="chip">'+profs.length+'</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
+    profs.map(function(pr){
+      var pl=playerById[pr.id], club=pl?pl.team:null, mgmt=pl&&pl.mgmt?pl.mgmt:null;
+      var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
+      return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'">'+
+        '<td class="tleft"><span class="playercell">'+(pr.avatar_url?'<img src="'+esc(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
+        '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
+        '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
+        '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
+        '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<button class="btn btn-ghost btn-sm" data-manage="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Club role</button>'+
+          (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
+        '</span></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
+  return h;
+};
+CG.setUserRole = function(profileId, role){
+  CG.sb.rpc("set_member_role",{ p_target:profileId, p_role:role, p_team_code:null }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t set role: "+r.error.message,"err"); return; }
+    var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr) pr.role=role;
+    CG.toast("Role updated to "+role,"ok");
+  });
+};
+CG.assignClubRole = function(profileId, name){
+  var teamOpts='<option value="">Choose club…</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
+  CG.modal("Assign "+esc(name)+" to club management",
+    '<label class="fld"><span>Club</span><select id="mgTeam">'+teamOpts+'</select></label>'+
+    '<label class="fld"><span>Role</span><select id="mgRole"><option value="owner">Owner</option><option value="gm">General Manager</option><option value="agm">Assistant GM</option></select></label>'+
+    '<p class="caption">Sets the club’s Owner / GM / AGM. Management runs their club’s Team HQ (roster, trades, lineups) and drafts their own picks.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Assign</button>');
+  document.getElementById("mgGo").addEventListener("click", function(){
+    var code=document.getElementById("mgTeam").value, role=document.getElementById("mgRole").value;
+    if(!code){ CG.toast("Pick a club first","err"); return; }
+    CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:role, p_profile:profileId }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
+      if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" is now "+role.toUpperCase()+" of "+code+" — refresh to see the badge","ok");
+    });
+  });
+};
+CG.banUser = function(profileId, name){
+  CG.modal("Ban "+esc(name)+"?",
+    '<label class="fld"><span>Reason (shown to the member)</span><textarea id="banReason" rows="2" placeholder="e.g. repeated conduct violations"></textarea></label>'+
+    '<p class="caption">Bans remove site access and remove the member from the Chel Gaming Discord. Reversible with Unban.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="banGo">Ban member</button>');
+  document.getElementById("banGo").addEventListener("click", function(){
+    var reason=(document.getElementById("banReason").value||"").trim();
+    CG.sb.rpc("ban_player",{ p_profile:profileId, p_reason:reason }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t ban: "+r.error.message,"err"); return; }
+      var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr){ pr.banned=true; pr.ban_reason=reason; }
+      if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" banned","ok"); CG.router();
+    });
+  });
+};
+CG.unbanUser = function(profileId){
+  CG.sb.rpc("unban_player",{ p_profile:profileId }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t unban: "+r.error.message,"err"); return; }
+    var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr) pr.banned=false;
+    CG.toast("Member unbanned","ok"); CG.router();
+  });
+};
+CG.AFTER._admUsers = function(){
+  var search=document.getElementById("userSearch");
+  if(search) search.addEventListener("input", function(){
+    var qy=this.value.toLowerCase();
+    document.querySelectorAll("#usersBody tr").forEach(function(tr){ tr.style.display = tr.getAttribute("data-user-name").indexOf(qy)>=0?"":"none"; });
+  });
+  document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value); }); });
+  document.querySelectorAll("[data-manage]").forEach(function(b){ b.addEventListener("click", function(){ CG.assignClubRole(this.getAttribute("data-manage"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
+};
+
+/* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
   if (CG.role()!=="commish") return CG.unauthorized("The Control Center is commissioner-only.");
   if (param==="preseason") return CG.adminShell("preseason", CG.admPreseason(qs||{}));
+  if (param==="users") return CG.adminShell("users", CG.admUsersLive(qs||{}));
   return CG._origAdminRoute(param, qs);
 };
 CG._origAdminAfter = CG.AFTER.admin;
 CG.AFTER.admin = function(param, qs){
   if (param==="preseason"){ CG.AFTER._preseason(); return; }
+  if (param==="users"){ CG.AFTER._admUsers(); return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 
