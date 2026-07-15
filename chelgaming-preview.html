@@ -356,6 +356,8 @@ label.fld>span{display:block;font-family:var(--f-mono);font-size:11px;letter-spa
 .toggle.on{background:var(--ink)}
 .toggle::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .18s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
 .toggle.on::after{left:23px}
+html[data-theme="dark"] .toggle.on{background:var(--chrome)}
+html[data-theme="dark"] .toggle.on::after{background:#101519}
 
 /* ---------- entity autocomplete ---------- */
 .ac-menu{position:absolute;background:var(--paper);border:1.5px solid var(--ink);border-radius:var(--r-m);
@@ -397,7 +399,7 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
   display:flex;align-items:center;gap:9px;min-height:36px}
 .hub-side a:hover{color:var(--ink);background:var(--paper)}
 .hub-side a.on{background:var(--bc);color:#fff}
-.hub-side a.on .hs-n{background:var(--chrome);color:var(--ink)}
+.hub-side a.on .hs-n{background:var(--chrome);color:#101519}
 .hub-side .hs-n{margin-left:auto;font-family:var(--f-mono);font-size:10px;background:var(--line);
   border-radius:100px;padding:1px 7px;color:var(--ink)}
 .kpi{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:16px 18px;cursor:pointer;transition:border-color .15s}
