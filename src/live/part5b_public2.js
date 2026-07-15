@@ -7,6 +7,12 @@ CG.ROUTES.awards = function(param, qs){
   var lg = CG.lg, C = CG.CONTENT;
   var tab = qs.tab||"stars";
   var head = CG.pageHead("Hardware","Awards & honors","Three Stars every game night, Players of the Week every Monday, season hardware in August.");
+  if (CG.isPreseason && CG.isPreseason()){
+    return head + '<div class="shell" style="padding-bottom:48px"><div class="card"><div class="empty" style="padding:70px 20px">'+
+      '<div class="e-art">'+CG.ic("trophy",22)+'</div><b>Awards begin when the season does</b>'+
+      '<p>Three Stars are named after every game night, Players of the Week every Monday, and season hardware in the finale. The first honors go out in Week 1.</p>'+
+      '<a class="btn btn-chrome" style="margin-top:18px" href="#/schedule">Opening schedule</a></div></div></div>';
+  }
   var tabs = '<div class="shell"><div class="tabs" role="tablist">'+
     [["stars","Three Stars"],["potw","Players of the Week"],["season","Season awards"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
@@ -70,6 +76,23 @@ CG.AFTER.awards = function(param){
 /* ---------- POWER RANKINGS ---------- */
 CG.ROUTES.rankings = function(){
   var lg = CG.lg, C = CG.CONTENT;
+  if (CG.isPreseason && CG.isPreseason()){
+    var pHead = CG.pageHead("Preseason projections","CGHL Power Rankings","Weekly power rankings begin once games are played. Until then, here's how the clubs line up on paper — by roster overall.");
+    var order = CG.TEAMS.slice().sort(function(a,b){ return lg.teamRatings[b.code].ovr - lg.teamRatings[a.code].ovr; });
+    var pRows = order.map(function(t, i){
+      var r = lg.byTeam[t.code]||[];
+      return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+t.code+'" role="link" tabindex="0"><div class="card-b" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:center">'+
+        '<div style="text-align:center"><b style="font-family:var(--f-disp);font-weight:900;font-size:34px;letter-spacing:-.02em">'+(i+1)+'</b></div>'+
+        CG.crest(t.code,52)+
+        '<div style="min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+          '<b style="font-family:var(--f-disp);font-size:19px">'+esc(t.name)+'</b>'+
+          '<span class="chip">'+esc(t.div)+' Division</span>'+
+          '<span class="ovrbox '+CG.ovrClass(lg.teamRatings[t.code].ovr)+'" style="min-width:36px;height:24px;font-size:13px">'+lg.teamRatings[t.code].ovr+'</span></div>'+
+          '<p class="caption" style="margin-top:8px">'+r.length+' player'+(r.length===1?"":"s")+' signed · roster building</p></div></div></div>';
+    }).join("");
+    return pHead + '<div class="shell" style="padding-bottom:40px"><div class="stack">'+pRows+'</div>'+
+      '<div class="note" style="margin-top:20px">Projections from roster overall only — no games have been played yet. Weekly rankings with commentary start in Week 1.</div></div>';
+  }
   var head = CG.pageHead("Week 7 · published "+CG.fmtDate("2026-07-13"),"CGHL Power Rankings", esc(C.rankings.intro));
   var rows = lg.powerRankings.map(function(pr){
     var t = CG.TEAM[pr.team], s = lg.teams[pr.team];

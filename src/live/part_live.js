@@ -37,13 +37,14 @@ CG.buildLiveLeague = async function(){
     sb.from("roster_spots").select("*"),
     sb.from("contracts").select("*"),
     sb.from("games").select("*").order("scheduled_at"),
-    sb.from("transactions").select("*").order("occurred_at", { ascending:false })
+    sb.from("transactions").select("*").order("occurred_at", { ascending:false }),
+    sb.from("news").select("*").order("published_at", { ascending:false })
   ]);
   var bad = q.find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=(q[2].data||[])[0]||null,
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
-      games=q[6].data||[], transactions=q[7].data||[];
+      games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[];
 
   /* ---- team registry (rebuilt from the DB: real logos, ids, management) ---- */
   var teamById={}, id2code={};
@@ -155,6 +156,20 @@ CG.buildLiveLeague = async function(){
   lg.liveTransactions = transactions.map(function(tx){
     return { type:tx.type, text:tx.description||"", dateIso:(tx.occurred_at||"").slice(0,10) };
   });
+
+  /* real newsroom — replace the prototype's simulated articles */
+  if (CG.CONTENT){
+    CG.CONTENT.articles = news.map(function(n){
+      var paras = String(n.body||"").split(/\n\s*\n+/).map(function(s){ return s.trim(); }).filter(Boolean);
+      if (!paras.length && n.body) paras = [String(n.body)];
+      return {
+        slug: n.id, title: n.title||"Untitled", category: n.category||"League News",
+        excerpt: (paras[0]||"").slice(0,180), author: n.author||"CGHL Newsroom",
+        dateIso: (n.published_at||n.created_at||"").slice(0,10) || "2026-01-01",
+        featured: false, body: paras.length?paras:["—"], relatedTeams: [], tags: []
+      };
+    });
+  }
 
   CG.LIVE.loaded = true;
   return lg;
