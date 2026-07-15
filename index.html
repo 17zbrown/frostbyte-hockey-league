@@ -3668,7 +3668,7 @@ CG.hubNav = function(section){
 };
 CG.hubShell = function(section, inner){
   var notice = (CG.LIVE_MODE && (CG.role()==="mgmt"||CG.role()==="commish"))
-    ? '<div class="note chr" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">New Team HQ — some actions are still being connected to the live database.</b> Roster moves, trades, and lineups here may not save yet. For changes that must stick right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic tools</a>.</span></div>'
+    ? '<div class="note chr" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">The Trade Hub is live</b> — offers write to the database. Still being connected: roster waive/block and the lineup builder — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic tools</a>.</span></div>'
     : "";
   return '<section class="sec-tight"><div class="shell"><div class="hub-grid">'+CG.hubNav(section)+'<div>'+notice+inner+'</div></div></div></section>';
 };
@@ -4650,7 +4650,7 @@ CG.adminShell = function(section, inner){
   }).join("")+'</nav>';
   var who = CG.LIVE_MODE ? ((CG.persona()||{}).tag || "Commissioner") : "zackbrown17";
   var notice = CG.LIVE_MODE
-    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Live:</b> Pre-season (registrations, signings, scouting, owner apps), the <b>draft</b>, and <b>Users &amp; roles</b> all write to the database. Still being connected: results entry, discipline actions, and trades — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
+    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Live:</b> Pre-season (registrations, signings, scouting, owner apps), the <b>draft</b>, <b>Users &amp; roles</b>, and <b>trades</b> all write to the database. Still being connected: results entry and discipline actions — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
     : "";
   return '<section class="sec-tight"><div class="shell"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+
     '<div><span class="eyebrow chr">Control center · Season 1</span><h1 class="h-sec" style="margin-top:6px">League operating system</h1></div>'+
@@ -5776,6 +5776,15 @@ CG.loadManagerData = async function(){
       var oa = await CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
       CG.lg._ownerApps = (oa && !oa.error && oa.data) || [];
     }
+    /* my club's live trades (incoming + outgoing, still open) */
+    CG.lg._myTrades = [];
+    var myCode = CG.myClub && CG.myClub(), myTid = (CG.lg._codeToId||{})[myCode];
+    if (myTid){
+      try {
+        var tr = await CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false});
+        CG.lg._myTrades = (tr && !tr.error && tr.data) || [];
+      } catch(e){ CG.lg._myTrades = []; }
+    }
   } catch(e){}
 };
 CG.initAuth = async function(){
@@ -6463,6 +6472,128 @@ CG.AFTER.admin = function(param, qs){
   if (param==="users"){ CG.AFTER._admUsers(); return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
+
+/* ================================================================
+   LIVE TRADES — Team HQ Trade Hub on the real trades model
+   (players + draft picks + salary retention; accept_trade RPC)
+   ================================================================ */
+CG._liveTrade = null;
+CG.liveTrade = function(){ if(!CG._liveTrade) CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; return CG._liveTrade; };
+CG.tPlayer = function(pid){ return (CG.lg.players||[]).find(function(p){ return p.id===pid; }); };
+CG.tPick = function(kid){ return (CG.lg.draftPicks||[]).find(function(p){ return p.id===kid; }); };
+CG.tRoster = function(code){ return (CG.lg.byTeam[code]||[]).filter(function(p){ return !p.mgmt; }); };
+CG.tPicks = function(code){ return (CG.lg.draftPicks||[]).filter(function(p){ return p.ownerCode===code && !p.used && !p.skipped; }); };
+CG.pickLabel = function(k){ return k?("’"+String(k.season).slice(-2)+" R"+k.round+(k.origCode&&k.origCode!==k.ownerCode?" (via "+k.origCode+")":"")):"pick"; };
+CG.refreshTrades = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){ if(location.hash.indexOf("/tradehub")>=0 && CG.router) CG.router(); }); };
+CG.hubTradeHubLive = function(qs){
+  var lg=CG.lg, club=CG.myClub(), t=CG.TEAM[club], d=CG.liveTrade();
+  var myTid=(lg._codeToId||{})[club], trades=lg._myTrades||[];
+  var incoming=trades.filter(function(tr){ return tr.to_team_id===myTid; });
+  var outgoing=trades.filter(function(tr){ return tr.from_team_id===myTid; });
+  var others=Object.keys(CG.TEAM).filter(function(c){ return c!==club; }).sort();
+  function items(pids,kids){
+    var out=(pids||[]).map(function(pid){ var p=CG.tPlayer(pid); return '<div style="margin-top:6px"><span class="playercell">'+(p?CG.crest(p.team,18):"")+'<span class="nm">'+esc(p?p.tag:"a player")+'</span>'+(p?'<small style="color:var(--steel)">'+p.pos+' · '+CG.fmtMoney(p.salary)+'</small>':"")+'</span></div>'; });
+    (kids||[]).forEach(function(kid){ out.push('<div class="caption" style="margin-top:6px">'+esc(CG.pickLabel(CG.tPick(kid)))+' pick</div>'); });
+    return out.length?out.join(""):'<span class="caption">—</span>';
+  }
+  var h='<div style="margin-bottom:18px"><span class="eyebrow chr">'+esc(t.name)+' · team management</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Trade Hub</h1>'+
+    '<p class="lede" style="margin-top:8px">Offer players and draft picks, review incoming offers, and propose deals — all live. Nothing changes hands until the other club accepts.</p></div>';
+  h+='<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Confidential to management.</b> Offers and notes are visible to your Owner, GM, and AGM (Rule 2.3).</span></div>';
+  var inc='<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
+  if(incoming.length){
+    inc+=incoming.map(function(tr){ var fromCode=lg._idToCode[tr.from_team_id];
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+        '<span class="teamcell">'+CG.crest(fromCode,22)+'<span class="nm">'+esc((CG.TEAM[fromCode]||{}).name||fromCode)+'</span></span><span class="nf-t">'+CG.fmtDate((tr.created_at||"").slice(0,10)||"2026-01-01")+'</span></div>'+
+        '<div class="grid g2" style="gap:14px"><div><span class="caption">You receive</span>'+items(tr.offered_profile_ids,tr.offered_pick_ids)+'</div>'+
+        '<div><span class="caption">You send</span>'+items(tr.requested_profile_ids,tr.requested_pick_ids)+'</div></div>'+
+        (tr.note?'<p class="small" style="color:var(--steel);margin-top:10px;font-style:italic">“'+esc(tr.note)+'”</p>':"")+
+        '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<button class="btn btn-ghost btn-sm" data-trade-counter="'+tr.id+'">Counter</button>'+
+          '<button class="btn btn-ghost btn-sm" data-trade-decline="'+tr.id+'">Decline</button>'+
+          '<button class="btn btn-chrome btn-sm" data-trade-accept="'+tr.id+'">Accept</button></div></div>';
+    }).join("");
+  } else { inc+='<div class="card-b"><p class="small" style="color:var(--steel)">No open offers right now. When another club sends you one, it lands here.</p></div>'; }
+  inc+='</div>';
+  var outCard='';
+  if(outgoing.length){
+    outCard='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Offers you’ve sent</h3><span class="chip">'+outgoing.length+'</span></div>'+
+      outgoing.map(function(tr){ var toCode=lg._idToCode[tr.to_team_id];
+        return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+          '<span class="teamcell">'+CG.crest(toCode,22)+'<span class="nm">to '+esc((CG.TEAM[toCode]||{}).name||toCode)+'</span></span><span class="chip chip-warn">Proposed</span></div>'+
+          '<div class="grid g2" style="gap:14px"><div><span class="caption">You send</span>'+items(tr.offered_profile_ids,tr.offered_pick_ids)+'</div>'+
+          '<div><span class="caption">You receive</span>'+items(tr.requested_profile_ids,tr.requested_pick_ids)+'</div></div>'+
+          '<button class="btn btn-ghost btn-sm" data-trade-cancel="'+tr.id+'" style="margin-top:10px">Withdraw offer</button></div>';
+      }).join("")+'</div>';
+  }
+  function sideList(pids,kids,sk){
+    var body=(pids||[]).map(function(pid){ var p=CG.tPlayer(pid); return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="playercell">'+(p?CG.crest(p.team,18):"")+'<span class="nm">'+esc(p?p.tag:"?")+'</span><small style="color:var(--steel)">'+(p?p.pos+" · "+CG.fmtMoney(p.salary):"")+'</small></span><button class="chip" data-trade-rm="'+sk+'p:'+pid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
+    body+=(kids||[]).map(function(kid){ return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="caption">'+esc(CG.pickLabel(CG.tPick(kid)))+' pick</span><button class="chip" data-trade-rm="'+sk+'k:'+kid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
+    return body||'<p class="caption" style="margin-top:8px">Nothing added yet.</p>';
+  }
+  var partnerName=d.partner?(CG.TEAM[d.partner]||{}).name:"Partner";
+  var build='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Build a trade</h3>'+((d.offP.length||d.reqP.length||d.offK.length||d.reqK.length)?'<button class="btn btn-ghost btn-sm" id="tradeClear">Clear</button>':'<span class="chip chip-chrome">Draft</span>')+'</div><div class="card-b">'+
+    '<label class="fld" style="max-width:340px"><span>Trade partner</span><select id="tradePartner"><option value="">Choose a club…</option>'+others.map(function(c){ return '<option value="'+c+'"'+(d.partner===c?" selected":"")+'>'+esc(CG.TEAM[c].name)+'</option>'; }).join("")+'</select></label>'+
+    '<div class="grid g2" style="gap:16px;margin-top:14px;align-items:start">'+
+      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(t.name)+' send</b>'+sideList(d.offP,d.offK,"off")+'<button class="btn btn-ghost btn-sm" id="tradeAddOff" style="margin-top:12px">'+CG.ic("plus",13)+'Add player / pick</button></div>'+
+      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(partnerName)+' send</b>'+sideList(d.reqP,d.reqK,"req")+'<button class="btn btn-ghost btn-sm" id="tradeAddReq"'+(d.partner?"":" disabled")+' style="margin-top:12px">'+CG.ic("plus",13)+'Add player / pick</button></div>'+
+    '</div>'+
+    '<label class="fld" style="margin-top:14px"><span>Note to the other club (optional)</span><input id="tradeNote" placeholder="Why this works for both sides…"></label>'+
+    '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
+    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.</p>'+
+  '</div></div>';
+  return h+inc+outCard+build;
+};
+CG.tradePicker = function(side){
+  var d=CG.liveTrade(), code = side==="off" ? CG.myClub() : d.partner;
+  if(!code){ CG.toast("Choose a partner first","err"); return; }
+  var alreadyP = side==="off"? d.offP : d.reqP, alreadyK = side==="off"? d.offK : d.reqK;
+  var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; });
+  var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
+  var pHtml=players.map(function(p){ return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b><span class="caption" style="display:block">'+p.pos+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
+  var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
+  CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players</span>'+(pHtml||'<span class="caption">none available</span>')+'<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');
+  document.querySelectorAll("[data-tpick-p]").forEach(function(b){ b.addEventListener("click", function(){ (side==="off"?d.offP:d.reqP).push(this.getAttribute("data-tpick-p")); if(CG.closeOverlay)CG.closeOverlay(); CG.router(); }); });
+  document.querySelectorAll("[data-tpick-k]").forEach(function(b){ b.addEventListener("click", function(){ (side==="off"?d.offK:d.reqK).push(this.getAttribute("data-tpick-k")); if(CG.closeOverlay)CG.closeOverlay(); CG.router(); }); });
+};
+CG.proposeTrade = function(){
+  var d=CG.liveTrade(), club=CG.myClub();
+  if(!d.partner){ CG.toast("Choose a partner club","err"); return; }
+  if((!d.offP.length&&!d.offK.length)||(!d.reqP.length&&!d.reqK.length)){ CG.toast("Add at least one player or pick on each side","err"); return; }
+  var payload={ season_id:CG.SEASON.id, from_team_id:CG.lg._codeToId[club], to_team_id:CG.lg._codeToId[d.partner], from_profile_id:CG.auth.user.id,
+    offered_profile_ids:d.offP, requested_profile_ids:d.reqP, offered_pick_ids:d.offK, requested_pick_ids:d.reqK, retention:d.ret||{}, note:((document.getElementById("tradeNote")||{}).value||"").trim()||null };
+  CG.sb.from("trades").insert(payload).then(function(r){
+    if(r.error){ CG.toast("Couldn’t propose: "+r.error.message,"err"); return; }
+    CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}};
+    CG.toast("Trade proposed to "+CG.TEAM[d.partner].name,"ok"); CG.refreshTrades();
+  });
+};
+CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error) CG.toast("Couldn’t accept: "+r.error.message,"err"); else { CG.toast("Trade accepted!","ok"); CG.refreshTrades(); } }); }); };
+CG.declineTrade = function(id){ CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); };
+CG.cancelTrade = function(id){ CG.sb.from("trades").update({ status:"cancelled", updated_at:new Date().toISOString() }).eq("id",id).then(function(r){ if(r.error) CG.toast("Couldn’t withdraw: "+r.error.message,"err"); else { CG.toast("Offer withdrawn","ok"); CG.refreshTrades(); } }); };
+CG.counterTrade = function(id){
+  var tr=(CG.lg._myTrades||[]).find(function(x){ return x.id===id; }); if(!tr) return;
+  CG._liveTrade={ partner:CG.lg._idToCode[tr.from_team_id], offP:(tr.requested_profile_ids||[]).slice(), reqP:(tr.offered_profile_ids||[]).slice(), offK:(tr.requested_pick_ids||[]).slice(), reqK:(tr.offered_pick_ids||[]).slice(), ret:{} };
+  CG.toast("Loaded their offer to counter — adjust and propose","ok"); CG.router();
+};
+CG.AFTER._tradehubLive = function(qs){
+  if(qs && qs.add){ var dd=CG.liveTrade(); if(dd.offP.indexOf(qs.add)<0) dd.offP.push(qs.add); location.hash="#/hub/tradehub"; return; }
+  var ps=document.getElementById("tradePartner"); if(ps) ps.addEventListener("change", function(){ var d=CG.liveTrade(); if(d.partner!==this.value){ d.reqP=[]; d.reqK=[]; } d.partner=this.value||null; CG.router(); });
+  var ao=document.getElementById("tradeAddOff"); if(ao) ao.addEventListener("click", function(){ CG.tradePicker("off"); });
+  var ar=document.getElementById("tradeAddReq"); if(ar) ar.addEventListener("click", function(){ CG.tradePicker("recv"); });
+  document.querySelectorAll("[data-trade-rm]").forEach(function(b){ b.addEventListener("click", function(){ var parts=this.getAttribute("data-trade-rm").split(":"), d=CG.liveTrade(), map={offp:"offP",offk:"offK",reqp:"reqP",reqk:"reqK"}, arr=d[map[parts[0]]]; if(arr){ var i=arr.indexOf(parts[1]); if(i>=0) arr.splice(i,1); } CG.router(); }); });
+  var clr=document.getElementById("tradeClear"); if(clr) clr.addEventListener("click", function(){ CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; CG.router(); });
+  var pr=document.getElementById("tradePropose"); if(pr) pr.addEventListener("click", CG.proposeTrade);
+  document.querySelectorAll("[data-trade-accept]").forEach(function(b){ b.addEventListener("click", function(){ CG.acceptTrade(this.getAttribute("data-trade-accept")); }); });
+  document.querySelectorAll("[data-trade-decline]").forEach(function(b){ b.addEventListener("click", function(){ CG.declineTrade(this.getAttribute("data-trade-decline")); }); });
+  document.querySelectorAll("[data-trade-cancel]").forEach(function(b){ b.addEventListener("click", function(){ CG.cancelTrade(this.getAttribute("data-trade-cancel")); }); });
+  document.querySelectorAll("[data-trade-counter]").forEach(function(b){ b.addEventListener("click", function(){ CG.counterTrade(this.getAttribute("data-trade-counter")); }); });
+};
+/* route the Team HQ Trade Hub to the live version */
+CG._protoTradeHub = CG.hubTradeHub;
+CG.hubTradeHub = function(qs){ return CG.LIVE_MODE ? CG.hubTradeHubLive(qs) : CG._protoTradeHub(qs); };
+CG._protoTradeAfter = CG.AFTER._tradehub;
+CG.AFTER._tradehub = function(qs){ if(CG.LIVE_MODE) return CG.AFTER._tradehubLive(qs); return CG._protoTradeAfter?CG._protoTradeAfter(qs):undefined; };
 
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
 CG.bootLive = async function(){

@@ -16,7 +16,7 @@ CG.adminShell = function(section, inner){
   }).join("")+'</nav>';
   var who = CG.LIVE_MODE ? ((CG.persona()||{}).tag || "Commissioner") : "zackbrown17";
   var notice = CG.LIVE_MODE
-    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Live:</b> Pre-season (registrations, signings, scouting, owner apps), the <b>draft</b>, and <b>Users &amp; roles</b> all write to the database. Still being connected: results entry, discipline actions, and trades — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
+    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Live:</b> Pre-season (registrations, signings, scouting, owner apps), the <b>draft</b>, <b>Users &amp; roles</b>, and <b>trades</b> all write to the database. Still being connected: results entry and discipline actions — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
     : "";
   return '<section class="sec-tight"><div class="shell"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+
     '<div><span class="eyebrow chr">Control center · Season 1</span><h1 class="h-sec" style="margin-top:6px">League operating system</h1></div>'+
