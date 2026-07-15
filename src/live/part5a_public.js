@@ -54,12 +54,43 @@ CG.gameCard = function(g){
 };
 
 /* ---------- HOME ---------- */
+/* pre-season = no games played yet; drives the "season hasn't started" framing on
+   the live site. The prototype build has 48 simulated results, so this is false there. */
+CG.isPreseason = function(){ return !!(CG.lg && CG.lg.results && CG.lg.results.length===0); };
+CG.seasonStartMs = function(){ var s=CG.SEASON||(CG.lg&&CG.lg.season); return s&&s.starts_at?Date.parse(s.starts_at):null; };
+CG.daysToStart = function(){ var m=CG.seasonStartMs(); return m?Math.max(0,Math.ceil((m-CG.now())/86400000)):null; };
 CG.slideDefs = function(){
   var lg = CG.lg, C = CG.CONTENT;
+  if (CG.isPreseason()){
+    var start = CG.seasonStartMs(), days = CG.daysToStart(), slides = [];
+    var startTxt = start ? CG.fmtDate(new Date(start).toISOString()) : "soon";
+    slides.push({ key:"kickoff", label:"Season 1", html:
+      '<span class="s-cat"><span class="chip chip-chrome">Season 1 · Inaugural</span></span>'+
+      '<h2>The puck drops '+startTxt+'.</h2>'+
+      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+'Eight clubs, two divisions, ten weeks — Chel Gaming’s first competitive season. Rosters are locking in now.</p>'+
+      '<div class="s-cta"><a class="btn btn-chrome" href="#/schedule">Opening schedule</a>'+
+      '<a class="btn btn-ghost" href="#/teams">The clubs</a></div>'+
+      '<span class="s-date">Season opens '+startTxt+'</span>' });
+    slides.push({ key:"clubs", label:"The clubs", html:
+      '<span class="s-cat"><span class="chip chip-chrome">'+CG.TEAMS.length+' founding clubs</span></span>'+
+      '<h2>Meet the founding eight.</h2>'+
+      '<p class="s-dek">Two divisions, real rosters, real management under a $'+Math.round((CG.CAP||60000000)/1000000)+'M cap. Explore each club and its cap sheet.</p>'+
+      '<div class="s-cta"><a class="btn btn-chrome" href="#/teams">Browse clubs</a>'+
+      '<a class="btn btn-ghost" href="#/players">Player directory</a></div>'+
+      '<span class="s-date">Season 1 · founding season</span>' });
+    slides.push({ key:"howitworks", label:"How it works", html:
+      '<span class="s-cat"><span class="chip chip-chrome">The format</span></span>'+
+      '<h2>6v6 EA NHL, run like a real league.</h2>'+
+      '<p class="s-dek">Salary caps and contracts, weekly availability and lineups, verified stats, and a live rulebook. Everything below is built out and ready for opening night.</p>'+
+      '<div class="s-cta"><a class="btn btn-chrome" href="#/rulebook">The rulebook</a></div>'+
+      '<span class="s-date">Chel Gaming Hockey League</span>' });
+    var cfgP = CG.store.get("slides")||{};
+    return slides.filter(function(s){ return !(cfgP[s.key]&&cfgP[s.key].off); });
+  }
   var feat = lg.tonight.find(function(g){ return g.feature; });
   var a1 = C.articles.find(function(a){ return a.featured; }) || C.articles[0];
   var potw = lg.potw[lg.potw.length-1];
-  var sk = CG.playerById(lg, potw.skater);
+  var sk = potw ? CG.playerById(lg, potw.skater) : null;
   var s1 = CG.standings(lg,"East")[0], s2 = CG.standings(lg,"West")[0];
   var slides = [];
   slides.push({ key:"news", label:"Breaking news", html:
@@ -75,7 +106,7 @@ CG.slideDefs = function(){
     '<div class="s-cta"><a class="btn btn-chrome" href="#/matchup/'+feat.id+'">Matchup center</a>'+
     '<a class="btn btn-ghost" href="#/schedule">Tonight’s slate</a></div>'+
     '<span class="s-date">Puck drop '+CG.fmtTime(feat.at)+' · Lights Center</span>' });
-  slides.push({ key:"potw", label:"Player of the Week", html:
+  if (potw && sk) slides.push({ key:"potw", label:"Player of the Week", html:
     '<span class="s-cat"><span class="chip chip-chrome">Player of the Week '+potw.week+'</span></span>'+
     '<h2>'+esc(sk.tag)+'</h2>'+
     '<p class="s-dek">'+esc((C.awards.potw.find(function(w){return w.week===potw.week;})||{}).skaterBlurb||"")+'</p>'+
@@ -115,30 +146,42 @@ CG.modOn = function(key){
 };
 CG.ROUTES.home = function(){
   var lg = CG.lg, C = CG.CONTENT;
+  var pre = CG.isPreseason();
   var html = "";
   /* HERO */
+  var railGames = pre ? lg.schedule.filter(function(g){ return g.at>CG.now(); }).sort(function(a,b){return a.at-b.at;}).slice(0,4) : lg.tonight;
   html += '<section id="hero"><div class="shell hero-grid">'+
     '<div class="caro" id="heroCaro" aria-label="Featured stories"></div>'+
-    '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">Tonight · Week 7</span>'+
+    '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+(pre?"Opening games":"Tonight · Week 7")+'</span>'+
       '<a class="sec-link" style="color:#fff" href="#/schedule">Full schedule</a></div>'+
-      lg.tonight.map(function(g){
+      (railGames.length ? railGames.map(function(g){
         return '<a class="railgame" href="#/matchup/'+g.id+'">'+
           '<span class="rg-line">'+CG.crest(g.away,22)+esc(CG.TEAM[g.away].code)+' @ '+CG.crest(g.home,22)+esc(CG.TEAM[g.home].code)+'</span>'+
-          '<span class="rg-t">'+CG.fmtTime(g.at)+'</span>'+
+          '<span class="rg-t">'+(pre?CG.fmtDay(g.at):CG.fmtTime(g.at))+'</span>'+
           '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+(g.feature?' · <b style="color:var(--chrome)">MARQUEE</b>':"")+'</span></a>';
-      }).join("")+
-      '<p class="caption" style="color:var(--on-ink-dim)">Lineups release 60 min before puck drop · codes at T-30 (Rule 4.2).</p>'+
+      }).join("") : '<p class="caption" style="color:var(--on-ink-dim);padding:8px 0">The opening schedule is being finalized.</p>')+
+      '<p class="caption" style="color:var(--on-ink-dim)">'+(pre?"Lineups and private game codes go live on game day (Rule 4.2).":"Lineups release 60 min before puck drop · codes at T-30 (Rule 4.2).")+'</p>'+
     '</aside></div></section>';
   /* quick fact strip */
-  var lead = CG.skaterLeaders(lg,"p")[0];
-  html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
-    '<div><b class="num">Week 7</b><span>of 10 · Season 1</span></div>'+
-    '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+lg.results.length+'</b><span>Games played</span></div>'+
-    '<div style="cursor:pointer" data-go="'+CG.playerRoute(lead)+'"><b>'+esc(lead.tag)+'</b><span>'+lg.pstats[lead.id].p+' pts · scoring lead</span></div>'+
-    '<div style="cursor:pointer" data-go="#/standings"><b class="num">3×2</b><span>Playoff spots per division</span></div>'+
-  '</div></div></section>';
+  if (pre){
+    var days = CG.daysToStart(), start = CG.seasonStartMs();
+    html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
+      '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Season 1")+'</b><span>inaugural season</span></div>'+
+      '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>day'+(days===1?"":"s")+' to puck drop'+(start?" · "+CG.fmtDay(start):"")+'</span></div>'+
+      '<div style="cursor:pointer" data-go="#/teams"><b class="num">'+CG.TEAMS.length+'</b><span>clubs · '+(CG.DIVISIONS?CG.DIVISIONS.length:2)+' divisions</span></div>'+
+      '<div style="cursor:pointer" data-go="#/players"><b class="num">'+lg.players.length+'</b><span>players signed</span></div>'+
+    '</div></div></section>';
+  } else {
+    var lead = CG.skaterLeaders(lg,"p")[0];
+    html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
+      '<div><b class="num">Week 7</b><span>of 10 · Season 1</span></div>'+
+      '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+lg.results.length+'</b><span>Games played</span></div>'+
+      (lead?'<div style="cursor:pointer" data-go="'+CG.playerRoute(lead)+'"><b>'+esc(lead.tag)+'</b><span>'+lg.pstats[lead.id].p+' pts · scoring lead</span></div>':"")+
+      '<div style="cursor:pointer" data-go="#/standings"><b class="num">3×2</b><span>Playoff spots per division</span></div>'+
+    '</div></div></section>';
+  }
   /* TONIGHT dark band */
-  if (CG.modOn("tonight")){
+  if (CG.modOn("tonight") && !pre){
     html += '<section class="sec sec-dark"><div class="shell">'+
       '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Game night</span><h2 class="h-sec">Tonight’s matchups</h2></div>'+
       '<a class="sec-link" style="color:#fff" href="#/schedule">Week 7 slate</a></div>'+
@@ -181,7 +224,7 @@ CG.ROUTES.home = function(){
       '</div></div></section>';
   }
   /* LEADERS band */
-  if (CG.modOn("leaders")){
+  if (CG.modOn("leaders") && !pre){
     var pts = CG.skaterLeaders(lg,"p").slice(0,5);
     var gls = CG.skaterLeaders(lg,"g").slice(0,5);
     var gs  = CG.goalieLeaders(lg).slice(0,4);
@@ -203,7 +246,7 @@ CG.ROUTES.home = function(){
       '</div></div></section>';
   }
   /* VIDEO — Intermission Report */
-  if (CG.modOn("video")){
+  if (CG.modOn("video") && !pre){
     var vid = CG.store.get("prefs").video;
     html += '<section class="sec-tight"><div class="shell"><div class="grid g32" style="align-items:center">'+
       '<div><span class="eyebrow chr">Intermission report</span><h2 class="h-sec" style="margin:12px 0 10px">The week in one sitting</h2>'+
@@ -217,7 +260,7 @@ CG.ROUTES.home = function(){
       '</div></div></div></section>';
   }
   /* NEWS */
-  if (CG.modOn("news")){
+  if (CG.modOn("news") && !pre){
     var arts = C.articles.slice().sort(function(a,b){ return b.dateIso.localeCompare(a.dateIso); });
     var leadA = arts[0], rest = arts.slice(1,4);
     html += '<section class="sec"><div class="shell">'+
@@ -228,7 +271,7 @@ CG.ROUTES.home = function(){
       '</div></div></section>';
   }
   /* HONORS */
-  if (CG.modOn("honors")){
+  if (CG.modOn("honors") && !pre){
     var stars = lg.lastNight[lg.lastNight.length-1].stars;
     var potw = lg.potw[lg.potw.length-1];
     var skp = CG.playerById(lg, potw.skater), glp = CG.playerById(lg, potw.goalie);
@@ -461,9 +504,11 @@ CG.ROUTES.team = function(code, qs){
     var ord = {C:0,LW:1,RW:2,LD:3,RD:4,G:5};
     return ord[a.pos]-ord[b.pos] || a.depth-b.depth;
   });
-  var mgmt = { owner: roster.find(function(p){return p.pos==="RW"&&p.depth===1;}),
-               gm: roster.find(function(p){return p.pos==="C"&&p.depth===1;}),
-               agm: roster.find(function(p){return p.pos==="LD"&&p.depth===1;}) };
+  /* management comes from the real owner/GM/AGM assignment (p.mgmt) in both builds;
+     a club may not have named all three yet, so every use below is guarded. */
+  var mgmt = { owner: roster.find(function(p){return p.mgmt==="owner";}),
+               gm: roster.find(function(p){return p.mgmt==="gm";}),
+               agm: roster.find(function(p){return p.mgmt==="agm";}) };
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
     '<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+CG.crest(code,84)+
       '<div style="min-width:0;flex:1"><span class="eyebrow chr">'+t.div+' Division · '+esc(t.city)+' · '+esc(t.arena)+'</span>'+
@@ -472,14 +517,15 @@ CG.ROUTES.team = function(code, qs){
           '<span><b style="color:#fff" class="num">'+s.w+"-"+s.l+"-"+s.otl+'</b> record</span>'+
           '<span><b style="color:#fff" class="num">'+s.pts+'</b> points</span>'+
           '<span><b style="color:#fff" class="num">'+(s.diff>0?"+":"")+s.diff+'</b> diff</span>'+
-          (archived?'':'<span>#'+pr.rank+' power ranking '+ (pr.move? (pr.move>0?"▲":"▼")+Math.abs(pr.move):"") +'</span>')+
+          (archived||!pr?'':'<span>#'+pr.rank+' power ranking '+ (pr.move? (pr.move>0?"▲":"▼")+Math.abs(pr.move):"") +'</span>')+
           CG.form5(s.last5)+'</div></div>'+
       (archived?'':'<div style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+lg.teamRatings[code].ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Team overall</span></div>')+'</div>'+
     '<div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;align-items:center">'+
-      '<span class="chip chip-ink" style="border-color:#39434B">Owner · '+esc(mgmt.owner.tag)+'</span>'+
-      '<span class="chip chip-ink" style="border-color:#39434B">GM · '+esc(mgmt.gm.tag)+'</span>'+
-      '<span class="chip chip-ink" style="border-color:#39434B">AGM · '+esc(mgmt.agm.tag)+'</span></div>'+
+      (mgmt.owner?'<span class="chip chip-ink" style="border-color:#39434B">Owner · '+esc(mgmt.owner.tag)+'</span>':"")+
+      (mgmt.gm?'<span class="chip chip-ink" style="border-color:#39434B">GM · '+esc(mgmt.gm.tag)+'</span>':"")+
+      (mgmt.agm?'<span class="chip chip-ink" style="border-color:#39434B">AGM · '+esc(mgmt.agm.tag)+'</span>':"")+
+      (!mgmt.owner&&!mgmt.gm&&!mgmt.agm?'<span class="chip chip-ink" style="border-color:#39434B">Management not yet named</span>':"")+'</div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
       (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>':'<span class="chip chip-win">Live — updates after every final</span>')+
@@ -500,7 +546,7 @@ CG.ROUTES.team = function(code, qs){
         var route = CG.playerRoute(p)+(archived?"?season="+seasonKey:"");
         return '<tr class="rowlink" style="--tc:'+t.color+'" data-go="'+route+'">'+
           '<td class="tleft"><span class="playercell"><span class="nm">'+esc(p.tag)+'</span>'+(p.rookie?' <span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+
-          (mgmt.gm.id===p.id?' <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">GM</span>':"")+'</span></td>'+
+          (p.mgmt?' <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">'+(p.mgmt==="owner"?"OWNER":p.mgmt==="gm"?"GM":"AGM")+'</span>':"")+'</span></td>'+
           '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td><td class="tleft small" style="color:var(--steel)">'+esc(p.arch)+'</td>'+
           '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px">'+line+'</td>'+
           (archived?"":'<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td>')+'</tr>';
