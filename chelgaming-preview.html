@@ -859,11 +859,63 @@ CG.simGame = function(game, playersByTeam, rng, suspensions){
 };
 
 /* ---------- full season build ---------- */
+/* ---------- salary & cap system (LG-style: management on $0, everyone else under contract) ---------- */
+CG.CAP = 65000000;                 /* team salary cap */
+CG.MIN_SALARY = 750000;            /* league minimum */
+CG.fmtMoney = function(v){
+  if (v==null) return "—";
+  if (v===0) return "$0";
+  if (Math.abs(v) >= 1000000) return "$"+(v/1000000).toFixed(v%1000000?2:1).replace(/\.0$/,"")+"M";
+  return "$"+Math.round(v/1000)+"K";
+};
+CG.assignSalaries = function(players, byTeam, rng){
+  /* management contracts are $0 (Owner = RW depth-1, GM = C depth-1); AGM (LD depth-1) is a
+     $3.0M tertiary contract, mirroring the LG constitution's management contract rules. */
+  function mgmtRole(p){
+    if (p.depth!==1) return null;
+    if (p.pos==="C")  return "gm";     /* $0 */
+    if (p.pos==="RW") return "owner";  /* $0 */
+    if (p.pos==="LD") return "agm";    /* $3.0M */
+    return null;
+  }
+  players.forEach(function(p){
+    p.mgmt = mgmtRole(p);
+    p.term = 1 + Math.floor(rng()*3);                 /* 1–3 season contract */
+    if (p.mgmt==="owner" || p.mgmt==="gm"){ p.salary = 0; p.mgmtSalary = true; return; }
+    if (p.mgmt==="agm"){ p.salary = 3000000; return; }
+    /* base salary scales with talent; a little noise for realism */
+    p.salary = Math.max(CG.MIN_SALARY, (0.8 + p.talent*11 + (rng()-0.5)*1.4) * 1000000);
+  });
+  /* scale non-fixed salaries so the richest club lands just under the cap (varied cap space) */
+  var maxPay = 0;
+  Object.keys(byTeam).forEach(function(code){
+    var pay = byTeam[code].reduce(function(s,p){ return s+p.salary; },0);
+    if (pay>maxPay) maxPay = pay;
+  });
+  var target = CG.CAP - 3200000;                       /* richest club ≈ $61.8M */
+  var factor = maxPay>0 ? target/maxPay : 1;
+  players.forEach(function(p){
+    if (p.mgmtSalary || p.mgmt==="agm") return;
+    p.salary = Math.max(CG.MIN_SALARY, Math.round(p.salary*factor/100000)*100000);
+  });
+  /* trade block + waiver state (seeded deterministically later) */
+  players.forEach(function(p){ p.onBlock = false; });
+};
+CG.teamPayroll = function(lg, code){
+  /* waived players clear the cap immediately (Rule 2.5); the store carries that
+     state in the browser. In the pure-Node engine test there is no store, so
+     nothing is waived and this reduces to the raw contract sum. */
+  var waived = (typeof CG!=="undefined" && CG.store && CG.store.get) ? (CG.store.get("waived")||{}) : {};
+  return lg.byTeam[code].reduce(function(s,p){ return s + (waived[p.id] ? 0 : (p.salary||0)); }, 0);
+};
+CG.capSpace = function(lg, code){ return CG.CAP - CG.teamPayroll(lg, code); };
+
 CG.buildLeague = function(overrides){
   var rng = CG.makeRng(20260715);
   var players = CG.buildPlayers(rng);
   var byTeam = {};
   players.forEach(function(p){ (byTeam[p.team]=byTeam[p.team]||[]).push(p); });
+  CG.assignSalaries(players, byTeam, rng);
 
   /* fixed narrative events (pre-sim so stats respect them) */
   var enforcer = players.filter(function(p){ return p.gritty && p.pos!=="G"; })
@@ -918,8 +970,45 @@ CG.buildLeague = function(overrides){
     if (!best || v > best.v){ best = { g:g, v:v }; }
   });
   lg.tonight.forEach(function(g){ g.feature = best && g.id===best.g.id; });
+  CG.seedTrades(lg);
   return lg;
 };
+
+/* ---------- trade block + incoming offers seed (demo, deterministic) ---------- */
+CG.seedTrades = function(lg){
+  function byTag(code, tag){ return lg.byTeam[code].find(function(p){ return p.tag===tag; }); }
+  /* league-wide trade block: two depth skaters per team (excluding the managed club, CBR,
+     which the GM curates themselves in the Trade Hub) */
+  lg.blockSeed = [];
+  CG.TEAMS.forEach(function(t){
+    if (t.code==="CBR") return;
+    lg.byTeam[t.code].filter(function(p){ return p.pos!=="G" && p.depth===2 && !p.mgmt; })
+      .slice(0,2).forEach(function(p){ p.onBlock = true; lg.blockSeed.push(p.id); });
+  });
+  /* incoming offers TO the managed club (Circuit Breakers). Management ($0) is never dealt. */
+  function ids(list){ return list.filter(function(p){ return p && !p.mgmt; }).map(function(p){ return p.id; }); }
+  var deke = byTag("CBR","DekeDynasty");           /* CBR star RD (non-mgmt) */
+  var cbrDepth = lg.byTeam.CBR.find(function(p){ return p.pos==="LW" && p.depth===2 && !p.mgmt; });
+  var tucStar = byTag("TUC","GloveSideGus");       /* TUC LW scorer (non-mgmt) */
+  var tucDepthD = lg.byTeam.TUC.find(function(p){ return p.pos==="LD" && p.depth===2 && !p.mgmt; });
+  lg.incoming = [];
+  if (deke && tucStar){
+    lg.incoming.push({ id:"trIn1", from:"TUC", to:"CBR", at:Date.parse("2026-07-15T16:20:00-04:00"),
+      give: ids([tucStar, tucDepthD]),
+      get:  ids([deke]),
+      note:"We're loaded up front and thin on the back end. GloveSideGus is a proven scorer — straight-up upgrade to your attack for a righty D.",
+      status:"pending" });
+  }
+  if (cbrDepth){
+    lg.incoming.push({ id:"trIn2", from:"POL", to:"CBR", at:Date.parse("2026-07-14T21:05:00-04:00"),
+      give: ids([lg.byTeam.POL.find(function(p){return p.pos==="LW"&&p.depth===1&&!p.mgmt;})]),
+      get:  ids([cbrDepth]),
+      note:"Depth-for-depth, cap-neutral. Helps both rooms.",
+      status:"pending" });
+  }
+  return lg;
+};
+CG.playerSalary = function(lg, pid){ var p = CG.playerById(lg, pid); return p?p.salary:0; };
 
 /* ---------- aggregation: standings, stats, ratings, honors ---------- */
 CG.DEFAULT_WEIGHTS = {
@@ -1211,6 +1300,53 @@ if (typeof module !== "undefined" && typeof require !== "undefined" && require.m
    audited + corrected against the engine (venues, rosters, rules).
    ================================================================ */
 CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Streak meets streak: Vipers visit Blades in Week 7's marquee matchup","category":"League News","excerpt":"The Vipers bring a four-game win streak and QuickReleaseQi's .932 goaltending to Northshore tonight, where KneeDeepKen and the three-straight-wins Blades are waiting.","author":"M. Callahan — CGHL Newsroom","dateIso":"2026-07-15","featured":true,"body":["The best game of the Week 7 slate needs no dressing up: the Aurora Blades (8-4-0), winners of three straight, welcome the Tucson Vipers (10-2-0), winners of four straight, tonight in the West's heavyweight matchup. Two streaks walk in; only one walks out.","Every path to a Blades win runs through QuickReleaseQi, who has stopped pucks at a .932 clip this season and turned the Tucson net into a no-fly zone. Aurora's counterpunch is KneeDeepKen, whose 13 goals lead the Blades attack. Ken's release against Qi's glove is the matchup within the matchup.","Tucson also gets reinforcements: OpenIceOpie returns tonight after serving a two-game suspension during Week 6. The Vipers won without him, but his physical edge changes how much room Aurora's forwards will get in the middle of the ice.","The stakes are straightforward. A Vipers win keeps daylight between them and the field in the West; a Blades win turns the last four weeks into a genuine division race. Puck drops tonight, and lineups lock 30 minutes before it does."],"relatedTeams":["Aurora Blades","Tucson Vipers"],"tags":["week-7","preview","aurora-blades","tucson-vipers","west-division"]},{"slug":"openiceopie-cleared-to-return-after-suspension","title":"OpenIceOpie cleared to return after two-game suspension","category":"Suspensions","excerpt":"The Vipers' OpenIceOpie has served his two-game Rule 7.4 suspension in full and is eligible to return for tonight's showdown with Aurora.","author":"D. Kowalski — CGHL Newsroom","dateIso":"2026-07-14","featured":false,"body":["OpenIceOpie is back. The Tucson Vipers' OpenIceOpie has completed the two-game suspension handed down under Rule 7.4 and is eligible to return tonight when the Vipers visit the Aurora Blades.","The ban stemmed from a checking-from-behind incident that also drew a game misconduct. League player safety reviewed the play, ruled it a clear Rule 7.4 violation, and both games of the suspension were served during Week 6.","Tucson never missed a beat in the interim, extending its win streak to four, but Opie's return adds bite to a lineup that has leaned on structure and goaltending. Expect the Blades to test his discipline early and often.","The league office reiterated that checking from behind remains a point of emphasis this season. Repeat violations carry escalating discipline, and every ruling is published in full in the league's discipline log."],"relatedTeams":["Tucson Vipers","Aurora Blades"],"tags":["discipline","rule-7-4","suspension","tucson-vipers"]},{"slug":"commissioner-update-week-8-availability-lineup-lock","title":"Commissioner update: Week 8 availability due Sunday, lineups lock at T-30","category":"Commissioner Update","excerpt":"Week 8 availability is due Sunday at 8 PM ET, lineups lock 30 minutes before puck drop, and game codes release at T-30.","author":"R. Osei — CGHL Newsroom","dateIso":"2026-07-14","featured":false,"body":["Commissioner zackbrown17 posted a mid-season housekeeping notice Tuesday, and every captain should read it twice. The headline item: Week 8 availability is due Sunday at 8:00 PM ET, no exceptions.","Lineup rules were also spelled out. Rosters for each game lock 30 minutes before puck drop, and no substitutions or lineup edits will be processed after the lock.","Game codes follow the same rhythm: codes release at T-30, thirty minutes before scheduled puck drop, and go out to team captains through the usual channels. Captains are responsible for getting lobbies up on time.","\"We're six weeks in and the product is good — let's keep it tight,\" zackbrown17 wrote in the notice. Questions about availability or scheduling should go to the league office before Sunday's deadline."],"relatedTeams":[],"tags":["commissioner","availability","lineup-lock","game-codes","week-8"]},{"slug":"week-7-power-rankings","title":"Week 7 power rankings: Breakers stay first, Blades jump to third","category":"Power Rankings","excerpt":"The Breakers hold No. 1 by the thinnest of margins, Tucson lurks at No. 2, Aurora climbs to third, and the free-falling Yetis land at No. 8.","author":"M. Callahan — CGHL Newsroom","dateIso":"2026-07-13","featured":false,"body":["Week 7 is here, and the top of the rankings is a coin flip we refuse to flip. The Circuit Breakers hold at No. 1, the Tucson Vipers sit at No. 2, and both are 10-2-0 with legitimate claims to the crown.","1. Circuit Breakers (10-2-0). Saturday's 5-0 shutout of the Yetis was the most complete game any CGHL team has played this season. TapeToTapeTee's nine-point week and HatTrickHavoc's shutout give the Breakers the edge — for now.","2. Tucson Vipers (10-2-0). Four straight wins and a goaltender in QuickReleaseQi stopping pucks at .932 with a 1.40 goals-against average. If they win at Aurora this week, the top spot is theirs to argue for.","3. Aurora Blades (8-4-0, up). Three straight wins push the Blades up to No. 3, with KneeDeepKen's 13 goals leading the charge. Wednesday at Lights Center tells us whether they belong here.","8. Steel Yetis (down). Six straight losses, a 5-0 shutout defeat, and no obvious fix in sight drop the Yetis to the basement of these rankings. The talent is still there; the results are not."],"relatedTeams":["Circuit Breakers","Tucson Vipers","Aurora Blades","Steel Yetis"],"tags":["power-rankings","week-7","standings"]},{"slug":"week-6-honors-tapetotapetee-quietroomquinn","title":"Week 6 honors: TapeToTapeTee's nine-point tear, QuietRoomQuinn shuts the door","category":"Awards","excerpt":"A nine-point week earns TapeToTapeTee top honors, while QuietRoomQuinn's goaltending fuels the Blades' three-game surge.","author":"R. Osei — CGHL Newsroom","dateIso":"2026-07-13","featured":false,"body":["TapeToTapeTee is your Week 6 Player of the Week, and it was not close. The Circuit Breakers star piled up nine points on the week, dragging an already dangerous Breakers attack to another level.","The exclamation point came Saturday: two goals and an assist in a 5-0 dismantling of the Steel Yetis. Every shift Tee took this week produced something, and the Breakers' 10-2-0 record owes plenty to it.","Between the pipes, the honor goes to QuietRoomQuinn, the backbone of the Aurora Blades' three-game win streak. Quinn was calm, square, and stingy all week, and the Blades' charge toward the top of the West starts in their crease.","Weekly honors are selected by the CGHL newsroom at the close of each week's games. Week 7 candidates, consider the bar set."],"relatedTeams":["Circuit Breakers","Aurora Blades"],"tags":["player-of-the-week","awards","week-6","circuit-breakers","tundra-wolves"]},{"slug":"week-6-wrap-two-leaders-one-skid-one-revival","title":"Week 6 wrap: two 10-2-0 division leaders, a six-game skid, and a Wolves revival","category":"League News","excerpt":"Six weeks in, the Vipers and Breakers are deadlocked at 10-2-0 atop their divisions, the Yetis have lost six straight, and the Tundra Wolves are quietly the hottest team in the East.","author":"M. Callahan — CGHL Newsroom","dateIso":"2026-07-12","featured":true,"body":["Six weeks are in the books, and the CGHL standings have a symmetry problem. The Tucson Vipers and the Circuit Breakers both sit at 10-2-0, each perched on top of their division, and neither shows any sign of slowing down. If the season ended today, a Vipers-Breakers final would surprise exactly no one.","The Breakers closed the week loudest, blanking the Steel Yetis 5-0 on Saturday behind an 18-save shutout from HatTrickHavoc and a two-goal, one-assist night from TapeToTapeTee. Out West, the Vipers kept stacking wins and carry a four-game streak into Week 7. Tucson's formula has not changed all season: tight checking and QuickReleaseQi slamming the door.","Then there are the Steel Yetis, whose season has come apart at the seams. Saturday's shutout loss stretched their skid to six straight, and a team that opened the year with contender talk now heads into Week 7 searching for anything that resembles its early form.","The week's quietest good news belongs to the Tundra Wolves, winners of three straight in the East. WristerWes has orchestrated the run, with UpperNinety and ZambroniZed burying two goals apiece in Saturday's 6-2 statement over Polar Reign — and the Wolves suddenly look like the team most likely to make the Breakers sweat. Four weeks remain, and the middle of both divisions is very much alive."],"relatedTeams":["Tucson Vipers","Circuit Breakers","Steel Yetis","Tundra Wolves"],"tags":["week-6","standings","recap","division-race"]},{"slug":"quickreleaseqi-nine-wins-one-loss","title":"Nine wins, one loss: how QuickReleaseQi became the CGHL's toughest goalie to beat","category":"Player Feature","excerpt":"Nine wins, one loss, a 1.40 goals-against average, and a .932 save percentage: QuickReleaseQi's first half has been the story of the season.","author":"D. Kowalski — CGHL Newsroom","dateIso":"2026-07-12","featured":false,"body":["The numbers read like a typo: 9-1, a 1.40 goals-against average, and a .932 save percentage. QuickReleaseQi is not just the best goalie in the CGHL through six weeks — the gap between Qi and the field is the story of the season's first half.","Watch a Vipers game and the pattern repeats: clean positioning, an economy of movement, and a glove that snaps shut before shooters finish their follow-through. Nothing about the style is flashy until you realize how rarely a rebound hits the ice.","Tucson has returned the favor by building a structure that funnels shots to the outside, and the result is a 10-2-0 record and a four-game win streak heading into Week 7. Ask anyone in the Vipers room where it starts, and the answer is the same: the crease.","The stiffest test of the season arrives Wednesday in the form of the Aurora Blades and KneeDeepKen, who has 13 goals and no respect for hot goalies. If Qi holds serve, the conversation shifts from great season to historic one."],"relatedTeams":["Tucson Vipers"],"tags":["goaltending","tucson-vipers","player-feature","quickreleaseqi"]},{"slug":"recap-breakers-5-yetis-0","title":"Breakers 5, Yetis 0: HatTrickHavoc's 18-save shutout deepens the skid","category":"Game Recap","excerpt":"HatTrickHavoc stopped all 18 shots and TapeToTapeTee had two goals and an assist as the Breakers blanked the skidding Yetis 5-0.","author":"R. Osei — CGHL Newsroom","dateIso":"2026-07-11","featured":false,"body":["The Circuit Breakers did not just beat the Steel Yetis on Saturday; they erased them. A 5-0 final, an 18-save shutout for HatTrickHavoc, and another statement from the East's top team.","TapeToTapeTee led the offense with two goals and an assist, capping a nine-point week that has Player of the Week written all over it. The Breakers scored early, defended in layers, and never let the game breathe.","For the Yetis, the loss was a sixth straight, and the manner of it stung more than the number. Eighteen shots on goal, none past HatTrickHavoc, and long stretches where the Breakers simply toyed with the puck.","The Breakers sit at 10-2-0 atop the East. The Yetis get a week to find themselves before the schedule shows any mercy — and on current form, it won't."],"relatedTeams":["Circuit Breakers","Steel Yetis"],"tags":["game-recap","shutout","circuit-breakers","steel-yetis","week-6"]},{"slug":"rookie-watch-bennybiscuit-wraparoundwill","title":"Rookie watch: BennyBiscuit and WraparoundWill are separated by a single point","category":"Player Feature","excerpt":"Circuit Breakers defenseman BennyBiscuit (17 points) and Polar Reign winger WraparoundWill (16) have turned the rookie race into a weekly photo finish.","author":"D. Kowalski — CGHL Newsroom","dateIso":"2026-07-09","featured":false,"body":["The CGHL's rookie race has come down to a single point. BennyBiscuit, the Circuit Breakers' rookie defenseman, leads all first-year players with 17 points; WraparoundWill, Polar Reign's rookie right wing, sits one back at 16.","Biscuit's production is the more surprising of the two — 17 points from the blue line would be notable for a veteran, let alone a rookie logging big minutes on the East's best team. The Breakers trust him in every situation, and it shows.","Will's game is louder. True to the name, he hunts wraparounds and net-front chaos, and his 16 points have come with a flair that makes Polar Reign appointment viewing. He is the reason to watch Reign games down the stretch.","Four weeks remain to settle it. A defenseman versus a winger, a system player versus an agent of chaos — whichever way it breaks, the rookie class of Season 1 has already set the standard."],"relatedTeams":["Circuit Breakers","Polar Reign"],"tags":["rookies","circuit-breakers","polar-reign","player-feature"]},{"slug":"scoring-race-icepickizzy-puckp1rate","title":"The scoring race: IcePickIzzy's 21 points, PuckP1rate's clean pursuit","category":"League News","excerpt":"IcePickIzzy has ground out 21 points on a .500 Icehawks team; PuckP1rate is one behind with zero penalty minutes. Two very different ways to chase a scoring title.","author":"R. Osei — CGHL Newsroom","dateIso":"2026-07-08","featured":false,"body":["The CGHL scoring race is a study in opposites. IcePickIzzy leads the league with 21 points, ground out shift by shift for a Midnight Icehawks team stuck at .500; PuckP1rate of the Circuit Breakers sits one back at 20 — without taking a single penalty minute all season.","Izzy's points are the heavy kind. Net-front screens, won battles along the wall, greasy rebound goals — nothing about the league lead has come easy, and on a .500 team, nobody is padding Izzy's totals. Take Izzy off the Icehawks and the season looks very different.","P1rate's pursuit is almost the opposite: 20 points of clean hands and cleaner positioning, with zero PIM through six weeks. In a league that tracks discipline as closely as this one does, a scorer who never visits the box is its own kind of weapon.","Four weeks remain, one point separates them, and the two share the East — starting tonight, when the Breakers visit Duskmoor and the race goes head to head. Pick a side: the grinder or the gentleman."],"relatedTeams":["Midnight Icehawks","Tucson Vipers"],"tags":["scoring-race","midnight-icehawks","tucson-vipers","stats"]}],"rulebook":{"chapters":[{"num":1,"title":"Membership & conduct","sections":[{"id":"1.1","title":"Eligibility and registration","paragraphs":["Membership in the Chel Gaming Hockey League (CGHL) is open to players who complete registration through the league's official channels, link a valid EA account and gamertag, and join the league Discord server. A player is not eligible to appear in a CGHL game until the league office has confirmed their registration and assigned them to a club or to the free agent pool.","Each player may hold exactly one CGHL identity. Registering, playing under, or lending out a secondary account — including playing under another member's account for any reason — is account misrepresentation and is subject to discipline under Chapter 7. Players are responsible for keeping their gamertag and contact information current with the league office; games played under an unregistered or outdated gamertag may be ruled unofficial."]},{"id":"1.2","title":"Code of conduct","paragraphs":["All members — players, captains, managers, and league staff — are expected to compete hard and act like professionals. Harassment, hate speech, threats, doxxing, and targeted abuse are prohibited in all league spaces, including in-game chat, Discord, streams of league games, and direct messages arising out of league business. The standard applies whether or not the conduct occurs during a scheduled game.","Unsportsmanlike conduct includes, without limitation: deliberate goaltender interference intended to injure or provoke, quitting a game in progress without cause, stat manipulation, throwing games, and public abuse of officials or opponents. The league office may act on conduct violations on its own initiative; it does not require a formal complaint to open a review."]},{"id":"1.3","title":"League communications","paragraphs":["The CGHL Discord server is the league's official channel of record. Schedule releases, rule changes, disciplinary notices, and game codes are delivered through Discord, and every rostered player is responsible for information posted there. A claim of not having seen an official posting is not a defense to a missed obligation under this rulebook.","Captains serve as the formal point of contact between their club and the league office. Protests, reschedule requests, and roster paperwork must come from a club's captain or designated alternate to be considered filed."]}]},{"num":2,"title":"Rosters & player movement","sections":[{"id":"2.1","title":"Roster composition","paragraphs":["Each club maintains an active roster within the limits published by the league office before the season. The active roster must at all times include enough eligible players to ice a full 6v6 lineup, including a goaltender. Clubs that fall below the minimum through departures or suspensions must notify the league office immediately and restore compliance through the free agent process.","Every player on an active roster must be assigned a primary position group (forward, defense, or goaltender). Position assignments govern lineup verification under Chapter 5 but do not restrict in-game position changes made by the club during play."]},{"id":"2.2","title":"Free agency and signings","paragraphs":["Unrostered registered players are held in the league free agent pool. Clubs sign free agents by filing a signing request with the league office; a signing is effective only once the league office confirms it and updates the official roster. A free agent may not dress for a club before the signing is confirmed, and any game in which an unconfirmed player dresses is subject to forfeiture under Chapter 3.","Contact with rostered players of other clubs for the purpose of inducing a departure — tampering — is prohibited and is subject to discipline under Chapter 7."]},{"id":"2.3","title":"Trades","paragraphs":["Clubs may trade rostered players by mutual agreement of both captains. Both clubs must file matching trade confirmations with the league office, and the trade takes effect only when the league office posts it to the official transaction log. Players acquired by trade are eligible for their new club beginning with that club's next scheduled game after posting.","The league office may void any trade it determines was made in bad faith, including trades intended to circumvent roster limits, manipulate playoff seeding, or park players on behalf of another club."]},{"id":"2.4","title":"Movement deadline","paragraphs":["All player movement — signings, trades, and releases — closes at the league-posted roster deadline announced before the season. After the deadline, rosters are frozen through the end of the playoffs, except that the league office may authorize an emergency goaltender signing for a club unable to ice a goaltender through no fault of its own."]}]},{"num":3,"title":"Scheduling, forfeits & reschedules","sections":[{"id":"3.1","title":"The official schedule","paragraphs":["The CGHL regular season runs ten weeks, with matchups and puck-drop times published on the official league schedule. The schedule as posted by the league office is binding on all clubs. Puck-drop times are stated in Eastern Time unless otherwise noted, and clubs are responsible for converting to their local time.","Clubs are expected to be lobby-ready at the scheduled puck-drop time. Lobby-ready means a full eligible lineup is online, in the league Discord, and prepared to enter the private game upon code release under Rule 4.2."]},{"id":"3.2","title":"Forfeits and the grace period","paragraphs":["A club that cannot ice an eligible lineup at the scheduled puck-drop time is granted a grace period of fifteen (15) minutes. If the club still cannot ice an eligible lineup when the grace period expires, the game is declared a forfeit and recorded as a regulation loss for the offending club. If neither club can ice an eligible lineup at the expiration of the grace period, the game is recorded as a double forfeit.","Invoking the grace period is not penalty-free as a habit: clubs that repeatedly rely on the grace period may be referred to the league office for review under Chapter 7. A club that knows in advance it cannot play must pursue a reschedule under Rule 3.3 rather than allowing a forfeit to occur."]},{"id":"3.3","title":"Reschedules","paragraphs":["A game may be rescheduled only by written agreement of both captains, filed with and approved by the league office before the originally scheduled puck drop. The league office will not approve reschedules that push a game past the end of the week in which it was originally scheduled unless exceptional circumstances exist.","Where the clubs cannot agree, the game stands as scheduled. The league office may on its own authority move a game for league-wide technical outages, EA server failures, or other events outside the clubs' control."]}]},{"num":4,"title":"Game settings & servers","sections":[{"id":"4.1","title":"Official game configuration","paragraphs":["All CGHL games are played in EA Sports NHL 26 as 6v6 club games using the league-published settings sheet, which forms part of this rulebook by reference. Games played on any other settings are unofficial and will be replayed on correct settings at the league office's direction.","Effective with rulebook version 1.2, games tied at the end of regulation proceed to a five (5) minute, 3-on-3 sudden-death overtime period. If the game remains tied at the end of overtime, it is decided by a shootout conducted under the settings sheet. Regular season and playoff overtime formats may differ only where this rulebook expressly says so."]},{"id":"4.2","title":"Private game codes","paragraphs":["League games are played in private lobbies secured by a game code issued by the league office. Codes are released to the two competing clubs' captains no earlier than thirty (30) minutes before the scheduled puck drop.","Game codes are confidential. A code may be shared only with rostered players dressing in that game and may never be posted publicly — including in open Discord channels, streams, social media, or any other public venue. Publicly sharing a game code, or admitting a non-rostered player to a league lobby, is a conduct violation subject to discipline under Chapter 7, and the league office may order the game replayed on a fresh code."]},{"id":"4.3","title":"Disconnects and rejoins","paragraphs":["If a player disconnects during play, the game continues; clubs are expected to play through individual drops. The disconnected player may rejoin the same game in progress at the next stoppage. A club may not use a disconnect, real or feigned, to gain a stoppage, delay, or matchup advantage.","If the lobby itself fails — a full crash or an EA server outage affecting both clubs — captains must capture evidence of the score and game clock at failure. The league office will order the game resumed from the recorded score and time where feasible, and replayed in full where it is not."]},{"id":"4.4","title":"Connection standards","paragraphs":["Players are expected to compete on a stable connection. Persistent, game-affecting lag attributable to a single player may be reviewed by the league office, which may require the player to sit until the issue is resolved. Deliberate manipulation of one's connection to induce lag is cheating and is subject to discipline under Chapter 7."]}]},{"num":5,"title":"Availability & lineups","sections":[{"id":"5.1","title":"Weekly availability","paragraphs":["Every rostered player must submit weekly availability for the upcoming game week through the league's availability system no later than Sunday at 8:00 PM Eastern Time. Availability submitted after the deadline is accepted at the captain's discretion for lineup purposes but is recorded as late by the league office.","Captains are responsible for confirming that their club's availability picture supports an eligible lineup for each scheduled game. A club that discovers an availability shortfall after the Sunday deadline must pursue a reschedule under Rule 3.3 without delay; waiting until game night is not a defense to a forfeit."]},{"id":"5.2","title":"Eligible lineups","paragraphs":["A lineup is eligible when every dressed player is on the club's confirmed active roster, is not under suspension, and satisfies the position requirements of the settings sheet, including a rostered goaltender. Dressing an ineligible player results in forfeiture of the game in which the player dressed, without prejudice to further discipline under Chapter 7."]},{"id":"5.3","title":"Lineup lock","paragraphs":["Lineups lock thirty (30) minutes before the scheduled puck drop. After lock, a club may substitute a player only for a genuine emergency — a sudden disconnection, hardware failure, or personal emergency — and only with a rostered, otherwise-eligible player, reported to the league office before the game begins.","The locked lineup is the lineup of record for statistics under Chapter 6 and for eligibility review. Discrepancies between the locked lineup and the players who actually appeared are investigated by the league office, and unexplained discrepancies are treated as dressing an ineligible player under Rule 5.2."]}]},{"num":6,"title":"Statistics & verification","sections":[{"id":"6.1","title":"The official record","paragraphs":["The league's published standings, statistics, and transaction log constitute the official record of the CGHL. In any conflict between the official record and a club's own records, EA's in-game screens, or third-party trackers, the official record controls once the league office has verified the game under this chapter."]},{"id":"6.2","title":"Submission and evidence","paragraphs":["Immediately following each game, the home club's captain must submit the final score and box score to the league office through the designated reporting channel, accompanied by end-of-game screenshots or equivalent capture showing the score and player statistics. The away club's captain must confirm or dispute the submission.","Clubs must retain their game evidence through the end of the season. Games for which no evidence can be produced are recorded at the league office's discretion based on the best available information, and repeated failures to submit evidence are subject to discipline under Chapter 7."]},{"id":"6.3","title":"Corrections and disputes","paragraphs":["A club that believes the official record is wrong must file a correction request with the league office, identifying the game and the specific entry disputed and attaching supporting evidence. The league office rules on correction requests and its statistical rulings are final, except that a ruling which itself imposes discipline may be appealed under Rule 7.6.","Statistics accrued through verified manipulation — including arranged goals, deliberate own-goals, or padding against a complicit opponent — will be struck from the record, and the players and clubs involved referred for discipline under Chapter 7."]}]},{"num":7,"title":"Discipline, suspensions & appeals","sections":[{"id":"7.1","title":"Disciplinary authority","paragraphs":["The league office holds exclusive authority to investigate suspected violations of this rulebook and to impose discipline on players, captains, and clubs. The league office may act on a filed complaint, an official's report, or its own observation, and may review any league game in full, including recorded footage and Discord communications in league spaces.","Discipline is corrective, not merely punitive: sanctions are set to protect competitive integrity and member safety, with the player's history and the harm caused weighed in every decision."]},{"id":"7.2","title":"Classes of sanction","paragraphs":["Available sanctions include, in escalating order: formal warning, single-game suspension, multi-game suspension, forfeiture of games or statistics, suspension for the remainder of the season including playoffs, and expulsion from the league. Sanctions may be combined where a single course of conduct violates multiple rules.","A suspended player may not dress, appear in a league lobby, or serve as a club's point of contact for game operations while the suspension runs. Suspensions carry across season boundaries where unserved games remain."]},{"id":"7.3","title":"In-game misconduct","paragraphs":["Conduct penalized within the game by EA's rule engine is ordinarily punished by the game itself. The league office layers supplemental discipline on top of in-game penalties where the conduct is dangerous, repeated, or targeted — the fact that a penalty was served in-game does not exhaust the league's disciplinary interest in it."]},{"id":"7.4","title":"Dangerous contact","paragraphs":["Dangerous contact is any deliberate act whose evident purpose is to injure, intimidate, or provoke rather than to play the puck. It expressly includes checking an opponent from behind — particularly into the boards or the goal frame — and all post-whistle misconduct, including hits, cross-checks, slew-foots, and goaltender contact delivered after play has been blown dead.","The baseline sanction for a verified act of dangerous contact is a two (2) game suspension. The league office adjusts upward from the baseline for aggravating factors — targeting a goaltender, repetition within the same game, prior history under this rule, or conduct that continues after a warning — and may reduce below the baseline only in documented, exceptional circumstances. Effective version 1.2 of this rulebook, the baseline is mandatory: a verified violation of this rule may not be resolved by warning alone.","Captains share responsibility under this rule. A captain who directs, encourages, or conspicuously tolerates dangerous contact by their players is subject to discipline as if they had committed the act."]},{"id":"7.5","title":"Repeat offenses","paragraphs":["A player's full disciplinary history in the CGHL is before the league office in every matter. Repeat violations of the same rule presumptively draw a longer suspension than the prior sanction for that rule, and a pattern of violations across different rules may itself justify a season-length suspension or expulsion even where no single incident would."]},{"id":"7.6","title":"Appeals","paragraphs":["A player or club sanctioned under this chapter may appeal by filing a written appeal with the league office within forty-eight (48) hours of the sanction being posted. The appeal must identify the ruling appealed, state the grounds — factual error, misapplication of a rule, or disproportionate sanction — and attach any evidence not already before the league office. Sanctions not appealed within the 48-hour window are final.","Appeals are decided by a panel that excludes any official who imposed the original sanction. Filing an appeal does not stay a suspension: the sanction runs while the appeal is pending, and games already served are credited if the appeal succeeds. The panel may uphold, reduce, or vacate a sanction; it may increase a sanction only where the appeal itself reveals misconduct not previously known."]}]},{"num":8,"title":"Playoffs & seeding","sections":[{"id":"8.1","title":"Qualification and seeding","paragraphs":["At the conclusion of the regular season, the top three (3) clubs in each division qualify for the CGHL playoffs, producing a six-club field. The two division winners are awarded the top two seeds: seeds 1 and 2 are assigned to the East and West division champions, ordered between themselves by overall regular-season record. The remaining four qualifiers are seeded 3 through 6 by overall regular-season record without regard to division.","Seeding is fixed when the league office certifies the final standings and does not re-seed between rounds."]},{"id":"8.2","title":"Tiebreakers","paragraphs":["Ties in the standings — for division titles, playoff berths, or seeding — are broken in the following order: head-to-head record between the tied clubs; regulation wins; goal differential across all regular-season games; goals scored; and, if still tied, a one-game play-in scheduled by the league office. Forfeited games count as regulation results for all tiebreaker purposes."]},{"id":"8.3","title":"Playoff play","paragraphs":["Playoff rounds are contested as series in the format published with the playoff schedule, with the higher seed holding home designation for scheduling and reporting purposes. All regular-season rules apply in the playoffs except where this rulebook or the published playoff format expressly provides otherwise; there are no shootouts in playoff games, with tied games continuing in successive overtime periods under the settings sheet until decided.","Playoff eligibility is limited to players who were on their club's active roster at the movement deadline under Rule 2.4 and who are not under suspension for the game in question."]}]},{"num":9,"title":"Awards & honors","sections":[{"id":"9.1","title":"League awards","paragraphs":["The CGHL confers end-of-season awards recognizing individual and club excellence, including most valuable player, best goaltender, best defenseman, and the league championship trophy awarded to the playoff champion. The full slate of awards for a season is published by the league office before the final week of the regular season."]},{"id":"9.2","title":"Selection and voting","paragraphs":["Individual awards are selected by a vote conducted by the league office among club captains and league staff, informed by the official statistical record under Chapter 6. No voter may cast a first-place vote for a member of their own club. The league office publishes voting results with the award announcements.","Statistical titles — scoring leaders and goaltending leaders — are determined directly from the official record and are not subject to vote. Minimum-appearance thresholds for goaltending titles are published with the settings sheet."]},{"id":"9.3","title":"Eligibility and forfeiture of honors","paragraphs":["A player serving a suspension of season length or longer is ineligible for individual awards for that season. The league office may strip an award or honor, before or after conferral, where the underlying performance is found to have involved a verified violation of Chapter 6 or Chapter 7."]}]},{"num":10,"title":"Definitions","sections":[{"id":"10.1","title":"Terms of art","paragraphs":["As used in this rulebook: \"league office\" means the CGHL commissioner and staff acting in their official capacity; \"club\" means a member team of the CGHL together with its captain, managers, and rostered players; \"captain\" includes a club's designated alternate when acting in the captain's place; \"puck drop\" means the scheduled start time of a game as published on the official schedule; \"dress\" means to appear in a league lobby as a participant in a game; \"game week\" means the scheduling week as delineated on the official schedule; and \"settings sheet\" means the league-published game configuration document incorporated by Rule 4.1.","\"Eligible lineup\" carries the meaning given in Rule 5.2. \"Dangerous contact\" carries the meaning given in Rule 7.4. \"Official record\" carries the meaning given in Rule 6.1."]},{"id":"10.2","title":"Interpretation and amendment","paragraphs":["Chapter and section headings are for convenience and do not limit the text. Where this rulebook is silent, the league office rules in the manner that best protects competitive integrity, and such rulings have the force of the rulebook until it is amended. Time references are Eastern Time unless stated otherwise, and stated time periods include weekends and holidays.","This rulebook may be amended by the league office at any time. Amendments are published with a version number and effective date, take effect prospectively from the stated date, and do not reopen games or rulings completed under a prior version except where the amendment expressly says so."]}]}],"changelog":[{"version":"1.2","dateIso":"2026-07-01","summary":"Overtime format changed to a 5-minute 3-on-3 sudden-death period followed by a shootout (Rule 4.1). Rule 7.4 (Dangerous contact) strengthened: the 2-game baseline suspension is now mandatory for verified violations and may not be resolved by warning alone."},{"version":"1.1","dateIso":"2026-06-10","summary":"Clarified disconnect and rejoin procedure (Rule 4.3): individual drops play on with rejoin at the next stoppage; full lobby failures resume from the recorded score and clock where feasible."},{"version":"1.0","dateIso":"2026-05-20","summary":"Initial publication of the CGHL Official Rulebook for Season 1."}]},"rankings":{"intro":"Week 7 opens with a dead heat at the top of the board: Circuit Breakers and Tucson Vipers both sit 10-2-0, separated only by the Breakers' plus-28 goal differential against Tucson's plus-16. Behind them, the Aurora Blades have won three straight to climb to No. 3, and the Steel Yetis — losers of six in a row — tumble two spots to the basement. The gap between the league's top two and everyone else is starting to look like a moat.","entries":[{"code":"CBR","comment":"The Breakers hung five on the Yetis and never let them breathe — HatTrickHavoc stopped all 18 shots he saw while TapeToTapeTee went 2G 1A. With a plus-28 goal differential and three of the league's top five scorers, this is still the deepest lineup in the CGHL.","keyPlayer":"PuckP1rate — 20 points in just 9 games on 28.2% shooting"},{"code":"TUC","comment":"Four straight wins for the Vipers, the latest a workmanlike 3–1 handling of the Icehawks with KillerCrossover and JackpotJett each posting a goal and a helper. The complication: OpenIceOpie sits two games for checking from behind under Rule 7.4, thinning the lineup at the worst possible time.","keyPlayer":"QuickReleaseQi — 9-1 with a league-best 1.40 GAA and .932 save percentage"},{"code":"AUR","comment":"Three straight wins vault Aurora up a spot, capped by a 3–2 escape against Anaheim behind PenaltyKillPax's goal-and-assist night. QuietRoomQuinn has claimed Goalie of the Week honors three times already — Weeks 2, 4 and 6 — and gives this surge real backbone.","keyPlayer":"KneeDeepKen — 13 G leads the club"},{"code":"ICE","comment":"Back-to-back losses cost the Icehawks a spot, the latest a 3–1 defeat to the Vipers. At 6-6-0 they still hold second in the East, but the gap to Circuit Breakers has stretched to eight points and the margin for error is gone.","keyPlayer":"IcePickIzzy — league-best 21 points (12 G, 9 A) in 10 games"},{"code":"POL","comment":"Polar Reign has dropped three straight, including a 6–2 blowout at the hands of a Tundra Wolves side that entered the week last in these rankings. A minus-8 differential says this roster is better than 5-7-0 — two of the league's top ten scorers wear the crown.","keyPlayer":"ShortSideSho — 17 points on a 27.3 shooting percentage"},{"code":"TUN","comment":"Nobody is hotter at the bottom of the board — the Wolves have won three straight and jump two spots after burying Polar Reign 6–2, with UpperNinety and ZambroniZed scoring twice apiece. The 3-8-1 record still drags, but the last week looks like a different team.","keyPlayer":"WristerWes — 14 points, the only Wolf among the league's top scorers"},{"code":"ANA","comment":"The Ducks pushed surging Aurora to the wire in a 2–3 loss, but the slide is now four games. A league-worst minus-20 differential and 49 goals against tell the story: this club can create chances but cannot keep the puck out of its own net.","keyPlayer":"SauceBoss77 — two assists in the near-upset of the Blades"},{"code":"YET","comment":"Shut out 5–0 by Circuit Breakers, the Yetis have dropped six straight and fall two spots to the basement. A goaltending committee that has yet to put a single name on the league's goalie leaderboard, paired with just 29 goals in 12 games, leaves nowhere to hide.","keyPlayer":"—"}],"matchupPreview":"Tonight's Week 7 headliner sends the 10-2-0 Tucson Vipers into Aurora to face the 8-4-0 Blades, winners of three straight. It doubles as a goaltending showcase: QuickReleaseQi (9-1, .932, league-best 1.40 GAA) against QuietRoomQuinn, already a three-time Goalie of the Week this season. Tucson also gets OpenIceOpie back from his two-game suspension tonight, while Aurora counters with KneeDeepKen and his club-leading 13 goals. A Blades win cuts the West gap to two points; a Vipers win stretches the cushion to six and runs their streak to five."},"ops":{"complaints":[{"caseId":"CG-0142","category":"Disconnect dispute","filedBy":"FiveHoleFinn","against":"—","summary":"Week 5 mid-game disconnect — score rolled back per Rule 3","detail":"FiveHoleFinn (Circuit Breakers winger) reported that the lobby dropped mid-game during Wednesday's Week 5 matchup and that the score at the moment of the disconnect was in dispute. Both clubs were asked to submit lobby screenshots and connection logs from the restart so officials could reconstruct the game state.","status":"Resolved","confidential":false,"assignedTo":"RefCam_Official","decision":"Full lobby failure confirmed from logs and both captains' screenshots. Per the disconnect procedure (Rule 4.3), the game was resumed from a fresh lobby with the score and clock carried forward from the point of failure. The final result stands and the standings reflect it. No fault assigned to either club.","timeline":[{"dateIso":"2026-07-02","who":"FiveHoleFinn","entry":"Case submitted: lobby dropped mid-game in Wednesday's Week 5 matchup; score at the time of the disconnect is disputed."},{"dateIso":"2026-07-02","who":"RefCam_Official","entry":"Case assigned and moved to under review. Lobby logs pulled — the home club's timeline matches the connection data, and a Rule 4.3 rollback looks clean. Drafting the decision pending club uploads.","internal":true},{"dateIso":"2026-07-03","who":"RefCam_Official","entry":"More information requested: both clubs asked to upload lobby screenshots and connection logs from the restart."},{"dateIso":"2026-07-05","who":"RefCam_Official","entry":"Resolved: score rolled back to the last completed period per Rule 4.3 and the remainder replayed. Decision published to both clubs."}]},{"caseId":"CG-0147","category":"Gameplay violation","filedBy":"TapeToTapeTee","against":"OpenIceOpie (TUC)","summary":"Late hit in Friday's Week 5 game — two-game suspension under Rule 7.4","detail":"TapeToTapeTee filed clips of a late hit delivered well after the puck was gone during Friday's Week 5 game against the Tucson Vipers. Officials pulled footage from both clubs' angles and reviewed the sequence frame by frame before issuing a ruling under Rule 7.4.","status":"Resolved","confidential":false,"assignedTo":"RefCam_Official","decision":"Rule 7.4 violation confirmed on review of footage from both clubs. OpenIceOpie (Tucson Vipers) suspended two games, covering both Week 6 game nights. The suspension was served in full; OpenIceOpie was reinstated July 14 and is eligible for Week 7.","timeline":[{"dateIso":"2026-07-04","who":"TapeToTapeTee","entry":"Case submitted with two clips of the hit from Friday's Week 5 game against Tucson."},{"dateIso":"2026-07-05","who":"RefCam_Official","entry":"Under review: footage requested and received from both clubs; sequence reviewed from both angles."},{"dateIso":"2026-07-06","who":"RefCam_Official","entry":"Resolved: Rule 7.4 violation confirmed. OpenIceOpie suspended two games, covering both Week 6 game nights. Decision published and logged to Transactions."}]},{"caseId":"CG-0151","category":"Harassment","filedBy":"(confidential)","against":"(confidential)","summary":"Confidential harassment report under active review","detail":"A harassment report has been filed through the confidential reporting form. To protect the parties involved, all details are restricted to league staff while the review is active. Updates will be shared directly with the filer.","status":"Under review","confidential":true,"assignedTo":"RefCam_Official","timeline":[{"dateIso":"2026-07-11","who":"(confidential)","entry":"Case submitted through the confidential reporting form."},{"dateIso":"2026-07-12","who":"RefCam_Official","entry":"Case assigned and moved to under review. Details restricted to league staff."}]},{"caseId":"CG-0153","category":"Scheduling issue","filedBy":"ShortSideSho","against":"—","summary":"Request to move Polar Reign's Wednesday Week 8 game","detail":"ShortSideSho (Polar Reign) requests moving the club's Wednesday, July 22 fixture in Week 8, citing a roster availability conflict that would leave Whitecliff short of a full six. Per league policy, a schedule change needs the opposing club's written agreement plus at least two proposed alternative windows inside Week 8.","status":"More information requested","confidential":false,"timeline":[{"dateIso":"2026-07-13","who":"ShortSideSho","entry":"Case submitted: request to move Polar Reign's Wednesday, July 22 game in Week 8 due to a roster availability conflict."},{"dateIso":"2026-07-14","who":"League Office","entry":"More information requested: please provide two alternative windows within Week 8 and written confirmation from the opposing club."}]}],"transactions":[{"dateIso":"2026-06-01","type":"note","team":"LEAGUE","text":"Season 1 rosters finalized. Eight clubs, two divisions, ten weeks. Opening night is Wednesday, June 3 — every roster is locked and loaded."},{"dateIso":"2026-06-17","type":"callup","team":"CBR","text":"HatTrickHavoc has earned a start-share in the Circuit Breakers crease. What began as a spot start is now a rotation — Voltage City's staff confirmed Havoc splits game nights the rest of the way."},{"dateIso":"2026-06-22","type":"callup","team":"POL","text":"Polar Reign open up the crease. Whitecliff confirms a goalie start-share beginning in Week 4 as the club searches for stability in its own end."},{"dateIso":"2026-06-24","type":"callup","team":"TUN","text":"Tundra Wolves call up UpperNinety from the depth chart. Greywater slots the newcomer straight into the game-night rotation for Week 4."},{"dateIso":"2026-06-29","type":"note","team":"AUR","text":"Aurora Blades unveil a Northshore alternate look. The new third jersey debuts at Lights Center in Week 5."},{"dateIso":"2026-07-06","type":"suspension","team":"TUC","text":"OpenIceOpie (Tucson Vipers) suspended two games under Rule 7.4 for a late hit in Friday's Week 5 game. The ban covers both Week 6 game nights. Full decision in case CG-0147."},{"dateIso":"2026-07-08","type":"callup","team":"TUN","text":"ZambroniZed stays up. The depth call-up has run red-hot since arriving, and the Tundra Wolves confirmed Zed keeps a full-time spot in the game-night lineup."},{"dateIso":"2026-07-10","type":"note","team":"YET","text":"Trade request logged in Iron Ridge. A Steel Yetis player has formally asked for a move, and the front office is listening — expect the phones to stay busy as the deadline gets closer."},{"dateIso":"2026-07-13","type":"note","team":"LEAGUE","text":"Week 8 availability window is open. Clubs must submit availability through the manager portal by Sunday, July 19 at 8:00 PM ET."},{"dateIso":"2026-07-14","type":"reinstatement","team":"TUC","text":"OpenIceOpie reinstated after serving the two-game Rule 7.4 suspension in full. Eligible for Wednesday's Week 7 slate."}],"announcements":[{"dateIso":"2026-07-13","title":"Week 8 availability is open","body":"The Week 8 availability window opened today. Owners and GMs: submit your club's availability through the manager portal by Sunday, July 19 at 8:00 PM ET. The Week 8 schedule posts once every club is in — get your windows locked early so we can publish on time. Pending change requests (including any Week 8 moves) will be resolved before the schedule goes final."},{"dateIso":"2026-07-15","title":"Tonight's game codes release 30 minutes before puck drop","body":"Lobby codes for tonight's Week 7 games go out 30 minutes before each scheduled puck drop. Watch your matchup pages — codes appear there first. Keep codes inside your club: sharing a lobby code outside the two rostered teams is a conduct issue. If a code hasn't appeared 15 minutes before your start time, ping the League Office in the Action Center."}],"teamNotes":[{"code":"CBR","line":"East leaders at 9-2-1 with 44 goals in 12 games — SnipeShowVI's league-best 18 set the pace in Voltage City."},{"code":"ICE","line":"Quietly relentless at 8-3-1, a win back of the East lead and refusing to let the Breakers breathe."},{"code":"TUN","line":"A game over .500 at 6-5-1, and the depth is arriving — Greywater's call-ups have given the Wolves real bite."},{"code":"ANA","line":"At 4-7-1 with 28 goals through 12 games, the Ducks' problem isn't effort — it's finish."},{"code":"TUC","line":"The league's measuring stick: 10-1-1, a league-best 49 goals scored and a league-low 25 against."},{"code":"AUR","line":"Second in the West at 7-4-1 and built on structure — Northshore trades chances for control and keeps winning the math."},{"code":"YET","line":"Dead even at 6-6-0 — the only club without an overtime loss — with BarDownBo's 15 goals keeping Iron Ridge in every fight."},{"code":"POL","line":"3-8-1 and retooling on the fly in Whitecliff — 45 goals against says the fix starts in the Reign's own end."}]},"awards":{"threeStars":[{"gameId":"g45","blurb":"PenaltyKillPax scored one and set up another to take first-star honors as the Aurora Blades edged the Anaheim Ducks 3-2. Anaheim's SauceBoss77 grabbed the second star with two assists in the loss, and KneeDeepKen added two helpers of his own for the third."},{"gameId":"g46","blurb":"WristerWes led the way with a goal and two assists as the Tundra Wolves ran over Polar Reign 6-2. UpperNinety and ZambroniZed buried two goals apiece to claim the second and third stars."},{"gameId":"g47","blurb":"KillerCrossover and JackpotJett matched each other with a goal and an assist apiece in the Tucson Vipers' 3-1 win over the Midnight Icehawks. QuickReleaseQi rounded out the stars with 20 saves in the Tucson net."},{"gameId":"g48","blurb":"TapeToTapeTee ripped two goals and added a helper as the Circuit Breakers blanked the Steel Yetis 5-0. DekeDynasty chipped in a goal and two assists for the second star, and HatTrickHavoc took the third with an 18-save shutout."}],"potw":[{"week":1,"skaterBlurb":"GrittyGrinder set the tone for the Aurora Blades right out of the gate, piling up 9 points in the opening week to claim the league's first skater honors.","goalieBlurb":"QuickReleaseQi owned the Tucson Vipers' crease from opening night and made the season's first goalie-of-the-week call an easy one."},{"week":2,"skaterBlurb":"PuckP1rate went off for 11 points in week 2, the kind of stat line that had the rest of the East checking the box score twice. The Circuit Breakers rode every bit of it.","goalieBlurb":"QuietRoomQuinn lived up to the gamertag, calmly turning aside chance after chance to keep the Aurora Blades in every game they played."},{"week":3,"skaterBlurb":"ShortSideSho piled up 9 points for Polar Reign in week 3, living up to the name with a knack for finding room where there shouldn't be any.","goalieBlurb":"QuickReleaseQi grabbed his second nod of the young season, once again making the Vipers' net the hardest place in the league to score."},{"week":4,"skaterBlurb":"KneeDeepKen posted 8 points for the Aurora Blades in week 4, doing his best work below the dots and around the blue paint.","goalieBlurb":"QuietRoomQuinn made it a Blades sweep of the week 4 hardware, matching KneeDeepKen's honors with another composed run between the pipes."},{"week":5,"skaterBlurb":"PuckP1rate did it again: another 11-point week for the Circuit Breakers' catalyst, making him the season's first repeat skater of the week.","goalieBlurb":"QuickReleaseQi collected his third goalie-of-the-week nod, the steady hand behind the Vipers' charge to the top of the West."},{"week":6,"skaterBlurb":"TapeToTapeTee closed the first half with a 9-point week, capping it with a two-goal, three-point night in the Circuit Breakers' 5-0 shutout of the Steel Yetis.","goalieBlurb":"QuietRoomQuinn earned his third weekly nod, giving the Aurora Blades a chance every single time the puck dropped."}]}};
+
+/* ================================================================
+   RULEBOOK — Chapter 2 amendments adapted from the League Gaming
+   constitution (salary cap, contracts, and the Owner/GM/AGM
+   management structure), rewritten in CGHL's own voice.
+   Additive only: no existing rule IDs change, so every in-app
+   citation (4.2, 5.1, 5.3, 7.4, 8.1, 3.2, 7.6) stays valid.
+   ================================================================ */
+(function(){
+  var rb = CG.CONTENT.rulebook;
+  var ch2 = rb.chapters.find(function(c){ return c.num===2; });
+  if (ch2 && !ch2.sections.some(function(s){ return s.id==="2.5"; })){
+    ch2.sections.push({
+      id:"2.5", title:"Salary cap and contracts",
+      paragraphs:[
+        "Every club operates under a hard salary cap of $65,000,000. A club may not ice a lineup, complete a trade, or claim a waived player if the move would push its active payroll above the cap. Compliance is checked automatically at every roster move, and the league office may void any transaction that breaches it.",
+        "Every player carries a contract with a cap hit and a term of one to three seasons. The league minimum salary is $750,000. A contract that reaches the end of its term returns the player to free agency under Rule 2.2.",
+        "Waiving a player clears his cap hit immediately and opens a 24-hour waiver window. A claiming club takes on the player at his pre-waiver salary, reinstated exactly as it stood; a player who clears unclaimed becomes a free agent. A player returning from a league suspension is reinstated at his pre-suspension salary and remaining term.",
+        "Cap space, contract values, and trade-block status are confidential team information. They are visible only to a club's management group and the league office, and are covered by the confidentiality standard in Rule 2.3."
+      ]
+    });
+  }
+  if (ch2 && !ch2.sections.some(function(s){ return s.id==="2.6"; })){
+    ch2.sections.push({
+      id:"2.6", title:"Team management structure",
+      paragraphs:[
+        "Each club is led by an Owner and a General Manager. Together they may appoint one Assistant General Manager. These roles form the club's management group and are the only accounts with access to confidential team tools — the availability grid, the lineup builder, the roster cap sheet, and the Trade Hub.",
+        "Management contracts carry fixed cap values: the Owner and the General Manager count $0 against the cap, and the Assistant General Manager (and any additional tertiary management contract) counts a flat $3,000,000. A player is protected while he holds a management role — he may not be waived, and he may not be included in a trade, until the role is vacated.",
+        "Managers are held to the activity and on-ice standards the commissioner sets each season — minimum weekly availability and, where applicable, baseline performance thresholds by position. A manager who falls short of those standards may be reviewed and, if warranted, removed and replaced under this chapter.",
+        "Trade discussions, offers, and block listings are restricted to the management groups involved and the league office. Carrying that information outside the management group — to players, to rival clubs, or to the public — is a conduct violation under Rule 1.2 and Rule 2.3."
+      ]
+    });
+  }
+  var ch8 = rb.chapters.find(function(c){ return c.num===8; });
+  if (ch8){
+    var s81 = ch8.sections.find(function(s){ return s.id==="8.1"; });
+    if (s81 && s81.paragraphs.join(" ").toLowerCase().indexOf("points percentage")<0){
+      s81.paragraphs.push("Clubs are ordered by points percentage rather than raw points, so teams that have played a different number of games are compared fairly. A regulation or overtime win is worth two points and an overtime loss one; points percentage is the points a club has earned divided by the points available to it — equivalently, wins plus half of overtime losses, divided by games played.");
+    }
+  }
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version!=="1.3"){
+    rb.changelog.unshift({
+      version:"1.3", dateIso:"2026-07-15",
+      summary:"Chapter 2 expanded to codify the salary cap and contract system (Rule 2.5) and the Owner/GM/AGM management structure (Rule 2.6): the $65M hard cap, one-to-three-season contracts, the $750K minimum, waiver salary reinstatement, $0 Owner/GM contracts, and the $3M assistant-manager contract. Seeding now states the points-percentage standard (Rule 8.1)."
+    });
+  }
+})();
 /* ================================================================
    UI FRAMEWORK — state, permissions, router, shared components
    ================================================================ */
@@ -1227,7 +1363,8 @@ CG.store = (function(){
   var def = { role:"guest", read:{}, availability:{}, lineups:{}, myComplaints:[],
               results:[], slides:{}, modules:{}, audit:[], weights:null, media:[],
               rbEdits:{}, notifs:{}, recentSearch:[], caseNotes:{}, prefs:{},
-              resched:{}, starsOverride:{}, caseDecisions:{}, userRoles:{}, rbPublished:null };
+              resched:{}, starsOverride:{}, caseDecisions:{}, userRoles:{}, rbPublished:null,
+              blockToggles:{}, waived:{}, tradeOffers:[], tradeDecisions:{} };
   var data;
   try { data = Object.assign({}, def, JSON.parse(localStorage.getItem(CG.STORE_KEY)||"{}")); }
   catch(e){ data = def; }
@@ -1359,6 +1496,8 @@ CG.avatarHtml = function(key){
 CG.PERMS = {
   "availability.submit":      ["member","mgmt"],
   "availability.viewTeam":    ["mgmt","staff","commish"],
+  "roster.manage":            ["mgmt","commish"],
+  "trades.manage":            ["mgmt","commish"],
   "lineup.build":             ["mgmt","commish"],
   "lineup.viewOwn":           ["member","mgmt"],
   "codes.view":               ["member","mgmt","staff","commish"],
@@ -2715,6 +2854,8 @@ CG.ROUTES.player = function(pid, qs){
           (p.rookie?'<span class="chip chip-chrome">Rookie</span>':"")+
           '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>'+
           '<span class="chip chip-ink" style="border-color:#39434B">Shoots '+p.shoots+'</span>'+
+          (!archived?'<span class="chip chip-ink" style="border-color:#39434B">'+
+            (p.mgmt?(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+" · "+CG.fmtMoney(p.salary):CG.fmtMoney(p.salary)+" · "+p.term+" yr")+'</span>':"")+
           (sus? (sus.status==="served"
             ? '<span class="chip chip-warn">Suspension served (Wk 6)</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
@@ -2755,7 +2896,16 @@ CG.ROUTES.player = function(pid, qs){
       cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div></div>'+
-      sideCard+'</div>';
+      '<div class="stack">'+sideCard+(archived?"":
+        '<div class="card"><div class="card-h"><h3>Contract</h3>'+
+        (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
+        '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
+          '<div><b class="num" style="font-size:22px">'+CG.fmtMoney(p.salary)+'</b><span class="caption" style="display:block">Cap hit</span></div>'+
+          '<div><b class="num" style="font-size:22px">'+p.term+' yr'+(p.term>1?"s":"")+'</b><span class="caption" style="display:block">Term remaining</span></div></div>'+
+        '<p class="caption" style="margin-top:12px">'+(p.mgmt
+          ? "Management contracts (Owner, GM, AGM) carry a fixed cap value and are protected from waivers and trades (Rule 2.6)."
+          : "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. Contracts run one to three seasons; expiring deals return to free agency (Rule 2.5).")+'</p>'+
+        '</div></div>')+'</div></div>';
   }
   if (tab==="log"){
     var log = SD.glog[p.id];
@@ -3366,12 +3516,48 @@ CG.avFor = function(playerId){
            at: Date.parse("2026-07-1"+(3+(n%2))+"T1"+(n%9)+":00:00-04:00") };
 };
 
+/* ---------- roster / trade demo state ----------
+   The managed club is always the seat's own team (mgmt = Breakers; commissioner
+   previews the Breakers desk). Block flags start from the engine seed, then the
+   demo store lets management toggle them live. */
+CG.myClub = function(){ var me = CG.me(); return me && me.team ? me.team : "CBR"; };
+CG.isOnBlock = function(pid){
+  var t = CG.store.get("blockToggles")||{};
+  if (Object.prototype.hasOwnProperty.call(t, pid)) return !!t[pid];
+  var p = CG.playerById(CG.lg, pid);
+  return !!(p && p.onBlock);
+};
+CG.setOnBlock = function(pid, on){
+  var t = CG.store.get("blockToggles")||{}; t[pid] = !!on; CG.store.set("blockToggles", t);
+};
+CG.isWaived = function(pid){ return !!(CG.store.get("waived")||{})[pid]; };
+CG.setWaived = function(pid, on){
+  var w = CG.store.get("waived")||{}; if (on) w[pid]=true; else delete w[pid]; CG.store.set("waived", w);
+};
+/* league-wide trade block, honoring live toggles; management never blocks itself */
+CG.blockedPlayers = function(){
+  return CG.lg.players.filter(function(p){ return !p.mgmt && CG.isOnBlock(p.id); });
+};
+/* incoming offers still awaiting a decision */
+CG.incomingOffers = function(){
+  var dec = CG.store.get("tradeDecisions")||{};
+  return (CG.lg.incoming||[]).filter(function(o){ return !dec[o.id]; });
+};
+CG.incomingCount = function(){ return CG.can("trades.manage") ? CG.incomingOffers().length : 0; };
+CG.tradePlayerLine = function(pid){
+  var p = CG.playerById(CG.lg, pid); if (!p) return "";
+  return '<span class="playercell">'+CG.crest(p.team,18)+'<span class="nm">'+esc(p.tag)+'</span>'+
+    '<small style="color:var(--steel)">'+p.pos+' · OVR '+CG.lg.ratings[p.id].ovr+' · '+CG.fmtMoney(CG.playerSalary(CG.lg,pid))+'</small></span>';
+};
+
 /* hub sidebar per role */
 CG.hubNav = function(section){
   var r = CG.role();
   var items = [["", "Dashboard", "home"]];
   if (CG.can("availability.submit")) items.push(["availability","Availability","cal"]);
-  if (CG.can("lineup.build") && r!=="commish") items.push(["lineup","Lineup builder","users"]);
+  if (CG.can("roster.manage") && r!=="commish") items.push(["roster","Roster","users"]);
+  if (CG.can("trades.manage") && r!=="commish") items.push(["tradehub","Trade Hub","swap"]);
+  if (CG.can("lineup.build") && r!=="commish") items.push(["lineup","Lineup builder","grid"]);
   if (CG.can("complaints.file")||CG.can("complaints.review")) items.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
   if (r==="staff") items.push(["statsentry","Stats entry","chart"]);
   items.push(["notifications","Notifications","bell"]);
@@ -3380,6 +3566,7 @@ CG.hubNav = function(section){
     items.map(function(it){
       var badge = "";
       if (it[0]==="availability" && !CG.store.get("availability")["w8:"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
+      if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
         var openN = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; }).length;
@@ -3405,6 +3592,8 @@ CG.ROUTES.hub = function(param, qs){
   var section = param||"";
   if (section==="") return CG.hubShell("", CG.hubDashboard());
   if (section==="availability") return CG.hubShell("availability", CG.hubAvailability());
+  if (section==="roster") return CG.can("roster.manage") ? CG.hubShell("roster", CG.hubRoster(qs)) : CG.unauthorized("Roster management is a team-management tool. Switch to the Team Mgmt seat to try it.");
+  if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management. Switch to the Team Mgmt seat to try it.");
   if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool. Switch to the Team Mgmt seat to try it.");
   if (section==="complaints") return CG.hubShell("complaints", CG.hubComplaints());
   if (section==="complaint") return CG.hubShell("complaints", CG.hubComplaintDetail(qs.id));
@@ -3436,14 +3625,8 @@ CG.hubDashboard = function(){
         ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+'. You can edit until the deadline.</p>'
         : '<p class="small" style="color:var(--steel)">Two game nights next week. Your GM builds lineups from this — 30 seconds now saves a scramble later.</p>')+
       '<a class="btn '+(av?"btn-ghost":"btn-chrome")+' btn-sm" style="margin-top:12px" href="#/hub/availability">'+(av?"Review / edit":"Submit availability")+'</a></div></div>');
-    if (tonight){
-      cards.push('<div class="card"><div class="card-h"><h3>Tonight</h3><a class="sec-link" href="#/matchup/'+tonight.id+'">Matchup center</a></div>'+
-        '<div class="card-b"><div style="display:flex;gap:10px;align-items:center;font-family:var(--f-disp);font-weight:700">'+
-        CG.crest(tonight.away,26)+esc(CG.TEAM[tonight.away].code)+' @ '+CG.crest(tonight.home,26)+esc(CG.TEAM[tonight.home].code)+
-        '<span class="chip chip-live" style="margin-left:auto"><span class="live-dot"></span>'+CG.fmtTime(tonight.at)+'</span></div>'+
-        '<p class="small" style="margin-top:10px;color:var(--steel)">'+(inLineup
-          ? "You’re in the confirmed lineup at "+CG.POS_NAME[me.pos]+". Code goes live at "+CG.fmtTime(tonight.at-30*60000)+" on the matchup page."
-          : "You’re listed as a scratch tonight — stay ready in case of a late swap.")+'</p></div></div>');
+    if (lg.tonight.length){
+      cards.push(CG.tonightCard(me, tonight, inLineup));
     }
     if (lg.pstats[me.id].gp){
       var last3 = lg.glog[me.id].slice(-3).reverse();
@@ -3486,6 +3669,31 @@ CG.hubDashboard = function(){
         '<span class="nf-ic">'+CG.ic(n.icon||"bell",15)+'</span><span style="min-width:0"><b>'+esc(n.title)+'</b><p>'+esc(n.body)+'</p></span></div>';
     }).join("")+'</div>');
   return h + '<div class="grid g2">'+cards.join("")+'</div>';
+};
+
+/* Tonight's slate — every game clickable through to its matchup center
+   (line matchup, server/lobby settings, and the private game code). */
+CG.tonightCard = function(me, myGame, inLineup){
+  var lg = CG.lg;
+  var rows = lg.tonight.slice().sort(function(a,b){ return a.at-b.at; }).map(function(g){
+    var mine = me && (g.home===me.team||g.away===me.team);
+    return '<div class="notif" data-go="#/matchup/'+g.id+'" style="cursor:pointer'+(mine?';background:var(--chrome-tint)':"")+'">'+
+      '<span class="nf-ic">'+CG.crest(g.away,22)+'</span>'+
+      '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+esc(CG.TEAM[g.away].code)+' @ '+esc(CG.TEAM[g.home].code)+'</b>'+
+      '<p>'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+
+        (g.feature?' · <span style="color:var(--chrome-deep);font-weight:700">Marquee</span>':"")+
+        (mine?' · <span style="font-weight:700">your game</span>':"")+'</p></span>'+
+      '<span class="nf-t" style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">'+CG.fmtTime(g.at)+
+        '<span class="chip" style="font-size:9px;padding:1px 7px">Matchup ›</span></span></div>';
+  }).join("");
+  var note = myGame
+    ? '<div class="card-b" style="border-top:1px solid var(--line)"><p class="small" style="color:var(--steel)">'+(inLineup
+        ? "You’re in the confirmed lineup at "+CG.POS_NAME[me.pos]+". Your private game code goes live at "+CG.fmtTime(myGame.at-30*60000)+" — open the matchup to grab it."
+        : "You’re a scratch tonight — stay ready for a late swap. Tap your game to see the confirmed lines and lobby settings.")+'</p></div>'
+    : '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Tap any game for confirmed lines, server settings, and the private lobby code (Rule 4.2).</span></div>';
+  return '<div class="card" style="grid-column:1/-1"><div class="card-h"><h3>Tonight’s slate</h3>'+
+    '<span class="chip chip-live"><span class="live-dot"></span>'+lg.tonight.length+' game'+(lg.tonight.length===1?"":"s")+'</span></div>'+
+    rows + note + '</div>';
 };
 
 /* ---------- availability ---------- */
@@ -3749,6 +3957,300 @@ CG.AFTER._lineup = function(){
   });
 };
 
+/* ================================================================
+   ROSTER — cap sheet + waive / trade / trade-block actions
+   ================================================================ */
+CG.mgmtTag = function(role){ return role==="owner"?"Owner":role==="gm"?"GM":role==="agm"?"AGM":""; };
+CG.hubRoster = function(qs){
+  var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];
+  var roster = lg.byTeam[club].slice().sort(function(a,b){
+    var order = {LW:0,C:1,RW:2,LD:3,RD:4,G:5};
+    return (order[a.pos]-order[b.pos]) || a.depth-b.depth;
+  });
+  var payroll = CG.teamPayroll(lg, club), space = CG.capSpace(lg, club);
+  var blockN = roster.filter(function(p){ return !p.mgmt && CG.isOnBlock(p.id); }).length;
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · team management</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Roster & salary cap</h1>'+
+    '<p class="lede" style="margin-top:8px">Your full club, with contracts and cap hit. Waive a player, put one on the trade block, or open a trade — all under the $'+(CG.CAP/1000000)+'M cap (Rule 2.5).</p></div>';
+  h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
+    '<span><b style="font-family:var(--f-disp)">Confidential — management only.</b> Salaries, cap space, and trade-block status are visible to your Owner, GM, and AGM. Don’t share them with players or rival clubs (Rule 2.3).</span></div>';
+  h += '<div class="grid g3" style="margin-bottom:20px">'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(payroll)+'</b><span>Active payroll</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px;color:'+(space<0?"var(--red)":"var(--green)")+'">'+CG.fmtMoney(space)+'</b><span>Cap space</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(CG.CAP)+'</b><span>Salary cap</span></div></div>';
+  var rows = roster.map(function(p){
+    var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
+    var status = waived ? '<span class="chip chip-loss">Waived</span>'
+      : mrole ? '<span class="chip chip-chrome">'+mrole+'</span>'
+      : onBlk ? '<span class="chip chip-warn">On block</span>'
+      : '<span class="chip chip-win">Active</span>';
+    var actions = p.mgmt
+      ? '<span class="caption">Management contract — protected</span>'
+      : (waived
+        ? '<button class="btn btn-ghost btn-sm" data-reinstate="'+p.id+'">Reinstate</button>'
+        : '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
+          '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
+          '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
+    return '<tr'+(waived?' style="opacity:.55"':"")+'>'+
+      '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
+      '<td class="tnum">'+p.pos+'</td>'+
+      '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
+      '<td class="tnum" data-v="'+(p.salary||0)+'"><b>'+CG.fmtMoney(p.salary)+'</b></td>'+
+      '<td class="tnum">'+p.term+' yr'+(p.term>1?"s":"")+'</td>'+
+      '<td>'+status+'</td>'+
+      '<td class="tright">'+actions+'</td></tr>';
+  }).join("");
+  h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
+    '<span class="chip">'+blockN+' on the block</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
+    '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player clears their cap hit; a claimed player’s salary is reinstated at his pre-waiver number (Rule 2.5).</span></div></div>';
+  return h;
+};
+CG.AFTER._roster = function(){
+  $$("[data-trade]").forEach(function(b){ b.addEventListener("click", function(){
+    location.hash = "#/hub/tradehub?add="+this.getAttribute("data-trade");
+  }); });
+  $$("[data-block]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid = this.getAttribute("data-block"), on = CG.isOnBlock(pid);
+    CG.setOnBlock(pid, !on);
+    var p = CG.playerById(CG.lg, pid);
+    CG.audit(on?"Removed from trade block":"Added to trade block", p.tag);
+    CG.toast(on ? p.tag+" removed from the trade block" : p.tag+" listed on the trade block", "ok");
+    CG.router();
+  }); });
+  $$("[data-waive]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid = this.getAttribute("data-waive"), p = CG.playerById(CG.lg, pid);
+    CG.confirm("Waive "+p.tag+"?","This clears his "+CG.fmtMoney(p.salary)+" cap hit and exposes him to a 24-hour waiver window. Any club can claim him at his current salary (Rule 2.5). In this prototype the move is reversible.","Waive player", function(){
+      CG.setWaived(pid, true); CG.setOnBlock(pid, false);
+      CG.audit("Player waived", p.tag+" ("+CG.fmtMoney(p.salary)+")");
+      CG.pushNotif("flag","Player waived",p.tag+" was placed on waivers — 24-hour claim window open.","#/hub/roster");
+      CG.toast(p.tag+" placed on waivers","ok"); CG.renderChrome(); CG.router();
+    });
+  }); });
+  $$("[data-reinstate]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid = this.getAttribute("data-reinstate"), p = CG.playerById(CG.lg, pid);
+    CG.setWaived(pid, false);
+    CG.audit("Waiver cleared", p.tag);
+    CG.toast(p.tag+" cleared waivers — back on the active roster","ok"); CG.renderChrome(); CG.router();
+  }); });
+};
+
+/* ================================================================
+   TRADE HUB — build trades, incoming offers, league-wide block
+   (confidential to team management)
+   ================================================================ */
+CG._tradeDraft = null;
+CG.tradeDraft = function(){ if (!CG._tradeDraft) CG._tradeDraft = { partner:null, send:[], recv:[] }; return CG._tradeDraft; };
+CG.tradeAddPlayer = function(pid){
+  var p = CG.playerById(CG.lg, pid); if (!p || p.mgmt) return;
+  var d = CG.tradeDraft();
+  if (p.team===CG.myClub()){ if (d.send.indexOf(pid)<0) d.send.push(pid); }
+  else { if (d.partner && d.partner!==p.team) d.recv = []; d.partner = p.team; if (d.recv.indexOf(pid)<0) d.recv.push(pid); }
+};
+CG.tradeCapAfter = function(club, sendPids, recvPids){
+  var out = sendPids.reduce(function(s,pid){ return s+CG.playerSalary(CG.lg,pid); }, 0);
+  var inc = recvPids.reduce(function(s,pid){ return s+CG.playerSalary(CG.lg,pid); }, 0);
+  return CG.teamPayroll(CG.lg, club) - out + inc;
+};
+CG.hubTradeHub = function(qs){
+  var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club], d = CG.tradeDraft();
+  var incoming = CG.incomingOffers();
+  var h = '<div style="margin-bottom:18px"><span class="eyebrow chr">'+esc(t.name)+' · team management</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Trade Hub</h1>'+
+    '<p class="lede" style="margin-top:8px">Build and send offers, review what other clubs send you, and see every player on the block across the league — all within the cap (Rule 2.5).</p></div>';
+  h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
+    '<span><b style="font-family:var(--f-disp)">Confidential to management.</b> Everything on this page — offers, notes, and block listings — is restricted to your Owner, GM, and AGM. Sharing trade talks outside the management group is a Rule 2.3 violation.</span></div>';
+
+  /* ---- incoming offers ---- */
+  var inc = '<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
+  if (incoming.length){
+    inc += incoming.map(function(o){
+      var capAfter = CG.tradeCapAfter(club, o.get, o.give); /* we send o.get, receive o.give */
+      var over = capAfter > CG.CAP;
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+        '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
+        '<span class="teamcell">'+CG.crest(o.from,24)+'<span class="nm">'+esc(CG.TEAM[o.from].name)+'</span></span>'+
+        '<span class="nf-t">'+CG.fmtFull(o.at)+'</span></div>'+
+        '<div class="grid g2" style="gap:14px">'+
+          '<div><span class="caption">You receive</span>'+o.give.map(function(pid){ return '<div style="margin-top:6px">'+CG.tradePlayerLine(pid)+'</div>'; }).join("")+'</div>'+
+          '<div><span class="caption">You send</span>'+o.get.map(function(pid){ return '<div style="margin-top:6px">'+CG.tradePlayerLine(pid)+'</div>'; }).join("")+'</div>'+
+        '</div>'+
+        (o.note?'<p class="small" style="color:var(--steel);margin-top:12px;font-style:italic">“'+esc(o.note)+'”</p>':"")+
+        '<div style="display:flex;gap:9px;align-items:center;margin-top:12px;flex-wrap:wrap">'+
+          '<span class="chip '+(over?"chip-loss":"chip-win")+'">Cap after: '+CG.fmtMoney(capAfter)+(over?" · OVER":" · OK")+'</span>'+
+          '<span style="margin-left:auto;display:flex;gap:8px">'+
+          '<button class="btn btn-ghost btn-sm" data-th-counter="'+o.id+'">Counter</button>'+
+          '<button class="btn btn-ghost btn-sm" data-th-decline="'+o.id+'">Decline</button>'+
+          '<button class="btn btn-chrome btn-sm" data-th-accept="'+o.id+'"'+(over?" disabled title=\"Accepting would put you over the cap\"":"")+'>Accept</button>'+
+          '</span></div></div>';
+    }).join("");
+  } else {
+    inc += '<div class="card-b"><p class="small" style="color:var(--steel)">No open offers right now. When another club sends you one, it lands here and you get a notification.</p></div>';
+  }
+  inc += '</div>';
+
+  /* ---- trade builder ---- */
+  var others = Object.keys(CG.TEAM).filter(function(c){ return c!==club; }).sort();
+  var sendPay = d.send.reduce(function(s,pid){ return s+CG.playerSalary(lg,pid); },0);
+  var recvPay = d.recv.reduce(function(s,pid){ return s+CG.playerSalary(lg,pid); },0);
+  var capAfter = CG.tradeCapAfter(club, d.send, d.recv);
+  var over = capAfter > CG.CAP;
+  function sideList(side, pids){
+    if (!pids.length) return '<p class="caption" style="margin-top:8px">No players yet — add from '+(side==="send"?"your roster":"their roster")+'.</p>';
+    return pids.map(function(pid){
+      return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'+CG.tradePlayerLine(pid)+
+        '<button class="chip" data-th-rm="'+side+':'+pid+'" title="Remove" style="cursor:pointer;margin-left:auto">✕</button></div>';
+    }).join("");
+  }
+  var builder = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Build a trade</h3>'+
+    (d.send.length||d.recv.length?'<button class="btn btn-ghost btn-sm" id="thClear">Clear</button>':'<span class="chip chip-chrome">Draft</span>')+'</div>'+
+    '<div class="card-b">'+
+    '<label class="fld" style="max-width:340px"><span>Trade partner</span><select id="thPartner">'+
+      '<option value="">Choose a club…</option>'+
+      others.map(function(c){ return '<option value="'+c+'"'+(d.partner===c?" selected":"")+'>'+esc(CG.TEAM[c].name)+'</option>'; }).join("")+
+    '</select></label>'+
+    '<div class="grid g2" style="gap:16px;margin-top:14px;align-items:start">'+
+      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-family:var(--f-disp)">'+esc(t.name)+' send</b>'+
+        '<span class="caption">out '+CG.fmtMoney(sendPay)+'</span></div>'+
+        sideList("send", d.send)+
+        '<button class="btn btn-ghost btn-sm" id="thAddSend" style="margin-top:12px">'+CG.ic("plus",13)+'Add your player</button></div>'+
+      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-family:var(--f-disp)">'+(d.partner?esc(CG.TEAM[d.partner].name):"Partner")+' send</b>'+
+        '<span class="caption">in '+CG.fmtMoney(recvPay)+'</span></div>'+
+        sideList("recv", d.recv)+
+        '<button class="btn btn-ghost btn-sm" id="thAddRecv" style="margin-top:12px"'+(d.partner?"":" disabled title=\"Choose a partner club first\"")+'>'+CG.ic("plus",13)+'Add their player</button></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">'+
+      '<span class="chip '+(over?"chip-loss":"chip-win")+'">Your cap after: '+CG.fmtMoney(capAfter)+' · '+CG.fmtMoney(CG.CAP-capAfter)+(over?" OVER":" free")+'</span>'+
+      '<button class="btn btn-chrome" id="thPropose" style="margin-left:auto"'+(over?" disabled":"")+'>Send offer to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
+    '</div>'+
+    '<p class="caption" style="margin-top:10px">Both clubs must clear the $'+(CG.CAP/1000000)+'M cap after the deal. The league office reviews every accepted trade before it’s official (Rule 2.3).</p>'+
+    '</div></div>';
+
+  /* ---- outgoing (proposed) ---- */
+  var mine = (CG.store.get("tradeOffers")||[]).slice().reverse();
+  var outgoing = mine.length ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Offers you’ve sent</h3><span class="chip">'+mine.length+'</span></div>'+
+    mine.map(function(o){
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+        '<span class="teamcell">'+CG.crest(o.to,22)+'<span class="nm">to '+esc(CG.TEAM[o.to].name)+'</span></span>'+
+        '<span class="chip chip-warn">'+esc(o.status||"Sent")+'</span></div>'+
+        '<div class="grid g2" style="gap:14px"><div><span class="caption">You send</span>'+o.send.map(function(pid){ return '<div style="margin-top:6px">'+CG.tradePlayerLine(pid)+'</div>'; }).join("")+'</div>'+
+        '<div><span class="caption">You receive</span>'+o.recv.map(function(pid){ return '<div style="margin-top:6px">'+CG.tradePlayerLine(pid)+'</div>'; }).join("")+'</div></div>'+
+        '<button class="btn btn-ghost btn-sm" data-th-withdraw="'+o.id+'" style="margin-top:12px">Withdraw offer</button></div>';
+    }).join("")+'</div>' : "";
+
+  /* ---- trade block ---- */
+  var myBlock = lg.byTeam[club].filter(function(p){ return !p.mgmt && CG.isOnBlock(p.id); });
+  var leagueBlock = CG.blockedPlayers().filter(function(p){ return p.team!==club; })
+    .sort(function(a,b){ return a.team.localeCompare(b.team) || lg.ratings[b.id].ovr-lg.ratings[a.id].ovr; });
+  var block = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Trade block</h3><span class="chip">'+leagueBlock.length+' available league-wide</span></div>'+
+    '<div class="card-b">'+
+    '<b style="font-family:var(--f-disp);font-size:13px">Your listings ('+esc(t.name)+')</b>'+
+    (myBlock.length ? '<div style="margin-top:8px">'+myBlock.map(function(p){
+        return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'+CG.tradePlayerLine(p.id)+
+          '<button class="chip" data-th-block-rm="'+p.id+'" title="Remove from block" style="cursor:pointer;margin-left:auto">Remove</button></div>';
+      }).join("")+'</div>'
+      : '<p class="caption" style="margin-top:6px">You have nobody listed. Add a player from the <a href="#/hub/roster" style="border-bottom:2px solid var(--chrome);font-weight:600">Roster tab</a>.</p>')+
+    '</div>'+
+    '<div class="tblwrap" style="border-top:1px solid var(--line)"><table class="tbl keepcols"><caption>Players on the block across the league</caption><thead><tr>'+
+    '<th class="tleft">Player</th><th>Club</th><th>POS</th><th>OVR</th><th>Cap hit</th><th class="tright">Action</th></tr></thead><tbody>'+
+    (leagueBlock.length ? leagueBlock.map(function(p){
+      return '<tr><td class="tleft"><span class="playercell"><span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
+        '<td><span class="teamcell" style="justify-content:center">'+CG.crest(p.team,18)+'<span class="mono" style="font-size:11px">'+CG.TEAM[p.team].code+'</span></span></td>'+
+        '<td class="tnum">'+p.pos+'</td><td class="tnum">'+lg.ratings[p.id].ovr+'</td><td class="tnum">'+CG.fmtMoney(p.salary)+'</td>'+
+        '<td class="tright"><button class="btn btn-ghost btn-sm" data-th-trade-for="'+p.id+'">Start a trade</button></td></tr>';
+    }).join("") : '<tr><td colspan="6" class="tleft"><span class="caption">No clubs are listing players right now.</span></td></tr>')+
+    '</tbody></table></div></div>';
+
+  return h + '<div class="stack">'+inc+builder+outgoing+block+'</div>';
+};
+CG.tradePickerModal = function(side){
+  var lg = CG.lg, d = CG.tradeDraft();
+  var club = side==="send" ? CG.myClub() : d.partner;
+  if (!club){ CG.toast("Choose a partner club first","err"); return; }
+  var already = side==="send" ? d.send : d.recv;
+  var pool = lg.byTeam[club].filter(function(p){ return !p.mgmt && already.indexOf(p.id)<0; })
+    .sort(function(a,b){ return lg.ratings[b.id].ovr-lg.ratings[a.id].ovr; });
+  CG.modal("Add a "+esc(CG.TEAM[club].name)+" player",
+    '<p class="caption" style="margin-bottom:10px">Management contracts (Owner, GM, AGM) can’t be traded and are hidden.</p>'+
+    '<div class="stack" style="gap:6px;max-height:340px;overflow:auto">'+pool.map(function(p){
+      return '<button class="gamecard" data-th-pick="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%">'+
+        '<span class="nf-ic">'+CG.crest(p.team,22)+'</span>'+
+        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b><span class="caption" style="display:block">'+p.pos+' · OVR '+lg.ratings[p.id].ovr+(CG.isOnBlock(p.id)?" · on block":"")+'</span></span>'+
+        '<span><b>'+CG.fmtMoney(p.salary)+'</b><span class="caption" style="display:block;text-align:right">'+p.term+' yr</span></span></button>';
+    }).join("")+'</div>',
+    '<button class="btn btn-ghost" data-close>Done</button>');
+  $$("[data-th-pick]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.tradeAddPlayer(this.getAttribute("data-th-pick")); CG.closeOverlay(); CG.router();
+  }); });
+};
+CG.AFTER._tradehub = function(qs){
+  if (qs && qs.add){ CG.tradeAddPlayer(qs.add); location.hash = "#/hub/tradehub"; return; }
+  var ps = $("#thPartner");
+  if (ps) ps.addEventListener("change", function(){
+    var d = CG.tradeDraft(); if (d.partner!==this.value) d.recv = []; d.partner = this.value||null; CG.router();
+  });
+  var as = $("#thAddSend"); if (as) as.addEventListener("click", function(){ CG.tradePickerModal("send"); });
+  var ar = $("#thAddRecv"); if (ar) ar.addEventListener("click", function(){ CG.tradePickerModal("recv"); });
+  $$("[data-th-rm]").forEach(function(b){ b.addEventListener("click", function(){
+    var parts = this.getAttribute("data-th-rm").split(":"), d = CG.tradeDraft();
+    d[parts[0]] = d[parts[0]].filter(function(x){ return x!==parts[1]; }); CG.router();
+  }); });
+  var clr = $("#thClear"); if (clr) clr.addEventListener("click", function(){ CG._tradeDraft = { partner:null, send:[], recv:[] }; CG.router(); });
+  var prop = $("#thPropose"); if (prop) prop.addEventListener("click", function(){
+    var d = CG.tradeDraft(), club = CG.myClub();
+    if (!d.partner){ CG.toast("Choose a partner club first","err"); return; }
+    if (!d.send.length || !d.recv.length){ CG.toast("Add at least one player on each side","err"); return; }
+    if (CG.tradeCapAfter(club, d.send, d.recv) > CG.CAP){ CG.toast("This deal puts you over the cap","err"); return; }
+    CG.confirm("Send this offer to "+CG.TEAM[d.partner].name+"?",
+      "The offer goes to their management group with a notification. They can accept, decline, or counter. Nothing is final until the league office approves it (Rule 2.3).","Send offer", function(){
+      var offers = CG.store.get("tradeOffers")||[];
+      offers.push({ id:"trOut"+(offers.length+1), to:d.partner, send:d.send.slice(), recv:d.recv.slice(), status:"Sent — awaiting response" });
+      CG.store.set("tradeOffers", offers);
+      CG.audit("Trade offer sent", CG.TEAM[club].code+" → "+CG.TEAM[d.partner].code);
+      CG.pushNotif("swap","Trade offer sent","Your offer to "+CG.TEAM[d.partner].name+" is on their desk — you’ll be notified when they respond.","#/hub/tradehub");
+      CG._tradeDraft = { partner:null, send:[], recv:[] };
+      CG.toast("Offer sent to "+CG.TEAM[d.partner].name,"ok"); CG.renderChrome(); CG.router();
+    });
+  });
+  $$("[data-th-accept]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-th-accept"), o = (CG.lg.incoming||[]).find(function(x){ return x.id===id; });
+    CG.confirm("Accept this offer from "+CG.TEAM[o.from].name+"?","In the live league this routes to the league office for final approval before rosters change. In the prototype it just marks the offer accepted.","Accept offer", function(){
+      var dec = CG.store.get("tradeDecisions")||{}; dec[id]="accepted"; CG.store.set("tradeDecisions", dec);
+      CG.audit("Trade offer accepted", CG.TEAM[o.from].code);
+      CG.pushNotif("check","Trade accepted","Your acceptance of "+CG.TEAM[o.from].name+"’s offer is pending league-office approval.","#/hub/tradehub");
+      CG.toast("Offer accepted — routed to the league office","ok"); CG.renderChrome(); CG.router();
+    });
+  }); });
+  $$("[data-th-decline]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-th-decline"), o = (CG.lg.incoming||[]).find(function(x){ return x.id===id; });
+    var dec = CG.store.get("tradeDecisions")||{}; dec[id]="declined"; CG.store.set("tradeDecisions", dec);
+    CG.audit("Trade offer declined", CG.TEAM[o.from].code);
+    CG.toast("Offer from "+CG.TEAM[o.from].name+" declined","ok"); CG.renderChrome(); CG.router();
+  }); });
+  $$("[data-th-counter]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-th-counter"), o = (CG.lg.incoming||[]).find(function(x){ return x.id===id; });
+    CG._tradeDraft = { partner:o.from, send:o.give.slice(), recv:o.get.slice() };  /* mirror their offer to edit */
+    CG.toast("Loaded their offer into the builder — adjust and send back","ok"); CG.router();
+  }); });
+  $$("[data-th-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-th-withdraw");
+    var offers = (CG.store.get("tradeOffers")||[]).filter(function(o){ return o.id!==id; });
+    CG.store.set("tradeOffers", offers); CG.toast("Offer withdrawn","ok"); CG.router();
+  }); });
+  $$("[data-th-block-rm]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid = this.getAttribute("data-th-block-rm"); CG.setOnBlock(pid, false);
+    CG.toast(CG.playerById(CG.lg,pid).tag+" removed from the block","ok"); CG.router();
+  }); });
+  $$("[data-th-trade-for]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.tradeAddPlayer(this.getAttribute("data-th-trade-for")); CG.router();
+  }); });
+};
+
 /* ---------- complaints ---------- */
 CG.visibleComplaints = function(){
   var r = CG.role(), me = CG.me();
@@ -3994,6 +4496,8 @@ CG.hubSettings = function(){
 };
 CG.AFTER.hub = function(param, qs){
   if (param==="availability") CG.AFTER._availability();
+  if (param==="roster") CG.AFTER._roster();
+  if (param==="tradehub") CG.AFTER._tradehub(qs);
   if (param==="lineup") CG.AFTER._lineup();
   if (param==="complaints"||param==="complaint") CG.AFTER._complaints(qs);
   var ma = $("#markAllPage");
@@ -4009,13 +4513,18 @@ CG.AFTER.hub = function(param, qs){
     CG.store.set("prefs", prefs);
     CG.toast("Profile saved","ok");
   });
+  /* wire the radio's change event, not the label's click, so arrow-key
+     navigation (which fires change, not click) also switches the theme */
+  function pickTheme(l){
+    var v = l.getAttribute("data-theme-pick");
+    CG.applyTheme(v);
+    $$("[data-theme-pick]").forEach(function(x){ x.classList.toggle("on", x===l); });
+    CG.toast(v==="auto" ? "Theme follows your system now" : (v[0].toUpperCase()+v.slice(1))+" mode on","ok");
+  }
   $$("[data-theme-pick]").forEach(function(l){
-    l.addEventListener("click", function(){
-      var v = this.getAttribute("data-theme-pick");
-      CG.applyTheme(v);
-      $$("[data-theme-pick]").forEach(function(x){ x.classList.toggle("on", x===l); });
-      CG.toast(v==="auto" ? "Theme follows your system now" : (v[0].toUpperCase()+v.slice(1))+" mode on","ok");
-    });
+    var radio = l.querySelector('input[type="radio"]');
+    if (radio) radio.addEventListener("change", function(){ if (radio.checked) pickTheme(l); });
+    else l.addEventListener("click", function(){ pickTheme(l); });
   });
 };
 /* pref toggles anywhere */
