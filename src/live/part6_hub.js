@@ -83,7 +83,10 @@ CG.hubNav = function(section){
     }).join("")+'</nav>';
 };
 CG.hubShell = function(section, inner){
-  return '<section class="sec-tight"><div class="shell"><div class="hub-grid">'+CG.hubNav(section)+'<div>'+inner+'</div></div></div></section>';
+  var notice = (CG.LIVE_MODE && (CG.role()==="mgmt"||CG.role()==="commish"))
+    ? '<div class="note chr" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">New Team HQ — some actions are still being connected to the live database.</b> Roster moves, trades, and lineups here may not save yet. For changes that must stick right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic tools</a>.</span></div>'
+    : "";
+  return '<section class="sec-tight"><div class="shell"><div class="hub-grid">'+CG.hubNav(section)+'<div>'+notice+inner+'</div></div></div></section>';
 };
 CG.unauthorized = function(need){
   return '<section class="sec"><div class="shell"><div class="empty" style="padding:70px 20px">'+

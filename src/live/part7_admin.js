@@ -14,10 +14,14 @@ CG.adminShell = function(section, inner){
       return '<a href="#/admin'+(it[0]?"/"+it[0]:"")+'" class="'+(section===it[0]?"on":"")+'">'+CG.ic(it[2],15)+it[1]+'</a>';
     }).join("");
   }).join("")+'</nav>';
+  var who = CG.LIVE_MODE ? ((CG.persona()||{}).tag || "Commissioner") : "zackbrown17";
+  var notice = CG.LIVE_MODE
+    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">New Control Center — admin actions are still being connected to the live database.</b> Results, discipline, roster, and draft changes made here may not persist yet. For live operations right now, use the fully-wired <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
+    : "";
   return '<section class="sec-tight"><div class="shell"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+
     '<div><span class="eyebrow chr">Control center · Season 1</span><h1 class="h-sec" style="margin-top:6px">League operating system</h1></div>'+
-    '<span class="chip chip-ink">Signed in as zackbrown17 · Commissioner</span></div>'+
-    '<div class="hub-grid">'+side+'<div>'+inner+'</div></div></div></section>';
+    '<span class="chip chip-ink">Signed in as '+esc(who)+' · Commissioner</span></div>'+
+    notice+'<div class="hub-grid">'+side+'<div>'+inner+'</div></div></div></section>';
 };
 CG.ROUTES.admin = function(param, qs){
   if (CG.role()!=="commish") return CG.unauthorized("The Control Center is commissioner-only. Every route in it is permission-checked — switch to the Commissioner seat to explore.");

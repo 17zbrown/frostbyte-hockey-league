@@ -227,7 +227,14 @@ CG.applySession = async function(session){
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
+  /* direct messages: load + subscribe on sign-in, tear down on sign-out */
+  if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
+  else { CG.teardownDMs && CG.teardownDMs(); }
   CG.enforceBan();
+};
+CG.teardownDMs = function(){
+  CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false;
+  if(CG._dm.channel){ try{ CG.sb.removeChannel(CG._dm.channel); }catch(e){} CG._dm.channel=null; }
 };
 /* re-map the draft board/pool with the same maps the adapter built */
 CG.mapDraftData = function(lg, draftPicks, registrations){
@@ -527,6 +534,117 @@ CG.ROUTES.draft = function(){
     '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
 
+/* ================================================================
+   PARITY: DIRECT MESSAGES (direct_messages + realtime + mark_dm_read)
+   ================================================================ */
+CG._dm = { msgs:[], profiles:{}, active:null, loaded:false, channel:null, filter:"" };
+CG._DM_SEL = "id,gamertag,display_name,avatar_url,discord_username";
+CG.dmUid = function(){ return CG.auth.user ? CG.auth.user.id : null; };
+CG.dmOtherId = function(m){ var me=CG.dmUid(); return m.sender_id===me ? m.recipient_id : m.sender_id; };
+CG.dmName = function(id){ var p=CG._dm.profiles[id]; return p ? (p.gamertag||p.display_name||"Member") : "Member"; };
+CG.dmAva = function(id){ var p=CG._dm.profiles[id];
+  if (p&&p.avatar_url) return '<img src="'+p.avatar_url+'" alt="" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">';
+  return '<span class="avatar" style="width:38px;height:38px;flex-shrink:0">'+esc(String(CG.dmName(id)).slice(0,2).toUpperCase())+'</span>';
+};
+CG.dmUnreadTotal = function(){ var me=CG.dmUid(); return CG._dm.msgs.filter(function(m){ return m.recipient_id===me && !m.read_at; }).length; };
+CG.loadDMs = async function(){
+  if (!CG.sb || !CG.dmUid()) return;
+  var me=CG.dmUid();
+  try {
+    var r = await CG.sb.from("direct_messages").select("*").or("sender_id.eq."+me+",recipient_id.eq."+me).order("created_at",{ascending:true});
+    CG._dm.msgs = r.data||[];
+    var need = {}; CG._dm.msgs.forEach(function(m){ var o=CG.dmOtherId(m); if(o&&!CG._dm.profiles[o]) need[o]=1; });
+    var ids = Object.keys(need);
+    if (ids.length){ var ps = await CG.sb.from("profiles").select(CG._DM_SEL).in("id",ids); (ps.data||[]).forEach(function(p){ CG._dm.profiles[p.id]=p; }); }
+  } catch(e){}
+  CG._dm.loaded = true;
+};
+CG.dmConvos = function(){
+  var me=CG.dmUid(), map={};
+  CG._dm.msgs.forEach(function(m){ var o=CG.dmOtherId(m); (map[o]=map[o]||{other:o,msgs:[]}).msgs.push(m); });
+  return Object.keys(map).map(function(k){ var c=map[k]; c.last=c.msgs[c.msgs.length-1]; c.unread=c.msgs.filter(function(m){return m.recipient_id===me&&!m.read_at;}).length; return c; })
+    .sort(function(a,b){ return new Date(b.last.created_at)-new Date(a.last.created_at); });
+};
+CG.dmMarkRead = async function(other){
+  var me=CG.dmUid();
+  var unread = CG._dm.msgs.filter(function(m){ return m.sender_id===other&&m.recipient_id===me&&!m.read_at; });
+  if (!unread.length) return;
+  var iso=new Date().toISOString(); unread.forEach(function(m){ m.read_at=iso; });
+  CG.renderChrome();
+  try { await CG.sb.rpc("mark_dm_read",{p_other:other}); } catch(e){}
+};
+CG.dmSend = async function(){
+  var inp=document.getElementById("dmInput"); if(!inp||!CG._dm.active) return;
+  var body=inp.value.trim(); if(!body) return;
+  inp.value="";
+  var r = await CG.sb.from("direct_messages").insert({ sender_id:CG.dmUid(), recipient_id:CG._dm.active, body:body }).select().single();
+  if(r.error){ CG.toast(/banned/i.test(r.error.message)?"That player can’t receive messages":"Couldn’t send: "+r.error.message,"err"); inp.value=body; return; }
+  CG._dm.msgs.push(r.data); CG.router();
+};
+CG.subscribeDMs = function(){
+  if(!CG.sb||!CG.dmUid()||CG._dm.channel) return;
+  var me=CG.dmUid();
+  try {
+    CG._dm.channel = CG.sb.channel("dm-"+me)
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"direct_messages",filter:"recipient_id=eq."+me},function(payload){
+        var m=payload.new; if(!m||CG._dm.msgs.find(function(x){return x.id===m.id;})) return;
+        CG._dm.msgs.push(m);
+        var onView = location.hash.indexOf("/messages")>=0;
+        var finish=function(){ CG.renderChrome(); if(onView) CG.router(); else CG.toast("New message from "+CG.dmName(m.sender_id),"ok"); };
+        if(!CG._dm.profiles[m.sender_id]){ CG.sb.from("profiles").select(CG._DM_SEL).eq("id",m.sender_id).maybeSingle().then(function(res){ if(res.data)CG._dm.profiles[res.data.id]=res.data; finish(); }); }
+        else finish();
+      }).subscribe();
+  } catch(e){}
+};
+CG.ROUTES.messages = function(param){
+  var head = CG.pageHead("Direct messages","Messages","Private messages with other league members — managers, staff, and the commissioner.");
+  if (!CG.auth.profile){
+    return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("msg",22)+'</div><b>Sign in to message</b><p>Direct messages are tied to your Discord account.</p>'+
+      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
+  }
+  if (!CG._dm.loaded){
+    return head + '<div class="shell" style="padding-bottom:48px"><div class="card"><div class="card-b" id="dmLoading"><p class="caption">Loading conversations…</p></div></div></div>';
+  }
+  var me=CG.dmUid(), convos=CG.dmConvos(), active=CG._dm.active;
+  var list = convos.slice();
+  if (active && !list.find(function(c){return c.other===active;})) list.unshift({other:active,msgs:[],last:null,unread:0});
+  var listHtml = list.length ? list.map(function(c){
+    var prev = c.last ? ((c.last.sender_id===me?"You: ":"")+c.last.body) : "New conversation";
+    return '<div class="notif'+(c.other===active?" unread":"")+'" data-dm-open="'+c.other+'" style="cursor:pointer'+(c.other===active?';background:var(--chrome-tint)':"")+'">'+CG.dmAva(c.other)+
+      '<span style="min-width:0;flex:1"><b style="font-family:var(--f-disp);font-size:13.5px">'+esc(CG.dmName(c.other))+'</b>'+
+      '<p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(prev)+'</p></span>'+
+      (c.unread?'<span class="hs-n">'+(c.unread>9?"9+":c.unread)+'</span>':"")+'</div>';
+  }).join("") : '<div class="empty" style="padding:40px 16px"><b>No conversations yet</b><p>Open a member’s profile to start one.</p></div>';
+  var thread;
+  if (!active){ thread = '<div class="empty" style="padding:70px 20px"><div class="e-art">'+CG.ic("msg",20)+'</div><b>Pick a conversation</b><p>Your messages appear here.</p></div>'; }
+  else {
+    var msgs = CG._dm.msgs.filter(function(m){ return CG.dmOtherId(m)===active; });
+    var body = msgs.length ? msgs.map(function(m){
+      var mine = m.sender_id===me;
+      return '<div style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+esc(m.body)+
+        '<span style="display:block;font-size:10px;opacity:.6;margin-top:3px">'+CG.fmtTime(Date.parse(m.created_at))+'</span></div>';
+    }).join("") : '<div class="empty" style="padding:40px"><p>No messages yet — say hi.</p></div>';
+    thread = '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center">'+CG.dmAva(active)+'<b style="font-family:var(--f-disp)">'+esc(CG.dmName(active))+'</b></div>'+
+      '<div id="dmMsgs" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;min-height:300px">'+body+'</div>'+
+      '<div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px"><textarea id="dmInput" rows="1" placeholder="Message '+esc(CG.dmName(active))+'…" maxlength="2000" style="flex:1;resize:none"></textarea><button class="btn btn-chrome btn-sm" id="dmSend">Send</button></div>';
+  }
+  return head + '<div class="shell" style="padding-bottom:48px"><div class="card" style="padding:0;overflow:hidden">'+
+    '<div class="grid" style="grid-template-columns:300px 1fr;gap:0;min-height:520px">'+
+    '<div style="border-right:1px solid var(--line);overflow-y:auto;max-height:600px">'+listHtml+'</div>'+
+    '<div style="display:flex;flex-direction:column">'+thread+'</div>'+
+    '</div></div></div>';
+};
+CG.AFTER.messages = function(param){
+  var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
+  if (CG.auth.profile && !CG._dm.loaded){ CG.loadDMs().then(function(){ CG.router(); }); return; }
+  document.querySelectorAll("[data-dm-open]").forEach(function(el){ el.addEventListener("click", function(){ CG._dm.active=this.getAttribute("data-dm-open"); CG.router(); CG.dmMarkRead(CG._dm.active); }); });
+  var send=document.getElementById("dmSend"); if(send) send.addEventListener("click", CG.dmSend);
+  var inp=document.getElementById("dmInput"); if(inp) inp.addEventListener("keydown", function(e){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); CG.dmSend(); } });
+  var mv=document.getElementById("dmMsgs"); if(mv) mv.scrollTop=mv.scrollHeight;
+  if (CG._dm.active) CG.dmMarkRead(CG._dm.active);
+};
+
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
 CG.bootLive = async function(){
   var app = document.getElementById("app");
@@ -541,6 +659,10 @@ CG.bootLive = async function(){
       CG.NAV.push(["Register","#/register"]);
     }
     await CG.initAuth();
+    /* signed-in extras: Messages in the account drawer's reach (nav link) */
+    if (CG.auth.user && CG.NAV && !CG.NAV.some(function(n){ return n[1]==="#/messages"; })){
+      CG.NAV.push(["Messages","#/messages"]);
+    }
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
     if (app) app.innerHTML =
