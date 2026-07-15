@@ -4650,7 +4650,7 @@ CG.adminShell = function(section, inner){
   }).join("")+'</nav>';
   var who = CG.LIVE_MODE ? ((CG.persona()||{}).tag || "Commissioner") : "zackbrown17";
   var notice = CG.LIVE_MODE
-    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">New Control Center — admin actions are still being connected to the live database.</b> Results, discipline, roster, and draft changes made here may not persist yet. For live operations right now, use the fully-wired <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
+    ? '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Pre-season Central is fully live</b> — registrations, roster signings, owner apps, and scouting all write to the database. Still being connected: results entry, discipline, draft-pick making, and trades — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic admin</a>.</span></div>'
     : "";
   return '<section class="sec-tight"><div class="shell"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px">'+
     '<div><span class="eyebrow chr">Control center · Season 1</span><h1 class="h-sec" style="margin-top:6px">League operating system</h1></div>'+
@@ -5681,7 +5681,7 @@ CG.buildLiveLeague = async function(){
 
   /* draft board + pool (parity with the live site). Maps stored on lg so the
      manager-only data can be re-mapped after auth via CG.mapDraftData. */
-  lg._idToCode = {}; teamsRaw.forEach(function(t){ lg._idToCode[t.id] = t.code; });
+  lg._idToCode = {}; lg._codeToId = {}; teamsRaw.forEach(function(t){ lg._idToCode[t.id] = t.code; lg._codeToId[t.code] = t.id; });
   lg._profName = {}; profiles.forEach(function(pr){ lg._profName[pr.id] = pr.gamertag || pr.display_name || "player"; });
   lg._rosteredIds = {}; roster.forEach(function(rs){ lg._rosteredIds[rs.profile_id] = true; });
   CG.mapDraftData(lg, draftPicks, registrations);
@@ -6173,13 +6173,16 @@ CG.admPreseason = function(){
   var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   h+='<div class="card"><div class="card-h"><h3>Registered players</h3><span class="chip">'+regs.length+'</span></div>'+
     (regs.length?'<div class="tblwrap"><table class="tbl keepcols"><caption>Season registrations</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Status</th></tr></thead><tbody>'+
+      '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Status</th><th class="tright">Assign to club</th></tr></thead><tbody>'+
       sortedRegs.map(function(r){ var prof=r.profiles||{}, on=rosteredIds[r.profile_id];
+        var clubOpts = '<option value="">Choose club…</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
         return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td><td class="tleft small" style="color:var(--steel)">'+esc(prof.ea_id||"—")+'</td>'+
           '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" style="width:64px;text-align:center;padding:5px" placeholder="—"></td>'+
-          '<td>'+(on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td></tr>';
-      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool — saves as you edit. Player assignment to clubs runs from the draft and the classic tools.</span></div>'
+          '<td>'+(on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td>'+
+          '<td class="tright">'+(on?'<span class="caption">—</span>':'<span style="display:inline-flex;gap:6px;align-items:center"><select data-assign-team="'+r.id+'" style="padding:5px;max-width:150px">'+clubOpts+'</select>'+
+            '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+esc(prof.gamertag||"a player")+'">Sign</button></span>')+'</td></tr>';
+      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool. Pick a club and Sign to add a free agent to a roster (auto-assigns the next open jersey number, logs a transaction).</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
@@ -6214,6 +6217,29 @@ CG.AFTER._preseason = function(){
   });
   document.querySelectorAll("[data-app-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-approve"),"approved"); }); });
   document.querySelectorAll("[data-app-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-deny"),"denied"); }); });
+  document.querySelectorAll("[data-assign]").forEach(function(b){ b.addEventListener("click", function(){
+    var el=this, regId=el.getAttribute("data-assign"), sel=document.querySelector('[data-assign-team="'+regId+'"]'), code=sel?sel.value:"";
+    if(!code){ CG.toast("Pick a club first","err"); return; }
+    var name=el.getAttribute("data-name");
+    CG.confirm("Sign "+name+" to "+CG.TEAM[code].name+"?","This adds the player to the club's active roster with the next open jersey number and logs a transaction. Reversible with a waive.","Sign player", function(){
+      CG.assignRegistration(regId, el.getAttribute("data-prof"), el.getAttribute("data-pos"), name, code);
+    });
+  }); });
+};
+CG.assignRegistration = async function(regId, profileId, position, playerName, code){
+  var s=CG.SEASON, teamId=(CG.lg._codeToId||{})[code];
+  if(!s||!teamId){ CG.toast("Missing season/club","err"); return; }
+  var used={}; (CG.lg.byTeam[code]||[]).forEach(function(p){ if(p.jersey) used[p.jersey]=1; });
+  var num=0; for(var n=1;n<=99;n++){ if(!used[n]){ num=n; break; } }
+  var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 });
+  if(r1.error){ CG.toast("Couldn’t sign: "+r1.error.message,"err"); return; }
+  await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId);
+  await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" });
+  /* optimistic local update so the view reflects it immediately */
+  CG.lg._rosteredIds[profileId]=true;
+  if(CG.lg.byTeam[code]) CG.lg.byTeam[code].push({ id:profileId, tag:playerName, team:code, pos:position, jersey:num, mgmt:null, salary:0, depth:9 });
+  CG.toast(playerName+" signed to "+CG.TEAM[code].name+" · #"+num,"ok");
+  CG.router();
 };
 CG.setOwnerAppStatus = async function(id, status){
   var r = await CG.sb.from("owner_applications").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id);
