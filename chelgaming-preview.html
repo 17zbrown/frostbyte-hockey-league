@@ -2342,28 +2342,28 @@ CG.ROUTES.home = function(){
   }
   /* STANDINGS + rail */
   if (CG.modOn("standings")){
-    html += '<section class="sec"><div class="shell"><div class="grid g23">'+
-      '<div><div class="sec-head"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">The race, division by division</h2></div>'+
+    html += '<section class="sec"><div class="shell">'+
+      '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">The race, division by division</h2></div>'+
         '<a class="sec-link" href="#/standings">Full standings</a></div>'+
-        '<div class="grid g2">'+
-          '<div class="card"><div class="card-h"><h3>East Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("East",{cutline:true})+'</div>'+
-          '<div class="card"><div class="card-h"><h3>West Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("West",{cutline:true})+'</div>'+
-        '</div></div>'+
-      '<div class="stack">'+
+      '<div class="grid g2">'+
+        '<div class="card"><div class="card-h"><h3>East Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("East",{cutline:true})+'</div>'+
+        '<div class="card"><div class="card-h"><h3>West Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("West",{cutline:true})+'</div>'+
+      '</div>'+
+      '<div class="grid g2" style="margin-top:18px;align-items:start">'+
         '<div class="card"><div class="card-h"><h3>Power Rankings</h3><a class="sec-link" href="#/rankings">Week 7</a></div>'+
-          lg.powerRankings.slice(0,5).map(function(pr){
+          lg.powerRankings.map(function(pr){
             var t = CG.TEAM[pr.team];
             return '<div class="leaderrow'+(pr.rank===1?" top":"")+'" data-go="#/team/'+pr.team+'"><span class="rk num">'+pr.rank+'</span>'+
-              CG.crest(pr.team,30)+'<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(t.name)+'</b>'+
-              '<small style="display:block" class="caption">'+lg.teams[pr.team].w+"-"+lg.teams[pr.team].l+"-"+lg.teams[pr.team].otl+'</small></span>'+
+              CG.crest(pr.team,30)+'<span style="min-width:0"><b style="font-family:var(--f-disp);font-size:14px">'+esc(t.name)+'</b>'+
+              '<small style="display:block" class="caption">'+lg.teams[pr.team].w+"-"+lg.teams[pr.team].l+"-"+lg.teams[pr.team].otl+' · '+esc(t.div)+' Division</small></span>'+
               '<span class="val">'+CG.moveArrow(pr.move)+'</span></div>';
           }).join("")+'</div>'+
-        '<div class="card"><div class="card-h"><h3>Transactions</h3><span class="chip">Log</span></div>'+
-          C.ops.transactions.slice(0,5).map(function(tx){
+        '<div class="card"><div class="card-h"><h3>Transactions</h3><span class="chip">Season 1 log</span></div>'+
+          C.ops.transactions.slice(0,7).map(function(tx){
             return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(tx.type==="suspension"?"flag":tx.type==="reinstatement"?"check":"swap",15)+'</span>'+
               '<span style="min-width:0"><b>'+esc(tx.team)+'</b><p>'+esc(tx.text)+'</p></span><span class="nf-t">'+CG.fmtDate(tx.dateIso)+'</span></div>';
           }).join("")+'</div>'+
-      '</div></div></div></section>';
+      '</div></div></section>';
   }
   /* LEADERS band */
   if (CG.modOn("leaders")){
