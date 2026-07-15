@@ -17,6 +17,13 @@ CG.sb = (window.supabase && window.supabase.createClient)
 CG._loadEpoch = Date.now();
 CG.now = function(){ return Date.now(); };
 
+/* real site identity (the static head still says "Platform Prototype") */
+try {
+  document.title = "Chel Gaming Hockey League";
+  var _md = document.querySelector('meta[name="description"]');
+  if (_md) _md.setAttribute("content", "The competitive home of 6v6 EA Sports NHL — schedules, standings, rosters, salary cap, trades, and the league rulebook.");
+} catch(e){}
+
 CG.LIVE = { loaded:false, error:null };
 
 CG.buildLiveLeague = async function(){

@@ -478,15 +478,20 @@ CG.hubLabel = function(){
   }
 };
 CG.renderChrome = function(){
-  /* demo bar */
-  $("#demobar").innerHTML = '<div class="shell">'+
-    '<b>CHEL GAMING · PROTOTYPE</b><span class="db-lab2">Demo data · simulated Season 1 · demo clock '+CG.fmtFull(CG.now())+'</span>'+
-    '<div class="db-roles" role="group" aria-label="Switch demo role">'+
-      Object.keys(CG.PERSONAS).map(function(k){
-        return '<button data-role="'+k+'" class="'+(CG.role()===k?"on":"")+'">'+CG.PERSONAS[k].label+'</button>';
-      }).join("")+
-      '<button class="db-reset" data-demo-reset title="Clear everything you changed in this demo">Reset</button>'+
-    '</div></div>';
+  /* demo bar (prototype only — the live site uses real Discord auth, no seat switcher) */
+  var demobar = $("#demobar");
+  if (CG.LIVE_MODE){
+    if (demobar){ demobar.innerHTML = ""; demobar.style.display = "none"; }
+  } else if (demobar){
+    demobar.innerHTML = '<div class="shell">'+
+      '<b>CHEL GAMING · PROTOTYPE</b><span class="db-lab2">Demo data · simulated Season 1 · demo clock '+CG.fmtFull(CG.now())+'</span>'+
+      '<div class="db-roles" role="group" aria-label="Switch demo role">'+
+        Object.keys(CG.PERSONAS).map(function(k){
+          return '<button data-role="'+k+'" class="'+(CG.role()===k?"on":"")+'">'+CG.PERSONAS[k].label+'</button>';
+        }).join("")+
+        '<button class="db-reset" data-demo-reset title="Clear everything you changed in this demo">Reset</button>'+
+      '</div></div>';
+  }
   /* ticker: last night finals + tonight */
   var items = [];
   CG.lg.lastNight.forEach(function(r){
@@ -518,6 +523,14 @@ CG.renderChrome = function(){
   if (svL)  items.push(tkLead("SV%", svL, (ps[svL.id].sv/Math.max(1,ps[svL.id].sa)).toFixed(3).replace(/^0/,"")));
   if (gaaL) items.push(tkLead("GAA", gaaL, (ps[gaaL.id].ga/ps[gaaL.id].gp).toFixed(2)));
   if (pmL)  items.push(tkLead("+/-", pmL, (ps[pmL.id].pm>0?"+":"")+ps[pmL.id].pm));
+  /* pre-season / empty ticker: show the opening slate instead of a blank bar */
+  if (!items.length){
+    CG.lg.schedule.filter(function(g){ return g.at>CG.now(); }).sort(function(a,b){ return a.at-b.at; }).slice(0,8).forEach(function(g){
+      items.push('<a class="tk-item" href="#/matchup/'+g.id+'"><span class="tk-lab">'+CG.fmtDay(g.at).toUpperCase()+'</span>'+
+        '<b>'+g.away+' @ '+g.home+'</b><span class="tk-lab">'+CG.fmtTime(g.at)+'</span></a>');
+    });
+    if (!items.length) items.push('<span class="tk-item"><span class="tk-lab">CHEL GAMING HOCKEY LEAGUE</span><b>Season 1 — the inaugural season</b></span>');
+  }
   var tk = items.join("");
   $("#ticker").innerHTML = '<div class="tk-track"><div style="display:flex;height:100%">'+tk+'</div><div style="display:flex;height:100%" aria-hidden="true">'+tk+'</div></div>';
   /* masthead */
@@ -554,11 +567,11 @@ CG.renderChrome = function(){
   $("#sitefoot").innerHTML = '<div class="shell">'+
     '<div class="ft-top">'+
       '<div>'+CG.leagueMark(40)+'<p style="margin-top:14px;max-width:30ch;font-size:13.5px;color:var(--on-ink-dim)">The competitive home of 6v6 EA Sports NHL 26. Run by players, for players — since Season 1.</p>'+
-      '<div style="margin-top:16px"><span class="protopill"><span class="live-dot"></span>Prototype — demo data, not the live site</span></div></div>'+
+      (CG.LIVE_MODE?'</div>':'<div style="margin-top:16px"><span class="protopill"><span class="live-dot"></span>Prototype — demo data, not the live site</span></div></div>')+
       '<div><h4>League</h4><a class="fl" href="#/schedule">Schedule</a><a class="fl" href="#/standings">Standings</a><a class="fl" href="#/rankings">Power Rankings</a><a class="fl" href="#/awards">Awards</a></div>'+
       '<div><h4>Clubs & Players</h4><a class="fl" href="#/teams">All Clubs</a><a class="fl" href="#/players">Player Directory</a><a class="fl" href="#/stats">Stat Central</a></div>'+
-      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a><a class="fl" href="#/blueprint">Platform Blueprint</a></div>'+
-      '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+'<a class="fl" href="#/signin">Switch demo role</a></div>'+
+      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+(CG.LIVE_MODE?'':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
+      '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+(CG.LIVE_MODE?'':'<a class="fl" href="#/signin">Switch demo role</a>')+'</div>'+
     '</div>'+
     '<div class="ft-base"><span>© 2026 Chel Gaming Hockey League · Season 1</span><span>All times Eastern</span></div>'+
   '</div>';
