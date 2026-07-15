@@ -5670,6 +5670,123 @@ CG.buildLiveLeague = async function(){
   return lg;
 };
 
+/* ================================================================
+   REAL AUTH — Discord OAuth via Supabase, replacing the demo-seat
+   system. Role is derived from profiles.role + team management pointers.
+   ================================================================ */
+CG.auth = { user:null, profile:null, role:"guest" };
+CG._guildTok = null;
+
+/* user_role enum: {member, gm, commissioner, owner, agm, staff} -> prototype role keys */
+CG.computeRole = function(profile){
+  if (!profile) return "guest";
+  if (profile.role === "commissioner") return "commish";
+  /* manager if: their resolved roster entry has a mgmt role (teams pointers OR
+     contracts.is_manager), their global role is a management role, or they're
+     named on a team's owner/gm/agm pointer. */
+  var player = CG.lg && CG.lg.players.find(function(p){ return p.id===profile.id; });
+  var isMgr = (player && player.mgmt) ||
+    ["owner","gm","agm"].indexOf(profile.role) >= 0 ||
+    (CG.TEAMS||[]).some(function(t){ return profile.id===t.owner || profile.id===t.gm || profile.id===t.agm; });
+  if (isMgr) return "mgmt";
+  if (profile.role === "staff") return "staff";
+  return "member";
+};
+CG.applySession = async function(session){
+  CG.auth.user = session ? session.user : null;
+  if (session && session.provider_token) CG.ensureInGuild(session.provider_token);
+  if (CG.auth.user){
+    try { var r = await CG.sb.from("profiles").select("*").eq("id", CG.auth.user.id).maybeSingle(); CG.auth.profile = r.data || null; }
+    catch(e){ CG.auth.profile = null; }
+  } else { CG.auth.profile = null; }
+  CG.auth.role = CG.computeRole(CG.auth.profile);
+  CG.enforceBan();
+};
+CG.initAuth = async function(){
+  if (!CG.sb || !CG.sb.auth) return;
+  try {
+    var s = await CG.sb.auth.getSession();
+    await CG.applySession(s && s.data ? s.data.session : null);
+    CG.sb.auth.onAuthStateChange(function(_e, sess){
+      CG.applySession(sess).then(function(){ if (CG.renderChrome) CG.renderChrome(); if (CG.router) CG.router(); });
+    });
+  } catch(e){ console.warn("auth init failed", e); }
+};
+
+/* --- live overrides of the demo persona system (defined in part4) --- */
+CG.role = function(){ return (CG.auth && CG.auth.role) || "guest"; };
+CG.persona = function(){
+  var role = CG.role(), p = CG.auth.profile;
+  var label = (CG.PERSONAS[role]||{}).label || (role.charAt(0).toUpperCase()+role.slice(1));
+  var o = { key:role, label:label };
+  if (p){
+    o.tag = p.gamertag || p.display_name || "Member";
+    o.avatar = p.avatar_url || null;
+    o.who = o.tag + (role==="commish"?" · Commissioner":role==="mgmt"?" · Team management":role==="staff"?" · League staff":role==="member"?" · Member":"");
+  } else { o.who = "Signed out"; }
+  return o;
+};
+CG.me = function(){
+  var p = CG.auth.profile; if (!p || !CG.lg) return null;
+  return CG.lg.players.find(function(x){ return x.id===p.id; }) || null;
+};
+CG.avatarHtml = function(){
+  var p = CG.auth.profile;
+  if (p && p.avatar_url) return '<img src="'+p.avatar_url+'" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block">';
+  var tag = (p && (p.gamertag||p.display_name)) || "G";
+  return esc(String(tag).slice(0,2).toUpperCase());
+};
+CG.setRole = function(){ /* no-op in live — role comes from the real session */ };
+
+CG.signIn = function(){
+  if (!CG.sb || !CG.sb.auth) return;
+  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin + window.location.pathname, scopes:"identify email guilds.join" } });
+};
+CG.signOut = async function(){ if (CG.sb && CG.sb.auth){ try { await CG.sb.auth.signOut(); } catch(e){} } location.hash = "#/home"; };
+/* login doubles as a Discord server invite (provider_token present only on fresh OAuth) */
+CG.ensureInGuild = function(token){
+  if (!token || CG._guildTok===token) return; CG._guildTok = token;
+  try {
+    fetch("/api/discord-join", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ access_token: token }) })
+      .then(function(r){ return r.json().catch(function(){ return {}; }); })
+      .then(function(j){ if (j && j.inGuild && CG.auth.profile) CG.auth.profile.in_guild = true; })
+      .catch(function(){});
+  } catch(e){}
+};
+CG.enforceBan = function(){
+  var banned = CG.auth.profile && CG.auth.profile.banned;
+  var ov = document.getElementById("banScreen");
+  if (banned){
+    if (!ov){ ov = document.createElement("div"); ov.id = "banScreen";
+      ov.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(10,12,14,.97);display:flex;align-items:center;justify-content:center;padding:24px"; document.body.appendChild(ov); }
+    ov.innerHTML = '<div style="max-width:440px;text-align:center;color:#fff">'+
+      '<div style="font-size:40px">⛔</div><h2 style="font-family:var(--f-disp);margin:10px 0">Your access has been revoked</h2>'+
+      '<p style="color:var(--on-ink-dim)">'+(CG.auth.profile.ban_reason?esc(CG.auth.profile.ban_reason):"Contact the league office.")+'</p>'+
+      '<button class="btn btn-ghost" style="margin-top:16px" onclick="CG.signOut()">Sign out</button></div>';
+    ov.style.display = "flex"; document.body.style.overflow = "hidden";
+  } else if (ov){ ov.style.display = "none"; document.body.style.overflow = ""; }
+};
+
+/* --- real sign-in page (replaces the demo seat picker) --- */
+CG.ROUTES.signin = function(){
+  if (CG.auth && CG.auth.profile){
+    var p = CG.auth.profile;
+    return '<section class="sec"><div class="shell" style="max-width:620px;text-align:center">'+
+      '<span class="eyebrow chr">Account</span><h1 class="h-page" style="margin-top:10px">You’re signed in</h1>'+
+      '<p class="lede" style="margin:12px auto 22px">Signed in as <b>'+esc(p.gamertag||p.display_name||"member")+'</b>'+(p.role?' · '+esc(p.role):'')+'.</p>'+
+      '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'+
+        '<a class="btn btn-chrome" href="#/hub">'+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
+        '<button class="btn btn-ghost" onclick="CG.signOut()">Sign out</button></div></div></section>';
+  }
+  return '<section class="sec"><div class="shell" style="max-width:640px;text-align:center">'+
+    '<span class="eyebrow chr">One account for everything</span>'+
+    '<h1 class="h-page" style="margin-top:10px">Sign in with Discord</h1>'+
+    '<p class="lede" style="margin:12px auto 22px">Your Discord account is your league account. Not in the Chel Gaming server yet? Signing in adds you automatically and signs you into the site in one step.</p>'+
+    '<button class="btn btn-lg" id="dcSignIn" style="background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
+    '<p class="caption" style="margin-top:12px">Scopes requested: identify · email · guilds.join.</p></div></section>';
+};
+CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); }); };
+
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
 CG.bootLive = async function(){
   var app = document.getElementById("app");
@@ -5679,6 +5796,7 @@ CG.bootLive = async function(){
     '<p>Pulling live teams, rosters, and the schedule from the league database.</p></div></div></section>';
   try {
     CG.lg = await CG.buildLiveLeague();
+    await CG.initAuth();
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
     if (app) app.innerHTML =
