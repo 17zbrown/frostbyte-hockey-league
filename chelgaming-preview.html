@@ -1254,17 +1254,22 @@ CG.boot = function(){
   if ((CG.store.get("results")||[]).length) CG.aggregate(CG.lg, { weights: weights });
   /* commissioner reschedules (future games only) */
   var rs = CG.store.get("resched")||{};
-  var moved = false;
   CG.lg.schedule.forEach(function(g){
     if (rs[g.id] && !CG.lg.results.some(function(r){ return r.id===g.id; })){
-      g.at = rs[g.id]; g.rescheduled = true; moved = true;
+      g.at = rs[g.id]; g.rescheduled = true;
     }
   });
-  if (moved){
-    CG.lg.tonight = CG.lg.schedule.filter(function(g){
-      return !CG.lg.results.some(function(r){ return r.id===g.id; }) && Math.abs(g.at - CG.lg.demoNow) < 10*3600000;
-    });
-  }
+  /* tonight's slate always excludes games that now have results (entered mid-demo),
+     and the marquee flag is re-picked from what's actually left to play */
+  CG.lg.tonight = CG.lg.schedule.filter(function(g){
+    return !CG.lg.results.some(function(r){ return r.id===g.id; }) && Math.abs(g.at - CG.lg.demoNow) < 10*3600000;
+  });
+  var bestT = null;
+  CG.lg.tonight.forEach(function(g){
+    var v = CG.lg.teams[g.home].pts + CG.lg.teams[g.away].pts;
+    if (!bestT || v > bestT.v) bestT = { g:g, v:v };
+  });
+  CG.lg.tonight.forEach(function(g){ g.feature = bestT && g.id===bestT.g.id; });
   /* commissioner Three-Stars overrides */
   var so = CG.store.get("starsOverride")||{};
   CG.lg.results.forEach(function(r){ if (so[r.id]) r.stars = so[r.id]; });
