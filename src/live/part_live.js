@@ -203,7 +203,13 @@ CG.applySession = async function(session){
   if (CG.auth.user){
     try { var r = await CG.sb.from("profiles").select("*").eq("id", CG.auth.user.id).maybeSingle(); CG.auth.profile = r.data || null; }
     catch(e){ CG.auth.profile = null; }
-  } else { CG.auth.profile = null; }
+    /* the user's registration for the open season (for the Register flow) */
+    CG.auth.registration = null;
+    if (CG.auth.user && CG.SEASON && CG.SEASON.id){
+      try { var rg = await CG.sb.from("season_registrations").select("*").eq("season_id", CG.SEASON.id).eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.registration = rg.data || null; }
+      catch(e){ CG.auth.registration = null; }
+    }
+  } else { CG.auth.profile = null; CG.auth.registration = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   CG.enforceBan();
 };
@@ -292,6 +298,76 @@ CG.ROUTES.signin = function(){
 };
 CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); }); };
 
+/* ================================================================
+   PARITY: SEASON REGISTRATION (season_registrations)
+   ================================================================ */
+CG.ROUTES.register = function(){
+  var s = CG.SEASON || {}, open = !!s.registration_open;
+  var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
+    "Register for the season", "One form puts you in the player pool. The commissioner assigns roster spots from there.");
+  if (!CG.auth.profile){
+    return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("user",22)+'</div><b>Sign in to register</b>'+
+      '<p>Your Discord account is your league account — signing in also adds you to the Chel Gaming Discord.</p>'+
+      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
+  }
+  if (!open){
+    return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("clock",22)+'</div><b>Registration isn’t open right now</b>'+
+      '<p>'+(s.status==="active"?"Season "+s.number+" is already underway.":"Registration for the next season hasn’t opened yet — watch the announcements channel.")+'</p>'+
+      '<a class="btn btn-ghost" style="margin-top:16px" href="#/schedule">View the schedule</a></div></div></div>';
+  }
+  var p = CG.auth.profile, reg = CG.auth.registration, eaMissing = !p.ea_id;
+  var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified. Update your details below any time before the deadline.</div>' : "";
+  var body = '<div class="card"><div class="card-h"><h3>'+(reg?"Update registration":"Register")+'</h3><span class="chip '+(reg?"chip-win":"chip-chrome")+'">'+(reg?"Registered":"Open")+'</span></div><div class="card-b">'+
+    (eaMissing ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">You need your <b>EA ID</b> on file to register.</span><button class="btn btn-ghost btn-sm" id="regEaBtn">Add EA ID</button></div>'
+                : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
+    '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">'+
+      ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
+    '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability, preferred club, anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
+    '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — signing in adds you automatically.</p>'+
+  '</div></div>';
+  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
+};
+CG.AFTER.register = function(){
+  var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
+  var sel = (CG.auth.registration && CG.auth.registration.position) || "C";
+  document.querySelectorAll("[data-regpos]").forEach(function(el){ el.addEventListener("click", function(){ sel=this.getAttribute("data-regpos"); document.querySelectorAll("[data-regpos]").forEach(function(x){ x.classList.toggle("chip-chrome", x===el); }); }); });
+  var ea=document.getElementById("regEaBtn"); if(ea) ea.addEventListener("click", CG.promptEaId);
+  var sub=document.getElementById("regSubmit"); if(sub) sub.addEventListener("click", function(){ CG.registerForSeason(sel, (document.getElementById("regNote")||{}).value||""); });
+};
+CG.promptEaId = function(){
+  CG.modal("Add your EA ID",
+    '<label class="fld"><span>EA ID / gamertag used in-game</span><input id="eaInput" placeholder="e.g. YourEAName" value="'+esc((CG.auth.profile||{}).ea_id||"")+'"></label><p class="caption">Shown to league staff for lobby verification; hidden from the public directory unless you opt in.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="eaSave">Save EA ID</button>');
+  document.getElementById("eaSave").addEventListener("click", function(){
+    var v=(document.getElementById("eaInput").value||"").trim();
+    if(v.length<2){ CG.toast("Enter your EA ID","err"); return; }
+    CG.saveEaId(v);
+  });
+};
+CG.saveEaId = async function(v){
+  if(!CG.sb||!CG.auth.user) return;
+  var r = await CG.sb.from("profiles").update({ ea_id:v }).eq("id", CG.auth.user.id);
+  if(r.error){ CG.toast("Couldn’t save EA ID: "+r.error.message,"err"); return; }
+  CG.auth.profile.ea_id=v; if(CG.closeOverlay) CG.closeOverlay(); CG.toast("EA ID saved","ok"); CG.router();
+};
+CG.registerForSeason = async function(position, note){
+  if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  var s=CG.SEASON; if(!s||!s.registration_open){ CG.toast("Registration isn’t open","err"); return; }
+  if(!CG.auth.profile.ea_id){ CG.toast("Add your EA ID first","err"); CG.promptEaId(); return; }
+  if(!CG.auth.profile.in_guild){
+    try { var fr=await CG.sb.from("profiles").select("in_guild").eq("id",CG.auth.user.id).maybeSingle(); if(fr.data&&fr.data.in_guild) CG.auth.profile.in_guild=true; } catch(e){}
+    if(!CG.auth.profile.in_guild){ CG.toast("Join the Chel Gaming Discord to register","err"); return; }
+  }
+  var payload={ season_id:s.id, profile_id:CG.auth.user.id, position:position||"C", note:(note||"").trim()||null };
+  var r=await CG.sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
+  if(r.error){ CG.toast("Couldn’t register: "+r.error.message,"err"); return; }
+  CG.auth.registration=payload;
+  CG.toast("You’re registered for Season "+(s.number||1)+"!","ok"); CG.router();
+};
+
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
 CG.bootLive = async function(){
   var app = document.getElementById("app");
@@ -301,6 +377,10 @@ CG.bootLive = async function(){
     '<p>Pulling live teams, rosters, and the schedule from the league database.</p></div></div></section>';
   try {
     CG.lg = await CG.buildLiveLeague();
+    /* surface Register in the nav while the open season is taking sign-ups */
+    if (CG.SEASON && CG.SEASON.registration_open && CG.NAV && !CG.NAV.some(function(n){ return n[1]==="#/register"; })){
+      CG.NAV.push(["Register","#/register"]);
+    }
     await CG.initAuth();
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
