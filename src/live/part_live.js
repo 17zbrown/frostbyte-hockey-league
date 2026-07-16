@@ -808,6 +808,7 @@ CG.ROUTES.owner = function(){
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
   var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
+    '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
     '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
     '<div class="fld"><span>Franchise choices *</span><p class="caption" style="margin:2px 0 8px">Pick the NHL franchises you’d most like to run, in order. Your second and third choices cover you if an earlier pick is already an active club.</p>'+
       '<div class="grid g3" style="gap:10px">'+
@@ -836,7 +837,7 @@ CG.submitOwnerApp = async function(){
   var picks=[fr1,fr2,fr3].filter(Boolean);
   if(new Set(picks).size!==picks.length){ CG.toast("Your franchise choices must be different","err"); return; }
   var payload={ season_id: CG.SEASON?CG.SEASON.id:null, profile_id: CG.auth.user.id, ea_id:ea,
-    experience:v("ow-exp")||null,
+    availability:v("ow-avail")||null, experience:v("ow-exp")||null,
     preferred_club:fr1, franchise_2:fr2, franchise_3:fr3,
     pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
   var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
@@ -849,6 +850,13 @@ CG.submitOwnerApp = async function(){
    from the Staff Desk. Approval promotes to role='staff' (the
    Discord Staff role follows on the next sync).
    ================================================================ */
+/* the league office's departments — what a staff applicant can sign up to work */
+CG.STAFF_DEPARTMENTS = [
+  ["officiating","Officiating","Game-night disputes, forfeits, and rule calls"],
+  ["statistics","Statistics","Spot-check the EA imports and keep the record clean"],
+  ["player-relations","Player relations","Work the complaint and appeal case queue"],
+  ["media","Media & broadcast","News, recaps, and stream nights"]
+];
 CG.ROUTES.staffapply = function(){
   var head = CG.pageHead("Join the league office","Apply to join the staff",
     "Staff work the case queue, verify imported stats, and keep game nights honest. Applications are tied to your Discord account.");
@@ -872,10 +880,18 @@ CG.ROUTES.staffapply = function(){
       : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply.</div>' : "")
     : "";
   var v = function(k){ return app ? esc(app[k]||"") : ""; };
+  var pickedDepts = (app && app.departments) || [];
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+
     '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
       (app?'<span class="chip '+(app.status==="pending"?"chip-warn":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
-    '<div class="grid g2" style="gap:12px">'+
+    '<div class="fld"><span>Departments *</span><p class="caption" style="margin:2px 0 8px">Pick every department you’d work — the league office assigns duties from here.</p>'+
+      '<div class="stack" style="gap:8px">'+CG.STAFF_DEPARTMENTS.map(function(d){
+        var on = pickedDepts.indexOf(d[0])>=0;
+        return '<button type="button" class="gamecard" data-sa-dept="'+d[0]+'" aria-pressed="'+on+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%;'+(on?"border-color:var(--chrome)":"")+'">'+
+          '<span class="chip '+(on?"chip-chrome":"")+'" style="font-size:9px;align-self:center">'+(on?"IN":"—")+'</span>'+
+          '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+d[1]+'</b><span class="caption" style="display:block">'+d[2]+'</span></span></button>';
+      }).join("")+'</div></div>'+
+    '<div class="grid g2" style="gap:12px;margin-top:14px">'+
     '<label class="fld"><span>Timezone</span><input id="sa-tz" placeholder="e.g. Eastern" value="'+v("timezone")+'"></label>'+
     '<label class="fld"><span>Availability</span><input id="sa-avail" placeholder="e.g. most weeknights after 8" value="'+v("availability")+'"></label></div>'+
     '<label class="fld"><span>Relevant experience</span><input id="sa-exp" placeholder="e.g. reffed in two leagues, ran stats for…" value="'+v("experience")+'"></label>'+
@@ -890,13 +906,26 @@ CG.ROUTES.staffapply = function(){
 CG.AFTER.staffapply = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
   var sub=document.getElementById("sa-submit"); if(sub) sub.addEventListener("click", CG.submitStaffApp);
+  document.querySelectorAll("[data-sa-dept]").forEach(function(b){ b.addEventListener("click", function(){
+    var on = this.getAttribute("aria-pressed")!=="true";
+    this.setAttribute("aria-pressed", on?"true":"false");
+    this.style.borderColor = on ? "var(--chrome)" : "";
+    var chip = this.querySelector(".chip");
+    if (chip){ chip.classList.toggle("chip-chrome", on); chip.textContent = on ? "IN" : "—"; }
+  }); });
+};
+CG.staffDeptLabel = function(key){
+  var d = (CG.STAFF_DEPARTMENTS||[]).find(function(x){ return x[0]===key; });
+  return d ? d[1] : key;
 };
 CG.submitStaffApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   var pitch=v("sa-pitch");
+  var depts=[].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });
+  if(!depts.length){ CG.toast("Pick at least one department","err"); return; }
   if(!pitch){ CG.toast("Tell the league office why you — the pitch is the application","err"); return; }
-  var payload={ profile_id: CG.auth.user.id, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
+  var payload={ profile_id: CG.auth.user.id, departments:depts, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
     experience:v("sa-exp")||null, pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
   var r=await CG.sb.from("staff_applications").upsert(payload,{onConflict:"profile_id"});
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
@@ -1391,6 +1420,7 @@ CG.admPreseason = function(){
     h+=sapps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
+        ((a.departments&&a.departments.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+a.departments.map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join("")+'</div>':"")+
         '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+(a.availability?'<span>'+esc(a.availability)+'</span>':"")+(a.experience?'<span>'+esc(a.experience)+'</span>':"")+'</div>'+
         (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
         '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-sapp-approve="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
@@ -2344,6 +2374,7 @@ CG.hubStaffDesk = function(){
         '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
         '<span><span class="chip chip-chrome" style="font-size:9px">STAFF</span> <b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b></span>'+
         '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>'+
+        ((a.departments&&a.departments.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+a.departments.map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join("")+'</div>':"")+
         '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+(a.availability?'<span>'+esc(a.availability)+'</span>':"")+(a.experience?'<span>'+esc(a.experience)+'</span>':"")+'</div>'+
         (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
         '<div style="display:flex;gap:8px;margin-top:10px">'+
