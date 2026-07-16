@@ -582,7 +582,7 @@ CG.renderChrome = function(){
     mnav.map(function(n){ return '<a href="'+n[1]+'">'+n[0]+' <span style="color:var(--chrome)">→</span></a>'; }).join("")+
     '<div class="mn-g">Account</div>'+
     (CG.role()==="guest" ? '<a href="#/signin">Sign in</a>' :
-      '<a href="#/hub/notifications">Notifications</a><a href="#/hub/settings">Settings</a><a href="#/signin">Switch role</a>');
+      (CG.LIVE_MODE?'<a href="#/hub/messages">Messages</a>':"")+'<a href="#/hub/notifications">Notifications</a><a href="#/hub/settings">Settings</a><a href="#/signin">Switch role</a>');
   /* footer */
   $("#sitefoot").innerHTML = '<div class="shell">'+
     '<div class="ft-top">'+
@@ -833,6 +833,8 @@ document.addEventListener("click", function(e){
       '<div class="stack" style="gap:4px">'+
       '<a class="pop-item" href="#/hub" data-close-nav>'+CG.ic("home",16)+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
       (CG.me()?'<a class="pop-item" href="'+CG.playerRoute(CG.me())+'" data-close-nav>'+CG.ic("user",16)+'My player profile</a>':"")+
+      (CG.LIVE_MODE?'<a class="pop-item" href="#/hub/messages" data-close-nav>'+CG.ic("msg",16)+'Messages'+
+        (CG.dmUnreadTotal&&CG.dmUnreadTotal()?'<span class="hs-n" style="margin-left:auto">'+CG.dmUnreadTotal()+'</span>':"")+'</a>':"")+
       '<a class="pop-item" href="#/hub/notifications" data-close-nav>'+CG.ic("bell",16)+'Notifications</a>'+
       '<a class="pop-item" href="#/hub/settings" data-close-nav>'+CG.ic("gear",16)+'Settings</a>'+
       '<div class="pop-sep"></div>'+

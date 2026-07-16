@@ -65,7 +65,7 @@ CG.hubNav = function(section){
   var mine = [["", "Dashboard", "home"]];
   if (CG.can("availability.submit")) mine.push(["availability","Availability","cal"]);
   if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
-  if (CG.LIVE_MODE) mine.push(["messages","Messages","msg"]);
+  /* Messages lives in the account menu (avatar), not the hub sidebar */
   if (r==="staff") mine.push(["statsentry","Stats entry","chart"]);
   mine.push(["notifications","Notifications","bell"]);
   mine.push(["settings","Settings","gear"]);
@@ -82,7 +82,6 @@ CG.hubNav = function(section){
       var badge = "";
       if (it[0]==="availability" && !CG.store.get("availability")[CG.WEEK8.key+":"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
-      if (it[0]==="messages" && CG.dmUnreadTotal && CG.dmUnreadTotal()) badge = '<span class="hs-n">'+CG.dmUnreadTotal()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
         var openN = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; }).length;
