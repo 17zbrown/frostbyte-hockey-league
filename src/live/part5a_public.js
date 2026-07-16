@@ -768,7 +768,9 @@ CG.ROUTES.player = function(pid, qs){
   var canSeeAvail = CG.role()==="commish" || CG.role()==="staff" || (me && me.team===p.team && CG.can("availability.viewTeam")) || (me && me.id===p.id);
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
     '<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
-      '<div class="avatar" style="width:84px;height:84px;font-size:28px;background:'+t.color+';color:#101519;border-color:#101519">'+esc(p.tag.slice(0,2).toUpperCase())+'</div>'+
+      (t.logo
+        ? '<img class="crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="'+esc(t.name)+' logo">'
+        : '<div style="flex-shrink:0">'+CG.crest(p.team,84)+'</div>')+
       '<div style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+

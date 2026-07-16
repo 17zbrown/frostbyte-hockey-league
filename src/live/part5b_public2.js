@@ -472,7 +472,7 @@ CG.AFTER.signin = function(){
 CG.ROUTES._404 = function(){
   return '<section class="sec"><div class="shell"><div class="empty" style="padding:80px 20px">'+
     '<div class="e-art">'+CG.ic("search",22)+'</div><b>Icing — nothing at this address</b>'+
-    '<p>The page you’re after doesn’t exist in the prototype. Try the navigation above or head back to the front page.</p>'+
+    '<p>There’s no page at this address. Try the navigation above or head back to the front page.</p>'+
     '<a class="btn btn-ink" href="#/home" style="margin-top:18px">Back to the front page</a></div></div></section>';
 };
 

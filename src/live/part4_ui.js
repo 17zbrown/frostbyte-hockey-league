@@ -191,9 +191,11 @@ CG.crestSeq = 0;
 CG.crest = function(code, size){
   var t = CG.TEAM[code]; if (!t) return "";
   var s = size||28;
-  /* clubs with an uploaded logo (from the live site's media library) use it everywhere */
-  if (t.logo) return '<img class="crest" src="'+t.logo+'" width="'+s+'" height="'+Math.round(s*1.1)+'" '+
-    'style="object-fit:contain" alt="'+esc(t.name)+' logo">';
+  /* clubs with an uploaded logo (from the live site's media library) use it everywhere;
+     logo artwork carries its own padding, so it renders at twice the crest size to read clearly */
+  if (t.logo){ var si = s*2;
+    return '<img class="crest" src="'+t.logo+'" width="'+si+'" height="'+Math.round(si*1.05)+'" '+
+      'style="object-fit:contain" alt="'+esc(t.name)+' logo">'; }
   var lum = (function(hex){ var c=hex.replace("#",""); return (0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255; })(t.color);
   var fg = lum > .62 ? "#101519" : "#FFFFFF";
   var id = "cr"+(CG.crestSeq++);

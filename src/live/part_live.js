@@ -163,6 +163,11 @@ CG.buildLiveLeague = async function(){
       eaMatchId:g.ea_match_id||null };
   }).filter(function(g){ return g.home && g.away && g.at; });
 
+  /* the ratings engine regresses small samples against weeks played — derive that
+     from posted finals (the DB season row has no such column) */
+  CG.SEASON.completedWeeks = schedule.reduce(function(m,g){
+    return g.status==="final" ? Math.max(m, g.week||1) : m; }, 0);
+
   /* per-player box scores from game_stats (written by the EA auto-stats pipeline).
      Each box line carries the prototype's base keys (so CG.aggregate builds season
      totals) plus every EA advanced metric, keyed by profile id (unlinked EA players

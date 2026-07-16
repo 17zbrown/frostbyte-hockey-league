@@ -530,7 +530,7 @@ CG.admHomepage = function(){
         '<button class="toggle'+(off?"":" on")+'" data-mod="'+m.key+'" role="switch" aria-checked="'+(!off)+'" aria-label="'+m.label+'"></button></div>';
     }).join("")+'</div>'+
     '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Intermission video</h3></div><div class="card-b">'+
-    '<p class="small" style="color:var(--steel)">Drop an MP4/WebM to run muted on loop in the homepage video slot (session-only in the prototype — production stores it in the media library with poster + schedule).</p>'+
+    '<p class="small" style="color:var(--steel)">Drop an MP4/WebM to run muted on loop in the homepage video slot.</p>'+
     '<input type="file" id="vidUp" accept="video/mp4,video/webm" style="margin-top:12px">'+
     (CG.store.get("prefs").video?'<button class="btn btn-ghost btn-sm" style="margin-top:10px" id="vidClear">Remove current video</button>':"")+
     '</div></div>';
