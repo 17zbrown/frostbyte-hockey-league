@@ -85,12 +85,12 @@ CG.standTable = function(div, opts){
 };
 CG.gameCard = function(g){
   var lg = CG.lg;
-  var res = lg.results.find(function(r){ return r.id===g.id; });
+  var res = (lg.allResults||lg.results).find(function(r){ return r.id===g.id; });
   var tag;
   if (res) tag = '<span class="chip">'+ (res.ot?"Final / OT":"Final") +'</span>';
   else if (Math.abs(g.at - CG.now()) < 10*3600000 && g.at > CG.now()) tag = '<span class="chip chip-live"><span class="live-dot"></span>Tonight</span>';
   else if (g.at < CG.now()) tag = '<span class="chip chip-warn">Awaiting result</span>';
-  else tag = '<span class="chip">Week '+g.week+'</span>';
+  else tag = '<span class="chip">'+(g.stage==="preseason"?"Pre-season · Wk "+g.week:g.stage==="playoff"?"Playoffs · Wk "+g.week:"Week "+g.week)+'</span>';
   return '<div class="gamecard" data-go="#/matchup/'+g.id+'" role="link" tabindex="0">'+
     '<div class="gc-when"><b>'+CG.fmtDay(g.at).split(",")[0]+'</b><span>'+CG.fmtTime(g.at)+'</span></div>'+
     '<div class="gc-match">'+CG.crest(g.away,26)+esc(CG.TEAM[g.away].name)+
@@ -394,21 +394,37 @@ CG.ROUTES.schedule = function(param, qs){
       Array.from({length:10},function(_,i){ return '<option value="'+(i+1)+'"'+(fWeek==String(i+1)?" selected":"")+'>Week '+(i+1)+'</option>'; }).join("")+'</select>'+
     '<button class="btn btn-ghost btn-sm" id="csvSched">'+CG.ic("dl",14)+'Export CSV</button>'+
   '</div></div>';
+  /* group by stage + week so pre-season week 1 never merges with regular week 1 */
+  var stageOrder = { preseason:0, regular:1, playoff:2 };
   var byWeek = {};
   lg.schedule.forEach(function(g){
     if (fTeam && g.home!==fTeam && g.away!==fTeam) return;
     if (fWeek && g.week!=+fWeek) return;
-    var done = lg.results.some(function(r){ return r.id===g.id; });
+    var done = (lg.allResults||lg.results).some(function(r){ return r.id===g.id; });
     if (fState==="final" && !done) return;
     if (fState==="upcoming" && done) return;
-    (byWeek[g.week]=byWeek[g.week]||[]).push(g);
+    var st = g.stage||"regular";
+    var k = st+":"+g.week;
+    (byWeek[k]=byWeek[k]||{stage:st, week:g.week, games:[]}).games.push(g);
   });
-  var weeks = Object.keys(byWeek).map(Number).sort(function(a,b){ return a-b; });
-  var body = weeks.length ? weeks.map(function(w){
+  /* "this week" = the group holding the next game still to be played */
+  var nowKey = null, soonest = Infinity;
+  Object.keys(byWeek).forEach(function(k){
+    byWeek[k].games.forEach(function(g){
+      if (g.status!=="final" && g.at >= CG.now()-6*3600000 && g.at < soonest){ soonest = g.at; nowKey = k; }
+    });
+  });
+  var keys = Object.keys(byWeek).sort(function(a,b){
+    var A=byWeek[a], B=byWeek[b];
+    return (stageOrder[A.stage]-stageOrder[B.stage]) || (A.week-B.week);
+  });
+  var body = keys.length ? keys.map(function(k){
+    var grp = byWeek[k];
+    var lab = (grp.stage==="preseason"?"Pre-season · Week ":grp.stage==="playoff"?"Playoffs · Week ":"Week ")+grp.week;
     return '<div style="margin-bottom:30px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'+
-      '<span class="eyebrow chr">Week '+w+'</span>'+(w===7?'<span class="chip chip-live"><span class="live-dot"></span>This week</span>':"")+'</div>'+
-      '<div class="stack" style="gap:9px">'+byWeek[w].map(CG.gameCard).join("")+'</div></div>';
-  }).join("") : '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games match those filters</b><p>Clear a filter or two — the full 10-week slate lives here.</p></div>';
+      '<span class="eyebrow chr">'+lab+'</span>'+(k===nowKey?'<span class="chip chip-live"><span class="live-dot"></span>This week</span>':"")+'</div>'+
+      '<div class="stack" style="gap:9px">'+grp.games.map(CG.gameCard).join("")+'</div></div>';
+  }).join("") : '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games match those filters</b><p>Clear a filter or two — the full slate lives here.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
 };
 CG.AFTER.schedule = function(param, qs){
@@ -420,10 +436,10 @@ CG.AFTER.schedule = function(param, qs){
   $("#fWeek").addEventListener("change", function(){ nav({week:this.value}); });
   $$("[data-state]").forEach(function(b){ b.addEventListener("click", function(){ nav({state:this.getAttribute("data-state")}); }); });
   $("#csvSched").addEventListener("click", function(){
-    var rows = [["Week","Date","Away","Home","Away score","Home score","OT"]];
+    var rows = [["Stage","Week","Date","Away","Home","Away score","Home score","OT"]];
     CG.lg.schedule.forEach(function(g){
-      var r = CG.lg.results.find(function(x){ return x.id===g.id; });
-      rows.push([g.week, CG.fmtDay(g.at), CG.TEAM[g.away].name, CG.TEAM[g.home].name,
+      var r = (CG.lg.allResults||CG.lg.results).find(function(x){ return x.id===g.id; });
+      rows.push([g.stage||"regular", g.week, CG.fmtDay(g.at), CG.TEAM[g.away].name, CG.TEAM[g.home].name,
         r?r.score[g.away]:"", r?r.score[g.home]:"", r?(r.ot?"Y":"N"):""]);
     });
     CG.exportCSV("cghl-schedule.csv", rows);
@@ -433,15 +449,33 @@ CG.AFTER.schedule = function(param, qs){
 /* ---------- STANDINGS ---------- */
 CG.ROUTES.standings = function(param, qs){
   var view = qs.view||"division";
-  var head = CG.pageHead("Season 1 · through week 6","League standings",
+  var hasPre = (CG.lg.schedule||[]).some(function(g){ return g.stage==="preseason"; });
+  var regWk = (CG.lg.results||[]).reduce(function(m,r){ return Math.max(m, r.week||1); }, 0);
+  var eyebrow = esc((CG.SEASON&&CG.SEASON.name)||"Season") + (regWk ? " · through week "+regWk : (hasPre ? " · pre-season" : ""));
+  var views = [["division","Divisions"],["league","League"],["wildcard","Playoff picture"]];
+  if (hasPre) views.push(["preseason","Pre-season"]);
+  var head = CG.pageHead(eyebrow,"League standings",
     "Two points for a win, one for an overtime loss. Top three per division qualify — the dashed line is the cut (Rule 8.1). Tiebreakers: wins, then goal differential, then goals for.",
     '<div style="display:flex;gap:9px;align-items:flex-end;flex-wrap:wrap">'+
-      '<div class="seg" role="group" aria-label="Standings view">'+[["division","Divisions"],["league","League"],["wildcard","Playoff picture"]].map(function(v){
+      '<div class="seg" role="group" aria-label="Standings view">'+views.map(function(v){
         return '<button data-view="'+v[0]+'" class="'+(view===v[0]?"on":"")+'">'+v[1]+'</button>'; }).join("")+'</div>'+
       '<button class="btn btn-ghost btn-sm" id="csvStand">'+CG.ic("dl",14)+'CSV</button></div>');
   var body;
   var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
-  if (view==="league"){
+  if (view==="preseason" && hasPre){
+    var preTeams = (CG.lg.pre && CG.lg.pre.teams) || null;
+    var preRows = preTeams ? CG.standings({teams:preTeams}) : CG.TEAMS.map(function(t){ return {team:t, code:t.code, gp:0,w:0,l:0,otl:0,gf:0,ga:0,diff:0,pts:0}; });
+    body = '<div class="card"><div class="card-h"><h3>Pre-season table</h3><span class="chip">separate from the season</span></div>'+
+      '<div class="tblwrap"><table class="tbl compact"><caption class="sr">Pre-season standings</caption>'+
+      '<thead><tr><th>#</th><th class="tleft">Club</th><th>GP</th><th>W</th><th>L</th><th>OTL</th><th>GF</th><th>GA</th><th>DIFF</th><th>PTS</th></tr></thead><tbody>'+
+      preRows.map(function(r,i){
+        return '<tr data-go="#/team/'+r.code+'"><td class="tnum">'+(i+1)+'</td>'+
+          '<td class="tleft"><span class="teamcell">'+CG.crest(r.code,22)+'<b>'+esc(r.team.name)+'</b></span></td>'+
+          '<td class="tnum">'+r.gp+'</td><td class="tnum">'+r.w+'</td><td class="tnum">'+r.l+'</td><td class="tnum">'+r.otl+'</td>'+
+          '<td class="tnum">'+r.gf+'</td><td class="tnum">'+r.ga+'</td><td class="tnum">'+(r.diff>0?"+":"")+r.diff+'</td><td class="tnum"><b>'+r.pts+'</b></td></tr>';
+      }).join("")+'</tbody></table></div>'+
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Two weeks, rosters filled by random assignment. Pre-season results never touch the league standings — they exist so every player logs the five games that make them draft-eligible.</span></div></div>';
+  } else if (view==="league"){
     body = '<div class="card"><div class="card-h"><h3>Overall league table</h3><span class="chip">'+CG.TEAMS.length+' clubs</span></div>'+CG.standTable(null,{full:true,caption:"League standings — all clubs"})+'</div>';
   } else if (view==="wildcard"){
     var byDiv = DIVS.map(function(dv){ return { name:dv, rows:CG.standings(CG.lg,dv) }; });
@@ -827,11 +861,19 @@ CG.ROUTES.player = function(pid, qs){
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
       advCells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<p class="caption" style="margin-top:12px">Every figure is pulled automatically from the EA NHL match record — no manual entry.</p></div></div>' : '';
+    /* pre-season line — separate from the season, but part of the overall rating */
+    var ps = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
+    var preCard = (ps && ps.gp>0) ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Pre-season</h3><span class="chip">'+ps.gp+' GP · counts toward overall</span></div><div class="card-b">'+
+      '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
+      (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
+           : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
+        .map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
+      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating — and toward the five games that make a first-year player draft-eligible.</p></div></div>' : '';
     body += '<div class="grid g23"><div>'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
       cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
-        '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>'+advCard+'</div>'+
+        '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>'+preCard+advCard+'</div>'+
       '<div class="stack">'+sideCard+(archived?"":
         '<div class="card"><div class="card-h"><h3>Contract</h3>'+
         (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
@@ -859,6 +901,22 @@ CG.ROUTES.player = function(pid, qs){
       }).join("")+'</tbody></table></div>'+
       (archived?'<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Archived box scores are kept for the record; match pages are only linked for the current season.</span></div>':"")+'</div>'
     : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No games recorded'+(archived?" that season":" yet")+'</b><p>'+(archived?"This player didn’t draw into a lineup during "+esc(SD.label)+".":"This player hasn’t drawn into a lineup — the game log fills in after their first shift.")+'</p></div></div>';
+    /* pre-season game log — its own table, never mixed into the season's */
+    var preLog = (!archived && CG.lg.pre && CG.lg.pre.glog && CG.lg.pre.glog[p.id]) || [];
+    if (preLog.length){
+      body += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Pre-season games</h3><span class="chip">'+preLog.length+' GP</span></div>'+
+        '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Pre-season game log</caption><thead><tr>'+
+        (isG?'<th>Wk</th><th class="tleft">Opponent</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
+            :'<th>Wk</th><th class="tleft">Opponent</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>')+
+        '</tr></thead><tbody>'+preLog.map(function(en){
+          var b = en.line;
+          return '<tr class="rowlink" data-go="#/matchup/'+en.game+'"><td class="tnum">'+en.week+'</td>'+
+            '<td class="tleft"><span class="teamcell">'+CG.crest(en.opp,22)+'<span class="nm">'+esc(CG.TEAM[en.opp].name)+'</span></span></td>'+
+            (isG? '<td>'+b.sa+'</td><td>'+b.sv+'</td><td>'+b.ga+'</td><td><span class="chip '+(b.w?"chip-win":"chip-loss")+'">'+(b.w?"W":b.otl?"OTL":"L")+(b.so?" · SO":"")+'</span></td>'
+                : '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="'+(b.pim?"":"z")+'">'+b.pim+'</td>')+
+            '</tr>';
+        }).join("")+'</tbody></table></div></div>';
+    }
   }
   if (tab==="honors" && archived){
     body += '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No honors in '+esc(SD.label)+'</b><p>Weekly hardware — Three Stars and Players of the Week — began with Season 1. Preseason games were exhibitions.</p></div></div>';

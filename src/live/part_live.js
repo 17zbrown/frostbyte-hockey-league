@@ -45,7 +45,7 @@ CG.buildLiveLeague = async function(){
     sb.from("transactions").select("*").order("occurred_at", { ascending:false }),
     sb.from("news").select("*").order("published_at", { ascending:false }),
     sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
-    sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)"),
+    sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr, profiles(gamertag,ea_id)"),
     sb.from("leagues").select("*").order("sort_order"),
     sb.from("game_stats").select("*"),
     sb.from("feature_flags").select("key,enabled"),
@@ -145,7 +145,7 @@ CG.buildLiveLeague = async function(){
         salary: (c && c.salary!=null) ? c.salary : (rs.salary||0),
         term: c ? Math.max(1, (c.end_season||1) - (c.start_season||1) + 1) : 1,
         mgmt: mgmt, mgmtSalary: (mgmt==="owner"||mgmt==="gm"),
-        onBlock: false, status: rs.status || "active"
+        onBlock: false, status: rs.status || "active", origin: rs.origin || "assigned"
       };
     })
     .filter(Boolean);
@@ -155,7 +155,7 @@ CG.buildLiveLeague = async function(){
 
   /* ---- schedule + results ---- */
   var schedule = games.map(function(g){
-    return { id:g.id, week:g.week||1,
+    return { id:g.id, week:g.week||1, stage:g.stage||"regular",
       home:id2code[g.home_team_id], away:id2code[g.away_team_id],
       at:Date.parse(g.scheduled_at), feature:false,
       code:g.game_code||null, server:g.server||null, status:g.status,
@@ -163,10 +163,20 @@ CG.buildLiveLeague = async function(){
       eaMatchId:g.ea_match_id||null };
   }).filter(function(g){ return g.home && g.away && g.at; });
 
-  /* the ratings engine regresses small samples against weeks played — derive that
-     from posted finals (the DB season row has no such column) */
-  CG.SEASON.completedWeeks = schedule.reduce(function(m,g){
-    return g.status==="final" ? Math.max(m, g.week||1) : m; }, 0);
+  /* weeks-played counts, per stage. The engine uses CG.SEASON.completedWeeks two
+     ways: to regress ratings under small samples (should see every stage) and to
+     mint weekly honors (must only ever see regular-season weeks) — so each
+     aggregate pass below gets the count that matches the results it consumes. */
+  var preWkSet={}, allWkSet={}, regMaxWk=0;
+  schedule.forEach(function(g){
+    if (g.status!=="final") return;
+    var st=g.stage||"regular", w=g.week||1;
+    allWkSet[st+":"+w]=1;
+    if (st==="preseason") preWkSet[w]=1;
+    else if (st!=="playoff") regMaxWk=Math.max(regMaxWk,w);
+  });
+  var preWeeksDone=Object.keys(preWkSet).length, allWeeksDone=Object.keys(allWkSet).length;
+  CG.SEASON.completedWeeks = regMaxWk;
 
   /* per-player box scores from game_stats (written by the EA auto-stats pipeline).
      Each box line carries the prototype's base keys (so CG.aggregate builds season
@@ -218,18 +228,57 @@ CG.buildLiveLeague = async function(){
         });
       });
       var stars = cand.sort(function(a,b){ return b.val-a.val || b.g-a.g; }).slice(0,3).map(function(x){ return { pid:x.pid, team:x.team }; });
-      return { id:g.id, week:g.week, home:g.home, away:g.away, at:g.at,
+      return { id:g.id, week:g.week, stage:g.stage, home:g.home, away:g.away, at:g.at,
         ot:g.ot, score:score, box:box, stars:stars, entered:true };
     });
 
-  var lg = { players:players, byTeam:byTeam, schedule:schedule, results:results,
-             suspensions:[], demoNow:CG.now(), season:season, live:true };
-  CG.aggregate(lg, {});
+  /* stage split: pre-season keeps its own standings and player lines, the regular
+     season owns the league standings, and overalls/parts see every game played */
+  var preResults = results.filter(function(r){ return r.stage==="preseason"; });
+  var regResults = results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; });
+  var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
+             allResults:results, suspensions:[], demoNow:CG.now(), season:season, live:true };
+  if (preResults.length){
+    CG.SEASON.completedWeeks = preWeeksDone;
+    lg.results = preResults; CG.aggregate(lg, {});
+    lg.pre = { teams: lg.teams, pstats: lg.pstats, glog: lg.glog, results: preResults };
+    CG.SEASON.completedWeeks = allWeeksDone;
+    lg.results = results; CG.aggregate(lg, {});      /* every stage -> ratings */
+    var ratingsAll = lg.ratings, teamRatingsAll = lg.teamRatings;
+    CG.SEASON.completedWeeks = regMaxWk;             /* honors only ever see regular weeks */
+    lg.results = regResults; CG.aggregate(lg, {});   /* regular season -> standings + stats */
+    lg.ratings = ratingsAll;
+    if (teamRatingsAll) lg.teamRatings = teamRatingsAll;
+  } else {
+    CG.aggregate(lg, {});
+  }
+
+  /* draft-eligibility bookkeeping: pre-season games played this cycle, career
+     games across every season, and who has already been through a draft */
+  var preFinalIds={};
+  schedule.forEach(function(g){ if(g.stage==="preseason" && g.status==="final") preFinalIds[g.id]=1; });
+  var preGp={}, careerGp={};
+  gameStatsRows.forEach(function(r){
+    if (!r.profile_id) return;
+    careerGp[r.profile_id]=(careerGp[r.profile_id]||0)+1;
+    if (preFinalIds[r.game_id]){
+      var pgo=preGp[r.profile_id]=preGp[r.profile_id]||{gp:0,g:0,a:0};
+      pgo.gp++; pgo.g+=(+r.goals||0); pgo.a+=(+r.assists||0);
+    }
+  });
+  var draftedEver={};
+  draftPicks.forEach(function(p){ if(p.player_id) draftedEver[p.player_id]=true; });
+  var priorSeason={};
+  var curSeasonId = season ? season.id : null;
+  roster.forEach(function(rs){ if(curSeasonId && rs.season_id!==curSeasonId) priorSeason[rs.profile_id]=true; });
+  lg.preGp=preGp; lg.careerGp=careerGp;
+  /* veteran = been drafted, rostered in a prior season, or 5+ career games */
+  lg.isVeteran = function(pid){ return !!(draftedEver[pid] || priorSeason[pid] || (careerGp[pid]||0)>=5); };
 
   /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
      from the box above via CG.aggregate; these power the advanced leaders + profiles) */
   if (gameStatsRows.length){
-    var finalIds = {}; results.forEach(function(r){ finalIds[r.id]=true; });
+    var finalIds = {}; regResults.forEach(function(r){ finalIds[r.id]=true; });
     gameStatsRows.forEach(function(r){
       if (!finalIds[r.game_id] || !r.profile_id) return;
       var s = lg.pstats[r.profile_id]; if (!s) return;
@@ -257,12 +306,12 @@ CG.buildLiveLeague = async function(){
   /* ---- power rankings from real results ----
      points% (60) + capped goal-diff/game (25) + last-5 form (15). Until games are
      played the engine's roster-strength order stands as the pre-season ranking. */
-  if (results.length){
+  if (regResults.length){
     var prOrder = function(exclFromWeek){
       var s = {};
       CG.TEAMS.forEach(function(t){
         var pts=0, gp=0, diff=0, seq=[];
-        results.forEach(function(r){
+        regResults.forEach(function(r){
           if (exclFromWeek && (r.week||1) >= exclFromWeek) return;
           if (r.home!==t.code && r.away!==t.code) return;
           var opp = r.home===t.code ? r.away : r.home; gp++;
@@ -277,7 +326,7 @@ CG.buildLiveLeague = async function(){
         return s[b]-s[a] || lg.teams[b].pts-lg.teams[a].pts || lg.teams[b].diff-lg.teams[a].diff;
       });
     };
-    var prMaxWk = results.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
+    var prMaxWk = regResults.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
     var prNow = prOrder(null), prPrev = prOrder(prMaxWk);
     lg.powerRankings = prNow.map(function(code,i){
       var was = prPrev.indexOf(code)+1;
@@ -304,9 +353,9 @@ CG.buildLiveLeague = async function(){
   var futureG = schedule.filter(function(g){ return g.status!=="final" && g.at > CG.now()-6*3600000; })
     .sort(function(a,b){ return a.at-b.at; });
   if (futureG.length){
-    var avWk = futureG[0].week || 1;
+    var avWk = futureG[0].week || 1, avStage = futureG[0].stage || "regular";
     var byNight = {};
-    futureG.filter(function(g){ return (g.week||1)===avWk; }).forEach(function(g){
+    futureG.filter(function(g){ return (g.week||1)===avWk && (g.stage||"regular")===avStage; }).forEach(function(g){
       var day = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(g.at));
       if (!byNight[day] || g.at < byNight[day]) byNight[day] = g.at;
     });
@@ -318,7 +367,8 @@ CG.buildLiveLeague = async function(){
       dl = new Date(dl.getTime()-86400000);
     }
     var dlDay = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(dl);
-    CG.WEEK8 = { key:"w"+avWk, label:"Week "+avWk,
+    CG.WEEK8 = { key:(avStage==="preseason"?"pre":avStage==="playoff"?"po":"w")+avWk,
+      label:(avStage==="preseason"?"Pre-season week ":avStage==="playoff"?"Playoff week ":"Week ")+avWk,
       deadline: Date.parse(dlDay+"T20:00:00-04:00"),
       nights: [ { key:"n1", at:nights[0] }, { key:"n2", at:nights[1] } ] };
   }
@@ -376,7 +426,8 @@ CG.buildLiveLeague = async function(){
   lg._idToCode = {}; lg._codeToId = {}; teamsRaw.forEach(function(t){ lg._idToCode[t.id] = t.code; lg._codeToId[t.code] = t.id; });
   lg._profName = {}; profiles.forEach(function(pr){ lg._profName[pr.id] = pr.gamertag || pr.display_name || "player"; });
   lg._profilesRaw = profiles;
-  lg._rosteredIds = {}; roster.forEach(function(rs){ lg._rosteredIds[rs.profile_id] = true; });
+  /* current season only — a spot in a past season must not block this season's pool */
+  lg._rosteredIds = {}; roster.forEach(function(rs){ if(!curSeasonId || rs.season_id===curSeasonId) lg._rosteredIds[rs.profile_id] = true; });
   CG.mapDraftData(lg, draftPicks, registrations);
 
   CG.LIVE.loaded = true;
@@ -442,7 +493,8 @@ CG.mapDraftData = function(lg, draftPicks, registrations){
       ownerCode: idToCode[p.current_team_id]||null, origCode: idToCode[p.original_team_id]||null,
       playerId:p.player_id, playerName: p.player_id?(profName[p.player_id]||"a player"):null, used:!!p.used };
   });
-  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id]; })
+  var poolSeason = (CG.SEASON && CG.SEASON.id) || null;
+  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && (!r.season_id || r.season_id===poolSeason); })
     .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(r.scout_ovr==null?null:r.scout_ovr), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
     .sort(function(a,b){ return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr); });
   lg.registrationsCount = (registrations||[]).length;
@@ -455,7 +507,7 @@ CG.loadManagerData = async function(){
   try {
     var q = await Promise.all([
       CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
-      CG.sb.from("season_registrations").select("id,profile_id,position,scout_ovr,note, profiles(gamertag,ea_id,platform,jersey_number)"),
+      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,note, profiles(gamertag,ea_id,platform,jersey_number)"),
       CG.sb.from("draft_state").select("*")
     ]);
     var regs = (q[1]&&!q[1].error&&q[1].data)||[];
@@ -807,10 +859,14 @@ CG.ROUTES.draft = function(){
     }).join("")+'</tbody></table></div></div>';
 
   var poolCard = '<div class="card"><div class="card-h"><h3>Prospect pool</h3><span class="chip">'+pool.length+' available</span></div>'+
-    (pool.length ? '<div class="card-b" style="padding-top:8px"><p class="caption" style="margin-bottom:10px">Registered players not yet on a roster, ranked by the commissioner’s scouted overall.</p>'+
+    (pool.length ? '<div class="card-b" style="padding-top:8px"><p class="caption" style="margin-bottom:10px">Registered players not yet on a roster, ranked by the commissioner’s scouted overall. Pre-season lines come from the EA box scores.</p>'+
       pool.slice(0,40).map(function(pr,i){
+        var ps=(CG.lg.preGp||{})[pr.profileId], vet=CG.lg.isVeteran&&CG.lg.isVeteran(pr.profileId);
+        var preLine = ps&&ps.gp ? ps.gp+" GP · "+ps.g+"G "+ps.a+"A pre-season" : "no pre-season games";
+        var eligChip = vet ? "" : (ps&&ps.gp>=5 ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
+                                                : ' <span class="chip chip-warn" style="font-size:9px">'+((ps&&ps.gp)||0)+' OF 5</span>');
         return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
-          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b><small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+'</small></span>'+
+          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+' · '+preLine+'</small></span>'+
           '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
       }).join("")+'</div>'
       : '<div class="card-b"><p class="caption">No prospects available yet — the pool fills from season registrations that haven’t been assigned to a club.</p></div>')+'</div>';
@@ -1013,7 +1069,7 @@ CG.AFTER.messages = function(param){
    ================================================================ */
 CG.admPreseason = function(){
   var lg=CG.lg, s=CG.SEASON||{};
-  var regs=(lg._registrationsRaw||[]).slice(), apps=lg._ownerApps||[];
+  var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[];
   var rosterMax=s.roster_max||15, rosteredIds=lg._rosteredIds||{};
   var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
   var pendingApps=apps.filter(function(a){ return a.status==="pending"; }).length;
@@ -1022,19 +1078,52 @@ CG.admPreseason = function(){
   var kpis=[[regs.length,"Registered players",""],[assigned+" / "+regs.length,"Assigned to a club",""],[pendingApps,"Owner apps pending",pendingApps>0?"alert":""],[s.registration_open?"Open":"Closed","Registration",""]];
   h+='<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-bottom:20px">'+
     kpis.map(function(k){ return '<div class="kpi'+(k[2]==="alert"?" alert":"")+'" style="cursor:default"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'; }).join("")+'</div>';
+
+  /* season timeline — the phases the whole lifecycle runs on */
+  var phases=[["Owner apps close",s.owner_app_deadline],["Registration closes",s.registration_deadline],
+    ["Pre-season starts",s.preseason_starts_at],["Draft night",s.draft_at],
+    ["Free agency opens",s.free_agency_opens_at],["Free agency closes",s.free_agency_closes_at],
+    ["Puck drop",s.starts_at],["Playoffs",s.playoffs_start_at]];
+  var anyPhase = phases.some(function(p){ return p[1]; });
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Season timeline</h3>'+
+    '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
+    (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
+      phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
+      '<p class="caption" style="margin-top:12px">When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically.</p></div>'
+    :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Pre-season starts”, and hit Auto-space — the draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
+
+  /* lifecycle actions */
+  var pool = regs.filter(function(r){ return !rosteredIds[r.profile_id] && r.status!=="declined"; });
+  var randomN = (lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
+  var rookies = pool.filter(function(r){ return !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5; });
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pre-season lifecycle</h3></div><div class="card-b">'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
+    '<button class="btn btn-chrome" id="preAssignAll"'+(pool.length?"":" disabled")+'>Randomly assign unrostered ('+pool.length+')</button>'+
+    '<button class="btn btn-ghost" id="preReleaseNow"'+(randomN?"":" disabled")+'>Release random assignments ('+randomN+')</button>'+
+    '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Distribute unproven rookies ('+rookies.length+')</button></div>'+
+    '<p class="caption" style="margin-top:12px">Randomly assign spreads every unrostered registration evenly across the clubs (management counts toward the split). '+
+    'Release runs automatically after the final pre-season game — the button is the manual override. '+
+    'Distribute sends players who missed the 5-game minimum (and have no draft history or 5 career games) to a random club with an open spot after free agency closes.</p></div></div>';
+
   var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   h+='<div class="card"><div class="card-h"><h3>Registered players</h3><span class="chip">'+regs.length+'</span></div>'+
     (regs.length?'<div class="tblwrap"><table class="tbl keepcols"><caption>Season registrations</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Status</th><th class="tright">Assign to club</th></tr></thead><tbody>'+
+      '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Pre-season</th><th>Draft eligibility</th><th>Status</th><th class="tright">Assign to club</th></tr></thead><tbody>'+
       sortedRegs.map(function(r){ var prof=r.profiles||{}, on=rosteredIds[r.profile_id];
+        var pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0}, vet=lg.isVeteran(r.profile_id);
+        var elig = vet ? '<span class="chip">Veteran — exempt</span>'
+                 : pre.gp>=5 ? '<span class="chip chip-win">Eligible</span>'
+                 : '<span class="chip chip-warn">'+pre.gp+' of 5 games</span>';
         var clubOpts = '<option value="">Choose club…</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
         return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td><td class="tleft small" style="color:var(--steel)">'+esc(prof.ea_id||"—")+'</td>'+
           '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" style="width:64px;text-align:center;padding:5px" placeholder="—"></td>'+
+          '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
+          '<td>'+elig+'</td>'+
           '<td>'+(on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td>'+
           '<td class="tright">'+(on?'<span class="caption">—</span>':'<span style="display:inline-flex;gap:6px;align-items:center"><select data-assign-team="'+r.id+'" style="padding:5px;max-width:150px">'+clubOpts+'</select>'+
             '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+esc(prof.gamertag||"a player")+'">Sign</button></span>')+'</td></tr>';
-      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool. Pick a club and Sign to add a free agent to a roster (auto-assigns the next open jersey number, logs a transaction).</span></div>'
+      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool. Pre-season games played come straight from the EA box scores; the 5-game minimum only applies to players without a draft cycle or 5 career games. Pick a club and Sign for a one-off manual signing.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
@@ -1069,6 +1158,9 @@ CG.AFTER._preseason = function(){
   });
   document.querySelectorAll("[data-app-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-approve"),"approved"); }); });
   document.querySelectorAll("[data-app-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-deny"),"denied"); }); });
+  var paa=document.getElementById("preAssignAll"); if (paa) paa.addEventListener("click", CG.preseasonRandomAssign);
+  var prn=document.getElementById("preReleaseNow"); if (prn) prn.addEventListener("click", CG.preseasonRelease);
+  var prk=document.getElementById("preRookies"); if (prk) prk.addEventListener("click", CG.distributeRookies);
   document.querySelectorAll("[data-assign]").forEach(function(b){ b.addEventListener("click", function(){
     var el=this, regId=el.getAttribute("data-assign"), sel=document.querySelector('[data-assign-team="'+regId+'"]'), code=sel?sel.value:"";
     if(!code){ CG.toast("Pick a club first","err"); return; }
@@ -1078,6 +1170,125 @@ CG.AFTER._preseason = function(){
     });
   }); });
 };
+/* ---- pre-season lifecycle actions ---- */
+CG.shuffleArr = function(a){ a=a.slice(); for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)), t=a[i]; a[i]=a[j]; a[j]=t; } return a; };
+CG.nextJersey = function(used){ for (var n=1;n<=99;n++){ if(!used[n]){ used[n]=1; return n; } } return 0; };
+
+CG.preseasonRandomAssign = function(){
+  var lg=CG.lg, s=CG.SEASON;
+  if (!s || !s.id){ CG.toast("Create a season first","err"); return; }
+  var rosteredIds=lg._rosteredIds||{};
+  var pool=(lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined"; });
+  if (!pool.length){ CG.toast("Everyone registered is already on a club","err"); return; }
+  var rosterMax=s.roster_max||15;
+  CG.confirm("Randomly assign "+pool.length+" players for the pre-season?",
+    "Every unrostered registration is spread evenly across the "+CG.TEAMS.length+" clubs (management counts toward the split, clubs cap at "+rosterMax+"). "+
+    "They are released back to the draft pool automatically when the final pre-season game ends.",
+    "Assign randomly", function(){
+    var counts={}, used={};
+    CG.TEAMS.forEach(function(t){
+      counts[t.code]=(lg.byTeam[t.code]||[]).length;
+      used[t.code]={}; (lg.byTeam[t.code]||[]).forEach(function(p){ if(p.jersey) used[t.code][p.jersey]=1; });
+    });
+    var rows=[], regIds=[], skipped=0;
+    CG.shuffleArr(pool).forEach(function(r){
+      var open=CG.TEAMS.filter(function(t){ return counts[t.code]<rosterMax; });
+      if (!open.length){ skipped++; return; }
+      var min=Math.min.apply(null, open.map(function(t){ return counts[t.code]; }));
+      var lows=open.filter(function(t){ return counts[t.code]===min; });
+      var pick=lows[Math.floor(Math.random()*lows.length)];
+      counts[pick.code]++;
+      rows.push({ season_id:s.id, team_id:pick.id, profile_id:r.profile_id,
+        jersey_number:CG.nextJersey(used[pick.code]), position:r.position||"C", salary:0, origin:"preseason_random" });
+      regIds.push(r.id);
+    });
+    if (!rows.length){ CG.toast("No club has an open roster spot","err"); return; }
+    var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
+    (function insertNext(idx){
+      if (idx>=chunks.length){
+        CG.sb.from("season_registrations").update({ status:"assigned" }).in("id", regIds).then(function(){
+          CG.sb.from("transactions").insert({ season_id:s.id, type:"sign",
+            description:"Pre-season: "+rows.length+" registered players randomly assigned across the league" }).then(function(){
+            CG.toast(rows.length+" players randomly assigned"+(skipped?" · "+skipped+" left out (rosters full)":""),"ok");
+            CG.reloadLeague();
+          });
+        });
+        return;
+      }
+      CG.sb.from("roster_spots").insert(chunks[idx]).then(function(rz){
+        if (rz.error){ CG.toast("Assignment stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
+        insertNext(idx+1);
+      });
+    })(0);
+  });
+};
+
+CG.preseasonRelease = function(){
+  var s=CG.SEASON; if (!s || !s.id) return;
+  var n=(CG.lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
+  CG.confirm("Release all "+n+" random pre-season assignments?",
+    "This is what happens automatically when the final pre-season game ends — use it early only if you mean to. "+
+    "Players return to the draft pool; their pre-season stats and eligibility are kept. Management and manually signed players stay put.",
+    "Release to draft pool", function(){
+    CG.sb.from("roster_spots").delete().eq("season_id",s.id).eq("origin","preseason_random").select("profile_id").then(function(r){
+      if (r.error){ CG.toast("Couldn’t release: "+r.error.message,"err"); return; }
+      var ids=(r.data||[]).map(function(x){ return x.profile_id; });
+      var after=function(){
+        CG.sb.from("transactions").insert({ season_id:s.id, type:"release",
+          description:"Pre-season complete — "+ids.length+" randomly assigned players returned to the draft pool" }).then(function(){
+          CG.toast(ids.length+" players released to the draft pool","ok"); CG.reloadLeague();
+        });
+      };
+      if (ids.length) CG.sb.from("season_registrations").update({ status:"pending" }).eq("season_id",s.id).in("profile_id",ids).then(after);
+      else { CG.toast("Nothing to release","ok"); CG.reloadLeague(); }
+    });
+  });
+};
+
+CG.distributeRookies = function(){
+  var lg=CG.lg, s=CG.SEASON; if (!s || !s.id) return;
+  var rosteredIds=lg._rosteredIds||{};
+  var rookies=(lg._registrationsRaw||[]).filter(function(r){
+    return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined" &&
+      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
+  });
+  if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
+  var faOpen = s.free_agency_closes_at && Date.parse(s.free_agency_closes_at) > CG.now();
+  var rosterMax=s.roster_max||15;
+  CG.confirm("Distribute "+rookies.length+" unproven rookies?",
+    (faOpen?"Heads up: free agency hasn’t closed yet — this normally runs after it does. ":"")+
+    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot. "+
+    "This keeps managers from parking incoming players to poach them in free agency.",
+    "Distribute rookies", function(){
+    var counts={}, used={};
+    CG.TEAMS.forEach(function(t){
+      counts[t.code]=(lg.byTeam[t.code]||[]).length;
+      used[t.code]={}; (lg.byTeam[t.code]||[]).forEach(function(p){ if(p.jersey) used[t.code][p.jersey]=1; });
+    });
+    var rows=[], regIds=[], names=[];
+    CG.shuffleArr(rookies).forEach(function(r){
+      var open=CG.TEAMS.filter(function(t){ return counts[t.code]<rosterMax; });
+      if (!open.length) return;
+      var pick=open[Math.floor(Math.random()*open.length)]; /* uniform random, per the rule */
+      counts[pick.code]++;
+      rows.push({ season_id:s.id, team_id:pick.id, profile_id:r.profile_id,
+        jersey_number:CG.nextJersey(used[pick.code]), position:r.position||"C", salary:0, origin:"rookie_random" });
+      regIds.push(r.id);
+      names.push(((r.profiles||{}).gamertag||"a player")+" → "+pick.code);
+    });
+    if (!rows.length){ CG.toast("No club has an open roster spot","err"); return; }
+    CG.sb.from("roster_spots").insert(rows).then(function(rz){
+      if (rz.error){ CG.toast("Couldn’t place: "+rz.error.message,"err"); return; }
+      CG.sb.from("season_registrations").update({ status:"assigned" }).in("id",regIds).then(function(){
+        CG.sb.from("transactions").insert({ season_id:s.id, type:"sign",
+          description:"Rookie placement: "+names.join(", ") }).then(function(){
+          CG.toast(rows.length+" rookies placed on random clubs","ok"); CG.reloadLeague();
+        });
+      });
+    });
+  });
+};
+
 CG.assignRegistration = async function(regId, profileId, position, playerName, code){
   var s=CG.SEASON, teamId=(CG.lg._codeToId||{})[code];
   if(!s||!teamId){ CG.toast("Missing season/club","err"); return; }
@@ -1816,7 +2027,7 @@ CG.admOverviewLive = function(){
   var unlinked = (CG.TEAMS||[]).filter(function(t){ return !t.eaClubId; });
   var pendingApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
   var openCases = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; });
-  var unsigned = (lg._registrationsRaw||[]).filter(function(r){ return !(lg._rosteredIds||{})[r.profile_id]; });
+  var unsigned = (lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===((CG.SEASON&&CG.SEASON.id)||null)) && !(lg._rosteredIds||{})[r.profile_id]; });
   var nextG = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at>CG.now(); }).sort(function(a,b){ return a.at-b.at; })[0];
   var days = CG.daysToStart ? CG.daysToStart() : null;
   var draftSt = lg.draftState ? lg.draftState.status : null;
@@ -2050,48 +2261,83 @@ CG.AFTER._admHomepage = function(){
 /* ================================================================
    LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
    ================================================================ */
-/* round-robin season generator (ported from the classic site, verified in prod
+/* round-robin schedule generator (ported from the classic site, verified in prod
    there): 3 ET slots a night, Wed + Fri, every club plays once per slot —
-   3 a night, 6 a week, GAMES_PER_CLUB slots = the season. */
+   3 a night, 6 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
+   Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
 CG.GAMES_PER_CLUB = 54;
+CG.PRESEASON_WEEKS = 2;
 CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
-CG.generateSchedule = function(){
+CG.HOLIDAYS = ["12-25","07-01","07-04"];
+
+/* ---- shared ET-safe date helpers ---- */
+CG.dayAdd = function(ymd, n){
+  var p=ymd.split("-").map(Number);
+  var d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
+  d.setUTCDate(d.getUTCDate()+n);
+  return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");
+};
+CG.dayOfWeek = function(ymd){ var p=ymd.split("-").map(Number); return new Date(Date.UTC(p[0],p[1]-1,p[2],12)).getUTCDay(); };
+CG.etISO = function(ymd, hm){ /* correct across EDT/EST */
+  var guess = new Date(ymd+"T"+hm+":00-04:00");
+  var et = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(guess);
+  if (et !== hm) guess = new Date(ymd+"T"+hm+":00-05:00");
+  return guess.toISOString();
+};
+CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(iso)); };
+CG.holidayWeek = function(wedYmd){ /* the Mon..Sun week around a game Wednesday */
+  var mon = CG.dayAdd(wedYmd,-2);
+  for (var i=0;i<7;i++){ if (CG.HOLIDAYS.indexOf(CG.dayAdd(mon,i).slice(5))>=0) return true; }
+  return false;
+};
+CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, skip holiday weeks */
+  var wed = anchorYmd;
+  while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
+  var out=[], skipped=[], guard=0;
+  while (out.length < weeks && guard++ < 60){
+    if (CG.holidayWeek(wed)){ skipped.push(wed); wed = CG.dayAdd(wed,7); continue; }
+    out.push({ week: out.length+1, wed: wed, fri: CG.dayAdd(wed,2) });
+    wed = CG.dayAdd(wed,7);
+  }
+  return { nights: out, skipped: skipped };
+};
+
+CG.generateSchedule = function(stage){
+  stage = stage==="preseason" ? "preseason" : "regular";
   var s = CG.SEASON;
   if (!s || !s.id){ CG.toast("Create a season first — the schedule hangs off it","err"); return; }
+  var anchorIso = stage==="preseason" ? s.preseason_starts_at : s.starts_at;
+  if (!anchorIso){ CG.toast("Set the "+(stage==="preseason"?"pre-season":"season")+" start date in Seasons first (Auto-space fills it)","err"); return; }
   var codes = (CG.TEAMS||[]).map(function(t){ return t.code; });
   if (codes.length<2){ CG.toast("You need at least two clubs to build a schedule","err"); return; }
-  if ((CG.lg.schedule||[]).length){ CG.toast("A schedule already exists — clear it first to regenerate","err"); return; }
-  var weeks = Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/2);
-  CG.confirm("Generate the "+esc(s.name||"season")+" schedule?",
-    codes.length+" clubs · "+CG.GAMES_PER_CLUB+" games each · 3 a night, 6 a week (Wed + Fri, 9:00 / 9:35 / 10:10 PM ET) · "+weeks+" weeks starting from the season's first Wednesday.",
-    "Generate schedule", function(){
+  if ((CG.lg.schedule||[]).some(function(g){ return g.stage===stage; })){
+    CG.toast("A "+(stage==="preseason"?"pre-season":"regular-season")+" schedule already exists — clear it first","err"); return; }
+  var perNight=CG.NIGHT_SLOTS.length;
+  var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*2*perNight : CG.GAMES_PER_CLUB;
+  var weeks = Math.ceil(slots/perNight/2);
+  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks);
+  var skipNote = plan.skipped.length ? " Holiday week"+(plan.skipped.length===1?"":"s")+" skipped: "+plan.skipped.join(", ")+"." : "";
+  CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
+    codes.length+" clubs · "+slots+" games each · 3 a night, 6 a week (Wed + Fri, 9:00 / 9:35 / 10:10 PM ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
+    "Generate "+(stage==="preseason"?"pre-season":"schedule"), function(){
     function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
-    function ymd(d){ return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0"); }
-    var base = s.starts_at ? new Date(s.starts_at) : new Date();
-    var d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 12, 0, 0));
-    while (d.getUTCDay()!==3) d.setUTCDate(d.getUTCDate()+1);
     var dates=[];
-    for (var w=0; w<weeks+1; w++){
-      var wed=new Date(d); wed.setUTCDate(d.getUTCDate()+7*w);
-      var fri=new Date(wed); fri.setUTCDate(wed.getUTCDate()+2);
-      dates.push({week:w+1,date:ymd(wed)}); dates.push({week:w+1,date:ymd(fri)});
-    }
+    plan.nights.forEach(function(n){ dates.push({week:n.week,date:n.wed}); dates.push({week:n.week,date:n.fri}); });
     var arr=codes.slice(); if (arr.length%2) arr.push(null);
-    var m=arr.length, fixed=arr[0], others=arr.slice(1);
-    var perNight=CG.NIGHT_SLOTS.length, rows=[];
-    for (var r=0; r<CG.GAMES_PER_CLUB; r++){
+    var m=arr.length, fixed=arr[0], others=arr.slice(1), rows=[];
+    for (var r=0; r<slots; r++){
       var day=dates[Math.floor(r/perNight)]; if(!day) continue;
-      var iso=new Date(day.date+"T"+CG.NIGHT_SLOTS[r%perNight]+":00-04:00").toISOString();
+      var iso=CG.etISO(day.date, CG.NIGHT_SLOTS[r%perNight]);
       var order=[fixed].concat(rrRotate(others,r));
       for (var i=0;i<m/2;i++){
         var a=order[i], b=order[m-1-i]; if(!a||!b) continue;
         if (r%2===1){ var t=a; a=b; b=t; }
-        rows.push({ season_id:s.id, week:day.week, home_team_id:(CG.lg._codeToId||{})[a], away_team_id:(CG.lg._codeToId||{})[b], scheduled_at:iso, status:"scheduled" });
+        rows.push({ season_id:s.id, week:day.week, stage:stage, home_team_id:(CG.lg._codeToId||{})[a], away_team_id:(CG.lg._codeToId||{})[b], scheduled_at:iso, status:"scheduled" });
       }
     }
     var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
     (function insertNext(idx){
-      if (idx>=chunks.length){ CG.toast(rows.length+" games generated — "+CG.GAMES_PER_CLUB+"/club over "+weeks+" weeks","ok"); CG.reloadLeague(); return; }
+      if (idx>=chunks.length){ CG.toast(rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks","ok"); CG.reloadLeague(); return; }
       CG.sb.from("games").insert(chunks[idx]).then(function(rz){
         if (rz.error){ CG.toast("Generation stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
         insertNext(idx+1);
@@ -2099,31 +2345,39 @@ CG.generateSchedule = function(){
     })(0);
   });
 };
-CG.clearSchedule = function(){
+CG.clearSchedule = function(stage){
+  stage = stage==="preseason" ? "preseason" : "regular";
   var s = CG.SEASON; if (!s || !s.id) return;
-  var played = (CG.lg.schedule||[]).filter(function(g){ return g.status==="final"; }).length;
-  CG.confirm("Clear the entire schedule?",
-    (CG.lg.schedule||[]).length+" games go, including their codes and server picks"+(played?" — and "+played+" finals WITH their box scores":"")+". This can’t be undone.",
-    "Clear schedule", function(){
-    CG.sb.from("games").delete().eq("season_id", s.id).then(function(r){
+  var mine = (CG.lg.schedule||[]).filter(function(g){ return g.stage===stage; });
+  if (!mine.length) return;
+  var played = mine.filter(function(g){ return g.status==="final"; }).length;
+  CG.confirm("Clear the "+(stage==="preseason"?"pre-season":"regular-season")+" schedule?",
+    mine.length+" games go, including their codes and server picks"+(played?" — and "+played+" finals WITH their box scores":"")+". This can’t be undone.",
+    "Clear "+(stage==="preseason"?"pre-season":"schedule"), function(){
+    CG.sb.from("games").delete().eq("season_id", s.id).eq("stage", stage).then(function(r){
       if (r.error){ CG.toast("Couldn’t clear: "+r.error.message,"err"); return; }
-      CG.toast("Schedule cleared","ok"); CG.reloadLeague();
+      CG.toast((stage==="preseason"?"Pre-season":"Regular season")+" cleared","ok"); CG.reloadLeague();
     });
   });
 };
 CG.admScheduleLive = function(){
   var lg = CG.lg;
+  var pre = lg.schedule.filter(function(g){ return g.stage==="preseason"; });
+  var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason"; });
   var future = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px"><div><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+
     (lg.schedule.length ? future.length+' games to play. Move any game — the EA auto-import matches by clubs + date, so stats follow a rescheduled game automatically.'
-                        : 'No games yet. Generate a full season in one click, then fine-tune any game time by hand.')+'</p></div>'+
-    '<span style="display:inline-flex;gap:8px;align-self:flex-start">'+
-    (lg.schedule.length ? '<button class="btn btn-ghost" id="schedClear">Clear schedule</button>'
-                        : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Auto-generate season</button>')+'</span></div>';
+                        : 'No games yet. Generate the pre-season and the regular season from the dates in Seasons, then fine-tune any game time by hand. Weeks touching Christmas, Canada Day, or July 4 are skipped automatically.')+'</p></div>'+
+    '<span style="display:inline-flex;gap:8px;align-self:flex-start;flex-wrap:wrap">'+
+    (pre.length ? '<button class="btn btn-ghost" id="preClear">Clear pre-season ('+pre.length+')</button>'
+                : '<button class="btn btn-ghost" id="preGen">'+CG.ic("plus",15)+'Generate pre-season</button>')+
+    (reg.length ? '<button class="btn btn-ghost" id="schedClear">Clear season ('+reg.length+')</button>'
+                : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Generate season</button>')+'</span></div>';
   h += '<div class="card"><div class="card-h"><h3>Upcoming slate</h3><span class="chip">next '+Math.min(future.length,16)+' shown</span></div>'+
     future.slice(0,16).map(function(g){
       return '<div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
         '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:170px">'+CG.fmtFull(g.at)+'</span>'+
+        (g.stage==="preseason"?'<span class="chip" style="font-size:9px">PRE</span>':g.stage==="playoff"?'<span class="chip chip-chrome" style="font-size:9px">PO</span>':"")+
         '<span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+'</span></span><span class="caption">@</span>'+
         '<span class="teamcell">'+CG.crest(g.home,20)+'<span class="mono" style="font-size:12px">'+esc(g.home)+'</span></span>'+
         '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Open</a>'+
@@ -2134,9 +2388,13 @@ CG.admScheduleLive = function(){
 };
 CG.AFTER._admScheduleLive = function(){
   var gen=document.getElementById("schedGen");
-  if (gen) gen.addEventListener("click", CG.generateSchedule);
+  if (gen) gen.addEventListener("click", function(){ CG.generateSchedule("regular"); });
+  var pgen=document.getElementById("preGen");
+  if (pgen) pgen.addEventListener("click", function(){ CG.generateSchedule("preseason"); });
   var clr=document.getElementById("schedClear");
-  if (clr) clr.addEventListener("click", CG.clearSchedule);
+  if (clr) clr.addEventListener("click", function(){ CG.clearSchedule("regular"); });
+  var pclr=document.getElementById("preClear");
+  if (pclr) pclr.addEventListener("click", function(){ CG.clearSchedule("preseason"); });
   document.querySelectorAll("[data-resched-live]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-resched-live");
     var g=CG.lg.schedule.find(function(x){ return x.id===id; }); if(!g) return;
@@ -2151,7 +2409,7 @@ CG.AFTER._admScheduleLive = function(){
     document.getElementById("rsGo").addEventListener("click", function(){
       var v=document.getElementById("rsWhen").value;
       if(!v){ CG.toast("Pick the new date and time","err"); return; }
-      var iso=new Date(v+":00-04:00").toISOString();  /* league runs Aug–Oct: EDT */
+      var iso=CG.etISO(v.slice(0,10), v.slice(11,16));
       CG.sb.from("games").update({ scheduled_at: iso }).eq("id",id).then(function(r){
         if(r.error){ CG.toast("Couldn’t reschedule: "+r.error.message,"err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
@@ -2196,14 +2454,17 @@ CG.admSeasonsLive = function(){
       '<span class="chip '+st+'">'+esc(s.status)+'</span>'+(s.registration_open?'<span class="chip chip-win">Registration open</span>':"")+'</span></div>'+
       '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
         [["Number", s.number],
-         ["Starts", s.starts_at?CG.fmtDay(Date.parse(s.starts_at)):"—"],
-         ["Ends", s.ends_at?CG.fmtDay(Date.parse(s.ends_at)):"—"],
+         ["Pre-season", s.preseason_starts_at?CG.fmtDay(Date.parse(s.preseason_starts_at)):"—"],
+         ["Draft", s.draft_at?CG.fmtDay(Date.parse(s.draft_at)):"—"],
+         ["Free agency", s.free_agency_opens_at?(CG.fmtDay(Date.parse(s.free_agency_opens_at))+" – "+(s.free_agency_closes_at?CG.fmtDay(Date.parse(s.free_agency_closes_at)):"?")):"—"],
+         ["Season starts", s.starts_at?CG.fmtDay(Date.parse(s.starts_at)):"—"],
+         ["Season ends", s.ends_at?CG.fmtDay(Date.parse(s.ends_at)):"—"],
+         ["Playoffs", s.playoffs_start_at?CG.fmtDay(Date.parse(s.playoffs_start_at)):"—"],
          ["Salary cap", s.salary_cap?("$"+(s.salary_cap/1e6)+"M"):"—"],
          ["Roster max", s.roster_max||"—"],
          ["Trade deadline", s.trade_deadline_week?("Week "+s.trade_deadline_week):"—"],
          ["Registration closes", s.registration_deadline?CG.fmtDay(Date.parse(s.registration_deadline)):"—"],
          ["Owner apps close", s.owner_app_deadline?CG.fmtDay(Date.parse(s.owner_app_deadline)):"—"],
-         ["Draft", s.draft_at?CG.fmtDay(Date.parse(s.draft_at)):"—"],
          ["Roster moves", s.moves_lock_override||"auto"]
         ].map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:16px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-season-edit="'+s.id+'">Edit settings</button>'+
@@ -2230,17 +2491,46 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Number</span><input id="ssNum" type="number" min="1" value="'+(s.number||1)+'"></label>'+
     '<label class="fld"><span>Status</span><select id="ssStatus">'+["upcoming","active","complete"].map(function(x){ return '<option'+(s.status===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
     '<label class="fld"><span>Registration</span><select id="ssRegOpen"><option value="1"'+(s.registration_open?" selected":"")+'>Open</option><option value="0"'+(!s.registration_open?" selected":"")+'>Closed</option></select></label>'+
+    '<label class="fld"><span>Pre-season starts (ET)</span><input type="datetime-local" id="ssPre" value="'+dt(s.preseason_starts_at)+'"></label>'+
+    '<label class="fld" style="align-self:end"><span>&nbsp;</span><button class="btn btn-ghost" id="ssSpace" type="button" style="width:100%">Auto-space the whole timeline</button></label>'+
+    '<label class="fld"><span>Draft night (ET)</span><input type="datetime-local" id="ssDraft" value="'+dt(s.draft_at)+'"></label>'+
+    '<label class="fld"><span>Free agency opens (ET)</span><input type="datetime-local" id="ssFaOpen" value="'+dt(s.free_agency_opens_at)+'"></label>'+
+    '<label class="fld"><span>Free agency closes (ET)</span><input type="datetime-local" id="ssFaClose" value="'+dt(s.free_agency_closes_at)+'"></label>'+
     '<label class="fld"><span>Season starts (ET)</span><input type="datetime-local" id="ssStarts" value="'+dt(s.starts_at)+'"></label>'+
     '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
+    '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
     '<label class="fld"><span>Registration closes (ET)</span><input type="datetime-local" id="ssRegDl" value="'+dt(s.registration_deadline)+'"></label>'+
     '<label class="fld"><span>Owner apps close (ET)</span><input type="datetime-local" id="ssOwnDl" value="'+dt(s.owner_app_deadline)+'"></label>'+
-    '<label class="fld"><span>Draft night (ET)</span><input type="datetime-local" id="ssDraft" value="'+dt(s.draft_at)+'"></label>'+
     '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||60000000)/1e6)+'"></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||12)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
-    '</div><p class="caption">auto = moves lock at the trade-deadline week on their own · locked / open force it either way. Blank dates are simply unset.</p>',
+    '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
+    '</div><p class="caption">Give “Pre-season starts” one date and Auto-space fills everything else: 2 pre-season weeks (Wed + Fri), draft the Saturday after the final Friday, free agency 24 hours later for 48 hours, puck drop the very next Wednesday, 9 regular-season weeks, playoffs the Wednesday after. Weeks touching Christmas, Canada Day, or July 4 are skipped. Every field stays editable — Auto-space just fills the form; nothing saves until you hit Save.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
+  document.getElementById("ssSpace").addEventListener("click", function(){
+    var v = document.getElementById("ssPre").value;
+    if (!v){ CG.toast("Give “Pre-season starts” a date first — everything spaces from it","err"); return; }
+    var anchor = v.slice(0,10);
+    var pre = CG.gameNights(anchor, CG.PRESEASON_WEEKS);
+    var preStart = pre.nights[0].wed, preFinal = pre.nights[CG.PRESEASON_WEEKS-1].fri;
+    var draftDay = CG.dayAdd(preFinal,1);                       /* Saturday draft night */
+    var reg = CG.gameNights(CG.dayAdd(draftDay,4), Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/2));
+    var regStart = reg.nights[0].wed, regEnd = reg.nights[reg.nights.length-1].fri;
+    var po = CG.gameNights(CG.dayAdd(regEnd,1), 1);
+    function put(id, iso){ document.getElementById(id).value = dt(iso); }
+    put("ssPre",      CG.etISO(preStart,"21:00"));
+    put("ssDraft",    CG.etISO(draftDay,"19:00"));
+    put("ssFaOpen",   CG.etISO(CG.dayAdd(draftDay,1),"19:00"));  /* 24h after draft night */
+    put("ssFaClose",  CG.etISO(CG.dayAdd(draftDay,3),"19:00"));  /* 48-hour window */
+    put("ssStarts",   CG.etISO(regStart,"21:00"));
+    put("ssEnds",     CG.etISO(regEnd,"23:59"));
+    put("ssPlayoffs", CG.etISO(po.nights[0].wed,"21:00"));
+    put("ssRegDl",    CG.etISO(CG.dayAdd(preStart,-2),"20:00")); /* the Monday before */
+    put("ssOwnDl",    CG.etISO(CG.dayAdd(preStart,-7),"20:00")); /* mid management window */
+    var skipped = pre.skipped.concat(reg.skipped, po.skipped);
+    CG.toast("Timeline spaced: pre-season "+preStart+" → draft "+draftDay+" → puck drop "+regStart+
+      (skipped.length?" · holiday week"+(skipped.length===1?"":"s")+" skipped: "+skipped.join(", "):""),"ok");
+  });
   document.getElementById("ssGo").addEventListener("click", function(){
     var name=(document.getElementById("ssName").value||"").trim();
     if(!name){ CG.toast("Name the season","err"); return; }
@@ -2248,12 +2538,14 @@ CG.seasonForm = function(id){
     if(!(num>=1)){ CG.toast("Season number must be 1 or more","err"); return; }
     var clash=(CG._seasonsRaw||[]).find(function(x){ return x.number===num && (!id || x.id!==id); });
     if(clash){ CG.toast("Number "+num+" is already "+(clash.name||"another season"),"err"); return; }
-    function iso(elId){ var v=document.getElementById(elId).value; return v ? new Date(v+":00-04:00").toISOString() : null; }
+    function iso(elId){ var v=document.getElementById(elId).value; return v ? CG.etISO(v.slice(0,10), v.slice(11,16)) : null; }
     var cap=Math.round(parseFloat(document.getElementById("ssCap").value||"60")*1e6);
     var rec={ name:name, number:num, status:document.getElementById("ssStatus").value,
       registration_open: document.getElementById("ssRegOpen").value==="1",
       starts_at:iso("ssStarts"), ends_at:iso("ssEnds"), registration_deadline:iso("ssRegDl"),
       owner_app_deadline:iso("ssOwnDl"), draft_at:iso("ssDraft"),
+      preseason_starts_at:iso("ssPre"), free_agency_opens_at:iso("ssFaOpen"),
+      free_agency_closes_at:iso("ssFaClose"), playoffs_start_at:iso("ssPlayoffs"),
       salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||12,
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
       moves_lock_override:document.getElementById("ssMoves").value };

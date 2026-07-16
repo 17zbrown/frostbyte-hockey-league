@@ -680,9 +680,9 @@ CG.searchIndex = function(){
     });
   });
   lg.schedule.forEach(function(g){
-    var done = lg.results.some(function(r){ return r.id===g.id; });
+    var done = (lg.allResults||lg.results).some(function(r){ return r.id===g.id; });
     ix.push({ cat:"Games", label:CG.TEAM[g.away].name+" @ "+CG.TEAM[g.home].name,
-      sub:"Week "+g.week+" · "+CG.fmtDay(g.at)+(done?" · Final":""), route:"#/matchup/"+g.id,
+      sub:(g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week+" · "+CG.fmtDay(g.at)+(done?" · Final":""), route:"#/matchup/"+g.id,
       key:(CG.TEAM[g.away].name+" "+CG.TEAM[g.home].name+" week "+g.week).toLowerCase() });
   });
   return ix;

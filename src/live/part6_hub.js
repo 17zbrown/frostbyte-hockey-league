@@ -1028,7 +1028,7 @@ CG.newComplaintFlow = function(){
 /* ---------- staff stats entry ---------- */
 CG.hubStatsEntry = function(){
   var lg = CG.lg;
-  var missing = lg.schedule.filter(function(g){ return g.at < CG.now() && !lg.results.some(function(r){ return r.id===g.id; }); });
+  var missing = lg.schedule.filter(function(g){ return g.at < CG.now() && !(lg.allResults||lg.results).some(function(r){ return r.id===g.id; }); });
   return '<div style="margin-bottom:20px"><span class="eyebrow chr">Statistician grant</span><h1 class="h-sec" style="margin-top:8px">Stats entry desk</h1>'+
     '<p class="lede" style="margin-top:8px">Finals get entered here (or in the Control Center) and flow instantly into standings, player stats, and ratings.</p></div>'+
     (missing.length

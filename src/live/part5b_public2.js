@@ -234,7 +234,7 @@ CG.ROUTES.matchup = function(id){
   var lg = CG.lg;
   var g = lg.schedule.find(function(x){ return x.id===id; });
   if (!g) return CG.ROUTES._404();
-  var res = lg.results.find(function(r){ return r.id===id; });
+  var res = (lg.allResults||lg.results).find(function(r){ return r.id===id; });
   var now = CG.now();
   var th = lg.teams[g.home], ta = lg.teams[g.away];
   var prPos = {}; lg.powerRankings.forEach(function(p){ prPos[p.team]=p.rank; });
@@ -252,7 +252,7 @@ CG.ROUTES.matchup = function(id){
   var hero = '<section class="sec-tight"><div class="shell">'+
     '<a href="#/schedule" class="sec-link">'+CG.ic("back",14)+'Schedule</a>'+
     '<div class="mx-hero" style="margin-top:18px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:20px">'+
-      '<span class="chip '+(status==="Tonight"?"chip-live":"chip-ink")+'" style="border-color:#39434B">'+(status==="Tonight"?'<span class="live-dot"></span>':"")+status+' · Week '+g.week+'</span>'+
+      '<span class="chip '+(status==="Tonight"?"chip-live":"chip-ink")+'" style="border-color:#39434B">'+(status==="Tonight"?'<span class="live-dot"></span>':"")+status+' · '+(g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week+'</span>'+
       '<span class="chip chip-ink" style="border-color:#39434B">'+CG.fmtFull(g.at)+' · '+esc(CG.TEAM[g.home].arena)+'</span></div>'+
     '<div class="mx-teams">'+
       '<div class="mx-side">'+CG.crest(g.away,64)+'<div><div class="mx-nm">'+esc(CG.TEAM[g.away].name)+'</div>'+
@@ -272,15 +272,20 @@ CG.ROUTES.matchup = function(id){
     /* FINAL: box score + stars */
     var starsBlurb = (CG.CONTENT.awards.threeStars.find(function(t){ return t.gameId===id; })||{}).blurb;
     body += '<div class="grid g23" style="align-items:start"><div>';
+    /* a box line can outlive its roster spot (players released after the pre-season,
+       unlinked EA accounts) — fall back to the name the EA record carried */
+    function boxPlayer(pid, code, b){
+      return CG.playerById(lg, pid) || { id:null, tag:(b&&b.name)||"Former roster player", pos:(b&&b.pos)||"", team:code };
+    }
     [g.away, g.home].forEach(function(code){
       var box = res.box[code];
-      var sk = Object.keys(box).filter(function(pid){ return !box[pid].goalie; }).map(function(pid){ return { p: CG.playerById(lg,pid), b: box[pid] }; })
+      var sk = Object.keys(box).filter(function(pid){ return !box[pid].goalie; }).map(function(pid){ return { p: boxPlayer(pid, code, box[pid]), b: box[pid] }; })
         .sort(function(a,b){ return (b.b.g+b.b.a)-(a.b.g+a.b.a); });
-      var gl = Object.keys(box).filter(function(pid){ return box[pid].goalie; }).map(function(pid){ return { p: CG.playerById(lg,pid), b: box[pid] }; })[0];
+      var gl = Object.keys(box).filter(function(pid){ return box[pid].goalie; }).map(function(pid){ return { p: boxPlayer(pid, code, box[pid]), b: box[pid] }; })[0];
       body += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3><span style="display:inline-flex;align-items:center;gap:9px">'+CG.crest(code,22)+esc(CG.TEAM[code].name)+' — '+res.score[code]+'</span></h3></div>'+
         '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Skater</th><th>G</th><th>A</th><th>P</th><th>S</th><th>HIT</th><th>BLK</th><th>TK</th><th>GV</th><th>PIM</th><th>+/-</th><th>TOI</th></tr></thead><tbody>'+
         sk.map(function(row){ var b=row.b;
-          return '<tr class="rowlink" data-go="'+CG.playerRoute(row.p)+'"><td class="tleft"><span class="playercell"><span class="nm">'+esc(row.p.tag)+'</span><small>'+row.p.pos+'</small></span></td>'+
+          return '<tr'+(row.p.id?' class="rowlink" data-go="'+CG.playerRoute(row.p)+'"':'')+'><td class="tleft"><span class="playercell"><span class="nm">'+esc(row.p.tag)+'</span><small>'+esc(row.p.pos||"")+'</small></span></td>'+
           '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td>'+
           '<td class="'+(b.hits?"":"z")+'">'+b.hits+'</td><td class="'+(b.blk?"":"z")+'">'+b.blk+'</td><td class="'+(b.tk?"":"z")+'">'+(b.tk||0)+'</td><td class="'+(b.gv?"":"z")+'">'+(b.gv||0)+'</td>'+
           '<td class="'+(b.pim?"":"z")+'">'+b.pim+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="mono" style="font-size:11px">'+(b.toi?CG.fmtToi(b.toi):"—")+'</td></tr>';
@@ -291,12 +296,12 @@ CG.ROUTES.matchup = function(id){
     body += '</div><div class="stack">'+
       '<div class="card"><div class="card-h"><h3>Three Stars</h3><span class="chip chip-chrome">Official</span></div><div class="card-b"><div class="stack" style="gap:10px">'+
       res.stars.map(function(st,i){
-        var p = CG.playerById(lg, st.pid); var b = res.box[st.team][st.pid];
-        return '<div class="starcard" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
+        var b = res.box[st.team][st.pid];
+        var p = boxPlayer(st.pid, st.team, b);
+        return '<div class="starcard"'+(p.id?' data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"':'')+'><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
           '<div style="display:flex;gap:10px;align-items:center;margin-top:4px">'+CG.crest(p.team,28)+'<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
           '<span class="caption" style="display:block">'+(b.goalie? b.sv+" saves" : b.g+"G "+b.a+"A")+'</span></div></div></div>';
       }).join("")+'</div>'+(starsBlurb?'<p class="caption" style="margin-top:12px">'+esc(starsBlurb)+'</p>':"")+'</div></div>'+
-      (res.entered?'<div class="note chr">This final was entered through the Control Center during your demo session — standings, stats, and ratings above already include it.</div>':"")+
     '</div></div>';
   } else {
     /* PREVIEW: server, code, lineups */
