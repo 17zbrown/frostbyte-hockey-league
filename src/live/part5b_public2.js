@@ -362,10 +362,12 @@ CG.ROUTES.matchup = function(id){
          ["Periods","3 × 5:00"],
          ["Overtime","3v3 · 5:00, then SO (v1.2)"],
          ["Host","Home club creates lobby"],
-         ["Streaming","Optional in the regular season"]].map(function(kv){
+         ["Streaming", g.stage==="playoff" ? "Required — at least one stream per club" : "Optional in the regular season"]].map(function(kv){
           return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px"><span style="color:var(--steel)">'+kv[0]+'</span><b style="text-align:right">'+kv[1]+'</b></div>';
         }).join("")+
-        '<p class="caption" style="margin-top:10px">The server resolves from both clubs’ private picks 30 minutes before the night’s first puck drop — home names two choices, away holds a veto. Playoff games require at least one stream per club. <a href="#/rulebook?rule=4.1" style="border-bottom:2px solid var(--chrome);font-weight:600">Rule 4 →</a></p></div></div>'+
+        '<p class="caption" style="margin-top:10px">The server resolves from both clubs’ private picks 30 minutes before the night’s first puck drop — home names two choices, away holds a veto. Playoff games require at least one stream per club.'+
+        (g.stage==="playoff" ? ' Playoff rosters: dressed players need '+Math.round((CG.PLAYOFF_MIN_PCT||0.3)*100)+'% of the regular season played, and nobody may appear in more than four games of this series (Rule 8.3).' : '')+
+        ' <a href="#/rulebook?rule=4.1" style="border-bottom:2px solid var(--chrome);font-weight:600">Rule 4 →</a></p></div></div>'+
       '<div class="card"><div class="card-h"><h3>Broadcast</h3>'+(g.feature?'<span class="chip chip-live"><span class="live-dot"></span>Twitch flag armed</span>':"")+'</div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel)">'+(g.feature?"Tonight’s marquee stream goes live 15 minutes before puck drop on the league channel. Twitch sync flags this card LIVE automatically the moment a rostered player starts streaming.":"No league stream scheduled — if a rostered player goes live on Twitch, this card flags LIVE automatically (5-minute sync).")+'</p>'+
       (g.feature?'<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-toast="Stream links activate at puck drop">'+CG.ic("play",14)+'Watch page</button>':"")+'</div></div>'+

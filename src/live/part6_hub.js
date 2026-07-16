@@ -566,6 +566,15 @@ CG.AFTER._lineup = function(){
    ROSTER — cap sheet + waive / trade / trade-block actions
    ================================================================ */
 CG.mgmtTag = function(role){ return role==="owner"?"Owner":role==="gm"?"GM":role==="agm"?"AGM":""; };
+/* playoff-eligibility floor (Rule 8.3): a player must appear in at least this
+   share of the club's regular-season games — fractions round up. No weekly max. */
+CG.PLAYOFF_MIN_PCT = 0.30;
+CG.clubSeasonGames = function(club){
+  var n = (CG.lg.schedule||[]).filter(function(g){
+    return (g.stage||"regular")==="regular" && (g.home===club || g.away===club); }).length;
+  return n || CG.GAMES_PER_CLUB || 54;
+};
+CG.playoffMinGames = function(club){ return Math.ceil(CG.PLAYOFF_MIN_PCT * CG.clubSeasonGames(club)); };
 CG.hubRoster = function(qs){
   var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];
   var roster = lg.byTeam[club].slice().sort(function(a,b){
@@ -597,21 +606,33 @@ CG.hubRoster = function(qs){
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
           '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
+    var gp = (lg.pstats[p.id]||{}).gp||0, minGp = CG.playoffMinGames(club), elig = gp >= minGp;
     return '<tr'+(waived?' style="opacity:.55"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
       '<td class="tnum">'+p.pos+'</td>'+
       '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
       '<td class="tnum" data-v="'+(p.salary||0)+'"><b>'+CG.fmtMoney(p.salary)+'</b></td>'+
       '<td class="tnum">'+p.term+' yr'+(p.term>1?"s":"")+'</td>'+
+      '<td class="tnum" data-v="'+gp+'">'+(elig
+        ? gp+' <span class="chip chip-win" style="font-size:9px" title="Meets the 30% playoff-eligibility floor">PLAYOFF OK</span>'
+        : gp+' <span class="caption">of '+minGp+'</span>')+'</td>'+
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
   }).join("");
+  var seasonGames = CG.clubSeasonGames(club), minGames = CG.playoffMinGames(club);
+  var eligN = roster.filter(function(p){ return ((lg.pstats[p.id]||{}).gp||0) >= minGames; }).length;
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Playoff eligibility</h3>'+
+    '<span class="chip">'+eligN+' of '+roster.length+' eligible</span></div><div class="card-b">'+
+    '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
+      '<div><b class="num" style="font-size:22px">'+Math.round(CG.PLAYOFF_MIN_PCT*100)+'%</b><span class="caption" style="display:block">of the regular season</span></div>'+
+      '<div><b class="num" style="font-size:22px">'+minGames+'</b><span class="caption" style="display:block">games minimum (of '+seasonGames+')</span></div></div>'+
+    '<p class="caption" style="margin-top:12px">A player must appear in at least '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% of the club’s regular-season games to dress in the playoffs — that’s '+minGames+' this season, fractions rounded up. There’s no weekly maximum: anyone can play every game. In the playoffs, no player may appear in more than four games of a single series (Rule 8.3).</p></div></div>';
   h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
-    '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
+    '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff floor">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player clears their cap hit; a claimed player’s salary is reinstated at his pre-waiver number (Rule 2.5).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">GP counts toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff-eligibility floor ('+minGames+' games). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player clears their cap hit; a claimed player’s salary is reinstated at his pre-waiver number (Rule 2.5).</span></div></div>';
   return h;
 };
 CG.AFTER._roster = function(){
