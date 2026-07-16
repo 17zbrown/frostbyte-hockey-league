@@ -392,6 +392,9 @@ CG.applySession = async function(session){
   /* direct messages: load + subscribe on sign-in, tear down on sign-out */
   if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
+  /* complaints & requests (league office) — RLS returns what this user may see */
+  if (CG.auth.user){ CG.loadActionRequests().then(function(){ if(/complaint/.test(location.hash)&&CG.router)CG.router(); }); }
+  else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
   CG.enforceBan();
 };
 CG.teardownDMs = function(){
@@ -1531,6 +1534,210 @@ CG.AFTER._admTeams = function(){
   }); });
 };
 
+/* ================================================================
+   LIVE LEAGUE OFFICE — complaints & requests on the real
+   action_requests / action_messages tables (replaces the demo cases)
+   ================================================================ */
+CG.ACTION_META = {
+  complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
+  appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
+  trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s management for a move — private to your club." },
+  position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." }
+};
+CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
+CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
+CG.loadActionRequests = async function(){
+  if (!CG.sb || !CG.lg || !CG.auth.user) return;
+  try {
+    var q = await Promise.all([
+      CG.sb.from("action_requests").select("*, profiles(gamertag)").order("created_at",{ascending:false}),
+      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true})
+    ]);
+    CG.lg._actionReqs = (q[0]&&!q[0].error&&q[0].data)||[];
+    var msgs = {};
+    ((q[1]&&!q[1].error&&q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
+    CG.lg._actionMsgs = msgs;
+  } catch(e){}
+};
+CG.refreshActions = function(){
+  CG.loadActionRequests().then(function(){
+    if (/complaint|admin\/complaints/.test(location.hash) && CG.router) CG.router();
+  });
+};
+/* dashboard tiles + counts read this — map real rows to the prototype shape */
+CG.visibleComplaints = function(){
+  return (CG.lg._actionReqs||[]).map(function(a){
+    var closed = a.status==="resolved"||a.status==="denied";
+    return { caseId:(a.id||"").slice(0,8), category:(CG.ACTION_META[a.type]||{}).label||a.type,
+      status: closed?"Resolved":"Under review", assignedTo:"", confidential:false,
+      summary:(a.subject||a.details||"").slice(0,90), filedBy:(a.profiles&&a.profiles.gamertag)||"member", against:a.target||"—" };
+  });
+};
+CG.actionStatusChip = function(st){
+  var map={ open:["chip","Open"], reviewing:["chip-warn","Reviewing"], acknowledged:["chip-chrome","Acknowledged"], resolved:["chip-win","Resolved"], denied:["chip-loss","Denied"] };
+  var m=map[st]||["chip",st||"Open"];
+  return '<span class="chip '+m[0]+'">'+esc(m[1])+'</span>';
+};
+CG.actionCard = function(a, review){
+  var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
+  var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
+  var metaBits = [];
+  if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
+  if (a.target) metaBits.push("About: "+esc(a.target));
+  metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
+  var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
+      '<b style="font-family:var(--f-disp)">'+esc(meta.label)+'</b>'+CG.actionStatusChip(a.status)+
+      (review?'<span class="caption">filed by <b>'+esc((a.profiles&&a.profiles.gamertag)||"member")+'</b></span>':"")+
+      '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>'+
+    (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
+    '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
+    (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
+  if (msgs.length){
+    h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
+      var isStaff = m.profiles && m.profiles.role==="commissioner";
+      return '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+'</b>'+
+        '<span class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(m.body||"")+'</span></div>';
+    }).join("")+'</div>';
+  }
+  var closed = a.status==="resolved"||a.status==="denied";
+  if (!closed){
+    h += '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
+      '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>';
+  }
+  if (review){
+    h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
+      (a.status!=="reviewing"?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
+      '<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>'+
+      '<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
+      '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>'+
+      '<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button></div>';
+  }
+  return h+'</div></div>';
+};
+CG.hubComplaintsLive = function(opts){
+  opts = opts||{};
+  var isCommish = CG.role()==="commish";
+  var review = isCommish;
+  var all = (CG.lg._actionReqs||[]);
+  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===CG.auth.user.id; }) : [];
+  var queue = review && !opts.mineOnly ? all : mine;
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"League office")+'</h1>'+
+    '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
+  h += '<div class="grid g2" style="margin-bottom:22px">'+Object.keys(CG.ACTION_META).map(function(k){
+    var m = CG.ACTION_META[k];
+    return '<div class="card raise" data-file-action="'+k+'" role="button" tabindex="0" style="cursor:pointer"><div class="card-b" style="display:flex;gap:12px;align-items:flex-start">'+
+      '<span class="nf-ic">'+CG.ic(m.icon,16)+'</span><div><b style="font-family:var(--f-disp)">'+esc(m.label)+'</b>'+
+      '<p class="caption" style="margin-top:3px">'+esc(m.blurb)+'</p></div></div></div>';
+  }).join("")+'</div>';
+  h += '<div class="card-h" style="padding:0 0 12px;border:0"><h3>'+(review?"Case queue ("+queue.length+")":"Your filed cases ("+queue.length+")")+'</h3></div>';
+  h += queue.length
+    ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
+    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
+  h += '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
+  return h;
+};
+CG.fileActionRequest = function(type){
+  if (!CG.auth.user){ CG.toast("Sign in with Discord first","err"); return; }
+  var meta = CG.ACTION_META[type]; if(!meta) return;
+  var me = CG.me();
+  var fields = "";
+  if (type==="complaint" || type==="appeal"){
+    var subs = type==="complaint" ? CG.COMPLAINT_SUBJECTS : CG.APPEAL_SUBJECTS;
+    fields += '<label class="fld"><span>'+(type==="complaint"?"What’s the complaint about?":"What are you appealing?")+'</span><select id="acSubject"><option value="">Select one…</option>'+subs.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join("")+'</select></label>';
+    if (type==="complaint"){
+      fields += '<label class="fld"><span>Who is this about? (optional)</span><select id="acTarget"><option value="">—</option>'+CG.lg.players.map(function(p){ return '<option>'+esc(p.tag)+'</option>'; }).join("")+'</select></label>';
+    }
+  }
+  if (type==="position_change"){
+    var posOpts = ["C","LW","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
+    fields += '<div class="grid g2" style="gap:12px">'+
+      '<label class="fld"><span>Current position</span><select id="acCur">'+posOpts+'</select></label>'+
+      '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>';
+  }
+  if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
+  fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
+    '<p class="caption">'+(meta.route==="manager"?"Private to your club’s management.":"Goes to the league office — commissioners are notified instantly.")+'</p>';
+  CG.modal("File — "+esc(meta.label), fields,
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="acGo">Submit</button>');
+  document.getElementById("acGo").addEventListener("click", function(){
+    var subEl=document.getElementById("acSubject");
+    var subject = subEl ? subEl.value : null;
+    if (subEl && !subject){ CG.toast("Pick what this is about","err"); return; }
+    var details = (document.getElementById("acDetails").value||"").trim();
+    if (!details){ CG.toast("Add details — describe what happened","err"); return; }
+    var payload = { profile_id: CG.auth.user.id, type:type, route:meta.route, details:details,
+      season_id: (CG.SEASON&&CG.SEASON.id)||null, subject: subject||null,
+      target: (document.getElementById("acTarget")||{}).value||null };
+    if (type==="trade_request") payload.team_id = (CG.lg._codeToId||{})[me.team]||null;
+    if (type==="position_change"){
+      payload.current_position = document.getElementById("acCur").value;
+      payload.requested_position = document.getElementById("acReq").value;
+      if (payload.current_position===payload.requested_position){ CG.toast("Pick a different requested position","err"); return; }
+    }
+    var btn=this; btn.disabled=true;
+    CG.sb.from("action_requests").insert(payload).then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(meta.route==="manager"?"Sent to your club’s management":"Filed — the league office has it","ok");
+      CG.refreshActions();
+    });
+  });
+};
+CG.AFTER._complaintsLive = function(){
+  document.querySelectorAll("[data-file-action]").forEach(function(c){
+    var go = function(){ CG.fileActionRequest(c.getAttribute("data-file-action")); };
+    c.addEventListener("click", go);
+    c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
+  });
+  document.querySelectorAll("[data-reply-send]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-reply-send");
+    var inp=document.querySelector('[data-reply-for="'+id+'"]');
+    var body=(inp&&inp.value||"").trim();
+    if(!body){ CG.toast("Write the reply first","err"); return; }
+    CG.sb.from("action_messages").insert({ request_id:id, author_id:CG.auth.user.id, body:body }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
+      CG.toast("Reply added","ok"); CG.refreshActions();
+    });
+  }); });
+  document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
+    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
+      if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+      CG.toast("Case "+st,"ok"); CG.refreshActions();
+    });
+  }); });
+  document.querySelectorAll("[data-act-respond]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-act-respond");
+    CG.modal("Official response",
+      '<label class="fld"><span>Response to the member</span><textarea id="arResp" rows="5"></textarea></label>'+
+      '<p class="caption">Shown on their case as the league’s written decision — pair it with Resolve or Deny.</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="arGo">Save response</button>');
+    document.getElementById("arGo").addEventListener("click", function(){
+      var txt=(document.getElementById("arResp").value||"").trim();
+      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Response saved","ok"); CG.refreshActions();
+      });
+    });
+  }); });
+  document.querySelectorAll("[data-act-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-act-del");
+    CG.confirm("Delete this case?","It’s removed permanently for everyone. This can’t be undone.","Delete case", function(){
+      CG.sb.from("action_requests").delete().eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        CG.toast("Case deleted","ok"); CG.refreshActions();
+      });
+    });
+  }); });
+};
+/* route the hub + admin complaint views to the live system */
+CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
+CG.hubComplaintDetail = function(){ return CG.hubComplaintsLive({}); };
+CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
+
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
@@ -1541,6 +1748,7 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="clubs") return CG.adminShell("clubs", CG.admTeamsLive(qs||{}));
   if (param==="presets") return CG.adminShell("presets", CG.admPresetsLive(qs||{}));
   if (param==="eastats") return CG.adminShell("eastats", CG.admEAStats(qs||{}));
+  if (param==="complaints") return CG.adminShell("complaints", CG.hubComplaintsLive({admin:true}));
   return CG._origAdminRoute(param, qs);
 };
 CG._origAdminAfter = CG.AFTER.admin;
@@ -1551,6 +1759,7 @@ CG.AFTER.admin = function(param, qs){
   if (param==="clubs"){ CG.AFTER._admTeams(); return; }
   if (param==="presets"){ CG.AFTER._admPresets(); return; }
   if (param==="eastats"){ CG.AFTER._admEAStats(); return; }
+  if (param==="complaints"){ CG.AFTER._complaintsLive(); return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 
