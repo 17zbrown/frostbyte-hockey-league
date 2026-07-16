@@ -475,6 +475,94 @@ CG.AFTER.schedule = function(param, qs){
   });
 };
 
+/* ---------- PLAYOFF BRACKET ----------
+   Renders the live postseason (stage='playoff' series, round = week) when it
+   exists; before then, the projected field seeded by Rule 8.1. A club that has
+   mathematically clinched a top-3 spot (server-detected, mirrored to
+   lg.clinched) shows a lock icon. */
+CG.LOCK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex-shrink:0"><path d="M6 10V8a6 6 0 1 1 12 0v2m-13 0h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+CG.playoffBracket = function(){
+  var lg = CG.lg, DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
+  var clinched = lg.clinched || [];
+  var isClinched = function(code){ return clinched.indexOf(code)>=0; };
+  var pog = (lg.playoffGames||[]);
+  var live = pog.length > 0;
+
+  /* ----- LIVE postseason: real series grouped by round (week) ----- */
+  if (live){
+    var bestOf = (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 3;
+    var need = Math.floor(bestOf/2)+1;
+    /* collapse each round's games into series keyed by the club pair */
+    var seriesByRound = {1:{},2:{},3:{}};
+    pog.forEach(function(g){
+      var rd = g.week||1; if(!seriesByRound[rd]) seriesByRound[rd]={};
+      var key = [g.home,g.away].sort().join("~");
+      var s = seriesByRound[rd][key] || (seriesByRound[rd][key]={ a:[g.home,g.away].sort()[0], b:[g.home,g.away].sort()[1], aw:0, bw:0, games:0 });
+      s.games++;
+      var res = (lg.allResults||[]).find(function(r){ return r.id===g.id; });
+      if (res){ var winner = res.score[g.home] > res.score[g.away] ? g.home : g.away;
+        if (winner===s.a) s.aw++; else s.bw++; }
+    });
+    var roundName = {1:"Quarter-finals",2:"Semi-finals",3:"Final"};
+    var seriesCard = function(s){
+      var done = s.aw>=need || s.bw>=need;
+      var aWon = s.aw>=need, bWon = s.bw>=need;
+      var side = function(code, wins, won){
+        return '<div style="display:flex;align-items:center;gap:9px;'+(done&&!won?"opacity:.5":"")+'">'+CG.crest(code,22)+
+          '<b class="mono" style="font-size:12.5px">'+esc(code)+'</b>'+(won?' <span class="chip chip-win" style="font-size:9px">WON</span>':"")+
+          '<b class="num" style="margin-left:auto;font-size:16px">'+wins+'</b></div>'; };
+      return '<div data-go="#/team/'+s.a+'" style="border:1px solid '+(done?"var(--chrome)":"var(--line)")+';border-radius:var(--r-s);padding:11px 13px;display:flex;flex-direction:column;gap:8px;cursor:pointer">'+
+        side(s.a,s.aw,aWon)+side(s.b,s.bw,bWon)+
+        '<span class="caption" style="text-align:center">'+(done?"Series won "+Math.max(s.aw,s.bw)+"–"+Math.min(s.aw,s.bw):"Best of "+((need-1)*2+1)+" · "+s.aw+"–"+s.bw)+'</span></div>'; };
+    var col = function(rd){
+      var list = Object.keys(seriesByRound[rd]||{}).map(function(k){ return seriesByRound[rd][k]; });
+      return '<div><span class="eyebrow" style="display:block;margin-bottom:10px">'+roundName[rd]+'</span>'+
+        (list.length ? '<div class="stack" style="gap:10px">'+list.map(seriesCard).join("")+'</div>'
+                     : '<div style="border:1px dashed var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><span class="caption">Set from the Control Center once the previous round ends.</span></div>')+'</div>'; };
+    var champ = null;
+    (Object.keys(seriesByRound[3]||{})).forEach(function(k){ var s=seriesByRound[3][k]; if(s.aw>=need) champ=s.a; else if(s.bw>=need) champ=s.b; });
+    return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff bracket</h3>'+
+      (champ?'<span class="chip chip-win">'+esc((CG.TEAM[champ]||{}).name||champ)+' — champions</span>':'<span class="chip chip-chrome">Postseason live</span>')+'</div>'+
+      '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+col(1)+col(2)+col(3)+'</div>'+
+      '<p class="caption" style="margin-top:14px">Series play out best-of-'+((need-1)*2+1)+'; the higher seed holds home designation (Rule 8.1). Decided series drop their unplayed games automatically.</p></div></div>';
+  }
+
+  /* ----- PROJECTION: seed the field from today's table (Rule 8.1) ----- */
+  var pWinners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
+  pWinners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
+  var pRest = [];
+  DIVS.forEach(function(dv){ CG.standings(CG.lg,dv).slice(1,3).forEach(function(r){ pRest.push(r); }); });
+  pRest.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
+  var seeds = pWinners.concat(pRest).slice(0,6);
+  if (seeds.length!==6) return "";
+  var played = (CG.lg.results||[]).length;
+  var anyClinch = seeds.some(function(r){ return isClinched(r.code); });
+  var seedRow = function(i){ var r=seeds[i], lock=isClinched(r.code);
+    return '<div style="display:flex;align-items:center;gap:9px;min-width:0"><span class="rk num" style="width:18px;flex-shrink:0">'+(i+1)+'</span>'+CG.crest(r.code,22)+
+      '<b class="mono" style="font-size:12px">'+esc(r.code)+'</b>'+
+      (lock?'<span title="Clinched a playoff spot" style="color:var(--chrome);display:inline-flex;align-items:center">'+CG.LOCK_ICON+'</span>':"")+
+      '<span class="caption num" style="margin-left:auto">'+r.pts+' pts</span></div>'; };
+  var tbdRow = function(txt){
+    return '<div style="display:flex;align-items:center;gap:9px"><span class="rk num" style="width:18px;flex-shrink:0">—</span><span class="caption">'+txt+'</span></div>'; };
+  var matchCard = function(a,b){
+    return '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:11px 13px;display:flex;flex-direction:column;gap:8px">'+a+b+'</div>'; };
+  return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Projected playoff bracket</h3>'+
+    '<span class="chip">'+(played?'If the season ended today':'Before puck drop — seeded by the table below')+'</span></div>'+
+    '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+
+    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Quarter-finals</span><div class="stack" style="gap:10px">'+
+      matchCard(seedRow(2),seedRow(5))+matchCard(seedRow(3),seedRow(4))+
+      '</div><p class="caption" style="margin-top:10px">Division winners — seeds 1 and 2 — skip straight to the semi-finals.</p></div>'+
+    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Semi-finals</span><div class="stack" style="gap:10px">'+
+      matchCard(seedRow(0),tbdRow("Lowest seed through"))+
+      matchCard(seedRow(1),tbdRow("Highest seed through"))+'</div></div>'+
+    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Final</span>'+
+      '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><b style="font-family:var(--f-disp)">Semi-final winners</b>'+
+      '<p class="caption" style="margin-top:6px">One series for the cup.</p></div></div>'+
+    '</div>'+
+    '<p class="caption" style="margin-top:14px">Top three per division qualify; division winners take the top seeds and the rest seed by points (Rule 8.1). The projection re-sorts after every final'+
+    (anyClinch?'. '+CG.LOCK_ICON.replace('width="12" height="12"','width="11" height="11"')+' marks a club that has mathematically clinched a spot.':'.')+'</p></div></div>';
+};
+
 /* ---------- STANDINGS ---------- */
 CG.ROUTES.standings = function(param, qs){
   var view = qs.view||"division";
@@ -533,40 +621,9 @@ CG.ROUTES.standings = function(param, qs){
       }).join("")+
     '</div>';
   }
-  /* projected playoff bracket — Rule 8.1 seeding from today's table, pinned on top */
-  var bracket = "";
-  if (view!=="preseason" && CG.TEAMS.length >= 6){
-    var pWinners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
-    pWinners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
-    var pRest = [];
-    DIVS.forEach(function(dv){ CG.standings(CG.lg,dv).slice(1,3).forEach(function(r){ pRest.push(r); }); });
-    pRest.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
-    var seeds = pWinners.concat(pRest).slice(0,6);
-    if (seeds.length===6){
-      var played = (CG.lg.results||[]).length;
-      var seedRow = function(i){ var r=seeds[i];
-        return '<div style="display:flex;align-items:center;gap:9px;min-width:0"><span class="rk num" style="width:18px;flex-shrink:0">'+(i+1)+'</span>'+CG.crest(r.code,22)+
-          '<b class="mono" style="font-size:12px">'+esc(r.code)+'</b><span class="caption num" style="margin-left:auto">'+r.pts+' pts</span></div>'; };
-      var tbdRow = function(txt){
-        return '<div style="display:flex;align-items:center;gap:9px"><span class="rk num" style="width:18px;flex-shrink:0">—</span><span class="caption">'+txt+'</span></div>'; };
-      var matchCard = function(a,b){
-        return '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:11px 13px;display:flex;flex-direction:column;gap:8px">'+a+b+'</div>'; };
-      bracket = '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Projected playoff bracket</h3>'+
-        '<span class="chip">'+(played?'If the season ended today':'Before puck drop — seeded by the table below')+'</span></div>'+
-        '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+
-        '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Quarter-finals</span><div class="stack" style="gap:10px">'+
-          matchCard(seedRow(2),seedRow(5))+matchCard(seedRow(3),seedRow(4))+
-          '</div><p class="caption" style="margin-top:10px">Division winners — seeds 1 and 2 — skip straight to the semi-finals.</p></div>'+
-        '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Semi-finals</span><div class="stack" style="gap:10px">'+
-          matchCard(seedRow(0),tbdRow("Lowest seed through"))+
-          matchCard(seedRow(1),tbdRow("Highest seed through"))+'</div></div>'+
-        '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Final</span>'+
-          '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><b style="font-family:var(--f-disp)">Semi-final winners</b>'+
-          '<p class="caption" style="margin-top:6px">One series for the cup.</p></div></div>'+
-        '</div>'+
-        '<p class="caption" style="margin-top:14px">Top three per division qualify; division winners take the top seeds and the rest seed by points (Rule 8.1). The projection re-sorts after every final.</p></div></div>';
-    }
-  }
+  /* playoff bracket — real series once the postseason is live, otherwise the
+     Rule 8.1 projection from today's table. Clinched clubs get a lock icon. */
+  var bracket = (view!=="preseason" && CG.TEAMS.length >= 6) ? CG.playoffBracket() : "";
   var legend = '<p class="caption" style="margin-top:16px">GP games played · W wins · L regulation losses · OTL overtime/shootout losses · GF/GA goals for/against · DIFF goal differential · L5 last five · STRK streak · PTS points.</p>';
   return head + '<div class="shell" style="padding-bottom:40px">'+bracket+body+legend+'</div>';
 };

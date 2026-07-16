@@ -247,8 +247,14 @@ CG.buildLiveLeague = async function(){
       reason: sx.reason||"", issued: sx.created_at,
       decidedBy: (by && (by.gamertag||by.display_name)) || "Commissioner" };
   });
+  /* playoff series (stage='playoff') for THIS season only, plus the public
+     clinch list so the projected bracket can lock in confirmed clubs */
+  var curGameIds = {}; games.forEach(function(g){ if(!curSeasonId || g.season_id===curSeasonId) curGameIds[g.id]=1; });
+  var playoffGames = schedule.filter(function(g){ return g.stage==="playoff" && curGameIds[g.id]; });
+  var clinched = (CG._siteCfg && CG._siteCfg["clinched_"+((season&&season.number)||1)]) || [];
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
-             allResults:results, suspensions:suspMapped, demoNow:CG.now(), season:season, live:true };
+             allResults:results, playoffGames:playoffGames, clinched:clinched,
+             suspensions:suspMapped, demoNow:CG.now(), season:season, live:true };
   if (preResults.length){
     CG.SEASON.completedWeeks = preWeeksDone;
     lg.results = preResults; CG.aggregate(lg, {});
@@ -2643,6 +2649,164 @@ CG.AFTER._admSeasons = function(){
   document.querySelectorAll("[data-season-del]").forEach(function(b){ b.addEventListener("click", function(){ CG.deleteSeason(this.getAttribute("data-season-del"), this.getAttribute("data-name")); }); });
 };
 
+/* ================================================================
+   LIVE ADMIN: PLAYOFFS — seed round 1 from the final table, advance rounds,
+   pick the series length. Clinches + series conclusion are DB triggers; this
+   panel is where a human sets each round's matchups.
+   ================================================================ */
+CG.playoffSeeds = function(){
+  var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
+  var winners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
+  winners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
+  var rest = [];
+  DIVS.forEach(function(dv){ CG.standings(CG.lg,dv).slice(1,3).forEach(function(r){ rest.push(r); }); });
+  rest.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
+  return winners.concat(rest).slice(0,6);
+};
+CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 3; };
+CG.admPlayoffsLive = function(){
+  var lg = CG.lg, s = CG.SEASON||{};
+  var pog = (lg.playoffGames||[]);
+  var bestOf = CG.playoffBestOf();
+  var rounds = { 1:[], 2:[], 3:[] };
+  pog.forEach(function(g){ (rounds[g.week||1]=rounds[g.week||1]||[]).push(g); });
+  var seeds = CG.playoffSeeds();
+  var regDone = (lg.schedule||[]).filter(function(g){ return g.stage==="regular"; });
+  var regLeft = regDone.filter(function(g){ return g.status!=="final"; }).length;
+
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Playoffs</h2>'+
+    '<p class="lede" style="margin-top:6px">Seed the bracket from the final table, then set each round. Clinches, series wins, and the champion are detected automatically — decided series drop their extra games on their own.</p></div>';
+
+  /* series length control — locked once any playoff game exists so a live
+     series can't be stranded by a mid-round change */
+  var poLive = pog.length>0;
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Series length</h3><span class="chip">Best of '+bestOf+'</span></div><div class="card-b">'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[3,5,7].map(function(n){
+      return '<button class="btn '+(n===bestOf?"btn-chrome":"btn-ghost")+' btn-sm" data-bestof="'+n+'"'+(poLive?" disabled":"")+'>Best of '+n+'</button>'; }).join("")+'</div>'+
+    '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series. '+
+    (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round.')+'</p></div></div>';
+
+  /* seeds */
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Seeding — from the final table</h3><span class="chip">'+(regLeft?regLeft+" regular games left":"regular season complete")+'</span></div><div class="card-b">';
+  if (seeds.length===6){
+    h += '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">'+
+      seeds.map(function(r,i){ return '<div style="display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:var(--r-s);padding:8px 11px">'+
+        '<b class="num" style="width:16px">'+(i+1)+'</b>'+CG.crest(r.code,20)+'<b class="mono" style="font-size:12px">'+esc(r.code)+'</b><span class="caption num" style="margin-left:auto">'+r.pts+'</span></div>'; }).join("")+'</div>'+
+      '<p class="caption" style="margin-top:10px">Seeds 1–2 (division winners) get a quarter-final bye. 3v6 and 4v5 open the bracket.</p>';
+  } else { h += '<p class="caption">Need at least six clubs across the divisions to seed a bracket.</p>'; }
+  h += '</div></div>';
+
+  /* rounds */
+  var roundMeta = [[1,"Quarter-finals","3v6 · 4v5"],[2,"Semi-finals","seed 1 vs lowest survivor · seed 2 vs highest"],[3,"Final","the two semi-final winners"]];
+  roundMeta.forEach(function(rm){
+    var rd=rm[0], list=rounds[rd]||[];
+    var pairs = {};
+    list.forEach(function(g){ var k=[g.home,g.away].sort().join("~"); (pairs[k]=pairs[k]||[]).push(g); });
+    var pairKeys = Object.keys(pairs);
+    h += '<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>'+rm[1]+'</h3>'+
+      (pairKeys.length?'<span class="chip chip-win">'+pairKeys.length+' series</span>':'<span class="chip">not set</span>')+'</div><div class="card-b">';
+    if (pairKeys.length){
+      h += pairKeys.map(function(k){ var gs=pairs[k], a=gs[0], finals=gs.filter(function(x){return x.status==="final";}).length;
+        return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;flex-wrap:wrap"><span class="teamcell">'+CG.crest(a.home,20)+'<b class="mono" style="font-size:12px">'+esc(a.home)+'</b></span><span class="caption">vs</span><span class="teamcell">'+CG.crest(a.away,20)+'<b class="mono" style="font-size:12px">'+esc(a.away)+'</b></span>'+
+          '<span class="caption" style="margin-left:auto">'+gs.length+' games · '+finals+' played</span></div>'; }).join("")+
+        '<div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-po-clear="'+rd+'">Clear this round</button></div>';
+    } else {
+      h += '<p class="caption" style="margin-bottom:12px">'+rm[2]+'. '+
+        (rd===1?'Generates 3v6 and 4v5 from the seeds above.':rd===2?'Generates once both quarter-finals are decided (seeds 1 and 2 enter here).':'Generates once both semi-finals are decided.')+'</p>'+
+        '<button class="btn btn-chrome btn-sm" data-po-gen="'+rd+'">'+CG.ic("plus",14)+'Generate '+rm[1].toLowerCase()+'</button>';
+    }
+    h += '</div></div>';
+  });
+  return h;
+};
+CG.AFTER._admPlayoffs = function(){
+  document.querySelectorAll("[data-bestof]").forEach(function(b){ b.addEventListener("click", function(){
+    var n=parseInt(this.getAttribute("data-bestof"),10);
+    CG.sb.from("site_config").upsert({ key:"playoff_format", value:{ bestOf:n } },{ onConflict:"key" }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      CG._siteCfg.playoff_format={ bestOf:n }; CG.toast("Series length set to best of "+n,"ok"); CG.router();
+    });
+  }); });
+  document.querySelectorAll("[data-po-gen]").forEach(function(b){ b.addEventListener("click", function(){ CG.generatePlayoffRound(parseInt(this.getAttribute("data-po-gen"),10)); }); });
+  document.querySelectorAll("[data-po-clear]").forEach(function(b){ b.addEventListener("click", function(){ CG.clearPlayoffRound(parseInt(this.getAttribute("data-po-clear"),10)); }); });
+};
+/* winner of a decided series in a round, by club code (null if none/undecided) */
+CG.seriesWinners = function(round){
+  var need = Math.floor(CG.playoffBestOf()/2)+1;
+  var pairs = {};
+  (CG.lg.playoffGames||[]).filter(function(g){ return (g.week||1)===round; }).forEach(function(g){
+    var k=[g.home,g.away].sort().join("~"); var p=pairs[k]||(pairs[k]={a:[g.home,g.away].sort()[0],b:[g.home,g.away].sort()[1],aw:0,bw:0});
+    var res=(CG.lg.allResults||[]).find(function(r){ return r.id===g.id; });
+    if(res){ var w=res.score[g.home]>res.score[g.away]?g.home:g.away; if(w===p.a)p.aw++; else p.bw++; }
+  });
+  return Object.keys(pairs).map(function(k){ var p=pairs[k];
+    return p.aw>=need ? {code:p.a,opp:p.b} : p.bw>=need ? {code:p.b,opp:p.a} : null; }).filter(Boolean);
+};
+CG.generatePlayoffRound = function(round){
+  var s=CG.SEASON; if(!s||!s.id){ CG.toast("No active season","err"); return; }
+  if ((CG.lg.playoffGames||[]).some(function(g){ return (g.week||1)===round; })){
+    CG.toast("That round already exists — clear it first to regenerate","err"); return; }
+  var bestOf=CG.playoffBestOf();
+  var seeds=CG.playoffSeeds();
+  if (seeds.length<6){ CG.toast("Need six seeds to build a bracket","err"); return; }
+  var seedRank={}; seeds.forEach(function(r,i){ seedRank[r.code]=i+1; });
+  var matchups=[]; /* [[homeCode, awayCode], ...] higher seed = home */
+  if (round===1){
+    matchups=[[seeds[2].code,seeds[5].code],[seeds[3].code,seeds[4].code]];
+  } else if (round===2){
+    var qf=CG.seriesWinners(1);
+    if (qf.length<2){ CG.toast("Both quarter-finals must finish first","err"); return; }
+    qf.sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
+    /* seed 1 draws the lowest surviving seed, seed 2 the highest */
+    matchups=[[seeds[0].code, qf[qf.length-1].code],[seeds[1].code, qf[0].code]];
+  } else {
+    var sf=CG.seriesWinners(2);
+    if (sf.length<2){ CG.toast("Both semi-finals must finish first","err"); return; }
+    sf.sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
+    matchups=[[sf[0].code, sf[1].code]];
+  }
+  /* schedule the series: best-of-N nights, higher seed hosts odd games, on the
+     Wed/Fri cadence from playoffs_start_at (or the day after the last game) */
+  var anchor = s.playoffs_start_at ? CG.etYMD(s.playoffs_start_at) : CG.etYMD(new Date(CG.now()+2*86400000).toISOString());
+  var priorPlayoff = (CG.lg.playoffGames||[]);
+  if (priorPlayoff.length){ var last=priorPlayoff.reduce(function(m,g){ return Math.max(m,g.at); },0); anchor=CG.dayAdd(CG.etYMD(new Date(last).toISOString()),2); }
+  var plan=CG.gameNights(anchor, Math.ceil(bestOf/2)+1);
+  var nights=[]; plan.nights.forEach(function(n){ nights.push(n.wed); nights.push(n.fri); });
+  var rows=[];
+  matchups.forEach(function(m){
+    for (var gi=0; gi<bestOf; gi++){
+      var day=nights[gi]||CG.dayAdd(nights[nights.length-1]||anchor, (gi+1)*2);
+      var host = gi%2===0 ? m[0] : m[1];   /* 2-2-1-1-1 is fine at this scale: alternate */
+      var away = host===m[0] ? m[1] : m[0];
+      rows.push({ season_id:s.id, week:round, stage:"playoff",
+        home_team_id:(CG.lg._codeToId||{})[host], away_team_id:(CG.lg._codeToId||{})[away],
+        scheduled_at:CG.etISO(day, CG.NIGHT_SLOTS[gi%CG.NIGHT_SLOTS.length]||"21:00"), status:"scheduled" });
+    }
+  });
+  var rn = round===1?"quarter-finals":round===2?"semi-finals":"final";
+  CG.confirm("Generate the "+rn+"?",
+    matchups.map(function(m){ return m[0]+" vs "+m[1]; }).join(" · ")+" — best of "+bestOf+", "+rows.length+" games. Unneeded games disappear once a series is decided.",
+    "Generate "+rn, function(){
+    CG.sb.from("games").insert(rows).then(function(r){
+      if(r.error){ CG.toast("Couldn’t generate: "+r.error.message,"err"); return; }
+      CG.toast(rn.charAt(0).toUpperCase()+rn.slice(1)+" set — "+rows.length+" games","ok"); CG.reloadLeague();
+    });
+  });
+};
+CG.clearPlayoffRound = function(round){
+  var s=CG.SEASON; if(!s||!s.id) return;
+  var mine=(CG.lg.playoffGames||[]).filter(function(g){ return (g.week||1)===round; });
+  var played=mine.filter(function(g){ return g.status==="final"; }).length;
+  CG.confirm("Clear this playoff round?",
+    mine.length+" games go"+(played?", including "+played+" finals with their box scores":"")+". This can’t be undone.",
+    "Clear round", function(){
+    CG.sb.from("games").delete().eq("season_id",s.id).eq("stage","playoff").eq("week",round).then(function(r){
+      if(r.error){ CG.toast("Couldn’t clear: "+r.error.message,"err"); return; }
+      CG.toast("Round cleared","ok"); CG.reloadLeague();
+    });
+  });
+};
+
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
@@ -2662,6 +2826,7 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="schedule") return CG.adminShell("schedule", CG.admScheduleLive());
   if (param==="ratings") return CG.adminShell("ratings", CG.admRatingsLive());
   if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive());
+  if (param==="playoffs") return CG.adminShell("playoffs", CG.admPlayoffsLive());
   if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
   return CG._origAdminRoute(param, qs);
 };
@@ -2679,6 +2844,7 @@ CG.AFTER.admin = function(param, qs){
   if (param==="homepage"){ CG.AFTER._admHomepage(); return; }
   if (param==="schedule"){ CG.AFTER._admScheduleLive(); return; }
   if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
+  if (param==="playoffs"){ CG.AFTER._admPlayoffs(); return; }
   if (param==="ratings"){ return; }
   if (param==="" || param==null){ return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
@@ -3011,6 +3177,7 @@ CG.bootLive = async function(){
       ]],
       ["League", [
         ["seasons","Seasons","db"],
+        ["playoffs","Playoffs","trophy"],
         ["leagues","Leagues & tiers","trophy"],
         ["rankings","Power rankings","up"],
         ["ratings","Overall ratings","chart"],
