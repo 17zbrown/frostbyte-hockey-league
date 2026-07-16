@@ -2072,7 +2072,7 @@ CG.actionCard = function(a, review){
 CG.hubComplaintsLive = function(opts){
   opts = opts||{};
   var isCommish = CG.role()==="commish";
-  var review = isCommish;
+  var review = isCommish || CG.role()==="staff";
   var all = (CG.lg._actionReqs||[]);
   var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===CG.auth.user.id; }) : [];
   var queue = review && !opts.mineOnly ? all : mine;
@@ -2190,6 +2190,70 @@ CG.AFTER._complaintsLive = function(){
 /* route the hub + admin complaint views to the live system */
 CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
 CG.hubComplaintDetail = function(){ return CG.hubComplaintsLive({}); };
+
+/* ================================================================
+   STAFF DESK — one page for the officials: cases, discipline,
+   import spot-checks, and tonight's slate. Staff + commissioner.
+   ================================================================ */
+CG.hubStaffDesk = function(){
+  var lg = CG.lg;
+  var reqs = (lg._actionReqs||[]);
+  var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="closed"; });
+  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
+  var now = Date.now();
+  var finals = (lg.allResults||[]).slice().sort(function(a,b){ return b.at-a.at; });
+  var weekFinals = finals.filter(function(r){ return now - r.at < 7*86400000; });
+  var tonight = lg.tonight||[];
+
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">League staff · officials’ tools</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Staff Desk</h1>'+
+    '<p class="lede" style="margin-top:8px">The case queue, active discipline, and the imports worth a second look — everything an official touches, in one place.</p></div>';
+
+  h += '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-bottom:20px">'+
+    '<div class="kpi'+(open.length?" alert":"")+'" style="cursor:pointer" data-go="#/hub/complaints"><b class="num">'+open.length+'</b><span>open cases</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+sus.length+'</b><span>active suspensions</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+weekFinals.length+'</b><span>finals · last 7 days</span></div>'+
+    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+tonight.length+'</b><span>games tonight</span></div></div>';
+
+  /* case queue preview */
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Case queue</h3>'+
+    '<a class="sec-link" href="#/hub/complaints">Open the queue</a></div>';
+  h += open.length ? open.slice(0,5).map(function(a){
+      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="chip chip-warn" style="text-transform:capitalize">'+esc(a.status||"open")+'</span>'+
+        '<b style="font-family:var(--f-disp);flex:1;min-width:160px">'+esc(a.subject||a.kind||"Request")+'</b>'+
+        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>';
+    }).join("")
+    : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
+  h += '</div>';
+
+  /* active discipline */
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3><span class="chip">'+sus.length+'</span></div>';
+  h += sus.length ? sus.map(function(s){
+      var p = CG.playerById(lg, s.playerId);
+      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<b style="font-family:var(--f-disp)">'+esc(p?p.tag:"A player")+'</b>'+
+        '<span class="caption" style="flex:1">'+esc(s.reason||"")+'</span>'+
+        '<span class="chip chip-loss">'+(s.mode==="date"?("until "+(s.endsAt?CG.fmtDay(Date.parse(s.endsAt)):"further notice")):(s.games+" game"+(s.games===1?"":"s")))+'</span>'+
+        (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
+    }).join("")
+    : '<div class="card-b"><p class="caption">No one is suspended. '+(CG.role()==="commish"?'Suspensions are issued from <a href="#/admin/users" style="font-weight:700;border-bottom:2px solid var(--chrome)">Users &amp; roles</a>.':'The commissioner issues suspensions; the record shows here and on profiles.')+'</p></div>';
+  h += '</div>';
+
+  /* recent finals — spot-check the EA imports */
+  h += '<div class="card"><div class="card-h"><h3>Recent finals — spot-check the imports</h3><span class="chip">auto-imported from EA</span></div>';
+  h += finals.length ? finals.slice(0,6).map(function(r){
+      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:120px">'+CG.fmtDay(r.at)+'</span>'+
+        '<span class="teamcell">'+CG.crest(r.away,20)+'<b class="mono" style="font-size:12px">'+esc(r.away)+' '+r.score[r.away]+'</b></span><span class="caption">@</span>'+
+        '<span class="teamcell">'+CG.crest(r.home,20)+'<b class="mono" style="font-size:12px">'+esc(r.home)+' '+r.score[r.home]+'</b></span>'+
+        (r.ot?'<span class="chip" style="font-size:9px">OT</span>':"")+
+        '<a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/matchup/'+r.id+'">Box score</a></div>';
+    }).join("")
+    : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
+  h += '</div>';
+  return h;
+};
 CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
 
 /* ================================================================

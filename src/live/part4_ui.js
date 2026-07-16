@@ -497,7 +497,8 @@ CG.hubTabs = function(){
   if (r==="guest") return [];
   var tabs = [["My Hub","#/hub","home"]];
   if (r==="mgmt" || CG.managesClub()) tabs.push(["Team HQ","#/hub/roster","users"]);
-  if (r==="staff") tabs.push(["Staff Desk","#/hub/complaints","flag"]);
+  /* the commissioner is league staff too — the desk is additive, like Team HQ */
+  if (r==="staff" || r==="commish") tabs.push(["Staff Desk","#/hub/staffdesk","flag"]);
   if (r==="commish") tabs.push(["Control Center","#/admin","gear"]);
   return tabs;
 };

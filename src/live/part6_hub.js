@@ -102,6 +102,8 @@ CG.hubNav = function(section){
   if (r==="staff" && !CG.LIVE_MODE) mine.push(["statsentry","Stats entry","chart"]);
   mine.push(["notifications","Notifications","bell"]);
   mine.push(["settings","Settings","gear"]);
+  var staffTools = [];
+  if ((r==="staff" || r==="commish") && CG.hubStaffDesk) staffTools.push(["staffdesk","Staff desk","flag"]);
   var club = [];
   var clubTools = r!=="commish" || CG.managesClub();
   if (clubTools){
@@ -125,6 +127,7 @@ CG.hubNav = function(section){
     }).join("");
   }
   return '<nav class="hub-side" aria-label="Hub sections"><div class="hs-group">My Hub</div>'+render(mine)+
+    (staffTools.length?'<div class="hs-group">Staff</div>'+render(staffTools):"")+
     (club.length?'<div class="hs-group">Team HQ</div>'+render(club):"")+'</nav>';
 };
 CG.hubShell = function(section, inner){
@@ -148,6 +151,9 @@ CG.ROUTES.hub = function(param, qs){
   if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management.");
   if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool.");
   if (section==="schedule") return (CG.can("lineup.build") && CG.LIVE_MODE && CG.hubScheduleLive) ? CG.hubShell("schedule", CG.hubScheduleLive(qs)) : CG.unauthorized("The club schedule desk is a team-management tool.");
+  if (section==="staffdesk") return (r==="staff"||r==="commish") && CG.hubStaffDesk
+    ? CG.hubShell("staffdesk", CG.hubStaffDesk())
+    : CG.unauthorized("The Staff Desk is for league staff.");
   if (section==="complaints") return CG.hubShell("complaints", CG.hubComplaints());
   if (section==="complaint") return CG.hubShell("complaints", CG.hubComplaintDetail(qs.id));
   if (section==="statsentry") return r==="staff"

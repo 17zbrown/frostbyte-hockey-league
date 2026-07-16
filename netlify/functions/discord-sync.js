@@ -158,7 +158,14 @@ export default async () => {
   }
 
   // managed role ids = static roles + position roles (by name) + every team's role (by stored id)
-  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Free Agent", ...POSITION_ROLES];
+  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Staff", "Free Agent", ...POSITION_ROLES];
+  // ensure the Staff role exists (mentionable — members ping the officials)
+  if (!roleId["staff"]) {
+    try {
+      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: "Staff", mentionable: true });
+      if (created && created.id) { roleId["staff"] = created.id; roleNameById[created.id] = "Staff"; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+    } catch (e) { sum.errors.push({ role: "Staff", error: String(e.message || e) }); }
+  }
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
   for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
@@ -195,6 +202,8 @@ export default async () => {
       if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
       if (teamRole === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
+      // league officials: staff wear Staff; the commissioner is staff too
+      if ((m.role === "staff" || m.role === "commissioner") && roleId["staff"]) desired.add(roleId["staff"]);
       // position role (Center / Left Wing / … / Goalie) from their current-season position
       const posName = POS_LABEL[posOf[m.profile_id]];
       if (posName && roleId[posName.toLowerCase()]) desired.add(roleId[posName.toLowerCase()]);
