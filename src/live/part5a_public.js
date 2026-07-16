@@ -9,6 +9,54 @@ CG.pageHead = function(eyebrow, title, lede, right){
     (lede?'<p class="lede" style="margin-top:10px">'+lede+'</p>':"")+
     '</div>'+(right||"")+'</div></div></section>';
 };
+/* ---- Twitch (ported from the classic site): profiles.twitch + profiles.live ----
+   Twitch purple is used ONLY on Twitch elements (brand use), never as site color. */
+CG.TWITCH_PURPLE = "#9146ff";
+CG.liveStreamers = function(g){
+  /* rostered players on either club who are flagged live with a handle */
+  return CG.lg.players.filter(function(p){
+    return (p.team===g.home || p.team===g.away) && p.twitchLive && p.twitch;
+  });
+};
+CG.twitchChip = function(p, dark){
+  return '<a class="chip" target="_blank" rel="noopener" href="https://twitch.tv/'+encodeURIComponent(p.twitch)+'" '+
+    'style="background:'+CG.TWITCH_PURPLE+';border-color:'+CG.TWITCH_PURPLE+';color:#fff" '+
+    'onclick="event.stopPropagation()" aria-label="Watch '+esc(p.tag)+' on Twitch">'+
+    '<span class="live-dot"></span>'+esc(p.tag)+'</a>';
+};
+CG.setTwitchLive = function(on){
+  if (!CG.LIVE_MODE || !CG.sb || !CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  CG.sb.from("profiles").update({ live: on }).eq("id", CG.auth.user.id).then(function(r){
+    if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+    if (CG.auth.profile) CG.auth.profile.live = on;
+    var me = CG.lg.players.find(function(x){ return x.id===CG.auth.user.id; });
+    if (me) me.twitchLive = on;
+    CG.toast(on ? "You’re flagged LIVE — your profile and game cards show it" : "Stream ended","ok");
+    CG.router();
+  });
+};
+CG.setTwitchHandle = function(){
+  if (!CG.LIVE_MODE || !CG.sb || !CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  var me = CG.lg.players.find(function(x){ return x.id===CG.auth.user.id; });
+  var cur = (me && me.twitch) || (CG.auth.profile && CG.auth.profile.twitch) || "";
+  CG.modal("Twitch channel",
+    '<label class="fld"><span>Your Twitch handle</span><input id="twHandle" value="'+esc(cur)+'" placeholder="e.g. zackbrown17" maxlength="40"></label>'+
+    '<p class="caption">Shown on your profile and flagged on game cards when you go live. Handle only — not the full URL.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="twSave">Save</button>');
+  document.getElementById("twSave").addEventListener("click", function(){
+    var h = (document.getElementById("twHandle").value||"").trim().replace(/^@|.*twitch\.tv\//i,"");
+    var patch = h ? { twitch: h } : { twitch: null, live: false };
+    CG.sb.from("profiles").update(patch).eq("id", CG.auth.user.id).then(function(r){
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (CG.auth.profile) CG.auth.profile.twitch = h||null;
+      if (me) me.twitch = h||null;
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(h ? "Twitch channel saved" : "Twitch channel removed","ok");
+      CG.router();
+    });
+  });
+};
+
 CG.standRows = function(div, opts){
   opts = opts||{};
   var rows = CG.standings(CG.lg, div);
@@ -155,10 +203,13 @@ CG.ROUTES.home = function(){
     '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+(pre?"Opening games":"Tonight · Week 7")+'</span>'+
       '<a class="sec-link" style="color:#fff" href="#/schedule">Full schedule</a></div>'+
       (railGames.length ? railGames.map(function(g){
+        var streamers = CG.liveStreamers(g);
         return '<a class="railgame" href="#/matchup/'+g.id+'">'+
-          '<span class="rg-line">'+CG.crest(g.away,22)+esc(CG.TEAM[g.away].code)+' @ '+CG.crest(g.home,22)+esc(CG.TEAM[g.home].code)+'</span>'+
+          '<span class="rg-line">'+CG.crest(g.away,22)+esc(CG.TEAM[g.away].code)+' @ '+CG.crest(g.home,22)+esc(CG.TEAM[g.home].code)+
+            (streamers.length?' <span class="chip chip-live" style="font-size:9px;padding:1px 8px;margin-left:auto"><span class="live-dot"></span>LIVE</span>':"")+'</span>'+
           '<span class="rg-t">'+(pre?CG.fmtDay(g.at):CG.fmtTime(g.at))+'</span>'+
-          '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+(g.feature?' · <b style="color:var(--chrome)">MARQUEE</b>':"")+'</span></a>';
+          '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+(g.feature?' · <b style="color:var(--chrome)">MARQUEE</b>':"")+
+            (streamers.length?' · streaming: '+streamers.map(function(p){ return esc(p.tag); }).join(", "):"")+'</span></a>';
       }).join("") : '<p class="caption" style="color:var(--on-ink-dim);padding:8px 0">The opening schedule is being finalized.</p>')+
       '<p class="caption" style="color:var(--on-ink-dim)">'+(pre?"Lineups and private game codes go live on game day (Rule 4.2).":"Lineups release 60 min before puck drop · codes at T-30 (Rule 4.2).")+'</p>'+
     '</aside></div></section>';
@@ -187,9 +238,11 @@ CG.ROUTES.home = function(){
       '<a class="sec-link" style="color:#fff" href="#/schedule">Week 7 slate</a></div>'+
       '<div class="grid g2">'+lg.tonight.map(function(g){
         var released = CG.now() >= g.at - 30*60000;
+        var streamers = CG.liveStreamers(g);
         return '<div class="card raise" data-go="#/matchup/'+g.id+'" role="link" tabindex="0"><div class="card-b" style="display:flex;flex-direction:column;gap:12px">'+
-          '<div style="display:flex;justify-content:space-between;align-items:center"><span class="chip chip-live"><span class="live-dot"></span>'+CG.fmtTime(g.at)+'</span>'+
-          (g.feature?'<span class="chip chip-chrome">Marquee</span>':"")+'</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span class="chip chip-live"><span class="live-dot"></span>'+CG.fmtTime(g.at)+'</span>'+
+          '<span style="display:inline-flex;gap:6px;flex-wrap:wrap">'+streamers.map(function(p){ return CG.twitchChip(p); }).join("")+
+          (g.feature?'<span class="chip chip-chrome">Marquee</span>':"")+'</span></div>'+
           '<div style="display:flex;align-items:center;gap:12px;font-family:var(--f-disp);font-weight:800;font-size:19px;color:#fff;flex-wrap:wrap">'+
             CG.crest(g.away,34)+esc(CG.TEAM[g.away].name)+'<span style="color:var(--on-ink-dim);font-size:12px;font-family:var(--f-mono)">at</span>'+CG.crest(g.home,34)+esc(CG.TEAM[g.home].name)+'</div>'+
           '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--f-mono);font-size:11px;color:var(--on-ink-dim)">'+
@@ -543,7 +596,7 @@ CG.ROUTES.team = function(code, qs){
   var body = '<div class="shell" style="padding:22px 0 40px">';
   if (tab==="roster"){
     body += '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Roster — '+esc(SD.label)+'</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th>#</th><th class="tleft">Style</th><th>GP</th><th>Pts / Record</th>'+(archived?"":'<th>OVR</th>')+'</tr></thead><tbody>'+
+      '<th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th>Pts / Record</th>'+(archived?"":'<th>OVR</th>')+'</tr></thead><tbody>'+
       roster.map(function(p){
         var ps = SD.pstats[p.id], line;
         if (p.pos==="G") line = ps.w+"-"+ps.l+"-"+ps.otl+" · "+(ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—");
@@ -552,7 +605,7 @@ CG.ROUTES.team = function(code, qs){
         return '<tr class="rowlink" style="--tc:'+t.color+'" data-go="'+route+'">'+
           '<td class="tleft"><span class="playercell"><span class="nm">'+esc(p.tag)+'</span>'+(p.rookie?' <span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+
           (p.mgmt?' <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">'+(p.mgmt==="owner"?"OWNER":p.mgmt==="gm"?"GM":"AGM")+'</span>':"")+'</span></td>'+
-          '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td><td class="tleft small" style="color:var(--steel)">'+esc(p.arch)+'</td>'+
+          '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
           '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px">'+line+'</td>'+
           (archived?"":'<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td>')+'</tr>';
       }).join("")+'</tbody></table></div></div>';
@@ -660,13 +713,12 @@ CG.ROUTES.players = function(param, qs){
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,24)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.TEAM[p.team].name)+'</small></span>'+
         (p.rookie?'<span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+'</span></td>'+
       '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
-      '<td class="tleft small" style="color:var(--steel)">'+esc(p.arch)+'</td>'+
       '<td class="tnum">'+s.gp+'</td><td class="tleft tnum" style="font-size:12px">'+stat+'</td>'+
       '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
   }).join("");
   var body = list.length
     ? '<div class="card"><div class="card-h"><h3>'+list.length+' players</h3><span class="chip">Sorted by overall</span></div>'+
-      '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th class="tleft">Style</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
+      '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     : '<div class="empty"><div class="e-art">'+CG.ic("user",22)+'</div><b>No players match</b><p>Loosen the filters — every rostered player in the league lives in this directory.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
 };
@@ -718,16 +770,15 @@ CG.ROUTES.player = function(pid, qs){
       '<div style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
-          '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.arch)+'</span>'+
           (p.rookie?'<span class="chip chip-chrome">Rookie</span>':"")+
           '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>'+
-          '<span class="chip chip-ink" style="border-color:#39434B">Shoots '+p.shoots+'</span>'+
+          (p.twitchLive&&p.twitch?'<a class="chip" target="_blank" rel="noopener" href="https://twitch.tv/'+encodeURIComponent(p.twitch)+'" style="background:'+CG.TWITCH_PURPLE+';border-color:'+CG.TWITCH_PURPLE+';color:#fff"><span class="live-dot"></span>LIVE on Twitch</a>':"")+
           (!archived?'<span class="chip chip-ink" style="border-color:#39434B">'+
             (p.mgmt?(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+" · "+CG.fmtMoney(p.salary):CG.fmtMoney(p.salary)+" · "+p.term+" yr")+'</span>':"")+
           (sus? (sus.status==="served"
             ? '<span class="chip chip-warn">Suspension served (Wk 6)</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
-          (canSeeAvail?'<span class="chip chip-win">Wk 8 availability: '+(CG.store.get("availability")["w8:"+p.id]?"submitted":"not submitted")+'</span>':"")+
+          (canSeeAvail?'<span class="chip chip-win">'+esc(CG.WEEK8.label)+' availability: '+(CG.store.get("availability")[CG.WEEK8.key+":"+p.id]?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
       '<div style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Overall · from results</span></div></div>'+
@@ -786,7 +837,7 @@ CG.ROUTES.player = function(pid, qs){
         '<p class="caption" style="margin-top:12px">'+(p.mgmt
           ? "Management contracts (Owner, GM, AGM) carry a fixed cap value and are protected from waivers and trades (Rule 2.6)."
           : "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. Contracts run one to three seasons; expiring deals return to free agency (Rule 2.5).")+'</p>'+
-        '</div></div>')+'</div></div>';
+        '</div></div>')+CG.broadcastCard(p)+'</div></div>';
   }
   if (tab==="log"){
     var log = SD.glog[p.id];
@@ -826,6 +877,29 @@ CG.ROUTES.player = function(pid, qs){
   body += '</div>';
   return head + tabs + body;
 };
+/* Twitch broadcast card on the profile: watch link for everyone; the profile's own
+   player also gets Go Live / End Stream + channel controls. Omitted entirely when
+   there's no handle and it isn't your profile. */
+CG.broadcastCard = function(p){
+  var isMine = !!(CG.auth && CG.auth.user && CG.auth.user.id===p.id);
+  if (!p.twitch && !isMine) return "";
+  var h = '<div class="card"><div class="card-h"><h3>Broadcast</h3>'+
+    (p.twitchLive&&p.twitch?'<span class="chip chip-live"><span class="live-dot"></span>LIVE</span>':'<span class="chip">Twitch</span>')+'</div><div class="card-b">';
+  if (p.twitch){
+    h += '<p class="small" style="color:var(--steel)">'+(p.twitchLive
+        ? esc(p.tag)+" is live right now — game cards across the site are flagged."
+        : "Streams league games at twitch.tv/"+esc(p.twitch)+".")+'</p>'+
+      '<a class="btn btn-sm" target="_blank" rel="noopener" href="https://twitch.tv/'+encodeURIComponent(p.twitch)+'" style="margin-top:12px;background:'+CG.TWITCH_PURPLE+';color:#fff">Watch on Twitch</a>';
+  } else {
+    h += '<p class="small" style="color:var(--steel)">Add your Twitch channel and go live on game nights — your profile and the night’s game cards flag it automatically.</p>';
+  }
+  if (isMine){
+    h += '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+
+      (p.twitch?'<button class="btn btn-ghost btn-sm" id="twToggle">'+(p.twitchLive?"End stream":"Go live")+'</button>':"")+
+      '<button class="btn btn-ghost btn-sm" id="twChange">'+(p.twitch?"Change channel":"Add channel")+'</button></div>';
+  }
+  return h+'</div></div>';
+};
 CG.scoutLine = function(p){
   var lg = CG.lg, s = lg.pstats[p.id], r = lg.ratings[p.id];
   if (p.pos==="G"){
@@ -852,13 +926,24 @@ CG.AFTER.player = function(pid, qs){
     var v = this.value;
     location.hash = "#/player/"+pid+(v!=="cur"?"?season="+v:"");
   });
+  /* Twitch controls (own profile only) */
+  var twT = $("#twToggle");
+  if (twT) twT.addEventListener("click", function(){
+    var me = CG.lg.players.find(function(x){ return x.id===pid; });
+    CG.setTwitchLive(!(me && me.twitchLive));
+  });
+  var twC = $("#twChange");
+  if (twC) twC.addEventListener("click", CG.setTwitchHandle);
 };
 
 /* ---------- STATS CENTRAL ---------- */
 CG.ROUTES.stats = function(param, qs){
   var lg = CG.lg;
   var tab = qs.tab||"skaters", minGp = qs.min===undefined? 3 : +qs.min, fTeam = qs.team||"";
-  var head = CG.pageHead("Stat central","League statistics","Sortable, filterable, exportable. Updated after every reported final — last updated after Week 6, Saturday night."
+  var head = CG.pageHead("Stat central","League statistics",
+    "Sortable, filterable, exportable. "+(lg.results.length
+      ? "Auto-imported from EA box scores after every final — "+lg.results.length+" game"+(lg.results.length===1?"":"s")+" recorded."
+      : "Every category fills in automatically from EA box scores once the season starts.")
     ,'<button class="btn btn-ghost btn-sm" id="csvStats" style="align-self:flex-end">'+CG.ic("dl",14)+'Export view</button>');
   var tabs = '<div class="shell"><div class="tabs" role="tablist">'+
     [["skaters","Skaters"],["advanced","Advanced"],["goalies","Goaltenders"],["teams","Teams"]].map(function(x){

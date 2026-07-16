@@ -145,13 +145,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .mh-brand .wm span{font-family:var(--f-mono);font-size:9px;letter-spacing:.3em;color:var(--steel);text-transform:uppercase}
 .mh-nav{display:flex;gap:2px;height:100%}
 .mh-nav a{display:inline-flex;align-items:center;padding:0 13px;font-family:var(--f-disp);
-  font-weight:600;font-size:14px;color:var(--steel);position:relative;letter-spacing:.005em}
+  font-weight:600;font-size:14px;color:var(--steel);position:relative;letter-spacing:.005em;white-space:nowrap}
 .mh-nav a:hover{color:var(--ink)}
 .mh-nav a.on{color:var(--ink)}
 .mh-nav a.on::after{content:"";position:absolute;left:12px;right:12px;bottom:-1.5px;height:3.5px;background:var(--chrome)}
-.mh-nav a.hub{color:var(--ink);border:1.5px solid var(--line);border-radius:var(--r-s);
-  margin:auto 0;padding:8px 13px;height:auto}
-.mh-nav a.hub:hover{border-color:var(--ink)}
 .mh-right{margin-left:auto;display:flex;align-items:center;gap:9px}
 .icon-btn{width:42px;height:42px;border-radius:var(--r-s);display:grid;place-items:center;
   border:1.5px solid var(--line);background:var(--paper);color:var(--ink);position:relative;transition:border-color .15s}

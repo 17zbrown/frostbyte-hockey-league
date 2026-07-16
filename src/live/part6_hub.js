@@ -14,7 +14,7 @@ CG.AV_OPTS = [
   ["late","Available late"],["until","Available until…"],["emg","Emergency sub only"]
 ];
 CG.avFor = function(playerId){
-  var saved = (CG.store.get("availability")||{})["w8:"+playerId];
+  var saved = (CG.store.get("availability")||{})[CG.WEEK8.key+":"+playerId];
   if (saved) return saved;
   /* deterministic demo availability for the rest of the roster */
   var n = 0; String(playerId).split("").forEach(function(c){ n += c.charCodeAt(0); });
@@ -27,7 +27,7 @@ CG.avFor = function(playerId){
    The managed club is always the seat's own team (mgmt = Breakers; commissioner
    previews the Breakers desk). Block flags start from the engine seed, then the
    demo store lets management toggle them live. */
-CG.myClub = function(){ var me = CG.me(); return me && me.team ? me.team : "CBR"; };
+CG.myClub = function(){ var me = CG.me(); if (me && me.team) return me.team; return (CG.TEAMS[0]||{}).code || null; };
 CG.isOnBlock = function(pid){
   var t = CG.store.get("blockToggles")||{};
   if (Object.prototype.hasOwnProperty.call(t, pid)) return !!t[pid];
@@ -72,7 +72,7 @@ CG.hubNav = function(section){
   return '<nav class="hub-side" aria-label="Hub sections"><div class="hs-group">'+esc(CG.persona().label)+' tools</div>'+
     items.map(function(it){
       var badge = "";
-      if (it[0]==="availability" && !CG.store.get("availability")["w8:"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
+      if (it[0]==="availability" && !CG.store.get("availability")[CG.WEEK8.key+":"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
@@ -120,7 +120,7 @@ CG.hubDashboard = function(){
   var cards = [];
   if (me){
     var t = CG.TEAM[me.team], s = lg.pstats[me.id];
-    var av = CG.store.get("availability")["w8:"+me.id];
+    var av = CG.store.get("availability")[CG.WEEK8.key+":"+me.id];
     var tonight = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; });
     var inLineup = tonight && Object.values(CG.plannedLineup(tonight, me.team)).indexOf(me.id)>=0;
     cards.push('<div class="card" style="--tc:'+t.color+'"><div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+me.team+'">Team page</a></div>'+
@@ -129,7 +129,7 @@ CG.hubDashboard = function(){
       '<span class="caption" style="display:block">'+lg.teams[me.team].w+"-"+lg.teams[me.team].l+"-"+lg.teams[me.team].otl+' · '+t.div+' Division'+(r==="mgmt"?" · You are the GM":"")+'</span></div>'+
       '<span class="ovrbox" style="margin-left:auto" title="My overall">'+lg.ratings[me.id].ovr+'</span></div></div>');
     cards.push('<div class="card'+(av?"":" ")+'" '+(av?"":'style="border-color:var(--chrome-deep);background:var(--chrome-tint)"')+'>'+
-      '<div class="card-h"><h3>Week 8 availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Sunday 8 PM ET")+'</span></div>'+
+      '<div class="card-h"><h3>'+esc(CG.WEEK8.label)+' availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Sunday 8 PM ET")+'</span></div>'+
       '<div class="card-b">'+(av
         ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+'. You can edit until the deadline.</p>'
         : '<p class="small" style="color:var(--steel)">Two game nights next week. Your GM builds lineups from this — 30 seconds now saves a scramble later.</p>')+
@@ -157,7 +157,7 @@ CG.hubDashboard = function(){
       '<div class="tasklist">'+
       (tonightG?'<div class="titem"><span class="t-dot '+(luState==="submitted"?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+luState+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lineup">Builder</a></div>':"")+
       '<div class="titem"><span class="t-dot'+(noReply?" red":" grn")+'"></span><span style="flex:1">'+noReply+' player'+(noReply===1?"":"s")+' with no Week 8 response.</span><a class="btn btn-ghost btn-sm" href="#/hub/availability">Grid</a></div>'+
-      '<div class="titem"><span class="t-dot grn"></span><span style="flex:1">No pending roster transactions.</span><button class="btn btn-ghost btn-sm" data-toast="Transaction requests open a guided form in the full build — routed to the league office for approval">Propose</button></div>'+
+      '<div class="titem"><span class="t-dot grn"></span><span style="flex:1">No pending roster transactions.</span><a class="btn btn-ghost btn-sm" href="#/hub/tradehub">Trade Hub</a></div>'+
       '</div></div>');
   }
   if (r==="staff"){
@@ -210,8 +210,8 @@ CG.hubAvailability = function(){
   var me = CG.me(), lg = CG.lg, r = CG.role();
   if (!CG.can("availability.submit") && !CG.can("availability.viewTeam")) return CG.unauthorized();
   var closed = CG.now() > CG.WEEK8.deadline;
-  var mine = me ? CG.store.get("availability")["w8:"+me.id] : null;
-  var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">Week 8 · deadline '+CG.fmtFull(CG.WEEK8.deadline)+'</span>'+
+  var mine = me ? CG.store.get("availability")[CG.WEEK8.key+":"+me.id] : null;
+  var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+' · deadline '+CG.fmtFull(CG.WEEK8.deadline)+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Weekly availability</h1>'+
     '<p class="lede" style="margin-top:8px">Two nights next week. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
   var form = !me
@@ -219,7 +219,7 @@ CG.hubAvailability = function(){
     : '<div class="card"><div class="card-h"><h3>My submission</h3>'+
     '<span class="chip '+(mine?"chip-win":closed?"chip-loss":"chip-warn")+'">'+(closed?"Window closed":mine?"Submitted "+CG.fmtDay(mine.at):"Not submitted")+'</span></div>'+
     '<div class="card-b">'+
-    (closed && !mine ? '<div class="empty"><b>The Week 8 window has closed</b><p>Availability locked at the deadline. Message your GM — a commissioner can still enter a late submission with an override.</p></div>'
+    (closed && !mine ? '<div class="empty"><b>The '+esc(CG.WEEK8.label)+' window has closed</b><p>Availability locked at the deadline. Message your GM — a commissioner can still enter a late submission with an override.</p></div>'
     : CG.WEEK8.nights.map(function(n,i){
       var cur = mine && mine.nights[n.key] ? mine.nights[n.key].st : null;
       var note = mine && mine.nights[n.key] ? (mine.nights[n.key].note||"") : "";
@@ -239,10 +239,10 @@ CG.hubAvailability = function(){
     '</div></div>';
   var grid = "";
   if (CG.can("availability.viewTeam")){
-    var roster = lg.byTeam[me?me.team:"CBR"].slice().sort(function(a,b){ return a.pos.localeCompare(b.pos); });
-    grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc(CG.TEAM[me?me.team:"CBR"].name)+'</h3>'+
+    var roster = (lg.byTeam[me&&me.team?me.team:CG.myClub()]||[]).slice().sort(function(a,b){ return a.pos.localeCompare(b.pos); });
+    grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc((CG.TEAM[me&&me.team?me.team:CG.myClub()]||{}).name||"—")+'</h3>'+
       '<span class="chip">Visible to management & staff only</span></div>'+
-      '<div class="tblwrap"><table class="tbl keepcols"><caption>Week 8 availability by player</caption><thead><tr>'+
+      '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(CG.WEEK8.label)+' availability by player</caption><thead><tr>'+
       '<th class="tleft">Player</th><th>POS</th><th>Wed 7/22</th><th>Sat 7/25</th><th class="tleft">Note</th><th>Logged</th></tr></thead><tbody>'+
       roster.map(function(p){
         var av = CG.avFor(p.id);
@@ -266,7 +266,7 @@ CG.hubAvailability = function(){
 CG.AFTER._availability = function(){
   var me = CG.me(); if (!me) return;
   var picks = {};
-  var mine = CG.store.get("availability")["w8:"+me.id];
+  var mine = CG.store.get("availability")[CG.WEEK8.key+":"+me.id];
   if (mine) Object.keys(mine.nights).forEach(function(k){ picks[k]=mine.nights[k].st; });
   function refreshCount(){
     var n = Object.keys(picks).filter(function(k){ return picks[k]; }).length;
@@ -289,9 +289,9 @@ CG.AFTER._availability = function(){
     ["n1","n2"].forEach(function(k){
       entry.nights[k] = { st:picks[k], note: ($("[data-note="+k+"]")||{}).value||"" };
     });
-    var all = CG.store.get("availability"); all["w8:"+me.id]=entry; CG.store.set("availability", all);
-    CG.pushNotif("check","Availability submitted","Week 8 — logged "+CG.fmtFull(entry.at)+". You can edit until Sunday 8 PM ET.","#/hub/availability");
-    CG.toast("Week 8 availability submitted","ok");
+    var all = CG.store.get("availability"); all[CG.WEEK8.key+":"+me.id]=entry; CG.store.set("availability", all);
+    CG.pushNotif("check","Availability submitted",CG.WEEK8.label+" — logged "+CG.fmtFull(entry.at)+". You can edit until Sunday 8 PM ET.","#/hub/availability");
+    CG.toast(CG.WEEK8.label+" availability submitted","ok");
     CG.renderChrome(); CG.router();
   });
   var cp = $("#avCopy");

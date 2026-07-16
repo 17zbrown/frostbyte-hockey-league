@@ -356,7 +356,7 @@ CG.ROUTES.matchup = function(id){
         '<p class="caption" style="margin-top:10px">Server auto-resolved from both clubs’ private region picks at the pick lock — no negotiation needed. Preset last updated '+CG.fmtDate("2026-07-01")+' · <a href="#/rulebook?rule=4.1" style="border-bottom:2px solid var(--chrome);font-weight:600">Rule 4 →</a></p></div></div>'+
       '<div class="card"><div class="card-h"><h3>Broadcast</h3>'+(g.feature?'<span class="chip chip-live"><span class="live-dot"></span>Twitch flag armed</span>':"")+'</div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel)">'+(g.feature?"Tonight’s marquee stream goes live 15 minutes before puck drop on the league channel. Twitch sync flags this card LIVE automatically the moment a rostered player starts streaming.":"No league stream scheduled — if a rostered player goes live on Twitch, this card flags LIVE automatically (5-minute sync).")+'</p>'+
-      (g.feature?'<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-toast="Stream links activate at puck drop in the live build">'+CG.ic("play",14)+'Watch page</button>':"")+'</div></div>'+
+      (g.feature?'<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-toast="Stream links activate at puck drop">'+CG.ic("play",14)+'Watch page</button>':"")+'</div></div>'+
     '</div></div>';
   }
   return hero + body + '</div>';

@@ -431,7 +431,7 @@ CG.baseNotifs = function(){
   n.push({ id:"n-codes", t:Date.parse("2026-07-15T20:30:00-04:00"), icon:"code",
     title:"Game codes released", body:"Tonight's private lobby codes are live on each matchup page.", route: feat ? "#/matchup/"+feat.id : "#/schedule" });
   n.push({ id:"n-avail", t:Date.parse("2026-07-13T10:00:00-04:00"), icon:"cal",
-    title:"Week 8 availability is open", body:"Submit by Sunday 8:00 PM ET (Rule 5.1).", route:"#/hub/availability" });
+    title:CG.WEEK8.label+" availability is open", body:"Submit by Sunday 8:00 PM ET (Rule 5.1).", route:"#/hub/availability" });
   n.push({ id:"n-rank", t:Date.parse("2026-07-14T09:00:00-04:00"), icon:"chart",
     title:"Week 7 Power Rankings published", body:"Blades jump to No. 3 after a 3-0 week.", route:"#/rankings" });
   var me = CG.me();
@@ -545,7 +545,7 @@ CG.renderChrome = function(){
       '<span class="wm"><b>CHEL GAMING</b><span>Hockey League</span></span></a>'+
     '<nav class="mh-nav" aria-label="Primary">'+
       CG.NAV.map(function(n){ return '<a href="'+n[1]+'" data-navlink>'+n[0]+'</a>'; }).join("")+
-      hubTabs.map(function(h){ return '<a href="'+h[1]+'" class="hub" data-navlink>'+h[0]+' →</a>'; }).join("")+
+      hubTabs.map(function(h){ return '<a href="'+h[1]+'" data-navlink>'+h[0]+'</a>'; }).join("")+
     '</nav>'+
     '<div class="mh-right">'+
       '<button class="icon-btn" id="searchBtn" aria-label="Search (press /)" title="Search ( / )">'+CG.ic("search")+'</button>'+

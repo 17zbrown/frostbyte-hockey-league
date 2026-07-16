@@ -171,7 +171,7 @@ CG.admCodes = function(){
     '<div class="grid g3"><label class="fld"><span>Code release</span><select><option>30 min before puck drop</option><option>45 min</option><option>60 min</option></select></label>'+
     '<label class="fld"><span>Lineup release</span><select><option>60 min before puck drop</option><option>45 min</option><option>30 min</option></select></label>'+
     '<label class="fld"><span>Lineup lock</span><select><option>30 min before puck drop</option><option>15 min</option></select></label></div>'+
-    '<button class="btn btn-ink btn-sm" data-toast="Release policy saved — applies to all future games (demo)">Save policy</button></div></div>';
+    '<button class="btn btn-ink btn-sm" data-toast="Code release is automatic at T-30 — this policy is fixed by Rule 4.2">Save policy</button></div></div>';
 };
 CG.AFTER._admCodes = function(){
   $$("[data-regen]").forEach(function(b){
@@ -240,12 +240,12 @@ CG.admSeasons = function(){
     '<div class="card-b"><div class="grid g2" style="gap:10px">'+
     [["Format","6v6 · 2 divisions"],["Weeks","10 + playoffs"],["Games played",CG.lg.results.length],["Clubs","8"],["Players","96"],["Points","2 W · 1 OTL"]].map(function(kv){
       return '<div class="kpi" style="cursor:default;padding:12px 14px"><b style="font-size:16px" class="num">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
-    '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-toast="Playoff bracket configuration opens after Week 10 (demo)">Configure playoffs</button>'+
-    '<button class="btn btn-ghost btn-sm" data-toast="Archiving locks all records read-only and snapshots final standings — available after the Cup (demo)">Archive season</button></div></div></div>'+
+    '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-toast="Playoff bracket setup opens once the regular season ends">Configure playoffs</button>'+
+    '<button class="btn btn-ghost btn-sm" data-toast="Archiving unlocks after the Cup is awarded — records then lock read-only">Archive season</button></div></div></div>'+
     '<div class="card"><div class="card-h"><h3>Preseason · 2026</h3><span class="chip">Archived</span></div>'+
     '<div class="card-b"><p class="small" style="color:var(--steel)">Two exhibition nights used for rules calibration. Archived read-only: every player and team profile keeps its preseason stat line under the season dropdown.</p>'+
     '<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-go="#/team/CBR?season=pre">Browse an archived team page</button></div></div></div>'+
-    '<button class="btn btn-ink" style="margin-top:16px" data-toast="Season 2 setup wizard: divisions, clubs, schedule template, rating carry-over (demo)">'+CG.ic("plus",15)+'Create Season 2</button>';
+    '<button class="btn btn-ink" style="margin-top:16px" data-toast="Season 2 setup opens after this season wraps">'+CG.ic("plus",15)+'Create Season 2</button>';
 };
 
 /* ---------- users & roles ---------- */
@@ -375,7 +375,7 @@ CG.admRankings = function(){
         '<button class="btn btn-ghost btn-sm" data-rkmove="'+i+':1" aria-label="Move down" '+(i===lg.powerRankings.length-1?"disabled":"")+'>↓</button>'+
         '<button class="btn btn-ghost btn-sm" data-rkedit="'+pr.team+'">Edit note</button></span></div>';
     }).join("")+'</div>'+
-    '<div style="display:flex;gap:9px;margin-top:16px"><button class="btn btn-ink" data-toast="Week 8 draft generates Sunday night from updated overalls (demo)">Draft Week 8</button>'+
+    '<div style="display:flex;gap:9px;margin-top:16px"><button class="btn btn-ink" data-toast="Overalls update automatically from EA box scores — no manual draft needed">Draft Week 8</button>'+
     '<a class="btn btn-ghost" href="#/rankings">View public page</a></div>';
 };
 CG.AFTER._admRankings = function(){
@@ -421,7 +421,7 @@ CG.admAwards = function(){
     '<div class="stack"><div class="card"><div class="card-h"><h3>Player of the Week 7</h3><span class="chip chip-warn">Week in progress</span></div>'+
     '<div class="empty"><div class="e-art">'+CG.ic("trophy",20)+'</div><b>Voting opens after Saturday’s games</b><p>Nominees auto-populate from weekly stat lines; staff ballots are logged and auditable.</p></div></div>'+
     '<div class="card"><div class="card-h"><h3>Season awards</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Ballots configured: MVP, Best Forward, Best Defenseman, Best Goaltender, Rookie of the Year, Sportsmanship, Playoff MVP. Voting window: after Week 10.</p>'+
-    '<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-toast="Ballot designer: nominees, weights, voter pools, reveal schedule (demo)">Configure ballots</button></div></div></div></div>';
+    '<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-toast="Ballot voting isn’t wired yet — awards are selected at season’s end">Configure ballots</button></div></div></div></div>';
 };
 CG.AFTER._admAwards = function(){
   $$("[data-stars]").forEach(function(b){
@@ -588,7 +588,7 @@ CG.admCarousel = function(){
         '<button class="btn btn-ghost btn-sm" data-slmove="'+d[0]+':1" aria-label="Move later">↓</button>'+
         '<button class="toggle'+(c.off?"":" on")+'" data-slide="'+d[0]+'" role="switch" aria-checked="'+(!c.off)+'" aria-label="'+d[1]+'"></button></div>';
     }).join("")+'</div>'+
-    '<button class="btn btn-ink" style="margin-top:16px" data-toast="Custom promo slides take a headline, art, CTA, schedule window, and optional sponsor slot (demo)">'+CG.ic("plus",15)+'Custom slide</button>';
+    '<button class="btn btn-ink" style="margin-top:16px" data-toast="Custom slides aren’t wired yet — the carousel runs on live news">'+CG.ic("plus",15)+'Custom slide</button>';
 };
 CG.AFTER._admCarousel = function(){
   $$("[data-slide]").forEach(function(t){
@@ -847,13 +847,13 @@ CG.admSettings = function(){
     '<label class="fld"><span>Points — OT loss</span><input type="number" value="1"></label></div>'+
     '<div class="grid g2"><label class="fld"><span>Playoff spots / division</span><input type="number" value="3"></label>'+
     '<label class="fld"><span>League time zone</span><select><option>Eastern</option><option>Central</option></select></label></div>'+
-    '<button class="btn btn-ink btn-sm" data-toast="Settings saved — standings math and cutlines recompute from these in production">Save settings</button></div></div>'+
+    '<button class="btn btn-ink btn-sm" data-toast="These settings aren’t wired to the database yet — current values match the rulebook">Save settings</button></div></div>'+
     '<div class="stack"><div class="card"><div class="card-h"><h3>Integrations</h3></div><div class="card-b">'+
     [["Discord bot — role sync, codes DM","Connected"],["Discord webhooks — scores, news","Connected"],["Twitch — live game flags","Connected"],["Email — digests & resets","Configured"]].map(function(x){
       return '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:13.5px"><span>'+x[0]+'</span><span class="chip chip-win">'+x[1]+'</span></div>';
     }).join("")+'</div></div>'+
     '<div class="card"><div class="card-h"><h3>Backups</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Nightly snapshots with 30-day retention; season archives are immutable. Last snapshot: this morning, 4:00 AM ET.</p>'+
-    '<button class="btn btn-ghost btn-sm" style="margin-top:10px" data-toast="On-demand snapshot queued (demo)">Snapshot now</button></div></div></div></div>';
+    '<button class="btn btn-ghost btn-sm" style="margin-top:10px" data-toast="Manual snapshots aren’t wired yet — nightly backups run automatically">Snapshot now</button></div></div></div></div>';
 };
 
 CG.AFTER.admin = function(param){
