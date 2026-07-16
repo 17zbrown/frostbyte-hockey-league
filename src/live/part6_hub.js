@@ -83,8 +83,8 @@ CG.hubNav = function(section){
     }).join("")+'</nav>';
 };
 CG.hubShell = function(section, inner){
-  var notice = (CG.LIVE_MODE && (CG.role()==="mgmt"||CG.role()==="commish"))
-    ? '<div class="note chr" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">The Trade Hub is live</b> — offers write to the database. Still being connected: roster waive/block and the lineup builder — for those right now, use the <a href="/legacy.html" style="font-weight:700;border-bottom:2px solid var(--chrome)">classic tools</a>.</span></div>'
+  var notice = (CG.LIVE_MODE && CG.role()==="mgmt")
+    ? '<div class="note chr" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Team HQ is live:</b> the Trade Hub, lineup builder, and server selection all write to the database. Roster waive &amp; trade-block still save on this device only — full persistence is next.</span></div>'
     : "";
   return '<section class="sec-tight"><div class="shell"><div class="hub-grid">'+CG.hubNav(section)+'<div>'+notice+inner+'</div></div></div></section>';
 };
@@ -98,7 +98,6 @@ CG.unauthorized = function(need){
 CG.ROUTES.hub = function(param, qs){
   var r = CG.role();
   if (r==="guest") return CG.unauthorized("Sign in to reach your dashboard — pick any demo seat to explore the member experience.");
-  if (r==="commish" && !param) { location.hash = "#/admin"; return ""; }
   var section = param||"";
   if (section==="") return CG.hubShell("", CG.hubDashboard());
   if (section==="availability") return CG.hubShell("availability", CG.hubAvailability());
@@ -307,6 +306,62 @@ CG.AFTER._availability = function(){
 };
 
 /* ---------- lineup builder ---------- */
+/* ---------- server veto (ported from the classic site, real game_vetoes DB) ----------
+   Home club picks 1st + 2nd server choice; away club picks a veto (won't play) + a
+   preferred. Picks are private to each club and lock 30 min before puck drop, when the
+   resolve_game_server RPC settles the server from both clubs' picks. */
+CG.SERVERS = ["NA East","NA Northeast","NA Central"];
+CG.VETO_LOCK_MS = 30*60000;
+CG.gameNight = function(g){
+  try { return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(new Date(g.at))==="Fri" ? "fri" : "wed"; }
+  catch(e){ return "wed"; }
+};
+CG.serverVetoCard = function(game, me){
+  var mine = (CG.lg._vetoes||{})[game.id] || {};
+  var home = game.home===me.team;
+  var locked = CG.now() >= game.at - CG.VETO_LOCK_MS;
+  var opp = home ? game.away : game.home;
+  function opts(sel){ return '<option value="">— pick —</option>'+CG.SERVERS.map(function(s){ return '<option value="'+esc(s)+'"'+(s===sel?" selected":"")+'>'+esc(s)+'</option>'; }).join(""); }
+  var inner;
+  if (locked){
+    var srv = (CG.lg._servers||{})[game.id];
+    inner = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="lock">'+CG.ic("lock",14)+'Locked</span><span>Server: <b style="font-family:var(--f-disp)">'+(srv?esc(srv):"To be set")+'</b></span></div>';
+  } else if (home){
+    inner = '<div class="grid g2" style="gap:12px">'+
+      '<label class="fld"><span>1st choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref1">'+opts(mine.pref1)+'</select></label>'+
+      '<label class="fld"><span>2nd choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref2">'+opts(mine.pref2)+'</select></label>'+
+      '</div><p class="caption" style="margin-top:8px">'+CG.ic("lock",12)+' Private · both required · locks 30 min before puck drop.</p>';
+  } else {
+    inner = '<div class="grid g2" style="gap:12px">'+
+      '<label class="fld"><span>Veto — won’t play</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="veto">'+opts(mine.veto)+'</select></label>'+
+      '<label class="fld"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label>'+
+      '</div><p class="caption" style="margin-top:8px">'+CG.ic("eye",12)+' Private · your preferred is used only if '+esc(CG.TEAM[opp].name)+' doesn’t submit.</p>';
+  }
+  return '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Server selection · '+(home?"Home":"Away")+'</h3><a class="sec-link" href="#/rulebook?rule=4.1">Rule 4</a></div><div class="card-b">'+inner+'</div></div>';
+};
+CG.saveVeto = function(gameId, changedSel){
+  var me = CG.me(); if(!me) return;
+  var tid = (CG.lg._codeToId||{})[me.team]; if(!tid){ CG.toast("This seat has no club","err"); return; }
+  var body = changedSel.closest(".card-b");
+  function val(f){ var el=body.querySelector('.srv-sel[data-veto-field="'+f+'"]'); return el&&el.value?el.value:null; }
+  var g = CG.lg.schedule.find(function(x){ return x.id===gameId; })||{};
+  var rec = { game_id:gameId, team_id:tid, updated_by:(CG.auth&&CG.auth.user?CG.auth.user.id:null), updated_at:new Date().toISOString() };
+  if (g.home===me.team){
+    var p1=val("pref1"), p2=val("pref2");
+    if(p1&&p2&&p1===p2){ CG.toast("1st and 2nd choices must differ","err"); changedSel.value=""; return; }
+    rec.pref1=p1; rec.pref2=p2;
+  } else {
+    var veto=val("veto"), pref=val("preferred");
+    if(veto&&pref&&veto===pref){ CG.toast("Preferred can’t be the server you vetoed","err"); changedSel.value=""; return; }
+    rec.veto=veto; rec.preferred=pref;
+  }
+  CG.sb.from("game_vetoes").upsert(rec,{onConflict:"game_id,team_id"}).then(function(r){
+    if(r.error){ CG.toast(/lock/i.test(r.error.message||"")?"Picks are locked":"Couldn’t save: "+r.error.message,"err"); return; }
+    CG.lg._vetoes = CG.lg._vetoes||{}; CG.lg._vetoes[gameId] = Object.assign({}, CG.lg._vetoes[gameId]||{}, rec);
+    CG.toast(g.home===me.team?"1st & 2nd choices saved":"Veto & preferred saved","ok");
+  });
+};
+
 CG.hubLineup = function(qs){
   var me = CG.me(), lg = CG.lg;
   if (!me || !CG.lg.byTeam[me.team]) return '<div class="note">This seat has no club attached — the lineup builder belongs to team management. As commissioner you can override any club’s submitted lineup from the matchup page.</div>';
@@ -316,10 +371,13 @@ CG.hubLineup = function(qs){
   var opp = game.home===me.team ? game.away : game.home;
   var key = game.id+":"+me.team;
   var saved = (CG.store.get("lineups")||{})[key];
+  var night = CG.gameNight(game);
+  var dbLu = (CG.lg._lineups||{})[me.team+":"+night];
   var lockAt = game.at - 30*60000;
   var locked = CG.now() >= lockAt;
-  var status = saved ? saved.status : "draft";
-  var slots = saved ? saved.slots : {};
+  var status = saved ? saved.status : (dbLu ? "submitted" : "draft");
+  var slots = saved ? saved.slots
+    : (dbLu ? { LW:dbLu.lw||null, C:dbLu.center||null, RW:dbLu.rw||null, LD:dbLu.ld||null, RD:dbLu.rd||null, G:dbLu.goalie||null } : {});
   var roster = lg.byTeam[me.team];
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.team===me.team && s.status!=="served") suspended[s.playerId]=true; });
@@ -359,7 +417,7 @@ CG.hubLineup = function(qs){
     ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Revision history</h3></div>'+
       saved.rev.map(function(rv){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("clock",14)+'</span><span><b>'+esc(rv.what)+'</b></span><span class="nf-t">'+CG.fmtTime(rv.at)+'</span></div>'; }).join("")+'</div>'
     : "";
-  return h + bar + '<div class="grid g5x7" style="align-items:start"><div>'+rink+hist+'</div>'+bench+'</div>';
+  return h + bar + '<div class="grid g5x7" style="align-items:start"><div>'+rink+CG.serverVetoCard(game, me)+hist+'</div>'+bench+'</div>';
 };
 CG.luSlot = function(pos, pid, locked){
   var p = pid && CG.playerById(CG.lg, pid);
@@ -376,7 +434,10 @@ CG.AFTER._lineup = function(){
   if (!game) return;
   var key = game.id+":"+me.team;
   var store = CG.store.get("lineups")||{};
-  var state = store[key] || { slots:{}, status:"draft", rev:[] };
+  var _night = CG.gameNight(game), _dbLu = (CG.lg._lineups||{})[me.team+":"+_night];
+  var state = store[key] || (_dbLu
+    ? { slots:{ LW:_dbLu.lw||undefined, C:_dbLu.center||undefined, RW:_dbLu.rw||undefined, LD:_dbLu.ld||undefined, RD:_dbLu.rd||undefined, G:_dbLu.goalie||undefined }, status:"submitted", rev:[] }
+    : { slots:{}, status:"draft", rev:[] });
   var sel = null;
   /* is this game one of the Week-8 nights availability was collected for? */
   var isWeek8Night = CG.WEEK8.nights.some(function(n){ return Math.abs(n.at - game.at) < 6*3600000; });
@@ -459,11 +520,29 @@ CG.AFTER._lineup = function(){
     if (missing.length){ CG.toast("Fill every slot first — missing "+missing.join(", "), "err"); return; }
     CG.confirm("Submit this lineup?","Your six starters go to the league office and release to the opponent 60 minutes before puck drop. You can resubmit until the lock.","Submit lineup", function(){
       save("Lineup submitted to the league office","submitted");
+      /* persist to the real lineups table (per game night) */
+      if (CG.LIVE_MODE && CG.sb){
+        var tid = (CG.lg._codeToId||{})[me.team], sid = CG.SEASON && CG.SEASON.id;
+        if (tid && sid){
+          var night = CG.gameNight(game);
+          var lr = { season_id:sid, team_id:tid, night:night,
+            lw:state.slots.LW||null, center:state.slots.C||null, rw:state.slots.RW||null,
+            ld:state.slots.LD||null, rd:state.slots.RD||null, goalie:state.slots.G||null,
+            updated_by:(CG.auth&&CG.auth.user?CG.auth.user.id:null), updated_at:new Date().toISOString() };
+          CG.sb.from("lineups").upsert(lr,{onConflict:"season_id,team_id,night"}).then(function(r){
+            if(r.error){ CG.toast("Saved on this device; DB sync failed: "+r.error.message,"err"); return; }
+            CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[me.team+":"+night] = lr;
+          });
+        }
+      }
       CG.pushNotif("check","Lineup submitted","vs "+CG.TEAM[game.home===me.team?game.away:game.home].name+" — locks "+CG.fmtTime(game.at-30*60000)+".","#/hub/lineup");
       CG.audit("Lineup submitted",""+key);
       CG.toast("Lineup submitted","ok");
       CG.renderChrome();
     });
+  });
+  document.querySelectorAll(".srv-sel").forEach(function(el){
+    el.addEventListener("change", function(){ CG.saveVeto(el.getAttribute("data-veto-game"), el); });
   });
 };
 

@@ -211,9 +211,14 @@ CG.AFTER.rulebook = function(param, qs){
 
 /* ---------- MATCHUP CENTER ---------- */
 CG.gameCode = function(id){
-  var n = parseInt(id.replace(/\D/g,""),10);
-  var A = "BCDFGHJKMPQRSTVWXZ";
-  return "CGHL-"+A[(n*7)%18]+A[(n*13)%18]+((n*37)%9+1)+"-"+A[(n*5)%18]+A[(n*11)%18]+((n*53)%9+1);
+  /* prefer a real EA lobby code assigned to the game (EA club codes are 6-digit numbers) */
+  var g = CG.lg && CG.lg.schedule && CG.lg.schedule.find(function(x){ return x.id===id; });
+  if (g && g.code) return String(g.code);
+  /* otherwise a stable 6-digit code hashed from the game id — same number for both
+     clubs on every render, never drifts */
+  var h = 2166136261, s = String(id);
+  for (var i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = (h*16777619) >>> 0; }
+  return String(100000 + (h % 900000));
 };
 CG.plannedLineup = function(g, code){
   var saved = (CG.store.get("lineups")||{})[g.id+":"+code];

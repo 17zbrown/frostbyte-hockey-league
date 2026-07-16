@@ -381,6 +381,22 @@ CG.loadManagerData = async function(){
         var tr = await CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false});
         CG.lg._myTrades = (tr && !tr.error && tr.data) || [];
       } catch(e){ CG.lg._myTrades = []; }
+      /* server vetoes + resolved servers for my club's upcoming games, and my saved lineups */
+      CG.lg._vetoes = {}; CG.lg._servers = {}; CG.lg._lineups = {};
+      try {
+        var upcoming = (CG.lg.schedule||[]).filter(function(g){ return (g.home===myCode||g.away===myCode) && g.status!=="final"; });
+        var upIds = upcoming.map(function(g){ return g.id; });
+        if (upIds.length){
+          var vv = await CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds);
+          (vv && !vv.error && vv.data || []).forEach(function(v){ if(v.team_id===myTid) CG.lg._vetoes[v.game_id]=v; });
+          var lockedIds = upcoming.filter(function(g){ return CG.now() >= g.at - (CG.VETO_LOCK_MS||1800000); }).map(function(g){ return g.id; });
+          await Promise.all(lockedIds.map(function(id){ return CG.sb.rpc("resolve_game_server",{p_game:id}).then(function(r){ if(r && !r.error && r.data) CG.lg._servers[id]=r.data; }).catch(function(){}); }));
+        }
+        if (CG.SEASON && CG.SEASON.id){
+          var lu = await CG.sb.from("lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid);
+          (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.night]=row; });
+        }
+      } catch(e){}
     }
   } catch(e){}
 };

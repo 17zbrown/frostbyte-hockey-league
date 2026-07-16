@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chel Gaming Hockey League — Concept Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ============================== TOKENS ============================== */
+  :root{
+    --paper:#EEF3F5; --panel:#FFFFFF; --panel-2:#F6FAFB; --panel-3:#EDF3F5;
+    --ink:#0D1417; --ink-soft:#26343A; --fog:#566A71; --faint:#8397A0;
+    --line:#DFE8EB; --line-2:#E9F0F2;
+    --frost:#0FB6C4;        /* bright glacial accent — sparingly */
+    --frost-ink:#0A7B87;    /* accent text on light */
+    --deep:#0B3A43;         /* deep teal — primary buttons, wordmark */
+    --frost-soft:#E3F4F6;   /* accent tint fill */
+    --shadow:0 1px 2px rgba(13,40,46,.05), 0 12px 30px -12px rgba(13,40,46,.16);
+    --shadow-lg:0 2px 4px rgba(13,40,46,.06), 0 40px 70px -24px rgba(13,40,46,.30);
+    --ice:#F8FCFD; --board:#CBDBE0; --hb-blue:#4E86C7; --hb-red:#D65F68; --crease:#DCEBF6;
+    --r-s:10px; --r-m:16px; --r-l:26px;
+    --f-disp:"Bricolage Grotesque",-apple-system,system-ui,sans-serif;
+    --f-body:"Hanken Grotesk",-apple-system,system-ui,sans-serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,monospace;
+    --nav-h:72px; --maxw:1220px;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0A0E10; --panel:#111A1D; --panel-2:#0E1619; --panel-3:#17242A;
+    --ink:#EAF2F3; --ink-soft:#CBDADE; --fog:#8CA1A8; --faint:#5F7178;
+    --line:#1E2A2F; --line-2:#182227;
+    --frost:#24C9D6; --frost-ink:#4FDDEA; --deep:#25C6D3; --frost-soft:#0E2A2F;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 34px -14px rgba(0,0,0,.6);
+    --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 44px 80px -26px rgba(0,0,0,.75);
+    --ice:#16242A; --board:#2A3D44; --hb-blue:#5C93D0; --hb-red:#D96B73; --crease:#183640;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth; scroll-padding-top:calc(var(--nav-h) + 12px)}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--f-body);
+    font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased; overflow-x:hidden;}
+  a{color:inherit; text-decoration:none}
+  h1,h2,h3,h4{font-family:var(--f-disp); font-weight:700; line-height:1.04; letter-spacing:-.02em; margin:0; text-wrap:balance}
+  p{margin:0}
+  button{font:inherit; cursor:pointer; border:0; background:none; color:inherit}
+  img,svg{max-width:100%; display:block}
+  ::selection{background:var(--frost); color:#04171a}
+  :focus-visible{outline:2.5px solid var(--frost); outline-offset:3px; border-radius:4px}
+
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 28px}
+  .eyebrow{font-family:var(--f-mono); font-size:11.5px; font-weight:600; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--frost-ink)}
+  .mono{font-family:var(--f-mono)}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* ============================== NAV ============================== */
+  header.nav{position:sticky; top:0; z-index:60; height:var(--nav-h);
+    background:color-mix(in srgb, var(--paper) 82%, transparent);
+    backdrop-filter:saturate(140%) blur(14px); border-bottom:1px solid var(--line)}
+  .nav-in{display:flex; align-items:center; gap:26px; height:100%}
+  .brand{display:flex; align-items:center; gap:11px; margin-right:6px}
+  .brand .mark{width:34px; height:34px; flex-shrink:0}
+  .brand b{font-family:var(--f-disp); font-weight:800; font-size:18px; letter-spacing:.01em; line-height:1; color:var(--ink); white-space:nowrap}
+  .brand .wm{font-family:var(--f-mono); font-weight:600; font-size:10px; letter-spacing:.34em;
+    text-transform:uppercase; color:var(--faint); display:block; margin-top:3px; white-space:nowrap}
+  nav.primary{display:flex; align-items:center; gap:4px; margin-left:6px}
+  .navgrp{position:relative}
+  .navtop{display:inline-flex; align-items:center; gap:5px; padding:9px 13px; border-radius:var(--r-s);
+    font-family:var(--f-body); font-weight:600; font-size:14.5px; color:var(--ink-soft); letter-spacing:-.01em;
+    transition:color .15s, background .15s}
+  .navtop svg{width:14px; height:14px; opacity:.6; transition:transform .2s}
+  .navgrp:hover .navtop{color:var(--ink); background:var(--panel-3)}
+  .navgrp:hover .navtop svg{transform:rotate(180deg)}
+  .dropdown{position:absolute; top:calc(100% + 8px); left:0; min-width:230px; background:var(--panel);
+    border:1px solid var(--line); border-radius:var(--r-m); box-shadow:var(--shadow-lg); padding:8px;
+    opacity:0; visibility:hidden; transform:translateY(6px); transition:.16s; z-index:70}
+  .navgrp:hover .dropdown{opacity:1; visibility:visible; transform:none}
+  .dropdown::before{content:""; position:absolute; top:-10px; left:0; right:0; height:12px}
+  .dd-item{display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:var(--r-s);
+    font-size:14px; font-weight:500; color:var(--ink-soft); transition:background .13s, color .13s}
+  .dd-item:hover{background:var(--panel-3); color:var(--ink)}
+  .dd-item .ic{width:17px; height:17px; color:var(--frost-ink); flex-shrink:0}
+  .dd-item .cr{width:20px; height:20px; border-radius:6px; flex-shrink:0}
+  .dd-sub{font-size:11px; color:var(--faint); margin-left:auto; font-family:var(--f-mono); letter-spacing:.02em}
+  .dd-sep{height:1px; background:var(--line); margin:6px 8px}
+  .nav-right{margin-left:auto; display:flex; align-items:center; gap:10px}
+  .icon-btn{width:40px; height:40px; border-radius:var(--r-s); display:grid; place-items:center;
+    border:1px solid var(--line); color:var(--ink-soft); background:var(--panel); transition:.15s}
+  .icon-btn:hover{border-color:var(--frost); color:var(--frost-ink)}
+  .icon-btn svg{width:18px; height:18px}
+  .btn{display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:var(--r-s);
+    font-family:var(--f-body); font-weight:600; font-size:14.5px; letter-spacing:-.01em; transition:.16s; white-space:nowrap}
+  .btn-primary{background:var(--deep); color:#fff}
+  :root[data-theme="dark"] .btn-primary{color:#04171a}
+  .btn-primary:hover{transform:translateY(-1px); box-shadow:0 10px 22px -8px color-mix(in srgb,var(--deep) 60%, transparent)}
+  .btn-ghost{border:1px solid var(--line); color:var(--ink); background:var(--panel)}
+  .btn-ghost:hover{border-color:var(--frost); color:var(--frost-ink)}
+  .btn-lg{padding:14px 24px; font-size:15.5px}
+  .btn svg{width:16px; height:16px}
+  .discord-glyph{width:18px;height:18px}
+  .hamburger{display:none}
+
+  /* ============================== HERO ============================== */
+  .hero{position:relative; padding:clamp(40px,6vw,86px) 0 clamp(48px,6vw,82px); overflow:hidden}
+  .hero::before{content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(1100px 560px at 78% -8%, color-mix(in srgb,var(--frost) 12%, transparent), transparent 62%),
+      radial-gradient(760px 460px at 6% 108%, color-mix(in srgb,var(--frost) 8%, transparent), transparent 60%);
+    pointer-events:none}
+  .hero-grid{position:relative; display:grid; grid-template-columns:1.04fr 1fr; gap:44px; align-items:center}
+  .hero-copy{max-width:560px}
+  .hero h1{font-size:clamp(38px,5.4vw,68px); font-weight:800; letter-spacing:-.035em; margin-top:20px}
+  .hero h1 .hl{color:var(--frost-ink); position:relative; white-space:nowrap}
+  .hero-sub{font-size:clamp(16px,1.7vw,19px); color:var(--fog); margin-top:20px; max-width:48ch}
+  .hero-cta{display:flex; flex-wrap:wrap; gap:12px; margin-top:30px}
+  .hero-facts{display:flex; gap:0; margin-top:34px; border-top:1px solid var(--line)}
+  .hero-fact{padding:16px 22px 0 0; margin-right:22px; border-right:1px solid var(--line)}
+  .hero-fact:last-child{border-right:0}
+  .hero-fact b{font-family:var(--f-disp); font-weight:700; font-size:26px; letter-spacing:-.02em; display:block; color:var(--ink)}
+  .hero-fact span{font-family:var(--f-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint)}
+
+  /* isometric rink stage */
+  .stage{position:relative; height:clamp(340px,38vw,470px); perspective:1500px}
+  .rink-shadow{position:absolute; left:50%; top:62%; width:82%; height:56%; transform:translate(-50%,-50%);
+    background:radial-gradient(closest-side, rgba(13,40,46,.22), transparent 72%); filter:blur(20px); z-index:0}
+  :root[data-theme="dark"] .rink-shadow{background:radial-gradient(closest-side, rgba(0,0,0,.6), transparent 72%)}
+  .rink-tilt{position:absolute; inset:0; display:grid; place-items:center; z-index:1;
+    transform:rotateX(54deg) rotateZ(-40deg) scale(1.02); transform-style:preserve-3d;
+    filter:drop-shadow(0 40px 40px rgba(13,40,46,.18))}
+  .rink-tilt svg{width:min(560px,96%); height:auto}
+  .chip{position:absolute; z-index:3; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; box-shadow:var(--shadow-lg); padding:12px 14px; animation:bob 6s ease-in-out infinite}
+  .chip .chip-lbl{font-family:var(--f-mono); font-size:9.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--faint); margin-bottom:8px}
+  .chip-score{top:6%; right:-2%; width:210px}
+  .cs-row{display:flex; align-items:center; gap:9px}
+  .cs-row + .cs-row{margin-top:9px}
+  .cs-row .cr{width:26px; height:26px; border-radius:7px; flex-shrink:0}
+  .cs-row .nm{font-weight:600; font-size:13.5px; letter-spacing:-.01em}
+  .cs-row .sc{margin-left:auto; font-family:var(--f-disp); font-weight:800; font-size:18px}
+  .cs-foot{margin-top:10px; padding-top:9px; border-top:1px solid var(--line); display:flex; align-items:center; gap:6px;
+    font-family:var(--f-mono); font-size:10px; letter-spacing:.06em; color:var(--frost-ink)}
+  .live-dot{width:7px; height:7px; border-radius:50%; background:var(--frost); box-shadow:0 0 0 0 color-mix(in srgb,var(--frost) 70%,transparent); animation:pulse 2s infinite}
+  .chip-lead{bottom:2%; left:-3%; width:196px; animation-delay:-3s}
+  .cl-row{display:flex; align-items:center; gap:9px; font-size:12.5px}
+  .cl-row + .cl-row{margin-top:8px}
+  .cl-row .rk{font-family:var(--f-mono); font-size:11px; color:var(--faint); width:14px}
+  .cl-row .cr{width:20px; height:20px; border-radius:6px}
+  .cl-row .nm{font-weight:600; letter-spacing:-.01em}
+  .cl-row .pt{margin-left:auto; font-family:var(--f-disp); font-weight:700}
+  .chip-puck{top:40%; left:16%; width:auto; padding:0; border:0; background:none; box-shadow:none; animation-delay:-1.5s}
+  .puck{width:46px; height:46px; border-radius:50%; background:radial-gradient(circle at 38% 32%, #3a4247, #0c1113 70%);
+    box-shadow:0 16px 22px -8px rgba(0,0,0,.5), inset 0 2px 3px rgba(255,255,255,.14)}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--frost) 65%,transparent)}70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  @media(prefers-reduced-motion:reduce){.chip,.live-dot{animation:none}}
+
+  /* ============================== SECTIONS ============================== */
+  section.band{padding:clamp(52px,7vw,90px) 0; position:relative}
+  .band.alt{background:var(--panel-2); border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+  .sec-head{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:34px}
+  .sec-head .lead{max-width:640px}
+  .sec-head h2{font-size:clamp(26px,3.3vw,40px); font-weight:700; margin-top:12px}
+  .sec-head p{color:var(--fog); margin-top:12px; font-size:16px}
+  .see-all{display:inline-flex; align-items:center; gap:7px; font-weight:600; font-size:14px; color:var(--frost-ink);
+    white-space:nowrap; padding:8px 4px; transition:gap .16s}
+  .see-all:hover{gap:11px}
+  .see-all svg{width:15px; height:15px}
+
+  /* marquee ticker */
+  .ticker{background:var(--deep); color:#eaffff; overflow:hidden; border-block:1px solid color-mix(in srgb,var(--deep) 70%,#000)}
+  :root[data-theme="dark"] .ticker{background:var(--panel); color:var(--ink); border-color:var(--line)}
+  .ticker-track{display:flex; gap:0; width:max-content; animation:scroll 42s linear infinite}
+  .ticker:hover .ticker-track{animation-play-state:paused}
+  .ti{display:inline-flex; align-items:center; gap:10px; padding:13px 26px; font-size:13px; font-weight:600; letter-spacing:-.01em; white-space:nowrap}
+  .ti .cr{width:18px; height:18px; border-radius:5px}
+  .ti .mono{opacity:.7; font-size:11px}
+  .ti .dot{width:4px; height:4px; border-radius:50%; background:currentColor; opacity:.4}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+  @media(prefers-reduced-motion:reduce){.ticker-track{animation:none; flex-wrap:wrap}}
+
+  /* feature rows (Cicada-style hairline list) */
+  .feat-grid{display:grid; grid-template-columns:1.1fr 1fr; gap:56px; align-items:center}
+  .feat-list{display:flex; flex-direction:column}
+  .feat{display:grid; grid-template-columns:auto 1fr auto; gap:18px; align-items:start; padding:24px 4px; border-top:1px solid var(--line); cursor:pointer; transition:padding-left .18s}
+  .feat:last-child{border-bottom:1px solid var(--line)}
+  .feat:hover{padding-left:10px}
+  .feat .fic{width:38px; height:38px; border-radius:11px; background:var(--frost-soft); color:var(--frost-ink); display:grid; place-items:center}
+  .feat .fic svg{width:20px; height:20px}
+  .feat h3{font-size:19px; font-weight:700; letter-spacing:-.02em}
+  .feat p{color:var(--fog); font-size:14.5px; margin-top:5px; max-width:46ch}
+  .feat .step{font-family:var(--f-mono); font-size:11px; color:var(--faint); align-self:center}
+  .feat-aside{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-l); padding:30px; box-shadow:var(--shadow)}
+  .feat-aside .eyebrow{margin-bottom:14px}
+  .feat-aside h3{font-family:var(--f-disp); font-size:23px; font-weight:700; letter-spacing:-.02em}
+  .feat-aside p{color:var(--fog); margin-top:10px; font-size:14.5px}
+  .mini-steps{margin-top:22px; display:flex; flex-direction:column; gap:2px}
+  .mini-step{display:flex; align-items:center; gap:12px; padding:11px 0; border-top:1px dashed var(--line); font-size:14px; font-weight:500}
+  .mini-step .n{font-family:var(--f-mono); font-size:11px; color:var(--frost-ink); width:22px; height:22px; border-radius:6px; background:var(--frost-soft); display:grid; place-items:center}
+
+  /* standings snapshot */
+  .stand-wrap{display:grid; grid-template-columns:1fr 1fr; gap:26px}
+  .stand-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-l); overflow:hidden; box-shadow:var(--shadow)}
+  .stand-head{display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid var(--line)}
+  .stand-head .tag{font-family:var(--f-mono); font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--frost-ink)}
+  .stand-head h3{font-size:17px; font-weight:700; letter-spacing:-.01em}
+  .strow{display:grid; grid-template-columns:22px 1fr repeat(4,38px); gap:6px; align-items:center; padding:11px 20px;
+    font-size:13.5px; border-top:1px solid var(--line-2); cursor:pointer; transition:background .13s}
+  .strow:hover{background:var(--panel-3)}
+  .strow.hcol{cursor:default; font-family:var(--f-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); background:var(--panel-2)}
+  .strow.hcol:hover{background:var(--panel-2)}
+  .strow .rk{font-family:var(--f-mono); color:var(--faint); font-size:12px}
+  .strow .tm{display:flex; align-items:center; gap:10px; font-weight:600; letter-spacing:-.01em; min-width:0}
+  .strow .tm .cr{width:24px; height:24px; border-radius:7px; flex-shrink:0}
+  .strow .tm .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .strow .c{text-align:center; font-variant-numeric:tabular-nums; color:var(--fog)}
+  .strow .c.pts{color:var(--ink); font-weight:700; font-family:var(--f-disp)}
+
+  /* clubs grid */
+  .clubs-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:16px}
+  .club{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-m); padding:22px; cursor:pointer;
+    transition:transform .18s, box-shadow .18s, border-color .18s; position:relative; overflow:hidden}
+  .club::after{content:""; position:absolute; left:0; right:0; bottom:0; height:3px; background:var(--tc,var(--frost)); opacity:.9; transform:scaleX(0); transform-origin:left; transition:transform .22s}
+  .club:hover{transform:translateY(-4px); box-shadow:var(--shadow-lg); border-color:color-mix(in srgb,var(--tc,var(--frost)) 45%, var(--line))}
+  .club:hover::after{transform:scaleX(1)}
+  .club .cr{width:52px; height:52px; border-radius:13px; margin-bottom:16px}
+  .club h3{font-size:16px; font-weight:700; letter-spacing:-.02em}
+  .club .meta{font-size:12.5px; color:var(--fog); margin-top:3px}
+  .club .div{display:inline-block; margin-top:14px; font-family:var(--f-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); border:1px solid var(--line); border-radius:20px; padding:3px 9px}
+
+  /* leaders */
+  .lead-grid{display:grid; grid-template-columns:1.5fr 1fr; gap:26px; align-items:start}
+  .lead-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-l); box-shadow:var(--shadow); overflow:hidden}
+  .lead-card .lc-head{display:flex; align-items:center; justify-content:space-between; padding:16px 22px; border-bottom:1px solid var(--line)}
+  .lead-card .lc-head h3{font-size:16px; font-weight:700}
+  .lead-card .lc-head .eyebrow{color:var(--faint)}
+  .lrow{display:grid; grid-template-columns:26px auto 1fr auto; gap:14px; align-items:center; padding:14px 22px; border-top:1px solid var(--line-2); cursor:pointer; transition:background .13s}
+  .lrow:hover{background:var(--panel-3)}
+  .lrow:first-of-type{border-top:0}
+  .lrow .rk{font-family:var(--f-disp); font-weight:800; font-size:18px; color:var(--faint)}
+  .lrow.top .rk{color:var(--frost-ink)}
+  .lrow .cr{width:34px; height:34px; border-radius:9px}
+  .lrow .who{display:flex; flex-direction:column; gap:1px; min-width:0}
+  .lrow .who .nm{font-weight:700; letter-spacing:-.02em; font-size:15px}
+  .lrow .who .tl{font-size:12px; color:var(--fog); font-family:var(--f-mono)}
+  .lrow .stat{text-align:right}
+  .lrow .stat b{font-family:var(--f-disp); font-weight:800; font-size:20px; letter-spacing:-.02em}
+  .lrow .stat span{display:block; font-family:var(--f-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint)}
+  .lead-side{display:flex; flex-direction:column; gap:16px}
+  .goalie-card{background:linear-gradient(155deg, var(--deep), color-mix(in srgb,var(--deep) 62%, #04252b)); color:#eafeff; border-radius:var(--r-l); padding:26px; position:relative; overflow:hidden; box-shadow:var(--shadow)}
+  .goalie-card .eyebrow{color:color-mix(in srgb, var(--frost) 80%, #fff)}
+  .goalie-card .gname{font-family:var(--f-disp); font-weight:800; font-size:26px; letter-spacing:-.02em; margin-top:12px}
+  .goalie-card .gteam{font-family:var(--f-mono); font-size:12px; opacity:.75; margin-top:2px}
+  .goalie-card .gstats{display:flex; gap:26px; margin-top:22px}
+  .goalie-card .gstats b{font-family:var(--f-disp); font-weight:800; font-size:24px; display:block}
+  .goalie-card .gstats span{font-family:var(--f-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; opacity:.7}
+  .goalie-card .gpuck{position:absolute; right:-30px; bottom:-30px; width:150px; height:150px; border-radius:50%;
+    border:14px solid rgba(255,255,255,.06)}
+
+  /* schedule */
+  .sched-list{display:flex; flex-direction:column; gap:10px}
+  .game{display:grid; grid-template-columns:88px 1fr auto; gap:20px; align-items:center; background:var(--panel);
+    border:1px solid var(--line); border-radius:var(--r-m); padding:15px 20px; cursor:pointer; transition:.16s}
+  .game:hover{border-color:color-mix(in srgb,var(--frost) 40%,var(--line)); transform:translateX(3px); box-shadow:var(--shadow)}
+  .game .when{border-right:1px solid var(--line); padding-right:16px}
+  .game .when b{font-family:var(--f-disp); font-weight:700; font-size:15px; display:block}
+  .game .when span{font-family:var(--f-mono); font-size:11px; color:var(--faint)}
+  .game .match{display:flex; align-items:center; gap:12px; font-weight:600; letter-spacing:-.01em}
+  .game .match .cr{width:30px; height:30px; border-radius:8px}
+  .game .match .vs{font-family:var(--f-mono); font-size:11px; color:var(--faint); margin:0 2px}
+  .game .goto{font-size:13px; color:var(--frost-ink); font-weight:600; display:flex; align-items:center; gap:6px}
+  .game .goto svg{width:14px;height:14px}
+
+  /* news */
+  .news-grid{display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:18px}
+  .ncard{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-l); overflow:hidden; cursor:pointer;
+    display:flex; flex-direction:column; transition:.18s}
+  .ncard:hover{transform:translateY(-4px); box-shadow:var(--shadow-lg); border-color:color-mix(in srgb,var(--frost) 30%,var(--line))}
+  .ncard .nimg{height:150px; position:relative; overflow:hidden}
+  .ncard .nimg svg{position:absolute; inset:0; width:100%; height:100%}
+  .ncard .nbody{padding:20px 22px 24px; flex:1; display:flex; flex-direction:column}
+  .ncard .ncat{font-family:var(--f-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--frost-ink)}
+  .ncard h3{font-size:18px; font-weight:700; letter-spacing:-.02em; margin-top:10px}
+  .ncard.lead h3{font-size:22px}
+  .ncard p{color:var(--fog); font-size:14px; margin-top:9px}
+  .ncard .nmeta{margin-top:auto; padding-top:16px; font-family:var(--f-mono); font-size:11px; color:var(--faint)}
+
+  /* join CTA */
+  .join{position:relative; overflow:hidden; background:linear-gradient(160deg, var(--deep), color-mix(in srgb,var(--deep) 55%, #041c22));
+    border-radius:calc(var(--r-l) + 6px); padding:clamp(38px,5vw,66px); color:#eafeff; box-shadow:var(--shadow-lg)}
+  .join::before{content:""; position:absolute; inset:0; background:
+    radial-gradient(600px 300px at 88% -20%, color-mix(in srgb,var(--frost) 40%,transparent), transparent 65%);
+    pointer-events:none}
+  .join-in{position:relative; max-width:620px}
+  .join .eyebrow{color:color-mix(in srgb,var(--frost) 82%,#fff)}
+  .join h2{font-size:clamp(28px,4vw,46px); font-weight:800; letter-spacing:-.03em; margin-top:14px; color:#fff}
+  .join p{margin-top:16px; font-size:17px; color:color-mix(in srgb,#eafeff 88%, transparent); max-width:52ch}
+  .join .hero-cta{margin-top:28px}
+  .join .btn-primary{background:#fff; color:var(--deep)}
+  .join .btn-primary:hover{box-shadow:0 12px 26px -8px rgba(0,0,0,.4)}
+  .join .btn-ghost{background:transparent; border-color:rgba(255,255,255,.32); color:#fff}
+  .join .btn-ghost:hover{border-color:#fff; background:rgba(255,255,255,.08); color:#fff}
+  .join-rink{position:absolute; right:-40px; top:50%; transform:translateY(-50%) rotate(8deg); width:340px; opacity:.16; z-index:0}
+
+  /* footer */
+  footer{background:var(--panel-2); border-top:1px solid var(--line); padding:60px 0 30px; margin-top:8px}
+  .foot-grid{display:grid; grid-template-columns:1.6fr repeat(4,1fr); gap:34px}
+  .foot-brand .brand{margin-bottom:16px}
+  .foot-brand p{color:var(--fog); font-size:14px; max-width:34ch}
+  .foot-soc{display:flex; gap:10px; margin-top:18px}
+  .foot-col h4{font-family:var(--f-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:14px}
+  .foot-col a{display:block; font-size:14px; color:var(--ink-soft); padding:6px 0; transition:color .13s}
+  .foot-col a:hover{color:var(--frost-ink)}
+  .foot-base{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:44px; padding-top:22px;
+    border-top:1px solid var(--line); font-size:12.5px; color:var(--faint); flex-wrap:wrap}
+  .foot-base .mono{font-size:11px}
+  .pv-note{display:inline-flex; align-items:center; gap:7px; font-family:var(--f-mono); font-size:11px; color:var(--frost-ink);
+    background:var(--frost-soft); border:1px solid color-mix(in srgb,var(--frost) 24%, var(--line)); border-radius:20px; padding:4px 11px}
+
+  /* mobile menu */
+  .mobile-menu{position:fixed; inset:var(--nav-h) 0 0; background:var(--paper); z-index:55; padding:20px 24px 40px;
+    overflow-y:auto; transform:translateX(100%); transition:transform .26s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; gap:4px}
+  .mobile-menu.on{transform:none}
+  .mm-group{font-family:var(--f-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); margin:18px 0 6px}
+  .mobile-menu a{padding:12px 4px; font-size:17px; font-weight:600; letter-spacing:-.01em; border-bottom:1px solid var(--line)}
+  .mm-cta{display:flex; gap:10px; margin-top:24px}
+  .mm-cta .btn{flex:1; justify-content:center}
+
+  .reveal{opacity:0; transform:translateY(22px); transition:opacity .7s cubic-bezier(.16,1,.3,1), transform .7s cubic-bezier(.16,1,.3,1)}
+  .reveal.in{opacity:1; transform:none}
+  @media(prefers-reduced-motion:reduce){.reveal{opacity:1; transform:none}}
+
+  /* toast */
+  .toast{position:fixed; left:50%; bottom:30px; transform:translate(-50%,20px); background:var(--ink); color:var(--paper);
+    padding:13px 20px; border-radius:12px; box-shadow:var(--shadow-lg); font-size:14px; font-weight:600; z-index:90;
+    opacity:0; pointer-events:none; transition:.22s; display:flex; align-items:center; gap:10px; max-width:90vw}
+  .toast.on{opacity:1; transform:translate(-50%,0)}
+  .toast .tk{color:var(--frost)}
+
+  /* ============================== RESPONSIVE ============================== */
+  @media(max-width:1080px){
+    nav.primary{display:none}
+    .hamburger{display:grid}
+    .hero-grid{grid-template-columns:1fr; gap:20px}
+    .stage{order:-1; height:clamp(300px,52vw,420px)}
+    .feat-grid{grid-template-columns:1fr; gap:34px}
+    .lead-grid{grid-template-columns:1fr}
+    .clubs-grid{grid-template-columns:repeat(3,1fr)}
+    .news-grid{grid-template-columns:1fr 1fr}
+    .foot-grid{grid-template-columns:1fr 1fr; gap:28px 34px}
+    .foot-brand{grid-column:1 / -1}
+  }
+  @media(max-width:600px){
+    .nav-right .btn{display:none}   /* Sign in / Sign up move into the drawer on phones */
+    .brand .wm{display:none}
+  }
+  @media(max-width:720px){
+    .wrap{padding:0 18px}
+    .stand-wrap{grid-template-columns:1fr}
+    .clubs-grid{grid-template-columns:1fr 1fr}
+    .news-grid{grid-template-columns:1fr}
+    .sec-head{flex-direction:column; align-items:flex-start; gap:10px}
+    .chip-lead{display:none}
+    .hero-facts{flex-wrap:wrap; gap:10px 0}
+    .foot-grid{grid-template-columns:1fr 1fr}
+    .game{grid-template-columns:70px 1fr; gap:14px}
+    .game .goto{display:none}
+  }
+  @media(max-width:440px){
+    .clubs-grid{grid-template-columns:1fr}
+    .foot-grid{grid-template-columns:1fr}
+    .hero h1{font-size:34px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================== NAV ============================== -->
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" data-scroll="top" aria-label="Chel Gaming Hockey League home">
+      <span class="mark" id="brandMark"></span>
+      <span><b>CHEL GAMING</b><span class="wm">Hockey League</span></span>
+    </a>
+    <nav class="primary" id="primaryNav"></nav>
+    <div class="nav-right">
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle light or dark theme"></button>
+      <a class="btn btn-ghost" data-link="Sign in with Discord" href="#"><svg class="discord-glyph" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.5a14.6 14.6 0 0 1 4.3 2.2 13.5 13.5 0 0 0-11-.1A14.3 14.3 0 0 1 8.9 3.5L8.6 3a19.7 19.7 0 0 0-4.9 1.4A20.9 20.9 0 0 0 .1 18.6a19.9 19.9 0 0 0 6 3l.7-1.1a12.9 12.9 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l.7 1.1a19.8 19.8 0 0 0 6-3 20.8 20.8 0 0 0-3.6-14.2ZM8.3 15.3c-1.2 0-2.1-1.1-2.1-2.4S7.1 10.5 8.3 10.5s2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Zm7.4 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Z"/></svg>Sign in</a>
+      <a class="btn btn-primary" data-scroll="join" href="#join">Sign up</a>
+      <button class="icon-btn hamburger" id="ham" type="button" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    </div>
+  </div>
+</header>
+<div class="mobile-menu" id="mobileMenu"></div>
+
+<main>
+  <!-- ============================== HERO ============================== -->
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div class="hero-copy reveal">
+        <span class="eyebrow">Season 1 · Registration open</span>
+        <h1>Where <span class="hl">EA NHL</span> clubs come to compete.</h1>
+        <p class="hero-sub">The Chel Gaming Hockey League is a 6-on-6 EA Sports NHL 26 league built for players — draft into a club, grind a full season, and climb toward the Cup. One rink. Eight clubs. Every shift on record.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary btn-lg" data-scroll="join" href="#join">Claim your roster spot<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          <a class="btn btn-ghost btn-lg" data-scroll="about" href="#about">How the league works</a>
+        </div>
+        <div class="hero-facts">
+          <div class="hero-fact"><b>8</b><span>Clubs</span></div>
+          <div class="hero-fact"><b>2</b><span>Divisions</span></div>
+          <div class="hero-fact"><b>6v6</b><span>Club hockey</span></div>
+          <div class="hero-fact"><b>NHL&nbsp;26</b><span>On EA Sports</span></div>
+        </div>
+      </div>
+      <div class="stage reveal" aria-hidden="true">
+        <div class="rink-shadow"></div>
+        <div class="rink-tilt" id="rinkStage"></div>
+        <div class="chip chip-score" id="chipScore"></div>
+        <div class="chip chip-lead" id="chipLead"></div>
+        <div class="chip-puck"><div class="puck"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ticker -->
+  <div class="ticker" id="ticker" title="Standings — click to view"></div>
+
+  <!-- ============================== ABOUT / FEATURES ============================== -->
+  <section class="band" id="about">
+    <div class="wrap">
+      <div class="feat-grid">
+        <div class="reveal">
+          <span class="eyebrow">The rundown</span>
+          <h2 style="font-size:clamp(26px,3.3vw,40px);margin-top:12px;">A real league, run like one.</h2>
+          <p style="color:var(--fog);margin-top:14px;max-width:46ch;">No pickup lobbies. You sign with a club, take the ice on a schedule, and every goal, save, and standings point is tracked — from opening night to the Cup.</p>
+          <div class="feat-list" style="margin-top:26px;">
+            <div class="feat" data-scroll="clubs">
+              <div class="fic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.4 8.3 8 10 4.6-1.7 8-5 8-10V6l-8-4z"/></svg></div>
+              <div><h3>Draft into a club</h3><p>Register, get scouted, and land on one of eight club rosters with a real front office.</p></div>
+              <span class="step">01</span>
+            </div>
+            <div class="feat" data-scroll="schedule">
+              <div class="fic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></div>
+              <div><h3>Play the season</h3><p>Scheduled 6v6 matchups, live scores, and box scores parsed straight from your game screens.</p></div>
+              <span class="step">02</span>
+            </div>
+            <div class="feat" data-scroll="standings">
+              <div class="fic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg></div>
+              <div><h3>Climb the standings</h3><p>Wins move you up the table, stat leaders rise, and the top clubs punch their playoff ticket.</p></div>
+              <span class="step">03</span>
+            </div>
+          </div>
+        </div>
+        <aside class="feat-aside reveal">
+          <span class="eyebrow">Draft night</span>
+          <h3>From sign-up to starting line.</h3>
+          <p>Getting on the ice takes four steps — the whole path lives in the league office.</p>
+          <div class="mini-steps">
+            <div class="mini-step"><span class="n">1</span>Sign in with Discord</div>
+            <div class="mini-step"><span class="n">2</span>Register for the open season</div>
+            <div class="mini-step"><span class="n">3</span>Get drafted to a club</div>
+            <div class="mini-step"><span class="n">4</span>Lace 'em up on game night</div>
+          </div>
+          <a class="btn btn-primary" data-scroll="join" href="#join" style="margin-top:24px;width:100%;justify-content:center;">Start your registration</a>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== STANDINGS ============================== -->
+  <section class="band alt" id="standings">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="lead">
+          <span class="eyebrow">Standings · Season 1</span>
+          <h2>The race for the Cup.</h2>
+          <p>Top of each division through this week. Two points a win, one for an overtime loss — same as the real thing.</p>
+        </div>
+        <a class="see-all" data-scroll="standings" data-link="Full standings" href="#">Full standings<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="stand-wrap reveal">
+        <div class="stand-card" id="standEast"></div>
+        <div class="stand-card" id="standWest"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== CLUBS ============================== -->
+  <section class="band" id="clubs">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="lead">
+          <span class="eyebrow">The clubs</span>
+          <h2>Eight franchises. One trophy.</h2>
+          <p>Every club runs its own room — a front office, a roster, and a rivalry waiting to happen. Pick yours.</p>
+        </div>
+        <a class="see-all" data-scroll="clubs" data-link="All clubs" href="#">All clubs<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="clubs-grid reveal" id="clubsGrid"></div>
+    </div>
+  </section>
+
+  <!-- ============================== LEADERS ============================== -->
+  <section class="band alt" id="leaders">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="lead">
+          <span class="eyebrow">Stat leaders</span>
+          <h2>Who's lighting the lamp.</h2>
+          <p>The league's hottest sticks this season — points, goals, and the wall between the pipes.</p>
+        </div>
+        <a class="see-all" data-scroll="leaders" data-link="All player stats" href="#">All player stats<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="lead-grid reveal">
+        <div class="lead-card">
+          <div class="lc-head"><h3>Points leaders</h3><span class="eyebrow">GP · G · A · PTS</span></div>
+          <div id="leadersList"></div>
+        </div>
+        <div class="lead-side">
+          <div class="goalie-card" id="goalieCard"></div>
+          <div class="lead-card">
+            <div class="lc-head"><h3>Goal leaders</h3><span class="eyebrow">Goals</span></div>
+            <div id="goalList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== SCHEDULE ============================== -->
+  <section class="band" id="schedule">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="lead">
+          <span class="eyebrow">Upcoming games</span>
+          <h2>Next on the sheet.</h2>
+          <p>Puck drops are set in Eastern. Servers are picked once both clubs lock their preferences.</p>
+        </div>
+        <a class="see-all" data-scroll="schedule" data-link="Full schedule" href="#">Full schedule<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="sched-list reveal" id="schedList"></div>
+    </div>
+  </section>
+
+  <!-- ============================== NEWS ============================== -->
+  <section class="band alt" id="news">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="lead">
+          <span class="eyebrow">Off the wire</span>
+          <h2>Around the league.</h2>
+          <p>Recaps, roster moves, and rulings from the league office.</p>
+        </div>
+        <a class="see-all" data-scroll="news" data-link="All news" href="#">All news<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="news-grid reveal" id="newsGrid"></div>
+    </div>
+  </section>
+
+  <!-- ============================== JOIN ============================== -->
+  <section class="band" id="join">
+    <div class="wrap">
+      <div class="join reveal">
+        <div class="join-rink" id="joinRink"></div>
+        <div class="join-in">
+          <span class="eyebrow">Roster spots are filling</span>
+          <h2>Your club is one shift away.</h2>
+          <p>Sign in with Discord, register for Season 1, and get drafted. Free to play — all you bring is your stick.</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary btn-lg" data-link="Sign up for Season 1" href="#">Sign up for Season 1<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <a class="btn btn-ghost btn-lg" data-link="Join the Discord" href="#">Join the Discord</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============================== FOOTER ============================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="#top" data-scroll="top"><span class="mark" id="footMark"></span><span><b>CHEL GAMING</b><span class="wm">Hockey League</span></span></a>
+        <p>The competitive home of 6v6 EA Sports NHL 26. Run by players, for players — since Season 1.</p>
+        <div class="foot-soc">
+          <a class="icon-btn" data-link="Discord" href="#" aria-label="Discord"><svg class="discord-glyph" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.5a14.6 14.6 0 0 1 4.3 2.2 13.5 13.5 0 0 0-11-.1A14.3 14.3 0 0 1 8.9 3.5L8.6 3a19.7 19.7 0 0 0-4.9 1.4A20.9 20.9 0 0 0 .1 18.6a19.9 19.9 0 0 0 6 3l.7-1.1a12.9 12.9 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l.7 1.1a19.8 19.8 0 0 0 6-3 20.8 20.8 0 0 0-3.6-14.2ZM8.3 15.3c-1.2 0-2.1-1.1-2.1-2.4S7.1 10.5 8.3 10.5s2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Zm7.4 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Z"/></svg></a>
+        </div>
+      </div>
+      <div class="foot-col"><h4>League</h4><a data-scroll="standings" href="#">Standings</a><a data-scroll="schedule" href="#">Schedule</a><a data-link="Playoffs" href="#">Playoffs</a><a data-link="Power Rankings" href="#">Power Rankings</a><a data-link="Records" href="#">Records</a></div>
+      <div class="foot-col"><h4>Clubs</h4><a data-scroll="clubs" href="#">All Clubs</a><a data-link="Free Agency" href="#">Free Agency</a><a data-link="Trade Block" href="#">Trade Block</a><a data-link="Transactions" href="#">Transactions</a></div>
+      <div class="foot-col"><h4>Players</h4><a data-link="Player Directory" href="#">Directory</a><a data-scroll="leaders" href="#">Stat Leaders</a><a data-link="Awards" href="#">Awards</a><a data-scroll="join" href="#">Sign Up</a></div>
+      <div class="foot-col"><h4>Community</h4><a data-scroll="news" href="#">News</a><a data-link="Rulebook" href="#">Rulebook</a><a data-link="Action Center" href="#">Action Center</a><a data-link="Discord" href="#">Discord</a></div>
+    </div>
+    <div class="foot-base">
+      <span>© Season 1 · Chel Gaming Hockey League. Built for the players.</span>
+      <span class="pv-note"><span class="live-dot" style="position:static"></span>Design concept preview — not the live site</span>
+    </div>
+  </div>
+</footer>
+
+<div class="toast" id="toast"><span class="tk">→</span><span id="toastMsg"></span></div>
+
+<script>
+/* ============================== DATA ============================== */
+const TEAMS = [
+  {code:'CBR', name:'Circuit Breakers', city:'Voltage City', arena:'The Grid', div:'East', color:'#E8B93C'},
+  {code:'ICE', name:'Midnight Icehawks', city:'Duskmoor', arena:'Nest Arena', div:'East', color:'#8E7EE8'},
+  {code:'TUN', name:'Tundra Wolves', city:'Greywater', arena:'Den Arena', div:'East', color:'#6FA3C7'},
+  {code:'ANA', name:'Anaheim Ducks', city:'Nord Harbor', arena:'The Icebox', div:'East', color:'#2FB6BC'},
+  {code:'TUC', name:'Tucson Vipers', city:'Ashfall', arena:'The Pit', div:'West', color:'#F0762E'},
+  {code:'AUR', name:'Aurora Blades', city:'Northshore', arena:'Lights Center', div:'West', color:'#3FBE82'},
+  {code:'YET', name:'Steel Yetis', city:'Iron Ridge', arena:'The Foundry', div:'West', color:'#DB6088'},
+  {code:'POL', name:'Polar Reign', city:'Whitecliff', arena:'The Throne', div:'West', color:'#7C93A6'},
+];
+const T = Object.fromEntries(TEAMS.map(t=>[t.code,t]));
+const STAND = {
+  East:[['CBR',9,2,1,44,29],['ICE',8,3,1,41,31],['TUN',6,5,1,36,35],['ANA',4,7,1,28,40]],
+  West:[['TUC',10,1,1,49,25],['AUR',7,4,1,38,32],['YET',6,6,0,34,36],['POL',3,8,1,26,45]],
+};
+const LEADERS = [
+  ['Frostbyte','TUC',12,14,21],['SnipeShowVI','CBR',12,18,15],['TopShelfTy','ICE',12,12,18],
+  ['GlassEater','AUR',11,9,19],['BarDownBo','YET',12,15,11]
+];
+const GOALS = [['SnipeShowVI','CBR',18],['BarDownBo','YET',15],['Frostbyte','TUC',14]];
+const GOALIE = {name:'IronWall_31', team:'TUC', gaa:'1.92', svp:'.931', so:3};
+const GAMES = [
+  ['Fri','9:00 PM ET','CBR','ICE'],['Fri','9:40 PM ET','TUC','AUR'],
+  ['Sat','8:20 PM ET','YET','POL'],['Sat','9:00 PM ET','TUN','ANA']
+];
+const NEWS = [
+  ['League','Season 1 rosters are locking — draft night goes live Friday','Eight front offices, one board. Here’s how the inaugural draft order shakes out and what each club needs.','2 days ago', true],
+  ['Recap','Vipers stay perfect on the road with a 5–2 win in Voltage City','Tucson’s top line did the damage early and IronWall slammed the door late.','4 days ago', false],
+  ['Rulebook','Overtime moves to 3-on-3 for the regular season','A quick breakdown of the new OT format and how it affects the standings math.','1 week ago', false],
+];
+
+/* ============================== HELPERS ============================== */
+const $ = (s,r=document)=>r.querySelector(s);
+function lum(hex){const c=hex.replace('#','');const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);return (0.299*r+0.587*g+0.114*b)/255;}
+function ink(hex){return lum(hex)>0.62?'#0D1417':'#ffffff';}
+function crest(code,size){const t=T[code]; if(!t) return '';
+  const fg=ink(t.color); const id='g'+code+Math.random().toString(36).slice(2,6);
+  return `<svg class="cr" viewBox="0 0 100 100" style="width:${size}px;height:${size}px" role="img" aria-label="${t.name} crest">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${t.color}"/><stop offset="1" stop-color="${shade(t.color,-14)}"/></linearGradient></defs>
+    <rect x="4" y="4" width="92" height="92" rx="24" fill="url(#${id})"/>
+    <path d="M4 66 L52 30 L96 60 L96 76 Q96 96 76 96 L24 96 Q4 96 4 76 Z" fill="${fg}" opacity="0.10"/>
+    <path d="M50 12 L58 24 L44 24 Z" fill="${fg}" opacity="0.16"/>
+    <text x="50" y="63" text-anchor="middle" font-family="Bricolage Grotesque, sans-serif" font-weight="800" font-size="34" letter-spacing="-1" fill="${fg}">${code}</text>
+  </svg>`;
+}
+function shade(hex,amt){const c=hex.replace('#','');let r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+  r=Math.max(0,Math.min(255,r+amt*2.2));g=Math.max(0,Math.min(255,g+amt*2.2));b=Math.max(0,Math.min(255,b+amt*2.2));
+  return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');}
+function markSVG(){return `<svg viewBox="0 0 100 100" fill="none"><rect x="4" y="4" width="92" height="92" rx="26" fill="var(--deep)"/>
+  <path d="M28 68 Q28 40 50 40 Q72 40 72 68" stroke="var(--frost)" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="50" cy="72" r="6" fill="#fff"/><path d="M30 30 L44 44 M70 30 L56 44" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".85"/></svg>`;}
+
+/* isometric rink markings (top-down; tilted by CSS) */
+function rinkSVG(){
+  return `<svg viewBox="0 0 660 330" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <clipPath id="rc"><rect x="8" y="8" width="644" height="314" rx="150" ry="150"/></clipPath>
+      <radialGradient id="ig" cx="50%" cy="42%" r="70%">
+        <stop offset="0" stop-color="var(--ice)"/><stop offset="1" stop-color="color-mix(in srgb, var(--ice) 86%, var(--hb-blue))"/></radialGradient>
+    </defs>
+    <rect x="8" y="8" width="644" height="314" rx="150" ry="150" fill="url(#ig)" stroke="var(--board)" stroke-width="5"/>
+    <g clip-path="url(#rc)" fill="none">
+      <line x1="330" y1="8" x2="330" y2="322" stroke="var(--hb-red)" stroke-width="9"/>
+      <line x1="238" y1="8" x2="238" y2="322" stroke="var(--hb-blue)" stroke-width="9"/>
+      <line x1="422" y1="8" x2="422" y2="322" stroke="var(--hb-blue)" stroke-width="9"/>
+      <line x1="70" y1="8" x2="70" y2="322" stroke="var(--hb-red)" stroke-width="4"/>
+      <line x1="590" y1="8" x2="590" y2="322" stroke="var(--hb-red)" stroke-width="4"/>
+      <path d="M70 128 A46 46 0 0 1 70 202" fill="var(--crease)" stroke="var(--hb-red)" stroke-width="3"/>
+      <path d="M590 128 A46 46 0 0 0 590 202" fill="var(--crease)" stroke="var(--hb-red)" stroke-width="3"/>
+      <circle cx="330" cy="165" r="54" stroke="var(--hb-blue)" stroke-width="3.5"/>
+      <circle cx="330" cy="165" r="6" fill="var(--hb-blue)"/>
+      <circle cx="158" cy="96" r="42" stroke="var(--hb-red)" stroke-width="3.5"/><circle cx="158" cy="96" r="5" fill="var(--hb-red)"/>
+      <circle cx="158" cy="234" r="42" stroke="var(--hb-red)" stroke-width="3.5"/><circle cx="158" cy="234" r="5" fill="var(--hb-red)"/>
+      <circle cx="502" cy="96" r="42" stroke="var(--hb-red)" stroke-width="3.5"/><circle cx="502" cy="96" r="5" fill="var(--hb-red)"/>
+      <circle cx="502" cy="234" r="42" stroke="var(--hb-red)" stroke-width="3.5"/><circle cx="502" cy="234" r="5" fill="var(--hb-red)"/>
+      <circle cx="284" cy="112" r="5" fill="var(--hb-red)"/><circle cx="284" cy="218" r="5" fill="var(--hb-red)"/>
+      <circle cx="376" cy="112" r="5" fill="var(--hb-red)"/><circle cx="376" cy="218" r="5" fill="var(--hb-red)"/>
+    </g>
+  </svg>`;
+}
+
+/* ============================== NAV MODEL ============================== */
+const NAV = [
+  ['League','#standings','standings',[
+    ['ic','Standings','standings','M4 20V10M10 20V4M16 20v-8M22 20H2'],
+    ['ic','Schedule','schedule','M3 4h18v17H3zM3 9h18M8 2v4M16 2v4'],
+    ['ic','Playoffs','__Playoffs','M6 9V2h12v7a6 6 0 0 1-12 0zM6 5H3v2a3 3 0 0 0 3 3M18 5h3v2a3 3 0 0 1-3 3M9 20h6M12 15v5'],
+    ['ic','Power Rankings','__Power Rankings','M4 20V10M10 20V4M16 20v-8M22 20H2'],
+    ['ic','Records','__Records','M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-3M9 3h6v4H9z'],
+  ]],
+  ['Clubs','#clubs','clubs','__CLUBS__'],
+  ['Players','#leaders','leaders',[
+    ['ic','Player Directory','__Player Directory','M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'],
+    ['ic','Stat Leaders','leaders','M4 20V10M10 20V4M16 20v-8M22 20H2'],
+    ['ic','Awards','__Awards','M6 9V2h12v7a6 6 0 0 1-12 0zM6 5H3v2a3 3 0 0 0 3 3M18 5h3v2a3 3 0 0 1-3 3M9 20h6M12 15v5'],
+    ['ic','Sign Up','join','M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6'],
+  ]],
+  ['Community','#news','news',[
+    ['ic','News','news','M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4M16 6h2M16 10h2M10 6h2v4h-2z'],
+    ['ic','Rulebook','__Rulebook','M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'],
+    ['ic','Action Center','__Action Center','M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0'],
+    ['ic','Discord','__Discord','M8 12h.01M16 12h.01M7.5 7.5c3-1 6-1 9 0M7.5 16.5c3 1 6 1 9 0'],
+  ]],
+];
+
+function iconSVG(d){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;}
+function ddContent(items){
+  if(items==='__CLUBS__'){
+    let h = `<a class="dd-item" data-scroll="clubs"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-3"/></svg></span>All Clubs<span class="dd-sub">8</span></a><div class="dd-sep"></div>`;
+    h += TEAMS.map(t=>`<a class="dd-item" data-link="${t.name}"><span class="cr">${crest(t.code,20)}</span>${t.name}<span class="dd-sub">${t.div}</span></a>`).join('');
+    return h;
+  }
+  return items.map(([,label,target,d])=>{
+    const attr = target.startsWith('__') ? `data-link="${label}"` : `data-scroll="${target}"`;
+    return `<a class="dd-item" ${attr}><span class="ic">${iconSVG(d)}</span>${label}</a>`;
+  }).join('');
+}
+function caret(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>';}
+
+/* ============================== RENDER ============================== */
+function render(){
+  $('#brandMark').innerHTML = markSVG();
+  $('#footMark').innerHTML = markSVG();
+
+  // nav
+  $('#primaryNav').innerHTML = NAV.map(([label,href,scroll,items])=>`
+    <div class="navgrp">
+      <a class="navtop" data-scroll="${scroll}" href="${href}">${label}${caret()}</a>
+      <div class="dropdown">${ddContent(items)}</div>
+    </div>`).join('');
+
+  // mobile menu
+  let mm = '';
+  NAV.forEach(([label,,scroll,items])=>{
+    mm += `<div class="mm-group">${label}</div>`;
+    mm += `<a data-scroll="${scroll}">${label} overview</a>`;
+    if(items!=='__CLUBS__' && Array.isArray(items)){
+      items.forEach(([,l,t])=>{ const a = t.startsWith('__')?`data-link="${l}"`:`data-scroll="${t}"`; mm+=`<a ${a}>${l}</a>`; });
+    }
+    if(items==='__CLUBS__'){ TEAMS.forEach(t=>{ mm+=`<a data-link="${t.name}">${t.name}</a>`; }); }
+  });
+  mm += `<div class="mm-cta"><a class="btn btn-ghost" data-link="Sign in with Discord">Sign in</a><a class="btn btn-primary" data-scroll="join">Sign up</a></div>`;
+  $('#mobileMenu').innerHTML = mm;
+
+  // hero stage
+  $('#rinkStage').innerHTML = rinkSVG();
+  $('#chipScore').innerHTML = `<div class="chip-lbl">Live · 3rd period</div>
+    <div class="cs-row"><span class="cr">${crest('TUC',26)}</span><span class="nm">Vipers</span><span class="sc">3</span></div>
+    <div class="cs-row"><span class="cr">${crest('CBR',26)}</span><span class="nm">Breakers</span><span class="sc">2</span></div>
+    <div class="cs-foot"><span class="live-dot" style="position:static"></span>12:04 remaining</div>`;
+  $('#chipLead').innerHTML = `<div class="chip-lbl">Points leaders</div>
+    ${LEADERS.slice(0,3).map((l,i)=>`<div class="cl-row"><span class="rk">${i+1}</span><span class="cr">${crest(l[1],20)}</span><span class="nm">${l[0]}</span><span class="pt">${l[3]+l[4]}</span></div>`).join('')}`;
+  $('#joinRink').innerHTML = rinkSVG();
+
+  // ticker
+  const order = [...STAND.West,...STAND.East].map(r=>[r[0], r[1]*2+r[3]]).sort((a,b)=>b[1]-a[1]);
+  const tiItems = order.map(([code,pts],i)=>`<span class="ti" data-scroll="standings"><span class="mono">${String(i+1).padStart(2,'0')}</span><span class="cr">${crest(code,18)}</span>${T[code].name}<span class="mono">${pts} PTS</span><span class="dot"></span></span>`).join('');
+  $('#ticker').innerHTML = `<div class="ticker-track">${tiItems}${tiItems}</div>`;
+
+  // standings
+  function standCard(div){
+    const rows = STAND[div];
+    const head = `<div class="strow hcol"><span>#</span><span>Club</span><span class="c">GP</span><span class="c">W</span><span class="c">L</span><span class="c">PTS</span></div>`;
+    const body = rows.map((r,i)=>{const [code,w,l,otl]=r; const gp=w+l+otl, pts=w*2+otl;
+      return `<div class="strow" data-link="${T[code].name}"><span class="rk">${i+1}</span>
+        <span class="tm"><span class="cr">${crest(code,24)}</span><span class="nm">${T[code].name}</span></span>
+        <span class="c tnum">${gp}</span><span class="c tnum">${w}</span><span class="c tnum">${l}</span><span class="c pts tnum">${pts}</span></div>`;}).join('');
+    return `<div class="stand-head"><span class="tag">${div}</span><h3>Division</h3></div>${head}${body}`;
+  }
+  $('#standEast').innerHTML = standCard('East');
+  $('#standWest').innerHTML = standCard('West');
+
+  // clubs
+  $('#clubsGrid').innerHTML = TEAMS.map(t=>`
+    <div class="club" style="--tc:${t.color}" data-link="${t.name}">
+      <span class="cr">${crest(t.code,52)}</span>
+      <h3>${t.name}</h3>
+      <div class="meta">${t.city} · ${t.arena}</div>
+      <span class="div">${t.div} Division</span>
+    </div>`).join('');
+
+  // leaders
+  $('#leadersList').innerHTML = LEADERS.map((l,i)=>{const [n,tm,gp,g,a]=l; const p=g+a;
+    return `<div class="lrow ${i===0?'top':''}" data-link="${n}"><span class="rk">${i+1}</span>
+      <span class="cr">${crest(tm,34)}</span>
+      <span class="who"><span class="nm">${n}</span><span class="tl">${T[tm].name}</span></span>
+      <span class="stat"><b>${p}</b><span>${gp} GP · ${g}G · ${a}A</span></span></div>`;}).join('');
+  $('#goalList').innerHTML = GOALS.map((l,i)=>{const [n,tm,g]=l;
+    return `<div class="lrow" data-link="${n}"><span class="rk">${i+1}</span><span class="cr">${crest(tm,34)}</span>
+      <span class="who"><span class="nm">${n}</span><span class="tl">${T[tm].name}</span></span>
+      <span class="stat"><b>${g}</b><span>Goals</span></span></div>`;}).join('');
+  $('#goalieCard').innerHTML = `<div class="gpuck"></div><span class="eyebrow">Top goaltender</span>
+    <div class="gname">${GOALIE.name}</div><div class="gteam">${T[GOALIE.team].name}</div>
+    <div class="gstats"><div><b>${GOALIE.gaa}</b><span>GAA</span></div><div><b>${GOALIE.svp}</b><span>SV%</span></div><div><b>${GOALIE.so}</b><span>Shutouts</span></div></div>`;
+
+  // schedule
+  $('#schedList').innerHTML = GAMES.map(([d,t,h,a])=>`
+    <div class="game" data-link="${T[h].name} vs ${T[a].name}">
+      <div class="when"><b>${d}</b><span>${t}</span></div>
+      <div class="match"><span class="cr">${crest(h,30)}</span>${T[h].name}<span class="vs">vs</span><span class="cr">${crest(a,30)}</span>${T[a].name}</div>
+      <div class="goto">Match card<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+    </div>`).join('');
+
+  // news
+  const nimg = (c)=>`<svg viewBox="0 0 400 200" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="n${c.replace(/\W/g,'')}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--deep)"/><stop offset="1" stop-color="color-mix(in srgb,var(--deep) 55%, #06222a)"/></linearGradient></defs><rect width="400" height="200" fill="url(#n${c.replace(/\W/g,'')})"/><g opacity="0.5" transform="translate(240,40) rotate(12) scale(0.9)">${rinkSVG().replace('<svg','<svg width="260"')}</g></svg>`;
+  $('#newsGrid').innerHTML = NEWS.map(([cat,title,dek,meta,lead],i)=>`
+    <article class="ncard ${lead?'lead':''}" data-link="${title}">
+      <div class="nimg">${nimg(cat+i)}</div>
+      <div class="nbody"><span class="ncat">${cat}</span><h3>${title}</h3><p>${dek}</p><div class="nmeta">${meta}</div></div>
+    </article>`).join('');
+}
+
+/* ============================== INTERACTION ============================== */
+function toast(msg){const t=$('#toast'); $('#toastMsg').textContent=msg; t.classList.add('on');
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on'),2600);}
+function closeMobile(){ $('#mobileMenu').classList.remove('on'); $('#ham').setAttribute('aria-expanded','false'); }
+
+document.addEventListener('click',e=>{
+  const s = e.target.closest('[data-scroll]');
+  if(s){ e.preventDefault(); const id=s.getAttribute('data-scroll'); const el=document.getElementById(id);
+    if(el){ el.scrollIntoView({behavior:'smooth',block:'start'}); } closeMobile(); return; }
+  const l = e.target.closest('[data-link]');
+  if(l){ e.preventDefault(); toast(l.getAttribute('data-link')+' — opens on the full site'); closeMobile(); return; }
+});
+
+$('#ham').addEventListener('click',()=>{ const m=$('#mobileMenu'); const on=m.classList.toggle('on'); $('#ham').setAttribute('aria-expanded',on?'true':'false'); });
+
+// theme
+const SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{localStorage.setItem('cghl-theme',t);}catch(e){}
+  $('#themeBtn').innerHTML = t==='dark'?SUN:MOON; }
+$('#themeBtn').addEventListener('click',()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'));
+
+// reveal on scroll
+function initReveal(){
+  const io = new IntersectionObserver((es)=>{ es.forEach(x=>{ if(x.isIntersecting){ x.target.classList.add('in'); io.unobserve(x.target);} }); },{threshold:.12, rootMargin:'0px 0px -8% 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+}
+
+/* init */
+render();
+(function(){ let t='light'; try{ const saved=localStorage.getItem('cghl-theme'); if(saved) t=saved; }catch(e){} applyTheme(t); })();
+initReveal();
+</script>
+</body>
+</html>

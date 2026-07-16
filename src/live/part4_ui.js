@@ -468,15 +468,19 @@ CG.NAV = [
   ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"],["Teams","#/teams"],
   ["Players","#/players"],["Stats","#/stats"],["Awards","#/awards"],["News","#/news"],["Rulebook","#/rulebook"]
 ];
-CG.hubLabel = function(){
-  switch(CG.role()){
-    case "guest": return null;
-    case "member": return ["My Hub","#/hub"];
-    case "mgmt": return ["Team HQ","#/hub"];
-    case "staff": return ["Staff Desk","#/hub"];
-    case "commish": return ["Control Center","#/admin"];
-  }
+/* Every signed-in member always gets "My Hub" (the normal player hub). Any extra
+   role adds its own tab to the RIGHT of it. Returns an array of [label, href]. */
+CG.hubTabs = function(){
+  var r = CG.role();
+  if (r==="guest") return [];
+  var tabs = [["My Hub","#/hub"]];
+  if (r==="mgmt") tabs.push(["Team HQ","#/hub/roster"]);
+  else if (r==="staff") tabs.push(["Staff Desk","#/hub/complaints"]);
+  else if (r==="commish") tabs.push(["Control Center","#/admin"]);
+  return tabs;
 };
+/* back-compat: first tab (My Hub) for any older callers */
+CG.hubLabel = function(){ var t = CG.hubTabs(); return t.length ? t[0] : null; };
 CG.renderChrome = function(){
   /* demo bar (prototype only — the live site uses real Discord auth, no seat switcher) */
   var demobar = $("#demobar");
@@ -534,14 +538,14 @@ CG.renderChrome = function(){
   var tk = items.join("");
   $("#ticker").innerHTML = '<div class="tk-track"><div style="display:flex;height:100%">'+tk+'</div><div style="display:flex;height:100%" aria-hidden="true">'+tk+'</div></div>';
   /* masthead */
-  var hub = CG.hubLabel();
+  var hubTabs = CG.hubTabs();
   var me = CG.me(); var p = CG.persona();
   $("#masthead").innerHTML = '<div class="shell mh">'+
     '<a class="mh-brand" href="#/home" aria-label="Chel Gaming home">'+CG.leagueMark(36)+
       '<span class="wm"><b>CHEL GAMING</b><span>Hockey League</span></span></a>'+
     '<nav class="mh-nav" aria-label="Primary">'+
       CG.NAV.map(function(n){ return '<a href="'+n[1]+'" data-navlink>'+n[0]+'</a>'; }).join("")+
-      (hub?'<a href="'+hub[1]+'" class="hub" data-navlink>'+hub[0]+' →</a>':"")+
+      hubTabs.map(function(h){ return '<a href="'+h[1]+'" class="hub" data-navlink>'+h[0]+' →</a>'; }).join("")+
     '</nav>'+
     '<div class="mh-right">'+
       '<button class="icon-btn" id="searchBtn" aria-label="Search (press /)" title="Search ( / )">'+CG.ic("search")+'</button>'+
@@ -555,7 +559,7 @@ CG.renderChrome = function(){
       '<button class="icon-btn mh-burger" id="burger" aria-label="Menu">'+CG.ic("menu")+'</button>'+
     '</div></div>';
   /* mobile nav */
-  var mnav = CG.NAV.concat(hub?[[hub[0],hub[1]]]:[]);
+  var mnav = CG.NAV.concat(hubTabs);
   $("#mobilenav").innerHTML = '<div class="mn-h">'+CG.leagueMark(34)+
     '<button class="icon-btn" data-mn-close aria-label="Close menu" style="border-color:#39434B;background:transparent;color:#fff">'+CG.ic("x")+'</button></div>'+
     '<div class="mn-g">League</div>'+
