@@ -468,7 +468,12 @@ CG.teamLine = function(code){
 /* ---------- TEAMS ---------- */
 CG.ROUTES.teams = function(){
   var lg = CG.lg;
-  var head = CG.pageHead("The clubs","Eight franchises. One trophy.","Every club runs a real room — front office, 12-player roster, and a rivalry waiting to happen.");
+  var topL = CG.TOP_LEAGUE;
+  var tierBadge = topL ? '<div class="card" style="padding:12px 16px;display:flex;align-items:center;gap:14px">'+
+      '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:46px;height:46px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:7.5px;letter-spacing:.12em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:20px;line-height:1">'+topL.tier+'</b></div>'+
+      '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
+    '</div>' : "";
+  var head = CG.pageHead("The clubs","Eight franchises. One trophy.","Every club runs a real room — front office, 12-player roster, and a rivalry waiting to happen.", tierBadge);
   var pr = {}; lg.powerRankings.forEach(function(p){ pr[p.team]=p.rank; });
   var cards = CG.TEAMS.map(function(t){
     var s = lg.teams[t.code];

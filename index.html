@@ -2671,7 +2671,12 @@ CG.teamLine = function(code){
 /* ---------- TEAMS ---------- */
 CG.ROUTES.teams = function(){
   var lg = CG.lg;
-  var head = CG.pageHead("The clubs","Eight franchises. One trophy.","Every club runs a real room — front office, 12-player roster, and a rivalry waiting to happen.");
+  var topL = CG.TOP_LEAGUE;
+  var tierBadge = topL ? '<div class="card" style="padding:12px 16px;display:flex;align-items:center;gap:14px">'+
+      '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:46px;height:46px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:7.5px;letter-spacing:.12em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:20px;line-height:1">'+topL.tier+'</b></div>'+
+      '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
+    '</div>' : "";
+  var head = CG.pageHead("The clubs","Eight franchises. One trophy.","Every club runs a real room — front office, 12-player roster, and a rivalry waiting to happen.", tierBadge);
   var pr = {}; lg.powerRankings.forEach(function(p){ pr[p.team]=p.rank; });
   var cards = CG.TEAMS.map(function(t){
     var s = lg.teams[t.code];
@@ -5542,24 +5547,42 @@ CG.buildLiveLeague = async function(){
     sb.from("transactions").select("*").order("occurred_at", { ascending:false }),
     sb.from("news").select("*").order("published_at", { ascending:false }),
     sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
-    sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)")
+    sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)"),
+    sb.from("leagues").select("*").order("sort_order")
   ]);
-  /* first 9 are public-readable and required; the last two (draft_picks,
-     season_registrations) are manager-gated by RLS and fail for guests —
-     they're optional here and reloaded after auth for managers. */
+  /* first 9 are public-readable and required; draft_picks + season_registrations
+     (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
+     after auth for managers. leagues (11) is public-readable but non-fatal. */
   var bad = q.slice(0,9).find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=(q[2].data||[])[0]||null,
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
-      draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[];
+      draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[],
+      leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[];
+
+  /* ---- leagues / tiers (CG umbrella; CGHL = top tier, inspired by NHL) ---- */
+  var leagueById={};
+  CG.LEAGUES = leaguesRaw.map(function(l){
+    var obj = { id:l.id, code:l.code, name:l.name, tier:l.tier, inspiration:l.inspiration||null,
+      sort:(l.sort_order==null?0:l.sort_order), teamCount:0 };
+    leagueById[l.id]=obj; return obj;
+  });
+  /* fallback so the UI always has the top tier even before the table is seeded */
+  if (!CG.LEAGUES.length) CG.LEAGUES = [{ id:null, code:"CGHL", name:"Chel Gaming Hockey League", tier:1, inspiration:"NHL", sort:0, teamCount:0 }];
+  CG.LEAGUE_BY_CODE={}; CG.LEAGUES.forEach(function(l){ CG.LEAGUE_BY_CODE[l.code]=l; });
+  var topLeague = CG.LEAGUES.slice().sort(function(a,b){ return a.tier-b.tier || a.sort-b.sort; })[0];
+  CG.TOP_LEAGUE = topLeague;
 
   /* ---- team registry (rebuilt from the DB: real logos, ids, management) ---- */
   var teamById={}, id2code={};
   CG.TEAMS = teamsRaw.map(function(t){
+    var lg2 = t.league_id ? leagueById[t.league_id] : topLeague;
+    if (lg2) lg2.teamCount++;
     var obj = { code:t.code, name:t.name, city:t.city||"", arena:t.arena||"",
       div:t.division||"East", color:(t.color||"#8899A6").toUpperCase(), est:t.founded_season||1,
       logo:t.logo_url||null, id:t.id,
+      leagueId:(lg2&&lg2.id)||null, leagueCode:(lg2&&lg2.code)||"CGHL",
       owner:t.owner_profile_id, gm:t.gm_profile_id, agm:t.agm_profile_id,
       eaClub:t.ea_club_name||null };
     teamById[t.id]=obj; id2code[t.id]=t.code; return obj;
@@ -5787,6 +5810,21 @@ CG.loadManagerData = async function(){
     }
   } catch(e){}
 };
+/* re-read the leagues/tiers table (after creating a tier) and recompute counts */
+CG.loadLeagues = async function(){
+  if (!CG.sb) return;
+  try {
+    var r = await CG.sb.from("leagues").select("*").order("sort_order");
+    if (r.error || !r.data) return;
+    CG.LEAGUES = r.data.map(function(l){ return { id:l.id, code:l.code, name:l.name, tier:l.tier,
+      inspiration:l.inspiration||null, sort:(l.sort_order==null?0:l.sort_order), teamCount:0 }; });
+    if (!CG.LEAGUES.length) return;
+    CG.LEAGUE_BY_CODE={}; CG.LEAGUES.forEach(function(l){ CG.LEAGUE_BY_CODE[l.code]=l; });
+    (CG.TEAMS||[]).forEach(function(t){ var l=CG.LEAGUE_BY_CODE[t.leagueCode]; if(l) l.teamCount++; });
+    CG.TOP_LEAGUE = CG.LEAGUES.slice().sort(function(a,b){ return a.tier-b.tier||a.sort-b.sort; })[0];
+  } catch(e){}
+};
+
 CG.initAuth = async function(){
   if (!CG.sb || !CG.sb.auth) return;
   try {
@@ -6458,18 +6496,75 @@ CG.AFTER._admUsers = function(){
   document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
 };
 
+/* ================================================================
+   LIVE ADMIN: LEAGUES & TIERS (CG umbrella — create_league RPC)
+   ================================================================ */
+CG.admLeagues = function(){
+  var leagues=(CG.LEAGUES||[]).slice().sort(function(a,b){ return a.tier-b.tier || a.sort-b.sort; });
+  var totalClubs=(CG.TEAMS||[]).length;
+  var top=(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL";
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Leagues &amp; tiers</h2><p class="lede" style="margin-top:6px">Chel Gaming is the umbrella. Each tier is its own league modeled on a real-world circuit — the <b>'+esc(top)+'</b> sits on top, built on the NHL. Add tiers beneath it (a CGAHL on the AHL, and so on) to grow the pyramid.</p></div>';
+  h+='<div class="grid g3" style="margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+leagues.length+'</b><span>tier'+(leagues.length===1?"":"s")+'</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+totalClubs+'</b><span>clubs</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc(top)+'</b><span>top tier</span></div></div>';
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The Chel Gaming pyramid</h3><span class="chip">'+leagues.length+' tier'+(leagues.length===1?"":"s")+'</span></div>';
+  h+=leagues.map(function(l,i){
+    return '<div class="card-b" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line)":"")+'">'+
+      '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:8.5px;letter-spacing:.14em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:24px;line-height:1">'+l.tier+'</b></div>'+
+      '<div style="flex:1 1 160px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b class="mono" style="font-size:16px">'+esc(l.code)+'</b>'+(i===0?' <span class="chip chip-chrome" style="font-size:9px">TOP TIER</span>':'')+'</div><div style="color:var(--steel);font-size:13px;margin-top:2px">'+esc(l.name)+'</div></div>'+
+      '<div style="flex:0 0 auto;text-align:right"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">MODELED ON</div><b style="font-family:var(--f-disp);font-size:16px">'+esc(l.inspiration||"—")+'</b></div>'+
+      '<div style="flex:0 0 auto;text-align:right;min-width:56px"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">CLUBS</div><b class="num" style="font-family:var(--f-disp);font-size:16px">'+(l.teamCount||0)+'</b></div>'+
+    '</div>';
+  }).join("")+'</div>';
+  var insp=["NHL","AHL","ECHL","KHL","SHL","Liiga","NCAA","CHL","OHL","WHL","QMJHL"];
+  h+='<div class="card"><div class="card-h"><h3>Add a tier</h3></div><div class="card-b">'+
+    '<div class="grid g2" style="gap:14px">'+
+    '<label class="fld"><span>League code</span><input id="lgCode" placeholder="e.g. CGAHL" maxlength="8" style="text-transform:uppercase"></label>'+
+    '<label class="fld"><span>Tier number</span><input id="lgTier" type="number" min="1" max="20" value="'+(leagues.length+1)+'"></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Full name</span><input id="lgName" placeholder="e.g. Chel Gaming American Hockey League"></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Real-world inspiration</span><input id="lgInsp" list="inspList" placeholder="e.g. AHL"><datalist id="inspList">'+insp.map(function(x){ return '<option value="'+x+'">'; }).join("")+'</datalist></label>'+
+    '</div>'+
+    '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn btn-chrome" id="lgCreate">Create tier</button></div>'+
+    '<p class="caption" style="margin-top:12px">A new tier is created empty. Clubs stay in their current league — assigning clubs to a tier (and promotion / relegation between them) is coming next.</p>'+
+  '</div></div>';
+  return h;
+};
+CG.createLeague = function(){
+  var code=(document.getElementById("lgCode").value||"").trim().toUpperCase();
+  var name=(document.getElementById("lgName").value||"").trim();
+  var tier=parseInt(document.getElementById("lgTier").value,10);
+  var insp=(document.getElementById("lgInsp").value||"").trim();
+  if(!code){ CG.toast("Give the tier a code","err"); return; }
+  if(!name){ CG.toast("Give the tier a full name","err"); return; }
+  if(!(tier>=1)){ CG.toast("Tier number must be 1 or more","err"); return; }
+  if((CG.LEAGUE_BY_CODE||{})[code]){ CG.toast(code+" already exists","err"); return; }
+  var btn=document.getElementById("lgCreate"); if(btn){ btn.disabled=true; btn.textContent="Creating…"; }
+  CG.sb.rpc("create_league",{ p_code:code, p_name:name, p_tier:tier, p_inspiration:insp||null }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); if(btn){ btn.disabled=false; btn.textContent="Create tier"; } return; }
+    CG.toast(code+" created","ok");
+    CG.loadLeagues().then(function(){ if(location.hash.indexOf("/leagues")>=0 && CG.router) CG.router(); });
+  });
+};
+CG.AFTER._admLeagues = function(){
+  var b=document.getElementById("lgCreate"); if(b) b.addEventListener("click", CG.createLeague);
+  var code=document.getElementById("lgCode"); if(code) code.addEventListener("input", function(){ var s=this.selectionStart; this.value=this.value.toUpperCase(); try{ this.setSelectionRange(s,s); }catch(e){} });
+};
+
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
   if (CG.role()!=="commish") return CG.unauthorized("The Control Center is commissioner-only.");
   if (param==="preseason") return CG.adminShell("preseason", CG.admPreseason(qs||{}));
   if (param==="users") return CG.adminShell("users", CG.admUsersLive(qs||{}));
+  if (param==="leagues") return CG.adminShell("leagues", CG.admLeagues(qs||{}));
   return CG._origAdminRoute(param, qs);
 };
 CG._origAdminAfter = CG.AFTER.admin;
 CG.AFTER.admin = function(param, qs){
   if (param==="preseason"){ CG.AFTER._preseason(); return; }
   if (param==="users"){ CG.AFTER._admUsers(); return; }
+  if (param==="leagues"){ CG.AFTER._admLeagues(); return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 
@@ -6616,6 +6711,10 @@ CG.bootLive = async function(){
     /* Pre-season central in the Control Center (commissioner) */
     if (CG.ADMIN_NAV && CG.ADMIN_NAV[0] && !CG.ADMIN_NAV[0][1].some(function(it){ return it[0]==="preseason"; })){
       CG.ADMIN_NAV[0][1].splice(1, 0, ["preseason","Pre-season","users"]);
+    }
+    /* Leagues & tiers at the top of the League group (commissioner) */
+    if (CG.ADMIN_NAV && CG.ADMIN_NAV[1] && !CG.ADMIN_NAV[1][1].some(function(it){ return it[0]==="leagues"; })){
+      CG.ADMIN_NAV[1][1].splice(0, 0, ["leagues","Leagues & tiers","trophy"]);
     }
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
