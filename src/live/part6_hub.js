@@ -94,27 +94,25 @@ CG.hubNav = function(section){
     (club.length?'<div class="hs-group">Team HQ</div>'+render(club):"")+'</nav>';
 };
 CG.hubShell = function(section, inner){
-  var notice = (CG.LIVE_MODE && CG.role()==="mgmt")
-    ? '<div class="note chr" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("clock",15)+'<span><b style="font-family:var(--f-disp)">Team HQ is live:</b> the Trade Hub, lineup builder, and server selection all write to the database. Roster waive &amp; trade-block still save on this device only — full persistence is next.</span></div>'
-    : "";
+  var notice = "";
   return '<section class="sec-tight"><div class="shell"><div class="hub-grid">'+CG.hubNav(section)+'<div>'+notice+inner+'</div></div></div></section>';
 };
 CG.unauthorized = function(need){
   return '<section class="sec"><div class="shell"><div class="empty" style="padding:70px 20px">'+
     '<div class="e-art">'+CG.ic("lock",22)+'</div><b>You don’t have access to this area</b>'+
     '<p>'+esc(need||"This area is limited to signed-in league members with the right role.")+'</p>'+
-    '<a class="btn btn-ink" href="#/signin" style="margin-top:18px">Switch demo seat</a></div></div></section>';
+    '<a class="btn btn-ink" href="#/signin" style="margin-top:18px">Sign in</a></div></div></section>';
 };
 
 CG.ROUTES.hub = function(param, qs){
   var r = CG.role();
-  if (r==="guest") return CG.unauthorized("Sign in to reach your dashboard — pick any demo seat to explore the member experience.");
+  if (r==="guest") return CG.unauthorized("Sign in with Discord to reach your dashboard.");
   var section = param||"";
   if (section==="") return CG.hubShell("", CG.hubDashboard());
   if (section==="availability") return CG.hubShell("availability", CG.hubAvailability());
-  if (section==="roster") return CG.can("roster.manage") ? CG.hubShell("roster", CG.hubRoster(qs)) : CG.unauthorized("Roster management is a team-management tool. Switch to the Team Mgmt seat to try it.");
-  if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management. Switch to the Team Mgmt seat to try it.");
-  if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool. Switch to the Team Mgmt seat to try it.");
+  if (section==="roster") return CG.can("roster.manage") ? CG.hubShell("roster", CG.hubRoster(qs)) : CG.unauthorized("Roster management is a team-management tool.");
+  if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management.");
+  if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool.");
   if (section==="schedule") return (CG.can("lineup.build") && CG.LIVE_MODE && CG.hubScheduleLive) ? CG.hubShell("schedule", CG.hubScheduleLive(qs)) : CG.unauthorized("The club schedule desk is a team-management tool.");
   if (section==="complaints") return CG.hubShell("complaints", CG.hubComplaints());
   if (section==="complaint") return CG.hubShell("complaints", CG.hubComplaintDetail(qs.id));
@@ -374,7 +372,7 @@ CG.saveVeto = function(gameId, changedSel){
 
 CG.hubLineup = function(qs){
   var me = CG.me(), lg = CG.lg;
-  if (!me || !CG.lg.byTeam[me.team]) return '<div class="note">This seat has no club attached — the lineup builder belongs to team management. As commissioner you can override any club’s submitted lineup from the matchup page.</div>';
+  if (!me || !CG.lg.byTeam[me.team]) return '<div class="note">This account doesn’t run a club — the lineup builder belongs to team management.</div>';
   var game = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; })
     || lg.schedule.find(function(g){ return (g.home===me.team||g.away===me.team) && g.at>CG.now(); });
   if (!game) return '<div class="empty"><b>No upcoming game</b><p>The schedule is complete — nothing to build.</p></div>';
@@ -1093,7 +1091,7 @@ CG.hubSettings = function(){
     }).join("")+
     '<p class="caption" style="margin-top:10px">Email addresses are never public. Availability answers are visible only to your club’s management and league staff.</p></div></div>'+
     '<div class="card"><div class="card-h"><h3>Demo seat</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Signed in as <b>'+esc(p.who)+'</b>. Switch seats from the yellow strip up top, or:</p>'+
-    '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/signin">'+CG.ic("out",14)+'Switch demo seat</a></div></div></div></div>';
+    '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/signin">'+CG.ic("out",14)+'Sign out</a></div></div></div></div>';
 };
 CG.AFTER.hub = function(param, qs){
   if (param==="availability") CG.AFTER._availability();

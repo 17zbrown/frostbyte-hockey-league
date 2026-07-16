@@ -37,7 +37,7 @@ CG.buildLiveLeague = async function(){
   var q = await Promise.all([
     sb.from("teams").select("*"),
     sb.from("divisions").select("*").order("sort_order"),
-    sb.from("seasons").select("*").order("number", { ascending:false }).limit(1),
+    sb.from("seasons").select("*").order("number", { ascending:false }),
     sb.from("profiles").select("*"),
     sb.from("roster_spots").select("*"),
     sb.from("contracts").select("*"),
@@ -56,6 +56,7 @@ CG.buildLiveLeague = async function(){
      after auth for managers. leagues (11) + game_stats (12) are public but non-fatal. */
   var bad = q.slice(0,9).find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
+  CG._seasonsRaw = (q[2].data||[]);
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=(q[2].data||[])[0]||null,
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
@@ -2111,10 +2112,76 @@ CG.AFTER._admHomepage = function(){
 /* ================================================================
    LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
    ================================================================ */
+/* round-robin season generator (ported from the classic site, verified in prod
+   there): 3 ET slots a night, Wed + Fri, every club plays once per slot —
+   3 a night, 6 a week, GAMES_PER_CLUB slots = the season. */
+CG.GAMES_PER_CLUB = 54;
+CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
+CG.generateSchedule = function(){
+  var s = CG.SEASON;
+  if (!s || !s.id){ CG.toast("Create a season first — the schedule hangs off it","err"); return; }
+  var codes = (CG.TEAMS||[]).map(function(t){ return t.code; });
+  if (codes.length<2){ CG.toast("You need at least two clubs to build a schedule","err"); return; }
+  if ((CG.lg.schedule||[]).length){ CG.toast("A schedule already exists — clear it first to regenerate","err"); return; }
+  var weeks = Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/2);
+  CG.confirm("Generate the "+esc(s.name||"season")+" schedule?",
+    codes.length+" clubs · "+CG.GAMES_PER_CLUB+" games each · 3 a night, 6 a week (Wed + Fri, 9:00 / 9:35 / 10:10 PM ET) · "+weeks+" weeks starting from the season's first Wednesday.",
+    "Generate schedule", function(){
+    function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
+    function ymd(d){ return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0"); }
+    var base = s.starts_at ? new Date(s.starts_at) : new Date();
+    var d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 12, 0, 0));
+    while (d.getUTCDay()!==3) d.setUTCDate(d.getUTCDate()+1);
+    var dates=[];
+    for (var w=0; w<weeks+1; w++){
+      var wed=new Date(d); wed.setUTCDate(d.getUTCDate()+7*w);
+      var fri=new Date(wed); fri.setUTCDate(wed.getUTCDate()+2);
+      dates.push({week:w+1,date:ymd(wed)}); dates.push({week:w+1,date:ymd(fri)});
+    }
+    var arr=codes.slice(); if (arr.length%2) arr.push(null);
+    var m=arr.length, fixed=arr[0], others=arr.slice(1);
+    var perNight=CG.NIGHT_SLOTS.length, rows=[];
+    for (var r=0; r<CG.GAMES_PER_CLUB; r++){
+      var day=dates[Math.floor(r/perNight)]; if(!day) continue;
+      var iso=new Date(day.date+"T"+CG.NIGHT_SLOTS[r%perNight]+":00-04:00").toISOString();
+      var order=[fixed].concat(rrRotate(others,r));
+      for (var i=0;i<m/2;i++){
+        var a=order[i], b=order[m-1-i]; if(!a||!b) continue;
+        if (r%2===1){ var t=a; a=b; b=t; }
+        rows.push({ season_id:s.id, week:day.week, home_team_id:(CG.lg._codeToId||{})[a], away_team_id:(CG.lg._codeToId||{})[b], scheduled_at:iso, status:"scheduled" });
+      }
+    }
+    var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
+    (function insertNext(idx){
+      if (idx>=chunks.length){ CG.toast(rows.length+" games generated — "+CG.GAMES_PER_CLUB+"/club over "+weeks+" weeks","ok"); CG.reloadLeague(); return; }
+      CG.sb.from("games").insert(chunks[idx]).then(function(rz){
+        if (rz.error){ CG.toast("Generation stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
+        insertNext(idx+1);
+      });
+    })(0);
+  });
+};
+CG.clearSchedule = function(){
+  var s = CG.SEASON; if (!s || !s.id) return;
+  var played = (CG.lg.schedule||[]).filter(function(g){ return g.status==="final"; }).length;
+  CG.confirm("Clear the entire schedule?",
+    (CG.lg.schedule||[]).length+" games go, including their codes and server picks"+(played?" — and "+played+" finals WITH their box scores":"")+". This can’t be undone.",
+    "Clear schedule", function(){
+    CG.sb.from("games").delete().eq("season_id", s.id).then(function(r){
+      if (r.error){ CG.toast("Couldn’t clear: "+r.error.message,"err"); return; }
+      CG.toast("Schedule cleared","ok"); CG.reloadLeague();
+    });
+  });
+};
 CG.admScheduleLive = function(){
   var lg = CG.lg;
   var future = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
-  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+future.length+' games to play. Move any game — the EA auto-import matches by clubs + date, so stats follow a rescheduled game automatically.</p></div>';
+  var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px"><div><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+
+    (lg.schedule.length ? future.length+' games to play. Move any game — the EA auto-import matches by clubs + date, so stats follow a rescheduled game automatically.'
+                        : 'No games yet. Generate a full season in one click, then fine-tune any game time by hand.')+'</p></div>'+
+    '<span style="display:inline-flex;gap:8px;align-self:flex-start">'+
+    (lg.schedule.length ? '<button class="btn btn-ghost" id="schedClear">Clear schedule</button>'
+                        : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Auto-generate season</button>')+'</span></div>';
   h += '<div class="card"><div class="card-h"><h3>Upcoming slate</h3><span class="chip">next '+Math.min(future.length,16)+' shown</span></div>'+
     future.slice(0,16).map(function(g){
       return '<div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
@@ -2128,6 +2195,10 @@ CG.admScheduleLive = function(){
   return h;
 };
 CG.AFTER._admScheduleLive = function(){
+  var gen=document.getElementById("schedGen");
+  if (gen) gen.addEventListener("click", CG.generateSchedule);
+  var clr=document.getElementById("schedClear");
+  if (clr) clr.addEventListener("click", CG.clearSchedule);
   document.querySelectorAll("[data-resched-live]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-resched-live");
     var g=CG.lg.schedule.find(function(x){ return x.id===id; }); if(!g) return;
@@ -2170,6 +2241,128 @@ CG.admRatingsLive = function(){
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 (provisional until 5 games). The formula lives in the database (compute_overall) — the site never hand-edits a rating, so every number stays defensible.</span></div></div>';
 };
 
+/* ================================================================
+   LIVE ADMIN: SEASONS — create, edit every setting, delete (guarded)
+   ================================================================ */
+CG._seasonsRaw = CG._seasonsRaw || [];
+CG.admSeasonsLive = function(){
+  var list = (CG._seasonsRaw||[]).slice().sort(function(a,b){ return (b.number||0)-(a.number||0); });
+  var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
+    '<div><h2 class="h-sec">Seasons</h2><p class="lede" style="margin-top:6px">The league’s campaigns — every setting is yours: dates, cap, roster size, registration windows, deadlines. The newest season is the one the whole site runs on.</p></div>'+
+    '<button class="btn btn-chrome" id="seasonAdd" style="align-self:flex-start">'+CG.ic("plus",15)+'New season</button></div>';
+  h += list.length ? list.map(function(s){
+    var live = CG.SEASON && CG.SEASON.id===s.id;
+    var st = s.status==="active"?"chip-win":s.status==="complete"?"chip":"chip-chrome";
+    return '<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>'+esc(s.name||("Season "+s.number))+'</h3>'+
+      '<span style="display:inline-flex;gap:8px;align-items:center">'+(live?'<span class="chip chip-chrome">Site runs on this</span>':"")+
+      '<span class="chip '+st+'">'+esc(s.status)+'</span>'+(s.registration_open?'<span class="chip chip-win">Registration open</span>':"")+'</span></div>'+
+      '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
+        [["Number", s.number],
+         ["Starts", s.starts_at?CG.fmtDay(Date.parse(s.starts_at)):"—"],
+         ["Ends", s.ends_at?CG.fmtDay(Date.parse(s.ends_at)):"—"],
+         ["Salary cap", s.salary_cap?("$"+(s.salary_cap/1e6)+"M"):"—"],
+         ["Roster max", s.roster_max||"—"],
+         ["Trade deadline", s.trade_deadline_week?("Week "+s.trade_deadline_week):"—"],
+         ["Registration closes", s.registration_deadline?CG.fmtDay(Date.parse(s.registration_deadline)):"—"],
+         ["Owner apps close", s.owner_app_deadline?CG.fmtDay(Date.parse(s.owner_app_deadline)):"—"],
+         ["Draft", s.draft_at?CG.fmtDay(Date.parse(s.draft_at)):"—"],
+         ["Roster moves", s.moves_lock_override||"auto"]
+        ].map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:16px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
+      '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-season-edit="'+s.id+'">Edit settings</button>'+
+      '<button class="btn btn-ghost btn-sm" data-season-del="'+s.id+'" data-name="'+esc(s.name||("Season "+s.number))+'" style="margin-left:auto">Delete season</button></div></div></div>';
+  }).join("")
+  : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("db",22)+'</div><b>No seasons yet</b><p>Create one to open registration and start scheduling — the site shows clean off-season states until then.</p></div></div>';
+  return h;
+};
+CG.seasonForm = function(id){
+  var s = id ? (CG._seasonsRaw||[]).find(function(x){ return x.id===id; }) : null;
+  var isNew = !s;
+  var maxN = (CG._seasonsRaw||[]).reduce(function(m,x){ return Math.max(m, x.number||0); }, 0);
+  s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:true,
+             salary_cap:60000000, roster_max:12, trade_deadline_week:6, moves_lock_override:"auto" };
+  function dt(v){ /* ISO -> datetime-local in ET */
+    if (!v) return "";
+    var p = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date(v));
+    var g = function(t){ return (p.find(function(x){return x.type===t;})||{}).value; };
+    return g("year")+"-"+g("month")+"-"+g("day")+"T"+g("hour")+":"+g("minute");
+  }
+  CG.modal(isNew?"New season":"Season settings — "+esc(s.name||""),
+    '<div class="grid g2" style="gap:12px">'+
+    '<label class="fld"><span>Name</span><input id="ssName" value="'+esc(s.name||"")+'" placeholder="e.g. Season 2"></label>'+
+    '<label class="fld"><span>Number</span><input id="ssNum" type="number" min="1" value="'+(s.number||1)+'"></label>'+
+    '<label class="fld"><span>Status</span><select id="ssStatus">'+["upcoming","active","complete"].map(function(x){ return '<option'+(s.status===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
+    '<label class="fld"><span>Registration</span><select id="ssRegOpen"><option value="1"'+(s.registration_open?" selected":"")+'>Open</option><option value="0"'+(!s.registration_open?" selected":"")+'>Closed</option></select></label>'+
+    '<label class="fld"><span>Season starts (ET)</span><input type="datetime-local" id="ssStarts" value="'+dt(s.starts_at)+'"></label>'+
+    '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
+    '<label class="fld"><span>Registration closes (ET)</span><input type="datetime-local" id="ssRegDl" value="'+dt(s.registration_deadline)+'"></label>'+
+    '<label class="fld"><span>Owner apps close (ET)</span><input type="datetime-local" id="ssOwnDl" value="'+dt(s.owner_app_deadline)+'"></label>'+
+    '<label class="fld"><span>Draft night (ET)</span><input type="datetime-local" id="ssDraft" value="'+dt(s.draft_at)+'"></label>'+
+    '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||60000000)/1e6)+'"></label>'+
+    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||12)+'"></label>'+
+    '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
+    '</div><p class="caption">auto = moves lock at the trade-deadline week on their own · locked / open force it either way. Blank dates are simply unset.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
+  document.getElementById("ssGo").addEventListener("click", function(){
+    var name=(document.getElementById("ssName").value||"").trim();
+    if(!name){ CG.toast("Name the season","err"); return; }
+    var num=parseInt(document.getElementById("ssNum").value,10);
+    if(!(num>=1)){ CG.toast("Season number must be 1 or more","err"); return; }
+    var clash=(CG._seasonsRaw||[]).find(function(x){ return x.number===num && (!id || x.id!==id); });
+    if(clash){ CG.toast("Number "+num+" is already "+(clash.name||"another season"),"err"); return; }
+    function iso(elId){ var v=document.getElementById(elId).value; return v ? new Date(v+":00-04:00").toISOString() : null; }
+    var cap=Math.round(parseFloat(document.getElementById("ssCap").value||"60")*1e6);
+    var rec={ name:name, number:num, status:document.getElementById("ssStatus").value,
+      registration_open: document.getElementById("ssRegOpen").value==="1",
+      starts_at:iso("ssStarts"), ends_at:iso("ssEnds"), registration_deadline:iso("ssRegDl"),
+      owner_app_deadline:iso("ssOwnDl"), draft_at:iso("ssDraft"),
+      salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||12,
+      trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
+      moves_lock_override:document.getElementById("ssMoves").value };
+    var btn=this; btn.disabled=true;
+    var q = isNew ? CG.sb.from("seasons").insert(rec) : CG.sb.from("seasons").update(rec).eq("id",id);
+    q.then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(isNew?name+" created":"Season settings saved","ok");
+      CG.reloadLeague();
+    });
+  });
+};
+CG.deleteSeason = function(id, name){
+  /* show exactly what goes with it, then require the name typed back */
+  Promise.all([
+    CG.sb.from("games").select("id",{count:"exact",head:true}).eq("season_id",id),
+    CG.sb.from("roster_spots").select("id",{count:"exact",head:true}).eq("season_id",id),
+    CG.sb.from("season_registrations").select("id",{count:"exact",head:true}).eq("season_id",id)
+  ]).then(function(rs){
+    var games=(rs[0]&&rs[0].count)||0, spots=(rs[1]&&rs[1].count)||0, regs=(rs[2]&&rs[2].count)||0;
+    CG.modal("Delete "+esc(name)+"?",
+      '<div class="note red" style="margin:0 0 14px"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">This deletes the season and everything scheduled inside it:</b>'+
+      games+' game'+(games===1?"":"s")+' (and their box scores) · '+spots+' roster spot'+(spots===1?"":"s")+' · '+regs+' registration'+(regs===1?"":"s")+'. Player accounts, clubs, and news are kept. This cannot be undone.</div>'+
+      '<label class="fld"><span>Type the season name to confirm</span><input id="sdConfirm" placeholder="'+esc(name)+'" autocomplete="off"></label>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="sdGo">Delete permanently</button>');
+    document.getElementById("sdGo").addEventListener("click", function(){
+      if ((document.getElementById("sdConfirm").value||"").trim()!==name){ CG.toast("Type the season name exactly to confirm","err"); return; }
+      var btn=this; btn.disabled=true;
+      CG.sb.from("seasons").delete().eq("id",id).then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast(name+" deleted","ok");
+        CG.reloadLeague();
+      });
+    });
+  });
+};
+CG.AFTER._admSeasons = function(){
+  var add=document.getElementById("seasonAdd");
+  if(add) add.addEventListener("click", function(){ CG.seasonForm(null); });
+  document.querySelectorAll("[data-season-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.seasonForm(this.getAttribute("data-season-edit")); }); });
+  document.querySelectorAll("[data-season-del]").forEach(function(b){ b.addEventListener("click", function(){ CG.deleteSeason(this.getAttribute("data-season-del"), this.getAttribute("data-name")); }); });
+};
+
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
@@ -2188,6 +2381,7 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="homepage") return CG.adminShell("homepage", CG.admHomepageLive());
   if (param==="schedule") return CG.adminShell("schedule", CG.admScheduleLive());
   if (param==="ratings") return CG.adminShell("ratings", CG.admRatingsLive());
+  if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive());
   if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
   return CG._origAdminRoute(param, qs);
 };
@@ -2205,6 +2399,7 @@ CG.AFTER.admin = function(param, qs){
   if (param==="rankings"){ CG.AFTER._admRankings(); return; }
   if (param==="homepage"){ CG.AFTER._admHomepage(); return; }
   if (param==="schedule"){ CG.AFTER._admScheduleLive(); return; }
+  if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
   if (param==="ratings"){ return; }
   if (param==="" || param==null){ return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
@@ -2218,7 +2413,7 @@ CG.AFTER.admin = function(param, qs){
 CG.hubScheduleLive = function(){
   var me = CG.me(), lg = CG.lg;
   var club = CG.myClub(), t = CG.TEAM[club];
-  if (!me || !t) return '<div class="note">This seat has no club attached — the schedule desk belongs to team management.</div>';
+  if (!me || !t) return '<div class="note">This account doesn’t run a club — the schedule desk belongs to team management.</div>';
   var upcoming = lg.schedule.filter(function(g){ return (g.home===club||g.away===club) && g.status!=="final"; })
     .sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · game operations</span>'+
@@ -2424,24 +2619,43 @@ CG.bootLive = async function(){
     }
     await CG.initAuth();
     /* Messages lives in the player hub (hub sidebar + #/hub/messages) — no top-nav slot */
-    /* Pre-season central in the Control Center (commissioner) */
-    if (CG.ADMIN_NAV && CG.ADMIN_NAV[0] && !CG.ADMIN_NAV[0][1].some(function(it){ return it[0]==="preseason"; })){
-      CG.ADMIN_NAV[0][1].splice(1, 0, ["preseason","Pre-season","users"]);
-    }
-    /* Leagues & tiers at the top of the League group (commissioner) */
-    if (CG.ADMIN_NAV && CG.ADMIN_NAV[1] && !CG.ADMIN_NAV[1][1].some(function(it){ return it[0]==="leagues"; })){
-      CG.ADMIN_NAV[1][1].splice(0, 0, ["leagues","Leagues & tiers","trophy"]);
-    }
-    /* Teams (add/edit/remove clubs) right after Leagues & tiers */
-    if (CG.ADMIN_NAV && CG.ADMIN_NAV[1] && !CG.ADMIN_NAV[1][1].some(function(it){ return it[0]==="clubs"; })){
-      CG.ADMIN_NAV[1][1].splice(1, 0, ["clubs","Teams","grid"]);
-    }
-    /* EA stats replaces manual Results entry in the Operations group (stats auto-import) */
-    if (CG.ADMIN_NAV && CG.ADMIN_NAV[0] && !CG.ADMIN_NAV[0][1].some(function(it){ return it[0]==="eastats"; })){
-      var ops = CG.ADMIN_NAV[0][1], replaced = false;
-      for (var oi=0; oi<ops.length; oi++){ if (ops[oi][0]==="results"){ ops[oi] = ["eastats","EA stats","chart"]; replaced = true; break; } }
-      if (!replaced) ops.splice(2, 0, ["eastats","EA stats","chart"]);
-    }
+    /* Control Center nav, grouped by job: run game nights → manage people &
+       clubs → shape the league → publish → keep the machine running */
+    CG.ADMIN_NAV = [
+      ["Operations", [
+        ["","Overview","home"],
+        ["schedule","Schedule","cal"],
+        ["eastats","EA stats","chart"],
+        ["codes","Game codes","code"],
+        ["presets","Server presets","gear"]
+      ]],
+      ["Clubs & members", [
+        ["preseason","Pre-season","users"],
+        ["users","Users & roles","users"],
+        ["clubs","Teams","grid"],
+        ["complaints","Complaints","flag"]
+      ]],
+      ["League", [
+        ["seasons","Seasons","db"],
+        ["leagues","Leagues & tiers","trophy"],
+        ["rankings","Power rankings","up"],
+        ["ratings","Overall ratings","chart"],
+        ["awards","Awards","trophy"]
+      ]],
+      ["Content", [
+        ["news","Newsroom","doc"],
+        ["homepage","Homepage","grid"],
+        ["carousel","Hero carousel","film"],
+        ["media","Media library","ul"],
+        ["rulebook","Rulebook","doc"]
+      ]],
+      ["System", [
+        ["automations","Automations","clock"],
+        ["data","Import / export","db"],
+        ["audit","Audit log","eye"],
+        ["settings","Site settings","gear"]
+      ]]
+    ];
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
     if (app) app.innerHTML =

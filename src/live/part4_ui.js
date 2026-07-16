@@ -841,7 +841,7 @@ document.addEventListener("click", function(e){
       '<a class="pop-item" href="#/hub/notifications" data-close-nav>'+CG.ic("bell",16)+'Notifications</a>'+
       '<a class="pop-item" href="#/hub/settings" data-close-nav>'+CG.ic("gear",16)+'Settings</a>'+
       '<div class="pop-sep"></div>'+
-      '<a class="pop-item" href="#/signin" data-close-nav>'+CG.ic("out",16)+'Switch role / sign out</a>'+
+      '<a class="pop-item" href="#/signin" data-close-nav>'+CG.ic("out",16)+'Sign out</a>'+
       '</div>');
     return;
   }

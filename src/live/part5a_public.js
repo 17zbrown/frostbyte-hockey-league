@@ -218,7 +218,7 @@ CG.ROUTES.home = function(){
   if (pre){
     var days = CG.daysToStart(), start = CG.seasonStartMs();
     html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
-      '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Season 1")+'</b><span>inaugural season</span></div>'+
+      '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Off-season")+'</b><span>inaugural season</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>day'+(days===1?"":"s")+' to puck drop'+(start?" · "+CG.fmtDay(start):"")+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/teams"><b class="num">'+CG.TEAMS.length+'</b><span>clubs · '+(CG.DIVISIONS?CG.DIVISIONS.length:2)+' divisions</span></div>'+
       '<div style="cursor:pointer" data-go="#/players"><b class="num">'+lg.players.length+'</b><span>players signed</span></div>'+
