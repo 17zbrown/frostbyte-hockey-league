@@ -1,8 +1,10 @@
 # Netlify configuration for Chel Gaming Hockey League
-# Static site (index.html at the root) + serverless functions (EA stats, screenshots, Discord).
-# redeploy: re-trigger production publish (classic-site removal + server veto).
+# Serverless functions (EA stats, screenshots, Discord) + a static site whose single
+# index.html is generated at deploy time from src/live/ (so git doesn't carry a ~700KB
+# blob per edit). No dependencies — the build is a pure Node file concatenation (~1s).
 
 [build]
+  command = "node src/live/build.cjs index.html"
   publish = "."
   functions = "netlify/functions"
 

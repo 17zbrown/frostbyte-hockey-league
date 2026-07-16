@@ -19,3 +19,11 @@ node_modules/
 # Logs
 *.log
 npm-debug.log*
+
+# Build output — generated from src/live/ by build.cjs.
+# index.html is built by Netlify at deploy time (see netlify.toml); the staging/
+# prototype builds aren't shipped. Keeps git history from carrying ~700KB blobs.
+index.html
+chelgaming-live.html
+chelgaming-preview.html
+redesign-preview.html
