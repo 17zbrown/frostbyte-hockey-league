@@ -1382,9 +1382,20 @@ CG.admTeamsLive = function(){
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Renames propagate everywhere instantly (rosters, schedule, and history follow the club, not the name). Removing a club is blocked while it still has rostered players or scheduled games.</span></div></div>';
   return h;
 };
+/* upload a club logo to the public team-logos bucket (commissioner-only RLS);
+   timestamped path so a re-upload never fights the CDN cache on the old file */
+CG.uploadTeamLogo = function(file, code){
+  var ext = ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
+  var path = (code||"logo").toLowerCase()+"-"+Date.now()+"."+ext;
+  return CG.sb.storage.from("team-logos").upload(path, file, { upsert:true, contentType:file.type })
+    .then(function(r){
+      if (r.error) throw r.error;
+      return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
+    });
+};
 CG.teamForm = function(t){
   var isNew = !t;
-  t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East" };
+  t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
   var divOpts = (CG.DIVISIONS&&CG.DIVISIONS.length?CG.DIVISIONS:["East","West"]).map(function(d){ return '<option'+(t.div===d?" selected":"")+'>'+esc(d)+'</option>'; }).join("");
   CG.modal(isNew?"Add a club":"Edit — "+esc(t.name),
     '<div class="grid g2" style="gap:12px">'+
@@ -1394,8 +1405,49 @@ CG.teamForm = function(t){
     '<label class="fld"><span>Division</span><select id="tfDiv">'+divOpts+'</select></label>'+
     '<label class="fld"><span>Arena</span><input id="tfArena" value="'+esc(t.arena||"")+'" placeholder="e.g. TD Garden"></label>'+
     '<label class="fld"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px"></label>'+
+    '</div>'+
+    '<label class="fld" style="margin-top:2px"><span>Club logo</span></label>'+
+    '<div class="logo-drop" id="tfLogoDrop" role="button" tabindex="0" aria-label="Upload a club logo" data-url="'+esc(t.logo||"")+'">'+
+      (t.logo?'<img src="'+esc(t.logo)+'" alt="Current logo">':'<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>')+
+    '</div>'+
+    '<input type="file" id="tfLogoFile" accept="image/*" hidden>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'+
+      '<span class="caption">Uploads apply when you save the club.</span>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="tfLogoClear"'+(t.logo?'':' style="display:none"')+'>Use generated crest</button>'+
     '</div>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="tfSave">'+(isNew?"Add club":"Save changes")+'</button>');
+  /* --- drag & drop logo wiring --- */
+  var zone = document.getElementById("tfLogoDrop"), fileIn = document.getElementById("tfLogoFile"),
+      clearBtn = document.getElementById("tfLogoClear");
+  function setPreview(url){
+    zone.setAttribute("data-url", url||"");
+    zone.innerHTML = url ? '<img src="'+esc(url)+'" alt="Club logo">' :
+      '<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>';
+    clearBtn.style.display = url ? "" : "none";
+  }
+  function doUpload(f){
+    if (!f) return;
+    if (!/^image\//.test(f.type)){ CG.toast("That isn’t an image — use a PNG or JPG","err"); return; }
+    if (f.size > 2*1024*1024){ CG.toast("Keep the logo under 2 MB","err"); return; }
+    var prev = zone.getAttribute("data-url");
+    zone.classList.add("busy");
+    zone.innerHTML = '<span class="lp-hint">Uploading…</span>';
+    var code = (document.getElementById("tfCode").value||t.code||"logo").trim();
+    CG.uploadTeamLogo(f, code).then(function(url){
+      zone.classList.remove("busy"); setPreview(url);
+      CG.toast("Logo uploaded — save the club to apply it","ok");
+    }).catch(function(e){
+      zone.classList.remove("busy"); setPreview(prev);
+      CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
+    });
+  }
+  zone.addEventListener("click", function(){ fileIn.click(); });
+  zone.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fileIn.click(); } });
+  fileIn.addEventListener("change", function(){ if(fileIn.files[0]) doUpload(fileIn.files[0]); });
+  zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
+  zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
+  zone.addEventListener("drop", function(e){ e.preventDefault(); zone.classList.remove("drag"); if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
+  clearBtn.addEventListener("click", function(){ setPreview(""); CG.toast("Back to the generated crest — save to apply","ok"); });
   document.getElementById("tfSave").addEventListener("click", function(){
     var name=(document.getElementById("tfName").value||"").trim(),
         code=(document.getElementById("tfCode").value||"").trim().toUpperCase();
@@ -1405,7 +1457,8 @@ CG.teamForm = function(t){
     if(clash){ CG.toast(code+" is already "+clash.name+"’s code","err"); return; }
     var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
       division:document.getElementById("tfDiv").value, arena:(document.getElementById("tfArena").value||"").trim()||null,
-      color:document.getElementById("tfColor").value };
+      color:document.getElementById("tfColor").value,
+      logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
     var btn=this; btn.disabled=true;
     var q = isNew
       ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null }))
