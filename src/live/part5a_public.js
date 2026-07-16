@@ -112,10 +112,11 @@ CG.slideDefs = function(){
   if (CG.isPreseason()){
     var start = CG.seasonStartMs(), days = CG.daysToStart(), slides = [];
     var startTxt = start ? CG.fmtDate(new Date(start).toISOString()) : "soon";
-    slides.push({ key:"kickoff", label:"Season 1", html:
-      '<span class="s-cat"><span class="chip chip-chrome">Season 1 · Inaugural</span></span>'+
+    var sNum = (CG.SEASON&&CG.SEASON.number)||1;
+    slides.push({ key:"kickoff", label:CG.seasonTag(), html:
+      '<span class="s-cat"><span class="chip chip-chrome">'+esc(CG.seasonTag())+(sNum===1?' · Inaugural':'')+'</span></span>'+
       '<h2>The puck drops '+startTxt+'.</h2>'+
-      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+'Eight clubs, two divisions, ten weeks — Chel Gaming’s first competitive season. Rosters are locking in now.</p>'+
+      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+CG.TEAMS.length+' clubs, '+((CG.DIVISIONS&&CG.DIVISIONS.length)||2)+' divisions — '+(sNum===1?'Chel Gaming’s first competitive season':esc(CG.seasonTag())+' of Chel Gaming hockey')+'. Rosters are locking in now.</p>'+
       '<div class="s-cta"><a class="btn btn-chrome" href="#/schedule">Opening schedule</a>'+
       '<a class="btn btn-ghost" href="#/teams">The clubs</a></div>'+
       '<span class="s-date">Season opens '+startTxt+'</span>' });
@@ -125,7 +126,7 @@ CG.slideDefs = function(){
       '<p class="s-dek">Two divisions, real rosters, real management under a $'+Math.round((CG.CAP||60000000)/1000000)+'M cap. Explore each club and its cap sheet.</p>'+
       '<div class="s-cta"><a class="btn btn-chrome" href="#/teams">Browse clubs</a>'+
       '<a class="btn btn-ghost" href="#/players">Player directory</a></div>'+
-      '<span class="s-date">Season 1 · founding season</span>' });
+      '<span class="s-date">'+esc(CG.seasonTag())+' · '+CG.seasonYear()+'</span>' });
     slides.push({ key:"howitworks", label:"How it works", html:
       '<span class="s-cat"><span class="chip chip-chrome">The format</span></span>'+
       '<h2>6v6 EA NHL, run like a real league.</h2>'+
@@ -412,7 +413,7 @@ CG.AFTER.home = function(){
 CG.ROUTES.schedule = function(param, qs){
   var lg = CG.lg;
   var fTeam = qs.team||"", fState = qs.state||"all", fWeek = qs.week||"";
-  var head = CG.pageHead("Season 1 · schedule","Schedule & results","Every night, every final. All times Eastern. Game codes and lineups live on each matchup page.");
+  var head = CG.pageHead(esc(CG.seasonTag())+" · schedule","Schedule & results","Every night, every final. All times Eastern. Game codes and lineups live on each matchup page.");
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<select id="fTeam" aria-label="Filter by club" style="max-width:220px"><option value="">All clubs</option>'+
       CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+'</select>'+
@@ -532,8 +533,42 @@ CG.ROUTES.standings = function(param, qs){
       }).join("")+
     '</div>';
   }
+  /* projected playoff bracket — Rule 8.1 seeding from today's table, pinned on top */
+  var bracket = "";
+  if (view!=="preseason" && CG.TEAMS.length >= 6){
+    var pWinners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
+    pWinners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
+    var pRest = [];
+    DIVS.forEach(function(dv){ CG.standings(CG.lg,dv).slice(1,3).forEach(function(r){ pRest.push(r); }); });
+    pRest.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
+    var seeds = pWinners.concat(pRest).slice(0,6);
+    if (seeds.length===6){
+      var played = (CG.lg.results||[]).length;
+      var seedRow = function(i){ var r=seeds[i];
+        return '<div style="display:flex;align-items:center;gap:9px;min-width:0"><span class="rk num" style="width:18px;flex-shrink:0">'+(i+1)+'</span>'+CG.crest(r.code,22)+
+          '<b class="mono" style="font-size:12px">'+esc(r.code)+'</b><span class="caption num" style="margin-left:auto">'+r.pts+' pts</span></div>'; };
+      var tbdRow = function(txt){
+        return '<div style="display:flex;align-items:center;gap:9px"><span class="rk num" style="width:18px;flex-shrink:0">—</span><span class="caption">'+txt+'</span></div>'; };
+      var matchCard = function(a,b){
+        return '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:11px 13px;display:flex;flex-direction:column;gap:8px">'+a+b+'</div>'; };
+      bracket = '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Projected playoff bracket</h3>'+
+        '<span class="chip">'+(played?'If the season ended today':'Before puck drop — seeded by the table below')+'</span></div>'+
+        '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+
+        '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Quarter-finals</span><div class="stack" style="gap:10px">'+
+          matchCard(seedRow(2),seedRow(5))+matchCard(seedRow(3),seedRow(4))+
+          '</div><p class="caption" style="margin-top:10px">Division winners — seeds 1 and 2 — skip straight to the semi-finals.</p></div>'+
+        '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Semi-finals</span><div class="stack" style="gap:10px">'+
+          matchCard(seedRow(0),tbdRow("Lowest seed through"))+
+          matchCard(seedRow(1),tbdRow("Highest seed through"))+'</div></div>'+
+        '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Final</span>'+
+          '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><b style="font-family:var(--f-disp)">Semi-final winners</b>'+
+          '<p class="caption" style="margin-top:6px">One series for the cup.</p></div></div>'+
+        '</div>'+
+        '<p class="caption" style="margin-top:14px">Top three per division qualify; division winners take the top seeds and the rest seed by points (Rule 8.1). The projection re-sorts after every final.</p></div></div>';
+    }
+  }
   var legend = '<p class="caption" style="margin-top:16px">GP games played · W wins · L regulation losses · OTL overtime/shootout losses · GF/GA goals for/against · DIFF goal differential · L5 last five · STRK streak · PTS points.</p>';
-  return head + '<div class="shell" style="padding-bottom:40px">'+body+legend+'</div>';
+  return head + '<div class="shell" style="padding-bottom:40px">'+bracket+body+legend+'</div>';
 };
 CG.AFTER.standings = function(param, qs){
   $$("[data-view]").forEach(function(b){ b.addEventListener("click", function(){ location.hash="#/standings?view="+this.getAttribute("data-view"); }); });
@@ -549,12 +584,12 @@ CG.AFTER.standings = function(param, qs){
 
 /* ---------- per-profile season archive ---------- */
 CG.SEASONS_LIST = function(){
-  return [ { key:"cur", label:"Season 1 · 2026", status:"Current" } ]
+  return [ { key:"cur", label:CG.seasonTag()+" · "+CG.seasonYear(), status:"Current" } ]
     .concat(Object.keys(CG.lg.archive||{}).map(function(k){ return CG.lg.archive[k]; }));
 };
 CG.seasonData = function(key){
   if (key!=="cur" && CG.lg.archive && CG.lg.archive[key]) return CG.lg.archive[key];
-  return { key:"cur", label:"Season 1 · 2026", status:"Current",
+  return { key:"cur", label:CG.seasonTag()+" · "+CG.seasonYear(), status:"Current",
     teams:CG.lg.teams, pstats:CG.lg.pstats, glog:CG.lg.glog, results:CG.lg.results };
 };
 CG.seasonPicker = function(cur){
@@ -842,7 +877,7 @@ CG.ROUTES.player = function(pid, qs){
           (!archived?'<span class="chip chip-ink" style="border-color:#39434B">'+
             (p.mgmt?(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+" · "+CG.fmtMoney(p.salary):CG.fmtMoney(p.salary)+" · "+p.term+" yr")+'</span>':"")+
           (sus? (sus.status==="served"
-            ? '<span class="chip chip-warn">Suspension served (Wk 6)</span>'
+            ? '<span class="chip chip-warn">Suspension served</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
           (canSeeAvail?'<span class="chip chip-win">'+esc(CG.WEEK8.label)+' availability: '+(CG.store.get("availability")[CG.WEEK8.key+":"+p.id]?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+

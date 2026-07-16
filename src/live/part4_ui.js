@@ -188,6 +188,13 @@ CG.audit = function(action, detail){
 
 /* ---------- crest ---------- */
 CG.crestSeq = 0;
+/* current-season naming, derived from the live season row so labels never go stale */
+CG.seasonTag = function(){ var s=CG.SEASON||{}; return s.name || s.label || ("Season "+(s.number||1)); };
+CG.seasonYear = function(){
+  var s=CG.SEASON||{};
+  if (s.starts_at) return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date(s.starts_at));
+  return String(new Date().getFullYear());
+};
 CG.crest = function(code, size){
   var t = CG.TEAM[code]; if (!t) return "";
   var s = size||28;
@@ -598,7 +605,7 @@ CG.renderChrome = function(){
       '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+(CG.LIVE_MODE?'':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
       '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+(CG.LIVE_MODE?'':'<a class="fl" href="#/signin">Switch demo role</a>')+'</div>'+
     '</div>'+
-    '<div class="ft-base"><span>© 2026 Chel Gaming Hockey League · Season 1</span><span>All times Eastern</span></div>'+
+    '<div class="ft-base"><span>© '+CG.seasonYear()+' Chel Gaming Hockey League · '+esc(CG.seasonTag())+'</span><span>All times Eastern</span></div>'+
   '</div>';
   CG.markActiveNav();
 };

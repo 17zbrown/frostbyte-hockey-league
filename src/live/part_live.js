@@ -49,7 +49,8 @@ CG.buildLiveLeague = async function(){
     sb.from("leagues").select("*").order("sort_order"),
     sb.from("game_stats").select("*"),
     sb.from("feature_flags").select("key,enabled"),
-    sb.from("site_config").select("key,value")
+    sb.from("site_config").select("key,value"),
+    sb.from("suspensions").select("*").order("created_at",{ ascending:false })
   ]);
   /* first 9 are public-readable and required; draft_picks + season_registrations
      (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
@@ -64,7 +65,8 @@ CG.buildLiveLeague = async function(){
       leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[],
       gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[],
       flagsRaw=(q[13]&&!q[13].error&&q[13].data)||[],
-      siteCfgRaw=(q[14]&&!q[14].error&&q[14].data)||[];
+      siteCfgRaw=(q[14]&&!q[14].error&&q[14].data)||[],
+      suspRaw=(q[15]&&!q[15].error&&q[15].data)||[];
 
   /* public config: feature flags (homepage modules etc.) + site_config (rankings override) */
   CG._flags = {}; flagsRaw.forEach(function(f){ CG._flags[f.key] = !!f.enabled; });
@@ -236,8 +238,17 @@ CG.buildLiveLeague = async function(){
      season owns the league standings, and overalls/parts see every game played */
   var preResults = results.filter(function(r){ return r.stage==="preseason"; });
   var regResults = results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; });
+  /* discipline record straight from the suspensions table (newest first) */
+  var suspMapped = suspRaw.map(function(sx){
+    var by = profById[sx.created_by];
+    return { id:sx.id, playerId:sx.profile_id,
+      status: sx.status==="active" ? "active" : "served",
+      games: sx.games_total||0, mode: sx.mode, endsAt: sx.ends_at,
+      reason: sx.reason||"", issued: sx.created_at,
+      decidedBy: (by && (by.gamertag||by.display_name)) || "Commissioner" };
+  });
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
-             allResults:results, suspensions:[], demoNow:CG.now(), season:season, live:true };
+             allResults:results, suspensions:suspMapped, demoNow:CG.now(), season:season, live:true };
   if (preResults.length){
     CG.SEASON.completedWeeks = preWeeksDone;
     lg.results = preResults; CG.aggregate(lg, {});
@@ -1315,19 +1326,22 @@ CG.admUsersLive = function(){
     '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
     profs.map(function(pr){
       var pl=playerById[pr.id], mg=mgmtBy[pr.id]||null, club=pl?pl.team:(mg?mg.club:null), mgmt=mg?mg.role:null;
+      var sus=(lg.suspensions||[]).find(function(s){ return s.playerId===pr.id && s.status==="active"; });
       var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
       return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
         '<td class="tleft"><span class="playercell">'+(pr.avatar_url?'<img src="'+esc(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
         '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
         '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
-        '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
+        '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
           '<button class="btn btn-ghost btn-sm" data-manage="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Club role</button>'+
           (mg?'<button class="btn btn-ghost btn-sm" data-unmanage="'+pr.id+'" data-club="'+esc(mg.club)+'" data-mrole="'+esc(mg.role)+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Remove club role</button>':"")+
+          (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
+              :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
           (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
         '</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM; “Remove club role” clears the seat. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM; “Remove club role” clears the seat. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
   return h;
 };
 CG.setUserRole = function(profileId, role){
@@ -1365,6 +1379,51 @@ CG.removeClubRole = function(profileId, club, role, name){
       if(CG.closeOverlay) CG.closeOverlay();
       CG.toast(name+" removed as "+roleName+" of "+club,"ok");
       CG.reloadLeague();
+    });
+  });
+};
+CG.suspendUser = function(profileId, name){
+  CG.modal("Suspend "+esc(name),
+    '<label class="fld"><span>Reason (shown on the profile’s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.2 — abusive conduct in lobby"></textarea></label>'+
+    '<div class="grid g2" style="gap:12px;margin-top:4px">'+
+    '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
+    '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
+    '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
+    '<p class="caption">A suspended member can’t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
+  var modeSel=document.getElementById("susMode");
+  modeSel.addEventListener("change", function(){
+    var byDate=this.value==="date";
+    document.getElementById("susGamesWrap").style.display=byDate?"none":"";
+    document.getElementById("susDateWrap").style.display=byDate?"":"none";
+  });
+  document.getElementById("susGo").addEventListener("click", function(){
+    var reason=(document.getElementById("susReason").value||"").trim();
+    if(!reason){ CG.toast("Give the suspension a reason — it’s the league record","err"); return; }
+    var mode=modeSel.value, games=null, ends=null;
+    if (mode==="games"){
+      games=parseInt(document.getElementById("susGames").value,10);
+      if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
+    } else {
+      var v=document.getElementById("susDate").value;
+      if(!v){ CG.toast("Pick the end date","err"); return; }
+      ends=CG.etISO(v.slice(0,10), v.slice(11,16));
+    }
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
+      if(CG.closeOverlay) CG.closeOverlay();
+      CG.toast(name+" suspended "+(mode==="games"?"for "+games+" game"+(games===1?"":"s"):"until "+CG.fmtFull(Date.parse(ends))),"ok");
+      CG.reloadLeague();
+    });
+  });
+};
+CG.liftUserSuspension = function(susId, name){
+  CG.confirm("Lift "+esc(name)+"’s suspension?","They can be rostered and make moves again immediately. The record stays on their profile as served.","Lift suspension", function(){
+    CG.sb.rpc("lift_suspension",{ p_id:susId }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t lift: "+r.error.message,"err"); return; }
+      CG.toast(name+"’s suspension lifted","ok"); CG.reloadLeague();
     });
   });
 };
@@ -1422,6 +1481,8 @@ CG.AFTER._admUsers = function(){
   document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value); }); });
   document.querySelectorAll("[data-manage]").forEach(function(b){ b.addEventListener("click", function(){ CG.assignClubRole(this.getAttribute("data-manage"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-unmanage]").forEach(function(b){ b.addEventListener("click", function(){ CG.removeClubRole(this.getAttribute("data-unmanage"), this.getAttribute("data-club"), this.getAttribute("data-mrole"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-lift]").forEach(function(b){ b.addEventListener("click", function(){ CG.liftUserSuspension(this.getAttribute("data-lift"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
 };
@@ -2040,7 +2101,8 @@ CG.AUTOMATIONS = [
   { key:"discord-sync",     name:"Discord roles & names",     every:"Every 5 min",  desc:"Keeps Discord roles and display names matched to the league database." },
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
-  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" }
+  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
+  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, and puck-drop reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
@@ -2730,7 +2792,7 @@ CG.hubFreeAgents = function(){
   }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
-    '<p class="lede" style="margin-top:8px">Every signable player without a club. Approach opens a direct message; signing adds them to your roster on the spot — first come, first served.</p></div>';
+    '<p class="lede" style="margin-top:8px">Every signable player without a club. Approach opens a direct message to talk terms; signing adds them to your roster at the salary you negotiated — first come, first served, under the cap.</p></div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>free agents</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num">'+rosterN+' / '+rosterMax+'</b><span>your roster</span></div>'+
@@ -2771,12 +2833,24 @@ CG.AFTER._hubFreeAgents = function(){
   }); });
   document.querySelectorAll("[data-fa-sign]").forEach(function(b){ b.addEventListener("click", function(){
     var regId=this.getAttribute("data-fa-sign"), name=this.getAttribute("data-name");
-    CG.confirm("Sign "+name+"?",
-      "They join your roster immediately with the next open jersey number, and the signing is logged for the whole league. First come, first served.",
-      "Sign player", function(){
-      CG.sb.rpc("sign_free_agent",{ p_registration:regId }).then(function(r){
+    var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
+    var t=(CG.TEAMS||[]).find(function(x){ return uid&&(x.owner===uid||x.gm===uid||x.agm===uid); });
+    var used=((t&&CG.lg.byTeam[t.code])||[]).reduce(function(s,p){ return s+(p.salary||0); },0);
+    var space=Math.max(0,(CG.CAP||60000000)-used);
+    CG.modal("Sign "+esc(name),
+      '<label class="fld"><span>Negotiated salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.05" value="0.75"></label>'+
+      '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b> · league minimum $0.75M. Agree on the number with the player first — Approach opens that conversation. The cap, the window, and eligibility are all checked again on the click.</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="faSignGo">Sign player</button>');
+    document.getElementById("faSignGo").addEventListener("click", function(){
+      var v=parseFloat(document.getElementById("faSal").value);
+      if(!(v>=0.75)){ CG.toast("Salary must be at least $0.75M","err"); return; }
+      var sal=Math.round(v*1e6);
+      var btn=this; btn.disabled=true;
+      CG.sb.rpc("sign_free_agent",{ p_registration:regId, p_salary:sal }).then(function(r){
+        btn.disabled=false;
         if (r.error){ CG.toast("Couldn’t sign: "+r.error.message,"err"); return; }
-        CG.toast(String(r.data||name)+" — welcome aboard","ok");
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast(String(r.data||name)+" · "+CG.fmtMoney(sal)+" — welcome aboard","ok");
         CG.reloadLeague();
       });
     });

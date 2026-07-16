@@ -66,7 +66,7 @@ CG.hubNav = function(section){
   if (CG.can("availability.submit")) mine.push(["availability","Availability","cal"]);
   if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
   /* Messages lives in the account menu (avatar), not the hub sidebar */
-  if (r==="staff") mine.push(["statsentry","Stats entry","chart"]);
+  if (r==="staff" && !CG.LIVE_MODE) mine.push(["statsentry","Stats entry","chart"]);
   mine.push(["notifications","Notifications","bell"]);
   mine.push(["settings","Settings","gear"]);
   var club = [];
@@ -117,7 +117,12 @@ CG.ROUTES.hub = function(param, qs){
   if (section==="schedule") return (CG.can("lineup.build") && CG.LIVE_MODE && CG.hubScheduleLive) ? CG.hubShell("schedule", CG.hubScheduleLive(qs)) : CG.unauthorized("The club schedule desk is a team-management tool.");
   if (section==="complaints") return CG.hubShell("complaints", CG.hubComplaints());
   if (section==="complaint") return CG.hubShell("complaints", CG.hubComplaintDetail(qs.id));
-  if (section==="statsentry") return r==="staff" ? CG.hubShell("statsentry", CG.hubStatsEntry()) : CG.unauthorized();
+  if (section==="statsentry") return r==="staff"
+    ? CG.hubShell("statsentry", CG.LIVE_MODE
+      ? '<div style="margin-bottom:20px"><span class="eyebrow chr">Statistician grant</span><h1 class="h-sec" style="margin-top:8px">Stats entry</h1></div>'+
+        '<div class="note">Finals import themselves from the EA NHL API — there’s nothing to enter by hand anymore. Box scores, standings, and ratings update within minutes of a game ending; the Control Center’s EA stats panel shows the pipeline.</div>'
+      : CG.hubStatsEntry())
+    : CG.unauthorized();
   if (section==="notifications") return CG.hubShell("notifications", CG.hubNotifications());
   if (section==="settings") return CG.hubShell("settings", CG.hubSettings());
   return CG.ROUTES._404();
@@ -623,6 +628,18 @@ CG.AFTER._roster = function(){
   }); });
   $$("[data-waive]").forEach(function(b){ b.addEventListener("click", function(){
     var pid = this.getAttribute("data-waive"), p = CG.playerById(CG.lg, pid);
+    if (CG.LIVE_MODE){
+      CG.confirm("Waive "+p.tag+"?",
+        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and they return to the free-agent pool where any club can sign them (Rule 2.5). The move is logged for the whole league.",
+        "Waive player", function(){
+        CG.sb.rpc("waive_player",{ p_profile:pid }).then(function(r){
+          if (r.error){ CG.toast("Couldn’t waive: "+r.error.message,"err"); return; }
+          CG.toast(String(r.data||p.tag)+" waived — back in the free-agent pool","ok");
+          CG.reloadLeague();
+        });
+      });
+      return;
+    }
     CG.confirm("Waive "+p.tag+"?","This clears his "+CG.fmtMoney(p.salary)+" cap hit and exposes him to a 24-hour waiver window. Any club can claim him at his current salary (Rule 2.5). In this prototype the move is reversible.","Waive player", function(){
       CG.setWaived(pid, true); CG.setOnBlock(pid, false);
       CG.audit("Player waived", p.tag+" ("+CG.fmtMoney(p.salary)+")");
