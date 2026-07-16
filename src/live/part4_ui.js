@@ -603,7 +603,7 @@ CG.renderChrome = function(){
       (CG.LIVE_MODE?'</div>':'<div style="margin-top:16px"><span class="protopill"><span class="live-dot"></span>Prototype — demo data, not the live site</span></div></div>')+
       '<div><h4>League</h4><a class="fl" href="#/schedule">Schedule</a><a class="fl" href="#/standings">Standings</a><a class="fl" href="#/rankings">Power Rankings</a><a class="fl" href="#/awards">Awards</a></div>'+
       '<div><h4>Clubs & Players</h4><a class="fl" href="#/teams">All Clubs</a><a class="fl" href="#/players">Player Directory</a><a class="fl" href="#/stats">Stat Central</a></div>'+
-      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+(CG.LIVE_MODE?'':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
+      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+(CG.LIVE_MODE?'<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
       '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+(CG.LIVE_MODE?'':'<a class="fl" href="#/signin">Switch demo role</a>')+'</div>'+
     '</div>'+
     '<div class="ft-base"><span>© '+CG.seasonYear()+' Chel Gaming Hockey League · '+esc(CG.seasonTag())+'</span><span>All times Eastern</span></div>'+

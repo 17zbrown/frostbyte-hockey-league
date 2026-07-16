@@ -486,6 +486,8 @@ CG.applySession = async function(session){
       try { var rg = await CG.sb.from("season_registrations").select("*").eq("season_id", CG.SEASON.id).eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.registration = rg.data || null; }
       catch(e){ CG.auth.registration = null; }
     }
+    try { var sa = await CG.sb.from("staff_applications").select("*").eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.staffApp = sa.data || null; }
+    catch(e){ CG.auth.staffApp = null; }
     try { var oa = await CG.sb.from("owner_applications").select("*").eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.ownerApp = oa.data || null; }
     catch(e){ CG.auth.ownerApp = null; }
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
@@ -538,9 +540,11 @@ CG.loadManagerData = async function(){
     /* current draft = the highest season_number that has picks */
     var maxSn = (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0);
     CG.lg.draftState = states.find(function(s){ return s.season_number===maxSn; }) || null;
-    if (role==="commish"){
+    if (role==="commish" || role==="staff"){
       var oa = await CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
       CG.lg._ownerApps = (oa && !oa.error && oa.data) || [];
+      var sa2 = await CG.sb.from("staff_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
+      CG.lg._staffApps = (sa2 && !sa2.error && sa2.data) || [];
     }
     /* my club's live trades (incoming + outgoing, still open) */
     CG.lg._myTrades = [];
@@ -761,7 +765,7 @@ CG.registerForSeason = async function(position, note){
    ================================================================ */
 CG.ROUTES.owner = function(){
   var head = CG.pageHead("Run a club","Apply to own a team",
-    "Owners set their club’s identity, hire a GM, and build the roster. Applications are tied to your Discord so the commissioners know who applied.");
+    "Owners set their club’s identity, hire a GM, and build the roster. Applications are tied to your Discord so the commissioners know who applied. Rather officiate than own? Apply to join the staff instead.");
   if (!CG.auth.profile){
     return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
       '<div class="e-art">'+CG.ic("shield",22)+'</div><b>Sign in to apply</b>'+
@@ -812,6 +816,76 @@ CG.submitOwnerApp = async function(){
   var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
   CG.auth.ownerApp=payload; CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
+};
+
+/* ================================================================
+   STAFF APPLICATIONS — members apply; staff + commissioners decide
+   from the Staff Desk. Approval promotes to role='staff' (the
+   Discord Staff role follows on the next sync).
+   ================================================================ */
+CG.ROUTES.staffapply = function(){
+  var head = CG.pageHead("Join the league office","Apply to join the staff",
+    "Staff work the case queue, verify imported stats, and keep game nights honest. Applications are tied to your Discord account.");
+  if (!CG.auth.profile){
+    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("flag",22)+'</div><b>Sign in to apply</b>'+
+      '<p>Staff applications are tied to your Discord account so the league knows who applied.</p>'+
+      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
+  }
+  var r = CG.role();
+  if (r==="staff" || r==="commish"){
+    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("check",22)+'</div><b>You’re already on the staff</b>'+
+      '<p>The Staff Desk is in your hub — case queue, discipline, and import spot-checks.</p>'+
+      '<a class="btn btn-chrome" style="margin-top:16px" href="#/hub/staffdesk">Open the Staff Desk</a></div></div></div>';
+  }
+  var app = CG.auth.staffApp;
+  var statusNote = app
+    ? (app.status==="pending" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Application received.</b> The league office reviews staff applications — you’ll get a notification either way. You can update yours below.</div>'
+      : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply.</div>' : "")
+    : "";
+  var v = function(k){ return app ? esc(app[k]||"") : ""; };
+  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusNote+
+    '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
+      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
+    '<div class="grid g2" style="gap:12px">'+
+    '<label class="fld"><span>Timezone</span><input id="sa-tz" placeholder="e.g. Eastern" value="'+v("timezone")+'"></label>'+
+    '<label class="fld"><span>Availability</span><input id="sa-avail" placeholder="e.g. most weeknights after 8" value="'+v("availability")+'"></label></div>'+
+    '<label class="fld"><span>Relevant experience</span><input id="sa-exp" placeholder="e.g. reffed in two leagues, ran stats for…" value="'+v("experience")+'"></label>'+
+    '<label class="fld"><span>Why you? <span class="caption">(required)</span></span><textarea id="sa-pitch" rows="4" placeholder="What would you bring to the league office?">'+v("pitch")+'</textarea></label>'+
+    '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">'+
+      '<button class="btn btn-chrome" id="sa-submit">'+(app?"Update application":"Submit application")+'</button>'+
+      '<span class="caption">Staff review the queue on the <b>Staff Desk</b>; approval adds the Discord Staff role automatically.</span></div>'+
+    '</div></div>'+
+    '<p class="caption" style="margin-top:14px">Looking to run a club instead? <a href="#/owner" style="font-weight:700;border-bottom:2px solid var(--chrome)">Apply to own a team →</a></p>'+
+  '</div>';
+};
+CG.AFTER.staffapply = function(){
+  var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
+  var sub=document.getElementById("sa-submit"); if(sub) sub.addEventListener("click", CG.submitStaffApp);
+};
+CG.submitStaffApp = async function(){
+  if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
+  var pitch=v("sa-pitch");
+  if(!pitch){ CG.toast("Tell the league office why you — the pitch is the application","err"); return; }
+  var payload={ profile_id: CG.auth.user.id, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
+    experience:v("sa-exp")||null, pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
+  var r=await CG.sb.from("staff_applications").upsert(payload,{onConflict:"profile_id"});
+  if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+  CG.auth.staffApp=payload; CG.toast("Application submitted — the league office will review it","ok"); CG.router();
+};
+CG.decideStaffApp = function(id, approve, name){
+  CG.confirm((approve?"Approve":"Deny")+" "+esc(name)+"’s staff application?",
+    approve ? "They become league staff immediately: the Staff Desk appears in their hub and the Discord Staff role lands within a few minutes."
+            : "They’ll be notified and can reapply any time.",
+    approve?"Approve":"Deny", function(){
+    CG.sb.rpc("decide_staff_application",{ p_id:id, p_approve:approve }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t decide: "+r.error.message,"err"); return; }
+      CG.toast(String(r.data||name)+(approve?" is now league staff":" — application denied"),"ok");
+      CG.reloadLeague();
+    });
+  });
 };
 
 /* ================================================================
@@ -2215,6 +2289,45 @@ CG.hubStaffDesk = function(){
     '<div class="kpi" style="cursor:default"><b class="num">'+weekFinals.length+'</b><span>finals · last 7 days</span></div>'+
     '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+tonight.length+'</b><span>games tonight</span></div></div>';
 
+  /* applications — owner + staff, decided right here */
+  var ownerApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
+  var staffApps = (lg._staffApps||[]).filter(function(a){ return a.status==="pending"; });
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3>'+
+    '<span class="chip '+((ownerApps.length+staffApps.length)?"chip-warn":"chip-win")+'">'+
+    ((ownerApps.length+staffApps.length)?(ownerApps.length+staffApps.length)+" awaiting a decision":"none pending")+'</span></div>';
+  if (staffApps.length){
+    h += staffApps.map(function(a){ var prof=a.profiles||{};
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+        '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
+        '<span><span class="chip chip-chrome" style="font-size:9px">STAFF</span> <b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b></span>'+
+        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>'+
+        '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+(a.availability?'<span>'+esc(a.availability)+'</span>':"")+(a.experience?'<span>'+esc(a.experience)+'</span>':"")+'</div>'+
+        (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
+        '<div style="display:flex;gap:8px;margin-top:10px">'+
+        '<button class="btn btn-chrome btn-sm" data-sapp-approve="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'">Approve</button>'+
+        '<button class="btn btn-ghost btn-sm" data-sapp-deny="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'">Deny</button></div></div>';
+    }).join("");
+  }
+  if (ownerApps.length){
+    h += ownerApps.map(function(a){ var prof=a.profiles||{};
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+        '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
+        '<span><span class="chip" style="font-size:9px">OWNER</span> <b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b></span>'+
+        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>'+
+        '<div class="caption">'+(a.team_choice==="build"?('Wants to build <b>'+esc(a.proposed_name||"a new club")+'</b>'):('Preferred club: <b>'+esc(a.preferred_club||"no preference")+'</b>'))+(a.timezone?' · TZ '+esc(a.timezone):"")+'</div>'+
+        (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
+        '<div style="display:flex;gap:8px;margin-top:10px">'+
+        '<button class="btn btn-chrome btn-sm" data-oapp-approve="'+a.id+'">Approve</button>'+
+        '<button class="btn btn-ghost btn-sm" data-oapp-deny="'+a.id+'">Deny</button></div></div>';
+    }).join("");
+  }
+  if (!staffApps.length && !ownerApps.length){
+    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply at <b>Apply to own a team</b> (#/owner) and <b>Apply to join the staff</b> (#/staffapply) — both linked in the site footer.</p></div>';
+  } else {
+    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Approving a staff application promotes the member immediately (Discord role follows on the next sync). Approving an owner application green-lights them — the commissioner then hands them their club in Users &amp; roles → Club role.</span></div>';
+  }
+  h += '</div>';
+
   /* case queue preview */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Case queue</h3>'+
     '<a class="sec-link" href="#/hub/complaints">Open the queue</a></div>';
@@ -2253,6 +2366,16 @@ CG.hubStaffDesk = function(){
     : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
   h += '</div>';
   return h;
+};
+CG.AFTER._staffdesk = function(){
+  document.querySelectorAll("[data-sapp-approve]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.decideStaffApp(this.getAttribute("data-sapp-approve"), true, this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-sapp-deny]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.decideStaffApp(this.getAttribute("data-sapp-deny"), false, this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-oapp-approve]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.setOwnerAppStatus(this.getAttribute("data-oapp-approve"), "approved"); }); });
+  document.querySelectorAll("[data-oapp-deny]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.setOwnerAppStatus(this.getAttribute("data-oapp-deny"), "denied"); }); });
 };
 CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
 

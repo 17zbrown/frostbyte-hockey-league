@@ -1172,6 +1172,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="lineup") CG.AFTER._lineup();
   if (param==="schedule" && CG.AFTER._hubSchedule) CG.AFTER._hubSchedule();
   if (param==="complaints"||param==="complaint") CG.AFTER._complaints(qs);
+  if (param==="staffdesk" && CG.AFTER._staffdesk) CG.AFTER._staffdesk();
   var ma = $("#markAllPage");
   if (ma) ma.addEventListener("click", function(){
     var r = CG.store.get("read");
