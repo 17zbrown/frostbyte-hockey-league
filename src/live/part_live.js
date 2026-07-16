@@ -89,6 +89,7 @@ CG.buildLiveLeague = async function(){
   }).sort(function(a,b){ return (a.div===b.div?0:(a.div<b.div?-1:1)) || (a.code<b.code?-1:1); });
   CG.TEAM={}; CG.TEAMS.forEach(function(t){ CG.TEAM[t.code]=t; });
   CG.DIVISIONS = divisions.map(function(d){ return d.name; });
+  CG._divisionsRaw = divisions;
 
   /* ---- season + cap ---- */
   CG.SEASON = season || {};
@@ -1403,18 +1404,74 @@ CG.admTeamsLive = function(){
     '<div class="kpi" style="cursor:default"><b class="num">'+(CG.DIVISIONS?CG.DIVISIONS.length:2)+'</b><span>divisions</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc((CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL")+'</b><span>league</span></div></div>';
   h+='<div class="card"><div class="card-h"><h3>Clubs</h3><button class="btn btn-chrome btn-sm" id="teamAdd">'+CG.ic("plus",14)+'Add a club</button></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>All clubs</caption><thead><tr><th class="tleft">Club</th><th class="tleft">Code</th><th class="tleft">Division</th><th class="tleft">Arena</th><th>Roster</th><th class="tright">Actions</th></tr></thead><tbody>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>All clubs</caption><thead><tr><th class="tleft">Club</th><th class="tleft">Code</th><th class="tleft">Division</th><th>Roster</th><th class="tright">Actions</th></tr></thead><tbody>'+
     teams.map(function(t){
       var n=(CG.lg.byTeam[t.code]||[]).length;
       return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,24)+'<span><span class="nm">'+esc(t.name)+'</span><small>'+esc(t.city||"—")+'</small></span></span></td>'+
         '<td class="tleft mono" style="font-size:12px">'+esc(t.code)+'</td>'+
-        '<td class="tleft">'+esc(t.div)+'</td><td class="tleft small" style="color:var(--steel)">'+esc(t.arena||"—")+'</td>'+
+        '<td class="tleft">'+esc(t.div)+'</td>'+
         '<td data-v="'+n+'">'+n+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-team-edit="'+t.id+'">Edit</button>'+
         '<button class="btn btn-ghost btn-sm" data-team-del="'+t.id+'" data-name="'+esc(t.name)+'">Remove</button></span></td></tr>';
     }).join("")+'</tbody></table></div>'+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Renames propagate everywhere instantly (rosters, schedule, and history follow the club, not the name). Removing a club is blocked while it still has rostered players or scheduled games.</span></div></div>';
+  /* custom divisions — the league's groupings are data, not hardcoded */
+  var divs = (CG._divisionsRaw||[]).slice().sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
+  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Divisions</h3><span class="chip">'+divs.length+'</span></div>'+
+    divs.map(function(d,i){
+      var n = teams.filter(function(t){ return t.div===d.name; }).length;
+      return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+        '<b style="font-family:var(--f-disp);font-size:15px;flex:1">'+esc(d.name)+'</b>'+
+        '<span class="caption">'+n+' club'+(n===1?"":"s")+'</span>'+
+        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-div-rename="'+d.id+'" data-name="'+esc(d.name)+'">Rename</button>'+
+        '<button class="btn btn-ghost btn-sm" data-div-del="'+d.id+'" data-name="'+esc(d.name)+'" data-count="'+n+'">Delete</button></span></div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center">'+
+      '<input id="divNew" placeholder="New division name…" style="flex:1" maxlength="24">'+
+      '<button class="btn btn-chrome btn-sm" id="divAdd">Add division</button></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Standings, team pages, and the standings race group by these automatically. Renames carry every club along; deleting needs the division empty first.</span></div></div>';
   return h;
+};
+CG.addDivision = function(){
+  var name=(document.getElementById("divNew").value||"").trim();
+  if(!name){ CG.toast("Give the division a name","err"); return; }
+  if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
+  var maxSort=(CG._divisionsRaw||[]).reduce(function(m,d){ return Math.max(m,d.sort_order||0); },0);
+  CG.sb.from("divisions").insert({ name:name, sort_order:maxSort+1 }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t add: "+r.error.message,"err"); return; }
+    CG.toast(name+" division added","ok"); CG.reloadLeague();
+  });
+};
+CG.renameDivision = function(id, oldName){
+  CG.modal("Rename — "+esc(oldName),
+    '<label class="fld"><span>Division name</span><input id="divName" value="'+esc(oldName)+'" maxlength="24"></label>'+
+    '<p class="caption">Every club in '+esc(oldName)+' moves with the new name — standings and team pages update instantly.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="divGo">Rename</button>');
+  document.getElementById("divGo").addEventListener("click", function(){
+    var name=(document.getElementById("divName").value||"").trim();
+    if(!name){ CG.toast("Give the division a name","err"); return; }
+    if(name===oldName){ if(CG.closeOverlay)CG.closeOverlay(); return; }
+    if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
+    CG.sb.from("divisions").update({ name:name }).eq("id",id).then(function(r){
+      if(r.error){ CG.toast("Couldn’t rename: "+r.error.message,"err"); return; }
+      /* clubs reference the division by name — carry them along */
+      CG.sb.from("teams").update({ division:name }).eq("division",oldName).then(function(r2){
+        if(r2.error){ CG.toast("Division renamed, but clubs didn’t follow: "+r2.error.message,"err"); return; }
+        if(CG.closeOverlay)CG.closeOverlay();
+        CG.toast(oldName+" is now "+name,"ok"); CG.reloadLeague();
+      });
+    });
+  });
+};
+CG.deleteDivision = function(id, name, count){
+  if (count>0){ CG.toast("Can’t delete "+name+" — move its "+count+" club"+(count===1?"":"s")+" to another division first","err"); return; }
+  if ((CG._divisionsRaw||[]).length<=1){ CG.toast("The league needs at least one division","err"); return; }
+  CG.confirm("Delete the "+esc(name)+" division?","It’s empty, so nothing moves. This can’t be undone.","Delete division", function(){
+    CG.sb.from("divisions").delete().eq("id",id).then(function(r){
+      if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+      CG.toast(name+" deleted","ok"); CG.reloadLeague();
+    });
+  });
 };
 /* upload a club logo to the public team-logos bucket (commissioner-only RLS);
    timestamped path so a re-upload never fights the CDN cache on the old file */
@@ -1437,8 +1494,7 @@ CG.teamForm = function(t){
     '<label class="fld"><span>City</span><input id="tfCity" value="'+esc(t.city||"")+'" placeholder="e.g. Boston"></label>'+
     '<label class="fld"><span>Code (2–4 letters)</span><input id="tfCode" value="'+esc(t.code)+'" maxlength="4" style="text-transform:uppercase" placeholder="e.g. BOS"></label>'+
     '<label class="fld"><span>Division</span><select id="tfDiv">'+divOpts+'</select></label>'+
-    '<label class="fld"><span>Arena</span><input id="tfArena" value="'+esc(t.arena||"")+'" placeholder="e.g. TD Garden"></label>'+
-    '<label class="fld"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px"></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
     '</div>'+
     '<label class="fld" style="margin-top:2px"><span>Club logo</span></label>'+
     '<div class="logo-drop" id="tfLogoDrop" role="button" tabindex="0" aria-label="Upload a club logo" data-url="'+esc(t.logo||"")+'">'+
@@ -1490,7 +1546,7 @@ CG.teamForm = function(t){
     var clash=(CG.TEAMS||[]).find(function(x){ return x.code===code && (!t.id || x.id!==t.id); });
     if(clash){ CG.toast(code+" is already "+clash.name+"’s code","err"); return; }
     var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
-      division:document.getElementById("tfDiv").value, arena:(document.getElementById("tfArena").value||"").trim()||null,
+      division:document.getElementById("tfDiv").value,
       color:document.getElementById("tfColor").value,
       logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
     var btn=this; btn.disabled=true;
@@ -1535,6 +1591,16 @@ CG.AFTER._admTeams = function(){
   }); });
   document.querySelectorAll("[data-team-del]").forEach(function(b){ b.addEventListener("click", function(){
     CG.removeTeam(this.getAttribute("data-team-del"), this.getAttribute("data-name"));
+  }); });
+  var dAdd=document.getElementById("divAdd");
+  if(dAdd) dAdd.addEventListener("click", CG.addDivision);
+  var dNew=document.getElementById("divNew");
+  if(dNew) dNew.addEventListener("keydown", function(e){ if(e.key==="Enter") CG.addDivision(); });
+  document.querySelectorAll("[data-div-rename]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.renameDivision(this.getAttribute("data-div-rename"), this.getAttribute("data-name"));
+  }); });
+  document.querySelectorAll("[data-div-del]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.deleteDivision(this.getAttribute("data-div-del"), this.getAttribute("data-name"), +this.getAttribute("data-count"));
   }); });
 };
 
@@ -1765,6 +1831,67 @@ CG.AFTER.admin = function(param, qs){
   if (param==="eastats"){ CG.AFTER._admEAStats(); return; }
   if (param==="complaints"){ CG.AFTER._complaintsLive(); return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
+};
+
+/* ================================================================
+   TEAM HQ: SCHEDULE DESK — the club's game nights with server picks
+   (game_vetoes), lobby codes, and the resolved server. Servers stay
+   unset until 30 minutes before the night's FIRST puck drop.
+   ================================================================ */
+CG.hubScheduleLive = function(){
+  var me = CG.me(), lg = CG.lg;
+  var club = CG.myClub(), t = CG.TEAM[club];
+  if (!me || !t) return '<div class="note">This seat has no club attached — the schedule desk belongs to team management.</div>';
+  var upcoming = lg.schedule.filter(function(g){ return (g.home===club||g.away===club) && g.status!=="final"; })
+    .sort(function(a,b){ return a.at-b.at; });
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · game operations</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Schedule desk</h1>'+
+    '<p class="lede" style="margin-top:8px">Your next game nights: set server picks for every game, grab lobby codes, and watch the server lock in. Picks freeze 30 minutes before the night’s first puck drop — that’s also when the server is set.</p></div>';
+  if (!upcoming.length){
+    return h + '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games on the slate</b><p>Game nights appear here the moment the league posts your schedule.</p></div></div>';
+  }
+  /* group by ET night */
+  var nights = {}, order = [];
+  upcoming.forEach(function(g){
+    var day = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(g.at));
+    if (!nights[day]){ nights[day]=[]; order.push(day); }
+    nights[day].push(g);
+  });
+  h += order.slice(0,2).map(function(day){
+    var games = nights[day];
+    var firstAt = games[0].at;
+    var lockAt = firstAt - (CG.VETO_LOCK_MS||1800000);
+    var locked = CG.now() >= lockAt;
+    var rows = games.map(function(g){
+      var homeSide = g.home===club, opp = homeSide?g.away:g.home;
+      var codeReleased = CG.now() >= g.at - 30*60000;
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:12px">'+
+        '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+          '<span class="mono" style="font-size:12px;color:var(--steel);min-width:76px">'+CG.fmtTime(g.at)+'</span>'+
+          '<span class="teamcell">'+CG.crest(opp,24)+'<span><span class="nm">'+(homeSide?"vs":"@")+' '+esc(CG.TEAM[opp].name)+'</span></span></span>'+
+          '<span class="chip" style="font-size:9.5px">'+(homeSide?"HOME":"AWAY")+'</span>'+
+          '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">'+
+            (codeReleased
+              ? '<span class="chip chip-chrome mono" style="letter-spacing:.12em">'+CG.gameCode(g.id)+'</span>'
+              : '<span class="chip">'+CG.ic("lock",11)+' Code at '+CG.fmtTime(g.at-30*60000)+'</span>')+
+            '<a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Match card</a></span></div>'+
+        CG.serverVetoControls(g, me, lockAt)+
+      '</div>';
+    }).join("");
+    return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+CG.fmtDay(firstAt)+'</h3>'+
+      (locked
+        ? '<span class="chip chip-warn">'+CG.ic("lock",11)+' Picks locked · servers set</span>'
+        : '<span class="chip">Picks lock '+CG.fmtTime(lockAt)+' — 30 min before first puck drop</span>')+'</div>'+
+      rows+
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Home picks a 1st and 2nd server; away sets a veto and a preferred. Picks are private to each club — the server resolves from both sides when the night locks (Rule 4). Codes go only to rostered players and management (Rule 4.2).</span></div></div>';
+  }).join("");
+  if (order.length>2) h += '<p class="caption" style="margin-top:4px">'+(order.length-2)+' more game night'+(order.length-2===1?"":"s")+' scheduled — they surface here as they approach. <a href="#/schedule" style="font-weight:700;border-bottom:2px solid var(--chrome)">Full league schedule</a></p>';
+  return h;
+};
+CG.AFTER._hubSchedule = function(){
+  document.querySelectorAll(".srv-sel").forEach(function(el){
+    el.addEventListener("change", function(){ CG.saveVeto(el.getAttribute("data-veto-game"), el); });
+  });
 };
 
 /* Messages as a hub section (#/hub/messages) — the DM UI renders inside the

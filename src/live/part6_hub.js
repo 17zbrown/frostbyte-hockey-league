@@ -60,21 +60,25 @@ CG.tradePlayerLine = function(pid){
 /* hub sidebar per role */
 CG.hubNav = function(section){
   var r = CG.role();
-  var items = [["", "Dashboard", "home"]];
-  if (CG.can("availability.submit")) items.push(["availability","Availability","cal"]);
-  /* club tools: managers always; a commissioner only when they also run a club
-     (league-wide admin lives in the Control Center, not here) */
+  /* the sidebar is split by hat: personal tools under "My Hub", club management
+     under "Team HQ" (complaints is a player tool, so it stays out of Team HQ) */
+  var mine = [["", "Dashboard", "home"]];
+  if (CG.can("availability.submit")) mine.push(["availability","Availability","cal"]);
+  if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
+  if (CG.LIVE_MODE) mine.push(["messages","Messages","msg"]);
+  if (r==="staff") mine.push(["statsentry","Stats entry","chart"]);
+  mine.push(["notifications","Notifications","bell"]);
+  mine.push(["settings","Settings","gear"]);
+  var club = [];
   var clubTools = r!=="commish" || CG.managesClub();
-  if (CG.can("roster.manage") && clubTools) items.push(["roster","Roster","users"]);
-  if (CG.can("trades.manage") && clubTools) items.push(["tradehub","Trade Hub","swap"]);
-  if (CG.can("lineup.build") && clubTools) items.push(["lineup","Lineup builder","grid"]);
-  if (CG.can("complaints.file")||CG.can("complaints.review")) items.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
-  if (CG.LIVE_MODE) items.push(["messages","Messages","msg"]);
-  if (r==="staff") items.push(["statsentry","Stats entry","chart"]);
-  items.push(["notifications","Notifications","bell"]);
-  items.push(["settings","Settings","gear"]);
-  return '<nav class="hub-side" aria-label="Hub sections"><div class="hs-group">'+esc(CG.persona().label)+' tools</div>'+
-    items.map(function(it){
+  if (clubTools){
+    if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
+    if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
+    if (CG.can("lineup.build")) club.push(["lineup","Lineup builder","grid"]);
+    if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
+  }
+  function render(items){
+    return items.map(function(it){
       var badge = "";
       if (it[0]==="availability" && !CG.store.get("availability")[CG.WEEK8.key+":"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
@@ -85,7 +89,10 @@ CG.hubNav = function(section){
         if (openN) badge = '<span class="hs-n">'+openN+'</span>';
       }
       return '<a href="#/hub'+(it[0]?"/"+it[0]:"")+'" class="'+(section===it[0]?"on":"")+'">'+CG.ic(it[2],15)+it[1]+badge+'</a>';
-    }).join("")+'</nav>';
+    }).join("");
+  }
+  return '<nav class="hub-side" aria-label="Hub sections"><div class="hs-group">My Hub</div>'+render(mine)+
+    (club.length?'<div class="hs-group">Team HQ</div>'+render(club):"")+'</nav>';
 };
 CG.hubShell = function(section, inner){
   var notice = (CG.LIVE_MODE && CG.role()==="mgmt")
@@ -109,6 +116,7 @@ CG.ROUTES.hub = function(param, qs){
   if (section==="roster") return CG.can("roster.manage") ? CG.hubShell("roster", CG.hubRoster(qs)) : CG.unauthorized("Roster management is a team-management tool. Switch to the Team Mgmt seat to try it.");
   if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management. Switch to the Team Mgmt seat to try it.");
   if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool. Switch to the Team Mgmt seat to try it.");
+  if (section==="schedule") return (CG.can("lineup.build") && CG.LIVE_MODE && CG.hubScheduleLive) ? CG.hubShell("schedule", CG.hubScheduleLive(qs)) : CG.unauthorized("The club schedule desk is a team-management tool.");
   if (section==="complaints") return CG.hubShell("complaints", CG.hubComplaints());
   if (section==="complaint") return CG.hubShell("complaints", CG.hubComplaintDetail(qs.id));
   if (section==="statsentry") return r==="staff" ? CG.hubShell("statsentry", CG.hubStatsEntry()) : CG.unauthorized();
@@ -321,28 +329,26 @@ CG.gameNight = function(g){
   try { return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(new Date(g.at))==="Fri" ? "fri" : "wed"; }
   catch(e){ return "wed"; }
 };
-CG.serverVetoCard = function(game, me){
+/* one game's server-pick controls (compact, used by the Schedule desk).
+   `lockAt` is 30 min before the NIGHT'S FIRST puck drop — servers stay unset
+   until then, and picks freeze for the whole night at that moment. */
+CG.serverVetoControls = function(game, me, lockAt){
   var mine = (CG.lg._vetoes||{})[game.id] || {};
   var home = game.home===me.team;
-  var locked = CG.now() >= game.at - CG.VETO_LOCK_MS;
-  var opp = home ? game.away : game.home;
   function opts(sel){ return '<option value="">— pick —</option>'+CG.SERVERS.map(function(s){ return '<option value="'+esc(s)+'"'+(s===sel?" selected":"")+'>'+esc(s)+'</option>'; }).join(""); }
-  var inner;
-  if (locked){
+  if (CG.now() >= lockAt){
     var srv = (CG.lg._servers||{})[game.id];
-    inner = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="lock">'+CG.ic("lock",14)+'Locked</span><span>Server: <b style="font-family:var(--f-disp)">'+(srv?esc(srv):"To be set")+'</b></span></div>';
-  } else if (home){
-    inner = '<div class="grid g2" style="gap:12px">'+
-      '<label class="fld"><span>1st choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref1">'+opts(mine.pref1)+'</select></label>'+
-      '<label class="fld"><span>2nd choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref2">'+opts(mine.pref2)+'</select></label>'+
-      '</div><p class="caption" style="margin-top:8px">'+CG.ic("lock",12)+' Private · both required · locks 30 min before puck drop.</p>';
-  } else {
-    inner = '<div class="grid g2" style="gap:12px">'+
-      '<label class="fld"><span>Veto — won’t play</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="veto">'+opts(mine.veto)+'</select></label>'+
-      '<label class="fld"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label>'+
-      '</div><p class="caption" style="margin-top:8px">'+CG.ic("eye",12)+' Private · your preferred is used only if '+esc(CG.TEAM[opp].name)+' doesn’t submit.</p>';
+    return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="lock">'+CG.ic("lock",13)+'Picks locked</span>'+
+      '<span class="small">Server: <b style="font-family:var(--f-disp)">'+(srv?esc(srv):"resolving…")+'</b></span></div>';
   }
-  return '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Server selection · '+(home?"Home":"Away")+'</h3><a class="sec-link" href="#/rulebook?rule=4.1">Rule 4</a></div><div class="card-b">'+inner+'</div></div>';
+  if (home){
+    return '<div class="grid g2" style="gap:12px">'+
+      '<label class="fld" style="margin:0"><span>1st choice · home</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref1">'+opts(mine.pref1)+'</select></label>'+
+      '<label class="fld" style="margin:0"><span>2nd choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref2">'+opts(mine.pref2)+'</select></label></div>';
+  }
+  return '<div class="grid g2" style="gap:12px">'+
+    '<label class="fld" style="margin:0"><span>Veto — won’t play</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="veto">'+opts(mine.veto)+'</select></label>'+
+    '<label class="fld" style="margin:0"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label></div>';
 };
 CG.saveVeto = function(gameId, changedSel){
   var me = CG.me(); if(!me) return;
@@ -422,7 +428,9 @@ CG.hubLineup = function(qs){
     ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Revision history</h3></div>'+
       saved.rev.map(function(rv){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("clock",14)+'</span><span><b>'+esc(rv.what)+'</b></span><span class="nf-t">'+CG.fmtTime(rv.at)+'</span></div>'; }).join("")+'</div>'
     : "";
-  return h + bar + '<div class="grid g5x7" style="align-items:start"><div>'+rink+CG.serverVetoCard(game, me)+hist+'</div>'+bench+'</div>';
+  return h + bar + '<div class="grid g5x7" style="align-items:start"><div>'+rink+
+    (CG.LIVE_MODE?'<div class="note" style="margin-top:18px">Server picks &amp; lobby codes live on the <a href="#/hub/schedule" style="font-weight:700;border-bottom:2px solid var(--chrome)">Schedule desk</a>.</div>':"")+
+    hist+'</div>'+bench+'</div>';
 };
 CG.luSlot = function(pos, pid, locked){
   var p = pid && CG.playerById(CG.lg, pid);
@@ -1093,6 +1101,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="roster") CG.AFTER._roster();
   if (param==="tradehub") CG.AFTER._tradehub(qs);
   if (param==="lineup") CG.AFTER._lineup();
+  if (param==="schedule" && CG.AFTER._hubSchedule) CG.AFTER._hubSchedule();
   if (param==="complaints"||param==="complaint") CG.AFTER._complaints(qs);
   var ma = $("#markAllPage");
   if (ma) ma.addEventListener("click", function(){

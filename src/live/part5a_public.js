@@ -139,7 +139,8 @@ CG.slideDefs = function(){
   var a1 = C.articles.find(function(a){ return a.featured; }) || C.articles[0];
   var potw = lg.potw[lg.potw.length-1];
   var sk = potw ? CG.playerById(lg, potw.skater) : null;
-  var s1 = CG.standings(lg,"East")[0], s2 = CG.standings(lg,"West")[0];
+  var divLeaders = (CG.DIVISIONS||["East","West"]).map(function(dv){ return CG.standings(lg,dv)[0]; }).filter(Boolean);
+  var curWeek = lg.results.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
   var slides = [];
   slides.push({ key:"news", label:"Breaking news", html:
     '<span class="s-cat"><span class="chip chip-chrome">League news</span></span>'+
@@ -167,10 +168,10 @@ CG.slideDefs = function(){
     '<p class="s-dek">'+esc(C.rankings.intro)+'</p>'+
     '<div class="s-cta"><a class="btn btn-chrome" href="#/rankings">Full rankings</a></div>'+
     '<span class="s-date">Published '+CG.fmtDate("2026-07-13")+' · CGHL Newsroom</span>' });
-  slides.push({ key:"standings", label:"Standings snapshot", html:
-    '<span class="s-cat"><span class="chip chip-chrome">Standings · Week 7</span></span>'+
-    '<h2>'+esc(s1.team.name)+' and '+esc(s2.team.name)+' set the pace.</h2>'+
-    '<p class="s-dek">Both division leaders sit at '+s1.w+"-"+s1.l+"-"+s1.otl+' through six weeks. Three playoff spots per division — the cutlines are already forming.</p>'+
+  if (divLeaders.length) slides.push({ key:"standings", label:"Standings snapshot", html:
+    '<span class="s-cat"><span class="chip chip-chrome">Standings · Week '+curWeek+'</span></span>'+
+    '<h2>'+divLeaders.map(function(l){ return esc(l.team.name); }).join(divLeaders.length===2?" and ":", ")+' set'+(divLeaders.length===1?"s":"")+' the pace.</h2>'+
+    '<p class="s-dek">'+divLeaders.map(function(l){ return esc(l.team.name)+' ('+l.w+"-"+l.l+"-"+l.otl+')'; }).join(" · ")+'. Three playoff spots per division — the cutlines are already forming.</p>'+
     '<div class="s-cta"><a class="btn btn-chrome" href="#/standings">Full standings</a></div>'+
     '<span class="s-date">Updated after last night’s finals</span>' });
   /* admin overrides: hide/reorder */
@@ -257,8 +258,9 @@ CG.ROUTES.home = function(){
       '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">The race, division by division</h2></div>'+
         '<a class="sec-link" href="#/standings">Full standings</a></div>'+
       '<div class="grid g2">'+
-        '<div class="card"><div class="card-h"><h3>East Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("East",{cutline:true})+'</div>'+
-        '<div class="card"><div class="card-h"><h3>West Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("West",{cutline:true})+'</div>'+
+        (CG.DIVISIONS||["East","West"]).map(function(dv){
+          return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable(dv,{cutline:true})+'</div>';
+        }).join("")+
       '</div>'+
       '<div class="grid g2" style="margin-top:18px;align-items:start">'+
         '<div class="card"><div class="card-h"><h3>Power Rankings</h3><a class="sec-link" href="#/rankings">Week 7</a></div>'+
@@ -438,34 +440,34 @@ CG.ROUTES.standings = function(param, qs){
         return '<button data-view="'+v[0]+'" class="'+(view===v[0]?"on":"")+'">'+v[1]+'</button>'; }).join("")+'</div>'+
       '<button class="btn btn-ghost btn-sm" id="csvStand">'+CG.ic("dl",14)+'CSV</button></div>');
   var body;
+  var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
   if (view==="league"){
-    body = '<div class="card"><div class="card-h"><h3>Overall league table</h3><span class="chip">8 clubs</span></div>'+CG.standTable(null,{full:true,caption:"League standings — all clubs"})+'</div>';
+    body = '<div class="card"><div class="card-h"><h3>Overall league table</h3><span class="chip">'+CG.TEAMS.length+' clubs</span></div>'+CG.standTable(null,{full:true,caption:"League standings — all clubs"})+'</div>';
   } else if (view==="wildcard"){
-    var east = CG.standings(CG.lg,"East"), west = CG.standings(CG.lg,"West");
-    function pl(rows){ return rows.slice(0,3); }
-    function out(rows){ return rows.slice(3); }
+    var byDiv = DIVS.map(function(dv){ return { name:dv, rows:CG.standings(CG.lg,dv) }; });
     body = '<div class="grid g2">'+
       '<div class="card"><div class="card-h"><h3>In the field today</h3><span class="chip chip-win">Qualified pace</span></div>'+
-        [["East",pl(east)],["West",pl(west)]].map(function(pair){
-          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+pair[0]+'</span></div>'+pair[1].map(function(r,i){
+        byDiv.map(function(d){
+          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+esc(d.name)+'</span></div>'+d.rows.slice(0,3).map(function(r,i){
             return '<div class="leaderrow" data-go="#/team/'+r.code+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(r.code,30)+
               '<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(r.team.name)+'</b></span><span class="val"><b class="num">'+r.pts+'</b><span>PTS</span></span></div>';
           }).join("");
         }).join("")+'</div>'+
       '<div class="card"><div class="card-h"><h3>On the outside</h3><span class="chip chip-loss">Below the cut</span></div>'+
-        [["East",out(east)],["West",out(west)]].map(function(pair){
-          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+pair[0]+'</span></div>'+pair[1].map(function(r){
-            var third = pair[0]==="East"?east[2]:west[2];
-            return '<div class="leaderrow" data-go="#/team/'+r.code+'"><span class="rk num">4</span>'+CG.crest(r.code,30)+
-              '<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(r.team.name)+'</b><small class="caption" style="display:block">'+(third.pts-r.pts)+' pts back of the line</small></span>'+
+        byDiv.map(function(d){
+          var third = d.rows[2];
+          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+esc(d.name)+'</span></div>'+d.rows.slice(3).map(function(r,i){
+            return '<div class="leaderrow" data-go="#/team/'+r.code+'"><span class="rk num">'+(i+4)+'</span>'+CG.crest(r.code,30)+
+              '<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(r.team.name)+'</b><small class="caption" style="display:block">'+(third?(third.pts-r.pts)+' pts back of the line':'')+'</small></span>'+
               '<span class="val"><b class="num">'+r.pts+'</b><span>PTS</span></span></div>';
           }).join("");
         }).join("")+'</div>'+
-    '</div><p class="note" style="margin-top:16px">Playoff seeding: division winners take seeds 1–2; remaining qualifiers seed by points (Rule 8.1). Four weeks remain.</p>';
+    '</div><p class="note" style="margin-top:16px">Playoff seeding: division winners take the top seeds; remaining qualifiers seed by points (Rule 8.1).</p>';
   } else {
     body = '<div class="grid g2">'+
-      '<div class="card"><div class="card-h"><h3>East Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("East",{full:true,cutline:true,compact:true,srCaption:true,caption:"East Division standings"})+'</div>'+
-      '<div class="card"><div class="card-h"><h3>West Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable("West",{full:true,cutline:true,compact:true,srCaption:true,caption:"West Division standings"})+'</div>'+
+      DIVS.map(function(dv){
+        return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable(dv,{full:true,cutline:true,compact:true,srCaption:true,caption:esc(dv)+" Division standings"})+'</div>';
+      }).join("")+
     '</div>';
   }
   var legend = '<p class="caption" style="margin-top:16px">GP games played · W wins · L regulation losses · OTL overtime/shootout losses · GF/GA goals for/against · DIFF goal differential · L5 last five · STRK streak · PTS points.</p>';
