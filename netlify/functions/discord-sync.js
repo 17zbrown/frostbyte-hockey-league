@@ -76,7 +76,7 @@ export default async () => {
   const inGuildById = {};
   for (const p of await sbGet("profiles?select=id,in_guild")) inGuildById[p.id] = p.in_guild;
   const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
-  const teams = await sbGet("teams?select=id,name,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
+  const teams = await sbGet("teams?select=id,name,color,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
   // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
   const mgmtRoleByProfile = {};
@@ -102,6 +102,7 @@ export default async () => {
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
+  const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
   const roleId = {};
   for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
   const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
@@ -126,11 +127,18 @@ export default async () => {
     } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
   }
 
-  // (0) keep each team's Discord ROLE + CHANNEL name in sync with the site team name
+  // (0) keep each team's Discord ROLE (name + color) + CHANNEL name in sync with the site
   for (const t of teams) {
     try {
-      if (t.discord_role_id && roleNameById[t.discord_role_id] && roleNameById[t.discord_role_id] !== t.name) {
-        await dApi("PATCH", `/guilds/${GUILD}/roles/${t.discord_role_id}`, { name: t.name }); sum.roleRenamed++;
+      if (t.discord_role_id && roleNameById[t.discord_role_id]) {
+        const patch = {};
+        if (roleNameById[t.discord_role_id] !== t.name) { patch.name = t.name; sum.roleRenamed++; }
+        // role color mirrors the club's primary color from the site (teams.color hex -> int)
+        const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : null;
+        if (wantColor != null && roleColorById[t.discord_role_id] !== wantColor) {
+          patch.color = wantColor; sum.roleRecolored = (sum.roleRecolored || 0) + 1;
+        }
+        if (Object.keys(patch).length) await dApi("PATCH", `/guilds/${GUILD}/roles/${t.discord_role_id}`, patch);
       }
       const wantSlug = slug(t.name);
       if (t.discord_channel_id && chanNameById[t.discord_channel_id] && chanNameById[t.discord_channel_id] !== wantSlug) {
