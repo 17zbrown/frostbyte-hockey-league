@@ -465,11 +465,6 @@ CG.loadManagerData = async function(){
     if (role==="commish"){
       var oa = await CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
       CG.lg._ownerApps = (oa && !oa.error && oa.data) || [];
-      /* server presets (app_config, commissioner-only read) */
-      try {
-        var pc = await CG.sb.from("app_config").select("value").eq("key","server_presets").maybeSingle();
-        if (pc && !pc.error && pc.data && pc.data.value) CG.lg._presets = JSON.parse(pc.data.value);
-      } catch(e){}
     }
     /* my club's live trades (incoming + outgoing, still open) */
     CG.lg._myTrades = [];
@@ -1325,92 +1320,6 @@ CG.saveEAClub = function(teamId, code){
 };
 CG.AFTER._admEAStats = function(){
   document.querySelectorAll("[data-ea-save]").forEach(function(b){ b.addEventListener("click", function(){ CG.saveEAClub(this.getAttribute("data-ea-save"), this.getAttribute("data-code")); }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: SERVER PRESETS — real, editable, persisted in app_config
-   (key server_presets, JSON array; commissioner-only RLS)
-   ================================================================ */
-CG.DEFAULT_PRESETS = [
-  { name:"League Night", assigned:"All regular-season games", active:true,
-    set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 5:00"],["OT","3v3 5:00 → SO"],["Host","Home club"],["Pauses","2 per club"],["Streaming","Both goalie POVs"]] },
-  { name:"Playoff Standard", assigned:"Playoff rounds", active:false,
-    set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 6:00"],["OT","5v5 continuous"],["Host","Higher seed"],["Pauses","1 per club"],["Streaming","League broadcast + POVs"]] }
-];
-CG.presets = function(){ return (CG.lg && CG.lg._presets) || CG.DEFAULT_PRESETS; };
-CG.savePresets = function(list, done){
-  CG.sb.from("app_config").upsert({ key:"server_presets", value: JSON.stringify(list), updated_at: new Date().toISOString() }, { onConflict:"key" })
-    .then(function(r){
-      if (r.error){ CG.toast("Couldn’t save presets: "+r.error.message,"err"); return; }
-      CG.lg._presets = list;
-      if (done) done();
-      CG.toast("Presets saved","ok");
-      if (CG.router) CG.router();
-    });
-};
-CG.admPresetsLive = function(){
-  var presets = CG.presets();
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Server presets</h2><p class="lede" style="margin-top:6px">The lobby settings clubs are expected to run. Edit a preset and it saves to the league database — the active one is what the rulebook’s settings sheet points to.</p></div>'+
-    '<div class="grid g2">'+presets.map(function(p,i){
-    return '<div class="card"><div class="card-h"><h3>'+esc(p.name)+'</h3><span class="chip'+(p.active?" chip-chrome":"")+'">'+(p.active?"Active default":"Scheduled")+'</span></div>'+
-    '<div class="card-b" style="padding-top:8px">'+(p.set||[]).map(function(kv){
-      return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px"><span style="color:var(--steel)">'+esc(kv[0])+'</span><b>'+esc(kv[1])+'</b></div>';
-    }).join("")+
-    '<p class="caption" style="margin:10px 0 12px">Assigned to: '+esc(p.assigned||"—")+'</p>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-preset-edit="'+i+'">Edit preset</button>'+
-    (!p.active?'<button class="btn btn-ghost btn-sm" data-preset-activate="'+i+'">Make active</button>':"")+
-    (presets.length>1?'<button class="btn btn-ghost btn-sm" data-preset-del="'+i+'">Delete</button>':"")+
-    '</div></div></div>';
-  }).join("")+'</div>'+
-  '<button class="btn btn-ink" style="margin-top:16px" id="presetNew">'+CG.ic("plus",15)+'New preset</button>';
-};
-CG.editPreset = function(idx){
-  var presets = CG.presets().map(function(p){ return JSON.parse(JSON.stringify(p)); });
-  var isNew = idx==null;
-  var p = isNew ? { name:"", assigned:"", active:false, set: JSON.parse(JSON.stringify((presets[0]||CG.DEFAULT_PRESETS[0]).set)) } : presets[idx];
-  var lines = (p.set||[]).map(function(kv){ return kv[0]+": "+kv[1]; }).join("\n");
-  CG.modal(isNew?"New preset":"Edit — "+esc(p.name),
-    '<label class="fld"><span>Preset name</span><input id="psName" value="'+esc(p.name)+'" placeholder="e.g. League Night"></label>'+
-    '<label class="fld"><span>Assigned to</span><input id="psAssigned" value="'+esc(p.assigned||"")+'" placeholder="e.g. All regular-season games"></label>'+
-    '<label class="fld"><span>Settings — one per line, <span class="mono">Setting: Value</span></span><textarea id="psSet" rows="8" style="font-family:var(--f-mono);font-size:12px">'+esc(lines)+'</textarea></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="psSave">'+(isNew?"Create preset":"Save preset")+'</button>');
-  document.getElementById("psSave").addEventListener("click", function(){
-    var name=(document.getElementById("psName").value||"").trim();
-    if(!name){ CG.toast("Give the preset a name","err"); return; }
-    var set=[], bad=null;
-    (document.getElementById("psSet").value||"").split("\n").forEach(function(ln){
-      ln=ln.trim(); if(!ln) return;
-      var ci=ln.indexOf(":");
-      if(ci<1){ bad=ln; return; }
-      set.push([ln.slice(0,ci).trim(), ln.slice(ci+1).trim()]);
-    });
-    if(bad){ CG.toast('“'+bad+'” isn’t “Setting: Value” — add a colon',"err"); return; }
-    if(!set.length){ CG.toast("Add at least one setting line","err"); return; }
-    var next = { name:name, assigned:(document.getElementById("psAssigned").value||"").trim(), active:p.active, set:set };
-    if (isNew){ presets.push(next); } else { presets[idx]=next; }
-    if (CG.closeOverlay) CG.closeOverlay();
-    CG.savePresets(presets);
-  });
-};
-CG.AFTER._admPresets = function(){
-  document.querySelectorAll("[data-preset-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.editPreset(+this.getAttribute("data-preset-edit")); }); });
-  document.querySelectorAll("[data-preset-activate]").forEach(function(b){ b.addEventListener("click", function(){
-    var i=+this.getAttribute("data-preset-activate");
-    var presets=CG.presets().map(function(p,j){ p=JSON.parse(JSON.stringify(p)); p.active=(j===i); return p; });
-    CG.savePresets(presets);
-  }); });
-  document.querySelectorAll("[data-preset-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var i=+this.getAttribute("data-preset-del");
-    var presets=CG.presets().map(function(p){ return JSON.parse(JSON.stringify(p)); });
-    var name=presets[i].name, wasActive=presets[i].active;
-    CG.confirm("Delete “"+esc(name)+"”?","Clubs keep playing on the remaining presets. This can’t be undone.","Delete preset", function(){
-      presets.splice(i,1);
-      if (wasActive && presets.length) presets[0].active=true;
-      CG.savePresets(presets);
-    });
-  }); });
-  var nw=document.getElementById("presetNew");
-  if (nw) nw.addEventListener("click", function(){ CG.editPreset(null); });
 };
 
 /* ================================================================
@@ -2372,7 +2281,7 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="users") return CG.adminShell("users", CG.admUsersLive(qs||{}));
   if (param==="leagues") return CG.adminShell("leagues", CG.admLeagues(qs||{}));
   if (param==="clubs") return CG.adminShell("clubs", CG.admTeamsLive(qs||{}));
-  if (param==="presets") return CG.adminShell("presets", CG.admPresetsLive(qs||{}));
+  if (param==="presets") return CG.ROUTES._404();  /* retired: fixed league-standard lobby settings + club server picks (Rule 4) */
   if (param==="eastats") return CG.adminShell("eastats", CG.admEAStats(qs||{}));
   if (param==="complaints") return CG.adminShell("complaints", CG.hubComplaintsLive({admin:true}));
   if (param==="automations") return CG.adminShell("automations", CG.admAutomationsLive());
@@ -2391,7 +2300,6 @@ CG.AFTER.admin = function(param, qs){
   if (param==="users"){ CG.AFTER._admUsers(); return; }
   if (param==="leagues"){ CG.AFTER._admLeagues(); return; }
   if (param==="clubs"){ CG.AFTER._admTeams(); return; }
-  if (param==="presets"){ CG.AFTER._admPresets(); return; }
   if (param==="eastats"){ CG.AFTER._admEAStats(); return; }
   if (param==="complaints"){ CG.AFTER._complaintsLive(); return; }
   if (param==="automations"){ CG.AFTER._admAutomations(); return; }
@@ -2626,8 +2534,7 @@ CG.bootLive = async function(){
         ["","Overview","home"],
         ["schedule","Schedule","cal"],
         ["eastats","EA stats","chart"],
-        ["codes","Game codes","code"],
-        ["presets","Server presets","gear"]
+        ["codes","Game codes","code"]
       ]],
       ["Clubs & members", [
         ["preseason","Pre-season","users"],
