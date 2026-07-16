@@ -1089,7 +1089,7 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. When free agency closes, rookies who missed the 5-game minimum are placed on random clubs automatically.</p></div>'
+      '<p class="caption" style="margin-top:12px">When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. Ten minutes after the draft’s final pick, rookies who missed the 5-game minimum are placed on random clubs — so rosters are settled before free agency opens.</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Pre-season starts”, and hit Auto-space — the draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions */
@@ -1102,7 +1102,7 @@ CG.admPreseason = function(){
     '<button class="btn btn-ghost" id="preReleaseNow"'+(randomN?"":" disabled")+'>Release random assignments ('+randomN+')</button>'+
     '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Distribute unproven rookies ('+rookies.length+')</button></div>'+
     '<p class="caption" style="margin-top:12px">Randomly assign spreads every unrostered registration evenly across the clubs (management counts toward the split). '+
-    'Release runs automatically after the final pre-season game; rookie placement runs automatically within ten minutes of free agency closing — both buttons are manual overrides. '+
+    'Release runs automatically after the final pre-season game; rookie placement runs automatically ten minutes after the draft’s final pick — both buttons are manual overrides. '+
     'Placement sends players who missed the 5-game minimum (and have no draft history or 5 career games) to a completely random club with an open spot.</p></div></div>';
 
   var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
@@ -1253,12 +1253,10 @@ CG.distributeRookies = function(){
       !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
   });
   if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
-  var faOpen = s.free_agency_closes_at && Date.parse(s.free_agency_closes_at) > Date.now();
   CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
-    "This runs on its own within ten minutes of free agency closing — the button forces it early or re-runs it by hand. "+
-    (faOpen?"Heads up: free agency hasn’t closed yet. ":"")+
-    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot. "+
-    "This keeps managers from parking incoming players to poach them in free agency.",
+    "This runs on its own ten minutes after the draft’s final pick — the button forces it early or re-runs it by hand. "+
+    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot, "+
+    "so rosters are settled before free agency and nobody can park a prospect to poach them later.",
     "Distribute rookies", function(){
     CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
       if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
@@ -2042,7 +2040,7 @@ CG.AUTOMATIONS = [
   { key:"discord-sync",     name:"Discord roles & names",     every:"Every 5 min",  desc:"Keeps Discord roles and display names matched to the league database." },
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
-  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 10 min inside the database", desc:"Once free agency closes, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" }
+  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
@@ -2693,12 +2691,96 @@ CG.ROUTES.hub = function(param, qs){
     if (CG.role()==="guest") return CG.unauthorized("Sign in to reach your messages.");
     return CG.hubShell("messages", CG.messagesBody());
   }
+  if (param==="freeagents"){
+    return CG.can("roster.manage") ? CG.hubShell("freeagents", CG.hubFreeAgents())
+      : CG.unauthorized("The free-agent board is a team-management tool.");
+  }
   return CG._origHubRoute(param, qs);
 };
 CG._origHubAfter = CG.AFTER.hub;
 CG.AFTER.hub = function(param, qs){
   if (param==="messages"){ CG.AFTER.messages(); return; }
+  if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
   if (CG._origHubAfter) CG._origHubAfter(param, qs);
+};
+
+/* ================================================================
+   TEAM HQ: FREE AGENTS — view and approach the signable pool
+   (signing itself goes through the sign_free_agent RPC, which
+   enforces the window, eligibility, and roster space server-side)
+   ================================================================ */
+CG.hubFreeAgents = function(){
+  var lg=CG.lg, s=CG.SEASON||{};
+  var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
+  var t=(CG.TEAMS||[]).find(function(x){ return uid && (x.owner===uid||x.gm===uid||x.agm===uid); });
+  if (!t) return '<div class="note">This account doesn’t run a club — the free-agent board belongs to team management.</div>';
+  var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;
+  var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
+  var nowMs = Date.now();
+  var canSign = !!(faO && nowMs >= faO);   /* signable during the window and after it, never before */
+  var winChip = !faO ? '<span class="chip chip-warn">No free-agency dates set yet</span>'
+    : nowMs < faO ? '<span class="chip chip-warn">Opens '+CG.fmtFull(faO)+'</span>'
+    : (faC && nowMs < faC) ? '<span class="chip chip-live"><span class="live-dot"></span>Window open — closes '+CG.fmtFull(faC)+'</span>'
+    : '<span class="chip chip-win">Window closed — free agents stay signable</span>';
+  var rosterN=(lg.byTeam[t.code]||[]).length, rosterMax=s.roster_max||15;
+  var rosteredIds=lg._rosteredIds||{};
+  var pool=(lg._registrationsRaw||[]).filter(function(r){
+    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] &&
+      (lg.isVeteran(r.profile_id) || ((lg.preGp[r.profile_id]||{}).gp||0) >= 5);
+  }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
+    '<p class="lede" style="margin-top:8px">Every signable player without a club. Approach opens a direct message; signing adds them to your roster on the spot — first come, first served.</p></div>';
+  h+='<div class="grid g3" style="margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>free agents</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+rosterN+' / '+rosterMax+'</b><span>your roster</span></div>'+
+    '<div class="kpi" style="cursor:default;justify-content:center;display:flex;align-items:center">'+winChip+'</div></div>';
+  h+='<div class="card"><div class="card-h"><h3>The board</h3><span class="chip">'+pool.length+'</span></div>'+
+    (pool.length?'<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Signable free agents</caption><thead><tr>'+
+      '<th class="tleft">Player</th><th>POS</th><th>Scout OVR</th><th>Pre-season</th><th class="tleft">Background</th><th class="tright">Actions</th></tr></thead><tbody>'+
+      pool.map(function(r){
+        var prof=r.profiles||{}, pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0};
+        var bg = lg.isVeteran(r.profile_id) ? '<span class="chip">Veteran</span>' : '<span class="chip chip-win">'+pre.gp+' pre-season games</span>';
+        var full = rosterN>=rosterMax;
+        return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
+          '<td class="tnum">'+esc(r.position||"—")+'</td>'+
+          '<td class="tnum">'+(r.scout_ovr==null?'<span class="caption">—</span>':r.scout_ovr)+'</td>'+
+          '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
+          '<td class="tleft">'+bg+'</td>'+
+          '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+            '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'">Approach</button>'+
+            '<button class="btn btn-chrome btn-sm" data-fa-sign="'+r.id+'" data-name="'+esc(prof.gamertag||"this player")+'"'+((canSign&&!full)?"":" disabled")+
+              ((!canSign)?' title="Signing opens with free agency"':full?' title="Your roster is full"':'')+'>Sign</button>'+
+          '</span></td></tr>';
+      }).join("")+'</tbody></table></div>'+
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Rookies who missed the 5-game pre-season minimum never appear here — the league places them on random clubs ten minutes after the draft’s final pick. Signing is enforced server-side: the window, eligibility, and your roster space are all checked again on the click.</span></div>'
+    :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Unsigned, draft-eligible players land here after the draft. Check back once free agency opens.</p></div></div>')+'</div>';
+  return h;
+};
+CG.AFTER._hubFreeAgents = function(){
+  document.querySelectorAll("[data-fa-dm]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid=this.getAttribute("data-fa-dm");
+    CG._dm = CG._dm || { msgs:[], profiles:{}, active:null, loaded:false };
+    /* seed the profile so a brand-new conversation shows their name, not "Member" */
+    if (!CG._dm.profiles[pid]){
+      var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===pid; });
+      if (pr) CG._dm.profiles[pid]=pr;
+    }
+    CG._dm.active=pid;
+    location.hash="#/hub/messages";
+  }); });
+  document.querySelectorAll("[data-fa-sign]").forEach(function(b){ b.addEventListener("click", function(){
+    var regId=this.getAttribute("data-fa-sign"), name=this.getAttribute("data-name");
+    CG.confirm("Sign "+name+"?",
+      "They join your roster immediately with the next open jersey number, and the signing is logged for the whole league. First come, first served.",
+      "Sign player", function(){
+      CG.sb.rpc("sign_free_agent",{ p_registration:regId }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t sign: "+r.error.message,"err"); return; }
+        CG.toast(String(r.data||name)+" — welcome aboard","ok");
+        CG.reloadLeague();
+      });
+    });
+  }); });
 };
 
 /* ================================================================

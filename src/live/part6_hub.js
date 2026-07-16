@@ -76,6 +76,7 @@ CG.hubNav = function(section){
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
     if (CG.can("lineup.build")) club.push(["lineup","Lineup builder","grid"]);
     if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
+    if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);
   }
   function render(items){
     return items.map(function(it){
