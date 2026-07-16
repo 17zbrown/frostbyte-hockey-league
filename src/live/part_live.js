@@ -1106,6 +1106,13 @@ CG.admUsersLive = function(){
   var lg=CG.lg;
   var profs=(lg._profilesRaw||[]).slice().sort(function(a,b){ return (a.gamertag||a.display_name||"").localeCompare(b.gamertag||b.display_name||""); });
   var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
+  /* management from the team registry, not roster spots — a manager without a
+     roster spot still holds the seat */
+  var mgmtBy={}; (CG.TEAMS||[]).forEach(function(t){
+    if(t.owner) mgmtBy[t.owner]={club:t.code, role:"owner"};
+    if(t.gm)    mgmtBy[t.gm]   ={club:t.code, role:"gm"};
+    if(t.agm)   mgmtBy[t.agm]  ={club:t.code, role:"agm"};
+  });
   var banned=profs.filter(function(p){ return p.banned; }).length;
   var staffN=profs.filter(function(p){ return p.role==="staff"; }).length;
   function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
@@ -1120,7 +1127,7 @@ CG.admUsersLive = function(){
   h+='<div class="card"><div class="card-h"><h3>Members</h3><span class="chip">'+profs.length+'</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
     profs.map(function(pr){
-      var pl=playerById[pr.id], club=pl?pl.team:null, mgmt=pl&&pl.mgmt?pl.mgmt:null;
+      var pl=playerById[pr.id], mg=mgmtBy[pr.id]||null, club=pl?pl.team:(mg?mg.club:null), mgmt=mg?mg.role:null;
       var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
       return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
         '<td class="tleft"><span class="playercell">'+(pr.avatar_url?'<img src="'+esc(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
@@ -1129,10 +1136,11 @@ CG.admUsersLive = function(){
         '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
           '<button class="btn btn-ghost btn-sm" data-manage="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Club role</button>'+
+          (mg?'<button class="btn btn-ghost btn-sm" data-unmanage="'+pr.id+'" data-club="'+esc(mg.club)+'" data-mrole="'+esc(mg.role)+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Remove club role</button>':"")+
           (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
         '</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM; “Remove club role” clears the seat. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
   return h;
 };
 CG.setUserRole = function(profileId, role){
@@ -1155,6 +1163,21 @@ CG.assignClubRole = function(profileId, name){
     CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:role, p_profile:profileId }).then(function(r){
       if(r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
       if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" is now "+role.toUpperCase()+" of "+code+" — refresh to see the badge","ok");
+    });
+  });
+};
+CG.removeClubRole = function(profileId, club, role, name){
+  var roleName = role==="owner"?"Owner":role==="gm"?"General Manager":"Assistant GM";
+  CG.modal("Remove "+esc(name)+" from "+esc(club)+" management?",
+    '<p>'+esc(name)+' is currently <b>'+roleName+'</b> of <b>'+esc(club)+'</b>. Removing the role ends their Team HQ access for the club; their roster spot and contract are untouched.</p>'+
+    '<p class="caption" style="margin-top:8px">Discord club-management roles update on the next sync. Reassign anytime with “Club role”.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="unmgGo">Remove role</button>');
+  document.getElementById("unmgGo").addEventListener("click", function(){
+    CG.sb.rpc("set_team_manager",{ p_team_code:club, p_role:role, p_profile:null }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
+      if(CG.closeOverlay) CG.closeOverlay();
+      CG.toast(name+" removed as "+roleName+" of "+club,"ok");
+      CG.reloadLeague();
     });
   });
 };
@@ -1211,6 +1234,7 @@ CG.AFTER._admUsers = function(){
   });
   document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value); }); });
   document.querySelectorAll("[data-manage]").forEach(function(b){ b.addEventListener("click", function(){ CG.assignClubRole(this.getAttribute("data-manage"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-unmanage]").forEach(function(b){ b.addEventListener("click", function(){ CG.removeClubRole(this.getAttribute("data-unmanage"), this.getAttribute("data-club"), this.getAttribute("data-mrole"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
 };
