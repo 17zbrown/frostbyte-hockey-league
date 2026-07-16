@@ -859,19 +859,20 @@ CG.ROUTES.staffapply = function(){
       '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
   }
   var r = CG.role();
-  if (r==="staff" || r==="commish"){
-    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
-      '<div class="e-art">'+CG.ic("check",22)+'</div><b>You’re already on the staff</b>'+
-      '<p>The Staff Desk is in your hub — case queue, discipline, and import spot-checks.</p>'+
-      '<a class="btn btn-chrome" style="margin-top:16px" href="#/hub/staffdesk">Open the Staff Desk</a></div></div></div>';
-  }
+  /* staff + commissioners see the exact form members see (and can submit it) —
+     a note on top says so, and the Staff Desk stays one click away */
+  var staffNote = (r==="staff" || r==="commish")
+    ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("check",15)+
+      '<span style="flex:1">You’re already on the league staff — this is the application exactly as members see it. Submitting works like any member’s.</span>'+
+      '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a></div>'
+    : "";
   var app = CG.auth.staffApp;
   var statusNote = app
     ? (app.status==="pending" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Application received.</b> The league office reviews staff applications — you’ll get a notification either way. You can update yours below.</div>'
       : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply.</div>' : "")
     : "";
   var v = function(k){ return app ? esc(app[k]||"") : ""; };
-  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusNote+
+  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+
     '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
       (app?'<span class="chip '+(app.status==="pending"?"chip-warn":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
     '<div class="grid g2" style="gap:12px">'+
