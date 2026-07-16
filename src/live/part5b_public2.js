@@ -273,12 +273,14 @@ CG.ROUTES.matchup = function(id){
         .sort(function(a,b){ return (b.b.g+b.b.a)-(a.b.g+a.b.a); });
       var gl = Object.keys(box).filter(function(pid){ return box[pid].goalie; }).map(function(pid){ return { p: CG.playerById(lg,pid), b: box[pid] }; })[0];
       body += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3><span style="display:inline-flex;align-items:center;gap:9px">'+CG.crest(code,22)+esc(CG.TEAM[code].name)+' — '+res.score[code]+'</span></h3></div>'+
-        '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Skater</th><th>G</th><th>A</th><th>S</th><th>HIT</th><th>BLK</th><th>PIM</th><th>+/-</th></tr></thead><tbody>'+
-        sk.map(function(row){
+        '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Skater</th><th>G</th><th>A</th><th>P</th><th>S</th><th>HIT</th><th>BLK</th><th>TK</th><th>GV</th><th>PIM</th><th>+/-</th><th>TOI</th></tr></thead><tbody>'+
+        sk.map(function(row){ var b=row.b;
           return '<tr class="rowlink" data-go="'+CG.playerRoute(row.p)+'"><td class="tleft"><span class="playercell"><span class="nm">'+esc(row.p.tag)+'</span><small>'+row.p.pos+'</small></span></td>'+
-          '<td class="'+(row.b.g?"":"z")+'">'+row.b.g+'</td><td class="'+(row.b.a?"":"z")+'">'+row.b.a+'</td><td>'+row.b.shots+'</td><td class="'+(row.b.hits?"":"z")+'">'+row.b.hits+'</td><td class="'+(row.b.blk?"":"z")+'">'+row.b.blk+'</td><td class="'+(row.b.pim?"":"z")+'">'+row.b.pim+'</td><td>'+(row.b.pm>0?"+":"")+row.b.pm+'</td></tr>';
+          '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td>'+
+          '<td class="'+(b.hits?"":"z")+'">'+b.hits+'</td><td class="'+(b.blk?"":"z")+'">'+b.blk+'</td><td class="'+(b.tk?"":"z")+'">'+(b.tk||0)+'</td><td class="'+(b.gv?"":"z")+'">'+(b.gv||0)+'</td>'+
+          '<td class="'+(b.pim?"":"z")+'">'+b.pim+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="mono" style="font-size:11px">'+(b.toi?CG.fmtToi(b.toi):"—")+'</td></tr>';
         }).join("")+
-        '<tr><td class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">G: '+esc(gl.p.tag)+'</td><td colspan="7" class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">'+gl.b.sv+' saves on '+gl.b.sa+' shots'+(gl.b.so?" · SHUTOUT":"")+'</td></tr>'+
+        (gl?'<tr><td class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">G: '+esc(gl.p.tag)+'</td><td colspan="11" class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">'+gl.b.sv+'/'+gl.b.sa+' saves'+(gl.b.sa?" ("+(gl.b.sv/gl.b.sa).toFixed(3).replace(/^0/,"")+")":"")+' · '+gl.b.ga+' GA'+(gl.b.so?" · SHUTOUT":"")+((gl.b.brkShots||gl.b.pokes)?' · '+(gl.b.brkSv||0)+'/'+(gl.b.brkShots||0)+' brk · '+(gl.b.pokes||0)+' poke':"")+(gl.b.toi?' · '+CG.fmtToi(gl.b.toi):"")+'</td></tr>':"")+
         '</tbody></table></div></div>';
     });
     body += '</div><div class="stack">'+

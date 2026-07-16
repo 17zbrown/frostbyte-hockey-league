@@ -17,6 +17,11 @@ CG.sb = (window.supabase && window.supabase.createClient)
 CG._loadEpoch = Date.now();
 CG.now = function(){ return Date.now(); };
 
+/* format a time-on-ice value (seconds) as m:ss for box scores / stat lines */
+CG.fmtToi = function(sec){ sec = Math.max(0, Math.round(+sec||0)); var m=Math.floor(sec/60), s=sec%60; return m+":"+(s<10?"0":"")+s; };
+/* seconds -> whole minutes, for per-game averages */
+CG.toiMin = function(sec){ return Math.round((+sec||0)/60); };
+
 /* real site identity (the static head still says "Platform Prototype") */
 try {
   document.title = "Chel Gaming Hockey League";
@@ -41,18 +46,20 @@ CG.buildLiveLeague = async function(){
     sb.from("news").select("*").order("published_at", { ascending:false }),
     sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
     sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)"),
-    sb.from("leagues").select("*").order("sort_order")
+    sb.from("leagues").select("*").order("sort_order"),
+    sb.from("game_stats").select("*")
   ]);
   /* first 9 are public-readable and required; draft_picks + season_registrations
      (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
-     after auth for managers. leagues (11) is public-readable but non-fatal. */
+     after auth for managers. leagues (11) + game_stats (12) are public but non-fatal. */
   var bad = q.slice(0,9).find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=(q[2].data||[])[0]||null,
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
       draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[],
-      leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[];
+      leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[],
+      gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[];
 
   /* ---- leagues / tiers (CG umbrella; CGHL = top tier, inspired by NHL) ---- */
   var leagueById={};
@@ -77,7 +84,7 @@ CG.buildLiveLeague = async function(){
       logo:t.logo_url||null, id:t.id,
       leagueId:(lg2&&lg2.id)||null, leagueCode:(lg2&&lg2.code)||"CGHL",
       owner:t.owner_profile_id, gm:t.gm_profile_id, agm:t.agm_profile_id,
-      eaClub:t.ea_club_name||null };
+      eaClub:t.ea_club_name||null, eaClubId:(t.ea_club_id!=null?String(t.ea_club_id):null) };
     teamById[t.id]=obj; id2code[t.id]=t.code; return obj;
   }).sort(function(a,b){ return (a.div===b.div?0:(a.div<b.div?-1:1)) || (a.code<b.code?-1:1); });
   CG.TEAM={}; CG.TEAMS.forEach(function(t){ CG.TEAM[t.code]=t; });
@@ -137,21 +144,95 @@ CG.buildLiveLeague = async function(){
       home:id2code[g.home_team_id], away:id2code[g.away_team_id],
       at:Date.parse(g.scheduled_at), feature:false,
       code:g.game_code||null, server:g.server||null, status:g.status,
-      homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot };
+      homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot,
+      eaMatchId:g.ea_match_id||null };
   }).filter(function(g){ return g.home && g.away && g.at; });
 
+  /* per-player box scores from game_stats (written by the EA auto-stats pipeline).
+     Each box line carries the prototype's base keys (so CG.aggregate builds season
+     totals) plus every EA advanced metric, keyed by profile id (unlinked EA players
+     keep a synthetic key so they still render but don't corrupt a profile's totals). */
+  var statsByGame = {};
+  gameStatsRows.forEach(function(r){ (statsByGame[r.game_id]=statsByGame[r.game_id]||[]).push(r); });
+  function eaSkaterLine(r){
+    return { goalie:false,
+      g:+r.goals||0, a:+r.assists||0, pm:+r.plus_minus||0, shots:+r.shots||0, hits:+r.hits||0,
+      blk:+r.blocked_shots||0, gv:+r.giveaways||0, tk:+r.takeaways||0, pim:+r.pim||0,
+      fow:+r.faceoffs_won||0, fot:+r.faceoffs_lost||0, gwg:+r.gwg||0,
+      ppg:+r.pp_goals||0, shg:+r.sh_goals||0, toi:+r.time_on_ice_seconds||0,
+      pass:+r.passes_completed||0, passAtt:+r.passes_attempted||0, sat:+r.shot_attempts||0,
+      poss:+r.possession_seconds||0, intc:+r.interceptions||0, pdrawn:+r.penalties_drawn||0,
+      defl:+r.deflections||0, saucer:+r.saucer_passes||0,
+      ratOff:+r.offense_rating||0, ratDef:+r.defense_rating||0, ratTeam:+r.team_play_rating||0,
+      name:r.skater_name||null, pos:r.position||null, eaId:r.ea_player_id||null, pid:r.profile_id||null };
+  }
+  function eaGoalieLine(r, won, ot){
+    var sa=+r.shots_against||0, sv=+r.saves||0;
+    return { goalie:true, sa:sa, sv:sv, ga:+r.goals_against||0,
+      w:won?1:0, l:(!won&&!ot)?1:0, otl:(!won&&ot)?1:0,
+      so:r.shutout?1:0, qs:((sa>0?(sv/sa):1)>=.885)?1:0,
+      brkShots:+r.breakaway_shots||0, brkSv:+r.breakaway_saves||0, pokes:+r.poke_checks||0,
+      toi:+r.time_on_ice_seconds||0,
+      name:r.skater_name||null, pos:"G", eaId:r.ea_player_id||null, pid:r.profile_id||null };
+  }
   var results = schedule
     .filter(function(g){ return g.status==="final" && g.homeScore!=null && g.awayScore!=null; })
     .map(function(g){
       var score={}; score[g.home]=g.homeScore; score[g.away]=g.awayScore;
       var box={}; box[g.home]={}; box[g.away]={};
+      (statsByGame[g.id]||[]).forEach(function(r){
+        var code = id2code[r.team_id]; if(!code || !box[code]) return;
+        var opp = code===g.home ? g.away : g.home;
+        var key = r.profile_id || ("ea:"+r.id);
+        box[code][key] = r.is_goalie ? eaGoalieLine(r, score[code]>score[opp], g.ot) : eaSkaterLine(r);
+      });
+      /* three stars — top performers across both clubs (linked players only) */
+      var cand = [];
+      [g.home, g.away].forEach(function(code){
+        Object.keys(box[code]).forEach(function(pid){
+          if (String(pid).indexOf("ea:")===0) return; /* unlinked EA player — can't link a star */
+          var b = box[code][pid];
+          var val = b.goalie ? (b.sv*0.1 + (b.so?3:0) + (b.w?2:0) + (b.sa?(b.sv/b.sa):0)*2)
+                             : (b.g*3 + b.a*2 + b.shots*0.15 + Math.max(0,b.pm)*0.3);
+          cand.push({ pid:pid, team:code, val:val, g:b.g||0 });
+        });
+      });
+      var stars = cand.sort(function(a,b){ return b.val-a.val || b.g-a.g; }).slice(0,3).map(function(x){ return { pid:x.pid, team:x.team }; });
       return { id:g.id, week:g.week, home:g.home, away:g.away, at:g.at,
-        ot:g.ot, score:score, box:box, stars:[], entered:true };
+        ot:g.ot, score:score, box:box, stars:stars, entered:true };
     });
 
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:results,
              suspensions:[], demoNow:CG.now(), season:season, live:true };
   CG.aggregate(lg, {});
+
+  /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
+     from the box above via CG.aggregate; these power the advanced leaders + profiles) */
+  if (gameStatsRows.length){
+    var finalIds = {}; results.forEach(function(r){ finalIds[r.id]=true; });
+    gameStatsRows.forEach(function(r){
+      if (!finalIds[r.game_id] || !r.profile_id) return;
+      var s = lg.pstats[r.profile_id]; if (!s) return;
+      s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
+      if (r.is_goalie){
+        s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
+        s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
+        s.pokes=(s.pokes||0)+(+r.poke_checks||0);
+      } else {
+        s.ppg=(s.ppg||0)+(+r.pp_goals||0); s.shg=(s.shg||0)+(+r.sh_goals||0);
+        s.pass=(s.pass||0)+(+r.passes_completed||0); s.passAtt=(s.passAtt||0)+(+r.passes_attempted||0);
+        s.sat=(s.sat||0)+(+r.shot_attempts||0); s.poss=(s.poss||0)+(+r.possession_seconds||0);
+        s.intc=(s.intc||0)+(+r.interceptions||0); s.pdrawn=(s.pdrawn||0)+(+r.penalties_drawn||0);
+        s.defl=(s.defl||0)+(+r.deflections||0); s.saucer=(s.saucer||0)+(+r.saucer_passes||0);
+        s._ratOff=(s._ratOff||0)+(+r.offense_rating||0); s._ratDef=(s._ratDef||0)+(+r.defense_rating||0);
+        s._ratTeam=(s._ratTeam||0)+(+r.team_play_rating||0); s._ratN=(s._ratN||0)+1;
+      }
+    });
+    lg.players.forEach(function(p){
+      var s=lg.pstats[p.id]; if(!s) return;
+      if (s._ratN){ s.ratOff=s._ratOff/s._ratN; s.ratDef=s._ratDef/s._ratN; s.ratTeam=s._ratTeam/s._ratN; }
+    });
+  }
 
   /* stats-derived ratings are all-zero pre-season — use the real overalls */
   players.forEach(function(p){
@@ -1044,6 +1125,63 @@ CG.AFTER._admLeagues = function(){
   var code=document.getElementById("lgCode"); if(code) code.addEventListener("input", function(){ var s=this.selectionStart; this.value=this.value.toUpperCase(); try{ this.setSelectionRange(s,s); }catch(e){} });
 };
 
+/* ================================================================
+   LIVE ADMIN: EA STATS — automatic stats pipeline (replaces manual
+   results entry). Link each club to its EA club id; the scheduled
+   poller + ingest-stats function do the rest.
+   ================================================================ */
+CG.admEAStats = function(){
+  var lg = CG.lg;
+  var teams = (CG.TEAMS||[]).slice();
+  var linked = teams.filter(function(t){ return t.eaClubId; }).length;
+  var finals = (lg.schedule||[]).filter(function(g){ return g.status==="final"; });
+  var imported = finals.filter(function(g){ return g.eaMatchId; });
+  var pending = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at < CG.now()-30*60000; });
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">EA stats — automatic</h2><p class="lede" style="margin-top:6px">Final scores and full box scores import straight from the EA NHL match record — there is no manual results entry. Link each club to its EA club below; the poller pulls finished games automatically on game nights and writes every stat.</p></div>';
+  h+='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'+
+    '<div class="kpi'+(linked<teams.length?" alert":"")+'" style="cursor:default"><b class="num">'+linked+'/'+teams.length+'</b><span>clubs linked</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+imported.length+'</b><span>auto-imported finals</span></div>'+
+    '<div class="kpi'+(pending.length?" alert":"")+'" style="cursor:default"><b class="num">'+pending.length+'</b><span>awaiting stats</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:18px">'+(linked?(linked<teams.length?"Partial":"Active"):"Setup")+'</b><span>pipeline</span></div></div>';
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Club → EA club link</h3><span class="chip">'+linked+'/'+teams.length+' linked</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Each club needs its numeric EA club id</caption><thead><tr><th class="tleft">Club</th><th class="tleft">EA club id</th><th class="tleft">EA club name (optional)</th><th class="tright">Save</th></tr></thead><tbody>'+
+    teams.map(function(t){
+      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,22)+'<span class="nm">'+esc(t.name)+'</span></span></td>'+
+        '<td class="tleft"><input data-ea-id="'+t.id+'" value="'+esc(t.eaClubId||"")+'" placeholder="e.g. 45210" inputmode="numeric" style="max-width:130px"></td>'+
+        '<td class="tleft"><input data-ea-name="'+t.id+'" value="'+esc(t.eaClub||"")+'" placeholder="EA club name" style="max-width:200px"></td>'+
+        '<td class="tright"><button class="btn btn-ghost btn-sm" data-ea-save="'+t.id+'" data-code="'+esc(t.code)+'">Save</button></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the scheduled poller matches EA games to your schedule by club-pair + date and writes the final score and every box-score stat — no manual entry.</span></div></div>';
+  h+='<div class="card"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
+  if (imported.length){
+    h+= imported.slice().sort(function(a,b){ return b.at-a.at; }).slice(0,8).map(function(g){
+      return '<div class="card-b" style="border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+' '+g.awayScore+'</span></span><span class="caption">@</span><span class="teamcell"><span class="mono" style="font-size:12px">'+esc(g.home)+' '+g.homeScore+'</span>'+CG.crest(g.home,20)+'</span><a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/matchup/'+g.id+'">Box score</a></div>';
+    }).join("");
+  } else if (pending.length){
+    h+='<div class="card-b"><span class="caption"><b>'+pending.length+'</b> scheduled game'+(pending.length>1?"s have":" has")+' passed and '+(pending.length>1?"are":"is")+' still waiting for EA stats. If a game never imports, confirm both clubs are linked above and were in the same EA match.</span></div>';
+  } else {
+    h+='<div class="card-b"><div class="empty" style="padding:30px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No finals yet</b><p>Once the season starts, finished games appear here automatically as the poller imports them.</p></div></div>';
+  }
+  h+='</div>';
+  return h;
+};
+CG.saveEAClub = function(teamId, code){
+  var idEl=document.querySelector('[data-ea-id="'+teamId+'"]'), nameEl=document.querySelector('[data-ea-name="'+teamId+'"]');
+  if(!idEl) return;
+  var eaId=(idEl.value||"").trim(), eaName=(nameEl.value||"").trim();
+  if (eaId && !/^\d+$/.test(eaId)){ CG.toast("EA club id should be numbers only","err"); return; }
+  var btn=document.querySelector('[data-ea-save="'+teamId+'"]'); if(btn){ btn.disabled=true; btn.textContent="Saving…"; }
+  CG.sb.from("teams").update({ ea_club_id: eaId||null, ea_club_name: eaName||null }).eq("id",teamId).then(function(r){
+    if(btn){ btn.disabled=false; btn.textContent="Save"; }
+    if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+    var t=CG.TEAM[code]; if(t){ t.eaClubId=eaId||null; t.eaClub=eaName||null; }
+    CG.toast(code+" EA link saved","ok"); CG.router();
+  });
+};
+CG.AFTER._admEAStats = function(){
+  document.querySelectorAll("[data-ea-save]").forEach(function(b){ b.addEventListener("click", function(){ CG.saveEAClub(this.getAttribute("data-ea-save"), this.getAttribute("data-code")); }); });
+};
+
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
@@ -1051,6 +1189,7 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="preseason") return CG.adminShell("preseason", CG.admPreseason(qs||{}));
   if (param==="users") return CG.adminShell("users", CG.admUsersLive(qs||{}));
   if (param==="leagues") return CG.adminShell("leagues", CG.admLeagues(qs||{}));
+  if (param==="eastats") return CG.adminShell("eastats", CG.admEAStats(qs||{}));
   return CG._origAdminRoute(param, qs);
 };
 CG._origAdminAfter = CG.AFTER.admin;
@@ -1058,6 +1197,7 @@ CG.AFTER.admin = function(param, qs){
   if (param==="preseason"){ CG.AFTER._preseason(); return; }
   if (param==="users"){ CG.AFTER._admUsers(); return; }
   if (param==="leagues"){ CG.AFTER._admLeagues(); return; }
+  if (param==="eastats"){ CG.AFTER._admEAStats(); return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 
@@ -1208,6 +1348,12 @@ CG.bootLive = async function(){
     /* Leagues & tiers at the top of the League group (commissioner) */
     if (CG.ADMIN_NAV && CG.ADMIN_NAV[1] && !CG.ADMIN_NAV[1][1].some(function(it){ return it[0]==="leagues"; })){
       CG.ADMIN_NAV[1][1].splice(0, 0, ["leagues","Leagues & tiers","trophy"]);
+    }
+    /* EA stats replaces manual Results entry in the Operations group (stats auto-import) */
+    if (CG.ADMIN_NAV && CG.ADMIN_NAV[0] && !CG.ADMIN_NAV[0][1].some(function(it){ return it[0]==="eastats"; })){
+      var ops = CG.ADMIN_NAV[0][1], replaced = false;
+      for (var oi=0; oi<ops.length; oi++){ if (ops[oi][0]==="results"){ ops[oi] = ["eastats","EA stats","chart"]; replaced = true; break; } }
+      if (!replaced) ops.splice(2, 0, ["eastats","EA stats","chart"]);
     }
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);

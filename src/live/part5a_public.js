@@ -759,11 +759,24 @@ CG.ROUTES.player = function(pid, qs){
           ? (s.gp? s.gp+" appearance"+(s.gp>1?"s":"")+", a "+(s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—")+" save percentage and a "+s.w+"-"+s.l+"-"+s.otl+" record." : "no game action.")
           : (s.gp? s.gp+" games played and "+s.p+" points ("+s.g+"G, "+s.a+"A) on "+s.shots+" shots." : "no game action."))+" Archived totals never change."
       : CG.scoutLine(p);
+    /* advanced EA metrics — only when real box scores exist (auto-imported) */
+    var hasAdv = !archived && s.gp>0 && s.toi!=null;
+    var advCells = isG
+      ? [["TOI/GP", s.gp?CG.fmtToi(s.toi/s.gp):"—"],["Brk SV%", s.brkShots?Math.round(100*s.brkSv/s.brkShots)+"%":"—"],
+         ["Brk saves",(s.brkSv||0)+"/"+(s.brkShots||0)],["Poke checks", s.pokes||0]]
+      : [["TOI/GP", s.gp?CG.fmtToi(s.toi/s.gp):"—"],["PPG", s.ppg||0],["SHG", s.shg||0],["Giveaways", s.gv||0],
+         ["Pass%", s.passAtt?Math.round(100*s.pass/s.passAtt)+"%":"—"],["Poss/GP",(s.gp&&s.poss!=null)?CG.fmtToi(s.poss/s.gp):"—"],
+         ["Shot att.", s.sat||0],["Interceptions", s.intc||0],["Pen. drawn", s.pdrawn||0],["Deflections", s.defl||0],["Saucer", s.saucer||0],
+         ["EA OFF", s._ratN?(+s.ratOff).toFixed(1):"—"],["EA DEF", s._ratN?(+s.ratDef).toFixed(1):"—"],["EA TP", s._ratN?(+s.ratTeam).toFixed(1):"—"]];
+    var advCard = hasAdv ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Advanced — from EA box scores</h3><span class="chip chip-chrome">Auto-imported</span></div><div class="card-b">'+
+      '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
+      advCells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
+      '<p class="caption" style="margin-top:12px">Every figure is pulled automatically from the EA NHL match record — no manual entry.</p></div></div>' : '';
     body += '<div class="grid g23"><div>'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
       cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
-        '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div></div>'+
+        '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>'+advCard+'</div>'+
       '<div class="stack">'+sideCard+(archived?"":
         '<div class="card"><div class="card-h"><h3>Contract</h3>'+
         (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
@@ -848,7 +861,7 @@ CG.ROUTES.stats = function(param, qs){
   var head = CG.pageHead("Stat central","League statistics","Sortable, filterable, exportable. Updated after every reported final — last updated after Week 6, Saturday night."
     ,'<button class="btn btn-ghost btn-sm" id="csvStats" style="align-self:flex-end">'+CG.ic("dl",14)+'Export view</button>');
   var tabs = '<div class="shell"><div class="tabs" role="tablist">'+
-    [["skaters","Skaters"],["goalies","Goaltenders"],["teams","Teams"]].map(function(x){
+    [["skaters","Skaters"],["advanced","Advanced"],["goalies","Goaltenders"],["teams","Teams"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div>'+
     '<div class="filters" style="margin:16px 0 18px">'+
     (tab!=="teams"?'<select id="sTeam" style="max-width:190px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+'</select>':"")+
@@ -870,11 +883,31 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+s.hits+'">'+s.hits+'</td><td data-v="'+s.blk+'">'+s.blk+'</td><td data-v="'+s.tk+'">'+s.tk+'</td>'+
         '<td data-v="'+s.pim+'" class="'+(s.pim?"":"z")+'">'+s.pim+'</td><td data-v="'+s.gwg+'" class="'+(s.gwg?"":"z")+'">'+s.gwg+'</td>'+
         '<td data-v="'+(s.fot?100*s.fow/s.fot:0).toFixed(1)+'">'+(s.fot?(100*s.fow/s.fot).toFixed(1):"—")+'</td></tr>'; }).join("")+'</tbody></table>';
+  } else if (tab==="advanced"){
+    var la = lg.players.filter(function(p){ return p.pos!=="G" && lg.pstats[p.id].gp>=minGp && (!fTeam||p.team===fTeam); })
+      .sort(function(a,b){ return (lg.pstats[b.id].toi||0)-(lg.pstats[a.id].toi||0); });
+    table = '<table class="tbl keepcols" id="statTbl"><caption>Advanced skater metrics — auto-imported from EA box scores</caption><thead><tr>'+
+      '<th class="tleft">Player</th><th class="sortable">GP</th><th class="sortable sorted">TOI/GP</th><th class="sortable">PPG</th><th class="sortable">SHG</th><th class="sortable">GV</th><th class="sortable">TK</th><th class="sortable">Pass%</th><th class="sortable">Poss/GP</th><th class="sortable">SAT</th><th class="sortable">INT</th><th class="sortable">PD</th><th class="sortable">OFF</th><th class="sortable">DEF</th><th class="sortable">TP</th></tr></thead><tbody>'+
+      la.map(function(p){ var s=lg.pstats[p.id];
+        var toiPg=s.gp?(s.toi||0)/s.gp:0, possPg=s.gp?(s.poss||0)/s.gp:0, passp=s.passAtt?100*s.pass/s.passAtt:0;
+        return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+'</small></span></span></td>'+
+        '<td data-v="'+s.gp+'">'+s.gp+'</td>'+
+        '<td data-v="'+toiPg.toFixed(0)+'">'+(s.gp?CG.fmtToi(toiPg):"—")+'</td>'+
+        '<td data-v="'+(s.ppg||0)+'" class="'+((s.ppg||0)?"":"z")+'">'+(s.ppg||0)+'</td>'+
+        '<td data-v="'+(s.shg||0)+'" class="'+((s.shg||0)?"":"z")+'">'+(s.shg||0)+'</td>'+
+        '<td data-v="'+(s.gv||0)+'">'+(s.gv||0)+'</td><td data-v="'+(s.tk||0)+'">'+(s.tk||0)+'</td>'+
+        '<td data-v="'+passp.toFixed(1)+'">'+(s.passAtt?passp.toFixed(1):"—")+'</td>'+
+        '<td data-v="'+possPg.toFixed(0)+'">'+(s.poss!=null&&s.gp?CG.fmtToi(possPg):"—")+'</td>'+
+        '<td data-v="'+(s.sat||0)+'">'+(s.sat||0)+'</td><td data-v="'+(s.intc||0)+'">'+(s.intc||0)+'</td><td data-v="'+(s.pdrawn||0)+'">'+(s.pdrawn||0)+'</td>'+
+        '<td data-v="'+(s._ratN?+s.ratOff:0).toFixed(1)+'">'+(s._ratN?(+s.ratOff).toFixed(1):"—")+'</td>'+
+        '<td data-v="'+(s._ratN?+s.ratDef:0).toFixed(1)+'">'+(s._ratN?(+s.ratDef).toFixed(1):"—")+'</td>'+
+        '<td data-v="'+(s._ratN?+s.ratTeam:0).toFixed(1)+'">'+(s._ratN?(+s.ratTeam).toFixed(1):"—")+'</td></tr>'; }).join("")+'</tbody></table>';
   } else if (tab==="goalies"){
     var gl = lg.players.filter(function(p){ return p.pos==="G" && lg.pstats[p.id].gp>=Math.min(minGp,3) && (!fTeam||p.team===fTeam); })
       .sort(function(a,b){ var A=lg.pstats[a.id],B=lg.pstats[b.id]; return B.sv/Math.max(1,B.sa)-A.sv/Math.max(1,A.sa); });
     table = '<table class="tbl keepcols" id="statTbl"><caption>Goaltender statistics</caption><thead><tr>'+
-      '<th class="tleft">Goaltender</th><th class="sortable">GP</th><th class="sortable">W</th><th class="sortable">L</th><th class="sortable">OTL</th><th class="sortable">SA</th><th class="sortable">SV</th><th class="sortable sorted">SV%</th><th class="sortable">GAA</th><th class="sortable">SO</th><th class="sortable">QS</th></tr></thead><tbody>'+
+      '<th class="tleft">Goaltender</th><th class="sortable">GP</th><th class="sortable">W</th><th class="sortable">L</th><th class="sortable">OTL</th><th class="sortable">SA</th><th class="sortable">SV</th><th class="sortable sorted">SV%</th><th class="sortable">GAA</th><th class="sortable">SO</th><th class="sortable">QS</th><th class="sortable">Brk%</th><th class="sortable">Poke</th></tr></thead><tbody>'+
       gl.map(function(p){ var s=lg.pstats[p.id]; var svp = s.sa? s.sv/s.sa : 0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
         '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+CG.TEAM[p.team].code+'</small></span></span></td>'+
@@ -882,7 +915,9 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+s.sa+'">'+s.sa+'</td><td data-v="'+s.sv+'">'+s.sv+'</td>'+
         '<td data-v="'+svp.toFixed(3)+'" class="pts">'+svp.toFixed(3).replace(/^0/,"")+'</td>'+
         '<td data-v="'+(s.gp?s.ga/s.gp:99).toFixed(2)+'">'+(s.gp?(s.ga/s.gp).toFixed(2):"—")+'</td>'+
-        '<td data-v="'+s.so+'" class="'+(s.so?"":"z")+'">'+s.so+'</td><td data-v="'+s.qs+'">'+s.qs+'</td></tr>'; }).join("")+'</tbody></table>';
+        '<td data-v="'+s.so+'" class="'+(s.so?"":"z")+'">'+s.so+'</td><td data-v="'+s.qs+'">'+s.qs+'</td>'+
+        '<td data-v="'+(s.brkShots?Math.round(100*s.brkSv/s.brkShots):0)+'">'+(s.brkShots?Math.round(100*s.brkSv/s.brkShots)+"%":"—")+'</td>'+
+        '<td data-v="'+(s.pokes||0)+'">'+(s.pokes||0)+'</td></tr>'; }).join("")+'</tbody></table>';
   } else {
     table = '<table class="tbl keepcols" id="statTbl"><caption>Team statistics</caption><thead><tr>'+
       '<th class="tleft">Club</th><th class="sortable">GP</th><th class="sortable">GF/GP</th><th class="sortable">GA/GP</th><th class="sortable sorted">DIFF</th><th class="sortable">S/GP</th><th class="sortable">SA/GP</th><th class="sortable">S%</th><th class="sortable">Home</th><th class="sortable">Road</th><th class="sortable">PTS%</th></tr></thead><tbody>'+
@@ -898,7 +933,7 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(r.ptsPct*100).toFixed(0)+'">'+(r.ptsPct*100).toFixed(0)+'%</td></tr>'; }).join("")+'</tbody></table>';
   }
   return head + tabs + '<div class="card"><div class="tblwrap">'+table+'</div></div>'+
-    '<p class="caption" style="margin:14px 0 40px">Definitions: P/GP points per game · S% shooting percentage · TK takeaways · GWG game-winning goals · FO% faceoff win rate · QS quality starts (≥.885 SV% in a start). Metrics the data can’t support aren’t shown.</p></div>';
+    '<p class="caption" style="margin:14px 0 40px">Definitions: P/GP points per game · S% shooting percentage · TK takeaways · GV giveaways · GWG game-winning goals · FO% faceoff win rate · QS quality starts (≥.885 SV% in a start) · TOI/GP time on ice per game · Pass% pass completion · SAT shot attempts · INT interceptions · PD penalties drawn · OFF/DEF/TP EA offense / defense / team-play ratings · Brk% breakaway save rate. Everything is auto-imported from EA box scores — metrics the data can’t support aren’t shown.</p></div>';
 };
 CG.AFTER.stats = function(param, qs){
   var tab = qs.tab||"skaters";
