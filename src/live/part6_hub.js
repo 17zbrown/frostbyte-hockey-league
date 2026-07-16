@@ -62,9 +62,12 @@ CG.hubNav = function(section){
   var r = CG.role();
   var items = [["", "Dashboard", "home"]];
   if (CG.can("availability.submit")) items.push(["availability","Availability","cal"]);
-  if (CG.can("roster.manage") && r!=="commish") items.push(["roster","Roster","users"]);
-  if (CG.can("trades.manage") && r!=="commish") items.push(["tradehub","Trade Hub","swap"]);
-  if (CG.can("lineup.build") && r!=="commish") items.push(["lineup","Lineup builder","grid"]);
+  /* club tools: managers always; a commissioner only when they also run a club
+     (league-wide admin lives in the Control Center, not here) */
+  var clubTools = r!=="commish" || CG.managesClub();
+  if (CG.can("roster.manage") && clubTools) items.push(["roster","Roster","users"]);
+  if (CG.can("trades.manage") && clubTools) items.push(["tradehub","Trade Hub","swap"]);
+  if (CG.can("lineup.build") && clubTools) items.push(["lineup","Lineup builder","grid"]);
   if (CG.can("complaints.file")||CG.can("complaints.review")) items.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
   if (r==="staff") items.push(["statsentry","Stats entry","chart"]);
   items.push(["notifications","Notifications","bell"]);
@@ -148,15 +151,15 @@ CG.hubDashboard = function(){
         }).join("")+'</div>');
     }
   }
-  if (r==="mgmt"){
-    var noReply = lg.byTeam[me.team].filter(function(p){ return CG.avFor(p.id).nights.n1.st==="nr"; }).length;
+  if (me && CG.managesClub()){
+    var noReply = (lg.byTeam[me.team]||[]).filter(function(p){ return CG.avFor(p.id).nights.n1.st==="nr"; }).length;
     var lu = (CG.store.get("lineups")||{});
     var tonightG = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; });
     var luState = tonightG && lu[tonightG.id+":"+me.team] ? lu[tonightG.id+":"+me.team].status : "not submitted";
     cards.push('<div class="card" style="border-color:var(--ink)"><div class="card-h"><h3>GM tasks</h3><span class="chip chip-chrome">Management</span></div>'+
       '<div class="tasklist">'+
       (tonightG?'<div class="titem"><span class="t-dot '+(luState==="submitted"?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+luState+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lineup">Builder</a></div>':"")+
-      '<div class="titem"><span class="t-dot'+(noReply?" red":" grn")+'"></span><span style="flex:1">'+noReply+' player'+(noReply===1?"":"s")+' with no Week 8 response.</span><a class="btn btn-ghost btn-sm" href="#/hub/availability">Grid</a></div>'+
+      '<div class="titem"><span class="t-dot'+(noReply?" red":" grn")+'"></span><span style="flex:1">'+noReply+' player'+(noReply===1?"":"s")+' with no '+esc(CG.WEEK8.label)+' response.</span><a class="btn btn-ghost btn-sm" href="#/hub/availability">Grid</a></div>'+
       '<div class="titem"><span class="t-dot grn"></span><span style="flex:1">No pending roster transactions.</span><a class="btn btn-ghost btn-sm" href="#/hub/tradehub">Trade Hub</a></div>'+
       '</div></div>');
   }

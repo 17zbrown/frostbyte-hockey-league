@@ -468,15 +468,25 @@ CG.NAV = [
   ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"],["Teams","#/teams"],
   ["Players","#/players"],["Stats","#/stats"],["Awards","#/awards"],["News","#/news"],["Rulebook","#/rulebook"]
 ];
-/* Every signed-in member always gets "My Hub" (the normal player hub). Any extra
-   role adds its own tab to the RIGHT of it. Returns an array of [label, href]. */
+/* Does the signed-in user run a club (Owner / GM / AGM)? Independent of their
+   league role — a commissioner or staff member can also own a club. */
+CG.managesClub = function(){
+  var me = CG.me();
+  if (me && me.mgmt) return true;
+  var uid = (CG.auth && CG.auth.user && CG.auth.user.id) || (me && me.id);
+  if (!uid) return false;
+  return (CG.TEAMS||[]).some(function(t){ return t.owner===uid || t.gm===uid || t.agm===uid; });
+};
+/* Every signed-in member always gets "My Hub" (the normal player hub). Every extra
+   hat adds its own tab to the RIGHT of it — the tabs are ADDITIVE, not either/or,
+   so a commissioner who also owns a club sees My Hub · Team HQ · Control Center. */
 CG.hubTabs = function(){
   var r = CG.role();
   if (r==="guest") return [];
   var tabs = [["My Hub","#/hub"]];
-  if (r==="mgmt") tabs.push(["Team HQ","#/hub/roster"]);
-  else if (r==="staff") tabs.push(["Staff Desk","#/hub/complaints"]);
-  else if (r==="commish") tabs.push(["Control Center","#/admin"]);
+  if (r==="mgmt" || CG.managesClub()) tabs.push(["Team HQ","#/hub/roster"]);
+  if (r==="staff") tabs.push(["Staff Desk","#/hub/complaints"]);
+  if (r==="commish") tabs.push(["Control Center","#/admin"]);
   return tabs;
 };
 /* back-compat: first tab (My Hub) for any older callers */

@@ -50,7 +50,7 @@ CG.admOverview = function(){
     [codesLive+"/"+lg.tonight.length, "Codes released", "#/admin/codes", false],
     [missingResults+"", "Games missing results", "#/admin/results", missingResults>0],
     [(teamsTonight-lineupsIn)+"", "Lineups not submitted", "#/admin/schedule", teamsTonight-lineupsIn>0],
-    [noResp+"", "No Week 8 availability", "#/admin/users", noResp>0],
+    [noResp+"", "No "+CG.WEEK8.label+" availability", "#/admin/users", noResp>0],
     [pending+"", "Open complaint cases", "#/admin/complaints", pending>0],
     ["1", "Award slate pending (Wk 7)", "#/admin/awards", false],
     [(CG.store.get("audit")||[]).length+"", "Audit entries this session", "#/admin/audit", false]

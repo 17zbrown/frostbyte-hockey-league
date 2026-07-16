@@ -354,7 +354,7 @@ CG.ROUTES.home = function(){
         return '<div class="note chr"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">'+esc(an.title)+'</b>'+esc(an.body)+
           '<span class="caption" style="display:block;margin-top:8px">'+CG.fmtDate(an.dateIso)+' · Commissioner</span></div>';
       }).join("")+
-      '<div class="note"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">Availability window</b>Week 8 submissions close Sunday 8:00 PM ET (Rule 5.1). '+
+      '<div class="note"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">Availability window</b>'+esc(CG.WEEK8.label)+' submissions close '+CG.fmtFull(CG.WEEK8.deadline)+' (Rule 5.1). '+
         (CG.can("availability.submit")?'<a href="#/hub/availability" style="font-weight:700;border-bottom:2px solid var(--chrome)">Submit yours →</a>':'<a href="#/signin" style="font-weight:700;border-bottom:2px solid var(--chrome)">Sign in to submit →</a>')+'</div>'+
     '</div></div></section>';
   }
