@@ -476,9 +476,20 @@ CG.unreadCount = function(){
 };
 
 /* ---------- chrome: demo bar, ticker, masthead, footer ---------- */
+/* top-level links stay for the everyday pages; everything else lives in two
+   grouped dropdowns so the bar keeps breathing room as sections grow */
 CG.NAV = [
-  ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"],["Teams","#/teams"],
-  ["Players","#/players"],["Stats","#/stats"],["Awards","#/awards"],["News","#/news"],["Rulebook","#/rulebook"]
+  ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"]
+];
+CG.NAV_GROUPS = [
+  ["Clubs & Players", [
+    ["Teams","#/teams","grid"],["Players","#/players","users"],
+    ["Stats","#/stats","chart"],["Awards","#/awards","trophy"]
+  ]],
+  ["League Office", [
+    ["News","#/news","msg"],["Rulebook","#/rulebook","db"],
+    ["Apply — own a club","#/owner","shield"],["Apply — join the staff","#/staffapply","flag"]
+  ]]
 ];
 /* Does the signed-in user run a club (Owner / GM / AGM)? Independent of their
    league role — a commissioner or staff member can also own a club. */
@@ -568,9 +579,15 @@ CG.renderChrome = function(){
       '<span class="wm"><b>CHEL GAMING</b><span>Hockey League</span></span></a>'+
     '<nav class="mh-nav" aria-label="Primary">'+
       CG.NAV.map(function(n){ return '<a href="'+n[1]+'" data-navlink>'+n[0]+'</a>'; }).join("")+
+      (CG.NAV_GROUPS||[]).map(function(g,gi){
+        return '<div class="mh-dd"><a href="'+g[1][0][1]+'" data-dd="navg'+gi+'" aria-haspopup="true" aria-expanded="false">'+g[0]+CG.ic("down",11)+'</a>'+
+          '<div class="pop" id="pop-navg'+gi+'" hidden>'+g[1].map(function(n){
+            return '<a class="pop-item" href="'+n[1]+'">'+CG.ic(n[2]||"home",16)+n[0]+'</a>';
+          }).join("")+'</div></div>';
+      }).join("")+
       (hubTabs.length>1
         /* several hats: one compact "Dashboards" dropdown keeps the bar breathable */
-        ? '<div class="mh-dd"><a href="'+hubTabs[0][1]+'" id="ddDash" aria-haspopup="true" aria-expanded="false">Dashboards'+CG.ic("down",11)+'</a>'+
+        ? '<div class="mh-dd"><a href="'+hubTabs[0][1]+'" id="ddDash" data-dd="dash" aria-haspopup="true" aria-expanded="false">Dashboards'+CG.ic("down",11)+'</a>'+
           '<div class="pop" id="ddDashPop" hidden>'+hubTabs.map(function(h){
             return '<a class="pop-item" href="'+h[1]+'">'+CG.ic(h[2]||"home",16)+h[0]+'</a>';
           }).join("")+'</div></div>'
@@ -588,7 +605,10 @@ CG.renderChrome = function(){
       '<button class="icon-btn mh-burger" id="burger" aria-label="Menu">'+CG.ic("menu")+'</button>'+
     '</div></div>';
   /* mobile nav */
-  var mnav = CG.NAV.concat(hubTabs);
+  /* the mobile menu stays a flat, complete list: top-level + both groups + hub tabs */
+  var mnav = CG.NAV.concat(
+    (CG.NAV_GROUPS||[]).reduce(function(acc,g){ return acc.concat(g[1].map(function(n){ return [n[0],n[1]]; })); }, []),
+    hubTabs);
   $("#mobilenav").innerHTML = '<div class="mn-h">'+CG.leagueMark(34)+
     '<button class="icon-btn" data-mn-close aria-label="Close menu" style="border-color:#39434B;background:transparent;color:#fff">'+CG.ic("x")+'</button></div>'+
     '<div class="mn-g">League</div>'+
@@ -616,14 +636,23 @@ CG.markActiveNav = function(){
   $$("#masthead [data-navlink]").forEach(function(a){
     a.classList.toggle("on", a.getAttribute("href").split("/")[1]===base);
   });
-  /* the Dashboards dropdown trigger lights up on any of its destinations */
-  var dd = $("#ddDash");
-  if (dd) dd.classList.toggle("on", base==="hub"||base==="admin");
+  /* every dropdown trigger lights up when one of its destinations is active */
+  $$("#masthead .mh-dd").forEach(function(dd){
+    var trig = dd.querySelector("[data-dd]");
+    if (!trig) return;
+    var active = Array.prototype.some.call(dd.querySelectorAll(".pop a"), function(a){
+      return a.getAttribute("href").split("/")[1]===base;
+    });
+    trig.classList.toggle("on", active);
+  });
 };
-CG.closeDashPop = function(){
-  var pop = $("#ddDashPop"), dd = $("#ddDash");
-  if (pop && !pop.hidden){ pop.hidden = true; if (dd) dd.setAttribute("aria-expanded","false"); }
+CG.closeNavPops = function(){
+  $$("#masthead .mh-dd").forEach(function(dd){
+    var pop = dd.querySelector(".pop"), trig = dd.querySelector("[data-dd]");
+    if (pop && !pop.hidden){ pop.hidden = true; if (trig) trig.setAttribute("aria-expanded","false"); }
+  });
 };
+CG.closeDashPop = function(){ CG.closeNavPops(); }; /* back-compat alias */
 
 /* ---------- carousel component ---------- */
 CG.carousel = function(rootSel, slides, opts){
@@ -830,15 +859,17 @@ document.addEventListener("click", function(e){
   if (e.target.closest("[data-demo-reset]")){ CG.confirm("Reset the demo?","Clears every change you made in this prototype — availability, lineups, entered results, edits.","Reset demo", function(){ CG.store.reset(); }); return; }
   if (e.target.closest("#searchBtn")){ CG.openPalette(); return; }
   if (e.target.closest("#bellBtn")){ CG.openBell(); return; }
-  if (e.target.closest("#ddDash")){
+  var ddTrig = e.target.closest("[data-dd]");
+  if (ddTrig && ddTrig.closest(".mh-dd")){
     e.preventDefault();
-    var pop = $("#ddDashPop"), dd = $("#ddDash");
-    pop.hidden = !pop.hidden;
-    dd.setAttribute("aria-expanded", pop.hidden?"false":"true");
+    var pop = ddTrig.closest(".mh-dd").querySelector(".pop");
+    var wasOpen = pop && !pop.hidden;
+    CG.closeNavPops();
+    if (pop && !wasOpen){ pop.hidden = false; ddTrig.setAttribute("aria-expanded","true"); }
     return;
   }
-  if (e.target.closest("#ddDashPop a")){ CG.closeDashPop(); /* fall through: let the link navigate */ }
-  else if (!e.target.closest(".mh-dd")) CG.closeDashPop();
+  if (e.target.closest(".mh-dd .pop a")){ CG.closeNavPops(); /* fall through: let the link navigate */ }
+  else if (!e.target.closest(".mh-dd")) CG.closeNavPops();
   if (e.target.closest("#avBtn")){
     var p = CG.persona();
     CG.drawer("Account", '<div class="pop-h" style="padding:0 0 14px"><span class="avatar">'+CG.avatarHtml()+'</span>'+
