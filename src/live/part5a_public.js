@@ -451,7 +451,7 @@ CG.ROUTES.schedule = function(param, qs){
     var grp = byWeek[k];
     var lab = (grp.stage==="preseason"?"Pre-season · Week ":grp.stage==="playoff"?"Playoffs · Week ":"Week ")+grp.week;
     return '<div style="margin-bottom:30px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'+
-      '<span class="eyebrow chr">'+lab+'</span>'+(k===nowKey?'<span class="chip chip-live"><span class="live-dot"></span>This week</span>':"")+'</div>'+
+      '<span class="eyebrow chr">'+lab+'</span>'+(k===nowKey?'<span class="chip chip-live"><span class="live-dot"></span>Next up</span>':"")+'</div>'+
       '<div class="stack" style="gap:9px">'+grp.games.map(CG.gameCard).join("")+'</div></div>';
   }).join("") : '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games match those filters</b><p>Clear a filter or two — the full slate lives here.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
@@ -936,7 +936,7 @@ CG.ROUTES.player = function(pid, qs){
           (sus? (sus.status==="served"
             ? '<span class="chip chip-warn">Suspension served</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
-          (canSeeAvail?'<span class="chip chip-win">'+esc(CG.WEEK8.label)+' availability: '+(CG.store.get("availability")[CG.WEEK8.key+":"+p.id]?"submitted":"not submitted")+'</span>':"")+
+          (canSeeAvail?'<span class="chip chip-win">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
       '<div style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Overall · from results</span></div></div>'+

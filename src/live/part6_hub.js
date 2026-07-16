@@ -13,8 +13,15 @@ CG.AV_OPTS = [
   ["yes","Available"],["no","Unavailable"],["maybe","Maybe"],
   ["late","Available late"],["until","Available until…"],["emg","Emergency sub only"]
 ];
+/* availability storage seam — the live build overrides both with the real
+   availability table; the prototype keeps its local store */
+CG.availGet = function(pid){ return (CG.store.get("availability")||{})[CG.WEEK8.key+":"+pid] || null; };
+CG.availSave = function(entry, cb){
+  var all = CG.store.get("availability"); all[CG.WEEK8.key+":"+((CG.me()||{}).id)] = entry;
+  CG.store.set("availability", all); if (cb) cb(true);
+};
 CG.avFor = function(playerId){
-  var saved = (CG.store.get("availability")||{})[CG.WEEK8.key+":"+playerId];
+  var saved = CG.availGet(playerId);
   if (saved) return saved;
   /* deterministic demo availability for the rest of the roster */
   var n = 0; String(playerId).split("").forEach(function(c){ n += c.charCodeAt(0); });
@@ -51,6 +58,32 @@ CG.incomingOffers = function(){
   return (CG.lg.incoming||[]).filter(function(o){ return !dec[o.id]; });
 };
 CG.incomingCount = function(){ return CG.can("trades.manage") ? CG.incomingOffers().length : 0; };
+/* trade-action seams — the live build overrides all four against the trades table */
+CG.outgoingOffers = function(){ return (CG.store.get("tradeOffers")||[]).slice().reverse(); };
+CG.sendTradeOffer = function(d, club){
+  var offers = CG.store.get("tradeOffers")||[];
+  offers.push({ id:"trOut"+(offers.length+1), to:d.partner, send:d.send.slice(), recv:d.recv.slice(), status:"Sent — awaiting response", open:true });
+  CG.store.set("tradeOffers", offers);
+  CG.audit("Trade offer sent", CG.TEAM[club].code+" → "+CG.TEAM[d.partner].code);
+  CG.pushNotif("swap","Trade offer sent","Your offer to "+CG.TEAM[d.partner].name+" is on their desk — you’ll be notified when they respond.","#/hub/tradehub");
+  CG._tradeDraft = { partner:null, send:[], recv:[] };
+  CG.toast("Offer sent to "+CG.TEAM[d.partner].name,"ok"); CG.renderChrome(); CG.router();
+};
+CG.acceptTradeOffer = function(id, o){
+  var dec = CG.store.get("tradeDecisions")||{}; dec[id]="accepted"; CG.store.set("tradeDecisions", dec);
+  CG.audit("Trade offer accepted", CG.TEAM[o.from].code);
+  CG.pushNotif("check","Trade accepted","Your acceptance of "+CG.TEAM[o.from].name+"’s offer is pending league-office approval.","#/hub/tradehub");
+  CG.toast("Offer accepted — routed to the league office","ok"); CG.renderChrome(); CG.router();
+};
+CG.declineTradeOffer = function(id, o){
+  var dec = CG.store.get("tradeDecisions")||{}; dec[id]="declined"; CG.store.set("tradeDecisions", dec);
+  CG.audit("Trade offer declined", CG.TEAM[o.from].code);
+  CG.toast("Offer from "+CG.TEAM[o.from].name+" declined","ok"); CG.renderChrome(); CG.router();
+};
+CG.withdrawTradeOffer = function(id){
+  var offers = (CG.store.get("tradeOffers")||[]).filter(function(o){ return o.id!==id; });
+  CG.store.set("tradeOffers", offers); CG.toast("Offer withdrawn","ok"); CG.router();
+};
 CG.tradePlayerLine = function(pid){
   var p = CG.playerById(CG.lg, pid); if (!p) return "";
   return '<span class="playercell">'+CG.crest(p.team,18)+'<span class="nm">'+esc(p.tag)+'</span>'+
@@ -81,7 +114,7 @@ CG.hubNav = function(section){
   function render(items){
     return items.map(function(it){
       var badge = "";
-      if (it[0]==="availability" && !CG.store.get("availability")[CG.WEEK8.key+":"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
+      if (it[0]==="availability" && !CG.availGet((CG.me()||{}).id)) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
@@ -136,7 +169,7 @@ CG.hubDashboard = function(){
   var cards = [];
   if (me){
     var t = CG.TEAM[me.team], s = lg.pstats[me.id];
-    var av = CG.store.get("availability")[CG.WEEK8.key+":"+me.id];
+    var av = CG.availGet(me.id);
     var tonight = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; });
     var inLineup = tonight && Object.values(CG.plannedLineup(tonight, me.team)).indexOf(me.id)>=0;
     cards.push('<div class="card" style="--tc:'+t.color+'"><div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+me.team+'">Team page</a></div>'+
@@ -226,7 +259,7 @@ CG.hubAvailability = function(){
   var me = CG.me(), lg = CG.lg, r = CG.role();
   if (!CG.can("availability.submit") && !CG.can("availability.viewTeam")) return CG.unauthorized();
   var closed = CG.now() > CG.WEEK8.deadline;
-  var mine = me ? CG.store.get("availability")[CG.WEEK8.key+":"+me.id] : null;
+  var mine = me ? CG.availGet(me.id) : null;
   var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+' · deadline '+CG.fmtFull(CG.WEEK8.deadline)+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Weekly availability</h1>'+
     '<p class="lede" style="margin-top:8px">Two nights next week. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
@@ -282,7 +315,7 @@ CG.hubAvailability = function(){
 CG.AFTER._availability = function(){
   var me = CG.me(); if (!me) return;
   var picks = {};
-  var mine = CG.store.get("availability")[CG.WEEK8.key+":"+me.id];
+  var mine = CG.availGet(me.id);
   if (mine) Object.keys(mine.nights).forEach(function(k){ picks[k]=mine.nights[k].st; });
   function refreshCount(){
     var n = Object.keys(picks).filter(function(k){ return picks[k]; }).length;
@@ -305,10 +338,12 @@ CG.AFTER._availability = function(){
     ["n1","n2"].forEach(function(k){
       entry.nights[k] = { st:picks[k], note: ($("[data-note="+k+"]")||{}).value||"" };
     });
-    var all = CG.store.get("availability"); all[CG.WEEK8.key+":"+me.id]=entry; CG.store.set("availability", all);
-    CG.pushNotif("check","Availability submitted",CG.WEEK8.label+" — logged "+CG.fmtFull(entry.at)+". You can edit until Sunday 8 PM ET.","#/hub/availability");
-    CG.toast(CG.WEEK8.label+" availability submitted","ok");
-    CG.renderChrome(); CG.router();
+    CG.availSave(entry, function(ok){
+      if (!ok) return;
+      CG.pushNotif("check","Availability submitted",CG.WEEK8.label+" — logged "+CG.fmtFull(entry.at)+". You can edit until Sunday 8 PM ET.","#/hub/availability");
+      CG.toast(CG.WEEK8.label+" availability submitted","ok");
+      CG.renderChrome(); CG.router();
+    });
   });
   var cp = $("#avCopy");
   if (cp) cp.addEventListener("click", function(){
@@ -770,15 +805,16 @@ CG.hubTradeHub = function(qs){
     '</div></div>';
 
   /* ---- outgoing (proposed) ---- */
-  var mine = (CG.store.get("tradeOffers")||[]).slice().reverse();
+  var mine = CG.outgoingOffers();
   var outgoing = mine.length ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Offers you’ve sent</h3><span class="chip">'+mine.length+'</span></div>'+
     mine.map(function(o){
+      var open = o.open!==false;
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<span class="teamcell">'+CG.crest(o.to,22)+'<span class="nm">to '+esc(CG.TEAM[o.to].name)+'</span></span>'+
-        '<span class="chip chip-warn">'+esc(o.status||"Sent")+'</span></div>'+
+        '<span class="chip '+(o.status==="Accepted"?"chip-win":o.status==="Declined"?"chip-loss":"chip-warn")+'">'+esc(o.status||"Sent")+'</span></div>'+
         '<div class="grid g2" style="gap:14px"><div><span class="caption">You send</span>'+o.send.map(function(pid){ return '<div style="margin-top:6px">'+CG.tradePlayerLine(pid)+'</div>'; }).join("")+'</div>'+
         '<div><span class="caption">You receive</span>'+o.recv.map(function(pid){ return '<div style="margin-top:6px">'+CG.tradePlayerLine(pid)+'</div>'; }).join("")+'</div></div>'+
-        '<button class="btn btn-ghost btn-sm" data-th-withdraw="'+o.id+'" style="margin-top:12px">Withdraw offer</button></div>';
+        (open?'<button class="btn btn-ghost btn-sm" data-th-withdraw="'+o.id+'" style="margin-top:12px">Withdraw offer</button>':"")+'</div>';
     }).join("")+'</div>' : "";
 
   /* ---- trade block ---- */
@@ -845,40 +881,31 @@ CG.AFTER._tradehub = function(qs){
     if (!d.send.length || !d.recv.length){ CG.toast("Add at least one player on each side","err"); return; }
     if (CG.tradeCapAfter(club, d.send, d.recv) > CG.CAP){ CG.toast("This deal puts you over the cap","err"); return; }
     CG.confirm("Send this offer to "+CG.TEAM[d.partner].name+"?",
-      "The offer goes to their management group with a notification. They can accept, decline, or counter. Nothing is final until the league office approves it (Rule 2.3).","Send offer", function(){
-      var offers = CG.store.get("tradeOffers")||[];
-      offers.push({ id:"trOut"+(offers.length+1), to:d.partner, send:d.send.slice(), recv:d.recv.slice(), status:"Sent — awaiting response" });
-      CG.store.set("tradeOffers", offers);
-      CG.audit("Trade offer sent", CG.TEAM[club].code+" → "+CG.TEAM[d.partner].code);
-      CG.pushNotif("swap","Trade offer sent","Your offer to "+CG.TEAM[d.partner].name+" is on their desk — you’ll be notified when they respond.","#/hub/tradehub");
-      CG._tradeDraft = { partner:null, send:[], recv:[] };
-      CG.toast("Offer sent to "+CG.TEAM[d.partner].name,"ok"); CG.renderChrome(); CG.router();
+      "The offer goes to their management group with a notification. They can accept, decline, or counter. Both clubs must clear the cap when it's accepted (Rule 2.5).","Send offer", function(){
+      CG.sendTradeOffer(d, club);
     });
   });
   $$("[data-th-accept]").forEach(function(b){ b.addEventListener("click", function(){
-    var id = this.getAttribute("data-th-accept"), o = (CG.lg.incoming||[]).find(function(x){ return x.id===id; });
-    CG.confirm("Accept this offer from "+CG.TEAM[o.from].name+"?","In the live league this routes to the league office for final approval before rosters change. In the prototype it just marks the offer accepted.","Accept offer", function(){
-      var dec = CG.store.get("tradeDecisions")||{}; dec[id]="accepted"; CG.store.set("tradeDecisions", dec);
-      CG.audit("Trade offer accepted", CG.TEAM[o.from].code);
-      CG.pushNotif("check","Trade accepted","Your acceptance of "+CG.TEAM[o.from].name+"’s offer is pending league-office approval.","#/hub/tradehub");
-      CG.toast("Offer accepted — routed to the league office","ok"); CG.renderChrome(); CG.router();
+    var id = this.getAttribute("data-th-accept"), o = CG.incomingOffers().find(function(x){ return x.id===id; });
+    if (!o) return;
+    CG.confirm("Accept this offer from "+CG.TEAM[o.from].name+"?",
+      "Accepting completes the trade: the players change clubs immediately, both cap sheets update, and the move is logged for the whole league. The deal is rejected automatically if either club would end up over the cap.","Accept offer", function(){
+      CG.acceptTradeOffer(id, o);
     });
   }); });
   $$("[data-th-decline]").forEach(function(b){ b.addEventListener("click", function(){
-    var id = this.getAttribute("data-th-decline"), o = (CG.lg.incoming||[]).find(function(x){ return x.id===id; });
-    var dec = CG.store.get("tradeDecisions")||{}; dec[id]="declined"; CG.store.set("tradeDecisions", dec);
-    CG.audit("Trade offer declined", CG.TEAM[o.from].code);
-    CG.toast("Offer from "+CG.TEAM[o.from].name+" declined","ok"); CG.renderChrome(); CG.router();
+    var id = this.getAttribute("data-th-decline"), o = CG.incomingOffers().find(function(x){ return x.id===id; });
+    if (o) CG.declineTradeOffer(id, o);
   }); });
   $$("[data-th-counter]").forEach(function(b){ b.addEventListener("click", function(){
-    var id = this.getAttribute("data-th-counter"), o = (CG.lg.incoming||[]).find(function(x){ return x.id===id; });
-    CG._tradeDraft = { partner:o.from, send:o.give.slice(), recv:o.get.slice() };  /* mirror their offer to edit */
+    var id = this.getAttribute("data-th-counter"), o = CG.incomingOffers().find(function(x){ return x.id===id; });
+    if (!o) return;
+    /* mirror from OUR side: we'd send what they asked for, receive what they offered */
+    CG._tradeDraft = { partner:o.from, send:o.get.slice(), recv:o.give.slice() };
     CG.toast("Loaded their offer into the builder — adjust and send back","ok"); CG.router();
   }); });
   $$("[data-th-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
-    var id = this.getAttribute("data-th-withdraw");
-    var offers = (CG.store.get("tradeOffers")||[]).filter(function(o){ return o.id!==id; });
-    CG.store.set("tradeOffers", offers); CG.toast("Offer withdrawn","ok"); CG.router();
+    CG.withdrawTradeOffer(this.getAttribute("data-th-withdraw"));
   }); });
   $$("[data-th-block-rm]").forEach(function(b){ b.addEventListener("click", function(){
     var pid = this.getAttribute("data-th-block-rm"); CG.setOnBlock(pid, false);

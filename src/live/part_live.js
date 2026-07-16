@@ -147,7 +147,7 @@ CG.buildLiveLeague = async function(){
         salary: (c && c.salary!=null) ? c.salary : (rs.salary||0),
         term: c ? Math.max(1, (c.end_season||1) - (c.start_season||1) + 1) : 1,
         mgmt: mgmt, mgmtSalary: (mgmt==="owner"||mgmt==="gm"),
-        onBlock: false, status: rs.status || "active", origin: rs.origin || "assigned"
+        onBlock: !!rs.on_block, status: rs.status || "active", origin: rs.origin || "assigned"
       };
     })
     .filter(Boolean);
@@ -391,7 +391,7 @@ CG.buildLiveLeague = async function(){
   }
   /* real data: no fabricated availability — unanswered means unanswered */
   CG.avFor = function(playerId){
-    var saved = (CG.store.get("availability")||{})[CG.WEEK8.key+":"+playerId];
+    var saved = CG.availGet(playerId);
     if (saved) return saved;
     return { nights:{ n1:{ st:"nr" }, n2:{ st:"nr" } }, at:null };
   };
@@ -490,6 +490,7 @@ CG.applySession = async function(session){
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
+  await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
   /* direct messages: load + subscribe on sign-in, tear down on sign-out */
   if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
@@ -690,6 +691,21 @@ CG.ROUTES.register = function(){
   }
   var p = CG.auth.profile, reg = CG.auth.registration, eaMissing = !p.ea_id;
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified. Update your details below any time before the deadline.</div>' : "";
+  /* the road ahead — so new players know exactly what registering starts */
+  var roadSteps = [
+    [s.registration_deadline, "Registration closes", "Get in before the cutoff."],
+    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
+    [s.draft_at, "Draft night", "Clubs pick from the pool. Ten minutes after the final pick, rookies under the five-game minimum are placed on random clubs."],
+    [s.free_agency_opens_at, "Free agency opens", "A 48-hour window where clubs sign remaining free agents at negotiated salaries."],
+    [s.starts_at, "Puck drop", "The regular season starts — 54 games, every stat imported automatically from EA."]
+  ].filter(function(st){ return st[0]; });
+  var roadmap = roadSteps.length ? '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">what registering starts</span></div>'+
+    roadSteps.map(function(st,i){
+      return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+        '<span class="mono" style="flex:0 0 150px;font-size:11.5px;color:var(--steel);padding-top:2px">'+CG.fmtFull(Date.parse(st[0]))+'</span>'+
+        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+st[1]+'</b><p class="caption" style="margin-top:2px">'+st[2]+'</p></span></div>';
+    }).join("")+'</div>' : "";
+  statusCard = roadmap + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(reg?"Update registration":"Register")+'</h3><span class="chip '+(reg?"chip-win":"chip-chrome")+'">'+(reg?"Registered":"Open")+'</span></div><div class="card-b">'+
     (eaMissing ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">You need your <b>EA ID</b> on file to register.</span><button class="btn btn-ghost btn-sm" id="regEaBtn">Add EA ID</button></div>'
                 : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
@@ -1028,6 +1044,118 @@ CG.subscribeDMs = function(){
   } catch(e){}
 };
 /* Messages lives in the player hub; the old top-level route redirects there. */
+/* ================================================================
+   LIVE: AVAILABILITY (availability table) + TRADES (trades table + accept_trade)
+   The prototype accessors in part6 are overridden here — one source of truth.
+   ================================================================ */
+CG._avail = {};
+CG.loadAvailability = async function(){
+  if (!CG.sb || !CG.auth.user || !CG.SEASON || !CG.SEASON.id) return;
+  var r = await CG.sb.from("availability").select("profile_id,week_key,nights,submitted_at").eq("season_id", CG.SEASON.id);
+  CG._avail = {};
+  ((r && r.data) || []).forEach(function(row){
+    CG._avail[row.week_key+":"+row.profile_id] = { at: Date.parse(row.submitted_at), nights: row.nights||{} };
+  });
+};
+CG.availGet = function(pid){ return CG._avail[CG.WEEK8.key+":"+pid] || null; };
+CG.availSave = function(entry, cb){
+  var uid = CG.auth.user && CG.auth.user.id;
+  if (!uid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Sign in to submit availability","err"); if(cb)cb(false); return; }
+  CG.sb.from("availability").upsert({
+    season_id: CG.SEASON.id, profile_id: uid, week_key: CG.WEEK8.key,
+    nights: entry.nights, submitted_at: new Date().toISOString()
+  }, { onConflict: "season_id,profile_id,week_key" }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t save availability: "+r.error.message,"err"); if(cb)cb(false); return; }
+    CG._avail[CG.WEEK8.key+":"+uid] = { at: Date.now(), nights: entry.nights };
+    if (cb) cb(true);
+  });
+};
+
+CG._trades = [];
+CG.loadTrades = async function(){
+  if (!CG.sb || !CG.auth.user || !CG.SEASON || !CG.SEASON.id) return;
+  var r = await CG.sb.from("trades").select("*").eq("season_id", CG.SEASON.id).order("created_at",{ ascending:false });
+  CG._trades = (r && r.data) || [];
+};
+CG.myManagedTeam = function(){
+  var uid = (CG.auth.user && CG.auth.user.id) || ((CG.me()||{}).id);
+  if (!uid) return null;
+  return (CG.TEAMS||[]).find(function(t){ return t.owner===uid || t.gm===uid || t.agm===uid; }) || null;
+};
+/* live override: a manager with no roster spot (e.g. before the pre-season fills
+   rosters) still runs THEIR club — never the alphabetical fallback */
+CG.myClub = function(){
+  var me = CG.me();
+  if (me && me.team) return me.team;
+  var t = CG.myManagedTeam();
+  if (t) return t.code;
+  return (CG.TEAMS[0]||{}).code || null;
+};
+CG.incomingOffers = function(){
+  var t = CG.myManagedTeam(); if (!t) return [];
+  return CG._trades.filter(function(x){ return x.to_team_id===t.id && x.status==="proposed"; })
+    .map(function(x){ return { id:x.id, from:(CG.lg._idToCode||{})[x.from_team_id],
+      at: Date.parse(x.created_at), give: x.offered_profile_ids||[], get: x.requested_profile_ids||[], note: x.note||"" }; })
+    .filter(function(o){ return o.from; });
+};
+CG.outgoingOffers = function(){
+  var t = CG.myManagedTeam(); if (!t) return [];
+  var label = { proposed:"Sent — awaiting response", declined:"Declined", accepted:"Accepted", cancelled:"Withdrawn" };
+  return CG._trades.filter(function(x){ return x.from_team_id===t.id && x.status!=="cancelled"; })
+    .map(function(x){ return { id:x.id, to:(CG.lg._idToCode||{})[x.to_team_id],
+      send: x.offered_profile_ids||[], recv: x.requested_profile_ids||[],
+      status: label[x.status]||x.status, open: x.status==="proposed" }; })
+    .filter(function(o){ return o.to; });
+};
+CG.sendTradeOffer = function(d, club){
+  var t = CG.myManagedTeam();
+  var partnerId = (CG.lg._codeToId||{})[d.partner];
+  if (!t || !partnerId){ CG.toast("Couldn’t resolve the clubs for this offer","err"); return; }
+  CG.sb.from("trades").insert({
+    season_id: CG.SEASON.id, from_team_id: t.id, to_team_id: partnerId,
+    from_profile_id: CG.auth.user.id,
+    offered_profile_ids: d.send.slice(), requested_profile_ids: d.recv.slice(),
+    offered_pick_ids: [], requested_pick_ids: [], retention: {},
+    note: d.note || null, status: "proposed"
+  }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
+    CG._tradeDraft = { partner:null, send:[], recv:[] };
+    CG.toast("Offer sent to "+CG.TEAM[d.partner].name+" — their management gets a notification","ok");
+    CG.loadTrades().then(function(){ if(CG.renderChrome)CG.renderChrome(); CG.router(); });
+  });
+};
+CG.acceptTradeOffer = function(id, o){
+  CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; }
+    CG.toast("Trade completed — rosters updated for both clubs","ok");
+    CG.loadTrades().then(function(){ CG.reloadLeague(); });
+  });
+};
+CG.declineTradeOffer = function(id, o){
+  CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
+    if (r.error){ CG.toast("Couldn’t decline: "+r.error.message,"err"); return; }
+    CG.toast("Offer declined","ok");
+    CG.loadTrades().then(function(){ if(CG.renderChrome)CG.renderChrome(); CG.router(); });
+  });
+};
+CG.withdrawTradeOffer = function(id){
+  CG.sb.from("trades").update({ status:"cancelled", updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
+    if (r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
+    CG.toast("Offer withdrawn","ok");
+    CG.loadTrades().then(function(){ CG.router(); });
+  });
+};
+/* trade block — a real flag on the roster spot; listings announce in #trade-block */
+CG.isOnBlock = function(pid){ var p = CG.playerById(CG.lg, pid); return !!(p && p.onBlock); };
+CG.setOnBlock = function(pid, on){
+  var p = CG.playerById(CG.lg, pid); if (!p) return;
+  p.onBlock = !!on; /* optimistic — the row below is the truth */
+  CG.sb.from("roster_spots").update({ on_block: !!on })
+    .eq("season_id", CG.SEASON.id).eq("profile_id", pid).then(function(r){
+      if (r.error){ p.onBlock = !on; CG.toast("Couldn’t update the block: "+r.error.message,"err"); CG.router(); }
+    });
+};
+
 CG.ROUTES.messages = function(){ location.hash = "#/hub/messages"; return ""; };
 CG.messagesBody = function(){
   var head = '<div style="margin-bottom:20px"><span class="eyebrow chr">Direct messages</span>'+
@@ -1612,6 +1740,7 @@ CG.reloadLeague = async function(){
   try {
     CG.lg = await CG.buildLiveLeague();
     await CG.loadManagerData();
+    await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
     CG.renderChrome(); CG.router();
   } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
 };
