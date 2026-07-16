@@ -1072,19 +1072,22 @@ CG.admUsersLive = function(){
   var profs=(lg._profilesRaw||[]).slice().sort(function(a,b){ return (a.gamertag||a.display_name||"").localeCompare(b.gamertag||b.display_name||""); });
   var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
   var banned=profs.filter(function(p){ return p.banned; }).length;
+  var staffN=profs.filter(function(p){ return p.role==="staff"; }).length;
   function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
   var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num">'+profs.filter(function(p){return p.role==="commissioner";}).length+'</b><span>commissioners</span></div>'+
-    '<div class="kpi'+(banned?" alert":"")+'" style="cursor:default"><b class="num">'+banned+'</b><span>banned</span></div></div>';
-  h+='<input type="search" id="userSearch" placeholder="Search players…" style="margin-bottom:16px" aria-label="Search users">';
+    '<div class="kpi" style="cursor:default"><b class="num">'+staffN+'</b><span>staff</span></div></div>';
+  h+='<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">'+
+    '<input type="search" id="userSearch" placeholder="Search players…" style="flex:1;min-width:200px" aria-label="Search users">'+
+    '<button class="btn btn-ghost btn-sm" id="bannedToggle" aria-pressed="false" style="white-space:nowrap">Banned only ('+banned+')</button></div>';
   h+='<div class="card"><div class="card-h"><h3>Members</h3><span class="chip">'+profs.length+'</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
     profs.map(function(pr){
       var pl=playerById[pr.id], club=pl?pl.team:null, mgmt=pl&&pl.mgmt?pl.mgmt:null;
       var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
-      return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'">'+
+      return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
         '<td class="tleft"><span class="playercell">'+(pr.avatar_url?'<img src="'+esc(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
         '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
         '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
@@ -1142,10 +1145,34 @@ CG.unbanUser = function(profileId){
   });
 };
 CG.AFTER._admUsers = function(){
-  var search=document.getElementById("userSearch");
-  if(search) search.addEventListener("input", function(){
-    var qy=this.value.toLowerCase();
-    document.querySelectorAll("#usersBody tr").forEach(function(tr){ tr.style.display = tr.getAttribute("data-user-name").indexOf(qy)>=0?"":"none"; });
+  var search=document.getElementById("userSearch"), bannedBtn=document.getElementById("bannedToggle");
+  function applyFilter(){
+    var qy=(search&&search.value||"").toLowerCase();
+    var bannedOnly = bannedBtn && bannedBtn.getAttribute("aria-pressed")==="true";
+    var shown=0;
+    document.querySelectorAll("#usersBody tr").forEach(function(tr){
+      var hit = tr.getAttribute("data-user-name").indexOf(qy)>=0 &&
+                (!bannedOnly || tr.getAttribute("data-user-banned")==="1");
+      tr.style.display = hit ? "" : "none";
+      if (hit) shown++;
+    });
+    var empty=document.getElementById("usersEmpty");
+    if (!shown && !empty){
+      empty=document.createElement("div");
+      empty.id="usersEmpty"; empty.className="card-b";
+      empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>';
+      var tbl=document.querySelector("#usersBody").closest(".tblwrap");
+      tbl.parentNode.insertBefore(empty, tbl.nextSibling);
+    } else if (shown && empty){ empty.remove(); }
+    else if (empty){ empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>'; }
+  }
+  if(search) search.addEventListener("input", applyFilter);
+  if(bannedBtn) bannedBtn.addEventListener("click", function(){
+    var on = this.getAttribute("aria-pressed")==="true";
+    this.setAttribute("aria-pressed", on?"false":"true");
+    this.classList.toggle("btn-ink", !on);
+    this.classList.toggle("btn-ghost", on);
+    applyFilter();
   });
   document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value); }); });
   document.querySelectorAll("[data-manage]").forEach(function(b){ b.addEventListener("click", function(){ CG.assignClubRole(this.getAttribute("data-manage"), this.getAttribute("data-name")); }); });
