@@ -483,10 +483,10 @@ CG.managesClub = function(){
 CG.hubTabs = function(){
   var r = CG.role();
   if (r==="guest") return [];
-  var tabs = [["My Hub","#/hub"]];
-  if (r==="mgmt" || CG.managesClub()) tabs.push(["Team HQ","#/hub/roster"]);
-  if (r==="staff") tabs.push(["Staff Desk","#/hub/complaints"]);
-  if (r==="commish") tabs.push(["Control Center","#/admin"]);
+  var tabs = [["My Hub","#/hub","home"]];
+  if (r==="mgmt" || CG.managesClub()) tabs.push(["Team HQ","#/hub/roster","users"]);
+  if (r==="staff") tabs.push(["Staff Desk","#/hub/complaints","flag"]);
+  if (r==="commish") tabs.push(["Control Center","#/admin","gear"]);
   return tabs;
 };
 /* back-compat: first tab (My Hub) for any older callers */
@@ -555,7 +555,13 @@ CG.renderChrome = function(){
       '<span class="wm"><b>CHEL GAMING</b><span>Hockey League</span></span></a>'+
     '<nav class="mh-nav" aria-label="Primary">'+
       CG.NAV.map(function(n){ return '<a href="'+n[1]+'" data-navlink>'+n[0]+'</a>'; }).join("")+
-      hubTabs.map(function(h){ return '<a href="'+h[1]+'" data-navlink>'+h[0]+'</a>'; }).join("")+
+      (hubTabs.length>1
+        /* several hats: one compact "Dashboards" dropdown keeps the bar breathable */
+        ? '<div class="mh-dd"><a href="'+hubTabs[0][1]+'" id="ddDash" aria-haspopup="true" aria-expanded="false">Dashboards'+CG.ic("down",11)+'</a>'+
+          '<div class="pop" id="ddDashPop" hidden>'+hubTabs.map(function(h){
+            return '<a class="pop-item" href="'+h[1]+'">'+CG.ic(h[2]||"home",16)+h[0]+'</a>';
+          }).join("")+'</div></div>'
+        : hubTabs.map(function(h){ return '<a href="'+h[1]+'" data-navlink>'+h[0]+'</a>'; }).join(""))+
     '</nav>'+
     '<div class="mh-right">'+
       '<button class="icon-btn" id="searchBtn" aria-label="Search (press /)" title="Search ( / )">'+CG.ic("search")+'</button>'+
@@ -593,10 +599,17 @@ CG.renderChrome = function(){
 };
 CG.markActiveNav = function(){
   var h = location.hash || "#/home";
+  var base = h.split("/")[1];
   $$("#masthead [data-navlink]").forEach(function(a){
-    var base = a.getAttribute("href").split("/")[1];
-    a.classList.toggle("on", h.split("/")[1]===base);
+    a.classList.toggle("on", a.getAttribute("href").split("/")[1]===base);
   });
+  /* the Dashboards dropdown trigger lights up on any of its destinations */
+  var dd = $("#ddDash");
+  if (dd) dd.classList.toggle("on", base==="hub"||base==="admin");
+};
+CG.closeDashPop = function(){
+  var pop = $("#ddDashPop"), dd = $("#ddDash");
+  if (pop && !pop.hidden){ pop.hidden = true; if (dd) dd.setAttribute("aria-expanded","false"); }
 };
 
 /* ---------- carousel component ---------- */
@@ -795,12 +808,24 @@ CG.router = function(){
 };
 
 /* ---------- global event wiring ---------- */
+document.addEventListener("keydown", function(e){
+  if (e.key==="Escape") CG.closeDashPop();
+});
 document.addEventListener("click", function(e){
   var t;
   if ((t = e.target.closest("[data-role]")) && t.closest("#demobar")){ CG.setRole(t.getAttribute("data-role")); return; }
   if (e.target.closest("[data-demo-reset]")){ CG.confirm("Reset the demo?","Clears every change you made in this prototype — availability, lineups, entered results, edits.","Reset demo", function(){ CG.store.reset(); }); return; }
   if (e.target.closest("#searchBtn")){ CG.openPalette(); return; }
   if (e.target.closest("#bellBtn")){ CG.openBell(); return; }
+  if (e.target.closest("#ddDash")){
+    e.preventDefault();
+    var pop = $("#ddDashPop"), dd = $("#ddDash");
+    pop.hidden = !pop.hidden;
+    dd.setAttribute("aria-expanded", pop.hidden?"false":"true");
+    return;
+  }
+  if (e.target.closest("#ddDashPop a")){ CG.closeDashPop(); /* fall through: let the link navigate */ }
+  else if (!e.target.closest(".mh-dd")) CG.closeDashPop();
   if (e.target.closest("#avBtn")){
     var p = CG.persona();
     CG.drawer("Account", '<div class="pop-h" style="padding:0 0 14px"><span class="avatar">'+CG.avatarHtml()+'</span>'+
