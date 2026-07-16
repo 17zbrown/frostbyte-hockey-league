@@ -1,5 +1,6 @@
 # Netlify configuration for Chel Gaming Hockey League
-# Static site (index.html at the root) + one serverless function for AI screenshot parsing.
+# Static site (index.html at the root) + serverless functions (EA stats, screenshots, Discord).
+# redeploy: re-trigger production publish (classic-site removal + server veto).
 
 [build]
   publish = "."
