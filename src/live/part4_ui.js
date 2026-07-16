@@ -428,12 +428,12 @@ CG.baseNotifs = function(){
   var r = CG.role(), lg = CG.lg, n = [];
   if (r==="guest") return n;
   var feat = lg.tonight.find(function(g){ return g.feature; });
-  n.push({ id:"n-codes", t:Date.parse("2026-07-15T20:30:00-04:00"), icon:"code",
-    title:"Game codes released", body:"Tonight's private lobby codes are live on each matchup page.", route: feat ? "#/matchup/"+feat.id : "#/schedule" });
-  n.push({ id:"n-avail", t:Date.parse("2026-07-13T10:00:00-04:00"), icon:"cal",
-    title:CG.WEEK8.label+" availability is open", body:"Submit by Sunday 8:00 PM ET (Rule 5.1).", route:"#/hub/availability" });
-  n.push({ id:"n-rank", t:Date.parse("2026-07-14T09:00:00-04:00"), icon:"chart",
-    title:"Week 7 Power Rankings published", body:"Blades jump to No. 3 after a 3-0 week.", route:"#/rankings" });
+  if (lg.tonight.length) n.push({ id:"n-codes", t:CG.now()-2*3600000, icon:"code",
+    title:"Game night — codes at T-30", body:"Tonight's private lobby codes go live on each matchup page 30 minutes before puck drop.", route: feat ? "#/matchup/"+feat.id : "#/schedule" });
+  n.push({ id:"n-avail", t:CG.now()-24*3600000, icon:"cal",
+    title:CG.WEEK8.label+" availability is open", body:"Submit before "+CG.fmtFull(CG.WEEK8.deadline)+" (Rule 5.1).", route:"#/hub/availability" });
+  if (lg.results.length) n.push({ id:"n-rank", t:CG.now()-12*3600000, icon:"chart",
+    title:"Power rankings updated", body:"Recomputed from the latest finals.", route:"#/rankings" });
   var me = CG.me();
   var myGame = me && lg.tonight.find(function(g){ return g.home===me.team || g.away===me.team; });
   if (r==="member" && myGame){
@@ -446,10 +446,13 @@ CG.baseNotifs = function(){
   }
   if (r==="mgmt" && myGame) n.push({ id:"n-lu", t:Date.parse("2026-07-15T17:30:00-04:00"), icon:"flag",
     title:"Lineup lock at "+CG.fmtTime(myGame.at-30*60000), body:"Submit tonight's lineup before the 30-minute lock (Rule 5.3).", route:"#/hub/lineup" });
-  if (r==="staff") n.push({ id:"n-case", t:Date.parse("2026-07-14T15:00:00-04:00"), icon:"flag",
-    title:"Case CG-0151 assigned to you", body:"Harassment report — under review. Confidential.", route:"#/hub/complaints" });
-  if (r==="commish") n.push({ id:"n-res", t:Date.parse("2026-07-15T19:00:00-04:00"), icon:"gear",
-    title:"4 games tonight need results", body:"Enter finals from the Control Center after the games.", route:"#/admin/results" });
+  if (r==="staff" || r==="commish"){
+    var openCases = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; }).length;
+    if (openCases) n.push({ id:"n-case", t:CG.now()-3600000, icon:"flag",
+      title: openCases+" open case"+(openCases===1?"":"s")+" in the league office", body:"Complaints and requests waiting on review.", route: r==="commish"?"#/admin/complaints":"#/hub/complaints" });
+  }
+  if (r==="commish" && lg.tonight.length) n.push({ id:"n-res", t:CG.now()-3600000, icon:"gear",
+    title:"Tonight's finals import automatically", body:"EA stats writes scores + box scores after each game — check the EA stats panel if one hasn't landed.", route:"#/admin/eastats" });
   var extra = (CG.store.get("notifs")[r]||[]);
   return extra.concat(n).sort(function(a,b){ return b.t-a.t; });
 };

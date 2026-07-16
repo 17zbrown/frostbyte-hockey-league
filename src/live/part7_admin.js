@@ -171,7 +171,7 @@ CG.admCodes = function(){
     '<div class="grid g3"><label class="fld"><span>Code release</span><select><option>30 min before puck drop</option><option>45 min</option><option>60 min</option></select></label>'+
     '<label class="fld"><span>Lineup release</span><select><option>60 min before puck drop</option><option>45 min</option><option>30 min</option></select></label>'+
     '<label class="fld"><span>Lineup lock</span><select><option>30 min before puck drop</option><option>15 min</option></select></label></div>'+
-    '<button class="btn btn-ink btn-sm" data-toast="Code release is automatic at T-30 — this policy is fixed by Rule 4.2">Save policy</button></div></div>';
+    '<span class="chip">Automatic · fixed by Rule 4.2</span></div></div>';
 };
 CG.AFTER._admCodes = function(){
   $$("[data-regen]").forEach(function(b){

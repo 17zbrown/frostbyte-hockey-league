@@ -47,7 +47,9 @@ CG.buildLiveLeague = async function(){
     sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
     sb.from("season_registrations").select("id,profile_id,position,scout_ovr, profiles(gamertag,ea_id)"),
     sb.from("leagues").select("*").order("sort_order"),
-    sb.from("game_stats").select("*")
+    sb.from("game_stats").select("*"),
+    sb.from("feature_flags").select("key,enabled"),
+    sb.from("site_config").select("key,value")
   ]);
   /* first 9 are public-readable and required; draft_picks + season_registrations
      (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
@@ -59,7 +61,17 @@ CG.buildLiveLeague = async function(){
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
       draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[],
       leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[],
-      gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[];
+      gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[],
+      flagsRaw=(q[13]&&!q[13].error&&q[13].data)||[],
+      siteCfgRaw=(q[14]&&!q[14].error&&q[14].data)||[];
+
+  /* public config: feature flags (homepage modules etc.) + site_config (rankings override) */
+  CG._flags = {}; flagsRaw.forEach(function(f){ CG._flags[f.key] = !!f.enabled; });
+  CG._siteCfg = {}; siteCfgRaw.forEach(function(r){ CG._siteCfg[r.key] = r.value; });
+  CG.modOn = function(key){
+    var f = CG._flags["home_"+key];
+    return f===undefined ? true : f;
+  };
 
   /* ---- leagues / tiers (CG umbrella; CGHL = top tier, inspired by NHL) ---- */
   var leagueById={};
@@ -265,6 +277,20 @@ CG.buildLiveLeague = async function(){
       var was = prPrev.indexOf(code)+1;
       return { rank:i+1, prev:was, team:code, move:was-(i+1) };
     });
+  }
+  /* commissioner's manual ranking override (site_config) — applies only while it
+     covers the current club list exactly; otherwise the computed order stands */
+  var prOv = CG._siteCfg && CG._siteCfg.power_rankings_override;
+  if (prOv && Array.isArray(prOv.order)){
+    var codesNow = CG.TEAMS.map(function(t){ return t.code; }).sort().join(",");
+    var codesOv = prOv.order.slice().sort().join(",");
+    if (codesNow===codesOv){
+      var autoRank = {}; (lg.powerRankings||[]).forEach(function(p){ autoRank[p.team]=p.rank; });
+      lg.powerRankings = prOv.order.map(function(code,i){
+        return { rank:i+1, prev:autoRank[code]||i+1, team:code, move:(autoRank[code]||i+1)-(i+1) };
+      });
+      lg.prManual = true;
+    }
   }
 
   /* ---- availability window from the REAL schedule (replaces the prototype's
@@ -1473,16 +1499,51 @@ CG.deleteDivision = function(id, name, count){
     });
   });
 };
-/* upload a club logo to the public team-logos bucket (commissioner-only RLS);
-   timestamped path so a re-upload never fights the CDN cache on the old file */
-CG.uploadTeamLogo = function(file, code){
+/* upload a club logo to the public team-logos bucket (commissioner-only RLS).
+   Token-explicit: a tab whose session lapsed (multi-tab refresh-token rotation)
+   silently falls back to the anon key in the storage client, which reads as
+   "violates row-level security". So we fetch the session ourselves, prove it
+   server-side, send it explicitly, and retry once through a refresh. */
+CG.uploadTeamLogo = async function(file, code){
+  var s = await CG.sb.auth.getSession();
+  var session = s && s.data && s.data.session;
+  if (!session){
+    var rf = await CG.sb.auth.refreshSession();
+    session = rf && rf.data && rf.data.session;
+  }
+  if (!session) throw new Error("your sign-in expired — sign out and back in, then retry");
+  var isComm = await CG.sb.rpc("is_commissioner");
+  if (isComm && isComm.error) throw new Error(isComm.error.message);
+  if (!isComm.data){
+    /* the token the server sees isn't a commissioner — one refresh, one recheck */
+    var rf2 = await CG.sb.auth.refreshSession();
+    session = (rf2 && rf2.data && rf2.data.session) || session;
+    isComm = await CG.sb.rpc("is_commissioner");
+    if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
+  }
   var ext = ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
   var path = (code||"logo").toLowerCase()+"-"+Date.now()+"."+ext;
-  return CG.sb.storage.from("team-logos").upload(path, file, { upsert:true, contentType:file.type })
-    .then(function(r){
-      if (r.error) throw r.error;
-      return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
+  async function put(tok){
+    return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+encodeURIComponent(path), {
+      method:"POST",
+      headers:{ "Authorization":"Bearer "+tok, "apikey":CG.SB_KEY, "Content-Type":file.type||"image/png", "x-upsert":"true", "cache-control":"3600" },
+      body:file
     });
+  }
+  var res = await put(session.access_token);
+  if (!res.ok){
+    var body = await res.json().catch(function(){ return {}; });
+    if (res.status===400 || res.status===403){
+      /* stale token race — refresh once and retry with the new one */
+      var rf3 = await CG.sb.auth.refreshSession();
+      var fresh = rf3 && rf3.data && rf3.data.session;
+      if (fresh){ res = await put(fresh.access_token); }
+      if (!res.ok){ body = await res.json().catch(function(){ return body; }); throw new Error(body.message||body.error||("upload rejected (HTTP "+res.status+")")); }
+    } else {
+      throw new Error(body.message||body.error||("upload rejected (HTTP "+res.status+")"));
+    }
+  }
+  return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
 };
 CG.teamForm = function(t){
   var isNew = !t;
@@ -1808,10 +1869,312 @@ CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
 CG.hubComplaintDetail = function(){ return CG.hubComplaintsLive({}); };
 CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
 
+/* ================================================================
+   LIVE ADMIN: OVERVIEW — real league state, real action items
+   ================================================================ */
+CG.admOverviewLive = function(){
+  var lg = CG.lg;
+  var unlinked = (CG.TEAMS||[]).filter(function(t){ return !t.eaClubId; });
+  var pendingApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
+  var openCases = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; });
+  var unsigned = (lg._registrationsRaw||[]).filter(function(r){ return !(lg._rosteredIds||{})[r.profile_id]; });
+  var nextG = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at>CG.now(); }).sort(function(a,b){ return a.at-b.at; })[0];
+  var days = CG.daysToStart ? CG.daysToStart() : null;
+  var draftSt = lg.draftState ? lg.draftState.status : null;
+  var h = '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">'+
+    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>days to puck drop</span></div>'+
+    '<div class="kpi'+(unsigned.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+unsigned.length+'</b><span>free agents unsigned</span></div>'+
+    '<div class="kpi'+(pendingApps.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+pendingApps.length+'</b><span>owner apps pending</span></div>'+
+    '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
+    '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
+    '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">5</b><span>automations</span></div></div>';
+  var actions = [];
+  if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
+  if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
+  if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason","Pre-season"]);
+  if (openCases.length) actions.push([openCases.length+' complaint'+(openCases.length===1?"":"s / requests")+' open in the league office',"#/admin/complaints","Case queue"]);
+  if (draftSt && draftSt!=="complete") actions.push(["The draft is "+draftSt,"#/draft","Draft room"]);
+  h += '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>Needs your attention</h3>'+(actions.length?'<span class="chip chip-warn">'+actions.length+'</span>':'<span class="chip chip-win">All clear</span>')+'</div>'+
+    (actions.length ? actions.map(function(a){
+      return '<div class="titem" style="padding:12px 18px;border-top:1px solid var(--line-soft)"><span class="t-dot red"></span><span style="flex:1">'+a[0]+'</span><a class="btn btn-ghost btn-sm" href="'+a[1]+'">'+a[2]+'</a></div>';
+    }).join("") : '<div class="card-b"><span class="caption">Nothing pending — registrations, cases, and club links are all handled.</span></div>')+'</div>';
+  h += '<div class="stack"><div class="card"><div class="card-h"><h3>Next game night</h3><a class="sec-link" href="#/admin/schedule">Schedule</a></div><div class="card-b">'+
+    (nextG ? '<b style="font-family:var(--f-disp);font-size:16px">'+CG.fmtDay(nextG.at)+'</b><p class="caption" style="margin-top:6px">First puck drop '+CG.fmtTime(nextG.at)+' · codes at T-30 · servers set 30 min before the first game.</p>'
+           : '<span class="caption">No games scheduled yet.</span>')+'</div></div>'+
+    '<div class="card"><div class="card-h"><h3>How results work</h3><a class="sec-link" href="#/admin/eastats">EA stats</a></div><div class="card-b"><p class="small" style="color:var(--steel)">Scores and full box scores import automatically from the EA NHL match record after every final — standings, stats, overalls, news recaps, and Discord posts all follow with no manual entry.</p></div></div></div></div>';
+  return h;
+};
+
+/* ================================================================
+   LIVE ADMIN: AUTOMATIONS — real heartbeats + run-now buttons
+   ================================================================ */
+CG.AUTOMATIONS = [
+  { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
+  { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
+  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 5 min",  desc:"Keeps Discord roles and display names matched to the league database." },
+  { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
+  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." }
+];
+CG.admAutomationsLive = function(){
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
+  h += '<div class="card">'+CG.AUTOMATIONS.map(function(a,i){
+    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+      '<div style="flex:1;min-width:220px"><b style="font-family:var(--f-disp)">'+esc(a.name)+'</b>'+
+        '<p class="caption" style="margin-top:2px">'+esc(a.desc)+' '+esc(a.every)+'.</p></div>'+
+      '<span class="chip" id="auto-st-'+a.key+'">checking…</span>'+
+      '<span class="caption mono" id="auto-ts-'+a.key+'" style="min-width:110px;text-align:right">—</span>'+
+      '<button class="btn btn-ghost btn-sm" data-auto-run="'+a.key+'">Run now</button></div>';
+  }).join("")+
+  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Also fully automatic, inside the database: standings on every final, auto news (recaps, spotlights, Three Stars), server resolution at lock, and every notification. Those have no off switch — they’re triggers.</span></div></div>';
+  return h;
+};
+CG.AFTER._admAutomations = function(){
+  /* heartbeats: each function stamps rl_<key> in app_config on every run */
+  CG.sb.from("app_config").select("key,value").like("key","rl_%").then(function(r){
+    var map = {}; ((r&&r.data)||[]).forEach(function(row){ map[row.key.replace(/^rl_/,"")]=row.value; });
+    CG.AUTOMATIONS.forEach(function(a){
+      var ts = map[a.key] ? Date.parse(map[a.key]) : null;
+      var stEl = document.getElementById("auto-st-"+a.key), tsEl = document.getElementById("auto-ts-"+a.key);
+      if (!stEl) return;
+      if (!ts){ stEl.textContent="never ran"; stEl.className="chip chip-warn"; return; }
+      var mins = Math.round((Date.now()-ts)/60000);
+      tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
+      var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
+      stEl.textContent = fresh ? "Running" : "Check";
+      stEl.className = "chip "+(fresh?"chip-win":"chip-warn");
+    });
+  });
+  document.querySelectorAll("[data-auto-run]").forEach(function(b){ b.addEventListener("click", function(){
+    var key = this.getAttribute("data-auto-run"), btn=this;
+    btn.disabled = true; btn.textContent = "Running…";
+    fetch("/.netlify/functions/"+key, { method:"GET" }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
+      .then(function(out){
+        btn.disabled=false; btn.textContent="Run now";
+        CG.toast(key+": "+JSON.stringify(out).slice(0,140),"ok");
+        if (CG.router) CG.router();
+      })
+      .catch(function(e){ btn.disabled=false; btn.textContent="Run now"; CG.toast(key+" failed: "+e.message,"err"); });
+  }); });
+};
+
+/* ================================================================
+   LIVE ADMIN: NEWSROOM — publish / edit / delete on the news table
+   (INSERTs auto-post to #news via the notify_discord_news trigger)
+   ================================================================ */
+CG.NEWS_CATS = ["League News","Game Recap","Transactions","Awards","Commissioner Update","Team Feature"];
+CG.admNewsLive = function(){
+  var arts = (CG.CONTENT.articles||[]).slice();
+  var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
+    '<div><h2 class="h-sec">Newsroom</h2><p class="lede" style="margin-top:6px">Stories publish straight to the site and auto-post to Discord’s #news. Recaps and player spotlights write themselves after finals — everything is editable here.</p></div>'+
+    '<button class="btn btn-chrome" id="newArt" style="align-self:flex-start">'+CG.ic("plus",15)+'New story</button></div>';
+  h += arts.length ? '<div class="card"><div class="card-h"><h3>Published</h3><span class="chip">'+arts.length+'</span></div>'+
+    arts.map(function(a){
+      var auto = /CGHL Wire/i.test(a.author||"");
+      return '<div class="card-b" style="display:flex;align-items:center;gap:12px;border-top:1px solid var(--line-soft)">'+
+        '<span class="nf-ic">'+CG.ic("doc",14)+'</span>'+
+        '<div style="flex:1;min-width:0;cursor:pointer" data-go="#/article/'+esc(a.slug)+'"><b>'+esc(a.title)+'</b>'+
+          '<p class="caption" style="margin-top:2px">'+esc(a.category)+' · '+esc(a.author)+' · '+CG.fmtDate(a.dateIso)+(auto?' · <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">AUTO</span>':"")+'</p></div>'+
+        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-news-edit="'+esc(a.slug)+'">Edit</button>'+
+        '<button class="btn btn-ghost btn-sm" data-news-del="'+esc(a.slug)+'" data-title="'+esc(a.title)+'">Delete</button></span></div>';
+    }).join("")+'</div>'
+  : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>No stories yet</b><p>Publish the first one — or wait for opening night, when recaps start writing themselves.</p></div></div>';
+  return h;
+};
+CG.newsForm = function(slug){
+  var a = slug ? (CG.CONTENT.articles||[]).find(function(x){ return x.slug===slug; }) : null;
+  var isNew = !a;
+  CG.modal(isNew?"New story":"Edit — "+esc(a.title),
+    '<label class="fld"><span>Headline</span><input id="nwT" value="'+esc(a?a.title:"")+'" placeholder="Sentence case, specific, no clickbait"></label>'+
+    '<label class="fld"><span>Category</span><select id="nwC">'+CG.NEWS_CATS.map(function(c){ return '<option'+(a&&a.category===c?" selected":"")+'>'+c+'</option>'; }).join("")+'</select></label>'+
+    '<label class="fld"><span>Body</span><textarea id="nwB" rows="8" placeholder="Write like a beat reporter. Blank lines become paragraphs.">'+esc(a?a.body.join("\n\n"):"")+'</textarea></label>'+
+    '<p class="caption">'+(isNew?"Publishing posts to the site immediately and announces in #news on Discord.":"Edits update the site — Discord isn’t re-posted.")+'</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="nwGo">'+(isNew?"Publish":"Save changes")+'</button>');
+  document.getElementById("nwGo").addEventListener("click", function(){
+    var t=(document.getElementById("nwT").value||"").trim();
+    if (t.length<8){ CG.toast("Give it a real headline first","err"); return; }
+    var body=(document.getElementById("nwB").value||"").trim();
+    if (!body){ CG.toast("Write the story body","err"); return; }
+    var rec={ title:t, category:document.getElementById("nwC").value, body:body };
+    var btn=this; btn.disabled=true;
+    var q = isNew
+      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"Commissioner")+" — Commissioner", published_at:new Date().toISOString(), season_id:(CG.SEASON&&CG.SEASON.id)||null }))
+      : CG.sb.from("news").update(rec).eq("id", slug);
+    q.then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(isNew?"Published — it’s live and posted to #news":"Story updated","ok");
+      CG.reloadLeague();
+    });
+  });
+};
+CG.AFTER._admNewsLive = function(){
+  var na=document.getElementById("newArt");
+  if (na) na.addEventListener("click", function(){ CG.newsForm(null); });
+  document.querySelectorAll("[data-news-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.newsForm(this.getAttribute("data-news-edit")); }); });
+  document.querySelectorAll("[data-news-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-news-del"), title=this.getAttribute("data-title");
+    CG.confirm("Delete “"+esc(title)+"”?","It comes off the site immediately. The Discord post (if any) stays.","Delete story", function(){
+      CG.sb.from("news").delete().eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        CG.toast("Story deleted","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+};
+
+/* ================================================================
+   LIVE ADMIN: POWER RANKINGS — automatic formula + manual override
+   ================================================================ */
+CG.admRankingsLive = function(){
+  var lg = CG.lg;
+  var order = CG._prDraft || (lg.powerRankings||[]).map(function(p){ return p.team; });
+  var dirty = !!CG._prDraft;
+  var manual = !!lg.prManual;
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Power rankings</h2><p class="lede" style="margin-top:6px">'+
+    (manual ? "Running on your <b>manual order</b>. The formula keeps computing underneath — return to automatic any time."
+            : "Running on the <b>automatic formula</b>: points percentage, goal differential per game, and last-five form. Reorder below to take manual control.")+'</p></div>';
+  h += '<div class="note '+(manual?"chr":"grn")+'" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp)">'+(manual?"Manual override active":"Automatic")+'</b>'+
+    '<span style="margin-left:auto;display:inline-flex;gap:8px">'+
+    (dirty?'<button class="btn btn-chrome btn-sm" id="prSave">Save this order</button><button class="btn btn-ghost btn-sm" id="prDiscard">Discard changes</button>':"")+
+    (manual&&!dirty?'<button class="btn btn-ghost btn-sm" id="prAuto">Return to automatic</button>':"")+'</span></div>';
+  h += '<div class="card">'+order.map(function(code,i){
+    var t = CG.TEAM[code]; if (!t) return "";
+    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+      '<b class="num" style="font-family:var(--f-disp);font-size:20px;width:28px">'+(i+1)+'</b>'+CG.crest(code,28)+
+      '<b style="font-family:var(--f-disp);flex:1">'+esc(t.name)+'</b>'+
+      '<span class="caption">'+CG.lg.teams[code].w+"-"+CG.lg.teams[code].l+"-"+CG.lg.teams[code].otl+'</span>'+
+      '<span style="display:inline-flex;gap:4px">'+
+        '<button class="btn btn-ghost btn-sm" data-pr-up="'+i+'" '+(i===0?"disabled":"")+' aria-label="Move '+esc(t.name)+' up">'+CG.ic("up",13)+'</button>'+
+        '<button class="btn btn-ghost btn-sm" data-pr-down="'+i+'" '+(i===order.length-1?"disabled":"")+' aria-label="Move '+esc(t.name)+' down">'+CG.ic("down",13)+'</button></span></div>';
+  }).join("")+
+  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">The public rankings page and the homepage widget follow whatever is live here. Manual orders persist until you return to automatic.</span></div></div>';
+  return h;
+};
+CG.AFTER._admRankings = function(){
+  function draft(){ return CG._prDraft || (CG.lg.powerRankings||[]).map(function(p){ return p.team; }); }
+  document.querySelectorAll("[data-pr-up]").forEach(function(b){ b.addEventListener("click", function(){
+    var i=+this.getAttribute("data-pr-up"); var d=draft().slice();
+    var x=d[i-1]; d[i-1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
+  }); });
+  document.querySelectorAll("[data-pr-down]").forEach(function(b){ b.addEventListener("click", function(){
+    var i=+this.getAttribute("data-pr-down"); var d=draft().slice();
+    var x=d[i+1]; d[i+1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
+  }); });
+  var sv=document.getElementById("prSave");
+  if (sv) sv.addEventListener("click", function(){
+    CG.sb.from("site_config").upsert({ key:"power_rankings_override", value:{ order: CG._prDraft }, updated_at:new Date().toISOString() },{ onConflict:"key" }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      CG._prDraft=null; CG.toast("Manual ranking saved — live everywhere","ok"); CG.reloadLeague();
+    });
+  });
+  var dc=document.getElementById("prDiscard");
+  if (dc) dc.addEventListener("click", function(){ CG._prDraft=null; CG.router(); });
+  var au=document.getElementById("prAuto");
+  if (au) au.addEventListener("click", function(){
+    CG.sb.from("site_config").delete().eq("key","power_rankings_override").then(function(r){
+      if (r.error){ CG.toast("Couldn’t switch: "+r.error.message,"err"); return; }
+      CG.toast("Back to the automatic formula","ok"); CG.reloadLeague();
+    });
+  });
+};
+
+/* ================================================================
+   LIVE ADMIN: HOMEPAGE MODULES — persisted league-wide via feature_flags
+   ================================================================ */
+CG.admHomepageLive = function(){
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Homepage</h2><p class="lede" style="margin-top:6px">Toggle front-page modules for everyone — saved to the league database, applied on the next load.</p></div>'+
+    '<div class="card"><div class="card-h"><h3>Homepage modules</h3><a class="sec-link" href="#/home">View front page</a></div>'+
+    CG.HOMEMODS.map(function(m){
+      var on = CG.modOn(m.key);
+      return '<div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line-soft)">'+
+        '<span style="flex:1;font-weight:600;font-size:14px">'+m.label+'</span>'+
+        '<button class="toggle'+(on?" on":"")+'" data-mod-live="'+m.key+'" role="switch" aria-checked="'+on+'" aria-label="'+m.label+'"></button></div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Sections hidden here disappear for every visitor. The hero, and anything a section needs to explain the season, stays.</span></div></div>';
+};
+CG.AFTER._admHomepage = function(){
+  document.querySelectorAll("[data-mod-live]").forEach(function(t){
+    t.addEventListener("click", function(){
+      var k = t.getAttribute("data-mod-live");
+      var next = !CG.modOn(k);
+      CG.sb.from("feature_flags").upsert({ key:"home_"+k, enabled:next, label:"Homepage: "+k },{ onConflict:"key" }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG._flags["home_"+k]=next;
+        t.classList.toggle("on", next); t.setAttribute("aria-checked", next);
+        CG.toast("Front page updated for everyone","ok");
+      });
+    });
+  });
+};
+
+/* ================================================================
+   LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
+   ================================================================ */
+CG.admScheduleLive = function(){
+  var lg = CG.lg;
+  var future = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+future.length+' games to play. Move any game — the EA auto-import matches by clubs + date, so stats follow a rescheduled game automatically.</p></div>';
+  h += '<div class="card"><div class="card-h"><h3>Upcoming slate</h3><span class="chip">next '+Math.min(future.length,16)+' shown</span></div>'+
+    future.slice(0,16).map(function(g){
+      return '<div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:170px">'+CG.fmtFull(g.at)+'</span>'+
+        '<span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+'</span></span><span class="caption">@</span>'+
+        '<span class="teamcell">'+CG.crest(g.home,20)+'<span class="mono" style="font-size:12px">'+esc(g.home)+'</span></span>'+
+        '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Open</a>'+
+        '<button class="btn btn-ghost btn-sm" data-resched-live="'+g.id+'">Reschedule</button></span></div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">All times Eastern. Moving a game keeps its lobby code and server picks; both clubs see the change instantly.</span></div></div>';
+  return h;
+};
+CG.AFTER._admScheduleLive = function(){
+  document.querySelectorAll("[data-resched-live]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-resched-live");
+    var g=CG.lg.schedule.find(function(x){ return x.id===id; }); if(!g) return;
+    var cur=new Date(g.at);
+    var et = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(cur);
+    var part = function(t){ return (et.find(function(x){return x.type===t;})||{}).value; };
+    var val = part("year")+"-"+part("month")+"-"+part("day")+"T"+part("hour")+":"+part("minute");
+    CG.modal("Reschedule — "+esc(g.away)+" @ "+esc(g.home),
+      '<label class="fld"><span>New date &amp; time (Eastern)</span><input type="datetime-local" id="rsWhen" value="'+val+'"></label>'+
+      '<p class="caption">Both clubs see the new time immediately; codes and server picks carry over.</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="rsGo">Reschedule</button>');
+    document.getElementById("rsGo").addEventListener("click", function(){
+      var v=document.getElementById("rsWhen").value;
+      if(!v){ CG.toast("Pick the new date and time","err"); return; }
+      var iso=new Date(v+":00-04:00").toISOString();  /* league runs Aug–Oct: EDT */
+      CG.sb.from("games").update({ scheduled_at: iso }).eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t reschedule: "+r.error.message,"err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast("Game moved to "+CG.fmtFull(Date.parse(iso)),"ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+};
+
+/* ================================================================
+   LIVE ADMIN: RATINGS — the automated overall pipeline, in the open
+   ================================================================ */
+CG.admRatingsLive = function(){
+  var lg = CG.lg;
+  var list = lg.players.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr||0)-(lg.ratings[a.id].ovr||0); });
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from EA box scores after every final, position-weighted, regressed while samples are small. Pre-season scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">Pre-season Central</a>.</p></div>'+
+    '<div class="card"><div class="card-h"><h3>Current overalls</h3><span class="chip">'+list.length+' rostered</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Rostered players by overall</caption><thead><tr><th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>GP</th><th>OVR</th></tr></thead><tbody>'+
+    list.map(function(p){ var s=lg.pstats[p.id];
+      return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
+        '<td class="tleft"><span class="playercell"><span class="nm">'+esc(p.tag)+'</span></span></td>'+
+        '<td class="tnum">'+p.pos+'</td><td class="tleft">'+esc(CG.TEAM[p.team].code)+'</td><td>'+(s?s.gp:0)+'</td>'+
+        '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 (provisional until 5 games). The formula lives in the database (compute_overall) — the site never hand-edits a rating, so every number stays defensible.</span></div></div>';
+};
+
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
 CG.ROUTES.admin = function(param, qs){
   if (CG.role()!=="commish") return CG.unauthorized("The Control Center is commissioner-only.");
+  if (param==="" || param==null) return CG.adminShell("", CG.admOverviewLive());
   if (param==="preseason") return CG.adminShell("preseason", CG.admPreseason(qs||{}));
   if (param==="users") return CG.adminShell("users", CG.admUsersLive(qs||{}));
   if (param==="leagues") return CG.adminShell("leagues", CG.admLeagues(qs||{}));
@@ -1819,6 +2182,13 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="presets") return CG.adminShell("presets", CG.admPresetsLive(qs||{}));
   if (param==="eastats") return CG.adminShell("eastats", CG.admEAStats(qs||{}));
   if (param==="complaints") return CG.adminShell("complaints", CG.hubComplaintsLive({admin:true}));
+  if (param==="automations") return CG.adminShell("automations", CG.admAutomationsLive());
+  if (param==="news") return CG.adminShell("news", CG.admNewsLive());
+  if (param==="rankings") return CG.adminShell("rankings", CG.admRankingsLive());
+  if (param==="homepage") return CG.adminShell("homepage", CG.admHomepageLive());
+  if (param==="schedule") return CG.adminShell("schedule", CG.admScheduleLive());
+  if (param==="ratings") return CG.adminShell("ratings", CG.admRatingsLive());
+  if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
   return CG._origAdminRoute(param, qs);
 };
 CG._origAdminAfter = CG.AFTER.admin;
@@ -1830,6 +2200,13 @@ CG.AFTER.admin = function(param, qs){
   if (param==="presets"){ CG.AFTER._admPresets(); return; }
   if (param==="eastats"){ CG.AFTER._admEAStats(); return; }
   if (param==="complaints"){ CG.AFTER._complaintsLive(); return; }
+  if (param==="automations"){ CG.AFTER._admAutomations(); return; }
+  if (param==="news"){ CG.AFTER._admNewsLive(); return; }
+  if (param==="rankings"){ CG.AFTER._admRankings(); return; }
+  if (param==="homepage"){ CG.AFTER._admHomepage(); return; }
+  if (param==="schedule"){ CG.AFTER._admScheduleLive(); return; }
+  if (param==="ratings"){ return; }
+  if (param==="" || param==null){ return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 
