@@ -197,11 +197,24 @@ CG.ROUTES.home = function(){
   var lg = CG.lg, C = CG.CONTENT;
   var pre = CG.isPreseason();
   var html = "";
+  /* free-agency countdown — pinned to the top of the front page while the window is open */
+  var faO = CG.SEASON && CG.SEASON.free_agency_opens_at ? Date.parse(CG.SEASON.free_agency_opens_at) : null;
+  var faC = CG.SEASON && CG.SEASON.free_agency_closes_at ? Date.parse(CG.SEASON.free_agency_closes_at) : null;
+  if (faO && faC && Date.now() >= faO && Date.now() < faC){
+    html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
+      '<span class="chip chip-live"><span class="live-dot"></span>Free agency is open</span>'+
+      '<span style="color:var(--on-ink-dim);font-size:13px">Clubs can sign free agents until '+CG.fmtFull(faC)+'</span>'+
+      '<span style="margin-left:auto;display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Closes in</span>'+
+      '<b id="faCountdown" class="num" data-close="'+faC+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>'+
+    '</div></section>';
+  }
   /* HERO */
   var railGames = pre ? lg.schedule.filter(function(g){ return g.at>CG.now(); }).sort(function(a,b){return a.at-b.at;}).slice(0,4) : lg.tonight;
+  var railLabel = pre ? "Opening games"
+    : "Tonight"+(railGames.length ? " · "+(railGames[0].stage==="preseason"?"Pre-season week ":"Week ")+railGames[0].week : "");
   html += '<section id="hero"><div class="shell hero-grid">'+
     '<div class="caro" id="heroCaro" aria-label="Featured stories"></div>'+
-    '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+(pre?"Opening games":"Tonight · Week 7")+'</span>'+
+    '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+railLabel+'</span>'+
       '<a class="sec-link" style="color:#fff" href="#/schedule">Full schedule</a></div>'+
       (railGames.length ? railGames.map(function(g){
         var streamers = CG.liveStreamers(g);
@@ -378,6 +391,21 @@ CG.newsCard = function(a, lead){
 };
 CG.AFTER.home = function(){
   CG.carousel("#heroCaro", CG.slideDefs().map(function(s){ return s.html; }));
+  /* free-agency countdown tick — stops itself when the strip leaves the page */
+  var faEl = document.getElementById("faCountdown");
+  if (faEl){
+    var faEnd = +faEl.getAttribute("data-close");
+    var faTick = function(){
+      var el = document.getElementById("faCountdown");
+      if (!el){ clearInterval(faIv); return; }
+      var ms = faEnd - Date.now();
+      if (ms <= 0){ clearInterval(faIv); CG.router(); return; } /* window closed — re-render without the strip */
+      var t = Math.floor(ms/1000);
+      var d = Math.floor(t/86400), hh = Math.floor((t%86400)/3600), mm = Math.floor((t%3600)/60), ss = t%60;
+      el.textContent = (d ? d+"d " : "")+String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0");
+    };
+    var faIv = setInterval(faTick, 1000); faTick();
+  }
 };
 
 /* ---------- SCHEDULE ---------- */

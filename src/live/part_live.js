@@ -1089,7 +1089,7 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically.</p></div>'
+      '<p class="caption" style="margin-top:12px">When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. When free agency closes, rookies who missed the 5-game minimum are placed on random clubs automatically.</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Pre-season starts”, and hit Auto-space — the draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions */
@@ -1102,8 +1102,8 @@ CG.admPreseason = function(){
     '<button class="btn btn-ghost" id="preReleaseNow"'+(randomN?"":" disabled")+'>Release random assignments ('+randomN+')</button>'+
     '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Distribute unproven rookies ('+rookies.length+')</button></div>'+
     '<p class="caption" style="margin-top:12px">Randomly assign spreads every unrostered registration evenly across the clubs (management counts toward the split). '+
-    'Release runs automatically after the final pre-season game — the button is the manual override. '+
-    'Distribute sends players who missed the 5-game minimum (and have no draft history or 5 career games) to a random club with an open spot after free agency closes.</p></div></div>';
+    'Release runs automatically after the final pre-season game; rookie placement runs automatically within ten minutes of free agency closing — both buttons are manual overrides. '+
+    'Placement sends players who missed the 5-game minimum (and have no draft history or 5 career games) to a completely random club with an open spot.</p></div></div>';
 
   var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   h+='<div class="card"><div class="card-h"><h3>Registered players</h3><span class="chip">'+regs.length+'</span></div>'+
@@ -1253,38 +1253,16 @@ CG.distributeRookies = function(){
       !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
   });
   if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
-  var faOpen = s.free_agency_closes_at && Date.parse(s.free_agency_closes_at) > CG.now();
-  var rosterMax=s.roster_max||15;
-  CG.confirm("Distribute "+rookies.length+" unproven rookies?",
-    (faOpen?"Heads up: free agency hasn’t closed yet — this normally runs after it does. ":"")+
+  var faOpen = s.free_agency_closes_at && Date.parse(s.free_agency_closes_at) > Date.now();
+  CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
+    "This runs on its own within ten minutes of free agency closing — the button forces it early or re-runs it by hand. "+
+    (faOpen?"Heads up: free agency hasn’t closed yet. ":"")+
     "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot. "+
     "This keeps managers from parking incoming players to poach them in free agency.",
     "Distribute rookies", function(){
-    var counts={}, used={};
-    CG.TEAMS.forEach(function(t){
-      counts[t.code]=(lg.byTeam[t.code]||[]).length;
-      used[t.code]={}; (lg.byTeam[t.code]||[]).forEach(function(p){ if(p.jersey) used[t.code][p.jersey]=1; });
-    });
-    var rows=[], regIds=[], names=[];
-    CG.shuffleArr(rookies).forEach(function(r){
-      var open=CG.TEAMS.filter(function(t){ return counts[t.code]<rosterMax; });
-      if (!open.length) return;
-      var pick=open[Math.floor(Math.random()*open.length)]; /* uniform random, per the rule */
-      counts[pick.code]++;
-      rows.push({ season_id:s.id, team_id:pick.id, profile_id:r.profile_id,
-        jersey_number:CG.nextJersey(used[pick.code]), position:r.position||"C", salary:0, origin:"rookie_random" });
-      regIds.push(r.id);
-      names.push(((r.profiles||{}).gamertag||"a player")+" → "+pick.code);
-    });
-    if (!rows.length){ CG.toast("No club has an open roster spot","err"); return; }
-    CG.sb.from("roster_spots").insert(rows).then(function(rz){
-      if (rz.error){ CG.toast("Couldn’t place: "+rz.error.message,"err"); return; }
-      CG.sb.from("season_registrations").update({ status:"assigned" }).in("id",regIds).then(function(){
-        CG.sb.from("transactions").insert({ season_id:s.id, type:"sign",
-          description:"Rookie placement: "+names.join(", ") }).then(function(){
-          CG.toast(rows.length+" rookies placed on random clubs","ok"); CG.reloadLeague();
-        });
-      });
+    CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
+      CG.toast((r.data||0)+" rookie"+((r.data||0)===1?"":"s")+" placed on random clubs","ok"); CG.reloadLeague();
     });
   });
 };
@@ -2063,7 +2041,8 @@ CG.AUTOMATIONS = [
   { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync",     name:"Discord roles & names",     every:"Every 5 min",  desc:"Keeps Discord roles and display names matched to the league database." },
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
-  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." }
+  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
+  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 10 min inside the database", desc:"Once free agency closes, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
@@ -2096,7 +2075,18 @@ CG.AFTER._admAutomations = function(){
   });
   document.querySelectorAll("[data-auto-run]").forEach(function(b){ b.addEventListener("click", function(){
     var key = this.getAttribute("data-auto-run"), btn=this;
+    var job = CG.AUTOMATIONS.find(function(a){ return a.key===key; });
     btn.disabled = true; btn.textContent = "Running…";
+    if (job && job.rpc){
+      /* database-side job — run it the way the scheduler does */
+      CG.sb.rpc(job.rpc).then(function(r){
+        btn.disabled=false; btn.textContent="Run now";
+        if (r.error){ CG.toast(key+" failed: "+r.error.message,"err"); return; }
+        CG.toast(job.name+": "+JSON.stringify(r.data).slice(0,140),"ok");
+        if (CG.router) CG.router();
+      });
+      return;
+    }
     fetch("/.netlify/functions/"+key, { method:"GET" }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
       .then(function(out){
         btn.disabled=false; btn.textContent="Run now";
