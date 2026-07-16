@@ -926,15 +926,19 @@ CG.subscribeDMs = function(){
       }).subscribe();
   } catch(e){}
 };
-CG.ROUTES.messages = function(param){
-  var head = CG.pageHead("Direct messages","Messages","Private messages with other league members — managers, staff, and the commissioner.");
+/* Messages lives in the player hub; the old top-level route redirects there. */
+CG.ROUTES.messages = function(){ location.hash = "#/hub/messages"; return ""; };
+CG.messagesBody = function(){
+  var head = '<div style="margin-bottom:20px"><span class="eyebrow chr">Direct messages</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Messages</h1>'+
+    '<p class="lede" style="margin-top:8px">Private messages with other league members — managers, staff, and the commissioner.</p></div>';
   if (!CG.auth.profile){
-    return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+    return head + '<div class="card"><div class="empty" style="padding:60px 20px">'+
       '<div class="e-art">'+CG.ic("msg",22)+'</div><b>Sign in to message</b><p>Direct messages are tied to your Discord account.</p>'+
-      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
+      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div>';
   }
   if (!CG._dm.loaded){
-    return head + '<div class="shell" style="padding-bottom:48px"><div class="card"><div class="card-b" id="dmLoading"><p class="caption">Loading conversations…</p></div></div></div>';
+    return head + '<div class="card"><div class="card-b" id="dmLoading"><p class="caption">Loading conversations…</p></div></div>';
   }
   var me=CG.dmUid(), convos=CG.dmConvos(), active=CG._dm.active;
   var list = convos.slice();
@@ -959,11 +963,11 @@ CG.ROUTES.messages = function(param){
       '<div id="dmMsgs" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;min-height:300px">'+body+'</div>'+
       '<div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px"><textarea id="dmInput" rows="1" placeholder="Message '+esc(CG.dmName(active))+'…" maxlength="2000" style="flex:1;resize:none"></textarea><button class="btn btn-chrome btn-sm" id="dmSend">Send</button></div>';
   }
-  return head + '<div class="shell" style="padding-bottom:48px"><div class="card" style="padding:0;overflow:hidden">'+
-    '<div class="grid" style="grid-template-columns:300px 1fr;gap:0;min-height:520px">'+
+  return head + '<div class="card" style="padding:0;overflow:hidden">'+
+    '<div class="grid" style="grid-template-columns:280px 1fr;gap:0;min-height:520px">'+
     '<div style="border-right:1px solid var(--line);overflow-y:auto;max-height:600px">'+listHtml+'</div>'+
     '<div style="display:flex;flex-direction:column">'+thread+'</div>'+
-    '</div></div></div>';
+    '</div></div>';
 };
 CG.AFTER.messages = function(param){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
@@ -1763,6 +1767,22 @@ CG.AFTER.admin = function(param, qs){
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 
+/* Messages as a hub section (#/hub/messages) — the DM UI renders inside the
+   player hub shell instead of holding its own top-level nav slot. */
+CG._origHubRoute = CG.ROUTES.hub;
+CG.ROUTES.hub = function(param, qs){
+  if (param==="messages"){
+    if (CG.role()==="guest") return CG.unauthorized("Sign in to reach your messages.");
+    return CG.hubShell("messages", CG.messagesBody());
+  }
+  return CG._origHubRoute(param, qs);
+};
+CG._origHubAfter = CG.AFTER.hub;
+CG.AFTER.hub = function(param, qs){
+  if (param==="messages"){ CG.AFTER.messages(); return; }
+  if (CG._origHubAfter) CG._origHubAfter(param, qs);
+};
+
 /* ================================================================
    LIVE TRADES — Team HQ Trade Hub on the real trades model
    (players + draft picks + salary retention; accept_trade RPC)
@@ -1899,10 +1919,7 @@ CG.bootLive = async function(){
       CG.NAV.push(["Register","#/register"]);
     }
     await CG.initAuth();
-    /* signed-in extras: Messages in the account drawer's reach (nav link) */
-    if (CG.auth.user && CG.NAV && !CG.NAV.some(function(n){ return n[1]==="#/messages"; })){
-      CG.NAV.push(["Messages","#/messages"]);
-    }
+    /* Messages lives in the player hub (hub sidebar + #/hub/messages) — no top-nav slot */
     /* Pre-season central in the Control Center (commissioner) */
     if (CG.ADMIN_NAV && CG.ADMIN_NAV[0] && !CG.ADMIN_NAV[0][1].some(function(it){ return it[0]==="preseason"; })){
       CG.ADMIN_NAV[0][1].splice(1, 0, ["preseason","Pre-season","users"]);

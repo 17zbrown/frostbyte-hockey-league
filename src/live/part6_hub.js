@@ -69,6 +69,7 @@ CG.hubNav = function(section){
   if (CG.can("trades.manage") && clubTools) items.push(["tradehub","Trade Hub","swap"]);
   if (CG.can("lineup.build") && clubTools) items.push(["lineup","Lineup builder","grid"]);
   if (CG.can("complaints.file")||CG.can("complaints.review")) items.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
+  if (CG.LIVE_MODE) items.push(["messages","Messages","msg"]);
   if (r==="staff") items.push(["statsentry","Stats entry","chart"]);
   items.push(["notifications","Notifications","bell"]);
   items.push(["settings","Settings","gear"]);
@@ -77,6 +78,7 @@ CG.hubNav = function(section){
       var badge = "";
       if (it[0]==="availability" && !CG.store.get("availability")[CG.WEEK8.key+":"+(CG.me()||{}).id]) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
+      if (it[0]==="messages" && CG.dmUnreadTotal && CG.dmUnreadTotal()) badge = '<span class="hs-n">'+CG.dmUnreadTotal()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
         var openN = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; }).length;
