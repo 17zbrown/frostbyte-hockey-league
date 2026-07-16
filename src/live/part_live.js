@@ -763,6 +763,38 @@ CG.registerForSeason = async function(position, note){
 /* ================================================================
    PARITY: OWNER APPLICATIONS (owner_applications)
    ================================================================ */
+/* every active NHL franchise (2026 / NHL 27 names) — the owner-application pool */
+CG.NHL_FRANCHISES = [
+  "Anaheim Ducks","Boston Bruins","Buffalo Sabres","Calgary Flames","Carolina Hurricanes",
+  "Chicago Blackhawks","Colorado Avalanche","Columbus Blue Jackets","Dallas Stars","Detroit Red Wings",
+  "Edmonton Oilers","Florida Panthers","Los Angeles Kings","Minnesota Wild","Montreal Canadiens",
+  "Nashville Predators","New Jersey Devils","New York Islanders","New York Rangers","Ottawa Senators",
+  "Philadelphia Flyers","Pittsburgh Penguins","San Jose Sharks","Seattle Kraken","St. Louis Blues",
+  "Tampa Bay Lightning","Toronto Maple Leafs","Utah Mammoth","Vancouver Canucks","Vegas Golden Knights",
+  "Washington Capitals","Winnipeg Jets"
+];
+/* franchises already fielded as active league clubs (matched by name) */
+CG.activeFranchiseSet = function(){
+  var set = {};
+  (CG.TEAMS||[]).forEach(function(t){ if(t.name) set[t.name] = t.code; });
+  return set;
+};
+CG.franchiseOptions = function(selected){
+  var active = CG.activeFranchiseSet();
+  return '<option value="">Choose a franchise…</option>'+CG.NHL_FRANCHISES.map(function(name){
+    var taken = active[name];
+    return '<option value="'+esc(name)+'"'+(selected===name?" selected":"")+'>'+esc(name)+(taken?" · already an active club":"")+'</option>';
+  }).join("");
+};
+/* review-card line: the ranked franchise choices, flagging any already taken */
+CG.franchisePicksLine = function(a){
+  var active = CG.activeFranchiseSet();
+  var picks = [a.preferred_club, a.franchise_2, a.franchise_3].filter(Boolean);
+  if (!picks.length) return '<span>No franchise selected</span>';
+  return '<span>Franchise: '+picks.map(function(name,i){
+    return '<b>'+["1st","2nd","3rd"][i]+' '+esc(name)+'</b>'+(active[name]?' <span class="chip chip-warn" style="font-size:8px;padding:1px 5px">taken</span>':"");
+  }).join(" · ")+'</span>';
+};
 CG.ROUTES.owner = function(){
   var head = CG.pageHead("Run a club","Apply to own a team",
     "Owners set their club’s identity, hire a GM, and build the roster. Applications are tied to your Discord so the commissioners know who applied. Rather officiate than own? Apply to join the staff instead.");
@@ -774,17 +806,15 @@ CG.ROUTES.owner = function(){
   }
   var p = CG.auth.profile, a = CG.auth.ownerApp||{};
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
-  var clubOpts = '<option value="">No preference</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(a.preferred_club===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("");
-  var build = a.team_choice==="build";
   var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
-    '<div class="grid g2"><label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
-      '<label class="fld"><span>Time zone</span><input id="ow-tz" placeholder="e.g. Eastern" value="'+esc(a.timezone||"")+'"></label></div>'+
-    '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
+    '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
-    '<label class="fld"><span>Club preference</span><select id="ow-choice"><option value="assigned"'+(!build?" selected":"")+'>Take an existing / assigned club</option><option value="build"'+(build?" selected":"")+'>Propose a brand-new club</option></select></label>'+
-    '<div id="ow-assignedwrap" style="'+(build?"display:none":"")+'"><label class="fld"><span>Preferred club</span><select id="ow-club">'+clubOpts+'</select></label></div>'+
-    '<div id="ow-buildwrap" class="grid g2" style="'+(build?"":"display:none")+'"><label class="fld"><span>Proposed team name</span><input id="ow-name" placeholder="e.g. Harbor Kraken" value="'+esc(a.proposed_name||"")+'"></label>'+
-      '<label class="fld"><span>Proposed city / location</span><input id="ow-loc" placeholder="e.g. Nord Harbor" value="'+esc(a.proposed_location||"")+'"></label></div>'+
+    '<div class="fld"><span>Franchise choices *</span><p class="caption" style="margin:2px 0 8px">Pick the NHL franchises you’d most like to run, in order. Your second and third choices cover you if an earlier pick is already an active club.</p>'+
+      '<div class="grid g3" style="gap:10px">'+
+        '<label class="fld"><span style="font-size:11px">1st choice *</span><select id="ow-fr1">'+CG.franchiseOptions(a.preferred_club)+'</select></label>'+
+        '<label class="fld"><span style="font-size:11px">2nd choice</span><select id="ow-fr2">'+CG.franchiseOptions(a.franchise_2)+'</select></label>'+
+        '<label class="fld"><span style="font-size:11px">3rd choice</span><select id="ow-fr3">'+CG.franchiseOptions(a.franchise_3)+'</select></label>'+
+      '</div></div>'+
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="ow-submit">'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
   '</div></div>';
@@ -792,26 +822,22 @@ CG.ROUTES.owner = function(){
 };
 CG.AFTER.owner = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
-  var ch=document.getElementById("ow-choice");
-  if(ch) ch.addEventListener("change", function(){
-    var build=this.value==="build";
-    var aw=document.getElementById("ow-assignedwrap"), bw=document.getElementById("ow-buildwrap");
-    if(aw) aw.style.display=build?"none":""; if(bw) bw.style.display=build?"":"none";
-  });
   var sub=document.getElementById("ow-submit"); if(sub) sub.addEventListener("click", CG.submitOwnerApp);
 };
 CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
-  var ea=v("ow-ea"), pitch=v("ow-pitch"), choice=(document.getElementById("ow-choice")||{}).value||"assigned";
+  function sv(id){ var el=document.getElementById(id); return el?(el.value||"").trim()||null:null; }
+  var ea=v("ow-ea"), pitch=v("ow-pitch");
+  var fr1=sv("ow-fr1"), fr2=sv("ow-fr2"), fr3=sv("ow-fr3");
   if(!ea){ CG.toast("EA ID is required","err"); return; }
+  if(!fr1){ CG.toast("Pick at least a first-choice franchise","err"); return; }
   if(!pitch){ CG.toast("Add a short pitch","err"); return; }
-  var propName = choice==="build" ? (v("ow-name")||null) : null;
-  if(choice==="build" && !propName){ CG.toast("Name your proposed team (or pick an assigned club)","err"); return; }
+  var picks=[fr1,fr2,fr3].filter(Boolean);
+  if(new Set(picks).size!==picks.length){ CG.toast("Your franchise choices must be different","err"); return; }
   var payload={ season_id: CG.SEASON?CG.SEASON.id:null, profile_id: CG.auth.user.id, ea_id:ea,
-    timezone:v("ow-tz")||null, availability:v("ow-avail")||null, experience:v("ow-exp")||null,
-    team_choice:choice, preferred_club: choice==="build"?null:((document.getElementById("ow-club")||{}).value||null),
-    proposed_name:propName, proposed_location: choice==="build"?(v("ow-loc")||null):null,
+    experience:v("ow-exp")||null,
+    preferred_club:fr1, franchise_2:fr2, franchise_3:fr3,
     pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
   var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
@@ -1289,7 +1315,7 @@ CG.AFTER.messages = function(param){
    ================================================================ */
 CG.admPreseason = function(){
   var lg=CG.lg, s=CG.SEASON||{};
-  var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[];
+  var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[], sapps=lg._staffApps||[];
   var rosterMax=s.roster_max||15, rosteredIds=lg._rosteredIds||{};
   var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
   var pendingApps=apps.filter(function(a){ return a.status==="pending"; }).length;
@@ -1350,12 +1376,26 @@ CG.admPreseason = function(){
     h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
-        '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.team_choice==="build"?'<span>Wants to build <b>'+esc(a.proposed_name||"a new club")+'</b>'+(a.proposed_location?" ("+esc(a.proposed_location)+")":""):'<span>Preferred club: <b>'+esc(a.preferred_club||"no preference")+'</b>')+'</span>'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+'</div>'+
+        '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+CG.franchisePicksLine(a)+(a.ea_id?'<span>EA '+esc(a.ea_id)+'</span>':"")+'</div>'+
         (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
         '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-app-approve="'+a.id+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
         '<button class="btn btn-ghost btn-sm" data-app-deny="'+a.id+'"'+(a.status==="denied"?" disabled":"")+'>Deny</button></div></div>';
     }).join("");
   } else { h+='<div class="card-b"><p class="caption">No owner applications yet. They appear here when members apply from the “Apply to own a team” page.</p></div>'; }
+  h+='</div>';
+  /* staff applications — reviewed here or on the Staff Desk; approval promotes to staff */
+  var pendSApps=sapps.filter(function(a){ return a.status==="pending"; }).length;
+  h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Staff applications</h3><span class="chip '+(pendSApps?"chip-warn":"chip-win")+'">'+(pendSApps?pendSApps+" pending":"none pending")+'</span></div>';
+  if (sapps.length){
+    h+=sapps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+        '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
+        '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+(a.availability?'<span>'+esc(a.availability)+'</span>':"")+(a.experience?'<span>'+esc(a.experience)+'</span>':"")+'</div>'+
+        (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
+        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-sapp-approve="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
+        '<button class="btn btn-ghost btn-sm" data-sapp-deny="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'"'+(a.status==="denied"?" disabled":"")+'>Deny</button></div></div>';
+    }).join("");
+  } else { h+='<div class="card-b"><p class="caption">No staff applications yet. They appear here when members apply from the “Apply to join the staff” page. Approving one promotes the member to staff (the Discord Staff role follows on the next sync).</p></div>'; }
   h+='</div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Roster fill</h3><span class="chip">max '+rosterMax+' per club</span></div><div class="card-b">'+
     CG.TEAMS.map(function(t){ var n=(lg.byTeam[t.code]||[]).length, pct=Math.round(100*n/rosterMax);
@@ -1378,6 +1418,8 @@ CG.AFTER._preseason = function(){
   });
   document.querySelectorAll("[data-app-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-approve"),"approved"); }); });
   document.querySelectorAll("[data-app-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-deny"),"denied"); }); });
+  document.querySelectorAll("[data-sapp-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.decideStaffApp(this.getAttribute("data-sapp-approve"), true, this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-sapp-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.decideStaffApp(this.getAttribute("data-sapp-deny"), false, this.getAttribute("data-name")); }); });
   var paa=document.getElementById("preAssignAll"); if (paa) paa.addEventListener("click", CG.preseasonRandomAssign);
   var prn=document.getElementById("preReleaseNow"); if (prn) prn.addEventListener("click", CG.preseasonRelease);
   var prk=document.getElementById("preRookies"); if (prk) prk.addEventListener("click", CG.distributeRookies);
@@ -2314,7 +2356,7 @@ CG.hubStaffDesk = function(){
         '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
         '<span><span class="chip" style="font-size:9px">OWNER</span> <b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b></span>'+
         '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>'+
-        '<div class="caption">'+(a.team_choice==="build"?('Wants to build <b>'+esc(a.proposed_name||"a new club")+'</b>'):('Preferred club: <b>'+esc(a.preferred_club||"no preference")+'</b>'))+(a.timezone?' · TZ '+esc(a.timezone):"")+'</div>'+
+        '<div class="caption">'+CG.franchisePicksLine(a)+'</div>'+
         (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
         '<div style="display:flex;gap:8px;margin-top:10px">'+
         '<button class="btn btn-chrome btn-sm" data-oapp-approve="'+a.id+'">Approve</button>'+
