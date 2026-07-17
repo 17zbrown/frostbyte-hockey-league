@@ -18,38 +18,56 @@ CG.ROUTES.awards = function(param, qs){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding:22px 0 40px">';
   if (tab==="stars"){
-    body += lg.lastNight.map(function(r){
-      var blurb = (C.awards.threeStars.find(function(t){ return t.gameId===r.id; })||{}).blurb||"";
+    var nights = lg.lastNight.filter(function(r){ return (r.stars||[]).every(function(st){ return CG.playerById(lg, st.pid); }); });
+    body += nights.length ? nights.map(function(r){
       return '<div class="card" style="margin-bottom:18px"><div class="card-h">'+
         '<h3>'+esc(CG.TEAM[r.home].name)+' '+r.score[r.home]+'–'+r.score[r.away]+' '+esc(CG.TEAM[r.away].name)+(r.ot?" (OT)":"")+'</h3>'+
         '<a class="sec-link" href="#/matchup/'+r.id+'">Box score</a></div>'+
         '<div class="card-b"><div class="starsrow">'+r.stars.map(function(st,i){
-          var p = CG.playerById(lg, st.pid); var b = r.box[st.team][st.pid];
+          var p = CG.playerById(lg, st.pid); var b = r.box[st.team][st.pid]||{};
           return '<div class="starcard" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
             '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'+CG.crest(p.team,30)+
             '<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
-            '<span class="caption" style="display:block">'+(b.goalie? b.sv+" saves"+(b.so?", shutout":"") : b.g+"G "+b.a+"A")+'</span></div></div></div>';
-        }).join("")+'</div><p class="small" style="color:var(--steel);margin-top:14px">'+esc(blurb)+'</p></div></div>';
-    }).join("");
+            '<span class="caption" style="display:block">'+(b.goalie? (b.sv||0)+" saves"+(b.so?", shutout":"") : (b.g||0)+"G "+(b.a||0)+"A")+'</span></div></div></div>';
+        }).join("")+'</div><p class="caption" style="margin-top:14px">Picked automatically from the night’s box scores.</p></div></div>';
+    }).join("") : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No Three Stars yet</b><p>Stars are named automatically after every completed game night.</p></div></div>';
   }
   if (tab==="potw"){
-    body += '<div class="stack">'+lg.potw.slice().reverse().map(function(w){
+    var weeks = lg.potw.slice().reverse().filter(function(w){ return CG.playerById(lg,w.skater) && CG.playerById(lg,w.goalie); });
+    var latestWeek = weeks.length ? weeks[0].week : null;
+    body += weeks.length ? '<div class="stack">'+weeks.map(function(w){
       var sk = CG.playerById(lg,w.skater), gl = CG.playerById(lg,w.goalie);
-      var blurb = C.awards.potw.find(function(x){ return x.week===w.week; })||{};
-      return '<div class="card"><div class="card-h"><h3>Week '+w.week+'</h3><span class="chip">'+(w.week===6?"Latest":"")+'</span></div>'+
+      return '<div class="card"><div class="card-h"><h3>Week '+w.week+'</h3><span class="chip">'+(w.week===latestWeek?"Latest":"")+'</span></div>'+
         '<div class="grid g2" style="gap:0">'+
-        [[sk,"Skater of the Week",blurb.skaterBlurb],[gl,"Goaltender of the Week",blurb.goalieBlurb]].map(function(row){
+        [[sk,"Skater of the Week",w.skBlurb],[gl,"Goaltender of the Week",w.glBlurb]].map(function(row){
           return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;border-top:1px solid var(--line-soft)">'+CG.crest(row[0].team,38)+
             '<div style="min-width:0"><span class="chip chip-chrome">'+row[1]+'</span>'+
             '<b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px;cursor:pointer" data-go="'+CG.playerRoute(row[0])+'">'+esc(row[0].tag)+'</b>'+
             '<span class="caption">'+esc(CG.TEAM[row[0].team].name)+'</span>'+
             '<p class="small" style="color:var(--steel);margin-top:8px">'+esc(row[2]||"")+'</p></div></div>';
         }).join("")+'</div></div>';
-    }).join("")+'</div>';
+    }).join("")+'</div>' : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No weekly honors yet</b><p>The first Players of the Week are computed automatically the Monday after Week 1 — straight from the imported box scores.</p></div></div>';
   }
   if (tab==="season"){
     var mvps = CG.skaterLeaders(lg,"p").slice(0,3);
-    body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Voting opens after Week 10.</b> Season hardware is decided by staff ballot with a published audit trail — nominees below are the current statistical front-runners, not winners.</div>'+
+    /* finalized hardware first — champion + any staff-balloted awards already decided */
+    var AWARD_LABELS = { mvp:"Most Valuable Player", best_goalie:"Best Goaltender", best_defenseman:"Best Defenseman", rookie_of_year:"Rookie of the Year" };
+    var decided = (lg.seasonAwards||[]).filter(function(a){ return a.profile_id && CG.playerById(lg, a.profile_id); });
+    if (lg.champion || decided.length){
+      body += '<div class="grid g3" style="margin-bottom:18px">'+
+        (lg.champion && lg.champion.team_id && (lg._idToCode||{})[lg.champion.team_id]
+          ? (function(){ var code = lg._idToCode[lg.champion.team_id];
+              return '<div class="card raise" data-go="#/team/'+code+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(code,44)+
+                '<div><span class="chip chip-chrome">League Champions</span><b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px">'+esc(CG.TEAM[code].name)+'</b>'+
+                '<span class="caption">'+esc(lg.champion.stat_line||"")+'</span></div></div></div>'; })()
+          : "")+
+        decided.map(function(a){ var p = CG.playerById(lg, a.profile_id);
+          return '<div class="card raise" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(p.team,44)+
+            '<div><span class="chip chip-chrome">'+esc(AWARD_LABELS[a.category]||a.category)+'</span><b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px">'+esc(p.tag)+'</b>'+
+            '<span class="caption">'+esc(CG.TEAM[p.team].name)+' · staff ballot</span></div></div></div>';
+        }).join("")+'</div>';
+    }
+    body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Season hardware is decided by staff ballot.</b> Staff vote from the Staff Desk through the season; the commissioner finalizes each award after the finale. Nominees below are the current statistical front-runners, not winners.</div>'+
       '<div class="grid g3">'+
       [["Most Valuable Player", mvps],
        ["Best Goaltender", CG.goalieLeaders(lg).slice(0,3)],
@@ -63,8 +81,8 @@ CG.ROUTES.awards = function(param, qs){
           }).join("")+'</div>';
       }).join("")+'</div>'+
       '<div class="grid g4" style="margin-top:18px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))">'+
-      ["Best Forward","Best Defenseman","Most Improved","Sportsmanship","Playoff MVP","Commissioner’s Award"].map(function(a){
-        return '<div class="kpi" style="cursor:default"><b style="font-size:15px;font-family:var(--f-disp)">'+a+'</b><span>Ballot opens Week 10</span></div>';
+      ["Most Valuable Player","Best Goaltender","Best Defenseman","Rookie of the Year"].map(function(a){
+        return '<div class="kpi" style="cursor:default"><b style="font-size:15px;font-family:var(--f-disp)">'+a+'</b><span>Decided by staff ballot</span></div>';
       }).join("")+'</div>';
   }
   return head + tabs + body + '</div>';

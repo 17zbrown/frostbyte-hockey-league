@@ -73,7 +73,8 @@ CG.buildLiveLeague = async function(){
     CG.sbAll("game_stats","*","id"),
     sb.from("feature_flags").select("key,enabled"),
     sb.from("site_config").select("key,value"),
-    sb.from("suspensions").select("*").order("created_at",{ ascending:false })
+    sb.from("suspensions").select("*").order("created_at",{ ascending:false }),
+    sb.from("awards").select("*").order("week")
   ]);
   /* first 9 are public-readable and required; draft_picks + season_registrations
      (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
@@ -98,7 +99,8 @@ CG.buildLiveLeague = async function(){
       gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[],
       flagsRaw=(q[13]&&!q[13].error&&q[13].data)||[],
       siteCfgRaw=(q[14]&&!q[14].error&&q[14].data)||[],
-      suspRaw=(q[15]&&!q[15].error&&q[15].data)||[];
+      suspRaw=(q[15]&&!q[15].error&&q[15].data)||[],
+      awardsRaw=(q[16]&&!q[16].error&&q[16].data)||[];
 
   /* public config: feature flags (homepage modules etc.) + site_config (rankings override) */
   CG._flags = {}; flagsRaw.forEach(function(f){ CG._flags[f.key] = !!f.enabled; });
@@ -450,8 +452,24 @@ CG.buildLiveLeague = async function(){
   lg.blockSeed = lg.blockSeed || [];
   lg.incoming = lg.incoming || [];
   lg.archive = {};
-  lg.potw = lg.potw || [];
   lg.lastNight = lg.lastNight || [];
+
+  /* real awards: pair each week's skater + goalie rows into the shape every honors surface
+     expects ({week, skater, goalie, blurbs}); season awards + champion ride alongside */
+  var seasonAwardsRaw = awardsRaw.filter(function(a){ return !seasonId || a.season_id===seasonId; });
+  var potwByWeek = {};
+  seasonAwardsRaw.forEach(function(a){
+    if (a.category==="potw_skater" || a.category==="potw_goalie"){
+      var e = potwByWeek[a.week] = potwByWeek[a.week] || { week:a.week };
+      if (a.category==="potw_skater"){ e.skater = a.profile_id; e.skBlurb = a.stat_line||""; e.blurb = a.stat_line||""; }
+      else { e.goalie = a.profile_id; e.glBlurb = a.stat_line||""; }
+    }
+  });
+  lg.potw = Object.values(potwByWeek).filter(function(e){ return e.skater && e.goalie; })
+    .sort(function(a,b){ return (a.week||0)-(b.week||0); });
+  lg.seasonAwards = seasonAwardsRaw.filter(function(a){ return a.week==null && a.category!=="champion"; });
+  lg.champion = seasonAwardsRaw.find(function(a){ return a.category==="champion"; }) || null;
+  lg._awardsRaw = awardsRaw;
 
   /* real transaction log */
   lg.liveTransactions = transactions.map(function(tx){
@@ -2850,6 +2868,35 @@ CG.hubStaffDesk = function(){
     }).join("")
     : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
   h += '</div>';
+
+  /* season award ballots — staff vote all season; the commissioner finalizes after the finale */
+  var BALLOT_CATS = [
+    ["mvp","Most Valuable Player", null],
+    ["best_goalie","Best Goaltender", "G"],
+    ["best_defenseman","Best Defenseman", "D"],
+    ["rookie_of_year","Rookie of the Year", null]
+  ];
+  var isCommish = CG.role()==="commish";
+  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3><span class="chip">one vote each</span></div>';
+  h += BALLOT_CATS.map(function(cat){
+    var pool = (lg.players||[]).filter(function(p){
+      if (cat[2]==="G") return p.pos==="G";
+      if (cat[2]==="D") return ["LD","RD","D"].indexOf(p.pos)>=0;
+      return true;
+    }).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
+    var opts = '<option value="">— pick a player —</option>'+pool.map(function(p){
+      return '<option value="'+p.id+'">'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
+    var won = (lg.seasonAwards||[]).find(function(a){ return a.category===cat[0]; });
+    return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
+      '<b style="font-family:var(--f-disp);min-width:190px">'+cat[1]+'</b>'+
+      (won ? '<span class="chip chip-win">Decided</span><span class="caption" data-ballot-tally="'+cat[0]+'"></span>'
+        : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
+          '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
+          '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
+          (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
+      '</div>';
+  }).join("");
+  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every staff member and commissioner gets one vote per award (change it any time before the finalize). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.</span></div></div>';
   return h;
 };
 CG.AFTER._staffdesk = function(){
@@ -2861,6 +2908,52 @@ CG.AFTER._staffdesk = function(){
     CG.setOwnerAppStatus(this.getAttribute("data-oapp-approve"), "approved"); }); });
   document.querySelectorAll("[data-oapp-deny]").forEach(function(b){ b.addEventListener("click", function(){
     CG.setOwnerAppStatus(this.getAttribute("data-oapp-deny"), "denied"); }); });
+
+  /* ---- season award ballots ---- */
+  var sid = CG.SEASON && CG.SEASON.id;
+  if (sid && CG.sb && document.querySelector("[data-ballot-cat],[data-ballot-tally]")){
+    var names = {}; (CG.lg._profilesRaw||[]).forEach(function(p){ names[p.id]=p.gamertag||p.display_name||"—"; });
+    CG.sb.from("award_ballots").select("category,voter_id,profile_id").eq("season_id", sid).then(function(r){
+      var rows = (r&&r.data)||[];
+      document.querySelectorAll("[data-ballot-cat]").forEach(function(sel){
+        var mine = rows.find(function(x){ return x.category===sel.getAttribute("data-ballot-cat") && x.voter_id===CG.auth.user.id; });
+        if (mine) sel.value = mine.profile_id;
+      });
+      document.querySelectorAll("[data-ballot-tally]").forEach(function(el){
+        var cat = el.getAttribute("data-ballot-tally");
+        var votes = rows.filter(function(x){ return x.category===cat; });
+        if (!votes.length){ el.textContent = "no votes yet"; return; }
+        var counts = {}; votes.forEach(function(v){ counts[v.profile_id]=(counts[v.profile_id]||0)+1; });
+        var top = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a]; }).slice(0,3);
+        el.textContent = votes.length+" vote"+(votes.length===1?"":"s")+" · leading: "+
+          top.map(function(pid){ return (names[pid]||"?")+" ("+counts[pid]+")"; }).join(", ");
+      });
+    });
+  }
+  document.querySelectorAll("[data-ballot-save]").forEach(function(b){ b.addEventListener("click", function(){
+    var cat=this.getAttribute("data-ballot-save"), btn=this;
+    var sel=document.querySelector('[data-ballot-cat="'+cat+'"]');
+    if(!sel||!sel.value){ CG.toast("Pick a player first","err"); return; }
+    btn.disabled=true;
+    CG.sb.from("award_ballots").upsert({ season_id:CG.SEASON.id, category:cat, voter_id:CG.auth.user.id,
+      profile_id:sel.value, updated_at:new Date().toISOString() },{ onConflict:"season_id,category,voter_id" })
+      .then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG.toast("Vote saved — change it any time","ok"); CG.router();
+      });
+  }); });
+  document.querySelectorAll("[data-ballot-final]").forEach(function(b){ b.addEventListener("click", function(){
+    var cat=this.getAttribute("data-ballot-final"), label=this.getAttribute("data-label");
+    CG.confirm("Finalize "+label+"?",
+      "Tallies the staff ballots and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to break it. Re-running later corrects the record.",
+      "Finalize award", function(){
+      CG.sb.rpc("finalize_season_award",{ p_season:CG.SEASON.id, p_category:cat }).then(function(r){
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        CG.toast(String(r.data||"Winner")+" wins "+label,"ok"); CG.reloadLeague();
+      });
+    });
+  }); });
 };
 CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
 
@@ -2912,6 +3005,7 @@ CG.AUTOMATIONS = [
   { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
+  { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
   { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){

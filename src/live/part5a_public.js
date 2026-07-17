@@ -879,9 +879,14 @@ CG.ROUTES.team = function(code, qs){
     body += '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No honors in '+esc(SD.label)+'</b><p>Weekly hardware began with Season 1 — exhibition games didn’t award stars or Players of the Week.</p></div></div>';
   }
   else if (tab==="honors"){
-    var wins = lg.potw.filter(function(w){ return CG.playerById(lg,w.skater).team===code || CG.playerById(lg,w.goalie).team===code; });
+    var wins = lg.potw.filter(function(w){
+      var sk = CG.playerById(lg,w.skater), gl = CG.playerById(lg,w.goalie);   /* winner may have left the roster */
+      return (sk && sk.team===code) || (gl && gl.team===code);
+    });
     body += wins.length ? '<div class="grid g3">'+wins.map(function(w){
-      var p = CG.playerById(lg, CG.playerById(lg,w.skater).team===code ? w.skater : w.goalie);
+      var sk = CG.playerById(lg,w.skater);
+      var p = CG.playerById(lg, sk && sk.team===code ? w.skater : w.goalie);
+      if (!p) return "";
       return '<div class="card raise" data-go="'+CG.playerRoute(p)+'"><div class="card-b" style="display:flex;gap:12px;align-items:center">'+
         CG.crest(code,34)+'<div><span class="chip chip-chrome">Week '+w.week+' POTW</span><b style="display:block;font-family:var(--f-disp);margin-top:6px">'+esc(p.tag)+'</b></div></div></div>';
     }).join("")+'</div>' : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No hardware yet</b><p>Weekly honors and season awards land here once this club starts collecting them.</p></div></div>';
