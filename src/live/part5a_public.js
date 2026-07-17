@@ -204,6 +204,56 @@ CG.modOn = function(key){
   var cfg = CG.store.get("modules")||{};
   return !(cfg[key]&&cfg[key].off);
 };
+/* ---------- season roadmap: every stop from sign-up to the playoffs, real dates only ---------- */
+CG.seasonTimeline = function(){
+  var s = CG.SEASON || {};
+  var now = CG.now();
+  var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
+  var defs = [
+    [s.registration_deadline, "Sign-up deadline",
+      "Last day to register and be draft-eligible. Late sign-ups still play — they’re placed on clubs automatically after the draft."],
+    [s.preseason_starts_at, "Pre-season",
+      "Two weeks of real games on randomly assigned rosters. First-year players need five appearances to enter the draft."],
+    [s.draft_at, "Draft night",
+      "Clubs build their rosters live from the eligible pool"+(s.draft_at?", starting "+CG.fmtTime(Date.parse(s.draft_at)):"")+"."],
+    [s.free_agency_opens_at, "Free agency",
+      "Clubs sign the remaining free agents at negotiated salaries"+(faC?" — the window closes "+CG.fmtDay(faC):"")+"."],
+    [s.starts_at, "Puck drop",
+      "The regular season: nine weeks of Wednesday and Friday nights, three games a night."],
+    [s.playoffs_start_at, "Playoffs",
+      "Top three per division qualify. Best-of series all the way to the championship."]
+  ];
+  var stops = defs.filter(function(d){ return d[0]; }).map(function(d){
+    return { at: Date.parse(d[0]), name: d[1], desc: d[2] };
+  }).sort(function(a,b){ return a.at-b.at; });
+  if (stops.length < 3) return "";
+  /* which phase are we in? the latest stop whose date has passed */
+  var nowIdx = -1;
+  stops.forEach(function(st,i){ if (st.at <= now) nowIdx = i; });
+  var regOpenNow = nowIdx === -1 && s.registration_open && stops[0].name === "Sign-up deadline";
+  var N = stops.length;
+  var fillPct = nowIdx >= 0 ? ((nowIdx + 0.5) / N) * 100 : (regOpenNow ? (0.5 / N) * 100 : 0);
+  var body = stops.map(function(st, i){
+    var state = i < nowIdx ? "done" : i === nowIdx ? "now" : (regOpenNow && i === 0 ? "now" : "");
+    var chip = "";
+    if (i === nowIdx) chip = '<span class="szn-chip">Happening now</span>';
+    else if (regOpenNow && i === 0) chip = '<span class="szn-chip">Open now</span>';
+    else if (nowIdx === -1 && !regOpenNow && i === 0) chip = '<span class="szn-chip">Up next</span>';
+    else if (i === nowIdx + 1 && nowIdx >= 0) chip = '<span class="szn-chip">Up next</span>';
+    return '<div class="szn-stop '+state+'"><span class="szn-node" aria-hidden="true"></span>'+
+      '<span class="szn-date">'+CG.fmtDay(st.at)+'</span>'+
+      '<b class="szn-name">'+esc(st.name)+'</b>'+
+      '<p class="szn-desc">'+esc(st.desc)+'</p>'+chip+'</div>';
+  }).join("");
+  return '<section class="sec-tight"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Season roadmap</span>'+
+    '<h2 class="h-sec">How the season rolls</h2></div>'+
+    '<a class="sec-link" href="#/rulebook">The rulebook</a></div>'+
+    '<div class="szn-tl" style="grid-template-columns:repeat('+N+',1fr);--fillv:'+fillPct.toFixed(1)+'%">'+
+    '<span class="szn-fill" aria-hidden="true" style="width:'+fillPct.toFixed(1)+'%"></span>'+body+'</div>'+
+  '</div></section>';
+};
+
 CG.ROUTES.home = function(){
   var lg = CG.lg, C = CG.CONTENT;
   var pre = CG.isPreseason();
@@ -270,6 +320,8 @@ CG.ROUTES.home = function(){
       '<div style="cursor:pointer" data-go="#/standings"><b class="num">3×2</b><span>Playoff spots per division</span></div>'+
     '</div></div></section>';
   }
+  /* SEASON ROADMAP — the whole year on one line, drawn from the real season dates */
+  html += CG.seasonTimeline();
   /* TONIGHT dark band */
   if (CG.modOn("tonight") && !pre){
     html += '<section class="sec sec-dark"><div class="shell">'+
