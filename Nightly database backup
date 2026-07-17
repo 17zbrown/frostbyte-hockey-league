@@ -1,0 +1,65 @@
+name: Nightly database backup
+
+# The Supabase project is on the free plan — no managed backups and no PITR. This takes a
+# nightly encrypted pg_dump and keeps it as a GitHub artifact for 30 days. Encryption is
+# mandatory: the repo is public and the dump contains member Discord identities and the
+# app_config webhook URLs. See docs/RESTORE.md to restore.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DB_PASSWORD        the Supabase database password (Project Settings → Database)
+#   BACKUP_PASSPHRASE   a long random passphrase you keep somewhere safe (a password manager)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "17 8 * * *" # 08:17 UTC nightly (~3-4am ET)
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install postgresql-client 16
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16 || sudo apt-get install -y postgresql-client
+
+      - name: Dump, compress, encrypt
+        env:
+          # Session pooler host (IPv4). The direct db.<ref>.supabase.co host is IPv6-only on the
+          # free tier and GitHub runners are IPv4, so we must use the pooler.
+          PGHOST: aws-0-us-east-1.pooler.supabase.com
+          PGPORT: "5432"
+          PGUSER: postgres.bzbuyclwdhmhdzujxeqd
+          PGDATABASE: postgres
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y%m%d-%H%M%S)
+          OUT="cghl-${STAMP}.sql.gz.enc"
+          pg_dump --no-owner --no-privileges \
+            | gzip -9 \
+            | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_PASSPHRASE \
+            > "$OUT"
+          SIZE=$(du -h "$OUT" | cut -f1)
+          echo "Wrote $OUT ($SIZE)"
+          # A dump that's suspiciously small means the connection or auth failed — fail loudly.
+          MINBYTES=10240
+          ACTUAL=$(stat -c%s "$OUT")
+          if [ "$ACTUAL" -lt "$MINBYTES" ]; then
+            echo "::error::Backup is only ${ACTUAL} bytes — the dump almost certainly failed."
+            exit 1
+          fi
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload artifact (30-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.OUT }}
+          path: ${{ env.OUT }}
+          retention-days: 30
