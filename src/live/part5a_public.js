@@ -218,11 +218,24 @@ CG.seasonTimeline = function(){
       "Clubs build their rosters live from the eligible pool"+(s.draft_at?", starting "+CG.fmtTime(Date.parse(s.draft_at)):"")+"."],
     [s.free_agency_opens_at, "Free agency",
       "Clubs sign the remaining free agents at negotiated salaries"+(faC?" — the window closes "+CG.fmtDay(faC):"")+"."],
-    [s.starts_at, "Puck drop",
-      "The regular season: nine weeks of Wednesday and Friday nights, three games a night."],
+    [s.starts_at, "Regular season",
+      "Wednesday and Friday nights, three games a night, every point counting toward the playoff race."],
     [s.playoffs_start_at, "Playoffs",
       "Top three per division qualify. Best-of series all the way to the championship."]
   ];
+  /* live week counter for the regular-season stop: the week we're actually in, as a fraction.
+     Time-based (next game night's week) with played-games as a floor, so a postponed early
+     game can't drag the number backward. */
+  var regGames = ((CG.lg && CG.lg.schedule) || []).filter(function(g){ return g.stage!=="preseason" && g.stage!=="playoff"; });
+  var totW = regGames.reduce(function(m,g){ return Math.max(m, g.week||0); }, 0);
+  var curW = null;
+  if (totW && s.starts_at && now >= Date.parse(s.starts_at)
+      && !(s.playoffs_start_at && now >= Date.parse(s.playoffs_start_at))){
+    var maxFinalW = regGames.reduce(function(m,g){ return g.status==="final" ? Math.max(m, g.week||0) : m; }, 0);
+    var nextByTime = regGames.filter(function(g){ return g.at >= now - 6*3600000; })
+      .sort(function(a,b){ return a.at-b.at; })[0];
+    curW = Math.min(totW, Math.max(maxFinalW || 1, nextByTime ? (nextByTime.week||1) : totW));
+  }
   var stops = defs.filter(function(d){ return d[0]; }).map(function(d){
     return { at: Date.parse(d[0]), name: d[1], desc: d[2] };
   }).sort(function(a,b){ return a.at-b.at; });
@@ -240,9 +253,11 @@ CG.seasonTimeline = function(){
     else if (regOpenNow && i === 0) chip = '<span class="szn-chip">Open now</span>';
     else if (nowIdx === -1 && !regOpenNow && i === 0) chip = '<span class="szn-chip">Up next</span>';
     else if (i === nowIdx + 1 && nowIdx >= 0) chip = '<span class="szn-chip">Up next</span>';
+    var weekLine = (st.name==="Regular season" && curW)
+      ? '<span class="szn-week">Week '+curW+' <span>/ '+totW+'</span></span>' : "";
     return '<div class="szn-stop '+state+'"><span class="szn-node" aria-hidden="true"></span>'+
       '<span class="szn-date">'+CG.fmtDay(st.at)+'</span>'+
-      '<b class="szn-name">'+esc(st.name)+'</b>'+
+      '<b class="szn-name">'+esc(st.name)+'</b>'+weekLine+
       '<p class="szn-desc">'+esc(st.desc)+'</p>'+chip+'</div>';
   }).join("");
   return '<section class="sec-tight"><div class="shell">'+

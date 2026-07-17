@@ -322,6 +322,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .szn-desc{font-size:12.5px;line-height:1.55;color:var(--steel);margin-top:6px;max-width:24ch}
 .szn-chip{display:inline-block;font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
   background:var(--chrome);color:#101519;padding:2px 8px;border-radius:99px;margin-top:8px;font-weight:700}
+.szn-week{display:inline-block;font-family:var(--f-mono);font-weight:700;font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;margin-top:6px;border-bottom:2.5px solid var(--chrome);padding-bottom:2px;
+  font-variant-numeric:tabular-nums}
+.szn-week span{color:var(--steel);font-weight:400}
 @media(max-width:860px){
   .szn-tl{grid-template-columns:1fr!important;gap:0}
   .szn-tl::before{left:7px;right:auto;top:12px;bottom:10px;width:2px;height:auto}
@@ -333,6 +337,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .szn-name{grid-column:2}
   .szn-desc{grid-column:2;max-width:52ch}
   .szn-chip{grid-column:2;justify-self:start}
+  .szn-week{grid-column:2;justify-self:start}
 }
 .statline{display:flex;gap:0;border-top:1.5px solid var(--ink);border-bottom:1px solid var(--line)}
 .statline>div{padding:14px 22px 14px 0;margin-right:22px;border-right:1px solid var(--line)}
