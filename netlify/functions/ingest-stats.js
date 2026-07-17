@@ -113,11 +113,23 @@ async function ingestOne(norm, summary) {
   const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
   const tA = teamByClub[ids[0]], tB = teamByClub[ids[1]];
 
-  // find a scheduled, not-yet-ingested game between these two clubs on the same ET day
+  // find a scheduled, not-yet-ingested game between these two clubs. Prefer the exact ET day;
+  // otherwise fall back to the nearest game within +/-1 ET day. A game that finishes after
+  // midnight ET (or spills into OT) reports the *next* ET day while the fixture stays on game
+  // night — exact-day matching would silently drop those box scores, so widen the window.
   const or = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
   const games = await sbGet(`games?${or}&ea_match_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id`);
-  const game = games.find((g) => etDayISO(g.scheduled_at) === norm.et_day);
-  if (!game) { summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: `no scheduled game for these clubs on ${norm.et_day}` }); return; }
+  const DAY = 86400000;
+  const matchDayUnix = Date.parse(`${norm.et_day}T12:00:00Z`); // noon avoids DST edge wobble
+  let game = games.find((g) => etDayISO(g.scheduled_at) === norm.et_day);
+  if (!game) {
+    const near = games
+      .map((g) => ({ g, days: Math.abs(Date.parse(`${etDayISO(g.scheduled_at)}T12:00:00Z`) - matchDayUnix) / DAY }))
+      .filter((x) => x.days <= 1)
+      .sort((a, b) => a.days - b.days);
+    if (near[0]) game = near[0].g;
+  }
+  if (!game) { summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: `no scheduled game for these clubs within a day of ${norm.et_day}` }); return; }
 
   // home/away scores from the schedule's perspective
   const clubByTeam = { [tA]: norm.clubs[0], [tB]: norm.clubs[1] };

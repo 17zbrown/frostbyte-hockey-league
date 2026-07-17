@@ -31,6 +31,29 @@ try {
 
 CG.LIVE = { loaded:false, error:null };
 
+/* PostgREST caps a single response at 1,000 rows and truncates silently. Any table that
+   grows past that (game_stats ~12 rows/final crosses it around week 3) must be paged, or box
+   scores, season totals, leaders, and the career/eligibility counts quietly undercount.
+   Returns a Supabase-shaped {data,error} so callers are unchanged. */
+CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
+  var page=1000, from=0, out=[], asc = ascending!==false;
+  try {
+    while (true){
+      var qb = CG.sb.from(table).select(sel||"*");
+      if (filterFn) qb = filterFn(qb);
+      if (orderCol) qb = qb.order(orderCol,{ ascending:asc });
+      var r = await qb.range(from, from+page-1);
+      if (r.error) return { data: out.length?out:null, error: r.error };
+      var rows = r.data||[];
+      out = out.concat(rows);
+      if (rows.length < page) break;
+      from += page;
+      if (from > 500000) break;   /* hard safety valve */
+    }
+  } catch(e){ return { data:null, error:e }; }
+  return { data: out, error: null };
+};
+
 CG.buildLiveLeague = async function(){
   var sb = CG.sb;
   if (!sb) throw new Error("Supabase client unavailable");
@@ -39,15 +62,15 @@ CG.buildLiveLeague = async function(){
     sb.from("divisions").select("*").order("sort_order"),
     sb.from("seasons").select("*").order("number", { ascending:false }),
     sb.from("profiles").select("*"),
-    sb.from("roster_spots").select("*"),
-    sb.from("contracts").select("*"),
-    sb.from("games").select("*").order("scheduled_at"),
-    sb.from("transactions").select("*").order("occurred_at", { ascending:false }),
+    CG.sbAll("roster_spots","*","id"),
+    CG.sbAll("contracts","*","id"),
+    CG.sbAll("games","*","scheduled_at"),
+    CG.sbAll("transactions","*","occurred_at",false),
     sb.from("news").select("*").order("published_at", { ascending:false }),
     sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
-    sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr, profiles(gamertag,ea_id)"),
+    sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at, profiles(gamertag,ea_id)"),
     sb.from("leagues").select("*").order("sort_order"),
-    sb.from("game_stats").select("*"),
+    CG.sbAll("game_stats","*","id"),
     sb.from("feature_flags").select("key,enabled"),
     sb.from("site_config").select("key,value"),
     sb.from("suspensions").select("*").order("created_at",{ ascending:false })
@@ -531,7 +554,7 @@ CG.loadManagerData = async function(){
   try {
     var q = await Promise.all([
       CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
-      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,note, profiles(gamertag,ea_id,platform,jersey_number)"),
+      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,note,created_at, profiles(gamertag,ea_id,platform,jersey_number)"),
       CG.sb.from("draft_state").select("*")
     ]);
     var regs = (q[1]&&!q[1].error&&q[1].data)||[];
@@ -1233,7 +1256,9 @@ CG.subscribeDMs = function(){
 CG._avail = {};
 CG.loadAvailability = async function(){
   if (!CG.sb || !CG.auth.user || !CG.SEASON || !CG.SEASON.id) return;
-  var r = await CG.sb.from("availability").select("profile_id,week_key,nights,submitted_at").eq("season_id", CG.SEASON.id);
+  var sid = CG.SEASON.id;
+  var r = await CG.sbAll("availability","profile_id,week_key,nights,submitted_at","week_key",true,
+    function(qb){ return qb.eq("season_id", sid); });
   CG._avail = {};
   ((r && r.data) || []).forEach(function(row){
     CG._avail[row.week_key+":"+row.profile_id] = { at: Date.parse(row.submitted_at), nights: row.nights||{} };
