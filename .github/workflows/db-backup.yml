@@ -1,12 +1,15 @@
 name: Nightly database backup
 
-# The Supabase project is on the free plan — no managed backups and no PITR. This takes a
+# The Supabase project is on the free plan ‚Äî no managed backups and no PITR. This takes a
 # nightly encrypted pg_dump and keeps it as a GitHub artifact for 30 days. Encryption is
 # mandatory: the repo is public and the dump contains member Discord identities and the
 # app_config webhook URLs. See docs/RESTORE.md to restore.
 #
-# Required repo secrets (Settings → Secrets and variables → Actions):
-#   DB_PASSWORD        the Supabase database password (Project Settings → Database)
+# pg_dump runs from the postgres:17-alpine image so the client always matches the server's
+# major version (Supabase runs Postgres 17; a mismatched client refuses to dump).
+#
+# Required repo secrets (Settings ‚Üí Secrets and variables ‚Üí Actions):
+#   DB_PASSWORD        the Supabase database password (Project Settings ‚Üí Database)
 #   BACKUP_PASSPHRASE   a long random passphrase you keep somewhere safe (a password manager)
 
 on:
@@ -23,16 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Install postgresql-client 16
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-16 || sudo apt-get install -y postgresql-client
-
       - name: Dump, compress, encrypt
         env:
-          # Session pooler host (IPv4). The direct db.<ref>.supabase.co host is IPv6-only on the
-          # free tier and GitHub runners are IPv4, so we must use the pooler.
-          PGHOST: aws-0-us-east-1.pooler.supabase.com
+          # Session pooler host for us-east-2 (the project's region; IPv4). The direct
+          # db.<ref>.supabase.co host is IPv6-only on the free tier and GitHub runners are IPv4.
+          PGHOST: aws-0-us-east-2.pooler.supabase.com
           PGPORT: "5432"
           PGUSER: postgres.bzbuyclwdhmhdzujxeqd
           PGDATABASE: postgres
@@ -40,19 +38,25 @@ jobs:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
+          if [ -z "$PGPASSWORD" ]; then echo "::error::DB_PASSWORD secret is empty or missing."; exit 1; fi
+          if [ -z "$BACKUP_PASSPHRASE" ]; then echo "::error::BACKUP_PASSPHRASE secret is empty or missing."; exit 1; fi
           STAMP=$(date -u +%Y%m%d-%H%M%S)
           OUT="cghl-${STAMP}.sql.gz.enc"
-          pg_dump --no-owner --no-privileges \
+          docker run --rm \
+            -e PGPASSWORD="$PGPASSWORD" \
+            postgres:17-alpine \
+            pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+              --no-owner --no-privileges \
             | gzip -9 \
             | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_PASSPHRASE \
             > "$OUT"
           SIZE=$(du -h "$OUT" | cut -f1)
           echo "Wrote $OUT ($SIZE)"
-          # A dump that's suspiciously small means the connection or auth failed — fail loudly.
+          # A dump that's suspiciously small means the connection or auth failed ‚Äî fail loudly.
           MINBYTES=10240
           ACTUAL=$(stat -c%s "$OUT")
           if [ "$ACTUAL" -lt "$MINBYTES" ]; then
-            echo "::error::Backup is only ${ACTUAL} bytes — the dump almost certainly failed."
+            echo "::error::Backup is only ${ACTUAL} bytes ‚Äî the dump almost certainly failed."
             exit 1
           fi
           echo "OUT=$OUT" >> "$GITHUB_ENV"
