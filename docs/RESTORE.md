@@ -32,10 +32,10 @@ confirm it produces a non-trivial artifact.
    fresh/empty project, or a specific table you have confirmed you want to replace. For a
    full-project restore, prefer a **new Supabase project** and repoint the site's Supabase URL/key,
    rather than clobbering production in place.
-4. Apply it against the target with the session pooler host:
+4. Apply it against the target with the session pooler host (region `us-east-2` for this project):
    ```bash
    PGPASSWORD='<db password>' psql \
-     -h aws-0-us-east-1.pooler.supabase.com -p 5432 \
+     -h aws-0-us-east-2.pooler.supabase.com -p 5432 \
      -U postgres.<project-ref> -d postgres \
      -f restore.sql
    ```
