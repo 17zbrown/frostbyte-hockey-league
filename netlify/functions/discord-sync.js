@@ -127,6 +127,28 @@ export default async () => {
     } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
   }
 
+  // Team channels self-heal the same way: private to the club + the league office. The club-role
+  // allow goes in the SAME pass as the @everyone deny (never deny first and stop — the club would
+  // lose sight of its own room), and the fast-path also verifies the club allow still exists.
+  const staffRoleIds = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
+  for (const t of teams) {
+    if (!t.discord_channel_id || !t.discord_role_id) continue;
+    const chan = guildChannels.find((c) => c.id === t.discord_channel_id);
+    if (!chan) continue;
+    const ow = chan.permission_overwrites || [];
+    const everyone = ow.find((o) => o.id === GUILD);
+    const clubAllow = ow.find((o) => o.id === t.discord_role_id);
+    const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
+    const clubOk = clubAllow && (BigInt(clubAllow.allow || "0") & 1024n) === 1024n;
+    if (hidden && clubOk) continue;
+    try {
+      await dApi("PUT", `/channels/${chan.id}/permissions/${t.discord_role_id}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+      for (const rid of staffRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+      await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
+      sum.teamLocked = (sum.teamLocked || 0) + 1;
+    } catch (e) { sum.errors.push({ lockChannel: t.name, error: String(e.message || e) }); }
+  }
+
   // (0) keep each team's Discord ROLE (name + color) + CHANNEL name in sync with the site
   for (const t of teams) {
     try {
@@ -170,15 +192,39 @@ export default async () => {
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
   for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
 
+  // Guild ban list (paginated), fetched once per run. Two jobs:
+  //  * stop re-PUTting the same ban every 5 minutes for already-banned members
+  //  * UNBAN reconciliation — a site Unban must lift the Discord ban too, or the member can
+  //    never rejoin the server and (since registration requires membership) is locked out forever
+  const guildBans = new Set();
+  try {
+    let after = null;
+    for (let page = 0; page < 10; page++) {
+      const batch = await dApi("GET", `/guilds/${GUILD}/bans?limit=1000${after ? "&after=" + after : ""}`);
+      if (!Array.isArray(batch) || !batch.length) break;
+      for (const b of batch) if (b.user && b.user.id) guildBans.add(String(b.user.id));
+      if (batch.length < 1000) break;
+      after = batch[batch.length - 1].user.id;
+    }
+  } catch (e) { sum.errors.push({ banList: String(e.message || e) }); }
+
   for (const m of links) {
     if (!m.discord_id) continue;
     try {
       // banned players are removed from the server and kept out (no return)
       if (bannedIds.has(m.profile_id)) {
-        const res = await dApi("PUT", `/guilds/${GUILD}/bans/${m.discord_id}`, { delete_message_seconds: 0 });
-        if (!(res && res.__notfound)) sum.banned = (sum.banned || 0) + 1;
+        if (!guildBans.has(String(m.discord_id))) {
+          const res = await dApi("PUT", `/guilds/${GUILD}/bans/${m.discord_id}`, { delete_message_seconds: 0 });
+          if (!(res && res.__notfound)) sum.banned = (sum.banned || 0) + 1;
+        }
         await markGuild(m.profile_id, false);
         continue;
+      }
+      // not banned on the site but still banned on Discord → lift it (site Unban made real)
+      if (guildBans.has(String(m.discord_id))) {
+        await dApi("DELETE", `/guilds/${GUILD}/bans/${m.discord_id}`);
+        guildBans.delete(String(m.discord_id));
+        sum.unbanned = (sum.unbanned || 0) + 1;
       }
       const mem = await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
       if (mem.__notfound) { sum.notInServer++; await markGuild(m.profile_id, false); continue; }

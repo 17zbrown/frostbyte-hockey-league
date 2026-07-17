@@ -373,6 +373,26 @@ CG.gameNight = function(g){
   try { return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(new Date(g.at))==="Fri" ? "fri" : "wed"; }
   catch(e){ return "wed"; }
 };
+/* which availability night (n1/n2) covers this game — null when the game isn't in the window */
+CG.nightAvKey = function(game){
+  var n = ((CG.WEEK8 && CG.WEEK8.nights) || []).find(function(x){ return Math.abs(x.at - game.at) < 6*3600000; });
+  return n ? n.key : null;
+};
+/* the lineup builder's target game — honors #/hub/lineup?night=wed|fri, else tonight/next */
+CG.lineupGameFor = function(me){
+  var lg = CG.lg;
+  var m = (location.hash.split("?")[1]||"").match(/night=(wed|fri)/);
+  var want = m ? m[1] : null;
+  var mine = function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final"; };
+  if (want){
+    var g2 = lg.schedule.filter(mine).filter(function(g){ return g.at>CG.now()-3*3600000 && CG.gameNight(g)===want; })
+      .sort(function(a,b){ return a.at-b.at; })[0];
+    if (g2) return g2;
+  }
+  return lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; })
+    || lg.schedule.filter(function(g){ return (g.home===me.team||g.away===me.team) && g.at>CG.now(); })
+        .sort(function(a,b){ return a.at-b.at; })[0];
+};
 /* one game's server-pick controls (compact, used by the Schedule desk).
    `lockAt` is 30 min before the NIGHT'S FIRST puck drop — servers stay unset
    until then, and picks freeze for the whole night at that moment. */
@@ -420,8 +440,7 @@ CG.saveVeto = function(gameId, changedSel){
 CG.hubLineup = function(qs){
   var me = CG.me(), lg = CG.lg;
   if (!me || !CG.lg.byTeam[me.team]) return '<div class="note">This account doesn’t run a club — the lineup builder belongs to team management.</div>';
-  var game = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; })
-    || lg.schedule.find(function(g){ return (g.home===me.team||g.away===me.team) && g.at>CG.now(); });
+  var game = CG.lineupGameFor(me);
   if (!game) return '<div class="empty"><b>No upcoming game</b><p>The schedule is complete — nothing to build.</p></div>';
   var opp = game.home===me.team ? game.away : game.home;
   var key = game.id+":"+me.team;
@@ -437,8 +456,19 @@ CG.hubLineup = function(qs){
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.team===me.team && s.status!=="served") suspended[s.playerId]=true; });
   var assigned = Object.values(slots);
+  /* Wed/Fri switcher — shown when the club has an upcoming game on each night */
+  var hasWed = lg.schedule.some(function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000 && CG.gameNight(g)==="wed"; });
+  var hasFri = lg.schedule.some(function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000 && CG.gameNight(g)==="fri"; });
+  var curNight = CG.gameNight(game);
+  var nightSwitch = (hasWed && hasFri)
+    ? '<span style="display:inline-flex;gap:6px;margin-left:12px;vertical-align:middle">'+
+      [["wed","Wednesday"],["fri","Friday"]].map(function(nn){
+        var on = curNight===nn[0];
+        return '<a class="chip '+(on?"chip-chrome":"")+'" href="#/hub/lineup?night='+nn[0]+'" aria-current="'+on+'" style="cursor:pointer">'+nn[1]+'</a>';
+      }).join("")+'</span>'
+    : "";
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Lineup builder</h1>'+
+    '<h1 class="h-sec" style="margin-top:8px">Lineup builder'+nightSwitch+'</h1>'+
     '<p class="lede" style="margin-top:8px">Click a bench player, then a slot — or drag them on. Six starters, one per position. Locks at '+CG.fmtTime(lockAt)+' (Rule 5.3); the opponent sees it 60 minutes before puck drop.</p></div>';
   var bar = '<div class="note '+(status==="submitted"?"grn":"chr")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">Status: '+(locked?"Locked":status)+'</b>'+
@@ -457,8 +487,8 @@ CG.hubLineup = function(qs){
   var bench = '<div class="card"><div class="card-h"><h3>Bench — '+esc(CG.TEAM[me.team].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
     '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p){
       var av = CG.avFor(p.id);
-      var w8night = CG.WEEK8.nights.some(function(n){ return Math.abs(n.at - game.at) < 6*3600000; });
-      var un = w8night && av.nights.n1.st==="no";
+      var avKey = CG.nightAvKey(game);   /* the availability answer for THIS game's night, not always Wednesday's */
+      var un = avKey && av.nights[avKey] && av.nights[avKey].st==="no";
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
       var reason = dis ? "Suspended (Rule 7.4)" : un ? "Marked unavailable" : "";
@@ -486,8 +516,7 @@ CG.luSlot = function(pos, pid, locked){
 CG.AFTER._lineup = function(){
   var me = CG.me(); if (!me) return;
   var lg = CG.lg;
-  var game = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; })
-    || lg.schedule.find(function(g){ return (g.home===me.team||g.away===me.team) && g.at>CG.now(); });
+  var game = CG.lineupGameFor(me);
   if (!game) return;
   var key = game.id+":"+me.team;
   var store = CG.store.get("lineups")||{};
@@ -496,8 +525,8 @@ CG.AFTER._lineup = function(){
     ? { slots:{ LW:_dbLu.lw||undefined, C:_dbLu.center||undefined, RW:_dbLu.rw||undefined, LD:_dbLu.ld||undefined, RD:_dbLu.rd||undefined, G:_dbLu.goalie||undefined }, status:"submitted", rev:[] }
     : { slots:{}, status:"draft", rev:[] });
   var sel = null;
-  /* is this game one of the Week-8 nights availability was collected for? */
-  var isWeek8Night = CG.WEEK8.nights.some(function(n){ return Math.abs(n.at - game.at) < 6*3600000; });
+  /* the availability night (n1/n2) covering this game — null when it's outside the window */
+  var avNightKey = CG.nightAvKey(game);
   function isLocked(){ return CG.now() >= game.at - 30*60000; }
   function msg(t, bad){ var el=$("#luMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
   function save(what, status){
@@ -511,7 +540,7 @@ CG.AFTER._lineup = function(){
     if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — only a commissioner override can change it now.";
     if (p.pos!==pos) return p.tag+" is a "+CG.POS_NAME[p.pos]+" — this slot needs a "+CG.POS_NAME[pos]+".";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
-    if (isWeek8Night && CG.avFor(p.id).nights.n1.st==="no") return p.tag+" is marked unavailable for this night.";
+    if (avNightKey && (CG.avFor(p.id).nights[avNightKey]||{}).st==="no") return p.tag+" is marked unavailable for this night.";
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
     return null;
   }

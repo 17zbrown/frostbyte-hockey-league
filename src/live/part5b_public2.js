@@ -230,8 +230,8 @@ CG.plannedLineup = function(g, code){
   if (saved && saved.status!=="draft") return saved.slots;
   var slots = {};
   ["LW","C","RW","LD","RD","G"].forEach(function(pos){
-    var pick = CG.lg.byTeam[code].filter(function(p){ return p.pos===pos; }).sort(function(a,b){ return a.depth-b.depth; })[0];
-    slots[pos] = pick.id;
+    var pick = (CG.lg.byTeam[code]||[]).filter(function(p){ return p.pos===pos; }).sort(function(a,b){ return a.depth-b.depth; })[0];
+    slots[pos] = pick ? pick.id : null;   /* a thin roster must not crash the page */
   });
   return slots;
 };
@@ -345,16 +345,18 @@ CG.ROUTES.matchup = function(id){
     body += '<div class="card"><div class="card-h"><h3>Confirmed lineups</h3>'+
       '<span class="chip">'+(lineupsOut?"Released "+CG.fmtTime(g.at-60*60000):"Release at "+CG.fmtTime(g.at-60*60000))+'</span></div>';
     if (lineupsOut){
-      body += '<div class="grid g2" style="gap:0">'+[g.away,g.home].map(function(code){
+      body += '<div class="grid g2" style="gap:0" id="muLineups">'+[g.away,g.home].map(function(code){
         var slots = CG.plannedLineup(g, code);
+        var anyone = ["LW","C","RW","LD","RD","G"].some(function(pos){ return slots[pos] && CG.playerById(lg, slots[pos]); });
         return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="teamcell" style="margin-bottom:12px">'+CG.crest(code,26)+'<span class="nm">'+esc(CG.TEAM[code].name)+'</span></span>'+
-          ["LW","C","RW","LD","RD","G"].map(function(pos){
-            var p = CG.playerById(lg, slots[pos]);
+          (anyone ? ["LW","C","RW","LD","RD","G"].map(function(pos){
+            var p = slots[pos] && CG.playerById(lg, slots[pos]);
             return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line-soft)">'+
               '<span class="mono" style="font-size:10px;color:var(--steel);width:26px">'+pos+'</span>'+
-              '<b style="font-size:13.5px;cursor:pointer" data-go="'+CG.playerRoute(p)+'">'+esc(p.tag)+'</b>'+
-              '<span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px;margin-left:auto">'+lg.ratings[p.id].ovr+'</span></div>';
-          }).join("")+'</div>';
+              (p ? '<b style="font-size:13.5px;cursor:pointer" data-go="'+CG.playerRoute(p)+'">'+esc(p.tag)+'</b>'+
+                   '<span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px;margin-left:auto">'+lg.ratings[p.id].ovr+'</span>'
+                 : '<span class="caption">TBD</span>')+'</div>';
+          }).join("") : '<p class="caption" style="padding:12px 0">Lineup not submitted yet.</p>')+'</div>';
       }).join("")+'</div>';
     } else {
       body += '<div class="empty"><div class="e-art">'+CG.ic("lock",20)+'</div><b>Lineups are sealed</b><p>Both lineups release simultaneously 60 minutes before puck drop — neither club sees the other’s sheet early.</p></div>';

@@ -153,6 +153,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
   backdrop-filter:blur(12px) saturate(140%);border-bottom:1.5px solid var(--ink)}
 .mh{height:var(--nav-h);display:flex;align-items:center;gap:20px}
 .mh-brand{display:flex;align-items:center;gap:10px;flex-shrink:0}
+/* the brand block must give way on narrow phones or the burger overflows the viewport */
+@media(max-width:430px){
+  .mh{gap:10px}
+  .mh-brand{gap:8px}
+  .mh-brand .crest{width:31px;height:31px}
+  .mh-brand .wm b{font-size:14px}
+  .mh-brand .wm span{letter-spacing:.18em}
+}
 .mh-brand .crest{width:36px;height:36px}
 .mh-brand .wm b{display:block;font-family:var(--f-disp);font-weight:900;font-size:16px;letter-spacing:-.01em;line-height:1}
 .mh-brand .wm span{font-family:var(--f-mono);font-size:9px;letter-spacing:.3em;color:var(--steel);text-transform:uppercase}
