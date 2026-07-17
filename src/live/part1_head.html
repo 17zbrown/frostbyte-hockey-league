@@ -616,6 +616,29 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
 #mobilenav a{display:flex;justify-content:space-between;align-items:center;padding:13px 2px;border-bottom:1px solid #232B31;
   font-family:var(--f-disp);font-weight:700;font-size:17px;color:var(--on-ink);min-height:48px}
 #mobilenav a:active{color:var(--chrome)}
+
+/* Admin "View as…" floating toolbar (see CG.renderViewAsBar) */
+#cgViewAs{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:120;
+  max-width:calc(100vw - 24px)}
+#cgViewAs .cgva-inner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;
+  background:var(--ink);color:var(--ice);border:1px solid var(--ink-3);border-radius:999px;
+  padding:8px 12px;box-shadow:0 8px 30px rgba(16,21,25,.28)}
+#cgViewAs.previewing .cgva-inner{border-color:var(--chrome);box-shadow:0 0 0 2px var(--chrome-tint),0 10px 34px rgba(16,21,25,.34)}
+#cgViewAs .cgva-tag{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);
+  font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--chrome);white-space:nowrap}
+#cgViewAs.previewing .cgva-tag{color:var(--chrome)}
+#cgViewAs .cgva-chips{display:inline-flex;gap:4px;flex-wrap:wrap}
+#cgViewAs .cgva-chip{font-family:var(--f-body);font-size:12px;font-weight:600;color:var(--ice);
+  background:transparent;border:1px solid var(--ink-3);border-radius:999px;padding:5px 11px;cursor:pointer;
+  min-height:32px;transition:background .12s,border-color .12s}
+#cgViewAs .cgva-chip:hover{border-color:var(--chrome)}
+#cgViewAs .cgva-chip.on{background:var(--chrome);color:#101519;border-color:var(--chrome)}
+#cgViewAs .cgva-chip:focus-visible{outline:2px solid var(--chrome);outline-offset:2px}
+#cgViewAs .cgva-exit{font-family:var(--f-body);font-size:12px;font-weight:700;cursor:pointer;
+  background:transparent;color:var(--ice);border:1px solid var(--chrome);border-radius:999px;padding:5px 12px;min-height:32px}
+#cgViewAs .cgva-note{font-size:11px;color:var(--steel-2);white-space:nowrap}
+@media(max-width:560px){#cgViewAs .cgva-note{display:none}}
+@media(prefers-reduced-motion:reduce){#cgViewAs .cgva-chip{transition:none}}
 </style>
 </head>
 <body>

@@ -165,6 +165,7 @@ CG.buildLiveLeague = async function(){
       at:Date.parse(g.scheduled_at), feature:false,
       code:g.game_code||null, server:g.server||null, status:g.status,
       homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot,
+      forfeit:g.forfeit_team_id?id2code[g.forfeit_team_id]:null, voided:!!g.voided,
       eaMatchId:g.ea_match_id||null };
   }).filter(function(g){ return g.home && g.away && g.at; });
 
@@ -211,7 +212,7 @@ CG.buildLiveLeague = async function(){
       name:r.skater_name||null, pos:"G", eaId:r.ea_player_id||null, pid:r.profile_id||null };
   }
   var results = schedule
-    .filter(function(g){ return g.status==="final" && g.homeScore!=null && g.awayScore!=null; })
+    .filter(function(g){ return g.status==="final" && !g.voided && g.homeScore!=null && g.awayScore!=null; })
     .map(function(g){
       var score={}; score[g.home]=g.homeScore; score[g.away]=g.awayScore;
       var box={}; box[g.home]={}; box[g.away]={};
@@ -501,6 +502,8 @@ CG.applySession = async function(session){
   if (CG.auth.user){ CG.loadActionRequests().then(function(){ if(/complaint/.test(location.hash)&&CG.router)CG.router(); }); }
   else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
   CG.enforceBan();
+  CG._va = null;                        /* any fresh session ends a stale preview */
+  if (CG.renderViewAsBar) CG.renderViewAsBar();
 };
 CG.teardownDMs = function(){
   CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false;
@@ -601,6 +604,53 @@ CG.initAuth = async function(){
 
 /* --- live overrides of the demo persona system (defined in part4) --- */
 CG.role = function(){ return (CG.auth && CG.auth.role) || "guest"; };
+
+/* ------------------------------------------------------------------ *
+ * Admin "View as…" — render any page as any role for a preview.
+ * Client-only: never writes, never changes the real role. Gated on the
+ * profiles.is_admin capability. All real actions still run under the real
+ * account via RLS, so a preview can look but not act as someone else.
+ * ------------------------------------------------------------------ */
+CG.VIEW_ROLES = [
+  ["guest","Signed out"], ["member","Member"], ["mgmt","Team management"], ["staff","Staff"], ["commish","Commissioner"]
+];
+CG.isAdmin = function(){ return !!(CG.auth && CG.auth.profile && CG.auth.profile.is_admin); };
+CG.viewAs = function(role){
+  if (!CG.isAdmin() && !CG._va) return;              /* admin, or already mid-preview (profile is nulled for guest) */
+  if (role==null){                                   /* exit preview → restore reality */
+    if (CG._va){ CG.auth.role = CG._va.role; CG.auth.profile = CG._va.profile; CG._va = null; }
+  } else {
+    if (!CG._va) CG._va = { role:CG.auth.role, profile:CG.auth.profile };  /* stash reality once */
+    CG.auth.role = (role==="guest") ? "guest" : role;
+    CG.auth.profile = (role==="guest") ? null : CG._va.profile;            /* guest = no profile */
+  }
+  CG.renderViewAsBar();
+  if (CG.renderChrome) CG.renderChrome();
+  if (CG.router) CG.router();
+  window.scrollTo(0,0);
+};
+CG.renderViewAsBar = function(){
+  var el = document.getElementById("cgViewAs");
+  if (!CG.isAdmin() && !(CG._va)){ if (el) el.remove(); return; }
+  if (!el){ el = document.createElement("div"); el.id = "cgViewAs"; document.body.appendChild(el); }
+  var active = CG._va ? CG.auth.role : null;                 /* the role currently being previewed */
+  var chips = CG.VIEW_ROLES.map(function(r){
+    var on = active===r[0];
+    return '<button type="button" data-va="'+r[0]+'" aria-pressed="'+on+'" class="cgva-chip'+(on?" on":"")+'">'+r[1]+'</button>';
+  }).join("");
+  el.className = CG._va ? "previewing" : "";
+  el.innerHTML =
+    '<div class="cgva-inner">'+
+      '<span class="cgva-tag">'+(CG._va?CG.ic("eye",13)+' Previewing':CG.ic("eye",13)+' View as')+'</span>'+
+      '<span class="cgva-chips">'+chips+'</span>'+
+      (CG._va?'<button type="button" class="cgva-exit" data-va-exit>Exit preview</button>':'')+
+      (CG._va?'<span class="cgva-note">Actions still use your real account.</span>':'')+
+    '</div>';
+  el.querySelectorAll("[data-va]").forEach(function(b){ b.addEventListener("click", function(){
+    var r=this.getAttribute("data-va"); CG.viewAs(active===r?null:r);
+  }); });
+  var ex=el.querySelector("[data-va-exit]"); if(ex) ex.addEventListener("click", function(){ CG.viewAs(null); });
+};
 CG.persona = function(){
   var role = CG.role(), p = CG.auth.profile;
   var label = (CG.PERSONAS[role]||{}).label || (role.charAt(0).toUpperCase()+role.slice(1));
@@ -696,21 +746,7 @@ CG.ROUTES.register = function(){
   }
   var p = CG.auth.profile, reg = CG.auth.registration, eaMissing = !p.ea_id;
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified. Update your details below any time before the deadline.</div>' : "";
-  /* the road ahead — so new players know exactly what registering starts */
-  var roadSteps = [
-    [s.registration_deadline, "Registration closes", "Get in before the cutoff."],
-    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
-    [s.draft_at, "Draft night", "Clubs pick from the pool. Ten minutes after the final pick, rookies under the five-game minimum are placed on random clubs."],
-    [s.free_agency_opens_at, "Free agency opens", "A 48-hour window where clubs sign remaining free agents at negotiated salaries."],
-    [s.starts_at, "Puck drop", "The regular season starts — 54 games, every stat imported automatically from EA."]
-  ].filter(function(st){ return st[0]; });
-  var roadmap = roadSteps.length ? '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">what registering starts</span></div>'+
-    roadSteps.map(function(st,i){
-      return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-        '<span class="mono" style="flex:0 0 150px;font-size:11.5px;color:var(--steel);padding-top:2px">'+CG.fmtFull(Date.parse(st[0]))+'</span>'+
-        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+st[1]+'</b><p class="caption" style="margin-top:2px">'+st[2]+'</p></span></div>';
-    }).join("")+'</div>' : "";
-  statusCard = roadmap + statusCard;
+  statusCard = CG.roadAheadCard(s) + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(reg?"Update registration":"Register")+'</h3><span class="chip '+(reg?"chip-win":"chip-chrome")+'">'+(reg?"Registered":"Open")+'</span></div><div class="card-b">'+
     (eaMissing ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">You need your <b>EA ID</b> on file to register.</span><button class="btn btn-ghost btn-sm" id="regEaBtn">Add EA ID</button></div>'
                 : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
@@ -805,7 +841,13 @@ CG.ROUTES.owner = function(){
       '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
   }
   var p = CG.auth.profile, a = CG.auth.ownerApp||{};
+  var r = CG.role(), lockedFromOwning = (r==="staff" || r==="commish");
+  var conflictNote = lockedFromOwning
+    ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
+      '<span style="flex:1">'+(r==="commish"?"Commissioners":"Staff")+' can’t own or manage a club — it keeps roster and management decisions impartial. You’re welcome to play as a rostered member; ownership applications are disabled for your role.</span></div>'
+    : "";
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
+  statusCard = conflictNote + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
@@ -817,7 +859,7 @@ CG.ROUTES.owner = function(){
         '<label class="fld"><span style="font-size:11px">3rd choice</span><select id="ow-fr3">'+CG.franchiseOptions(a.franchise_3)+'</select></label>'+
       '</div></div>'+
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
-    '<button class="btn btn-chrome" id="ow-submit">'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
+    '<button class="btn btn-chrome" id="ow-submit"'+(lockedFromOwning?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:720px;padding-bottom:48px">'+statusCard+body+'</div>';
 };
@@ -827,6 +869,8 @@ CG.AFTER.owner = function(){
 };
 CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  var r0=CG.role();
+  if(r0==="commish"||r0==="staff"){ CG.toast((r0==="commish"?"Commissioners":"Staff")+" can’t own or manage a club — you can still play as a member","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   function sv(id){ var el=document.getElementById(id); return el?(el.value||"").trim()||null:null; }
   var ea=v("ow-ea"), pitch=v("ow-pitch");
@@ -867,11 +911,15 @@ CG.ROUTES.staffapply = function(){
       '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
   }
   var r = CG.role();
-  /* staff + commissioners see the exact form members see (and can submit it) —
-     a note on top says so, and the Staff Desk stays one click away */
-  var staffNote = (r==="staff" || r==="commish")
-    ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("check",15)+
-      '<span style="flex:1">You’re already on the league staff — this is the application exactly as members see it. Submitting works like any member’s.</span>'+
+  /* Role separation: commissioners can't be staff, and staff are already staff — so neither
+     submits here. They still see the exact form members see (Control Center → View as… is the
+     cleaner preview). The Staff Desk stays one click away. */
+  var lockedFromStaff = (r==="staff" || r==="commish");
+  var staffNote = lockedFromStaff
+    ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
+      '<span style="flex:1">'+(r==="commish"
+        ? 'Commissioners can’t join the staff — it keeps rulings impartial. This is the form exactly as members see it; submitting is disabled for you.'
+        : 'You’re already on the league staff. This is the form exactly as members see it; there’s nothing to submit.')+'</span>'+
       '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a></div>'
     : "";
   var app = CG.auth.staffApp;
@@ -897,7 +945,7 @@ CG.ROUTES.staffapply = function(){
     '<label class="fld"><span>Relevant experience</span><input id="sa-exp" placeholder="e.g. reffed in two leagues, ran stats for…" value="'+v("experience")+'"></label>'+
     '<label class="fld"><span>Why you? <span class="caption">(required)</span></span><textarea id="sa-pitch" rows="4" placeholder="What would you bring to the league office?">'+v("pitch")+'</textarea></label>'+
     '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">'+
-      '<button class="btn btn-chrome" id="sa-submit">'+(app?"Update application":"Submit application")+'</button>'+
+      '<button class="btn btn-chrome" id="sa-submit"'+(lockedFromStaff?" disabled":"")+'>'+(app?"Update application":"Submit application")+'</button>'+
       '<span class="caption">Staff review the queue on the <b>Staff Desk</b>; approval adds the Discord Staff role automatically.</span></div>'+
     '</div></div>'+
     '<p class="caption" style="margin-top:14px">Looking to run a club instead? <a href="#/owner" style="font-weight:700;border-bottom:2px solid var(--chrome)">Apply to own a team →</a></p>'+
@@ -920,6 +968,9 @@ CG.staffDeptLabel = function(key){
 };
 CG.submitStaffApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
+  var r0=CG.role();
+  if(r0==="commish"){ CG.toast("Commissioners can’t join the staff — it keeps rulings impartial","err"); return; }
+  if(r0==="staff"){ CG.toast("You’re already on the league staff","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   var pitch=v("sa-pitch");
   var depts=[].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });
@@ -1356,7 +1407,8 @@ CG.admPreseason = function(){
     kpis.map(function(k){ return '<div class="kpi'+(k[2]==="alert"?" alert":"")+'" style="cursor:default"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'; }).join("")+'</div>';
 
   /* season timeline — the phases the whole lifecycle runs on */
-  var phases=[["Owner apps close",s.owner_app_deadline],["Registration closes",s.registration_deadline],
+  var phases=[["Off-season begins",s.offseason_starts_at],["Owner apps close",s.owner_app_deadline],
+    ["Sign-up deadline",s.registration_deadline],
     ["Pre-season starts",s.preseason_starts_at],["Draft night",s.draft_at],
     ["Free agency opens",s.free_agency_opens_at],["Free agency closes",s.free_agency_closes_at],
     ["Puck drop",s.starts_at],["Playoffs",s.playoffs_start_at]];
@@ -1365,21 +1417,24 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. Ten minutes after the draft’s final pick, rookies who missed the 5-game minimum are placed on random clubs — so rosters are settled before free agency opens.</p></div>'
-    :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Pre-season starts”, and hit Auto-space — the draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
+      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open all season and late sign-ups are randomly assigned after the draft. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. Ten minutes after the draft’s final pick, rookies who missed the 5-game minimum are placed on random clubs — so rosters are settled before free agency. Free agency runs a full week; puck drop waits for it to close.</p></div>'
+    :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions */
   var pool = regs.filter(function(r){ return !rosteredIds[r.profile_id] && r.status!=="declined"; });
   var randomN = (lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
   var rookies = pool.filter(function(r){ return !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5; });
+  var dl = s.signup_deadline_at || s.registration_deadline;
+  var lateN = pool.filter(function(r){ return dl && r.created_at && Date.parse(r.created_at) > Date.parse(dl); }).length;
   h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pre-season lifecycle</h3></div><div class="card-b">'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
     '<button class="btn btn-chrome" id="preAssignAll"'+(pool.length?"":" disabled")+'>Randomly assign unrostered ('+pool.length+')</button>'+
     '<button class="btn btn-ghost" id="preReleaseNow"'+(randomN?"":" disabled")+'>Release random assignments ('+randomN+')</button>'+
-    '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Distribute unproven rookies ('+rookies.length+')</button></div>'+
+    '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Distribute unproven rookies ('+rookies.length+')</button>'+
+    '<button class="btn btn-ghost" id="preLatecomers"'+(lateN?"":" disabled")+'>Assign late sign-ups ('+lateN+')</button></div>'+
     '<p class="caption" style="margin-top:12px">Randomly assign spreads every unrostered registration evenly across the clubs (management counts toward the split). '+
-    'Release runs automatically after the final pre-season game; rookie placement runs automatically ten minutes after the draft’s final pick — both buttons are manual overrides. '+
-    'Placement sends players who missed the 5-game minimum (and have no draft history or 5 career games) to a completely random club with an open spot.</p></div></div>';
+    'Release runs automatically after the final pre-season game; rookie placement runs automatically ten minutes after the draft’s final pick. '+
+    'The sign-up deadline is a draft-eligibility cutoff, not a hard close — anyone registering after it (and anyone joining mid-season) is placed on a club with an open spot automatically. These buttons are manual overrides.</p></div></div>';
 
   var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   h+='<div class="card"><div class="card-h"><h3>Registered players</h3><span class="chip">'+regs.length+'</span></div>'+
@@ -1387,19 +1442,28 @@ CG.admPreseason = function(){
       '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Pre-season</th><th>Draft eligibility</th><th>Status</th><th class="tright">Assign to club</th></tr></thead><tbody>'+
       sortedRegs.map(function(r){ var prof=r.profiles||{}, on=rosteredIds[r.profile_id];
         var pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0}, vet=lg.isVeteran(r.profile_id);
-        var elig = vet ? '<span class="chip">Veteran — exempt</span>'
-                 : pre.gp>=5 ? '<span class="chip chip-win">Eligible</span>'
+        var declined=r.status==="declined";
+        var late = dl && r.created_at && Date.parse(r.created_at) > Date.parse(dl);
+        var elig = declined ? '<span class="chip chip-loss">Declined</span>'
+                 : late ? '<span class="chip chip-warn">Late — random-assigned</span>'
+                 : vet ? '<span class="chip">Veteran — exempt</span>'
+                 : pre.gp>=5 ? '<span class="chip chip-win">Draft-eligible</span>'
                  : '<span class="chip chip-warn">'+pre.gp+' of 5 games</span>';
         var clubOpts = '<option value="">Choose club…</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
-        return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
+        var actions = declined
+          ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+esc(prof.gamertag||"a player")+'">Reinstate</button>'
+          : on ? '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+esc(prof.gamertag||"a player")+'">Decline</button>'
+          : '<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap"><select data-assign-team="'+r.id+'" style="padding:5px;max-width:150px">'+clubOpts+'</select>'+
+            '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+esc(prof.gamertag||"a player")+'">Sign</button>'+
+            '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+esc(prof.gamertag||"a player")+'">Decline</button></span>';
+        return '<tr'+(declined?' style="opacity:.55"':"")+'><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td><td class="tleft small" style="color:var(--steel)">'+esc(prof.ea_id||"—")+'</td>'+
-          '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" style="width:64px;text-align:center;padding:5px" placeholder="—"></td>'+
+          '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" style="width:64px;text-align:center;padding:5px" placeholder="—"'+(declined?" disabled":"")+'></td>'+
           '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
           '<td>'+elig+'</td>'+
-          '<td>'+(on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td>'+
-          '<td class="tright">'+(on?'<span class="caption">—</span>':'<span style="display:inline-flex;gap:6px;align-items:center"><select data-assign-team="'+r.id+'" style="padding:5px;max-width:150px">'+clubOpts+'</select>'+
-            '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+esc(prof.gamertag||"a player")+'">Sign</button></span>')+'</td></tr>';
-      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool. Pre-season games played come straight from the EA box scores; the 5-game minimum only applies to players without a draft cycle or 5 career games. Pick a club and Sign for a one-off manual signing.</span></div>'
+          '<td>'+(declined?'<span class="chip chip-loss">Declined</span>':on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td>'+
+          '<td class="tright">'+actions+'</td></tr>';
+      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool. Pre-season games played come straight from the EA box scores; the 5-game minimum only applies to players without a draft cycle or 5 career games. Late sign-ups (registered after the deadline) are flagged and get random-assigned after the draft. Decline keeps a banned or duplicate account out of assignment and the draft pool; Reinstate undoes it.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
@@ -1454,6 +1518,14 @@ CG.AFTER._preseason = function(){
   var paa=document.getElementById("preAssignAll"); if (paa) paa.addEventListener("click", CG.preseasonRandomAssign);
   var prn=document.getElementById("preReleaseNow"); if (prn) prn.addEventListener("click", CG.preseasonRelease);
   var prk=document.getElementById("preRookies"); if (prk) prk.addEventListener("click", CG.distributeRookies);
+  var plc=document.getElementById("preLatecomers"); if (plc) plc.addEventListener("click", CG.assignLatecomers);
+  document.querySelectorAll("[data-reg-decline]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-reg-decline"), name=this.getAttribute("data-name");
+    CG.confirm("Decline "+name+"’s registration?","They’re kept out of random assignment and the draft pool until reinstated. If they’re already rostered, waive them from the club first.","Decline", function(){ CG.setRegStatus(id,"declined",name); });
+  }); });
+  document.querySelectorAll("[data-reg-reinstate]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.setRegStatus(this.getAttribute("data-reg-reinstate"),"pending",this.getAttribute("data-name"));
+  }); });
   document.querySelectorAll("[data-assign]").forEach(function(b){ b.addEventListener("click", function(){
     var el=this, regId=el.getAttribute("data-assign"), sel=document.querySelector('[data-assign-team="'+regId+'"]'), code=sel?sel.value:"";
     if(!code){ CG.toast("Pick a club first","err"); return; }
@@ -1557,6 +1629,29 @@ CG.distributeRookies = function(){
     });
   });
 };
+/* Late sign-ups (registered after the draft-eligibility cutoff) + anyone who joins mid-season are
+   randomly assigned to a club with an open spot. Runs on its own every 5 min; this forces it. */
+CG.assignLatecomers = function(){
+  CG.confirm("Assign late sign-ups now?",
+    "Everyone who registered after the sign-up deadline (or joined mid-season) and isn’t on a club yet "+
+    "goes to the emptiest club with an open roster spot. This also runs automatically every few minutes — "+
+    "the button just forces it. Puck-drop rosters are never blocked by a late arrival.",
+    "Assign late sign-ups", function(){
+    CG.sb.rpc("auto_assign_latecomers",{ p_force:true }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
+      CG.toast((r.data||0)+" late sign-up"+((r.data||0)===1?"":"s")+" placed on clubs","ok"); CG.reloadLeague();
+    });
+  });
+};
+/* Decline / reinstate a registration (keeps banned or duplicate accounts out of assignment + the draft). */
+CG.setRegStatus = function(regId, status, name){
+  CG.sb.from("season_registrations").update({status:status}).eq("id",regId).then(function(r){
+    if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+    CG.toast((name||"Registration")+(status==="declined"?" declined":" reinstated"),"ok");
+    var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===regId;}); if(reg)reg.status=status;
+    CG.reloadLeague();
+  });
+};
 
 CG.assignRegistration = async function(regId, profileId, position, playerName, code){
   var s=CG.SEASON, teamId=(CG.lg._codeToId||{})[code];
@@ -1597,6 +1692,13 @@ CG.admUsersLive = function(){
   var staffN=profs.filter(function(p){ return p.role==="staff"; }).length;
   function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
   var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
+  /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
+     (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
+  var conflicts = profs.filter(function(pr){ return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id]; });
+  h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation is on.</b> '+
+    'Commissioners and staff can’t own or manage a club — it keeps votes on team management and staff impartial. They can still play as rostered members. New assignments that break the rule are blocked automatically.'+
+    (conflicts.length?' <span style="display:block;margin-top:8px">Grandfathered for Season 1 (keep both hats until the Season 2 rollover): '+
+      conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num">'+profs.filter(function(p){return p.role==="commissioner";}).length+'</b><span>commissioners</span></div>'+
@@ -2714,8 +2816,33 @@ CG.AFTER._admHomepage = function(){
    Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
 CG.GAMES_PER_CLUB = 54;
 CG.PRESEASON_WEEKS = 2;
+CG.OFFSEASON_DARK_DAYS = 14;   /* 2 weeks of no on-ice activity — staff seat owners + management */
+CG.FA_WINDOW_DAYS = 7;         /* free agency runs a full week; puck drop waits for it to close */
 CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
 CG.HOLIDAYS = ["12-25","07-01","07-04"];
+
+/* One timeline card, shared by the Register page and My Hub, so a member sees the same road
+   ahead in both places. Steps auto-hide until their date is set. */
+CG.roadAheadCard = function(s, opts){
+  s = s || CG.SEASON || {}; opts = opts || {};
+  var steps = [
+    [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
+    [s.registration_deadline, "Sign-up deadline", "Register by now to be eligible for the draft. Miss it and you can still join — you’ll be randomly placed on a club after the draft instead."],
+    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
+    [s.draft_at, "Draft night", "Clubs pick from the eligible pool. Ten minutes after the final pick, first-year players under the five-game minimum are placed on random clubs."],
+    [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
+    [s.starts_at, "Puck drop", "The regular season starts once free agency closes — 54 games, every stat imported automatically from EA."]
+  ].filter(function(st){ return st[0]; });
+  if (!steps.length) return "";
+  var nowT = CG.now(), nextIdx = steps.findIndex(function(st){ return Date.parse(st[0]) > nowT; });
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">'+(opts.chip||"what registering starts")+'</span></div>'+
+    steps.map(function(st,i){
+      var t = Date.parse(st[0]), past = t <= nowT, isNext = i===nextIdx;
+      return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;'+(i?"border-top:1px solid var(--line-soft)":"")+(past?"opacity:.5":"")+'">'+
+        '<span class="mono" style="flex:0 0 150px;font-size:11.5px;color:var(--steel);padding-top:2px">'+CG.fmtFull(t)+(isNext?' <span class="chip chip-chrome" style="font-size:9px;vertical-align:middle">NEXT UP</span>':past?' <span style="font-size:9px;color:var(--steel)">✓</span>':"")+'</span>'+
+        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+st[1]+'</b><p class="caption" style="margin-top:2px">'+st[2]+'</p></span></div>';
+    }).join("")+'</div>';
+};
 
 /* ---- shared ET-safe date helpers ---- */
 CG.dayAdd = function(ymd, n){
@@ -2828,9 +2955,10 @@ CG.admScheduleLive = function(){
         '<span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+'</span></span><span class="caption">@</span>'+
         '<span class="teamcell">'+CG.crest(g.home,20)+'<span class="mono" style="font-size:12px">'+esc(g.home)+'</span></span>'+
         '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Open</a>'+
-        '<button class="btn btn-ghost btn-sm" data-resched-live="'+g.id+'">Reschedule</button></span></div>';
+        '<button class="btn btn-ghost btn-sm" data-resched-live="'+g.id+'">Reschedule</button>'+
+        '<button class="btn btn-ghost btn-sm" data-forfeit-live="'+g.id+'">Forfeit</button></span></div>';
     }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">All times Eastern. Moving a game keeps its lobby code and server picks; both clubs see the change instantly.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">All times Eastern. Moving a game keeps its lobby code and server picks; both clubs see the change instantly. <b>Forfeit</b> records a game a club didn’t show for — a 1-0 win for the opponent with no player stats (Rule 5.3), which also clears the game from release and playoff gates.</span></div></div>';
   return h;
 };
 CG.AFTER._admScheduleLive = function(){
@@ -2864,6 +2992,34 @@ CG.AFTER._admScheduleLive = function(){
       });
     });
   }); });
+  document.querySelectorAll("[data-forfeit-live]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.declareForfeitPrompt(this.getAttribute("data-forfeit-live"));
+  }); });
+};
+/* Commissioner: record a forfeit (LG §5.3) — 1-0 to the club that showed, no player stats.
+   The "neither played" option voids the game (LG has no double-forfeit rule) and keeps it out
+   of the standings while still clearing the release / playoff gates. */
+CG.declareForfeitPrompt = function(id){
+  var g=CG.lg.schedule.find(function(x){ return x.id===id; }); if(!g) return;
+  var homeName=(CG.TEAM[g.home]||{}).name||g.home, awayName=(CG.TEAM[g.away]||{}).name||g.away;
+  CG.modal("Declare a forfeit — "+esc(g.away)+" @ "+esc(g.home),
+    '<label class="fld"><span>What happened?</span><select id="ffWho">'+
+      '<option value="away">'+esc(awayName)+' (away) forfeited → '+esc(homeName)+' wins 1-0</option>'+
+      '<option value="home">'+esc(homeName)+' (home) forfeited → '+esc(awayName)+' wins 1-0</option>'+
+      '<option value="void">Neither club played → void (no result, kept out of the standings)</option>'+
+    '</select></label>'+
+    '<p class="caption">A forfeit is recorded as a 1-0 win with no individual stats (Rule 5.3). The losing club still burns the game toward its weekly count. The league has no double-forfeit rule, so a game neither club played is voided rather than scored. Reversible from the game once declared.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ffGo">Record it</button>');
+  document.getElementById("ffGo").addEventListener("click", function(){
+    var who=document.getElementById("ffWho").value;
+    var forfeiterCode = who==="away"?g.away : who==="home"?g.home : null;
+    var forfeiterId = forfeiterCode ? (CG.lg._codeToId||{})[forfeiterCode] : null;
+    CG.sb.rpc("declare_forfeit",{ p_game:id, p_forfeit_team:forfeiterId, p_void: who==="void" }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t record: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(who==="void"?"Game voided":"Forfeit recorded — 1-0","ok"); CG.reloadLeague();
+    });
+  });
 };
 
 /* ================================================================
@@ -2938,44 +3094,66 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Number</span><input id="ssNum" type="number" min="1" value="'+(s.number||1)+'"></label>'+
     '<label class="fld"><span>Status</span><select id="ssStatus">'+["upcoming","active","complete"].map(function(x){ return '<option'+(s.status===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
     '<label class="fld"><span>Registration</span><select id="ssRegOpen"><option value="1"'+(s.registration_open?" selected":"")+'>Open</option><option value="0"'+(!s.registration_open?" selected":"")+'>Closed</option></select></label>'+
-    '<label class="fld"><span>Pre-season starts (ET)</span><input type="datetime-local" id="ssPre" value="'+dt(s.preseason_starts_at)+'"></label>'+
+    '<label class="fld"><span>Off-season begins (ET)</span><input type="datetime-local" id="ssOff" value="'+dt(s.offseason_starts_at)+'"></label>'+
     '<label class="fld" style="align-self:end"><span>&nbsp;</span><button class="btn btn-ghost" id="ssSpace" type="button" style="width:100%">Auto-space the whole timeline</button></label>'+
+    '<label class="fld"><span>Sign-up / draft-eligibility deadline (ET)</span><input type="datetime-local" id="ssRegDl" value="'+dt(s.registration_deadline)+'"></label>'+
+    '<label class="fld"><span>Owner apps close (ET)</span><input type="datetime-local" id="ssOwnDl" value="'+dt(s.owner_app_deadline)+'"></label>'+
+    '<label class="fld"><span>Pre-season starts (ET)</span><input type="datetime-local" id="ssPre" value="'+dt(s.preseason_starts_at)+'"></label>'+
     '<label class="fld"><span>Draft night (ET)</span><input type="datetime-local" id="ssDraft" value="'+dt(s.draft_at)+'"></label>'+
     '<label class="fld"><span>Free agency opens (ET)</span><input type="datetime-local" id="ssFaOpen" value="'+dt(s.free_agency_opens_at)+'"></label>'+
     '<label class="fld"><span>Free agency closes (ET)</span><input type="datetime-local" id="ssFaClose" value="'+dt(s.free_agency_closes_at)+'"></label>'+
     '<label class="fld"><span>Season starts (ET)</span><input type="datetime-local" id="ssStarts" value="'+dt(s.starts_at)+'"></label>'+
     '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
     '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
-    '<label class="fld"><span>Registration closes (ET)</span><input type="datetime-local" id="ssRegDl" value="'+dt(s.registration_deadline)+'"></label>'+
-    '<label class="fld"><span>Owner apps close (ET)</span><input type="datetime-local" id="ssOwnDl" value="'+dt(s.owner_app_deadline)+'"></label>'+
     '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||60000000)/1e6)+'"></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||12)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
-    '</div><p class="caption">Give “Pre-season starts” one date and Auto-space fills everything else: 2 pre-season weeks (Wed + Fri), draft the Saturday after the final Friday, free agency 24 hours later for 48 hours, puck drop the very next Wednesday, 9 regular-season weeks, playoffs the Wednesday after. Weeks touching Christmas, Canada Day, or July 4 are skipped. Every field stays editable — Auto-space just fills the form; nothing saves until you hit Save.</p>',
+    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed + Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, 9 regular-season weeks, and playoffs the Wednesday after. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Weeks touching Christmas, Canada Day, or July 4 are skipped. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
   document.getElementById("ssSpace").addEventListener("click", function(){
-    var v = document.getElementById("ssPre").value;
-    if (!v){ CG.toast("Give “Pre-season starts” a date first — everything spaces from it","err"); return; }
-    var anchor = v.slice(0,10);
-    var pre = CG.gameNights(anchor, CG.PRESEASON_WEEKS);
+    /* Two ways in. Give the off-season start (the first midnight after last season's final
+       playoff game) and the two dark weeks + sign-up deadline space themselves too; give only
+       a pre-season date and we start there. */
+    var offV = document.getElementById("ssOff").value;
+    var preV = document.getElementById("ssPre").value;
+    if (!offV && !preV){ CG.toast("Give “Off-season begins” or “Pre-season starts” a date — everything spaces from it","err"); return; }
+    var offDay = offV ? offV.slice(0,10) : null, darkEnd = null, ownDl, regDl;
+    var pre;
+    if (offDay){
+      darkEnd = CG.dayAdd(offDay, CG.OFFSEASON_DARK_DAYS-1);    /* 2 weeks, no on-ice activity */
+      pre = CG.gameNights(CG.dayAdd(darkEnd,1), CG.PRESEASON_WEEKS); /* pre-season the next week */
+      regDl = CG.etISO(darkEnd,"20:00");                        /* sign-ups close ending the 2 weeks */
+      ownDl = CG.etISO(CG.dayAdd(offDay,6),"20:00");            /* week 1 takes apps, week 2 seats them */
+    } else {
+      pre = CG.gameNights(preV.slice(0,10), CG.PRESEASON_WEEKS);
+    }
     var preStart = pre.nights[0].wed, preFinal = pre.nights[CG.PRESEASON_WEEKS-1].fri;
+    if (!offDay){
+      regDl = CG.etISO(CG.dayAdd(preStart,-2),"20:00");         /* the Monday before */
+      ownDl = CG.etISO(CG.dayAdd(preStart,-7),"20:00");
+    }
     var draftDay = CG.dayAdd(preFinal,1);                       /* Saturday draft night */
-    var reg = CG.gameNights(CG.dayAdd(draftDay,4), Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/2));
+    var faOpenDay  = CG.dayAdd(draftDay,1);                     /* 24h after draft night */
+    var faCloseDay = CG.dayAdd(faOpenDay,CG.FA_WINDOW_DAYS);    /* a full week of free agency */
+    /* Puck drop waits for free agency to close, so every club starts game 1 settled. */
+    var reg = CG.gameNights(CG.dayAdd(faCloseDay,1), Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/2));
     var regStart = reg.nights[0].wed, regEnd = reg.nights[reg.nights.length-1].fri;
     var po = CG.gameNights(CG.dayAdd(regEnd,1), 1);
     function put(id, iso){ document.getElementById(id).value = dt(iso); }
+    if (offDay) put("ssOff", CG.etISO(offDay,"00:00"));
     put("ssPre",      CG.etISO(preStart,"21:00"));
     put("ssDraft",    CG.etISO(draftDay,"19:00"));
-    put("ssFaOpen",   CG.etISO(CG.dayAdd(draftDay,1),"19:00"));  /* 24h after draft night */
-    put("ssFaClose",  CG.etISO(CG.dayAdd(draftDay,3),"19:00"));  /* 48-hour window */
+    put("ssFaOpen",   CG.etISO(faOpenDay,"19:00"));
+    put("ssFaClose",  CG.etISO(faCloseDay,"19:00"));
     put("ssStarts",   CG.etISO(regStart,"21:00"));
     put("ssEnds",     CG.etISO(regEnd,"23:59"));
     put("ssPlayoffs", CG.etISO(po.nights[0].wed,"21:00"));
-    put("ssRegDl",    CG.etISO(CG.dayAdd(preStart,-2),"20:00")); /* the Monday before */
-    put("ssOwnDl",    CG.etISO(CG.dayAdd(preStart,-7),"20:00")); /* mid management window */
+    put("ssRegDl",    regDl);
+    put("ssOwnDl",    ownDl);
     var skipped = pre.skipped.concat(reg.skipped, po.skipped);
-    CG.toast("Timeline spaced: pre-season "+preStart+" → draft "+draftDay+" → puck drop "+regStart+
+    CG.toast("Timeline spaced: "+(offDay?"off-season "+offDay+" → ":"")+"pre-season "+preStart+
+      " → draft "+draftDay+" → free agency closes "+faCloseDay+" → puck drop "+regStart+
       (skipped.length?" · holiday week"+(skipped.length===1?"":"s")+" skipped: "+skipped.join(", "):""),"ok");
   });
   document.getElementById("ssGo").addEventListener("click", function(){
@@ -2990,6 +3168,7 @@ CG.seasonForm = function(id){
     var rec={ name:name, number:num, status:document.getElementById("ssStatus").value,
       registration_open: document.getElementById("ssRegOpen").value==="1",
       starts_at:iso("ssStarts"), ends_at:iso("ssEnds"), registration_deadline:iso("ssRegDl"),
+      signup_deadline_at:iso("ssRegDl"), offseason_starts_at:iso("ssOff"),
       owner_app_deadline:iso("ssOwnDl"), draft_at:iso("ssDraft"),
       preseason_starts_at:iso("ssPre"), free_agency_opens_at:iso("ssFaOpen"),
       free_agency_closes_at:iso("ssFaClose"), playoffs_start_at:iso("ssPlayoffs"),
