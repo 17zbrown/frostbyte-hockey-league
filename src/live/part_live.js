@@ -81,7 +81,16 @@ CG.buildLiveLeague = async function(){
   var bad = q.slice(0,9).find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
   CG._seasonsRaw = (q[2].data||[]);
-  var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=(q[2].data||[])[0]||null,
+  /* Canonical "current season": the ACTIVE one wins; otherwise the newest season that isn't
+     complete; otherwise the newest. Matches the DB's current_season_num() so creating a Season 2
+     row (status 'upcoming') can never hijack the live site while Season 1 is still active. */
+  CG.pickCurrentSeason = function(rows){        /* rows arrive ordered by number desc */
+    rows = rows||[];
+    return rows.find(function(s){ return s.status==="active"; })
+        || rows.find(function(s){ return s.status!=="complete"; })
+        || rows[0] || null;
+  };
+  var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=CG.pickCurrentSeason(q[2].data||[]),
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
       draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[],
@@ -1753,11 +1762,22 @@ CG.admUsersLive = function(){
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM; “Remove club role” clears the seat. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
   return h;
 };
-CG.setUserRole = function(profileId, role){
-  CG.sb.rpc("set_member_role",{ p_target:profileId, p_role:role, p_team_code:null }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t set role: "+r.error.message,"err"); return; }
-    var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr) pr.role=role;
-    CG.toast("Role updated to "+role,"ok");
+CG.setUserRole = function(profileId, role, selEl){
+  var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; });
+  var prev = pr ? pr.role : null;
+  var name = pr ? (pr.gamertag||pr.display_name||"this member") : "this member";
+  if (selEl && prev) selEl.value = prev;   /* revert the visible dropdown now; a confirmed change re-renders on reload */
+  var roleLabel = role==="commissioner"?"Commissioner":role==="staff"?"Staff":"Member";
+  CG.confirm("Make "+esc(name)+" a "+roleLabel+"?",
+    role==="commissioner" ? "Commissioners have full league control and can’t hold a club seat. The last commissioner can’t be demoted."
+    : role==="staff" ? "Staff work the case queue and reviews, and can’t own or manage a club."
+    : "Member is a normal player account.",
+    "Set role", function(){
+    CG.sb.rpc("set_member_role",{ p_target:profileId, p_role:role, p_team_code:null }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t set role: "+r.error.message,"err"); return; }
+      if(pr) pr.role=role;
+      CG.toast(esc(name)+" is now "+roleLabel,"ok"); CG.reloadLeague();
+    });
   });
 };
 CG.assignClubRole = function(profileId, name){
@@ -1887,7 +1907,7 @@ CG.AFTER._admUsers = function(){
     this.classList.toggle("btn-ghost", on);
     applyFilter();
   });
-  document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value); }); });
+  document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value, this); }); });
   document.querySelectorAll("[data-manage]").forEach(function(b){ b.addEventListener("click", function(){ CG.assignClubRole(this.getAttribute("data-manage"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-unmanage]").forEach(function(b){ b.addEventListener("click", function(){ CG.removeClubRole(this.getAttribute("data-unmanage"), this.getAttribute("data-club"), this.getAttribute("data-mrole"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
