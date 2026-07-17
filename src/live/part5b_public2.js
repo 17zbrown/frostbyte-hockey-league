@@ -93,10 +93,15 @@ CG.ROUTES.rankings = function(){
     return pHead + '<div class="shell" style="padding-bottom:40px"><div class="stack">'+pRows+'</div>'+
       '<div class="note" style="margin-top:20px">Projections from roster overall only — no games have been played yet. Weekly rankings with commentary start in Week 1.</div></div>';
   }
-  var head = CG.pageHead("Week 7 · published "+CG.fmtDate("2026-07-13"),"CGHL Power Rankings", esc(C.rankings.intro));
+  var rkWeek = lg.results.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
+  var head = CG.pageHead("Week "+rkWeek+" · recomputed after every final","CGHL Power Rankings",
+    "Every club, ranked by record, goal share, and recent form — straight math, updated the moment a game goes final.");
   var rows = lg.powerRankings.map(function(pr){
     var t = CG.TEAM[pr.team], s = lg.teams[pr.team];
-    var entry = C.rankings.entries.find(function(e){ return e.code===pr.team; })||{};
+    /* commentary is computed from real results — the club's record and current form */
+    var line = t.name+" sit "+(pr.rank===1?"top of the league":pr.rank<=3?"inside the top three":"at #"+pr.rank)+
+      " at "+s.w+"-"+s.l+"-"+s.otl+(s.gf!=null&&s.ga!=null?", "+(s.gf>s.ga?"outscoring opponents "+s.gf+"–"+s.ga:s.gf<s.ga?"outscored "+s.ga+"–"+s.gf:"even on goals at "+s.gf)+" so far":"")+".";
+    var top = (lg.byTeam[pr.team]||[]).slice().sort(function(a,b){ return (lg.pstats[b.id]?lg.pstats[b.id].p:0)-(lg.pstats[a.id]?lg.pstats[a.id].p:0); })[0];
     return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+pr.team+'" role="link" tabindex="0"><div class="card-b" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:start">'+
       '<div style="text-align:center"><b style="font-family:var(--f-disp);font-weight:900;font-size:34px;letter-spacing:-.02em">'+pr.rank+'</b>'+
         '<span style="display:block;margin-top:2px">'+CG.moveArrow(pr.move)+'</span></div>'+
@@ -104,12 +109,12 @@ CG.ROUTES.rankings = function(){
       '<div style="min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
         '<b style="font-family:var(--f-disp);font-size:19px">'+esc(t.name)+'</b>'+
         '<span class="chip">'+s.w+"-"+s.l+"-"+s.otl+'</span><span class="ovrbox '+CG.ovrClass(lg.teamRatings[pr.team].ovr)+'" style="min-width:36px;height:24px;font-size:13px">'+lg.teamRatings[pr.team].ovr+'</span>'+CG.form5(s.last5)+'</div>'+
-        '<p class="small" style="color:var(--steel);margin-top:8px;max-width:72ch">'+esc(entry.comment||"")+'</p>'+
-        (entry.keyPlayer && entry.keyPlayer!=="—"?'<p class="caption" style="margin-top:7px"><b style="color:var(--ink)">Key player:</b> '+esc(entry.keyPlayer)+'</p>':"")+
+        '<p class="small" style="color:var(--steel);margin-top:8px;max-width:72ch">'+esc(line)+'</p>'+
+        (top && lg.pstats[top.id] && lg.pstats[top.id].p>0?'<p class="caption" style="margin-top:7px"><b style="color:var(--ink)">Key player:</b> '+esc(top.tag)+' — '+lg.pstats[top.id].p+' pts</p>':"")+
       '</div></div></div>';
   }).join("");
   return head + '<div class="shell" style="padding-bottom:40px"><div class="stack">'+rows+'</div>'+
-    '<div class="note" style="margin-top:20px"><b style="font-family:var(--f-disp)">How these differ from standings:</b> the standings are math; the rankings are judgment. Staff draft from team overall ratings and recent form, then reorder and write the commentary before publishing. Prior weeks are archived in the Control Center.</div></div>';
+    '<div class="note" style="margin-top:20px"><b style="font-family:var(--f-disp)">How these differ from standings:</b> the standings count points; the rankings weigh record, goal difference, and the last five games together — a hot club can outrank a higher-seeded one.</div></div>';
 };
 
 /* ---------- NEWS ---------- */
@@ -365,7 +370,11 @@ CG.ROUTES.matchup = function(id){
             '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b></span><span class="val"><b class="num">'+s.p+'</b><span>'+s.g+'G '+s.a+'A</span></span></div>';
         }).join("")+'</div>';
       }).join("")+'</div></div>';
-    if (g.feature) body += '<div class="card"><div class="card-h"><h3>Matchup preview</h3><span class="chip chip-chrome">Newsroom</span></div><div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7">'+esc(CG.CONTENT.rankings.matchupPreview)+'</p></div></div>';
+    if (g.feature){
+      var mh = CG.lg.teams[g.home], ma = CG.lg.teams[g.away];
+      body += '<div class="card"><div class="card-h"><h3>Matchup preview</h3><span class="chip chip-chrome">Marquee</span></div><div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7">'+
+        esc(CG.TEAM[g.away].name)+' ('+ma.w+'-'+ma.l+'-'+ma.otl+') visit '+esc(CG.TEAM[g.home].name)+' ('+mh.w+'-'+mh.l+'-'+mh.otl+') in tonight’s marquee matchup. Lineups release an hour before puck drop; the private lobby code goes live for rostered players 30 minutes out.</p></div></div>';
+    }
     body += '</div><div class="stack">'+codeBox+
       '<div class="card"><div class="card-h"><h3>Lobby settings</h3><span class="chip">League standard</span></div><div class="card-b" style="padding-top:10px">'+
         [["Server", g.server ? esc(g.server) : "Set at T-30 from the clubs’ picks"],

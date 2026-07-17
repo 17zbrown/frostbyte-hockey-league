@@ -527,6 +527,9 @@ CG.applySession = async function(session){
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
   await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
+  /* real notifications: load + realtime subscribe on sign-in, tear down on sign-out */
+  if (CG.auth.user){ CG.loadNotifs().then(function(){ if(CG.renderChrome)CG.renderChrome(); }); }
+  else { CG._notifs = null; if (CG._notifChannel){ try{ CG.sb.removeChannel(CG._notifChannel); }catch(e){} CG._notifChannel = null; } }
   /* direct messages: load + subscribe on sign-in, tear down on sign-out */
   if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
@@ -638,6 +641,112 @@ CG.initAuth = async function(){
 CG.role = function(){ return (CG.auth && CG.auth.role) || "guest"; };
 
 /* ------------------------------------------------------------------ *
+ * Notifications — the bell reads the real public.notifications table.
+ * DB triggers already write per-user alerts (trades, roster moves, role
+ * changes, application decisions, rule violations); this surfaces them.
+ * ------------------------------------------------------------------ */
+CG._notifs = null;
+CG.notifRoute = function(view, param){
+  switch (view){
+    case "team":         return param ? "#/team/"+param : "#/teams";
+    case "manager":      return "#/hub";
+    case "transactions": return "#/home";
+    case "automations":  return "#/admin/automations";
+    case "preseason":    return "#/admin/preseason";
+    case "users":        return "#/admin/users";
+    default:             return "#/hub";
+  }
+};
+CG.notifIcon = function(type){
+  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid" }[type] || "bell";
+};
+CG.loadNotifs = async function(){
+  if (!CG.sb || !CG.auth.user){ CG._notifs = null; return; }
+  try {
+    var r = await CG.sb.from("notifications")
+      .select("id,type,title,body,link_view,link_param,read,created_at")
+      .order("created_at",{ascending:false}).limit(50);
+    if (r.error){ CG._notifs = []; return; }
+    var readMap = CG.store.get("read");
+    CG._notifs = (r.data||[]).map(function(n){
+      if (n.read) readMap[n.id] = true;     /* keep the drawer's read-state in sync with the DB */
+      return { id:n.id, t:Date.parse(n.created_at), icon:CG.notifIcon(n.type),
+               title:n.title||"League update", body:n.body||"", read:!!n.read,
+               route:CG.notifRoute(n.link_view, n.link_param) };
+    });
+    CG.store.set("read", readMap);
+    /* realtime: new alerts light the bell without a refresh */
+    if (!CG._notifChannel){
+      CG._notifChannel = CG.sb.channel("notifs-"+CG.auth.user.id)
+        .on("postgres_changes",{ event:"INSERT", schema:"public", table:"notifications",
+            filter:"profile_id=eq."+CG.auth.user.id }, function(payload){
+          var n = payload["new"]||{};
+          (CG._notifs = CG._notifs||[]).unshift({ id:n.id, t:Date.parse(n.created_at||new Date().toISOString()),
+            icon:CG.notifIcon(n.type), title:n.title||"League update", body:n.body||"", read:false,
+            route:CG.notifRoute(n.link_view, n.link_param) });
+          if (CG.renderChrome) CG.renderChrome();
+        }).subscribe();
+    }
+  } catch(e){ CG._notifs = CG._notifs || []; }
+};
+CG.baseNotifs = function(){
+  if (!CG.auth || !CG.auth.user) return [];
+  return (CG._notifs || []).slice();
+};
+/* opening the bell marks everything read in the DB (the drawer still highlights what was new) */
+var _openBellProto = CG.openBell;
+CG.openBell = function(){
+  _openBellProto();
+  if (!CG.sb || !CG.auth.user || !CG._notifs) return;
+  var unread = CG._notifs.filter(function(n){ return !n.read; });
+  if (!unread.length) return;
+  CG.sb.from("notifications").update({ read:true }).eq("profile_id", CG.auth.user.id).eq("read", false)
+    .then(function(){ unread.forEach(function(n){ n.read = true; }); });
+};
+
+/* ------------------------------------------------------------------ *
+ * My Hub onboarding — a signed-in member with no roster spot used to see
+ * "Evening, coach." and one empty card. Show them where they actually
+ * stand: registration status, the road ahead, and their applications.
+ * ------------------------------------------------------------------ */
+var _hubDashboardProto = null;
+CG._wrapHubDashboard = function(){
+  if (_hubDashboardProto || !CG.hubDashboard) return;
+  _hubDashboardProto = CG.hubDashboard;
+  CG.hubDashboard = function(){
+    var me = CG.me(), r = CG.role();
+    if (me || r==="staff" || r==="commish" || !CG.auth.profile) return _hubDashboardProto();
+    var p = CG.auth.profile, s = CG.SEASON||{}, reg = CG.auth.registration;
+    var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+CG.fmtFull(CG.now())+'</span>'+
+      '<h1 class="h-page" style="margin-top:8px">Welcome, '+esc(p.gamertag||p.display_name||"skater")+'.</h1>'+
+      '<p class="lede" style="margin-top:10px">You’re signed in — here’s where you stand on the way to a roster spot.</p></div>';
+    /* 1 · registration status */
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
+      (reg?'<span class="chip chip-win">Registered</span>':(s.registration_open?'<span class="chip chip-warn">Not registered</span>':'<span class="chip">Closed</span>'))+'</div><div class="card-b">'+
+      (reg
+        ? '<p class="small" style="color:var(--steel)">You’re in the '+esc(CG.seasonTag())+' pool as a <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"skater")+'</b>. '+
+          (s.registration_deadline && Date.parse(s.registration_deadline)>CG.now()
+            ? 'You made the eligibility window — you’ll be randomly assigned for the pre-season and enter the draft.'
+            : 'You’ll be placed on a club automatically — watch your notifications.')+'</p>'+
+          (!p.ea_id?'<div class="note red" style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">Your <b>EA ID</b> is missing — stats can’t link to you without it.</span><button class="btn btn-ghost btn-sm" id="hubEaBtn">Add EA ID</button></div>':"")
+        : (s.registration_open
+            ? '<p class="small" style="color:var(--steel)">Registration is open'+(s.registration_deadline?' — register by <b>'+CG.fmtFull(Date.parse(s.registration_deadline))+'</b> to be draft-eligible. Join later and you still play; you’re placed on a club automatically.':'.')+'</p>'+
+              '<a class="btn btn-chrome" style="margin-top:12px" href="#/register">Register to play</a>'
+            : '<p class="small" style="color:var(--steel)">Registration isn’t open right now — watch the announcements channel.</p>'))+
+      '</div></div>';
+    /* 2 · the road ahead */
+    h += CG.roadAheadCard(s, { chip:"your season, step by step" });
+    /* 3 · applications */
+    var oa = CG.auth.ownerApp, sa = CG.auth.staffApp;
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3></div><div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
+      (oa?'<span class="chip '+(oa.status==="approved"?"chip-win":oa.status==="denied"?"chip-loss":"chip-warn")+'">Own a club — '+esc(oa.status)+'</span>':'<a class="chip" href="#/owner" style="cursor:pointer">Apply — own a club</a>')+
+      (sa?'<span class="chip '+(sa.status==="approved"?"chip-win":sa.status==="denied"?"chip-loss":"chip-warn")+'">Join the staff — '+esc(sa.status)+'</span>':'<a class="chip" href="#/staffapply" style="cursor:pointer">Apply — join the staff</a>')+
+      '<span class="caption" style="flex-basis:100%">Owner applications are reviewed in the off-season window; staff applications any time.</span></div></div>';
+    return h;
+  };
+};
+
+/* ------------------------------------------------------------------ *
  * Admin "View as…" — render any page as any role for a preview.
  * Client-only: never writes, never changes the real role. Gated on the
  * profiles.is_admin capability. All real actions still run under the real
@@ -708,6 +817,9 @@ CG.setRole = function(){ /* no-op in live — role comes from the real session *
 
 CG.signIn = function(){
   if (!CG.sb || !CG.sb.auth) return;
+  /* remember where the user was — OAuth bounces through Discord and lands on the origin,
+     so without this every sign-in dumps them back on Home instead of the page they left */
+  try { if (location.hash && location.hash.indexOf("#/")===0) localStorage.setItem("cg_return", JSON.stringify({ h:location.hash, at:Date.now() })); } catch(e){}
   /* match the current site's redirect exactly (origin only) so it stays within
      Supabase's existing Discord redirect allowlist */
   CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify email guilds.join" } });
@@ -778,25 +890,76 @@ CG.ROUTES.register = function(){
   }
   var p = CG.auth.profile, reg = CG.auth.registration, eaMissing = !p.ea_id;
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified. Update your details below any time before the deadline.</div>' : "";
-  statusCard = CG.roadAheadCard(s) + statusCard;
+  /* signing in normally auto-joins the Discord; when that failed (denied scope, expired token)
+     this is the recovery path instead of a dead-end toast at submit */
+  var invite = CG._siteCfg && CG._siteCfg.discord_invite;
+  var guildCard = (!p.in_guild && invite)
+    ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("msg",15)+
+      '<span style="flex:1">Registration needs you in the <b>Chel Gaming Discord</b> — that’s where game nights run. It looks like you’re not in yet.</span>'+
+      '<span style="display:inline-flex;gap:8px"><a class="btn btn-sm" style="background:#5865F2;color:#fff" href="'+esc(invite)+'" target="_blank" rel="noopener">Join the server</a>'+
+      '<button class="btn btn-ghost btn-sm" id="guildRecheck">I’ve joined — re-check</button></span></div>'
+    : "";
+  statusCard = CG.roadAheadCard(s) + guildCard + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(reg?"Update registration":"Register")+'</h3><span class="chip '+(reg?"chip-win":"chip-chrome")+'">'+(reg?"Registered":"Open")+'</span></div><div class="card-b">'+
     (eaMissing ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">You need your <b>EA ID</b> on file to register.</span><button class="btn btn-ghost btn-sm" id="regEaBtn">Add EA ID</button></div>'
                 : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
-    '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">'+
-      ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
+    '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" role="group" aria-label="Primary position">'+
+      ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability, preferred club, anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
-    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — signing in adds you automatically.</p>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — signing in adds you automatically. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
 };
 CG.AFTER.register = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
   var sel = (CG.auth.registration && CG.auth.registration.position) || "C";
-  document.querySelectorAll("[data-regpos]").forEach(function(el){ el.addEventListener("click", function(){ sel=this.getAttribute("data-regpos"); document.querySelectorAll("[data-regpos]").forEach(function(x){ x.classList.toggle("chip-chrome", x===el); }); }); });
+  document.querySelectorAll("[data-regpos]").forEach(function(el){ el.addEventListener("click", function(){
+    sel=this.getAttribute("data-regpos");
+    document.querySelectorAll("[data-regpos]").forEach(function(x){ var on=x===el; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); });
+  }); });
   var ea=document.getElementById("regEaBtn"); if(ea) ea.addEventListener("click", CG.promptEaId);
   var sub=document.getElementById("regSubmit"); if(sub) sub.addEventListener("click", function(){ CG.registerForSeason(sel, (document.getElementById("regNote")||{}).value||""); });
+  var rc=document.getElementById("guildRecheck"); if(rc) rc.addEventListener("click", function(){
+    var btn=this; btn.disabled=true; btn.textContent="Checking…";
+    CG.sb.from("profiles").select("in_guild").eq("id",CG.auth.user.id).maybeSingle().then(function(r){
+      if (r.data && r.data.in_guild){ CG.auth.profile.in_guild=true; CG.toast("You’re in — welcome to the league","ok"); CG.router(); }
+      else { btn.disabled=false; btn.textContent="I’ve joined — re-check"; CG.toast("Not seeing you in the server yet — the sync runs every few minutes, try again shortly","err"); }
+    });
+  });
 };
+/* ---- Terms & Privacy — one plain-language page, linked from the footer + register consent ---- */
+CG.ROUTES.legal = function(){
+  var head = CG.pageHead("The fine print, in plain language","Terms & Privacy",
+    "What you agree to by playing, and exactly what the league stores about you.");
+  function sec(title, paras){
+    return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+title+'</h3></div><div class="card-b">'+
+      paras.map(function(p){ return '<p class="small" style="color:var(--ink-3);line-height:1.7;max-width:74ch;margin-bottom:10px">'+p+'</p>'; }).join("")+'</div></div>';
+  }
+  return head + '<div class="shell" style="max-width:820px;padding-bottom:48px">'+
+    sec("Terms of play", [
+      "Chel Gaming Hockey League is a free, community-run competitive EA Sports NHL league. Registering commits you to the rulebook — availability, conduct, and game-night procedures included. The commissioners may suspend or remove accounts that break it.",
+      "League decisions (rulings, forfeits, suspensions, roster moves) follow the <a href='#/rulebook' style='font-weight:700;border-bottom:2px solid var(--chrome)'>rulebook</a> and are made by league staff and commissioners. The complaint and appeal process is in Chapter 7.",
+      "The league is not affiliated with EA Sports, the NHL, Discord, or Twitch. Club names and marks belong to their owners."
+    ])+
+    sec("What we store", [
+      "<b>From Discord (when you sign in):</b> your Discord id, username, display name, avatar, and email. Signing in also joins you to the league's Discord server — that's where games are organized.",
+      "<b>From you:</b> your EA ID and platform, season registrations, weekly availability, applications, and anything you write on the site (messages, complaints, trade notes).",
+      "<b>From play:</b> scores and full box-score statistics import automatically from the EA NHL match record after every league game. These form the league's permanent competitive record.",
+      "Email addresses are never shown publicly. Availability is visible only to your club's management and league staff. Complaint evidence is private to the league office."
+    ])+
+    sec("Where it lives", [
+      "The site runs on Netlify, data lives in Supabase (Postgres), game-night automation posts to the league's Discord server, and stream status is checked against Twitch. Each processor sees only what it needs to run its part.",
+      "Backups of the league database are taken nightly and kept encrypted for 30 days."
+    ])+
+    sec("Deleting your data", [
+      "Message any commissioner from <a href='#/hub/messages' style='font-weight:700;border-bottom:2px solid var(--chrome)'>Messages</a> (or on Discord) to delete your account. Deletion removes your profile, registrations, availability, applications, and messages. The permanent game record — box scores and results — is retained with your gamertag, the same way any league's record book works.",
+      "Questions about any of this go to the commissioners — they're listed on every club page."
+    ])+
+    '<p class="caption">Last updated July 16, 2026 · applies to chelgamingleague.com and the league Discord.</p>'+
+  '</div>';
+};
+
 CG.promptEaId = function(){
   CG.modal("Add your EA ID",
     '<label class="fld"><span>EA ID / gamertag used in-game</span><input id="eaInput" placeholder="e.g. YourEAName" value="'+esc((CG.auth.profile||{}).ea_id||"")+'"></label><p class="caption">Shown to league staff for lobby verification; hidden from the public directory unless you opt in.</p>',
@@ -3575,6 +3738,12 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive());
   if (param==="playoffs") return CG.adminShell("playoffs", CG.admPlayoffsLive());
   if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
+  if (param==="codes") return CG.adminShell("codes", CG.admCodesLive());
+  if (param==="audit") return CG.adminShell("audit", CG.admAuditLive());
+  /* retired prototype panels — their buttons toasted success while saving nothing real:
+     awards (awards program is DB-driven), carousel/media/settings/data (localStorage-only),
+     rulebook editor (content ships versioned through the repo) */
+  if (["awards","carousel","media","settings","data","rulebook"].indexOf(param)>=0) return CG.ROUTES._404();
   return CG._origAdminRoute(param, qs);
 };
 CG._origAdminAfter = CG.AFTER.admin;
@@ -3593,8 +3762,55 @@ CG.AFTER.admin = function(param, qs){
   if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
   if (param==="playoffs"){ CG.AFTER._admPlayoffs(); return; }
   if (param==="ratings"){ return; }
+  if (param==="codes"){ return; }
+  if (param==="audit"){ CG.AFTER._admAudit(); return; }
   if (param==="" || param==null){ return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
+};
+
+/* ---- Game codes: the real 6-digit lobby codes on tonight's + upcoming games ---- */
+CG.admCodesLive = function(){
+  var lg = CG.lg;
+  var up = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
+  var tonightKey = up.length ? CG.etYMD(new Date(up[0].at).toISOString()) : null;
+  var tonight = up.filter(function(g){ return CG.etYMD(new Date(g.at).toISOString())===tonightKey; }).slice(0,12);
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Game codes</h2><p class="lede" style="margin-top:6px">Every game carries a stable 6-digit private-lobby code, minted when the schedule is generated. Rostered players see their game’s code on the matchup page 30 minutes before puck drop — this table is the commissioner’s master list.</p></div>';
+  h+='<div class="card"><div class="card-h"><h3>'+(tonight.length?'Next game night — '+CG.fmtDay(tonight[0].at):'Upcoming games')+'</h3><span class="chip">'+(tonight.length||up.slice(0,12).length)+' games</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Lobby codes</caption><thead><tr><th class="tleft">When (ET)</th><th class="tleft">Matchup</th><th>Stage</th><th>Code</th></tr></thead><tbody>'+
+    (tonight.length?tonight:up.slice(0,12)).map(function(g){
+      return '<tr><td class="tleft mono" style="font-size:12px">'+CG.fmtFull(g.at)+'</td>'+
+        '<td class="tleft"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+'</span></span> <span class="caption">@</span> <span class="teamcell">'+CG.crest(g.home,20)+'<span class="mono" style="font-size:12px">'+esc(g.home)+'</span></span></td>'+
+        '<td>'+(g.stage==="preseason"?'<span class="chip" style="font-size:9px">PRE</span>':g.stage==="playoff"?'<span class="chip chip-chrome" style="font-size:9px">PO</span>':'<span class="chip" style="font-size:9px">REG</span>')+'</td>'+
+        '<td class="tnum"><b class="mono" style="font-size:15px;letter-spacing:.12em">'+esc(g.code||"—")+'</b></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Codes are stable — rescheduling a game keeps its code. Players only ever see their own game’s code, and only from 30 minutes before puck drop (Rule 4.2).</span></div></div>';
+  return h;
+};
+
+/* ---- Audit log: the real admin_audit table (role changes, forfeits, rollovers, violations) ---- */
+CG.admAuditLive = function(){
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Audit log</h2><p class="lede" style="margin-top:6px">Every privileged action the league takes — role changes, forfeits, re-opened finals, rollovers, and rule-violation flags — recorded permanently. Insert-only: nothing here can be edited or deleted.</p></div>'+
+    '<div class="card"><div class="card-h"><h3>Recent actions</h3><span class="chip" id="audCount">loading…</span></div><div id="audBody"><div class="card-b"><span class="caption">Loading…</span></div></div></div>';
+};
+CG.AFTER._admAudit = function(){
+  var body=document.getElementById("audBody"), count=document.getElementById("audCount");
+  if (!body || !CG.sb) return;
+  CG.sb.from("admin_audit").select("action,target_type,target_id,detail,created_at,actor")
+    .order("created_at",{ascending:false}).limit(50).then(function(r){
+    if (r.error){ body.innerHTML='<div class="card-b"><span class="caption">Couldn’t read the log: '+esc(r.error.message)+'</span></div>'; if(count)count.textContent="—"; return; }
+    var rows=r.data||[];
+    if (count) count.textContent = rows.length ? rows.length+" shown" : "empty";
+    if (!rows.length){ body.innerHTML='<div class="card-b"><p class="caption">No privileged actions recorded yet — they start landing here the first time a role changes, a forfeit is declared, or a final is re-opened.</p></div>'; return; }
+    var names={}; (CG.lg._profilesRaw||[]).forEach(function(p){ names[p.id]=p.gamertag||p.display_name||"—"; });
+    body.innerHTML = rows.map(function(x){
+      var label = { role_change:"Role change", reopen_final:"Final re-opened", season_rollover:"Season rollover",
+        playoff_violation_30pct:"Playoff eligibility flag", playoff_violation_series_cap:"Series-cap flag" }[x.action] || x.action;
+      var det = x.detail ? Object.keys(x.detail).map(function(k){ return k+": "+String(x.detail[k]); }).join(" · ") : "";
+      return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("eye",15)+'</span>'+
+        '<span style="min-width:0"><b>'+esc(label)+(x.actor&&names[x.actor]?' — '+esc(names[x.actor]):"")+'</b><p>'+esc(det||(x.target_type+" "+(x.target_id||"")))+'</p></span>'+
+        '<span class="nf-t">'+CG.fmtFull(Date.parse(x.created_at))+'</span></div>';
+    }).join("");
+  });
 };
 
 /* ================================================================
@@ -3676,7 +3892,46 @@ CG._origHubAfter = CG.AFTER.hub;
 CG.AFTER.hub = function(param, qs){
   if (param==="messages"){ CG.AFTER.messages(); return; }
   if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
+  var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
+  var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
+  var sl=document.getElementById("sSaveLive");
+  if (sl) sl.addEventListener("click", function(){
+    var ea=(document.getElementById("sEaLive").value||"").trim(), plat=document.getElementById("sPlatLive").value;
+    if (ea && ea.length<2){ CG.toast("EA ID looks too short","err"); return; }
+    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null }).eq("id",CG.auth.user.id).then(function(r){
+      if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null;
+      CG.toast("Profile saved","ok");
+    });
+  });
   if (CG._origHubAfter) CG._origHubAfter(param, qs);
+};
+CG._wrapHubDashboard();   /* part6 is loaded by now — install the onboarding dashboard */
+
+/* Settings — the live version writes to the real profile; the prototype's placebo privacy
+   toggles and demo-seat card are gone. Theme picker keeps part6's markup + wiring. */
+CG.hubSettings = function(){
+  var p = CG.auth.profile || {}, tp = CG.themePref();
+  return '<div style="margin-bottom:20px"><span class="eyebrow chr">Account</span><h1 class="h-sec" style="margin-top:8px">Settings</h1></div>'+
+    '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Appearance</h3><span class="chip">'+(tp==="auto"?"Following your system":"Set manually")+'</span></div>'+
+    '<div class="card-b"><div class="radio-cards" role="radiogroup" aria-label="Theme">'+
+    [["light","Light","Fresh Sheet — the ice-white editorial look"],["dark","Dark","Night Game — broadcast charcoal"],["auto","Auto","Follows your device setting"]].map(function(o){
+      return '<label class="'+(tp===o[0]?"on":"")+'" data-theme-pick="'+o[0]+'" style="flex-direction:column;align-items:flex-start;gap:3px">'+
+        '<input type="radio" name="themePref"'+(tp===o[0]?" checked":"")+'><b>'+o[1]+'</b><span class="caption" style="text-transform:none;letter-spacing:0">'+o[2]+'</span></label>';
+    }).join("")+'</div>'+
+    '<p class="caption" style="margin-top:12px">Applies instantly on this device.</p></div></div>'+
+    '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>League profile</h3></div><div class="card-b">'+
+    '<label class="fld"><span>Display name / gamertag</span><input value="'+esc(p.gamertag||p.display_name||"")+'" readonly style="background:var(--ice);color:var(--steel)">'+
+    '<span class="hint">Synced automatically from your Discord display name every few minutes — change it there and it flows here.</span></label>'+
+    '<label class="fld"><span>EA ID</span><input id="sEaLive" value="'+esc(p.ea_id||"")+'"><span class="hint">Used to link your EA box scores to your profile — required to register.</span></label>'+
+    '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
+    '<button class="btn btn-ink" id="sSaveLive">Save profile</button></div></div>'+
+    '<div class="stack"><div class="card"><div class="card-h"><h3>Your data</h3></div><div class="card-b">'+
+    '<p class="small" style="color:var(--steel)">The league stores your Discord identity (id, username, avatar), your EA ID and platform, your registrations and availability, and the stats you generate in league games. Email addresses are never public; availability is visible only to your club’s management and league staff.</p>'+
+    '<p class="small" style="color:var(--steel);margin-top:10px">Read the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a>. To delete your account and data, message any commissioner from <a href="#/hub/messages" style="font-weight:700;border-bottom:2px solid var(--chrome)">Messages</a> — deletion covers everything except the league’s permanent game record (box scores keep your gamertag).</p>'+
+    '</div></div>'+
+    '<div class="card"><div class="card-h"><h3>Session</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Signed in with Discord as <b>'+esc(p.gamertag||p.display_name||"—")+'</b>.</p>'+
+    '<button class="btn btn-ghost btn-sm" style="margin-top:12px" id="setSignOut">'+CG.ic("back",14)+'Sign out</button></div></div></div></div>';
 };
 
 /* ================================================================
@@ -3927,21 +4182,15 @@ CG.bootLive = async function(){
         ["playoffs","Playoffs","trophy"],
         ["leagues","Leagues & tiers","trophy"],
         ["rankings","Power rankings","up"],
-        ["ratings","Overall ratings","chart"],
-        ["awards","Awards","trophy"]
+        ["ratings","Overall ratings","chart"]
       ]],
       ["Content", [
         ["news","Newsroom","doc"],
-        ["homepage","Homepage","grid"],
-        ["carousel","Hero carousel","film"],
-        ["media","Media library","ul"],
-        ["rulebook","Rulebook","doc"]
+        ["homepage","Homepage","grid"]
       ]],
       ["System", [
         ["automations","Automations","clock"],
-        ["data","Import / export","db"],
-        ["audit","Audit log","eye"],
-        ["settings","Site settings","gear"]
+        ["audit","Audit log","eye"]
       ]]
     ];
   } catch(e){
@@ -3953,6 +4202,15 @@ CG.bootLive = async function(){
     return;
   }
   CG.renderChrome();
+  /* land back where the user was before the OAuth round-trip (stashed by CG.signIn just
+     before redirecting; consumed only within 10 minutes so a stale stash can't hijack boot) */
+  var ret = null;
+  try {
+    var raw = localStorage.getItem("cg_return");
+    if (raw){ localStorage.removeItem("cg_return"); var o = JSON.parse(raw);
+      if (o && o.h && o.h.indexOf("#/")===0 && Date.now()-(o.at||0) < 10*60000) ret = o.h; }
+  } catch(e){}
+  if (ret && (!location.hash || location.hash==="#/home")) location.hash = ret;
   if (!location.hash) location.hash = "#/home";
   CG.router();
 };

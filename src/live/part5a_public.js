@@ -105,6 +105,8 @@ CG.gameCard = function(g){
 /* pre-season = no games played yet; drives the "season hasn't started" framing on
    the live site. The prototype build has 48 simulated results, so this is false there. */
 CG.isPreseason = function(){ return !!(CG.lg && CG.lg.results && CG.lg.results.length===0); };
+/* transaction descriptions carry <b> emphasis written by the DB — escape everything else */
+CG.txText = function(s){ return esc(String(s||"")).replace(/&lt;b&gt;/g,"<b>").replace(/&lt;\/b&gt;/g,"</b>"); };
 CG.seasonStartMs = function(){ var s=CG.SEASON||(CG.lg&&CG.lg.season); return s&&s.starts_at?Date.parse(s.starts_at):null; };
 CG.daysToStart = function(){ var m=CG.seasonStartMs(); return m?Math.max(0,Math.ceil((m-CG.now())/86400000)):null; };
 CG.slideDefs = function(){
@@ -113,12 +115,14 @@ CG.slideDefs = function(){
     var start = CG.seasonStartMs(), days = CG.daysToStart(), slides = [];
     var startTxt = start ? CG.fmtDate(new Date(start).toISOString()) : "soon";
     var sNum = (CG.SEASON&&CG.SEASON.number)||1;
+    var regOpen = CG.SEASON && CG.SEASON.registration_open;
     slides.push({ key:"kickoff", label:CG.seasonTag(), html:
       '<span class="s-cat"><span class="chip chip-chrome">'+esc(CG.seasonTag())+(sNum===1?' · Inaugural':'')+'</span></span>'+
       '<h2>The puck drops '+startTxt+'.</h2>'+
-      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+CG.TEAMS.length+' clubs, '+((CG.DIVISIONS&&CG.DIVISIONS.length)||2)+' divisions — '+(sNum===1?'Chel Gaming’s first competitive season':esc(CG.seasonTag())+' of Chel Gaming hockey')+'. Rosters are locking in now.</p>'+
-      '<div class="s-cta"><a class="btn btn-chrome" href="#/schedule">Opening schedule</a>'+
-      '<a class="btn btn-ghost" href="#/teams">The clubs</a></div>'+
+      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+CG.TEAMS.length+' clubs, '+((CG.DIVISIONS&&CG.DIVISIONS.length)||2)+' divisions — '+(sNum===1?'Chel Gaming’s first competitive season':esc(CG.seasonTag())+' of Chel Gaming hockey')+'. '+
+      (regOpen?'Registration is open — claim your spot before the draft.':'Rosters take shape through the pre-season and the draft.')+'</p>'+
+      '<div class="s-cta">'+(regOpen?'<a class="btn btn-chrome" href="#/register">Register to play</a><a class="btn btn-ghost" href="#/schedule">Opening schedule</a>'
+        :'<a class="btn btn-chrome" href="#/schedule">Opening schedule</a><a class="btn btn-ghost" href="#/teams">The clubs</a>')+'</div>'+
       '<span class="s-date">Season opens '+startTxt+'</span>' });
     slides.push({ key:"clubs", label:"The clubs", html:
       '<span class="s-cat"><span class="chip chip-chrome">'+CG.TEAMS.length+' founding clubs</span></span>'+
@@ -143,32 +147,38 @@ CG.slideDefs = function(){
   var divLeaders = (CG.DIVISIONS||["East","West"]).map(function(dv){ return CG.standings(lg,dv)[0]; }).filter(Boolean);
   var curWeek = lg.results.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
   var slides = [];
-  slides.push({ key:"news", label:"Breaking news", html:
+  if (a1) slides.push({ key:"news", label:"Breaking news", html:
     '<span class="s-cat"><span class="chip chip-chrome">League news</span></span>'+
     '<h2>'+esc(a1.title)+'</h2><p class="s-dek">'+esc(a1.excerpt)+'</p>'+
     '<div class="s-cta"><a class="btn btn-chrome" href="#/article/'+a1.slug+'">Read the story</a>'+
     '<a class="btn btn-ghost" href="#/news">All news</a></div>'+
     '<span class="s-date">'+CG.fmtDate(a1.dateIso)+' · '+esc(a1.author)+'</span>' });
-  if (feat) slides.push({ key:"matchup", label:"Featured matchup", html:
-    '<span class="s-cat"><span class="chip chip-live"><span class="live-dot"></span>Tonight · Week '+feat.week+'</span></span>'+
-    '<h2>'+esc(CG.TEAM[feat.away].name)+' at '+esc(CG.TEAM[feat.home].name)+'</h2>'+
-    '<p class="s-dek">'+esc(CG.CONTENT.rankings.matchupPreview.split(". ").slice(0,2).join(". "))+'.</p>'+
-    '<div class="s-cta"><a class="btn btn-chrome" href="#/matchup/'+feat.id+'">Matchup center</a>'+
-    '<a class="btn btn-ghost" href="#/schedule">Tonight’s slate</a></div>'+
-    '<span class="s-date">Puck drop '+CG.fmtTime(feat.at)+' · Lights Center</span>' });
+  if (feat){
+    var frh = lg.teams[feat.home], fra = lg.teams[feat.away];
+    slides.push({ key:"matchup", label:"Featured matchup", html:
+      '<span class="s-cat"><span class="chip chip-live"><span class="live-dot"></span>Tonight · '+(feat.stage==="preseason"?"Pre-season week ":feat.stage==="playoff"?"Playoffs · Round ":"Week ")+feat.week+'</span></span>'+
+      '<h2>'+esc(CG.TEAM[feat.away].name)+' at '+esc(CG.TEAM[feat.home].name)+'</h2>'+
+      '<p class="s-dek">'+esc(CG.TEAM[feat.away].name)+' ('+fra.w+'-'+fra.l+'-'+fra.otl+') visit '+esc(CG.TEAM[feat.home].name)+' ('+frh.w+'-'+frh.l+'-'+frh.otl+') in tonight’s marquee. Lineups release an hour before puck drop.</p>'+
+      '<div class="s-cta"><a class="btn btn-chrome" href="#/matchup/'+feat.id+'">Matchup center</a>'+
+      '<a class="btn btn-ghost" href="#/schedule">Tonight’s slate</a></div>'+
+      '<span class="s-date">Puck drop '+CG.fmtTime(feat.at)+'</span>' });
+  }
   if (potw && sk) slides.push({ key:"potw", label:"Player of the Week", html:
     '<span class="s-cat"><span class="chip chip-chrome">Player of the Week '+potw.week+'</span></span>'+
     '<h2>'+esc(sk.tag)+'</h2>'+
-    '<p class="s-dek">'+esc((C.awards.potw.find(function(w){return w.week===potw.week;})||{}).skaterBlurb||"")+'</p>'+
+    '<p class="s-dek">'+esc(potw.blurb || (sk.tag+" takes Week "+potw.week+"’s honors for "+CG.TEAM[sk.team].name+"."))+'</p>'+
     '<div class="s-cta"><a class="btn btn-chrome" href="'+CG.playerRoute(sk)+'">Player profile</a>'+
     '<a class="btn btn-ghost" href="#/awards">Award history</a></div>'+
     '<span class="s-date">'+esc(CG.TEAM[sk.team].name)+' · '+sk.pos+'</span>' });
-  slides.push({ key:"rankings", label:"Power Rankings", html:
-    '<span class="s-cat"><span class="chip chip-chrome">Week 7 Power Rankings</span></span>'+
-    '<h2>Two at the top. One point of separation.</h2>'+
-    '<p class="s-dek">'+esc(C.rankings.intro)+'</p>'+
-    '<div class="s-cta"><a class="btn btn-chrome" href="#/rankings">Full rankings</a></div>'+
-    '<span class="s-date">Published '+CG.fmtDate("2026-07-13")+' · CGHL Newsroom</span>' });
+  if ((lg.powerRankings||[]).length){
+    var pr1 = lg.powerRankings[0], pr1t = CG.TEAM[pr1.team];
+    slides.push({ key:"rankings", label:"Power Rankings", html:
+      '<span class="s-cat"><span class="chip chip-chrome">Week '+curWeek+' Power Rankings</span></span>'+
+      '<h2>'+esc(pr1t?pr1t.name:"The top club")+' holds the top spot.</h2>'+
+      '<p class="s-dek">Computed fresh from results — record, goal share, and recent form, re-ranked after every final.</p>'+
+      '<div class="s-cta"><a class="btn btn-chrome" href="#/rankings">Full rankings</a></div>'+
+      '<span class="s-date">Updated after the latest finals · CGHL Wire</span>' });
+  }
   if (divLeaders.length) slides.push({ key:"standings", label:"Standings snapshot", html:
     '<span class="s-cat"><span class="chip chip-chrome">Standings · Week '+curWeek+'</span></span>'+
     '<h2>'+divLeaders.map(function(l){ return esc(l.team.name); }).join(divLeaders.length===2?" and ":", ")+' set'+(divLeaders.length===1?"s":"")+' the pace.</h2>'+
@@ -209,6 +219,17 @@ CG.ROUTES.home = function(){
       '<b id="faCountdown" class="num" data-close="'+faC+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>'+
     '</div></section>';
   }
+  /* registration countdown — pinned while sign-ups are open ahead of the eligibility deadline */
+  var regDl = CG.SEASON && CG.SEASON.registration_deadline ? Date.parse(CG.SEASON.registration_deadline) : null;
+  if (CG.SEASON && CG.SEASON.registration_open && regDl && Date.now() < regDl && !(faO && faC && Date.now() >= faO && Date.now() < faC)){
+    html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
+      '<span class="chip chip-chrome">'+esc(CG.seasonTag())+' registration is open</span>'+
+      '<span style="color:var(--on-ink-dim);font-size:13px">Register by '+CG.fmtFull(regDl)+' to be draft-eligible</span>'+
+      '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Deadline in</span>'+
+      '<b id="regCountdown" class="num" data-close="'+regDl+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>'+
+      '<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a></span>'+
+    '</div></section>';
+  }
   /* HERO */
   var railGames = pre ? lg.schedule.filter(function(g){ return g.at>CG.now(); }).sort(function(a,b){return a.at-b.at;}).slice(0,4) : lg.tonight;
   var railLabel = pre ? "Opening games"
@@ -239,8 +260,11 @@ CG.ROUTES.home = function(){
     '</div></div></section>';
   } else {
     var lead = CG.skaterLeaders(lg,"p")[0];
+    var homeCurWeek = lg.results.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
+    var homeTotWeeks = lg.schedule.filter(function(g){ return g.stage!=="preseason" && g.stage!=="playoff"; })
+      .reduce(function(m,g){ return Math.max(m, g.week||1); }, homeCurWeek);
     html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
-      '<div><b class="num">Week 7</b><span>of 10 · Season 1</span></div>'+
+      '<div><b class="num">Week '+homeCurWeek+'</b><span>of '+homeTotWeeks+' · '+esc(CG.seasonTag())+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+lg.results.length+'</b><span>Games played</span></div>'+
       (lead?'<div style="cursor:pointer" data-go="'+CG.playerRoute(lead)+'"><b>'+esc(lead.tag)+'</b><span>'+lg.pstats[lead.id].p+' pts · scoring lead</span></div>':"")+
       '<div style="cursor:pointer" data-go="#/standings"><b class="num">3×2</b><span>Playoff spots per division</span></div>'+
@@ -250,7 +274,7 @@ CG.ROUTES.home = function(){
   if (CG.modOn("tonight") && !pre){
     html += '<section class="sec sec-dark"><div class="shell">'+
       '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Game night</span><h2 class="h-sec">Tonight’s matchups</h2></div>'+
-      '<a class="sec-link" style="color:#fff" href="#/schedule">Week 7 slate</a></div>'+
+      '<a class="sec-link" style="color:#fff" href="#/schedule">'+(lg.tonight[0]?"Week "+(lg.tonight[0].week||1)+" slate":"Full schedule")+'</a></div>'+
       '<div class="grid g2">'+lg.tonight.map(function(g){
         var released = CG.now() >= g.at - 30*60000;
         var streamers = CG.liveStreamers(g);
@@ -277,7 +301,7 @@ CG.ROUTES.home = function(){
         }).join("")+
       '</div>'+
       '<div class="grid g2" style="margin-top:18px;align-items:start">'+
-        '<div class="card"><div class="card-h"><h3>Power Rankings</h3><a class="sec-link" href="#/rankings">Week 7</a></div>'+
+        '<div class="card"><div class="card-h"><h3>Power Rankings</h3><a class="sec-link" href="#/rankings">Full list</a></div>'+
           lg.powerRankings.map(function(pr){
             var t = CG.TEAM[pr.team];
             return '<div class="leaderrow'+(pr.rank===1?" top":"")+'" data-go="#/team/'+pr.team+'"><span class="rk num">'+pr.rank+'</span>'+
@@ -285,11 +309,11 @@ CG.ROUTES.home = function(){
               '<small style="display:block" class="caption">'+lg.teams[pr.team].w+"-"+lg.teams[pr.team].l+"-"+lg.teams[pr.team].otl+' · '+esc(t.div)+' Division</small></span>'+
               '<span class="val">'+CG.moveArrow(pr.move)+'</span></div>';
           }).join("")+'</div>'+
-        '<div class="card"><div class="card-h"><h3>Transactions</h3><span class="chip">Season 1 log</span></div>'+
-          C.ops.transactions.slice(0,7).map(function(tx){
-            return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(tx.type==="suspension"?"flag":tx.type==="reinstatement"?"check":"swap",15)+'</span>'+
-              '<span style="min-width:0"><b>'+esc(tx.team)+'</b><p>'+esc(tx.text)+'</p></span><span class="nf-t">'+CG.fmtDate(tx.dateIso)+'</span></div>';
-          }).join("")+'</div>'+
+        '<div class="card"><div class="card-h"><h3>Transactions</h3><span class="chip">'+esc(CG.seasonTag())+' log</span></div>'+
+          ((lg.liveTransactions||[]).length ? lg.liveTransactions.slice(0,7).map(function(tx){
+            return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(tx.type==="trade"?"swap":tx.type==="draft"?"grid":tx.type==="sign"?"check":tx.type==="waive"?"back":"flag",15)+'</span>'+
+              '<span style="min-width:0"><p style="font-weight:600">'+CG.txText(tx.text)+'</p></span><span class="nf-t">'+(tx.dateIso?CG.fmtDate(tx.dateIso):"")+'</span></div>';
+          }).join("") : '<div class="card-b"><p class="caption">No transactions yet — trades, signings, waivers, and placements land here the moment they happen.</p></div>')+'</div>'+
       '</div></div></section>';
   }
   /* LEADERS band */
@@ -325,7 +349,7 @@ CG.ROUTES.home = function(){
         (vid ? '<video src="'+esc(vid)+'" autoplay muted loop playsinline controls></video>'
              : '<div class="vb-fallback"><div style="text-align:center">'+CG.ic("film",34)+'<p style="margin-top:10px;font-family:var(--f-mono);font-size:12px">No video published for this week</p>'+
                '<p class="caption" style="color:var(--on-ink-dim)">Static poster shown until the commissioner uploads one.</p></div></div>')+
-        '<div class="vb-overlay"><b style="font-family:var(--f-disp)">Week 6: shutouts, streaks, and a scoring duel</b></div>'+
+        '<div class="vb-overlay"><b style="font-family:var(--f-disp)">The week in review</b></div>'+
       '</div></div></div></section>';
   }
   /* NEWS */
@@ -339,9 +363,12 @@ CG.ROUTES.home = function(){
         CG.newsCard(leadA, true) + rest.slice(0,2).map(function(a){ return CG.newsCard(a); }).join("")+
       '</div></div></section>';
   }
-  /* HONORS */
-  if (CG.modOn("honors") && !pre){
-    var stars = lg.lastNight[lg.lastNight.length-1].stars;
+  /* HONORS — needs at least one completed game night AND a minted POTW; either can lag early
+     in the season, so both are hard requirements or this section would throw on week 1 */
+  if (CG.modOn("honors") && !pre && lg.lastNight.length && lg.potw.length
+      && CG.playerById(lg, (lg.potw[lg.potw.length-1]||{}).skater)
+      && CG.playerById(lg, (lg.potw[lg.potw.length-1]||{}).goalie)){
+    var stars = (lg.lastNight[lg.lastNight.length-1].stars||[]).filter(function(s){ return CG.playerById(lg, s.pid); });
     var potw = lg.potw[lg.potw.length-1];
     var skp = CG.playerById(lg, potw.skater), glp = CG.playerById(lg, potw.goalie);
     html += '<section class="sec sec-dark"><div class="shell"><div class="grid g5x7">'+
@@ -352,7 +379,7 @@ CG.ROUTES.home = function(){
             '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'+CG.crest(p.team,30)+
             '<div><b style="font-family:var(--f-disp);color:#fff">'+esc(p.tag)+'</b><span class="caption" style="display:block;color:var(--on-ink-dim)">'+esc(CG.TEAM[p.team].name)+'</span></div></div></div>';
         }).join("")+'</div>'+
-        '<p class="caption" style="margin-top:14px;color:var(--on-ink-dim)">'+esc((C.awards.threeStars.find(function(t){ return t.gameId===lg.lastNight[lg.lastNight.length-1].id; })||{}).blurb||"")+'</p></div>'+
+        '<p class="caption" style="margin-top:14px;color:var(--on-ink-dim)">Picked automatically from the night’s box scores.</p></div>'+
       '<div><span class="eyebrow chr">Players of the Week '+potw.week+'</span>'+
         '<div class="stack" style="margin-top:22px">'+ [ [skp,"Skater"], [glp,"Goaltender"] ].map(function(pair){
           return '<div class="card raise" data-go="'+CG.playerRoute(pair[0])+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+
@@ -363,16 +390,28 @@ CG.ROUTES.home = function(){
         }).join("")+'</div></div>'+
     '</div></div></section>';
   }
-  /* DEADLINES */
+  /* DEADLINES — real dates only, straight off the season row (next two upcoming milestones) */
   if (CG.modOn("deadlines")){
-    html += '<section class="sec-tight"><div class="shell"><div class="grid g3">'+
-      C.ops.announcements.map(function(an){
-        return '<div class="note chr"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">'+esc(an.title)+'</b>'+esc(an.body)+
-          '<span class="caption" style="display:block;margin-top:8px">'+CG.fmtDate(an.dateIso)+' · Commissioner</span></div>';
-      }).join("")+
-      '<div class="note"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">Availability window</b>'+esc(CG.WEEK8.label)+' submissions close '+CG.fmtFull(CG.WEEK8.deadline)+' (Rule 5.1). '+
-        (CG.can("availability.submit")?'<a href="#/hub/availability" style="font-weight:700;border-bottom:2px solid var(--chrome)">Submit yours →</a>':'<a href="#/signin" style="font-weight:700;border-bottom:2px solid var(--chrome)">Sign in to submit →</a>')+'</div>'+
-    '</div></div></section>';
+    var s0 = CG.SEASON||{};
+    var mile = [
+      [s0.registration_deadline, "Draft-eligibility deadline", "Register by now to enter the draft. Later sign-ups still play — they’re placed on a club automatically after it."],
+      [s0.preseason_starts_at, "Pre-season opens", "Two weeks of real games on randomly assigned rosters."],
+      [s0.draft_at, "Draft night", "Clubs pick from the eligible pool live on the site."],
+      [s0.free_agency_opens_at, "Free agency opens", "One week for clubs to sign the remaining free agents."],
+      [s0.free_agency_closes_at, "Free agency closes", "Rosters settle — puck drop is the Wednesday after."],
+      [s0.starts_at, "Puck drop", "The regular season begins."],
+      [s0.playoffs_start_at, "Playoffs begin", "Top three per division qualify."]
+    ].filter(function(m){ return m[0] && Date.parse(m[0]) > CG.now(); }).slice(0,2);
+    if (mile.length){
+      html += '<section class="sec-tight"><div class="shell"><div class="grid g3">'+
+        mile.map(function(m){
+          return '<div class="note chr"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">'+esc(m[1])+'</b>'+esc(m[2])+
+            '<span class="caption" style="display:block;margin-top:8px">'+CG.fmtFull(Date.parse(m[0]))+'</span></div>';
+        }).join("")+
+        '<div class="note"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">Availability window</b>'+esc(CG.WEEK8.label)+' submissions close '+CG.fmtFull(CG.WEEK8.deadline)+' (Rule 5.1). '+
+          (CG.can("availability.submit")?'<a href="#/hub/availability" style="font-weight:700;border-bottom:2px solid var(--chrome)">Submit yours →</a>':'<a href="#/signin" style="font-weight:700;border-bottom:2px solid var(--chrome)">Sign in to submit →</a>')+'</div>'+
+      '</div></div></section>';
+    }
   }
   return html;
 };
@@ -406,6 +445,21 @@ CG.AFTER.home = function(){
       el.textContent = (d ? d+"d " : "")+String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0");
     };
     var faIv = setInterval(faTick, 1000); faTick();
+  }
+  /* registration countdown tick — same self-stopping pattern */
+  var rgEl = document.getElementById("regCountdown");
+  if (rgEl){
+    var rgEnd = +rgEl.getAttribute("data-close");
+    var rgTick = function(){
+      var el = document.getElementById("regCountdown");
+      if (!el){ clearInterval(rgIv); return; }
+      var ms = rgEnd - Date.now();
+      if (ms <= 0){ clearInterval(rgIv); CG.router(); return; }
+      var t = Math.floor(ms/1000);
+      var d = Math.floor(t/86400), hh = Math.floor((t%86400)/3600), mm = Math.floor((t%3600)/60), ss = t%60;
+      el.textContent = (d ? d+"d " : "")+String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0");
+    };
+    var rgIv = setInterval(rgTick, 1000); rgTick();
   }
 };
 
@@ -807,11 +861,15 @@ CG.ROUTES.team = function(code, qs){
     body += '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("swap",22)+'</div><b>No transactions in '+esc(SD.label)+'</b><p>Rosters were frozen for the exhibition slate; league transactions began with Season 1.</p></div></div>';
   }
   else if (tab==="moves"){
-    var tx = CG.CONTENT.ops.transactions.filter(function(x){ return x.team===t.name || x.team===code; });
+    /* the real transaction log has no team column — match this club's name or code in the text */
+    var tx = (lg.liveTransactions||[]).filter(function(x){
+      var s = (x.text||"");
+      return s.indexOf(t.name)>=0 || new RegExp("\\b"+code+"\\b").test(s);
+    }).slice(0,12);
     var sus = lg.suspensions.filter(function(x){ return x.team===code; });
     body += '<div class="grid g2"><div class="card"><div class="card-h"><h3>Transactions</h3></div>'+
-      (tx.length?tx.map(function(x){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("swap",15)+'</span><span><b>'+esc(x.type)+'</b><p>'+esc(x.text)+'</p></span><span class="nf-t">'+CG.fmtDate(x.dateIso)+'</span></div>'; }).join(""):
-        '<div class="empty"><b>No transactions</b><p>Roster moves and call-ups will appear here when they happen.</p></div>')+'</div>'+
+      (tx.length?tx.map(function(x){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(x.type==="trade"?"swap":x.type==="draft"?"grid":x.type==="sign"?"check":"flag",15)+'</span><span style="min-width:0"><p style="font-weight:600">'+CG.txText(x.text)+'</p></span><span class="nf-t">'+(x.dateIso?CG.fmtDate(x.dateIso):"")+'</span></div>'; }).join(""):
+        '<div class="empty"><b>No transactions</b><p>Trades, signings, waivers, and placements involving this club appear here when they happen.</p></div>')+'</div>'+
       '<div class="card"><div class="card-h"><h3>Discipline</h3></div>'+
       (sus.length?sus.map(function(x){ var p = CG.playerById(lg,x.playerId);
         return '<div class="notif" style="cursor:default"><span class="nf-ic" style="color:var(--red)">'+CG.ic("flag",15)+'</span><span><b>'+esc(p.tag)+' — '+x.games+'-game suspension ('+x.status+')</b><p>'+esc(x.reason)+'</p></span><span class="nf-t">'+CG.fmtDate(x.issued)+'</span></div>'; }).join(""):
