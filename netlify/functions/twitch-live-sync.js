@@ -81,9 +81,21 @@ export default async () => {
   }
   const msg = `twitch-live-sync: ${logins.length} handles checked, ${live.size} live, ${changed} updated`;
   console.log(msg);
+  try {
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: "rl_twitch-live-sync_result", value: JSON.stringify({
+        at: new Date().toISOString(), ok: true, checked: logins.length, live: live.size
+      }), updated_at: new Date().toISOString() }) });
+  } catch {}
   return new Response(msg, { status: 200 });
   } catch (e) {
     console.error("twitch-live-sync error:", e && (e.message || e));
+    try {
+      await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ key: "rl_twitch-live-sync_result", value: JSON.stringify({
+          at: new Date().toISOString(), ok: false, errCount: 1, lastError: String(e && (e.message || e))
+        }), updated_at: new Date().toISOString() }) });
+    } catch {}
     return new Response("skipped: error", { status: 200 });
   }
 };

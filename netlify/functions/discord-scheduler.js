@@ -93,6 +93,12 @@ export default async () => {
     sum.reminders = await gameReminders(games, teamById, now);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
+  try {
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: "rl_discord-scheduler_result", value: JSON.stringify({
+        at: new Date().toISOString(), ok: !sum.error, errCount: sum.error ? 1 : 0, lastError: sum.error || null
+      }), updated_at: new Date().toISOString() }) });
+  } catch {}
   return json(sum);
 };
 

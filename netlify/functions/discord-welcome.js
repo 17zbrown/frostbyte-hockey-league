@@ -166,5 +166,12 @@ export default async () => {
     sum.errors.push({ fatal: String(e.message || e) });
   }
   console.log("discord-welcome:", JSON.stringify(sum));
+  try {
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: "rl_discord-welcome_result", value: JSON.stringify({
+        at: new Date().toISOString(), ok: (sum.errors || []).length === 0,
+        errCount: (sum.errors || []).length, lastError: sum.errors && sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
+      }), updated_at: new Date().toISOString() }) });
+  } catch {}
   return new Response(JSON.stringify(sum), { status: 200, headers: { "content-type": "application/json" } });
 };

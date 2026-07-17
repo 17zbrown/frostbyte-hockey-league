@@ -1998,10 +1998,12 @@ CG.admEAStats = function(){
         '<td class="tright"><button class="btn btn-ghost btn-sm" data-ea-save="'+t.id+'" data-code="'+esc(t.code)+'">Save</button></td></tr>';
     }).join("")+'</tbody></table></div>'+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the scheduled poller matches EA games to your schedule by club-pair + date and writes the final score and every box-score stat — no manual entry.</span></div></div>';
-  h+='<div class="card"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
   if (imported.length){
     h+= imported.slice().sort(function(a,b){ return b.at-a.at; }).slice(0,8).map(function(g){
-      return '<div class="card-b" style="border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+' '+g.awayScore+'</span></span><span class="caption">@</span><span class="teamcell"><span class="mono" style="font-size:12px">'+esc(g.home)+' '+g.homeScore+'</span>'+CG.crest(g.home,20)+'</span><a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/matchup/'+g.id+'">Box score</a></div>';
+      return '<div class="card-b" style="border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+' '+g.awayScore+'</span></span><span class="caption">@</span><span class="teamcell"><span class="mono" style="font-size:12px">'+esc(g.home)+' '+g.homeScore+'</span>'+CG.crest(g.home,20)+'</span>'+
+        '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Box score</a>'+
+        '<button class="btn btn-ghost btn-sm" data-reopen-final="'+g.id+'" data-label="'+esc(g.away)+' @ '+esc(g.home)+'">Re-open</button></span></div>';
     }).join("");
   } else if (pending.length){
     h+='<div class="card-b"><span class="caption"><b>'+pending.length+'</b> scheduled game'+(pending.length>1?"s have":" has")+' passed and '+(pending.length>1?"are":"is")+' still waiting for EA stats. If a game never imports, confirm both clubs are linked above and were in the same EA match.</span></div>';
@@ -2009,6 +2011,10 @@ CG.admEAStats = function(){
     h+='<div class="card-b"><div class="empty" style="padding:30px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No finals yet</b><p>Once the season starts, finished games appear here automatically as the poller imports them.</p></div></div>';
   }
   h+='</div>';
+  /* every EA payload the poller has seen is archived — anything that didn't land shows here */
+  h+='<div class="card"><div class="card-h"><h3>Unmatched EA matches</h3><span class="chip" id="eaUnCount">checking…</span></div>'+
+    '<div id="eaUnmatchedBody"><div class="card-b"><span class="caption">Loading the ingest archive…</span></div></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every EA match the poller sees is archived, even when it can’t be matched to a fixture — EA’s own history only keeps a club’s few most recent games, so nothing is lost. Fix the cause (link the club, move the fixture, or Re-open a wrongly-claimed final above) and hit <b>Re-ingest</b> to replay the archived box score.</span></div></div>';
   return h;
 };
 CG.saveEAClub = function(teamId, code){
@@ -2026,6 +2032,57 @@ CG.saveEAClub = function(teamId, code){
 };
 CG.AFTER._admEAStats = function(){
   document.querySelectorAll("[data-ea-save]").forEach(function(b){ b.addEventListener("click", function(){ CG.saveEAClub(this.getAttribute("data-ea-save"), this.getAttribute("data-code")); }); });
+  /* re-open a wrongly-matched final: clears the result + box score so the real import can land */
+  document.querySelectorAll("[data-reopen-final]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-reopen-final"), label=this.getAttribute("data-label");
+    CG.confirm("Re-open "+label+"?",
+      "The final score and every box-score stat for this game are cleared and it returns to the schedule. Use this when the EA match that claimed the slot was actually a different game (a scrim between the same clubs). The archived payload stays replayable below.",
+      "Re-open the game", function(){
+      CG.sb.rpc("reopen_game_final",{ p_game:id }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t re-open: "+r.error.message,"err"); return; }
+        CG.toast("Game re-opened — the result and box score were cleared","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+  /* unmatched / errored archive rows, with one-click replay */
+  var body=document.getElementById("eaUnmatchedBody"), count=document.getElementById("eaUnCount");
+  if (body && CG.sb){
+    CG.sb.from("ea_ingest_log").select("ea_match_id,et_day,ea_club_ids,status,reason,last_attempt_at")
+      .in("status",["unmatched","error"]).order("last_attempt_at",{ascending:false}).limit(20)
+      .then(function(r){
+        var rows=(r&&r.data)||[];
+        if (count) count.textContent = rows.length ? rows.length+" need attention" : "all clear";
+        if (count) count.className = "chip "+(rows.length?"chip-warn":"chip-win");
+        if (r&&r.error){ body.innerHTML='<div class="card-b"><span class="caption">Couldn’t read the archive: '+esc(r.error.message)+'</span></div>'; return; }
+        if (!rows.length){ body.innerHTML='<div class="card-b"><span class="caption">Nothing waiting — every archived EA match either imported or was intentionally skipped.</span></div>'; return; }
+        body.innerHTML = rows.map(function(x){
+          return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+            '<span class="mono" style="font-size:11px;color:var(--steel)">'+esc(x.et_day||"?")+'</span>'+
+            '<span class="chip '+(x.status==="error"?"chip-loss":"chip-warn")+'" style="font-size:9px">'+esc(x.status.toUpperCase())+'</span>'+
+            '<span class="caption" style="flex:1;min-width:200px">'+esc(x.reason||"—")+'</span>'+
+            '<button class="btn btn-ghost btn-sm" data-reingest="'+esc(x.ea_match_id)+'">Re-ingest</button></div>';
+        }).join("");
+        body.querySelectorAll("[data-reingest]").forEach(function(b){ b.addEventListener("click", function(){
+          var mid=this.getAttribute("data-reingest"), btn=this;
+          btn.disabled=true; btn.textContent="Replaying…";
+          CG.sb.auth.getSession().then(function(s){
+            var tok = s && s.data && s.data.session && s.data.session.access_token;
+            if (!tok){ CG.toast("Sign in again — no session token","err"); btn.disabled=false; btn.textContent="Re-ingest"; return; }
+            fetch("/api/ingest-stats",{ method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
+              body: JSON.stringify({ reingest: mid }) })
+              .then(function(r){ return r.json(); })
+              .then(function(out){
+                btn.disabled=false; btn.textContent="Re-ingest";
+                if ((out.ingested||[]).length){ CG.toast("Box score imported — "+out.ingested[0].score,"ok"); CG.reloadLeague(); }
+                else if ((out.unmatched||[]).length){ CG.toast("Still unmatched: "+out.unmatched[0].reason,"err"); }
+                else if ((out.skipped||[]).length){ CG.toast("Already ingested — nothing to do","ok"); }
+                else { CG.toast("Replay failed: "+esc(JSON.stringify(out.errors||out).slice(0,120)),"err"); }
+              })
+              .catch(function(e){ btn.disabled=false; btn.textContent="Re-ingest"; CG.toast("Replay failed: "+e.message,"err"); });
+          });
+        }); });
+      });
+  }
 };
 
 /* ================================================================
@@ -2646,7 +2703,9 @@ CG.AUTOMATIONS = [
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
   { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
-  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, and puck-drop reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" }
+  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
+  { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
+  { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
@@ -2662,9 +2721,16 @@ CG.admAutomationsLive = function(){
   return h;
 };
 CG.AFTER._admAutomations = function(){
-  /* heartbeats: each function stamps rl_<key> in app_config on every run */
+  /* heartbeats + per-run results: each function stamps rl_<key> every run and rl_<key>_result
+     with {ok, errCount, lastError}. A run that happened but FAILED shows red, not green. */
   CG.sb.from("app_config").select("key,value").like("key","rl_%").then(function(r){
-    var map = {}; ((r&&r.data)||[]).forEach(function(row){ map[row.key.replace(/^rl_/,"")]=row.value; });
+    var map = {}, results = {};
+    ((r&&r.data)||[]).forEach(function(row){
+      var k = row.key.replace(/^rl_/,"");
+      if (/_result$/.test(k)){
+        try { results[k.replace(/_result$/,"")] = JSON.parse(row.value); } catch(e){}
+      } else map[k] = row.value;
+    });
     CG.AUTOMATIONS.forEach(function(a){
       var ts = map[a.key] ? Date.parse(map[a.key]) : null;
       var stEl = document.getElementById("auto-st-"+a.key), tsEl = document.getElementById("auto-ts-"+a.key);
@@ -2672,9 +2738,18 @@ CG.AFTER._admAutomations = function(){
       if (!ts){ stEl.textContent="never ran"; stEl.className="chip chip-warn"; return; }
       var mins = Math.round((Date.now()-ts)/60000);
       tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
+      var res = results[a.key];
+      var failed = res && res.ok === false;
       var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
-      stEl.textContent = fresh ? "Running" : "Check";
-      stEl.className = "chip "+(fresh?"chip-win":"chip-warn");
+      if (failed){
+        stEl.textContent = "Failing";
+        stEl.className = "chip chip-loss";
+        stEl.title = res.lastError ? String(res.lastError).slice(0,180) : "last run reported errors";
+      } else {
+        stEl.textContent = fresh ? "Running" : "Check";
+        stEl.className = "chip "+(fresh?"chip-win":"chip-warn");
+        stEl.title = "";
+      }
     });
   });
   document.querySelectorAll("[data-auto-run]").forEach(function(b){ b.addEventListener("click", function(){
@@ -3111,11 +3186,14 @@ CG.admSeasonsLive = function(){
          ["Salary cap", s.salary_cap?("$"+(s.salary_cap/1e6)+"M"):"—"],
          ["Roster max", s.roster_max||"—"],
          ["Trade deadline", s.trade_deadline_week?("Week "+s.trade_deadline_week):"—"],
-         ["Registration closes", s.registration_deadline?CG.fmtDay(Date.parse(s.registration_deadline)):"—"],
+         ["Off-season begins", s.offseason_starts_at?CG.fmtDay(Date.parse(s.offseason_starts_at)):"—"],
+         ["Sign-up deadline", s.registration_deadline?CG.fmtDay(Date.parse(s.registration_deadline)):"—"],
          ["Owner apps close", s.owner_app_deadline?CG.fmtDay(Date.parse(s.owner_app_deadline)):"—"],
          ["Roster moves", s.moves_lock_override||"auto"]
         ].map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:16px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
-      '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" data-season-edit="'+s.id+'">Edit settings</button>'+
+      '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-season-edit="'+s.id+'">Edit settings</button>'+
+      (s.status!=="complete" && (CG._seasonsRaw||[]).some(function(x){ return x.number<s.number && x.status==="complete"; })
+        ? '<button class="btn btn-chrome btn-sm" data-season-rollover="'+s.id+'" data-name="'+esc(s.name||("Season "+s.number))+'">Run rollover from last season</button>' : "")+
       '<button class="btn btn-ghost btn-sm" data-season-del="'+s.id+'" data-name="'+esc(s.name||("Season "+s.number))+'" style="margin-left:auto">Delete season</button></div></div></div>';
   }).join("")
   : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("db",22)+'</div><b>No seasons yet</b><p>Create one to open registration and start scheduling — the site shows clean off-season states until then.</p></div></div>';
@@ -3262,6 +3340,19 @@ CG.AFTER._admSeasons = function(){
   if(add) add.addEventListener("click", function(){ CG.seasonForm(null); });
   document.querySelectorAll("[data-season-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.seasonForm(this.getAttribute("data-season-edit")); }); });
   document.querySelectorAll("[data-season-del]").forEach(function(b){ b.addEventListener("click", function(){ CG.deleteSeason(this.getAttribute("data-season-del"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-season-rollover]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-season-rollover"), name=this.getAttribute("data-name");
+    CG.confirm("Run the rollover into "+name+"?",
+      "Contracts that ended with the previous season expire; multi-year deals carry their players onto "+name+" rosters at the contracted salary. From Season 2 on, this also ends the role-separation grandfathering — commissioners and staff holding a club seat must give one up. Safe to re-run; it only fills gaps.",
+      "Run rollover", function(){
+      CG.sb.rpc("start_next_season",{ p_new_season:id }).then(function(r){
+        if(r.error){ CG.toast("Rollover failed: "+r.error.message,"err"); return; }
+        var d=r.data||{};
+        CG.toast("Rollover done — "+(d.expired||0)+" contracts expired, "+(d.carried||0)+" carried onto rosters","ok");
+        CG.reloadLeague();
+      });
+    });
+  }); });
 };
 
 /* ================================================================

@@ -46,6 +46,17 @@ async function ranRecently(key, sec) {
   } catch (e) { return false; }
 }
 
+// Per-run result record — the Automations panel reads rl_<key>_result and turns the chip red
+// when the last run failed, instead of greening on "it ran" alone.
+async function recordResult(key, obj) {
+  if (!SB_SVC) return;
+  const h = { apikey: SB_SVC, Authorization: `Bearer ${SB_SVC}`, "Content-Type": "application/json" };
+  try {
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...h, Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: `rl_${key}_result`, value: JSON.stringify({ at: new Date().toISOString(), ...obj }), updated_at: new Date().toISOString() }) });
+  } catch {}
+}
+
 export default async () => {
   if (!SB_URL || !SB_KEY || !INGEST_KEY) {
     console.log("ea-poll: missing env (need SUPABASE_URL/ANON_KEY + INGEST_KEY) — skipping");
@@ -64,19 +75,24 @@ export default async () => {
     if (PROXY) { const { ProxyAgent } = await import("undici"); dispatcher = new ProxyAgent(PROXY); }
 
     const byId = new Map();
+    const clubErrors = [];
     for (const c of clubs) {
       try {
         const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${c}`;
         const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, dispatcher });
-        if (!r.ok) { console.error(`ea-poll club ${c}: EA ${r.status}${r.status === 403 ? " (IP blocked — needs residential HTTPS_PROXY)" : ""}`); continue; }
+        if (!r.ok) { clubErrors.push(`club ${c}: EA ${r.status}`); console.error(`ea-poll club ${c}: EA ${r.status}${r.status === 403 ? " (IP blocked — needs residential HTTPS_PROXY)" : ""}`); continue; }
         const data = await r.json();
         if (Array.isArray(data)) for (const m of data) if (m && m.matchId) byId.set(String(m.matchId), m);
-      } catch (e) { console.error(`ea-poll club ${c}: ${e.message}`); }
+      } catch (e) { clubErrors.push(`club ${c}: ${e.message}`); console.error(`ea-poll club ${c}: ${e.message}`); }
       await sleep(1200);
     }
 
     const matches = [...byId.values()];
-    if (!matches.length) return json({ polled: clubs.length, matches: 0 });
+    if (!matches.length) {
+      await recordResult("ea-poll", { ok: clubErrors.length === 0, polled: clubs.length, matches: 0,
+        errCount: clubErrors.length, lastError: clubErrors[0] || null });
+      return json({ polled: clubs.length, matches: 0, clubErrors });
+    }
 
     const ir = await fetch(`${ORIGIN}/api/ingest-stats`, {
       method: "POST",
@@ -84,11 +100,16 @@ export default async () => {
       body: JSON.stringify({ matches }),
     });
     const out = await ir.json().catch(() => ({}));
-    const summary = { polled: clubs.length, matches: matches.length, ingest: ir.status, ingested: (out.ingested || []).length, unmatched: (out.unmatched || []).length, skipped: (out.skipped || []).length };
+    const ingestErrs = (out.errors || []).length;
+    const summary = { polled: clubs.length, matches: matches.length, ingest: ir.status, ingested: (out.ingested || []).length, unmatched: (out.unmatched || []).length, skipped: (out.skipped || []).length, errors: ingestErrs };
     console.log("ea-poll:", JSON.stringify(summary));
+    await recordResult("ea-poll", { ok: ir.status === 200 && ingestErrs === 0 && clubErrors.length === 0,
+      ...summary, errCount: clubErrors.length + ingestErrs,
+      lastError: clubErrors[0] || (out.errors && out.errors[0] && (out.errors[0].error || out.errors[0].reason)) || (ir.status !== 200 ? `ingest HTTP ${ir.status}` : null) });
     return json(summary);
   } catch (e) {
     console.error("ea-poll fatal:", e.message);
+    await recordResult("ea-poll", { ok: false, errCount: 1, lastError: e.message });
     return json({ error: e.message }, 200);
   }
 };

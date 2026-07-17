@@ -100,16 +100,38 @@ async function resolveProfile(entry, seasonId, cache) {
   return pid;
 }
 
+// ---- Archive every match + attempt outcome. EA's API only returns each club's few most
+// recent matches, so a payload that isn't archived ages out of EA history forever. The log
+// makes every payload replayable (commissioner re-ingest) and every failure visible.
+async function logAttempt(norm, raw, status, reason, gameId) {
+  try {
+    await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", [{
+      ea_match_id: norm.ea_match_id, payload: raw, et_day: norm.et_day,
+      ea_club_ids: norm.clubs.map((c) => c.ea_club_id),
+      status, reason: reason || null, game_id: gameId || null,
+      last_attempt_at: new Date().toISOString()
+    }], "resolution=merge-duplicates,return=minimal");
+  } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); }
+}
+
 // ---- Ingest ONE normalized match ----
-async function ingestOne(norm, summary) {
+async function ingestOne(norm, raw, summary) {
   // dedupe
   const dup = await sbGet(`games?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=id&limit=1`);
-  if (dup[0]) { summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already ingested" }); return; }
+  if (dup[0]) {
+    summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already ingested" });
+    await logAttempt(norm, raw, "ingested", "already ingested (dedupe)", dup[0].id);
+    return;
+  }
 
   // map both clubs -> our teams
   const ids = norm.clubs.map((c) => c.ea_club_id);
   const teams = await sbGet(`teams?ea_club_id=in.(${ids.map(encodeURIComponent).join(",")})&select=id,ea_club_id`);
-  if (teams.length < 2) { summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: "one or both clubs not registered (teams.ea_club_id)" }); return; }
+  if (teams.length < 2) {
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: "one or both clubs not registered (teams.ea_club_id)" });
+    await logAttempt(norm, raw, "unmatched", "one or both clubs not registered (teams.ea_club_id)");
+    return;
+  }
   const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
   const tA = teamByClub[ids[0]], tB = teamByClub[ids[1]];
 
@@ -129,7 +151,11 @@ async function ingestOne(norm, summary) {
       .sort((a, b) => a.days - b.days);
     if (near[0]) game = near[0].g;
   }
-  if (!game) { summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: `no scheduled game for these clubs within a day of ${norm.et_day}` }); return; }
+  if (!game) {
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: `no scheduled game for these clubs within a day of ${norm.et_day}` });
+    await logAttempt(norm, raw, "unmatched", `no scheduled game for these clubs within a day of ${norm.et_day}`);
+    return;
+  }
 
   // home/away scores from the schedule's perspective
   const clubByTeam = { [tA]: norm.clubs[0], [tB]: norm.clubs[1] };
@@ -171,29 +197,63 @@ async function ingestOne(norm, summary) {
 
   const linked = rows.filter((r) => r.profile_id).length;
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: game.id, score: `${homeScore}-${awayScore}`, players: rows.length, linked });
+  await logAttempt(norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id);
+}
+
+// ---- Commissioner re-ingest: replay an archived payload by ea_match_id ----
+async function isCommissioner(jwt) {
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${jwt}` } });
+    if (!r.ok) return false;
+    const u = await r.json();
+    if (!u || !u.id) return false;
+    const prof = await sbGet(`profiles?id=eq.${u.id}&select=role&limit=1`);
+    return !!(prof[0] && prof[0].role === "commissioner");
+  } catch { return false; }
 }
 
 export const handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
   if (!SB_URL || !SB_KEY) return { statusCode: 500, body: JSON.stringify({ error: "Server not configured (SUPABASE_URL / SERVICE_ROLE_KEY)" }) };
-  const key = event.headers["x-ingest-key"] || event.headers["X-Ingest-Key"];
-  if (!INGEST_KEY || key !== INGEST_KEY) return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
 
-  let matches;
-  try {
-    const body = JSON.parse(event.body || "{}");
-    matches = Array.isArray(body) ? body : (Array.isArray(body.matches) ? body.matches : (body.matchId ? [body] : null));
-    if (!matches) throw new Error("Expected { matches: [...] } or a single match object.");
-  } catch (e) { return { statusCode: 400, body: JSON.stringify({ error: e.message }) }; }
+  let body;
+  try { body = JSON.parse(event.body || "{}"); }
+  catch (e) { return { statusCode: 400, body: JSON.stringify({ error: e.message }) }; }
+
+  const key = event.headers["x-ingest-key"] || event.headers["X-Ingest-Key"];
+  const authed = INGEST_KEY && key === INGEST_KEY;
+
+  // Commissioner re-ingest: { reingest: "<ea_match_id>" } with the signed-in user's JWT.
+  // INGEST_KEY stays server-side only; the archived payload is replayed from ea_ingest_log.
+  if (!authed && body && body.reingest) {
+    const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
+    if (!jwt || !(await isCommissioner(jwt))) return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
+    const row = (await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(String(body.reingest))}&select=payload&limit=1`))[0];
+    if (!row) return { statusCode: 404, body: JSON.stringify({ error: "No archived payload for that match id" }) };
+    const summary = { received: 1, ingested: [], skipped: [], unmatched: [], errors: [] };
+    try {
+      const norm = normalizeMatch(row.payload);
+      if (!norm) summary.errors.push({ reason: "archived payload is unparseable" });
+      else await ingestOne(norm, row.payload, summary);
+    } catch (e) { summary.errors.push({ ea_match_id: body.reingest, error: String(e.message || e) }); }
+    return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(summary) };
+  }
+
+  if (!authed) return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
+
+  const matches = Array.isArray(body) ? body : (Array.isArray(body.matches) ? body.matches : (body.matchId ? [body] : null));
+  if (!matches) return { statusCode: 400, body: JSON.stringify({ error: "Expected { matches: [...] } or a single match object." }) };
 
   const summary = { received: matches.length, ingested: [], skipped: [], unmatched: [], errors: [] };
   for (const raw of matches) {
     try {
       const norm = normalizeMatch(raw);
       if (!norm) { summary.errors.push({ reason: "unparseable match (need 2 clubs + matchId)" }); continue; }
-      await ingestOne(norm, summary);
+      await ingestOne(norm, raw, summary);
     } catch (e) {
       summary.errors.push({ ea_match_id: raw && raw.matchId, error: String(e.message || e) });
+      // best-effort archive even when the attempt blew up, so the payload is never lost
+      try { const n = normalizeMatch(raw); if (n) await logAttempt(n, raw, "error", String(e.message || e)); } catch {}
     }
   }
   return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(summary) };
