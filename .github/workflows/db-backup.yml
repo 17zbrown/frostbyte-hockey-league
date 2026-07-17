@@ -30,7 +30,7 @@ jobs:
         env:
           # Session pooler host for us-east-2 (the project's region; IPv4). The direct
           # db.<ref>.supabase.co host is IPv6-only on the free tier and GitHub runners are IPv4.
-          PGHOST: aws-0-us-east-2.pooler.supabase.com
+          PGHOST: aws-1-us-east-2.pooler.supabase.com
           PGPORT: "5432"
           PGUSER: postgres.bzbuyclwdhmhdzujxeqd
           PGDATABASE: postgres
