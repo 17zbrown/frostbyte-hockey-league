@@ -596,6 +596,14 @@ CG.loadManagerData = async function(){
     /* current draft = the highest season_number that has picks */
     var maxSn = (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0);
     CG.lg.draftState = states.find(function(s){ return s.season_number===maxSn; }) || null;
+    /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
+    CG.lg._myBoard = CG.lg._myBoard || [];
+    var myBoardTeam = CG.myManagedTeam && CG.myManagedTeam();
+    if (myBoardTeam && myBoardTeam.id && CG.SEASON && CG.SEASON.id){
+      var db = await CG.sb.from("draft_boards").select("profile_id,rank")
+        .eq("season_id", CG.SEASON.id).eq("team_id", myBoardTeam.id).order("rank");
+      if (db && !db.error) CG.lg._myBoard = (db.data||[]).map(function(r){ return r.profile_id; });
+    }
     if (role==="commish" || role==="staff"){
       var oa = await CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
       CG.lg._ownerApps = (oa && !oa.error && oa.data) || [];
@@ -667,6 +675,7 @@ CG._notifs = null;
 CG.notifRoute = function(view, param){
   switch (view){
     case "team":         return param ? "#/team/"+param : "#/teams";
+    case "draft":        return "#/hub/draft";
     case "manager":      return "#/hub";
     case "transactions": return "#/home";
     case "automations":  return "#/admin/automations";
@@ -1408,6 +1417,556 @@ CG.subscribeDraft = function(){
     .on("postgres_changes",{ event:"*", schema:"public", table:"draft_state" }, function(){ CG.refreshDraft(); })
     .on("postgres_changes",{ event:"*", schema:"public", table:"draft_picks" }, function(){ CG.refreshDraft(); })
     .subscribe();
+};
+
+/* ================================================================
+   DRAFT DESK (Team HQ) + DRAFT MANAGER (Control Center)
+   One engine, two rooms: clubs run their board and their picks from
+   Team HQ; the commissioner generates the order and runs the night
+   from the Control Center. Both update live over the draft channel.
+   ================================================================ */
+CG.DRAFT_STYLES = [
+  ["reverse_standings","Reverse pre-season standings","Worst pre-season record picks first — the classic worst-to-first order, computed from the standings."],
+  ["lottery","Weighted lottery","Every club can win pick one, but the worst record holds the most tickets (8·7·6…1). The drawn order is published."],
+  ["random","Pure random","A straight shuffle — every club has equal odds at every slot."],
+  ["manual","Manual order","You arrange the clubs yourself; the board builds from your order."]
+];
+CG.fmtClockS = function(s){ s = Math.max(0, s|0); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+CG.draftPicksCur = function(){
+  /* the current board = the draft_state's season; before that row exists, the newest picks */
+  var st = CG.lg.draftState;
+  var sn = st ? st.season_number
+              : (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0);
+  return (CG.lg.draftPicks||[]).filter(function(p){ return p.season===sn; });
+};
+CG.draftCurPick = function(){
+  var st = CG.lg.draftState; if (!st) return null;
+  return CG.draftPicksCur().find(function(p){ return p.overall===st.current_overall && !p.used && !p.skipped; }) || null;
+};
+CG.eligOf = function(pid){
+  var vet = CG.lg.isVeteran && CG.lg.isVeteran(pid);
+  var gp = ((CG.lg.preGp||{})[pid]||{}).gp||0;
+  return { vet:vet, gp:gp, ok: vet || gp>=5 };
+};
+CG.eligChipD = function(pid){
+  var e = CG.eligOf(pid);
+  if (e.vet) return '<span class="chip" style="font-size:9px">VETERAN</span>';
+  return e.ok ? '<span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
+              : '<span class="chip chip-warn" style="font-size:9px">'+e.gp+' OF 5</span>';
+};
+CG.draftPlayerFate = function(pid){
+  /* where did this player end up? for striking drafted players off boards live */
+  var p = CG.playerById(CG.lg, pid);
+  if (p) return { taken:true, code:p.team };
+  return { taken: !!(CG.lg._rosteredIds||{})[pid], code:null };
+};
+CG.draftStatusChip = function(st, hasPicks){
+  var s = st ? st.status : null;
+  if (!hasPicks) return '<span class="chip">No board yet</span>';
+  if (s==="live") return '<span class="chip chip-live"><span class="live-dot"></span>LIVE</span>';
+  if (s==="paused") return '<span class="chip chip-warn">Paused</span>';
+  if (s==="complete") return '<span class="chip chip-win">Complete</span>';
+  return '<span class="chip chip-chrome">Board set — not started</span>';
+};
+/* one self-stopping clock for whichever draft page is open; fires the server
+   auto-advance (guarded, idempotent) if the clock dies while we're watching */
+CG._armDraftTick = function(){
+  var el = document.getElementById("drTick"); if (!el) return;
+  clearInterval(CG._drIv);
+  var tick = function(){
+    var e = document.getElementById("drTick");
+    if (!e){ clearInterval(CG._drIv); return; }
+    var st = CG.lg.draftState || {};
+    if (st.status==="paused"){ e.textContent = CG.fmtClockS(st.paused_remaining==null?(st.pick_seconds||0):st.paused_remaining); return; }
+    if (st.status!=="live" || !st.clock_ends_at){ e.textContent = "–:––"; return; }
+    var ms = Date.parse(st.clock_ends_at) - Date.now();
+    if (ms <= 0){
+      e.textContent = "0:00";
+      if (!CG._drFired || Date.now()-CG._drFired > 15000){
+        CG._drFired = Date.now();
+        CG.sb.rpc("draft_auto_advance",{ p_season_number: st.season_number }).then(function(){});
+      }
+      return;
+    }
+    e.textContent = CG.fmtClockS(Math.ceil(ms/1000));
+  };
+  CG._drIv = setInterval(tick, 500); tick();
+};
+/* the board write: one atomic save; on failure re-sync from the database */
+CG.saveMyBoard = function(ids){
+  var t = CG.myManagedTeam(); if (!t || !CG.sb) return;
+  CG.lg._myBoard = ids.slice();
+  CG.router();  /* optimistic */
+  CG.sb.rpc("save_draft_board",{ p_team: t.id, p_players: ids }).then(function(r){
+    if (r.error){
+      CG.toast("The board didn’t save: "+r.error.message, "err");
+      CG.loadManagerData().then(function(){ CG.router(); });
+    }
+  });
+};
+/* shared pick modal: search the pool, eligible players first, one click to draft */
+CG.draftPickModalLive = function(pickId, forCode){
+  var pool = (CG.lg.draftPool||[]).slice().sort(function(a,b){
+    var ea = CG.eligOf(a.profileId).ok?1:0, eb = CG.eligOf(b.profileId).ok?1:0;
+    if (ea!==eb) return eb-ea;
+    return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr);
+  });
+  function rows(q){
+    q = (q||"").toLowerCase();
+    var list = pool.filter(function(p){ return !q || p.tag.toLowerCase().indexOf(q)>=0; }).slice(0,30);
+    if (!list.length) return '<p class="caption" style="padding:14px 0">No available players match.</p>';
+    return list.map(function(p){
+      var e = CG.eligOf(p.profileId);
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft)">'+
+        '<b style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis">'+esc(p.tag)+'</b>'+
+        '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+'</span>'+CG.eligChipD(p.profileId)+
+        '<button class="btn '+(e.ok?"btn-chrome":"btn-ghost")+' btn-sm" style="margin-left:auto" data-modpick="'+p.profileId+'" data-name="'+esc(p.tag)+'"'+(e.ok?"":" disabled title=\"Needs five pre-season games\"")+'>Draft</button></div>';
+    }).join("");
+  }
+  CG.modal("Draft a player"+(forCode?" — "+esc(forCode):""),
+    '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
+    '<div id="modPickList" style="max-height:320px;overflow:auto">'+rows("")+'</div>'+
+    '<p class="caption" style="margin-top:10px">Greyed players haven’t hit five pre-season games — they’re placed on clubs automatically after the draft.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button>');
+  function wire(){
+    document.querySelectorAll("[data-modpick]").forEach(function(b){ b.addEventListener("click", function(){
+      var pid=this.getAttribute("data-modpick"), nm=this.getAttribute("data-name"), btn=this;
+      btn.disabled=true; btn.textContent="Drafting…";
+      CG.sb.rpc("draft_make_pick",{ p_pick:pickId, p_player:pid }).then(function(r){
+        if(r.error){ CG.toast(r.error.message,"err"); btn.disabled=false; btn.textContent="Draft"; return; }
+        if(CG.closeOverlay) CG.closeOverlay();
+        CG.toast(nm+" drafted","ok"); CG.refreshDraft();
+      });
+    }); });
+  }
+  wire();
+  var q=document.getElementById("modPickQ");
+  if(q) q.addEventListener("input", function(){ document.getElementById("modPickList").innerHTML = rows(this.value); wire(); });
+};
+
+/* ---------------- Team HQ · Draft desk ---------------- */
+CG.hubDraftLive = function(){
+  var lg = CG.lg, st = lg.draftState, t = CG.myManagedTeam();
+  if (!t) return '<div class="note">The draft desk belongs to club management — owners, GMs, and AGMs.</div>';
+  var myCode = t.code;
+  var picks = CG.draftPicksCur();
+  var hasPicks = picks.length>0;
+  var pool = lg.draftPool||[], board = (lg._myBoard||[]).slice();
+  var cur = CG.draftCurPick();
+  var live = st && (st.status==="live"||st.status==="paused");
+  var myTurn = !!(cur && cur.ownerCode===myCode && st.status==="live");
+  var myPicks = picks.filter(function(p){ return p.ownerCode===myCode; });
+  var nextMine = myPicks.filter(function(p){ return !p.used && !p.skipped; }).sort(function(a,b){ return a.overall-b.overall; })[0];
+  var mySkipped = myPicks.filter(function(p){ return p.skipped && !p.used; });
+  var picksUntil = (nextMine && cur) ? picks.filter(function(p){ return !p.used && !p.skipped && p.overall>=cur.overall && p.overall<nextMine.overall; }).length : null;
+  var unlocked = pool.length>0 || (CG.SEASON && CG.SEASON.preseason_starts_at && Date.parse(CG.SEASON.preseason_starts_at)<=CG.now());
+  var draftAt = CG.SEASON && CG.SEASON.draft_at ? Date.parse(CG.SEASON.draft_at) : null;
+
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · the war room</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Draft desk</h1>'+
+    '<p class="lede" style="margin-top:8px">Build your board before the night, then let it work for you: if your clock ever runs out, the league drafts the best available player <b>from your board</b> automatically.</p></div>';
+
+  /* status strip */
+  h += '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:17px">'+CG.draftStatusChip(st, hasPicks)+'</b><span>draft status</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num dr-clock" id="drTick">–:––</b><span>pick clock</span></div>'+
+    '<div class="kpi'+(myTurn?" alert":"")+'" style="cursor:default"><b class="num" style="font-size:17px">'+(cur?'<span class="teamcell">'+CG.crest(cur.ownerCode,22)+'<span>'+esc(cur.ownerCode)+' · R'+cur.round+' #'+cur.overall+'</span></span>':"—")+'</b><span>on the clock</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:17px">'+(nextMine?('#'+nextMine.overall+' · R'+nextMine.round+(picksUntil!=null?(picksUntil===0?' — now':' — in '+picksUntil+' pick'+(picksUntil===1?'':'s')):'')):(hasPicks?'none left':'—'))+'</b><span>your next pick</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+board.length+'</b><span>players on your board</span></div></div>';
+
+  if (!hasPicks){
+    h += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">The board isn’t built yet.</b> '+
+      (draftAt?'Draft night is '+CG.fmtFull(draftAt)+'. ':'')+
+      'The commissioner generates the pick order before the night — your job until then is the board below.</div>';
+  }
+
+  /* ON THE CLOCK — the moment that matters */
+  if (myTurn){
+    var topAvail = null;
+    for (var bi=0; bi<board.length; bi++){
+      var fate = CG.draftPlayerFate(board[bi]);
+      if (!fate.taken && CG.eligOf(board[bi]).ok){ topAvail = board[bi]; break; }
+    }
+    var tp = topAvail ? (pool.find(function(p){ return p.profileId===topAvail; })||{tag:"your top target"}) : null;
+    h += '<div class="card" style="margin-bottom:18px;border-color:var(--chrome);border-width:2px"><div class="card-b" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
+      '<b style="font-family:var(--f-disp);font-size:19px">You’re on the clock.</b>'+
+      '<span class="caption">Round '+cur.round+' · pick '+cur.overall+' overall</span>'+
+      '<span style="margin-left:auto;display:inline-flex;gap:9px;flex-wrap:wrap">'+
+      (tp?'<button class="btn btn-chrome" data-quickpick="'+topAvail+'" data-pick="'+cur.id+'" data-name="'+esc(tp.tag)+'">'+CG.ic("check",15)+'Draft '+esc(tp.tag)+' (board #1)</button>':"")+
+      '<button class="btn '+(tp?"btn-ghost":"btn-chrome")+'" data-openpick="'+cur.id+'">Choose from the pool</button></span></div></div>';
+  }
+
+  /* make-up picks (skipped but recoverable) */
+  if (mySkipped.length && live){
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Make-up picks</h3><span class="chip chip-warn">'+mySkipped.length+' waiting</span></div>'+
+      mySkipped.map(function(p){
+        return '<div class="card-b" style="display:flex;gap:12px;align-items:center;border-top:1px solid var(--line-soft)"><span class="mono" style="font-size:12px">R'+p.round+' · #'+p.overall+' overall</span>'+
+          '<span class="caption" style="flex:1">Your clock ran out on this one — it’s still yours. Use it any time before the draft ends.</span>'+
+          '<button class="btn btn-chrome btn-sm" data-openpick="'+p.id+'">Use this pick</button></div>';
+      }).join("")+'</div>';
+  }
+
+  /* MY BOARD */
+  if (!unlocked){
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>My draft board</h3><span class="chip">locked</span></div>'+
+      '<div class="card-b"><div class="empty" style="padding:40px 20px"><div class="e-art">'+CG.ic("lock",22)+'</div><b>Boards unlock with the pre-season</b>'+
+      '<p>Once pre-season opens'+(CG.SEASON&&CG.SEASON.preseason_starts_at?' ('+CG.fmtDay(Date.parse(CG.SEASON.preseason_starts_at))+')':'')+' the registered player pool appears here — watch the games, rank your targets, and your board is ready for draft night.</p></div></div></div>';
+  } else {
+    var boarded = {}; board.forEach(function(pid){ boarded[pid]=true; });
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>My draft board</h3><span class="chip chip-chrome">private to your club</span></div>';
+    h += board.length ? '<div class="tblwrap"><table class="tbl keepcols"><caption>Your ranked targets</caption>'+
+      '<thead><tr><th>#</th><th class="tleft">Player</th><th>Pos</th><th>Pre-season</th><th>Eligibility</th><th class="tleft">Status</th><th class="tright">Order</th></tr></thead><tbody>'+
+      board.map(function(pid, i){
+        var p = pool.find(function(x){ return x.profileId===pid; });
+        var fate = CG.draftPlayerFate(pid);
+        var name = p ? p.tag : ((lg._profName||{})[pid]||"a player");
+        var pos = p ? p.pos : "—";
+        var pre = (lg.preGp||{})[pid]||{gp:0,g:0,a:0};
+        var status = fate.taken
+          ? (fate.code===myCode ? '<span class="chip chip-win" style="font-size:9px">ON YOUR CLUB</span>'
+                                : '<span class="chip chip-loss" style="font-size:9px">GONE · '+esc(fate.code||"signed")+'</span>')
+          : '<span class="chip" style="font-size:9px">AVAILABLE</span>';
+        return '<tr'+(fate.taken?' style="opacity:.55"':'')+'><td class="num">'+(i+1)+'</td>'+
+          '<td class="tleft"><b'+(fate.taken&&fate.code!==myCode?' style="text-decoration:line-through"':'')+'>'+esc(name)+'</b></td>'+
+          '<td class="mono" style="font-size:11px">'+esc(pos||"—")+'</td>'+
+          '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td>'+
+          '<td>'+CG.eligChipD(pid)+'</td><td class="tleft">'+status+'</td>'+
+          '<td class="tright"><span style="display:inline-flex;gap:4px">'+
+            '<button class="btn btn-ghost btn-sm" data-b-top="'+pid+'" title="Move to #1" aria-label="Move '+esc(name)+' to the top"'+(i===0?" disabled":"")+'>'+CG.ic("up",12)+CG.ic("up",12)+'</button>'+
+            '<button class="btn btn-ghost btn-sm" data-b-up="'+pid+'" title="Move up" aria-label="Move '+esc(name)+' up"'+(i===0?" disabled":"")+'>'+CG.ic("up",12)+'</button>'+
+            '<button class="btn btn-ghost btn-sm" data-b-dn="'+pid+'" title="Move down" aria-label="Move '+esc(name)+' down"'+(i===board.length-1?" disabled":"")+'>'+CG.ic("down",12)+'</button>'+
+            '<button class="btn btn-ghost btn-sm" data-b-rm="'+pid+'" title="Remove" aria-label="Remove '+esc(name)+'">'+CG.ic("x",12)+'</button></span></td></tr>';
+      }).join("")+'</tbody></table></div>'
+      : '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("grid",20)+'</div><b>Your board is empty</b><p>Rank the players you want below. On draft night, one click drafts your top available target — and if your clock ever expires, the league auto-drafts from this exact list.</p></div></div>';
+    /* add players */
+    h += '<div class="card-b" style="border-top:1px solid var(--line)">'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
+      '<input id="bdSearch" placeholder="Search the pool…" style="flex:1;min-width:180px">'+
+      '<span style="display:inline-flex;gap:6px" role="group" aria-label="Position filter">'+["ALL","C","LW","RW","LD","RD","G"].map(function(px){
+        return '<button type="button" class="chip'+(px==="ALL"?" chip-chrome":"")+'" data-bd-pos="'+px+'" aria-pressed="'+(px==="ALL")+'" style="cursor:pointer">'+px+'</button>';
+      }).join("")+'</span></div>'+
+      '<div id="bdPoolList">'+CG._bdPoolRows(pool, boarded, "", "ALL")+'</div></div>';
+    h += '</div>';
+  }
+
+  /* LIVE DRAFT TABLE */
+  if (hasPicks){
+    var rounds = {};
+    picks.forEach(function(p){ (rounds[p.round]=rounds[p.round]||[]).push(p); });
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The draft, pick by pick</h3>'+
+      (st&&st.order_meta?'<span class="chip">'+esc((CG.DRAFT_STYLES.find(function(s){return s[0]===st.order_meta.style;})||["","order set"])[1])+'</span>':"")+'</div>'+
+      '<div class="tblwrap"><table class="tbl keepcols"><caption>Every pick, live</caption>'+
+      '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th class="tleft">Status</th></tr></thead><tbody>'+
+      Object.keys(rounds).sort(function(a,b){return a-b;}).map(function(rn){
+        return '<tr><td colspan="4" style="background:var(--ice);font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;padding:7px 12px">ROUND '+rn+'</td></tr>'+
+          rounds[rn].sort(function(a,b){ return a.overall-b.overall; }).map(function(p){
+            var isCur = cur && p.id===cur.id;
+            var mine = p.ownerCode===myCode;
+            return '<tr class="'+(isCur?"dr-now":"")+'"'+(mine&&!isCur?' style="background:var(--chrome-tint)"':'')+'>'+
+              '<td class="num">'+p.overall+'</td>'+
+              '<td class="tleft"><span class="teamcell">'+CG.crest(p.ownerCode,20)+'<span class="mono" style="font-size:12px">'+esc(p.ownerCode||"?")+(mine?' <b style="font-size:10px;color:var(--steel)">YOU</b>':'')+'</span></span></td>'+
+              '<td class="tleft">'+(p.used?'<b>'+esc(p.playerName||"")+'</b>':'<span class="caption">—</span>')+'</td>'+
+              '<td class="tleft">'+(isCur?'<span class="chip chip-live" style="font-size:9px"><span class="live-dot"></span>ON THE CLOCK</span>'
+                : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
+                : p.skipped?'<span class="chip chip-warn" style="font-size:9px">'+(mine?'MAKE-UP WAITING':'SKIPPED')+'</span>'
+                :'<span class="caption mono" style="font-size:10px">upcoming</span>')+'</td></tr>';
+          }).join("");
+      }).join("")+'</tbody></table></div></div>';
+  }
+
+  /* how it works */
+  h += '<div class="card"><div class="card-h"><h3>How draft night runs</h3></div><div class="card-b"><div class="grid g2" style="gap:14px">'+
+    [["The clock","Each club gets '+((st&&st.pick_seconds)||120)+' seconds on the clock. Miss it and the league auto-drafts your top available board player — never a player you didn’t rank, unless your board runs dry."],
+     ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
+     ["Skipped picks aren’t lost","If a pick gets skipped, it stays yours — use it any time before the draft ends from the Make-up card."],
+     ["Eligibility","First-year players need five pre-season games to be draftable. Everyone under that gets placed on a club automatically ten minutes after the final pick."]
+    ].map(function(kv){ return '<div><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">'+kv[0]+'</b><p class="small" style="color:var(--steel);line-height:1.6">'+kv[1]+'</p></div>'; }).join("")+
+    '</div></div></div>';
+  return h;
+};
+CG._bdPoolRows = function(pool, boarded, q, posF){
+  q = (q||"").toLowerCase();
+  var list = pool.filter(function(p){
+    if (boarded[p.profileId]) return false;
+    if (q && p.tag.toLowerCase().indexOf(q)<0) return false;
+    if (posF && posF!=="ALL" && p.pos!==posF) return false;
+    return true;
+  }).slice(0, 14);
+  if (!list.length) return '<p class="caption" style="padding:8px 0">'+(Object.keys(boarded).length?"Everyone matching is already on your board.":"No available players match.")+'</p>';
+  return list.map(function(p){
+    var pre = (CG.lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft)">'+
+      '<b style="font-size:13.5px">'+esc(p.tag)+'</b>'+
+      '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+' · '+pre.gp+'gp '+pre.g+'g '+pre.a+'a</span>'+
+      CG.eligChipD(p.profileId)+
+      '<button class="btn btn-ghost btn-sm" style="margin-left:auto" data-bd-add="'+p.profileId+'">'+CG.ic("plus",12)+'Add</button></div>';
+  }).join("");
+};
+CG.AFTER._hubDraft = function(){
+  CG.subscribeDraft(); CG._armDraftTick();
+  var board = function(){ return (CG.lg._myBoard||[]).slice(); };
+  function move(pid, delta){
+    var b = board(), i = b.indexOf(pid); if (i<0) return;
+    var j = delta==="top" ? 0 : i+delta;
+    if (j<0 || j>=b.length) return;
+    b.splice(i,1); b.splice(j,0,pid); CG.saveMyBoard(b);
+  }
+  document.querySelectorAll("[data-b-up]").forEach(function(b){ b.addEventListener("click", function(){ move(this.getAttribute("data-b-up"), -1); }); });
+  document.querySelectorAll("[data-b-dn]").forEach(function(b){ b.addEventListener("click", function(){ move(this.getAttribute("data-b-dn"), 1); }); });
+  document.querySelectorAll("[data-b-top]").forEach(function(b){ b.addEventListener("click", function(){ move(this.getAttribute("data-b-top"), "top"); }); });
+  document.querySelectorAll("[data-b-rm]").forEach(function(b){ b.addEventListener("click", function(){
+    var b2 = board().filter(function(x){ return x!==this.getAttribute("data-b-rm"); }.bind(this)); CG.saveMyBoard(b2);
+  }); });
+  var boarded = {}; board().forEach(function(pid){ boarded[pid]=true; });
+  var posF = "ALL";
+  function rerenderPool(){
+    var el = document.getElementById("bdPoolList");
+    if (el){ el.innerHTML = CG._bdPoolRows(CG.lg.draftPool||[], boarded, (document.getElementById("bdSearch")||{}).value||"", posF); wireAdds(); }
+  }
+  function wireAdds(){
+    document.querySelectorAll("[data-bd-add]").forEach(function(b){ b.addEventListener("click", function(){
+      var b2 = board(); b2.push(this.getAttribute("data-bd-add")); CG.saveMyBoard(b2);
+    }); });
+  }
+  var s = document.getElementById("bdSearch");
+  if (s) s.addEventListener("input", rerenderPool);
+  document.querySelectorAll("[data-bd-pos]").forEach(function(b){ b.addEventListener("click", function(){
+    posF = this.getAttribute("data-bd-pos");
+    document.querySelectorAll("[data-bd-pos]").forEach(function(x){ var on = x===b; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); }.bind(this));
+    rerenderPool();
+  }); });
+  wireAdds();
+  document.querySelectorAll("[data-quickpick]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid=this.getAttribute("data-quickpick"), pickId=this.getAttribute("data-pick"), nm=this.getAttribute("data-name"), btn=this;
+    btn.disabled=true;
+    CG.sb.rpc("draft_make_pick",{ p_pick:pickId, p_player:pid }).then(function(r){
+      if(r.error){ CG.toast(r.error.message,"err"); btn.disabled=false; return; }
+      CG.toast(nm+" drafted — welcome aboard","ok"); CG.refreshDraft();
+    });
+  }); });
+  document.querySelectorAll("[data-openpick]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.draftPickModalLive(this.getAttribute("data-openpick"), (CG.myManagedTeam()||{}).code);
+  }); });
+};
+
+/* ---------------- Control Center · Draft manager ---------------- */
+CG.admDraftLive = function(){
+  var lg = CG.lg, st = lg.draftState;
+  var picks = CG.draftPicksCur();
+  var hasPicks = picks.length>0;
+  var cur = CG.draftCurPick();
+  var pool = lg.draftPool||[];
+  var eligible = pool.filter(function(p){ return CG.eligOf(p.profileId).ok; });
+  var made = picks.filter(function(p){ return p.used; }).length;
+  var running = st && (st.status==="live"||st.status==="paused");
+  var sn = st ? st.season_number : ((CG.SEASON&&CG.SEASON.number)||1);
+
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Draft manager</h2><p class="lede" style="margin-top:6px">Build the order, run the clock, fix anything mid-flight. Clubs pick for themselves from Team HQ — this desk is the whistle.</p></div>';
+
+  h += '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:17px">'+CG.draftStatusChip(st, hasPicks)+'</b><span>status</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num dr-clock" id="drTick">–:––</b><span>pick clock</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+made+'<span style="font-size:14px;color:var(--steel)">/'+(picks.length||"—")+'</span></b><span>picks made</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:17px">'+(cur?'<span class="teamcell">'+CG.crest(cur.ownerCode,22)+'<span>'+esc(cur.ownerCode)+' · #'+cur.overall+'</span></span>':"—")+'</b><span>on the clock</span></div>'+
+    '<div class="kpi'+(pool.length-eligible.length>0?" alert":"")+'" style="cursor:default"><b class="num">'+eligible.length+'<span style="font-size:14px;color:var(--steel)">/'+pool.length+'</span></b><span>pool eligible</span></div></div>';
+
+  /* SETUP — order style + generation (blocked while running) */
+  if (!running){
+    var meta = st && st.order_meta;
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
+      (meta?'<span class="chip chip-win">order set — '+esc((CG.DRAFT_STYLES.find(function(s){return s[0]===meta.style;})||["","custom"])[1])+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
+      '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
+      CG.DRAFT_STYLES.map(function(s,i){
+        return '<label class="'+(i===0?"on":"")+'" data-dstyle="'+s[0]+'" style="flex-direction:column;align-items:flex-start;gap:3px">'+
+          '<input type="radio" name="dStyle"'+(i===0?" checked":"")+'><b>'+s[1]+'</b>'+
+          '<span class="caption" style="text-transform:none;letter-spacing:0">'+s[2]+'</span></label>';
+      }).join("")+'</div>'+
+      '<div id="dManualWrap" style="display:none;margin-bottom:14px"><span class="eyebrow" style="display:block;margin-bottom:8px">Arrange the order — first pick at the top</span><div id="dManualList"></div></div>'+
+      '<div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">'+
+      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+((meta&&meta.rounds)||10)+'"></label>'+
+      '<button class="btn btn-chrome" id="dGenerate">'+CG.ic("grid",15)+(hasPicks?"Regenerate the board":"Generate the board")+'</button>'+
+      (meta?'<button class="btn btn-ghost" id="dAnnounce">Announce the order</button>':"")+
+      '</div>'+
+      (hasPicks?'<p class="caption" style="margin-top:10px">Regenerating replaces every pick — it’s blocked once any pick has been made (reverse them first). '+picks.length+' picks exist now.</p>'
+               :'<p class="caption" style="margin-top:10px">Ten rounds, snake order (1→8, then 8→1). The pick order publishes to the clubs the moment you generate.</p>')+
+      (meta&&meta.codes?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">'+meta.codes.map(function(c,i){ return '<span class="chip'+(i===0?" chip-chrome":"")+'" style="font-size:10px">'+(i+1)+' · '+esc(c)+'</span>'; }).join("")+'</div>':"")+
+      '</div></div>';
+  }
+
+  /* RUN CONTROLS */
+  if (hasPicks){
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Run the night</h3>'+(st?'<span class="caption mono">season '+sn+'</span>':"")+'</div>'+
+      '<div class="card-b" style="display:flex;gap:9px;flex-wrap:wrap;align-items:end">'+
+      (!running? '<label class="fld" style="max-width:150px;margin:0"><span>Seconds per pick</span><input id="dSecs" type="number" min="15" max="600" value="'+((st&&st.pick_seconds)||120)+'"></label>'+
+                 '<button class="btn btn-chrome" id="dStart">'+CG.ic("play",15)+(st&&st.status==="complete"?"Restart the draft":"Start the draft")+'</button>'
+       : (st.status==="live" ? '<button class="btn btn-ink" id="dPause">Pause</button>' : '<button class="btn btn-chrome" id="dResume">'+CG.ic("play",15)+'Resume</button>')+
+         '<label class="fld" style="max-width:130px;margin:0"><span>New clock (s)</span><input id="dResetSecs" type="number" min="15" max="600" placeholder="'+((st&&st.pick_seconds)||120)+'"></label>'+
+         '<button class="btn btn-ghost" id="dResetClock">Reset the clock</button>'+
+         '<button class="btn btn-ghost" id="dSkip">Skip this pick</button>'+
+         '<button class="btn btn-ghost" id="dConclude" style="margin-left:auto;color:var(--red)">Conclude the draft</button>')+
+      '</div>'+
+      (running&&cur?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
+        '<b style="font-family:var(--f-disp)">'+esc(CG.TEAM[cur.ownerCode]?CG.TEAM[cur.ownerCode].name:cur.ownerCode)+' are on the clock</b><span class="caption">R'+cur.round+' · #'+cur.overall+' overall</span>'+
+        '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-openpick="'+cur.id+'">Pick on their behalf</button></div>':"")+
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the league auto-drafts from the club’s own board (best available), then best-rated eligible player. Skipped picks stay recoverable — clubs use them from Team HQ, or you can from the table below. Concluding releases every unused pick and starts the ten-minute countdown to automatic rookie placement.</span></div></div>';
+  }
+
+  /* FULL BOARD */
+  if (hasPicks){
+    var rounds = {};
+    picks.forEach(function(p){ (rounds[p.round]=rounds[p.round]||[]).push(p); });
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Every pick</h3><span class="chip">'+made+' of '+picks.length+' made</span></div>'+
+      '<div class="tblwrap"><table class="tbl keepcols"><caption>The full board</caption>'+
+      '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th class="tleft">Status</th><th class="tright">Actions</th></tr></thead><tbody>'+
+      Object.keys(rounds).sort(function(a,b){return a-b;}).map(function(rn){
+        return '<tr><td colspan="5" style="background:var(--ice);font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;padding:7px 12px">ROUND '+rn+'</td></tr>'+
+          rounds[rn].sort(function(a,b){ return a.overall-b.overall; }).map(function(p){
+            var isCur = cur && p.id===cur.id;
+            return '<tr class="'+(isCur?"dr-now":"")+'"><td class="num">'+p.overall+'</td>'+
+              '<td class="tleft"><span class="teamcell">'+CG.crest(p.ownerCode,20)+'<span class="mono" style="font-size:12px">'+esc(p.ownerCode||"?")+'</span></span></td>'+
+              '<td class="tleft">'+(p.used?'<b>'+esc(p.playerName||"")+'</b>':'<span class="caption">—</span>')+'</td>'+
+              '<td class="tleft">'+(isCur?'<span class="chip chip-live" style="font-size:9px"><span class="live-dot"></span>ON THE CLOCK</span>'
+                : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
+                : p.skipped?'<span class="chip chip-warn" style="font-size:9px">SKIPPED</span>'
+                :'<span class="caption mono" style="font-size:10px">upcoming</span>')+'</td>'+
+              '<td class="tright">'+(p.used?'<button class="btn btn-ghost btn-sm" data-adm-reverse="'+p.id+'" data-name="'+esc(p.playerName||"the pick")+'">Reverse</button>'
+                : (isCur||p.skipped)&&running?'<button class="btn btn-ghost btn-sm" data-openpick="'+p.id+'">Pick for them</button>':'')+'</td></tr>';
+          }).join("");
+      }).join("")+'</tbody></table></div></div>';
+  }
+
+  /* POOL */
+  h += '<div class="card"><div class="card-h"><h3>The player pool</h3><span class="chip'+(pool.length?'':' chip-warn')+'">'+pool.length+' unrostered</span></div>';
+  if (pool.length){
+    var inelig = pool.length - eligible.length;
+    if (inelig>0) h += '<div class="card-b"><span class="caption"><b>'+inelig+'</b> player'+(inelig===1?"":"s")+' below five pre-season games — not draftable; they’re placed on clubs automatically ten minutes after the final pick.</span></div>';
+    h += '<div class="tblwrap"><table class="tbl keepcols"><caption>Available players</caption>'+
+      '<thead><tr><th class="tleft">Player</th><th>Pos</th><th>Pre-season</th><th class="tleft">Eligibility</th></tr></thead><tbody>'+
+      pool.slice(0,60).map(function(p){
+        var pre = (lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
+        return '<tr><td class="tleft"><b>'+esc(p.tag)+'</b></td><td class="mono" style="font-size:11px">'+esc(p.pos||"?")+'</td>'+
+          '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td><td class="tleft">'+CG.eligChipD(p.profileId)+'</td></tr>';
+      }).join("")+'</tbody></table></div>';
+  } else {
+    h += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("users",20)+'</div><b>No unrostered registrations yet</b><p>The pool fills as players register — every unrostered registrant for the season shows here with their eligibility.</p></div></div>';
+  }
+  h += '</div>';
+  return h;
+};
+CG.AFTER._admDraft = function(){
+  CG.subscribeDraft(); CG._armDraftTick();
+  var st = CG.lg.draftState;
+  var sn = st ? st.season_number : ((CG.SEASON&&CG.SEASON.number)||1);
+  var style = "reverse_standings";
+  CG._manualOrder = CG._manualOrder && CG._manualOrder.length===(CG.TEAMS||[]).length
+    ? CG._manualOrder : (CG.TEAMS||[]).map(function(t){ return t.code; });
+  function renderManual(){
+    var wrap = document.getElementById("dManualWrap"), list = document.getElementById("dManualList");
+    if (!wrap || !list) return;
+    wrap.style.display = style==="manual" ? "" : "none";
+    if (style!=="manual") return;
+    list.innerHTML = CG._manualOrder.map(function(c, i){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line-soft)">'+
+        '<b class="num" style="width:22px">'+(i+1)+'</b>'+CG.crest(c,22)+'<b style="font-size:13.5px;flex:1">'+esc(CG.TEAM[c]?CG.TEAM[c].name:c)+'</b>'+
+        '<button class="btn btn-ghost btn-sm" data-mo-up="'+c+'" aria-label="Move '+esc(c)+' up"'+(i===0?" disabled":"")+'>'+CG.ic("up",12)+'</button>'+
+        '<button class="btn btn-ghost btn-sm" data-mo-dn="'+c+'" aria-label="Move '+esc(c)+' down"'+(i===CG._manualOrder.length-1?" disabled":"")+'>'+CG.ic("down",12)+'</button></div>';
+    }).join("");
+    list.querySelectorAll("[data-mo-up]").forEach(function(b){ b.addEventListener("click", function(){
+      var c=this.getAttribute("data-mo-up"), i=CG._manualOrder.indexOf(c);
+      if(i>0){ CG._manualOrder.splice(i,1); CG._manualOrder.splice(i-1,0,c); renderManual(); }
+    }); });
+    list.querySelectorAll("[data-mo-dn]").forEach(function(b){ b.addEventListener("click", function(){
+      var c=this.getAttribute("data-mo-dn"), i=CG._manualOrder.indexOf(c);
+      if(i>=0&&i<CG._manualOrder.length-1){ CG._manualOrder.splice(i,1); CG._manualOrder.splice(i+1,0,c); renderManual(); }
+    }); });
+  }
+  document.querySelectorAll("[data-dstyle]").forEach(function(l){
+    var radio = l.querySelector('input[type="radio"]');
+    var pick = function(){ style = l.getAttribute("data-dstyle");
+      document.querySelectorAll("[data-dstyle]").forEach(function(x){ x.classList.toggle("on", x===l); });
+      renderManual(); };
+    if (radio) radio.addEventListener("change", function(){ if (radio.checked) pick(); });
+    l.addEventListener("click", pick);
+  });
+  renderManual();
+  var gen = document.getElementById("dGenerate");
+  if (gen) gen.addEventListener("click", function(){
+    var rounds = parseInt((document.getElementById("dRounds")||{}).value,10)||10;
+    var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===style;})||["","?"])[1];
+    var manualIds = style==="manual" ? CG._manualOrder.map(function(c){ return (CG.lg._codeToId||{})[c]; }) : null;
+    CG.confirm("Generate the draft board?",
+      rounds+" rounds, snake order, "+styleName.toLowerCase()+". This replaces the existing board — every club sees the new order immediately.",
+      "Generate the board", function(){
+      CG.sb.rpc("generate_draft_board",{ p_season_number: sn, p_rounds: rounds, p_style: style, p_manual: manualIds }).then(function(r){
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        var codes = (r.data&&r.data.codes)||[];
+        CG.toast("Board generated — first pick: "+(codes[0]||"?"),"ok");
+        CG.refreshDraft();
+      });
+    });
+  });
+  var ann = document.getElementById("dAnnounce");
+  if (ann) ann.addEventListener("click", function(){
+    var meta = (CG.lg.draftState||{}).order_meta||{};
+    var codes = meta.codes||[];
+    if (!codes.length){ CG.toast("Generate the board first","err"); return; }
+    var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===meta.style;})||["","the commissioner's order"])[1];
+    CG.confirm("Announce the draft order?","Publishes a newsroom story with the round-one order — it posts to Discord automatically.","Publish it", function(){
+      var body = "The Season "+sn+" draft order is set — decided by "+styleName.toLowerCase()+".\n\n"+
+        codes.map(function(c,i){ return (i+1)+". "+((CG.TEAM[c]||{}).name||c); }).join("\n")+
+        "\n\nRounds snake, so round two runs in reverse. "+(meta.rounds||10)+" rounds on the night.";
+      CG.sb.from("news").insert({ season_id: CG.SEASON.id, category:"League News", title:"The draft order is set",
+        author:"CGHL Wire", published_at:new Date().toISOString(), body: body }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t publish: "+r.error.message,"err"); return; }
+        CG.toast("Order announced — it’s in the newsroom and on Discord","ok");
+      });
+    });
+  });
+  var startB = document.getElementById("dStart");
+  if (startB) startB.addEventListener("click", function(){
+    var secs = parseInt((document.getElementById("dSecs")||{}).value,10)||120;
+    CG.confirm("Start the draft?", "The first club goes on the clock with "+secs+" seconds. Clubs draft from Team HQ; you run the room from here.","Start the draft", function(){
+      CG.sb.rpc("start_draft",{ p_season_number: sn, p_pick_seconds: secs }).then(function(r){
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        CG.toast("The draft is live","ok"); CG.refreshDraft();
+      });
+    });
+  });
+  function simpleRpc(id, fn, args, confirmTitle, confirmBody, confirmBtn){
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("click", function(){
+      var run = function(){
+        CG.sb.rpc(fn, args()).then(function(r){
+          if(r.error){ CG.toast(r.error.message,"err"); return; }
+          CG.refreshDraft();
+        });
+      };
+      if (confirmTitle) CG.confirm(confirmTitle, confirmBody, confirmBtn, run); else run();
+    });
+  }
+  simpleRpc("dPause","draft_pause",function(){ return { p_season_number: sn }; });
+  simpleRpc("dResume","draft_resume",function(){ return { p_season_number: sn }; });
+  simpleRpc("dSkip","draft_skip_pick",function(){ return { p_season_number: sn }; },
+    "Skip this pick?","The club keeps the pick as a make-up — they can use it any time before the draft ends.","Skip it");
+  simpleRpc("dResetClock","draft_reset_clock",function(){
+    var v = parseInt((document.getElementById("dResetSecs")||{}).value,10);
+    return { p_season_number: sn, p_seconds: (v>=15&&v<=600)?v:null };
+  });
+  simpleRpc("dConclude","draft_conclude",function(){ return { p_season_number: sn }; },
+    "Conclude the draft?","Every unused pick is released and the ten-minute countdown to automatic rookie placement begins. This is the end of the night.","Conclude it");
+  document.querySelectorAll("[data-adm-reverse]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-adm-reverse"), nm=this.getAttribute("data-name");
+    CG.confirm("Reverse this pick?", nm+" comes off the roster and back into the pool; the pick reopens.","Reverse it", function(){
+      CG.sb.rpc("draft_reverse_pick",{ p_pick:id }).then(function(r){
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        CG.toast("Pick reversed","ok"); CG.refreshDraft();
+      });
+    });
+  }); });
+  document.querySelectorAll("[data-openpick]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.draftPickModalLive(this.getAttribute("data-openpick"));
+  }); });
 };
 CG.AFTER.draft = function(){
   document.querySelectorAll("[data-makepick]").forEach(function(b){ b.addEventListener("click", function(){ CG.draftMakePick(this.getAttribute("data-makepick")); }); });
@@ -3876,6 +4435,7 @@ CG.ROUTES.admin = function(param, qs){
   if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive());
   if (param==="playoffs") return CG.adminShell("playoffs", CG.admPlayoffsLive());
   if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
+  if (param==="draft") return CG.adminShell("draft", CG.admDraftLive());
   if (param==="codes") return CG.adminShell("codes", CG.admCodesLive());
   if (param==="audit") return CG.adminShell("audit", CG.admAuditLive());
   /* retired prototype panels — their buttons toasted success while saving nothing real:
@@ -3900,6 +4460,7 @@ CG.AFTER.admin = function(param, qs){
   if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
   if (param==="playoffs"){ CG.AFTER._admPlayoffs(); return; }
   if (param==="ratings"){ return; }
+  if (param==="draft"){ CG.AFTER._admDraft(); return; }
   if (param==="codes"){ return; }
   if (param==="audit"){ CG.AFTER._admAudit(); return; }
   if (param==="" || param==null){ return; }
@@ -4020,6 +4581,10 @@ CG.ROUTES.hub = function(param, qs){
     if (CG.role()==="guest") return CG.unauthorized("Sign in to reach your messages.");
     return CG.hubShell("messages", CG.messagesBody());
   }
+  if (param==="draft"){
+    return CG.can("roster.manage") ? CG.hubShell("draft", CG.hubDraftLive())
+      : CG.unauthorized("The draft desk is a team-management tool.");
+  }
   if (param==="freeagents"){
     return CG.can("roster.manage") ? CG.hubShell("freeagents", CG.hubFreeAgents())
       : CG.unauthorized("The free-agent board is a team-management tool.");
@@ -4029,6 +4594,7 @@ CG.ROUTES.hub = function(param, qs){
 CG._origHubAfter = CG.AFTER.hub;
 CG.AFTER.hub = function(param, qs){
   if (param==="messages"){ CG.AFTER.messages(); return; }
+  if (param==="draft"){ CG.AFTER._hubDraft(); return; }
   if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
@@ -4306,6 +4872,7 @@ CG.bootLive = async function(){
       ["Operations", [
         ["","Overview","home"],
         ["schedule","Schedule","cal"],
+        ["draft","Draft manager","play"],
         ["eastats","EA stats","chart"],
         ["codes","Game codes","code"]
       ]],
