@@ -1279,8 +1279,11 @@ CG.ROUTES.draft = function(){
     return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
       '<div class="e-art">'+CG.ic("users",22)+'</div><b>No draft has been set up yet</b><p>When the commissioner builds the board, the picks, prospect pool, and live results appear here.</p></div></div></div>';
   }
-  var maxSn = Math.max.apply(null, picks.map(function(p){ return p.season; }));
+  /* same season key as the desk + manager, so future-season trade picks can't hijack the room */
+  var maxSn = (lg.draftState && lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number) || 1;
   var cur = picks.filter(function(p){ return p.season===maxSn; }).sort(function(a,b){ return (a.overall||9999)-(b.overall||9999); });
+  if (!cur.length) return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+    '<div class="e-art">'+CG.ic("users",22)+'</div><b>No draft board for this season yet</b><p>When the commissioner builds the board, the picks, prospect pool, and live results appear here.</p></div></div></div>';
   var total = cur.length, made = cur.filter(function(p){ return p.used; }).length, skips = cur.filter(function(p){ return p.skipped; }).length;
   var st = lg.draftState, dstatus = st ? st.status : "setup";
   var myClub = CG.myClub && CG.myClub();
@@ -1356,7 +1359,7 @@ CG.ROUTES.draft = function(){
   return head + '<div class="shell" style="padding-bottom:48px">'+clockBox+summary+
     '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
-CG._draftSeason = function(){ return (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0); };
+CG._draftSeason = function(){ return (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number) || 1; };
 CG.refreshDraft = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){
   if(location.hash.indexOf("/draft")>=0){ if(CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else CG.router(); }
 }); };
