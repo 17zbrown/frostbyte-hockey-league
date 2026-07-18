@@ -971,7 +971,7 @@ CG.ROUTES.register = function(){
       '<span style="display:inline-flex;gap:8px"><a class="btn btn-sm" style="background:#5865F2;color:#fff" href="'+esc(invite)+'" target="_blank" rel="noopener">Join the server</a>'+
       '<button class="btn btn-ghost btn-sm" id="guildRecheck">I’ve joined — re-check</button></span></div>'
     : "";
-  statusCard = CG.roadAheadCard(s) + guildCard + statusCard;
+  statusCard = guildCard + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(reg?"Update registration":"Register")+'</h3><span class="chip '+(reg?"chip-win":"chip-chrome")+'">'+(reg?"Registered":"Open")+'</span></div><div class="card-b">'+
     (eaMissing ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">You need your <b>EA ID</b> on file to register.</span><button class="btn btn-ghost btn-sm" id="regEaBtn">Add EA ID</button></div>'
                 : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
