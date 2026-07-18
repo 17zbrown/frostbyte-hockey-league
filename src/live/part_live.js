@@ -593,9 +593,10 @@ CG.loadManagerData = async function(){
       CG.mapDraftData(CG.lg, (q[0]&&!q[0].error&&q[0].data)||[], regs);
     }
     var states = (q[2]&&!q[2].error&&q[2].data)||[];
-    /* current draft = the highest season_number that has picks */
-    var maxSn = (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0);
-    CG.lg.draftState = states.find(function(s){ return s.season_number===maxSn; }) || null;
+    /* the current draft is the CURRENT SEASON's — never keyed off stray pick rows, so
+       leftover or future-season picks can never desync the desk from the controls */
+    var curSn = (CG.SEASON && CG.SEASON.number) || 1;
+    CG.lg.draftState = states.find(function(s){ return s.season_number===curSn; }) || null;
     /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
     CG.lg._myBoard = CG.lg._myBoard || [];
     var myBoardTeam = CG.myManagedTeam && CG.myManagedTeam();
@@ -1356,7 +1357,9 @@ CG.ROUTES.draft = function(){
     '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
 CG._draftSeason = function(){ return (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0); };
-CG.refreshDraft = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){ if(location.hash.indexOf("/draft")>=0 && CG.router) CG.router(); }); };
+CG.refreshDraft = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){
+  if(location.hash.indexOf("/draft")>=0){ if(CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else CG.router(); }
+}); };
 CG.draftStart = function(){
   var el=document.getElementById("draftSecs"), secs=el?(parseInt(el.value,10)||120):120, sn=CG._draftSeason();
   CG.confirm("Start the live draft?","This assigns the snake order and puts the first club on the clock. Clubs draft their own picks; you run the clock.","Start draft", function(){
@@ -1433,10 +1436,9 @@ CG.DRAFT_STYLES = [
 ];
 CG.fmtClockS = function(s){ s = Math.max(0, s|0); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
 CG.draftPicksCur = function(){
-  /* the current board = the draft_state's season; before that row exists, the newest picks */
+  /* always the CURRENT season's board — same key the commissioner controls use */
   var st = CG.lg.draftState;
-  var sn = st ? st.season_number
-              : (CG.lg.draftPicks||[]).reduce(function(m,p){ return Math.max(m, p.season||0); }, 0);
+  var sn = st ? st.season_number : ((CG.SEASON && CG.SEASON.number) || 1);
   return (CG.lg.draftPicks||[]).filter(function(p){ return p.season===sn; });
 };
 CG.draftCurPick = function(){
@@ -1496,13 +1498,19 @@ CG._armDraftTick = function(){
 CG.saveMyBoard = function(ids){
   var t = CG.myManagedTeam(); if (!t || !CG.sb) return;
   CG.lg._myBoard = ids.slice();
-  CG.router();  /* optimistic */
+  CG.rerenderKeepScroll();  /* optimistic */
   CG.sb.rpc("save_draft_board",{ p_team: t.id, p_players: ids }).then(function(r){
     if (r.error){
       CG.toast("The board didn’t save: "+r.error.message, "err");
-      CG.loadManagerData().then(function(){ CG.router(); });
+      CG.loadManagerData().then(function(){ CG.rerenderKeepScroll(); });
     }
   });
+};
+/* re-render without the jump-to-top — board edits and realtime pick updates keep your place */
+CG.rerenderKeepScroll = function(){
+  var y = window.scrollY;
+  CG.router();
+  window.scrollTo({ top: y, left: 0, behavior: "instant" });
 };
 /* shared pick modal: search the pool, eligible players first, one click to draft */
 CG.draftPickModalLive = function(pickId, forCode){
@@ -1513,9 +1521,11 @@ CG.draftPickModalLive = function(pickId, forCode){
   });
   function rows(q){
     q = (q||"").toLowerCase();
-    var list = pool.filter(function(p){ return !q || p.tag.toLowerCase().indexOf(q)>=0; }).slice(0,30);
+    var matches = pool.filter(function(p){ return !q || p.tag.toLowerCase().indexOf(q)>=0; });
+    var list = matches.slice(0,30);
     if (!list.length) return '<p class="caption" style="padding:14px 0">No available players match.</p>';
-    return list.map(function(p){
+    var more = matches.length>30 ? '<p class="caption" style="padding:8px 0">Showing 30 of '+matches.length+' — refine the search.</p>' : '';
+    return more + list.map(function(p){
       var e = CG.eligOf(p.profileId);
       return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft)">'+
         '<b style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis">'+esc(p.tag)+'</b>'+
@@ -1638,14 +1648,16 @@ CG.hubDraftLive = function(){
             '<button class="btn btn-ghost btn-sm" data-b-rm="'+pid+'" title="Remove" aria-label="Remove '+esc(name)+'">'+CG.ic("x",12)+'</button></span></td></tr>';
       }).join("")+'</tbody></table></div>'
       : '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("grid",20)+'</div><b>Your board is empty</b><p>Rank the players you want below. On draft night, one click drafts your top available target — and if your clock ever expires, the league auto-drafts from this exact list.</p></div></div>';
-    /* add players */
+    /* add players — search + filter survive re-renders (realtime redraws mid-draft) */
+    CG._bdUI = CG._bdUI || { q:"", pos:"ALL" };
     h += '<div class="card-b" style="border-top:1px solid var(--line)">'+
       '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
-      '<input id="bdSearch" placeholder="Search the pool…" style="flex:1;min-width:180px">'+
+      '<input id="bdSearch" placeholder="Search the pool…" value="'+esc(CG._bdUI.q)+'" style="flex:1;min-width:180px">'+
       '<span style="display:inline-flex;gap:6px" role="group" aria-label="Position filter">'+["ALL","C","LW","RW","LD","RD","G"].map(function(px){
-        return '<button type="button" class="chip'+(px==="ALL"?" chip-chrome":"")+'" data-bd-pos="'+px+'" aria-pressed="'+(px==="ALL")+'" style="cursor:pointer">'+px+'</button>';
+        var on = px===CG._bdUI.pos;
+        return '<button type="button" class="chip'+(on?" chip-chrome":"")+'" data-bd-pos="'+px+'" aria-pressed="'+on+'" style="cursor:pointer">'+px+'</button>';
       }).join("")+'</span></div>'+
-      '<div id="bdPoolList">'+CG._bdPoolRows(pool, boarded, "", "ALL")+'</div></div>';
+      '<div id="bdPoolList">'+CG._bdPoolRows(pool, boarded, CG._bdUI.q, CG._bdUI.pos)+'</div></div>';
     h += '</div>';
   }
 
@@ -1676,7 +1688,7 @@ CG.hubDraftLive = function(){
 
   /* how it works */
   h += '<div class="card"><div class="card-h"><h3>How draft night runs</h3></div><div class="card-b"><div class="grid g2" style="gap:14px">'+
-    [["The clock","Each club gets '+((st&&st.pick_seconds)||120)+' seconds on the clock. Miss it and the league auto-drafts your top available board player — never a player you didn’t rank, unless your board runs dry."],
+    [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the league auto-drafts your top available board player — never a player you didn’t rank, unless your board runs dry."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
      ["Skipped picks aren’t lost","If a pick gets skipped, it stays yours — use it any time before the draft ends from the Make-up card."],
      ["Eligibility","First-year players need five pre-season games to be draftable. Everyone under that gets placed on a club automatically ten minutes after the final pick."]
@@ -1686,14 +1698,16 @@ CG.hubDraftLive = function(){
 };
 CG._bdPoolRows = function(pool, boarded, q, posF){
   q = (q||"").toLowerCase();
-  var list = pool.filter(function(p){
+  var matches = pool.filter(function(p){
     if (boarded[p.profileId]) return false;
     if (q && p.tag.toLowerCase().indexOf(q)<0) return false;
     if (posF && posF!=="ALL" && p.pos!==posF) return false;
     return true;
-  }).slice(0, 14);
+  });
+  var list = matches.slice(0, 14);
   if (!list.length) return '<p class="caption" style="padding:8px 0">'+(Object.keys(boarded).length?"Everyone matching is already on your board.":"No available players match.")+'</p>';
-  return list.map(function(p){
+  var more = matches.length>14 ? '<p class="caption" style="padding:6px 0">Showing 14 of '+matches.length+' — search or filter to narrow it.</p>' : '';
+  return more + list.map(function(p){
     var pre = (CG.lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft)">'+
       '<b style="font-size:13.5px">'+esc(p.tag)+'</b>'+
@@ -1718,10 +1732,10 @@ CG.AFTER._hubDraft = function(){
     var b2 = board().filter(function(x){ return x!==this.getAttribute("data-b-rm"); }.bind(this)); CG.saveMyBoard(b2);
   }); });
   var boarded = {}; board().forEach(function(pid){ boarded[pid]=true; });
-  var posF = "ALL";
+  CG._bdUI = CG._bdUI || { q:"", pos:"ALL" };
   function rerenderPool(){
     var el = document.getElementById("bdPoolList");
-    if (el){ el.innerHTML = CG._bdPoolRows(CG.lg.draftPool||[], boarded, (document.getElementById("bdSearch")||{}).value||"", posF); wireAdds(); }
+    if (el){ el.innerHTML = CG._bdPoolRows(CG.lg.draftPool||[], boarded, CG._bdUI.q, CG._bdUI.pos); wireAdds(); }
   }
   function wireAdds(){
     document.querySelectorAll("[data-bd-add]").forEach(function(b){ b.addEventListener("click", function(){
@@ -1729,10 +1743,11 @@ CG.AFTER._hubDraft = function(){
     }); });
   }
   var s = document.getElementById("bdSearch");
-  if (s) s.addEventListener("input", rerenderPool);
+  if (s) s.addEventListener("input", function(){ CG._bdUI.q = this.value; rerenderPool(); });
   document.querySelectorAll("[data-bd-pos]").forEach(function(b){ b.addEventListener("click", function(){
-    posF = this.getAttribute("data-bd-pos");
-    document.querySelectorAll("[data-bd-pos]").forEach(function(x){ var on = x===b; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); }.bind(this));
+    CG._bdUI.pos = this.getAttribute("data-bd-pos");
+    var self = this;
+    document.querySelectorAll("[data-bd-pos]").forEach(function(x){ var on = x===self; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); });
     rerenderPool();
   }); });
   wireAdds();
@@ -1776,9 +1791,10 @@ CG.admDraftLive = function(){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
       (meta?'<span class="chip chip-win">order set — '+esc((CG.DRAFT_STYLES.find(function(s){return s[0]===meta.style;})||["","custom"])[1])+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
       '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
-      CG.DRAFT_STYLES.map(function(s,i){
-        return '<label class="'+(i===0?"on":"")+'" data-dstyle="'+s[0]+'" style="flex-direction:column;align-items:flex-start;gap:3px">'+
-          '<input type="radio" name="dStyle"'+(i===0?" checked":"")+'><b>'+s[1]+'</b>'+
+      CG.DRAFT_STYLES.map(function(s){
+        var on = s[0]===(CG._dStyle||"reverse_standings");
+        return '<label class="'+(on?"on":"")+'" data-dstyle="'+s[0]+'" style="flex-direction:column;align-items:flex-start;gap:3px">'+
+          '<input type="radio" name="dStyle"'+(on?" checked":"")+'><b>'+s[1]+'</b>'+
           '<span class="caption" style="text-transform:none;letter-spacing:0">'+s[2]+'</span></label>';
       }).join("")+'</div>'+
       '<div id="dManualWrap" style="display:none;margin-bottom:14px"><span class="eyebrow" style="display:block;margin-bottom:8px">Arrange the order — first pick at the top</span><div id="dManualList"></div></div>'+
@@ -1846,7 +1862,8 @@ CG.admDraftLive = function(){
         var pre = (lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
         return '<tr><td class="tleft"><b>'+esc(p.tag)+'</b></td><td class="mono" style="font-size:11px">'+esc(p.pos||"?")+'</td>'+
           '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td><td class="tleft">'+CG.eligChipD(p.profileId)+'</td></tr>';
-      }).join("")+'</tbody></table></div>';
+      }).join("")+'</tbody></table></div>'+
+      (pool.length>60?'<div class="card-b"><span class="caption">Showing 60 of '+pool.length+' — the full pool lives in Pre-season Central.</span></div>':'');
   } else {
     h += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("users",20)+'</div><b>No unrostered registrations yet</b><p>The pool fills as players register — every unrostered registrant for the season shows here with their eligibility.</p></div></div>';
   }
@@ -1857,7 +1874,7 @@ CG.AFTER._admDraft = function(){
   CG.subscribeDraft(); CG._armDraftTick();
   var st = CG.lg.draftState;
   var sn = st ? st.season_number : ((CG.SEASON&&CG.SEASON.number)||1);
-  var style = "reverse_standings";
+  var style = CG._dStyle || "reverse_standings";
   CG._manualOrder = CG._manualOrder && CG._manualOrder.length===(CG.TEAMS||[]).length
     ? CG._manualOrder : (CG.TEAMS||[]).map(function(t){ return t.code; });
   function renderManual(){
@@ -1882,7 +1899,7 @@ CG.AFTER._admDraft = function(){
   }
   document.querySelectorAll("[data-dstyle]").forEach(function(l){
     var radio = l.querySelector('input[type="radio"]');
-    var pick = function(){ style = l.getAttribute("data-dstyle");
+    var pick = function(){ style = l.getAttribute("data-dstyle"); CG._dStyle = style;
       document.querySelectorAll("[data-dstyle]").forEach(function(x){ x.classList.toggle("on", x===l); });
       renderManual(); };
     if (radio) radio.addEventListener("change", function(){ if (radio.checked) pick(); });
@@ -1925,7 +1942,11 @@ CG.AFTER._admDraft = function(){
   var startB = document.getElementById("dStart");
   if (startB) startB.addEventListener("click", function(){
     var secs = parseInt((document.getElementById("dSecs")||{}).value,10)||120;
-    CG.confirm("Start the draft?", "The first club goes on the clock with "+secs+" seconds. Clubs draft from Team HQ; you run the room from here.","Start the draft", function(){
+    var restarting = st && st.status==="complete";
+    CG.confirm(restarting?"Restart the draft?":"Start the draft?",
+      (restarting?"The draft re-opens: every unused pick returns to the queue and the next open pick goes on the clock with "
+                 :"The first club goes on the clock with ")+secs+" seconds. Clubs draft from Team HQ; you run the room from here.",
+      restarting?"Restart the draft":"Start the draft", function(){
       CG.sb.rpc("start_draft",{ p_season_number: sn, p_pick_seconds: secs }).then(function(r){
         if(r.error){ CG.toast(r.error.message,"err"); return; }
         CG.toast("The draft is live","ok"); CG.refreshDraft();
@@ -1950,8 +1971,10 @@ CG.AFTER._admDraft = function(){
   simpleRpc("dSkip","draft_skip_pick",function(){ return { p_season_number: sn }; },
     "Skip this pick?","The club keeps the pick as a make-up — they can use it any time before the draft ends.","Skip it");
   simpleRpc("dResetClock","draft_reset_clock",function(){
+    /* pass the typed value through — out-of-range surfaces the server's clear error
+       instead of silently resetting to the default */
     var v = parseInt((document.getElementById("dResetSecs")||{}).value,10);
-    return { p_season_number: sn, p_seconds: (v>=15&&v<=600)?v:null };
+    return { p_season_number: sn, p_seconds: isNaN(v)?null:v };
   });
   simpleRpc("dConclude","draft_conclude",function(){ return { p_season_number: sn }; },
     "Conclude the draft?","Every unused pick is released and the ten-minute countdown to automatic rookie placement begins. This is the end of the night.","Conclude it");
