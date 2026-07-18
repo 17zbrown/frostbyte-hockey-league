@@ -181,8 +181,8 @@ CG.ROUTES.rulebook = function(param, qs){
   var q = (qs.q||"").toLowerCase();
   var target = qs.rule||"";
   var edits = CG.store.get("rbEdits")||{};
-  var head = CG.pageHead("Official rulebook · v"+rb.changelog[0].version+" · effective "+CG.fmtDate("2026-07-01"),
-    "CGHL Rulebook","Ten chapters. Searchable, versioned, and linkable — cite a rule by its number anywhere in the league.",
+  var head = CG.pageHead("Official rulebook · v"+rb.changelog[0].version+" · effective "+CG.fmtDate(rb.changelog[0].dateIso),
+    "CGHL Rulebook","Start with Chapter 0 — how the season works, step by step. Searchable, versioned, and linkable — cite a rule by its number anywhere in the league.",
     '<div style="display:flex;gap:9px;align-self:flex-end"><button class="btn btn-ghost btn-sm" id="rbPrint">'+CG.ic("doc",14)+'Print view</button></div>');
   var toc = '<div class="card"><div class="card-h"><h3>Contents</h3></div><div style="padding:8px 0">'+
     rb.chapters.map(function(ch){
