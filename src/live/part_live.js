@@ -977,7 +977,7 @@ CG.ROUTES.register = function(){
                 : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
     '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" role="group" aria-label="Primary position">'+
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
-    '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability, preferred club, anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
+    '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
     '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — signing in adds you automatically. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
