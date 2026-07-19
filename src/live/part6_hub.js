@@ -1155,13 +1155,13 @@ CG.hubNotifications = function(){
         '<span class="nf-t">'+CG.fmtFull(n.t)+'</span></div>';
     }).join("") : '<div class="empty"><div class="e-art">'+CG.ic("bell",22)+'</div><b>All quiet</b><p>Codes, lineups, rulings, and deadlines will land here.</p></div>')+'</div>'+
     '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Delivery preferences</h3></div><div class="card-b">'+
-    [["Game codes released","codes",true],["Lineup & availability reminders","lineup",true],["League news & rankings","news",true],["Discipline updates involving me","disc",true],["Email a weekly digest","digest",false]].map(function(p){
+    [["Game codes released","codes",true],["Lineup & availability reminders","lineup",true],["League news & rankings","news",true],["Discipline updates involving me","disc",true]].map(function(p){
       var prefs = CG.store.get("prefs");
       var on = prefs["nf_"+p[1]]!==undefined ? prefs["nf_"+p[1]] : p[2];
       return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft)">'+
         '<span style="flex:1;font-size:14px">'+p[0]+'</span><button class="toggle'+(on?" on":"")+'" data-pref="nf_'+p[1]+'" role="switch" aria-checked="'+on+'" aria-label="'+p[0]+'"></button></div>';
     }).join("")+
-    '<p class="caption" style="margin-top:12px">The production build delivers through in-app, Discord DM, and email with quiet hours — preferences here are wired to the demo store.</p></div></div>';
+    '<p class="caption" style="margin-top:12px">Notifications are delivered in-app and by Discord DM — preferences here are wired to the demo store.</p></div></div>';
 };
 
 /* ---------- settings ---------- */
@@ -1191,7 +1191,7 @@ CG.hubSettings = function(){
       return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft)"><span style="flex:1;font-size:14px">'+pv[0]+'</span>'+
         '<button class="toggle'+(on?" on":"")+'" data-pref="'+pv[1]+'" role="switch" aria-checked="'+on+'" aria-label="'+pv[0]+'"></button></div>';
     }).join("")+
-    '<p class="caption" style="margin-top:10px">Email addresses are never public. Availability answers are visible only to your club’s management and league staff.</p></div></div>'+
+    '<p class="caption" style="margin-top:10px">The league does not collect your email address. Availability answers are visible only to your club’s management and league staff.</p></div></div>'+
     '<div class="card"><div class="card-h"><h3>Demo seat</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Signed in as <b>'+esc(p.who)+'</b>. Switch seats from the yellow strip up top, or:</p>'+
     '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/signin">'+CG.ic("out",14)+'Sign out</a></div></div></div></div>';
 };

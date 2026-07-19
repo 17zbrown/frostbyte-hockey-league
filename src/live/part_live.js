@@ -277,11 +277,18 @@ CG.buildLiveLeague = async function(){
   var preResults = results.filter(function(r){ return r.stage==="preseason"; });
   var regResults = results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; });
   /* discipline record straight from the suspensions table (newest first) */
+  var maxDoneSeason = (CG._seasonsRaw||[]).reduce(function(m,s){ return s.status==="complete" ? Math.max(m, s.number||0) : m; }, 0);
   var suspMapped = suspRaw.map(function(sx){
-    var by = profById[sx.created_by];
+    var by = profById[sx.created_by], who = profById[sx.profile_id];
+    /* a season-length suspension is served once its final season has completed — mirror the
+       DB's is_suspended() so the client never blocks a player the server already cleared,
+       even in the window before flip_season_status() flips the row to 'lifted' */
+    var served = sx.status!=="active" ||
+      (sx.mode==="seasons" && sx.until_season!=null && maxDoneSeason >= sx.until_season);
     return { id:sx.id, playerId:sx.profile_id,
-      status: sx.status==="active" ? "active" : "served",
-      games: sx.games_total||0, mode: sx.mode, endsAt: sx.ends_at,
+      playerName: (who && (who.gamertag||who.display_name)) || null,
+      status: served ? "served" : "active",
+      games: sx.games_total||0, mode: sx.mode, endsAt: sx.ends_at, untilSeason: sx.until_season,
       reason: sx.reason||"", issued: sx.created_at,
       decidedBy: (by && (by.gamertag||by.display_name)) || "Commissioner" };
   });
@@ -495,6 +502,7 @@ CG.buildLiveLeague = async function(){
   lg._idToCode = {}; lg._codeToId = {}; teamsRaw.forEach(function(t){ lg._idToCode[t.id] = t.code; lg._codeToId[t.code] = t.id; });
   lg._profName = {}; profiles.forEach(function(pr){ lg._profName[pr.id] = pr.gamertag || pr.display_name || "player"; });
   lg._profilesRaw = profiles;
+  lg._contractsRaw = contracts;
   /* current season only — a spot in a past season must not block this season's pool */
   lg._rosteredIds = {}; roster.forEach(function(rs){ if(!seasonId || rs.season_id===seasonId) lg._rosteredIds[rs.profile_id] = true; });
   CG.mapDraftData(lg, draftPicks, registrations);
@@ -571,7 +579,8 @@ CG.mapDraftData = function(lg, draftPicks, registrations){
       playerId:p.player_id, playerName: p.player_id?(profName[p.player_id]||"a player"):null, used:!!p.used };
   });
   var poolSeason = (CG.SEASON && CG.SEASON.id) || null;
-  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && (!r.season_id || r.season_id===poolSeason); })
+  var held = CG.contractHeldIds();
+  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && !held[r.profile_id] && (!r.season_id || r.season_id===poolSeason); })
     .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(r.scout_ovr==null?null:r.scout_ovr), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
     .sort(function(a,b){ return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr); });
   lg.registrationsCount = (registrations||[]).length;
@@ -682,6 +691,7 @@ CG.notifRoute = function(view, param){
     case "automations":  return "#/admin/automations";
     case "preseason":    return "#/admin/preseason";
     case "users":        return "#/admin/users";
+    case "rulebook":     return "#/rulebook";
     default:             return "#/hub";
   }
 };
@@ -894,7 +904,7 @@ CG.signIn = function(){
   try { if (location.hash && location.hash.indexOf("#/")===0) localStorage.setItem("cg_return", JSON.stringify({ h:location.hash, at:Date.now() })); } catch(e){}
   /* match the current site's redirect exactly (origin only) so it stays within
      Supabase's existing Discord redirect allowlist */
-  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify email guilds.join" } });
+  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify guilds.join" } });
 };
 CG.signOut = async function(){ if (CG.sb && CG.sb.auth){ try { await CG.sb.auth.signOut(); } catch(e){} } location.hash = "#/home"; };
 /* login doubles as a Discord server invite (provider_token present only on fresh OAuth) */
@@ -937,7 +947,7 @@ CG.ROUTES.signin = function(){
     '<h1 class="h-page" style="margin-top:10px">Sign in with Discord</h1>'+
     '<p class="lede" style="margin:12px auto 22px">Your Discord account is your league account. Not in the Chel Gaming server yet? Signing in adds you automatically and signs you into the site in one step.</p>'+
     '<button class="btn btn-lg" id="dcSignIn" style="background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
-    '<p class="caption" style="margin-top:12px">Scopes requested: identify · email · guilds.join.</p></div></section>';
+    '<p class="caption" style="margin-top:12px">Scopes requested: identify · guilds.join.</p></div></section>';
 };
 CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); }); };
 
@@ -961,7 +971,20 @@ CG.ROUTES.register = function(){
       '<a class="btn btn-ghost" style="margin-top:16px" href="#/schedule">View the schedule</a></div></div></div>';
   }
   var p = CG.auth.profile, reg = CG.auth.registration, eaMissing = !p.ea_id;
-  var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified. Update your details below any time before the deadline.</div>' : "";
+  /* Rule 2.5: a contract never replaces registration — spell out what an unsigned deal costs */
+  var snumR = s.number||1;
+  var myCt = ((CG.lg && CG.lg._contractsRaw) || []).find(function(c){
+    return p && c.profile_id===p.id && c.status==="active" && !c.is_manager && c.team_id &&
+           (c.start_season||1)<=snumR && (c.end_season||1)>=snumR; }) || null;
+  var ctCode = myCt ? ((CG.lg && CG.lg._idToCode) || {})[myCt.team_id] : null;
+  var ctName = (ctCode && CG.TEAM[ctCode] && CG.TEAM[ctCode].name) || "your club";
+  var onRoster = !!(myCt && p && ((CG.lg && CG.lg._rosteredIds) || {})[p.id]);
+  var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> '+(myCt&&onRoster
+      ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
+      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified.')+' Update your details below any time before the deadline.</div>' : "";
+  if (myCt && !reg){
+    statusCard = '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re under contract with '+esc(ctName)+' through Season '+(myCt.end_season||snumR)+' — but a contract doesn’t replace registration.</b> Until you sign up you can’t play, and your '+CG.fmtMoney(myCt.salary||0)+' salary sits on the club’s cap as dead money. If '+esc(ctName)+' takes on a new owner and you still haven’t signed up after the deadline, the deal is voided and you’re suspended through Season '+(myCt.end_season||snumR)+' (Rule 2.5). Registering — any time — puts you straight back on the roster.</div>' + statusCard;
+  }
   /* signing in normally auto-joins the Discord; when that failed (denied scope, expired token)
      this is the recovery path instead of a dead-end toast at submit */
   var invite = CG._siteCfg && CG._siteCfg.discord_invite;
@@ -1015,10 +1038,10 @@ CG.ROUTES.legal = function(){
       "The league is not affiliated with EA Sports, the NHL, Discord, or Twitch. Club names and marks belong to their owners."
     ])+
     sec("What we store", [
-      "<b>From Discord (when you sign in):</b> your Discord id, username, display name, avatar, and email. Signing in also joins you to the league's Discord server — that's where games are organized.",
+      "<b>From Discord (when you sign in):</b> your Discord id, username, display name, and avatar — no email address is requested or stored. Signing in also joins you to the league's Discord server — that's where games are organized.",
       "<b>From you:</b> your EA ID and platform, season registrations, weekly availability, applications, and anything you write on the site (messages, complaints, trade notes).",
       "<b>From play:</b> scores and full box-score statistics import automatically from the EA NHL match record after every league game. These form the league's permanent competitive record.",
-      "Email addresses are never shown publicly. Availability is visible only to your club's management and league staff. Complaint evidence is private to the league office."
+      "The league does not collect or store your email address. Availability is visible only to your club's management and league staff. Complaint evidence is private to the league office."
     ])+
     sec("Where it lives", [
       "The site runs on Netlify, data lives in Supabase (Postgres), game-night automation posts to the league's Discord server, and stream status is checked against Twitch. Each processor sees only what it needs to run its part.",
@@ -3432,10 +3455,13 @@ CG.hubStaffDesk = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3><span class="chip">'+sus.length+'</span></div>';
   h += sus.length ? sus.map(function(s){
       var p = CG.playerById(lg, s.playerId);
+      /* an enforcement-void suspension belongs to a player with no roster spot, so they aren't in
+         lg.players — fall back to the name carried on the suspension record itself */
+      var nm = p ? p.tag : (s.playerName || "A player");
       return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<b style="font-family:var(--f-disp)">'+esc(p?p.tag:"A player")+'</b>'+
+        '<b style="font-family:var(--f-disp)">'+esc(nm)+'</b>'+
         '<span class="caption" style="flex:1">'+esc(s.reason||"")+'</span>'+
-        '<span class="chip chip-loss">'+(s.mode==="date"?("until "+(s.endsAt?CG.fmtDay(Date.parse(s.endsAt)):"further notice")):(s.games+" game"+(s.games===1?"":"s")))+'</span>'+
+        '<span class="chip chip-loss">'+(s.mode==="date"?("until "+(s.endsAt?CG.fmtDay(Date.parse(s.endsAt)):"further notice")):s.mode==="seasons"?("through Season "+(s.untilSeason||"—")):(s.games+" game"+(s.games===1?"":"s")))+'</span>'+
         (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
     }).join("")
     : '<div class="card-b"><p class="caption">No one is suspended. '+(CG.role()==="commish"?'Suspensions are issued from <a href="#/admin/users" style="font-weight:700;border-bottom:2px solid var(--chrome)">Users &amp; roles</a>.':'The commissioner issues suspensions; the record shows here and on profiles.')+'</p></div>';
@@ -3581,6 +3607,54 @@ CG.admOverviewLive = function(){
 /* ================================================================
    LIVE ADMIN: AUTOMATIONS — real heartbeats + run-now buttons
    ================================================================ */
+/* ================================================================
+   RULE 2.5 DEAD CAP — unsigned contracts count against the cap.
+   Mirrors public.team_cap_used: an active, non-management contract
+   covering this season whose player has no roster spot holds its full
+   salary against the club until the player registers. ============= */
+CG.deadCapEntries = function(lg, code){
+  if (!lg || !lg.live || !lg._contractsRaw) return [];
+  var sn = (CG.SEASON && CG.SEASON.number) || 1, rostered = lg._rosteredIds || {}, idToCode = lg._idToCode || {};
+  return lg._contractsRaw.filter(function(c){
+    return c.status==="active" && !c.is_manager && c.team_id && idToCode[c.team_id]===code &&
+           (c.start_season||1)<=sn && (c.end_season||1)>=sn && !rostered[c.profile_id];
+  });
+};
+CG.deadCapFor = function(lg, code){
+  return CG.deadCapEntries(lg, code).reduce(function(s,c){ return s+(c.salary||0); },0);
+};
+/* profile ids under an active team contract this season. A contracted player returns to
+   their own club by registering (Rule 2.5), so they must never appear as a free agent or a
+   draft prospect — this guards the client pools even if an auto-activation hasn't run yet. */
+CG.contractHeldIds = function(){
+  var out = {}, sn = (CG.SEASON && CG.SEASON.number) || 1;
+  ((CG.lg && CG.lg._contractsRaw) || []).forEach(function(c){
+    if (c.status==="active" && !c.is_manager && c.team_id && (c.start_season||1)<=sn && (c.end_season||1)>=sn) out[c.profile_id]=true;
+  });
+  return out;
+};
+CG._origTeamPayroll = CG._origTeamPayroll || CG.teamPayroll;
+CG.teamPayroll = function(lg, code){
+  return CG._origTeamPayroll(lg, code) + ((lg && lg.live) ? CG.deadCapFor(lg, code) : 0);
+};
+/* Team HQ → Roster: name the dead money so management knows exactly why the number moved */
+CG._origHubRoster = CG._origHubRoster || CG.hubRoster;
+CG.hubRoster = function(qs){
+  var h = CG._origHubRoster(qs);
+  var club = CG.myClub && CG.myClub(); if (!club) return h;
+  var dead = CG.deadCapEntries(CG.lg, club);
+  if (!dead.length) return h;
+  var names = dead.map(function(c){
+    var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===c.profile_id; });
+    return '<b>'+esc((pr && (pr.gamertag||pr.display_name)) || "A player")+'</b> ('+CG.fmtMoney(c.salary||0)+' through Season '+(c.end_season||"—")+')';
+  }).join(", ");
+  var note = '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
+    '<span><b style="font-family:var(--f-disp)">Dead cap — unsigned contracts.</b> '+names+' — under contract but not yet registered for this season. The salary counts against your cap and they can’t play until they sign up; registering puts them straight back on your roster at no extra cap cost. If the club changes owners first, the deal is voided and the player is suspended for its remaining length (Rule 2.5).</span></div>';
+  var anchor = '<span>Salary cap</span></div></div>';
+  h = h.indexOf(anchor) > -1 ? h.replace(anchor, anchor + note) : note + h;
+  return h.replace('<span>Active payroll</span>', '<span>Payroll + dead cap</span>');
+};
+
 CG.AUTOMATIONS = [
   { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
   { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
@@ -3590,6 +3664,7 @@ CG.AUTOMATIONS = [
   { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
+  { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
   { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
   { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
@@ -4229,12 +4304,12 @@ CG.AFTER._admSeasons = function(){
   document.querySelectorAll("[data-season-rollover]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-season-rollover"), name=this.getAttribute("data-name");
     CG.confirm("Run the rollover into "+name+"?",
-      "Contracts that ended with the previous season expire; multi-year deals carry their players onto "+name+" rosters at the contracted salary. From Season 2 on, this also ends the role-separation grandfathering — commissioners and staff holding a club seat must give one up. Safe to re-run; it only fills gaps.",
+      "Contracts that ended with the previous season expire. Multi-year deals no longer auto-fill rosters: every player must sign up again (Rule 2.5) — registering puts them straight back on their club, and until then their salary holds cap space as dead money. After the sign-up deadline, clubs whose ownership changed have their unsigned deals voided and those players suspended for the remaining term. From Season 2 on, this also ends the role-separation grandfathering. Safe to re-run; it only fills gaps.",
       "Run rollover", function(){
       CG.sb.rpc("start_next_season",{ p_new_season:id }).then(function(r){
         if(r.error){ CG.toast("Rollover failed: "+r.error.message,"err"); return; }
         var d=r.data||{};
-        CG.toast("Rollover done — "+(d.expired||0)+" contracts expired, "+(d.carried||0)+" carried onto rosters","ok");
+        CG.toast("Rollover done — "+(d.expired||0)+" expired · "+(d.activated||0)+" activated · "+(d.holds||0)+" awaiting sign-up","ok");
         CG.reloadLeague();
       });
     });
@@ -4657,7 +4732,7 @@ CG.hubSettings = function(){
     '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
     '<button class="btn btn-ink" id="sSaveLive">Save profile</button></div></div>'+
     '<div class="stack"><div class="card"><div class="card-h"><h3>Your data</h3></div><div class="card-b">'+
-    '<p class="small" style="color:var(--steel)">The league stores your Discord identity (id, username, avatar), your EA ID and platform, your registrations and availability, and the stats you generate in league games. Email addresses are never public; availability is visible only to your club’s management and league staff.</p>'+
+    '<p class="small" style="color:var(--steel)">The league stores your Discord identity (id, username, avatar), your EA ID and platform, your registrations and availability, and the stats you generate in league games. No email address is collected or stored; availability is visible only to your club’s management and league staff.</p>'+
     '<p class="small" style="color:var(--steel);margin-top:10px">Read the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a>. To delete your account and data, message any commissioner from <a href="#/hub/messages" style="font-weight:700;border-bottom:2px solid var(--chrome)">Messages</a> — deletion covers everything except the league’s permanent game record (box scores keep your gamertag).</p>'+
     '</div></div>'+
     '<div class="card"><div class="card-h"><h3>Session</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Signed in with Discord as <b>'+esc(p.gamertag||p.display_name||"—")+'</b>.</p>'+
@@ -4683,9 +4758,9 @@ CG.hubFreeAgents = function(){
     : (faC && nowMs < faC) ? '<span class="chip chip-live"><span class="live-dot"></span>Window open — closes '+CG.fmtFull(faC)+'</span>'
     : '<span class="chip chip-win">Window closed — free agents stay signable</span>';
   var rosterN=(lg.byTeam[t.code]||[]).length, rosterMax=s.roster_max||15;
-  var rosteredIds=lg._rosteredIds||{};
+  var rosteredIds=lg._rosteredIds||{}, faHeld=CG.contractHeldIds();
   var pool=(lg._registrationsRaw||[]).filter(function(r){
-    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] &&
+    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
       (lg.isVeteran(r.profile_id) || ((lg.preGp[r.profile_id]||{}).gp||0) >= 5);
   }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
@@ -4733,7 +4808,7 @@ CG.AFTER._hubFreeAgents = function(){
     var regId=this.getAttribute("data-fa-sign"), name=this.getAttribute("data-name");
     var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
     var t=(CG.TEAMS||[]).find(function(x){ return uid&&(x.owner===uid||x.gm===uid||x.agm===uid); });
-    var used=((t&&CG.lg.byTeam[t.code])||[]).reduce(function(s,p){ return s+(p.salary||0); },0);
+    var used=t?CG.teamPayroll(CG.lg, t.code):0;   /* includes unsigned-contract dead cap (Rule 2.5) */
     var space=Math.max(0,(CG.CAP||60000000)-used);
     CG.modal("Sign "+esc(name),
       '<label class="fld"><span>Negotiated salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.05" value="0.75"></label>'+
