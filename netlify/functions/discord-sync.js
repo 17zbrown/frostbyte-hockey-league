@@ -149,6 +149,38 @@ export default async () => {
     } catch (e) { sum.errors.push({ lockChannel: t.name, error: String(e.message || e) }); }
   }
 
+  // The staff rooms (general / welcome / casework) are private to the league office: only the
+  // Commissioner and Staff roles may see them. They carry complaints, discipline, and staff-only
+  // case notes, so this self-heals on every pass exactly like the club rooms. Channel ids come
+  // from app_config.discord_staff_channel_ids (comma-separated).
+  // SAFETY: if neither office role resolves, do nothing — denying @everyone with no allow would
+  // hide the rooms from everybody, including staff.
+  try {
+    if (staffRoleIds.length) {
+      const cfgRows = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
+      const staffChanIds = String((cfgRows[0] && cfgRows[0].value) || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      for (const cid of staffChanIds) {
+        const chan = guildChannels.find((c) => c.id === cid);
+        if (!chan) { sum.staffChanMissing = (sum.staffChanMissing || 0) + 1; continue; }
+        const ow = chan.permission_overwrites || [];
+        const everyone = ow.find((o) => o.id === GUILD);
+        const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
+        const officeOk = staffRoleIds.every((rid) => {
+          const a = ow.find((o) => o.id === rid);
+          return a && (BigInt(a.allow || "0") & 1024n) === 1024n;
+        });
+        if (hidden && officeOk) continue; // already correct
+        // grant the office roles FIRST, then hide from @everyone (never the other way round)
+        for (const rid of staffRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+        await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
+        sum.staffLocked = (sum.staffLocked || 0) + 1;
+      }
+    } else {
+      sum.errors.push({ lockStaffChannels: "no Commissioner/Staff role found — skipped so the rooms aren't hidden from everyone" });
+    }
+  } catch (e) { sum.errors.push({ lockStaffChannels: String(e.message || e) }); }
+
   // (0) keep each team's Discord ROLE (name + color) + CHANNEL name in sync with the site
   for (const t of teams) {
     try {
