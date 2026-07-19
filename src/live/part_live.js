@@ -561,6 +561,9 @@ CG.applySession = async function(session){
   /* complaints & requests (league office) — RLS returns what this user may see */
   if (CG.auth.user){ CG.loadActionRequests().then(function(){ if(/complaint/.test(location.hash)&&CG.router)CG.router(); }); }
   else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
+  /* staff/commish: the "needs attention" backlog (open cases, apps, unmatched imports, …) */
+  if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); }
+  else { CG._staffAttention = null; }
   CG.enforceBan();
   CG._va = null;                        /* any fresh session ends a stale preview */
   if (CG.renderViewAsBar) CG.renderViewAsBar();
@@ -691,6 +694,8 @@ CG.notifRoute = function(view, param){
     case "preseason":    return "#/admin/preseason";
     case "users":        return "#/admin/users";
     case "rulebook":     return "#/rulebook";
+    case "staffdesk":    return "#/hub/staffdesk";
+    case "complaints":   return "#/hub/complaints";
     /* the invite is an external URL; the notification click handler opens http(s) routes in a
        new tab. Fall back to the register page (which also carries a Join button) if unset. */
     case "discord":      return (CG._siteCfg && CG._siteCfg.discord_invite) || "#/register";
@@ -698,7 +703,17 @@ CG.notifRoute = function(view, param){
   }
 };
 CG.notifIcon = function(type){
-  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg" }[type] || "bell";
+  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", request:"flag" }[type] || "bell";
+};
+/* staff/commish backlog summary from the DB (open cases, apps, unmatched EA imports, finals
+   missing box scores, active suspensions). Powers the Staff Desk "Needs attention" card and
+   mirrors the daily #league-staff briefing. */
+CG.loadStaffAttention = async function(){
+  if (!CG.sb || !CG.auth.user){ CG._staffAttention = null; return; }
+  try { var r = await CG.sb.rpc("staff_needs_attention");
+    CG._staffAttention = (r && !r.error) ? r.data : null;
+    if (/\/hub\/staffdesk/.test(location.hash) && CG.router) CG.router();
+  } catch(e){ CG._staffAttention = null; }
 };
 CG.loadNotifs = async function(){
   if (!CG.sb || !CG.auth.user){ CG._notifs = null; return; }
@@ -3230,7 +3245,7 @@ CG.actionCard = function(a, review){
     (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
   if (msgs.length){
     h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
-      var isStaff = m.profiles && m.profiles.role==="commissioner";
+      var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
       return '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+'</b>'+
         '<span class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(m.body||"")+'</span></div>';
     }).join("")+'</div>';
@@ -3376,10 +3391,47 @@ CG.hubComplaintDetail = function(){ return CG.hubComplaintsLive({}); };
    STAFF DESK — one page for the officials: cases, discipline,
    import spot-checks, and tonight's slate. Staff + commissioner.
    ================================================================ */
+/* Consolidated "Needs attention" triage card — the in-app twin of the daily #league-staff
+   briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
+   client-side (open cases, applications, suspensions) if the RPC hasn't returned yet. */
+CG.staffAttentionCard = function(){
+  var a = CG._staffAttention, lg = CG.lg;
+  /* client fallback for the counts the RPC would provide */
+  if (!a){
+    var oc = (lg._actionReqs||[]).filter(function(x){ return x.status!=="resolved" && x.status!=="denied"; }).length;
+    a = { open_cases:oc, oldest_case_hours:null, sla_breached:0,
+      pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
+      pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
+      active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
+      unmatched_ea:null, finals_missing_stats:null };
+  }
+  var n = function(v){ return (v==null?0:(v|0)); };
+  var apps = n(a.pending_staff_apps)+n(a.pending_owner_apps);
+  var items = [];
+  if (n(a.open_cases)>0) items.push({ label:(n(a.open_cases))+" open case"+(n(a.open_cases)===1?"":"s")+
+      (a.oldest_case_hours!=null?" · oldest "+(a.oldest_case_hours>=24?Math.round(a.oldest_case_hours/24)+"d":a.oldest_case_hours+"h"):""),
+      go:"#/hub/complaints", warn:n(a.sla_breached)>0 });
+  if (apps>0) items.push({ label:apps+" application"+(apps===1?"":"s")+" to review", go:"#/hub/staffdesk", warn:false });
+  if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
+  if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
+  if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
+
+  if (!items.length){
+    return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
+      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, or imports need attention right now.</span></div>';
+  }
+  return '<div class="card" style="margin-bottom:20px;border-color:var(--chrome)"><div class="card-h" style="background:var(--chrome-tint)">'+
+    '<h3>'+CG.ic("flag",15)+' Needs attention</h3>'+
+    (n(a.sla_breached)>0?'<span class="chip chip-loss">'+n(a.sla_breached)+' past 48h</span>':'<span class="chip chip-warn">'+items.length+' item'+(items.length===1?"":"s")+'</span>')+'</div>'+
+    '<div class="card-b" style="display:flex;flex-wrap:wrap;gap:8px">'+items.map(function(it){
+      return '<button class="chip '+(it.warn?"chip-loss":"chip-chrome")+'" style="cursor:pointer;padding:8px 12px" data-go="'+it.go+'">'+esc(it.label)+' →</button>';
+    }).join("")+'</div></div>';
+};
 CG.hubStaffDesk = function(){
   var lg = CG.lg;
   var reqs = (lg._actionReqs||[]);
-  var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="closed"; });
+  /* terminal statuses are 'resolved' and 'denied' — a denied case is closed, not open */
+  var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
   var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
   var now = Date.now();
   var finals = (lg.allResults||[]).slice().sort(function(a,b){ return b.at-a.at; });
@@ -3389,6 +3441,8 @@ CG.hubStaffDesk = function(){
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">League staff · officials’ tools</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Staff Desk</h1>'+
     '<p class="lede" style="margin-top:8px">The case queue, active discipline, and the imports worth a second look — everything an official touches, in one place.</p></div>';
+
+  h += CG.staffAttentionCard();
 
   h += '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-bottom:20px">'+
     '<div class="kpi'+(open.length?" alert":"")+'" style="cursor:pointer" data-go="#/hub/complaints"><b class="num">'+open.length+'</b><span>open cases</span></div>'+
@@ -3662,11 +3716,21 @@ CG.AUTOMATIONS = [
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
   { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
+  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #league-staff — suppressed when nothing needs attention.", rpc:"staff_briefing" },
   { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
   { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
+  /* #league-staff channel configuration — turns on the staff notifications */
+  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>#league-staff channel</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
+    '<div class="card-b">'+
+    '<p class="caption" style="margin-bottom:12px;max-width:74ch">Paste a Discord webhook for your <b>#league-staff</b> channel to switch on staff notifications — new staff, applications, cases, discipline, forfeits, and a daily backlog briefing. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Leave the role ID blank unless you want urgent pings to @mention a staff role (right-click the role → Copy ID, with Developer Mode on).</p>'+
+    '<label class="fld"><span>#league-staff webhook URL</span><input id="staffWh" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Staff role ID to ping (optional)</span><input id="staffRole" placeholder="e.g. 1524970…" autocomplete="off"></label>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-chrome btn-sm" id="staffChanSave">Save staff channel</button>'+
+    '<button class="btn btn-ghost btn-sm" id="staffChanTest">Send test message</button></div>'+
+    '<p class="caption" style="margin-top:10px">For your privacy the saved webhook is never shown back here — re-paste to change it. Clearing the field and saving turns the notifications off.</p></div></div>';
   h += '<div class="card">'+CG.AUTOMATIONS.map(function(a,i){
     return '<div class="card-b" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
       '<div style="flex:1;min-width:220px"><b style="font-family:var(--f-disp)">'+esc(a.name)+'</b>'+
@@ -3679,6 +3743,41 @@ CG.admAutomationsLive = function(){
   return h;
 };
 CG.AFTER._admAutomations = function(){
+  /* #league-staff channel config */
+  var chSt = document.getElementById("staffChanSt");
+  if (chSt){
+    /* refresh only the status chip — NOT the whole AFTER binder (re-running it would
+       re-addEventListener on the same, un-re-rendered buttons and stack duplicate handlers) */
+    function refreshChip(){
+      CG.sb.rpc("staff_channel_status").then(function(r){
+        var d = (r&&!r.error&&r.data)||{};
+        chSt.textContent = d.configured ? (d.has_role?"Connected · pings on":"Connected") : "Not set up";
+        chSt.className = "chip "+(d.configured?"chip-win":"chip-warn");
+      });
+    }
+    refreshChip();
+    var saveBtn = document.getElementById("staffChanSave");
+    if (saveBtn) saveBtn.addEventListener("click", function(){
+      var wh=(document.getElementById("staffWh").value||"").trim(), role=(document.getElementById("staffRole").value||"").trim();
+      var btn=this; btn.disabled=true;
+      CG.sb.rpc("set_staff_channel",{ p_webhook:wh, p_role_id:role }).then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
+        CG.toast(wh?"Staff channel saved":"Staff notifications turned off","ok");
+        document.getElementById("staffWh").value=""; document.getElementById("staffRole").value="";
+        refreshChip();
+      });
+    });
+    var testBtn = document.getElementById("staffChanTest");
+    if (testBtn) testBtn.addEventListener("click", function(){
+      var btn=this; btn.disabled=true; btn.textContent="Sending…";
+      CG.sb.rpc("staff_channel_test").then(function(r){
+        btn.disabled=false; btn.textContent="Send test message";
+        if(r.error){ CG.toast(r.error.message||"Test failed","err"); return; }
+        CG.toast(r.data==="sent"?"Test posted to #league-staff":"Set up the webhook first",r.data==="sent"?"ok":"err");
+      });
+    });
+  }
   /* heartbeats + per-run results: each function stamps rl_<key> every run and rl_<key>_result
      with {ok, errCount, lastError}. A run that happened but FAILED shows red, not green. */
   CG.sb.from("app_config").select("key,value").like("key","rl_%").then(function(r){
