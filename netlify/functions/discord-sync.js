@@ -275,8 +275,16 @@ export default async (req) => {
         if (Object.keys(patch).length) await dApi("PATCH", `/guilds/${GUILD}/roles/${t.discord_role_id}`, patch);
       }
       const wantSlug = slug(t.name);
-      if (t.discord_channel_id && chanNameById[t.discord_channel_id] && chanNameById[t.discord_channel_id] !== wantSlug) {
-        await dApi("PATCH", `/channels/${t.discord_channel_id}`, { name: wantSlug }); sum.chanRenamed++;
+      // The topic names the club, so a rename has to carry into it too. Syncing only the name is how
+      // every team room ended up advertising a club that no longer exists ("Private room for the
+      // Aurora Blades" sitting on #dallas-stars). Name and topic go in one PATCH — same rate limit.
+      const wantTopic = `Private room for the ${t.name} — roster, lineups, and team talk. Visible only to the club and staff.`;
+      if (t.discord_channel_id && chanNameById[t.discord_channel_id]) {
+        const cur = guildChannels.find((c) => c.id === t.discord_channel_id);
+        const cpatch = {};
+        if (chanNameById[t.discord_channel_id] !== wantSlug) { cpatch.name = wantSlug; sum.chanRenamed++; }
+        if (cur && (cur.topic || "") !== wantTopic) { cpatch.topic = wantTopic; sum.chanRetopic = (sum.chanRetopic || 0) + 1; }
+        if (Object.keys(cpatch).length) await dApi("PATCH", `/channels/${t.discord_channel_id}`, cpatch);
       }
     } catch (e) { sum.errors.push({ team: t.name, error: String(e.message || e) }); }
   }
