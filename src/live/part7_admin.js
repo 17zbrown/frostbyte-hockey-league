@@ -696,8 +696,8 @@ CG.AFTER._admRulebook = function(){
 CG.AUTOMATIONS = [
   { key:"discordSync", icon:"users", name:"Discord roster & role sync", every:"Every 5 minutes", lastMin:3,
     desc:"Gamertags follow Discord display names automatically. Owner / GM / AGM, club, position, Free Agent, and Commissioner roles are reconciled on every pass — and banned accounts are removed from the server and kept out." },
-  { key:"discordJoin", icon:"out", name:"Sign-in auto-join", every:"On every sign-in", lastMin:12, tryIt:"#/signin",
-    desc:"Signing in with Discord doubles as a server invite: if the account isn’t in the Chel Gaming Discord, the league bot adds it automatically (guilds.join), flags the profile in-guild, and signs them into the site — one step, no invite links." },
+  { key:"discordJoin", icon:"msg", name:"First-login Discord invite", every:"On first sign-in", lastMin:12, tryIt:"#/signin",
+    desc:"When a member signs in for the first time, the site drops an in-site notification with a one-tap invite to the Chel Gaming Discord. (Silent auto-add was retired — Discord blocks adding members who haven’t granted the join permission.)" },
   { key:"welcomeBot", icon:"msg", name:"Welcome bot", every:"Every 5 minutes", lastMin:3,
     desc:"New Discord members get greeted once in #welcome — catches invite-link joins and site sign-ins alike, with a burst guard so a raid never triggers a mass-ping." },
   { key:"webhooks", icon:"arrow", name:"Discord feeds", every:"On publish", lastMin:64,

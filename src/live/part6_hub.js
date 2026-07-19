@@ -1191,7 +1191,7 @@ CG.hubSettings = function(){
       return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft)"><span style="flex:1;font-size:14px">'+pv[0]+'</span>'+
         '<button class="toggle'+(on?" on":"")+'" data-pref="'+pv[1]+'" role="switch" aria-checked="'+on+'" aria-label="'+pv[0]+'"></button></div>';
     }).join("")+
-    '<p class="caption" style="margin-top:10px">The league does not collect your email address. Availability answers are visible only to your club’s management and league staff.</p></div></div>'+
+    '<p class="caption" style="margin-top:10px">The league never uses or displays your email. Availability answers are visible only to your club’s management and league staff.</p></div></div>'+
     '<div class="card"><div class="card-h"><h3>Demo seat</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Signed in as <b>'+esc(p.who)+'</b>. Switch seats from the yellow strip up top, or:</p>'+
     '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/signin">'+CG.ic("out",14)+'Sign out</a></div></div></div></div>';
 };

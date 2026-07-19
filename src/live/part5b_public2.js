@@ -439,7 +439,7 @@ CG.ROUTES.signin = function(){
     '<h1 class="h-page" style="margin-top:10px">Sign in with Discord</h1>'+
     '<p class="lede" style="margin:12px auto 0">Your Discord account is your league account. Not in the Chel Gaming server yet? Signing in <b>adds you to our Discord automatically</b> and signs you into the site in one step.</p>'+
     '<button class="btn btn-lg" id="dcSignIn" style="margin-top:22px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
-    '<p class="caption" style="margin-top:12px">Scopes: identify · guilds.join — exactly what the live site requests. The prototype simulates the OAuth handshake.</p></div>'+
+    '<p class="caption" style="margin-top:12px">Scope: identify — exactly what the live site requests. The prototype simulates the OAuth handshake.</p></div>'+
     '<div style="display:flex;align-items:center;gap:14px;margin:26px 0"><span style="flex:1;height:1px;background:var(--line)"></span>'+
     '<span class="eyebrow">or jump straight to a demo seat</span><span style="flex:1;height:1px;background:var(--line)"></span></div>'+
     '<div class="grid g2">'+
@@ -477,7 +477,6 @@ CG.AFTER.signin = function(){
           '<span class="caption" style="display:block">wants to access your Discord account</span></div></div>'+
         '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">'+
           '<div style="display:flex;gap:9px;padding:5px 0;font-size:13.5px">'+CG.ic("check",15)+'Access your username and avatar <span class="mono caption" style="margin-left:auto">identify</span></div>'+
-          '<div style="display:flex;gap:9px;padding:5px 0;font-size:13.5px">'+CG.ic("check",15)+'Join servers for you <span class="mono caption" style="margin-left:auto">guilds.join</span></div>'+
         '</div></div>'+
       '<div id="dcSteps" style="margin-top:14px"></div>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn" id="dcAuth" style="background:#5865F2;color:#fff">Authorize</button>');
@@ -492,8 +491,8 @@ CG.AFTER.signin = function(){
           l1.innerHTML = '<b style="font-family:var(--f-disp)">Already in the server ✓</b> — welcome back.';
         } else {
           l1.className = "note grn";
-          l1.innerHTML = '<b style="font-family:var(--f-disp)">You weren’t in the Chel Gaming Discord — we added you automatically ✓</b>'+
-            '<p class="small" style="margin-top:6px;color:var(--steel)">Same as the live site: your OAuth token carries guilds.join, so the league bot adds you to the server, flags your profile as in-guild, and the welcome bot greets you in #welcome within 5 minutes.</p>';
+          l1.innerHTML = '<b style="font-family:var(--f-disp)">You’re not in the Chel Gaming Discord yet ✓</b>'+
+            '<p class="small" style="margin-top:6px;color:var(--steel)">Same as the live site: you get an in-site notification with a one-tap invite to the server. Once you join, the welcome bot greets you in #welcome within 5 minutes.</p>';
           var prefs = CG.store.get("prefs"); prefs.dcMember = true; CG.store.set("prefs", prefs);
         }
         setTimeout(function(){
@@ -506,7 +505,7 @@ CG.AFTER.signin = function(){
               var r = this.getAttribute("data-dc-seat");
               CG.closeOverlay();
               CG.setRole(r);
-              if (!wasMember) CG.pushNotif("msg","Welcome to the Chel Gaming Discord","You were added during sign-in — say hey in #welcome.","#/hub/notifications");
+              if (!wasMember) CG.pushNotif("msg","Join the Chel Gaming Discord","Tap to open the server invite — it’s where game nights run.","#/hub/notifications");
               CG.renderChrome();
               location.hash = r==="commish" ? "#/admin" : "#/hub";
             });

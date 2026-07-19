@@ -896,7 +896,10 @@ document.addEventListener("click", function(e){
     var r = CG.store.get("read"); r[nf.getAttribute("data-notif")]=true; CG.store.set("read", r);
     var route = nf.getAttribute("data-route");
     CG.closeOverlay(); CG.renderChrome();
-    if (route) location.hash = route;
+    if (route){
+      if (/^https?:\/\//.test(route)) window.open(route, "_blank", "noopener");  /* e.g. the Discord invite */
+      else location.hash = route;
+    }
     return;
   }
   var go = e.target.closest("[data-go]");

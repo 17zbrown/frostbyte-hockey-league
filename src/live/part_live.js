@@ -13,19 +13,6 @@ CG.sb = (window.supabase && window.supabase.createClient)
   ? window.supabase.createClient(CG.SB_URL, CG.SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } })
   : null;
 
-/* The Discord OAuth access token (provider_token) lives on the session ONLY on the fresh
-   sign-in event — Supabase does not persist it, and it's gone by the time initAuth's own
-   listener registers. So we hook onAuthStateChange right here at client creation, before
-   Supabase emits SIGNED_IN, to catch it and drive the auto-join to the league Discord.
-   CG.ensureInGuild is defined later in this file; the callback is late-bound so that's fine,
-   and it de-dupes, so the applySession path calling it again is a harmless no-op. */
-if (CG.sb && CG.sb.auth && CG.sb.auth.onAuthStateChange){
-  CG.sb.auth.onAuthStateChange(function(_evt, sess){
-    var tok = sess && sess.provider_token;
-    if (tok && CG.ensureInGuild) CG.ensureInGuild(tok);
-  });
-}
-
 /* real wall clock (the prototype used a frozen demo clock) */
 CG._loadEpoch = Date.now();
 CG.now = function(){ return Date.now(); };
@@ -548,7 +535,6 @@ CG.computeRole = function(profile){
 };
 CG.applySession = async function(session){
   CG.auth.user = session ? session.user : null;
-  if (session && session.provider_token) CG.ensureInGuild(session.provider_token);
   if (CG.auth.user){
     try { var r = await CG.sb.from("profiles").select("*").eq("id", CG.auth.user.id).maybeSingle(); CG.auth.profile = r.data || null; }
     catch(e){ CG.auth.profile = null; }
@@ -705,11 +691,14 @@ CG.notifRoute = function(view, param){
     case "preseason":    return "#/admin/preseason";
     case "users":        return "#/admin/users";
     case "rulebook":     return "#/rulebook";
+    /* the invite is an external URL; the notification click handler opens http(s) routes in a
+       new tab. Fall back to the register page (which also carries a Join button) if unset. */
+    case "discord":      return (CG._siteCfg && CG._siteCfg.discord_invite) || "#/register";
     default:             return "#/hub";
   }
 };
 CG.notifIcon = function(type){
-  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid" }[type] || "bell";
+  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg" }[type] || "bell";
 };
 CG.loadNotifs = async function(){
   if (!CG.sb || !CG.auth.user){ CG._notifs = null; return; }
@@ -917,24 +906,14 @@ CG.signIn = function(){
   try { if (location.hash && location.hash.indexOf("#/")===0) localStorage.setItem("cg_return", JSON.stringify({ h:location.hash, at:Date.now() })); } catch(e){}
   /* match the current site's redirect exactly (origin only) so it stays within
      Supabase's existing Discord redirect allowlist */
-  /* New users grant guilds.join at their normal first-time authorize screen, so the bot
-     auto-adds them silently — no extra routing. We deliberately do NOT force prompt=consent
-     (it would re-show the authorize screen on EVERY login). The tradeoff: members who
-     authorized the app before guilds.join existed keep their old scopes and won't be
-     auto-joined; they use the one-click "Join the server" invite on the register page. */
-  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify guilds.join" } });
+  /* We only need identity to sign in. We do NOT request guilds.join: silently adding people
+     to the server proved unreliable (Discord rejects tokens that predate the scope), so on
+     first login we instead drop an in-site notification with the server invite (see
+     handle_new_user). Discord still forces the email scope on its side — see the register
+     page copy — but the site never uses it. */
+  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } });
 };
 CG.signOut = async function(){ if (CG.sb && CG.sb.auth){ try { await CG.sb.auth.signOut(); } catch(e){} } location.hash = "#/home"; };
-/* login doubles as a Discord server invite (provider_token present only on fresh OAuth) */
-CG.ensureInGuild = function(token){
-  if (!token || CG._guildTok===token) return; CG._guildTok = token;
-  try {
-    fetch("/api/discord-join", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ access_token: token }) })
-      .then(function(r){ return r.json().catch(function(){ return {}; }); })
-      .then(function(j){ if (j && j.inGuild && CG.auth.profile) CG.auth.profile.in_guild = true; })
-      .catch(function(){});
-  } catch(e){}
-};
 CG.enforceBan = function(){
   var banned = CG.auth.profile && CG.auth.profile.banned;
   var ov = document.getElementById("banScreen");
@@ -963,9 +942,9 @@ CG.ROUTES.signin = function(){
   return '<section class="sec"><div class="shell" style="max-width:640px;text-align:center">'+
     '<span class="eyebrow chr">One account for everything</span>'+
     '<h1 class="h-page" style="margin-top:10px">Sign in with Discord</h1>'+
-    '<p class="lede" style="margin:12px auto 22px">Your Discord account is your league account. Not in the Chel Gaming server yet? Signing in adds you automatically and signs you into the site in one step.</p>'+
+    '<p class="lede" style="margin:12px auto 22px">Your Discord account is your league account — sign in once and you’re in. Not in the Chel Gaming server yet? We’ll send you the invite right after you sign in.</p>'+
     '<button class="btn btn-lg" id="dcSignIn" style="background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
-    '<p class="caption" style="margin-top:12px">Scopes requested: identify · guilds.join.</p></div></section>';
+    '<p class="caption" style="margin-top:12px">Signs you in with your Discord identity. Discord also shares your email — the league never uses or displays it.</p></div></section>';
 };
 CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); }); };
 
@@ -1020,7 +999,7 @@ CG.ROUTES.register = function(){
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
-    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — signing in adds you automatically. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
 };
@@ -1056,10 +1035,10 @@ CG.ROUTES.legal = function(){
       "The league is not affiliated with EA Sports, the NHL, Discord, or Twitch. Club names and marks belong to their owners."
     ])+
     sec("What we store", [
-      "<b>From Discord (when you sign in):</b> your Discord id, username, display name, and avatar — no email address is requested or stored. Signing in also joins you to the league's Discord server — that's where games are organized.",
+      "<b>From Discord (when you sign in):</b> your Discord id, username, display name, and avatar. Discord also passes your email to our sign-in provider, but the league never uses or displays it. If you're not in the Chel Gaming server yet, you'll get an in-site notification with the invite.",
       "<b>From you:</b> your EA ID and platform, season registrations, weekly availability, applications, and anything you write on the site (messages, complaints, trade notes).",
       "<b>From play:</b> scores and full box-score statistics import automatically from the EA NHL match record after every league game. These form the league's permanent competitive record.",
-      "The league does not collect or store your email address. Availability is visible only to your club's management and league staff. Complaint evidence is private to the league office."
+      "Discord shares your email with our sign-in provider, but the league never uses or displays it. Availability is visible only to your club's management and league staff. Complaint evidence is private to the league office."
     ])+
     sec("Where it lives", [
       "The site runs on Netlify, data lives in Supabase (Postgres), game-night automation posts to the league's Discord server, and stream status is checked against Twitch. Each processor sees only what it needs to run its part.",
@@ -4750,7 +4729,7 @@ CG.hubSettings = function(){
     '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
     '<button class="btn btn-ink" id="sSaveLive">Save profile</button></div></div>'+
     '<div class="stack"><div class="card"><div class="card-h"><h3>Your data</h3></div><div class="card-b">'+
-    '<p class="small" style="color:var(--steel)">The league stores your Discord identity (id, username, avatar), your EA ID and platform, your registrations and availability, and the stats you generate in league games. No email address is collected or stored; availability is visible only to your club’s management and league staff.</p>'+
+    '<p class="small" style="color:var(--steel)">The league stores your Discord identity (id, username, avatar), your EA ID and platform, your registrations and availability, and the stats you generate in league games. Discord passes your email to our sign-in provider, but the league never uses or displays it; availability is visible only to your club’s management and league staff.</p>'+
     '<p class="small" style="color:var(--steel);margin-top:10px">Read the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a>. To delete your account and data, message any commissioner from <a href="#/hub/messages" style="font-weight:700;border-bottom:2px solid var(--chrome)">Messages</a> — deletion covers everything except the league’s permanent game record (box scores keep your gamertag).</p>'+
     '</div></div>'+
     '<div class="card"><div class="card-h"><h3>Session</h3></div><div class="card-b"><p class="small" style="color:var(--steel)">Signed in with Discord as <b>'+esc(p.gamertag||p.display_name||"—")+'</b>.</p>'+
