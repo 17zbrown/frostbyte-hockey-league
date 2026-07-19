@@ -96,7 +96,7 @@ export const handler = async (event) => {
     return json({ diagnostic: d });
   }
   if (event.httpMethod !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!BOT || !GUILD) { await logResult({ ok: false, reason: "not-configured" }); return json({ skipped: "Discord bot not configured" }, 200); }
+  if (!BOT || !GUILD) { await logResult({ ok: false, lastError: "Discord bot not configured (DISCORD_BOT_TOKEN / DISCORD_GUILD_ID missing)" }); return json({ skipped: "Discord bot not configured" }, 200); }
 
   let token;
   try { token = (JSON.parse(event.body || "{}") || {}).access_token; }
@@ -107,7 +107,9 @@ export const handler = async (event) => {
   const me = await fetch("https://discord.com/api/v10/users/@me", {
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
-  if (!me.ok) { await logResult({ ok: false, stage: "verify", status: me.status }); return json({ error: "Invalid Discord token" }, 401); }
+  // a bad/expired client token is not an automation failure (the function correctly rejected
+  // it) — record it for diagnostics but keep ok:true so the watchdog stays quiet
+  if (!me.ok) { await logResult({ ok: true, benign: "bad-or-expired-token", stage: "verify", status: me.status }); return json({ error: "Invalid Discord token" }, 401); }
   const user = await me.json();
 
   // Add to the guild (201 = added, 204 = already a member).
@@ -119,8 +121,20 @@ export const handler = async (event) => {
   if (put.status === 201) { await setInGuild(user.id, true, user.username); await logResult({ ok: true, result: "joined", user: user.id }); return json({ joined: true, inGuild: true, user: user.id }); }
   if (put.status === 204) { await setInGuild(user.id, true, user.username); await logResult({ ok: true, result: "already-member", user: user.id }); return json({ alreadyMember: true, inGuild: true, user: user.id }); }
   const detail = (await put.text()).slice(0, 300);
-  // A 403 here almost always means the bot lacks CREATE_INSTANT_INVITE — the exact
-  // permission Discord requires to add a member. The diag endpoint confirms it.
-  await logResult({ ok: false, stage: "put", status: put.status, detail, user: user.id });
-  return json({ error: "Join failed", inGuild: false, status: put.status, detail, hint: put.status === 403 ? "Bot likely lacks CREATE_INSTANT_INVITE" : undefined }, 200);
+
+  // 403 / code 50025 = THIS user's token lacks guilds.join (they authorized before the
+  // scope existed). That's expected and benign — they use the server invite instead — so it
+  // must NOT page the commissioners. Only escalate (ok:false → watchdog) if the BOT itself
+  // can no longer add members. Everything else unexpected is a genuine alert.
+  if (put.status === 403 && /"code":\s*50025/.test(detail)) {
+    const d = await botDiag();
+    if (d.canAddMembers) {
+      await logResult({ ok: true, benign: "user-token-missing-guilds.join", user: user.id });
+    } else {
+      await logResult({ ok: false, lastError: "Bot can no longer add members: " + JSON.stringify({ botInGuild: d.botInGuild, hasCreateInstantInvite: d.hasCreateInstantInvite, guildOk: d.guildOk }), user: user.id });
+    }
+    return json({ error: "Join failed", inGuild: false, status: 403, detail, hint: "User authorized before guilds.join existed — use the server invite" }, 200);
+  }
+  await logResult({ ok: false, lastError: "PUT " + put.status + " — " + detail, user: user.id });
+  return json({ error: "Join failed", inGuild: false, status: put.status, detail }, 200);
 };
