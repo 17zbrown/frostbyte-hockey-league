@@ -6,8 +6,14 @@
 // The access_token must carry the `guilds.join` scope (requested at sign-in). We
 // verify it by calling Discord /users/@me, then add THAT user (never a client-
 // supplied id) via PUT /guilds/{guild}/members/{user} with the bot token.
-//   Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID
-// Node 18+ runtime (global fetch, no dependencies).
+//   Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+//
+// GET (or ?diag=1) returns a read-only self-check: whether the bot is in the guild
+// and, crucially, whether it holds CREATE_INSTANT_INVITE — the permission Discord
+// REQUIRES to add a member — plus whether Membership Screening would hold new
+// members as "pending". No secrets are returned. Every real join also records its
+// outcome to app_config.rl_discord-join_result so failures are diagnosable.
+// Node 18+ runtime (global fetch, BigInt, no dependencies).
 
 const BOT = process.env.DISCORD_BOT_TOKEN;
 const GUILD = process.env.DISCORD_GUILD_ID;
@@ -15,6 +21,7 @@ const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 const json = (o, s = 200) => ({ statusCode: s, headers: { "content-type": "application/json" }, body: JSON.stringify(o) });
+const dh = { Authorization: `Bot ${BOT}`, "User-Agent": UA };
 
 // Flip profiles.in_guild for the member with this Discord id (so registration can require it),
 // and record their Discord @handle so the commissioner directory can show it.
@@ -31,9 +38,58 @@ async function setInGuild(discordId, value, username) {
   } catch (e) { /* best effort — the 5-min sync will also set it */ }
 }
 
+// Record the last outcome so we can see WHY joins succeed or fail (same rl_*_result
+// pattern the other automations use; surfaced in the Control Center Automations panel).
+async function logResult(obj) {
+  if (!SB_URL || !SB_KEY) return;
+  try {
+    await fetch(`${SB_URL}/rest/v1/app_config?on_conflict=key`, {
+      method: "POST",
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ key: "rl_discord-join_result", value: JSON.stringify(Object.assign({ at: new Date().toISOString() }, obj)) }),
+    });
+  } catch (e) { /* best effort */ }
+}
+
+// Read-only self-check: is the bot in the guild, and does it hold CREATE_INSTANT_INVITE?
+async function botDiag() {
+  if (!BOT || !GUILD) return { configured: false, reason: "DISCORD_BOT_TOKEN or DISCORD_GUILD_ID not set" };
+  const out = { configured: true, guildId: GUILD };
+  try {
+    const g = await fetch(`https://discord.com/api/v10/guilds/${GUILD}`, { headers: dh });
+    if (!g.ok) { out.guildOk = false; out.guildStatus = g.status; out.detail = (await g.text()).slice(0, 200); return out; }
+    const guild = await g.json();
+    out.guildOk = true; out.guildName = guild.name;
+    out.membershipScreening = (guild.features || []).includes("MEMBER_VERIFICATION_GATE_ENABLED");
+    out.community = (guild.features || []).includes("COMMUNITY");
+
+    const meRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD}/members/@me`, { headers: dh });
+    out.botInGuild = meRes.ok;
+    const me = meRes.ok ? await meRes.json() : null;
+    const rolesRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD}/roles`, { headers: dh });
+    const roles = rolesRes.ok ? await rolesRes.json() : [];
+    const rolePerms = {}; roles.forEach((r) => { try { rolePerms[r.id] = BigInt(r.permissions); } catch (e) {} });
+
+    // computed permissions = @everyone (role id === guild id) OR'd with each of the bot's roles
+    let perms = rolePerms[guild.id] || 0n;
+    ((me && me.roles) || []).forEach((rid) => { if (rolePerms[rid] != null) perms |= rolePerms[rid]; });
+    const ADMIN = 1n << 3n, CREATE_INSTANT_INVITE = 1n << 0n;
+    out.isAdmin = (perms & ADMIN) === ADMIN;
+    out.hasCreateInstantInvite = out.isAdmin || (perms & CREATE_INSTANT_INVITE) === CREATE_INSTANT_INVITE;
+    out.canAddMembers = out.hasCreateInstantInvite; // Discord requires exactly this to PUT a member
+  } catch (e) { out.error = String(e).slice(0, 200); }
+  return out;
+}
+
 export const handler = async (event) => {
+  const q = event.queryStringParameters || {};
+  if (event.httpMethod === "GET" || q.diag === "1") {
+    const d = await botDiag();
+    await logResult({ kind: "diag", ok: !!d.canAddMembers, diag: d });
+    return json({ diagnostic: d });
+  }
   if (event.httpMethod !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!BOT || !GUILD) return json({ skipped: "Discord bot not configured" }, 200);
+  if (!BOT || !GUILD) { await logResult({ ok: false, reason: "not-configured" }); return json({ skipped: "Discord bot not configured" }, 200); }
 
   let token;
   try { token = (JSON.parse(event.body || "{}") || {}).access_token; }
@@ -44,7 +100,7 @@ export const handler = async (event) => {
   const me = await fetch("https://discord.com/api/v10/users/@me", {
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
-  if (!me.ok) return json({ error: "Invalid Discord token" }, 401);
+  if (!me.ok) { await logResult({ ok: false, stage: "verify", status: me.status }); return json({ error: "Invalid Discord token" }, 401); }
   const user = await me.json();
 
   // Add to the guild (201 = added, 204 = already a member).
@@ -53,8 +109,11 @@ export const handler = async (event) => {
     headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
     body: JSON.stringify({ access_token: token }),
   });
-  if (put.status === 201) { await setInGuild(user.id, true, user.username); return json({ joined: true, inGuild: true, user: user.id }); }
-  if (put.status === 204) { await setInGuild(user.id, true, user.username); return json({ alreadyMember: true, inGuild: true, user: user.id }); }
-  const detail = (await put.text()).slice(0, 200);
-  return json({ error: "Join failed", inGuild: false, status: put.status, detail }, 200);
+  if (put.status === 201) { await setInGuild(user.id, true, user.username); await logResult({ ok: true, result: "joined", user: user.id }); return json({ joined: true, inGuild: true, user: user.id }); }
+  if (put.status === 204) { await setInGuild(user.id, true, user.username); await logResult({ ok: true, result: "already-member", user: user.id }); return json({ alreadyMember: true, inGuild: true, user: user.id }); }
+  const detail = (await put.text()).slice(0, 300);
+  // A 403 here almost always means the bot lacks CREATE_INSTANT_INVITE — the exact
+  // permission Discord requires to add a member. The diag endpoint confirms it.
+  await logResult({ ok: false, stage: "put", status: put.status, detail, user: user.id });
+  return json({ error: "Join failed", inGuild: false, status: put.status, detail, hint: put.status === 403 ? "Bot likely lacks CREATE_INSTANT_INVITE" : undefined }, 200);
 };

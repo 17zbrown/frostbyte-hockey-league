@@ -13,6 +13,19 @@ CG.sb = (window.supabase && window.supabase.createClient)
   ? window.supabase.createClient(CG.SB_URL, CG.SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } })
   : null;
 
+/* The Discord OAuth access token (provider_token) lives on the session ONLY on the fresh
+   sign-in event — Supabase does not persist it, and it's gone by the time initAuth's own
+   listener registers. So we hook onAuthStateChange right here at client creation, before
+   Supabase emits SIGNED_IN, to catch it and drive the auto-join to the league Discord.
+   CG.ensureInGuild is defined later in this file; the callback is late-bound so that's fine,
+   and it de-dupes, so the applySession path calling it again is a harmless no-op. */
+if (CG.sb && CG.sb.auth && CG.sb.auth.onAuthStateChange){
+  CG.sb.auth.onAuthStateChange(function(_evt, sess){
+    var tok = sess && sess.provider_token;
+    if (tok && CG.ensureInGuild) CG.ensureInGuild(tok);
+  });
+}
+
 /* real wall clock (the prototype used a frozen demo clock) */
 CG._loadEpoch = Date.now();
 CG.now = function(){ return Date.now(); };
