@@ -32,7 +32,15 @@ CG.now = function(){ return Date.parse(CG.DEMO_NOW_ISO) + (Date.now() - CG._load
 CG.fmtDay  = function(ts){ return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",month:"short",day:"numeric"}).format(ts); };
 CG.fmtTime = function(ts){ return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"}).format(ts)+" ET"; };
 CG.fmtFull = function(ts){ return CG.fmtDay(ts)+" · "+CG.fmtTime(ts); };
-CG.fmtDate = function(iso){ return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",year:"numeric"}).format(Date.parse(iso)); };
+/* A date-only string ("2026-07-19") is a calendar date, not an instant: Date.parse reads it as
+   UTC midnight, which renders as the PREVIOUS day in ET. Format those verbatim; only real
+   timestamps get converted to league time. */
+CG.fmtDate = function(iso){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||""));
+  if (m) return new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric"})
+    .format(new Date(+m[1], +m[2]-1, +m[3]));
+  return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",year:"numeric"}).format(Date.parse(iso));
+};
 
 /* ---------- league boot (sim + user-entered results overlay) ---------- */
 CG.boot = function(){
@@ -619,7 +627,7 @@ CG.renderChrome = function(){
   /* footer */
   $("#sitefoot").innerHTML = '<div class="shell">'+
     '<div class="ft-top">'+
-      '<div>'+CG.leagueMark(40)+'<p style="margin-top:14px;max-width:30ch;font-size:13.5px;color:var(--on-ink-dim)">The competitive home of 6v6 EA Sports NHL 26. Run by players, for players — since Season 1.</p>'+
+      '<div>'+CG.leagueMark(40)+'<p style="margin-top:14px;max-width:30ch;font-size:13.5px;color:var(--on-ink-dim)">The competitive home of 6v6 EA Sports NHL 27. Run by players, for players — since Season 1.</p>'+
       (CG.LIVE_MODE?'</div>':'<div style="margin-top:16px"><span class="protopill"><span class="live-dot"></span>Prototype — demo data, not the live site</span></div></div>')+
       '<div><h4>League</h4><a class="fl" href="#/schedule">Schedule</a><a class="fl" href="#/standings">Standings</a><a class="fl" href="#/rankings">Power Rankings</a><a class="fl" href="#/awards">Awards</a></div>'+
       '<div><h4>Clubs & Players</h4><a class="fl" href="#/teams">All Clubs</a><a class="fl" href="#/players">Player Directory</a><a class="fl" href="#/stats">Stat Central</a></div>'+
