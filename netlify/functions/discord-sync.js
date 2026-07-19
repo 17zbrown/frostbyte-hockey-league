@@ -73,8 +73,11 @@ export default async (req) => {
       const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
       const office = roles.filter((r) => ["commissioner", "staff"].includes(r.name.toLowerCase()));
       const cfg = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
-      const ids = String((cfg[0] && cfg[0].value) || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const configured = String((cfg[0] && cfg[0].value) || "").split(",").map((s) => s.trim()).filter(Boolean);
       const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+      // same target set the sync enforces: registered ids + everything under a Staff category
+      const staffCatIds = chans.filter((c) => c.type === 4 && /^staff\b/i.test(c.name || "")).map((c) => c.id);
+      const ids = [...new Set([...configured, ...chans.filter((c) => c.type === 0 && staffCatIds.includes(c.parent_id)).map((c) => c.id)])];
       const report = ids.map((cid) => {
         const c = chans.find((x) => x.id === cid);
         if (!c) return { channel: null, configuredId: cid, exists: false };
@@ -87,8 +90,11 @@ export default async (req) => {
             .map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
         };
       });
-      return new Response(JSON.stringify({ officeRoles: office.map((r) => r.name), staffChannels: report }, null, 2),
-        { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({
+        officeRoles: office.map((r) => r.name),
+        staffCategories: chans.filter((c) => staffCatIds.includes(c.id)).map((c) => c.name),
+        staffChannels: report,
+      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
   } catch (e) { return new Response(JSON.stringify({ diagError: String(e.message || e) }), { status: 500, headers: { "content-type": "application/json" } }); }
 
@@ -188,8 +194,14 @@ export default async (req) => {
   try {
     if (staffRoleIds.length) {
       const cfgRows = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
-      const staffChanIds = String((cfgRows[0] && cfgRows[0].value) || "")
+      const configured = String((cfgRows[0] && cfgRows[0].value) || "")
         .split(",").map((s) => s.trim()).filter(Boolean);
+      // Also sweep every channel sitting under a Staff category. A commissioner adding a new staff
+      // room months from now should not have to remember to register its id here — if it lives in
+      // the staff category it is staff-only, and this pass makes it so within five minutes.
+      const staffCatIds = guildChannels.filter((c) => c.type === 4 && /^staff\b/i.test(c.name || "")).map((c) => c.id);
+      const inCategory = guildChannels.filter((c) => c.type === 0 && staffCatIds.includes(c.parent_id)).map((c) => c.id);
+      const staffChanIds = [...new Set([...configured, ...inCategory])];
       for (const cid of staffChanIds) {
         sum.staffChecked++;
         const chan = guildChannels.find((c) => c.id === cid);
