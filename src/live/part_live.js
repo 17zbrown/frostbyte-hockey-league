@@ -917,12 +917,12 @@ CG.signIn = function(){
   try { if (location.hash && location.hash.indexOf("#/")===0) localStorage.setItem("cg_return", JSON.stringify({ h:location.hash, at:Date.now() })); } catch(e){}
   /* match the current site's redirect exactly (origin only) so it stays within
      Supabase's existing Discord redirect allowlist */
-  /* prompt=consent forces Discord to re-show the authorize screen every sign-in and
-     re-grant EVERY requested scope. Without it, a user who authorized the app before
-     guilds.join existed gets a token with only their old scopes, so the auto-join PUT
-     fails with 403 / code 50025 "Invalid OAuth2 access token". This guarantees the
-     token always carries guilds.join. (Costs one "Authorize" click per login.) */
-  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify guilds.join", queryParams:{ prompt:"consent" } } });
+  /* New users grant guilds.join at their normal first-time authorize screen, so the bot
+     auto-adds them silently — no extra routing. We deliberately do NOT force prompt=consent
+     (it would re-show the authorize screen on EVERY login). The tradeoff: members who
+     authorized the app before guilds.join existed keep their old scopes and won't be
+     auto-joined; they use the one-click "Join the server" invite on the register page. */
+  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify guilds.join" } });
 };
 CG.signOut = async function(){ if (CG.sb && CG.sb.auth){ try { await CG.sb.auth.signOut(); } catch(e){} } location.hash = "#/home"; };
 /* login doubles as a Discord server invite (provider_token present only on fresh OAuth) */
