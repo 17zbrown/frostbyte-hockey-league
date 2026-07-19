@@ -62,7 +62,36 @@ async function dApi(method, path, body) {
 // Discord channel-name slug (lowercase, hyphens) to compare against team names
 function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
-export default async () => {
+export default async (req) => {
+  // ?diag=staff — read-only proof of who can actually see the staff rooms. Returns booleans and
+  // role names only (never ids, tokens, or message content) so it is safe to hit from anywhere.
+  // This exists because "the sync changed nothing" is ambiguous on its own: it means either
+  // already-correct or wrongly-judged-correct, and privacy is not something to infer.
+  try {
+    if (BOT && GUILD && new URL(req.url).searchParams.get("diag") === "staff") {
+      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+      const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
+      const office = roles.filter((r) => ["commissioner", "staff"].includes(r.name.toLowerCase()));
+      const cfg = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
+      const ids = String((cfg[0] && cfg[0].value) || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+      const report = ids.map((cid) => {
+        const c = chans.find((x) => x.id === cid);
+        if (!c) return { channel: null, configuredId: cid, exists: false };
+        const ow = c.permission_overwrites || [];
+        const ev = ow.find((o) => o.id === GUILD);
+        return {
+          channel: "#" + c.name, exists: true,
+          hiddenFromEveryone: !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n,
+          canView: ow.filter((o) => (BigInt(o.allow || "0") & 1024n) === 1024n)
+            .map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
+        };
+      });
+      return new Response(JSON.stringify({ officeRoles: office.map((r) => r.name), staffChannels: report }, null, 2),
+        { status: 200, headers: { "content-type": "application/json" } });
+    }
+  } catch (e) { return new Response(JSON.stringify({ diagError: String(e.message || e) }), { status: 500, headers: { "content-type": "application/json" } }); }
+
   if (!SB_URL || !SB_KEY || !BOT || !GUILD) {
     console.log("discord-sync: missing env (need bot token + guild id + Supabase) — skipping");
     return new Response("skipped: missing env", { status: 200 });
