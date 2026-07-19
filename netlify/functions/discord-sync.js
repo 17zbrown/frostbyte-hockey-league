@@ -108,7 +108,8 @@ export default async () => {
   const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
   const chanNameById = Object.fromEntries(guildChannels.map((c) => [c.id, c.name]));
 
-  const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0, errors: [] };
+  const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0,
+    staffChecked: 0, staffLocked: 0, staffMissing: 0, errors: [] };
 
   // Keep #free-agency and #trade-block private to team management — self-heals if the @everyone
   // view permission ever gets re-added. VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608.
@@ -161,8 +162,11 @@ export default async () => {
       const staffChanIds = String((cfgRows[0] && cfgRows[0].value) || "")
         .split(",").map((s) => s.trim()).filter(Boolean);
       for (const cid of staffChanIds) {
+        sum.staffChecked++;
         const chan = guildChannels.find((c) => c.id === cid);
-        if (!chan) { sum.staffChanMissing = (sum.staffChanMissing || 0) + 1; continue; }
+        // a configured room that no longer exists is a misconfiguration, not an outage — count it
+        // so the Automations panel shows it, but don't page the watchdog over a deleted channel
+        if (!chan) { sum.staffMissing++; continue; }
         const ow = chan.permission_overwrites || [];
         const everyone = ow.find((o) => o.id === GUILD);
         const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
@@ -174,7 +178,7 @@ export default async () => {
         // grant the office roles FIRST, then hide from @everyone (never the other way round)
         for (const rid of staffRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
         await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
-        sum.staffLocked = (sum.staffLocked || 0) + 1;
+        sum.staffLocked++;
       }
     } else {
       sum.errors.push({ lockStaffChannels: "no Commissioner/Staff role found — skipped so the rooms aren't hidden from everyone" });
@@ -313,6 +317,7 @@ export default async () => {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "rl_discord-sync_result", value: JSON.stringify({
         at: new Date().toISOString(), ok: sum.errors.length === 0, checked: sum.checked,
+        staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
       }), updated_at: new Date().toISOString() }) });
   } catch {}
