@@ -278,7 +278,7 @@ CG.buildLiveLeague = async function(){
   var regResults = results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; });
   /* discipline record straight from the suspensions table (newest first) */
   var maxDoneSeason = (CG._seasonsRaw||[]).reduce(function(m,s){ return s.status==="complete" ? Math.max(m, s.number||0) : m; }, 0);
-  var suspMapped = suspRaw.map(function(sx){
+  var suspAll = suspRaw.map(function(sx){
     var by = profById[sx.created_by], who = profById[sx.profile_id];
     /* a season-length suspension is served once its final season has completed — mirror the
        DB's is_suspended() so the client never blocks a player the server already cleared,
@@ -292,13 +292,20 @@ CG.buildLiveLeague = async function(){
       reason: sx.reason||"", issued: sx.created_at,
       decidedBy: (by && (by.gamertag||by.display_name)) || "Commissioner" };
   });
+  /* A formal warning is "on record, no games lost" — it must NEVER read as a suspension.
+     Split it out HERE, at the source, so every downstream consumer (lineup builder, public
+     profile, Users & roles, the desk KPIs) is correct by construction rather than by each
+     call site remembering to filter on mode. Warnings are staff-only: the public RLS policy
+     excludes them, so they only appear for a commissioner or the player themselves. */
+  var suspMapped = suspAll.filter(function(s){ return s.mode!=="warning"; });
+  var warnMapped = suspAll.filter(function(s){ return s.mode==="warning"; });
   /* playoff series (the schedule above is already this season only), plus the
      public clinch list so the projected bracket can lock in confirmed clubs */
   var playoffGames = schedule.filter(function(g){ return g.stage==="playoff"; });
   var clinched = (CG._siteCfg && CG._siteCfg["clinched_"+((season&&season.number)||1)]) || [];
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
              allResults:results, playoffGames:playoffGames, clinched:clinched,
-             suspensions:suspMapped, demoNow:CG.now(), season:season, live:true };
+             suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true };
   if (preResults.length){
     CG.SEASON.completedWeeks = preWeeksDone;
     lg.results = preResults; CG.aggregate(lg, {});
@@ -561,9 +568,9 @@ CG.applySession = async function(session){
   /* complaints & requests (league office) — RLS returns what this user may see */
   if (CG.auth.user){ CG.loadActionRequests().then(function(){ if(/complaint/.test(location.hash)&&CG.router)CG.router(); }); }
   else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
-  /* staff/commish: the "needs attention" backlog (open cases, apps, unmatched imports, …) */
-  if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); }
-  else { CG._staffAttention = null; }
+  /* staff/commish: the "needs attention" backlog + the Staff Desk data cards */
+  if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); CG.loadStaffExtras(); }
+  else { CG._staffAttention = null; CG._staffExtras = null; }
   CG.enforceBan();
   CG._va = null;                        /* any fresh session ends a stale preview */
   if (CG.renderViewAsBar) CG.renderViewAsBar();
@@ -695,6 +702,7 @@ CG.notifRoute = function(view, param){
     case "users":        return "#/admin/users";
     case "rulebook":     return "#/rulebook";
     case "staffdesk":    return "#/hub/staffdesk";
+    case "stafftasks":   return "#/hub/staffdesk";
     case "complaints":   return "#/hub/complaints";
     /* the invite is an external URL; the notification click handler opens http(s) routes in a
        new tab. Fall back to the register page (which also carries a Join button) if unset. */
@@ -715,6 +723,26 @@ CG.loadStaffAttention = async function(){
     if (/\/hub\/staffdesk/.test(location.hash) && CG.router) CG.router();
   } catch(e){ CG._staffAttention = null; }
 };
+/* the Staff Desk's data cards — EA import issues, activity feed, directory, and the shared
+   task list. One batch, stored on CG._staffExtras; refreshed after task edits. */
+CG.loadStaffExtras = async function(){
+  if (!CG.sb || !CG.auth.user){ CG._staffExtras = null; return; }
+  try {
+    var q = await Promise.all([
+      CG.sb.rpc("ea_import_issues"), CG.sb.rpc("staff_activity", { p_limit:12 }),
+      CG.sb.rpc("staff_directory"),
+      CG.sb.from("staff_tasks").select("*").order("status").order("created_at",{ascending:false})
+    ]);
+    CG._staffExtras = {
+      ea: (q[0]&&!q[0].error)?q[0].data:null,
+      activity: (q[1]&&!q[1].error)?q[1].data:[],
+      directory: (q[2]&&!q[2].error)?q[2].data:[],
+      tasks: (q[3]&&!q[3].error&&q[3].data)||[]
+    };
+    if (/\/hub\/staffdesk/.test(location.hash) && CG.router) CG.router();
+  } catch(e){ CG._staffExtras = null; }
+};
+CG.refreshStaffExtras = function(){ CG.loadStaffExtras(); };
 CG.loadNotifs = async function(){
   if (!CG.sb || !CG.auth.user){ CG._notifs = null; return; }
   try {
@@ -3231,6 +3259,7 @@ CG.actionStatusChip = function(st){
 CG.actionCard = function(a, review){
   var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
   var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
+  var uid = CG.auth.user && CG.auth.user.id, names = (CG.lg&&CG.lg._profName)||{};
   var metaBits = [];
   if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
   if (a.target) metaBits.push("About: "+esc(a.target));
@@ -3239,28 +3268,48 @@ CG.actionCard = function(a, review){
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
       '<b style="font-family:var(--f-disp)">'+esc(meta.label)+'</b>'+CG.actionStatusChip(a.status)+
       (review?'<span class="caption">filed by <b>'+esc((a.profiles&&a.profiles.gamertag)||"member")+'</b></span>':"")+
-      '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>'+
-    (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
+      '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>';
+  /* one-owner assignment (staff/commish) */
+  if (review){
+    var who = a.assigned_to ? (names[a.assigned_to]||"a colleague") : null;
+    h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+      (who ? '<span class="chip chip-chrome" style="font-size:9px">'+esc("Claimed by "+who)+'</span>' : '<span class="chip chip-warn" style="font-size:9px">Unclaimed</span>')+
+      (a.assigned_to===uid ? '<button class="btn btn-ghost btn-sm" data-case-unclaim="'+a.id+'">Release</button>'
+        : '<button class="btn btn-ghost btn-sm" data-case-claim="'+a.id+'">Claim</button>')+'</div>';
+  }
+  h += (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
     '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
     (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
   if (msgs.length){
     h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
       var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
-      return '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+'</b>'+
-        '<span class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(m.body||"")+'</span></div>';
+      var att = (m.attachments||[]).map(function(u){
+        /* render ONLY http(s) links — never a javascript:/data: scheme a filer could inject */
+        return /^https?:\/\//i.test(String(u))
+          ? '<a href="'+esc(u)+'" target="_blank" rel="noopener nofollow" class="caption" style="border-bottom:2px solid var(--chrome)">'+CG.ic("link",12)+' attachment</a>'
+          : '<span class="caption">'+esc(String(u))+'</span>'; }).join(" ");
+      return '<div style="display:flex;flex-direction:column;gap:3px'+(m.internal?';background:var(--chrome-tint);border-radius:8px;padding:8px 10px':'')+'">'+
+        '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+(m.internal?' · staff-only note':"")+'</b>'+
+        '<span class="small" style="color:var(--steel);white-space:pre-wrap;flex:1">'+esc(m.body||"")+'</span></div>'+
+        (att?'<div style="padding-left:2px">'+att+'</div>':"")+'</div>';
     }).join("")+'</div>';
   }
   var closed = a.status==="resolved"||a.status==="denied";
   if (!closed){
-    h += '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
-      '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>';
+    h += '<div style="display:flex;flex-direction:column;gap:6px">'+
+      '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
+        '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input data-reply-att="'+a.id+'" placeholder="Attach a link (optional)" style="flex:1;min-width:180px">'+
+        (review?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
   }
   if (review){
     h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
-      (a.status!=="reviewing"?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
-      '<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>'+
-      '<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
-      '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>'+
+      (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
+      (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
+      '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'">Issue discipline</button>'+
+      '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
+      (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
+        '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':"")+
       '<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button></div>';
   }
   return h+'</div></div>';
@@ -3270,8 +3319,16 @@ CG.hubComplaintsLive = function(opts){
   var isCommish = CG.role()==="commish";
   var review = isCommish || CG.role()==="staff";
   var all = (CG.lg._actionReqs||[]);
-  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===CG.auth.user.id; }) : [];
+  var uid = CG.auth.user && CG.auth.user.id;
+  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
   var queue = review && !opts.mineOnly ? all : mine;
+  /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
+  var flt = review ? (CG._caseFilter||"all") : null;
+  if (review){
+    if (flt==="mine") queue = queue.filter(function(a){ return a.assigned_to===uid; });
+    else if (flt==="unclaimed") queue = queue.filter(function(a){ return !a.assigned_to && a.status!=="resolved" && a.status!=="denied"; });
+    else if (flt==="open") queue = queue.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
+  }
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"League office")+'</h1>'+
     '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
@@ -3281,7 +3338,10 @@ CG.hubComplaintsLive = function(opts){
       '<span class="nf-ic">'+CG.ic(m.icon,16)+'</span><div><b style="font-family:var(--f-disp)">'+esc(m.label)+'</b>'+
       '<p class="caption" style="margin-top:3px">'+esc(m.blurb)+'</p></div></div></div>';
   }).join("")+'</div>';
-  h += '<div class="card-h" style="padding:0 0 12px;border:0"><h3>'+(review?"Case queue ("+queue.length+")":"Your filed cases ("+queue.length+")")+'</h3></div>';
+  h += '<div class="card-h" style="padding:0 0 12px;border:0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h3>'+(review?"Case queue ("+queue.length+")":"Your filed cases ("+queue.length+")")+'</h3>'+
+    (review?'<div class="seg" role="tablist" aria-label="Filter cases">'+
+      [["all","All"],["open","Open"],["mine","Mine"],["unclaimed","Unclaimed"]].map(function(f){
+        return '<button data-case-filter="'+f[0]+'" class="'+(flt===f[0]?"on":"")+'" role="tab" aria-selected="'+(flt===f[0])+'">'+f[1]+'</button>'; }).join("")+'</div>':"")+'</div>';
   h += queue.length
     ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
     : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
@@ -3336,22 +3396,96 @@ CG.fileActionRequest = function(type){
     });
   });
 };
+/* issue a warning or suspension straight from a case — resolves it and links the record */
+CG.caseDisciplineModal = function(caseId, targetName){
+  var players = (CG.lg.players||[]).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
+  var match = players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
+  var opts = '<option value="">— pick the player —</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
+  var cur = (CG.SEASON&&CG.SEASON.number)||1;
+  CG.modal("Issue discipline",
+    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label>'+
+    '<label class="fld"><span>Type</span><select id="dcType">'+
+      '<option value="warning">Formal warning — on record, no games lost</option>'+
+      '<option value="games">Suspension — number of games</option>'+
+      '<option value="date">Suspension — until a date</option>'+
+      '<option value="seasons">Suspension — through a season</option></select></label>'+
+    '<div id="dcGames" class="fld" style="display:none"><label><span>Games</span><input id="dcGamesN" type="number" min="1" value="1"></label></div>'+
+    '<div id="dcDate" class="fld" style="display:none"><label><span>Ends after</span><input id="dcDateN" type="date"></label></div>'+
+    '<div id="dcSeasons" class="fld" style="display:none"><label><span>Through season number</span><input id="dcSeasonsN" type="number" min="'+cur+'" value="'+cur+'"></label></div>'+
+    '<label class="fld"><span>Reason (recorded on the player and the case)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
+    '<p class="caption">This resolves the case, posts to #league-staff, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
+  function sync(){ var t=document.getElementById("dcType").value;
+    document.getElementById("dcGames").style.display=t==="games"?"block":"none";
+    document.getElementById("dcDate").style.display=t==="date"?"block":"none";
+    document.getElementById("dcSeasons").style.display=t==="seasons"?"block":"none"; }
+  document.getElementById("dcType").addEventListener("change", sync); sync();
+  document.getElementById("dcGo").addEventListener("click", function(){
+    var pid=document.getElementById("dcPlayer").value; if(!pid){ CG.toast("Pick the player","err"); return; }
+    var t=document.getElementById("dcType").value;
+    var args={ p_request:caseId, p_profile:pid, p_mode:t, p_reason:(document.getElementById("dcReason").value||"").trim()||null };
+    if(t==="games") args.p_games=parseInt(document.getElementById("dcGamesN").value,10)||0;
+    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=new Date(d+"T23:59:59").toISOString(); }
+    if(t==="seasons") args.p_until_season=parseInt(document.getElementById("dcSeasonsN").value,10)||cur;
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("discipline_from_case", args).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t issue discipline","err"); return; }
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Discipline issued — case resolved","ok");
+      if(CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+    });
+  });
+};
+/* rap sheet / precedent for the player a case is about */
+CG.caseHistoryModal = function(targetName){
+  var p = (CG.lg.players||[]).find(function(x){ return targetName && x.tag.toLowerCase()===String(targetName).toLowerCase(); });
+  if(!p){ CG.toast("No rostered player matches “"+(targetName||"—")+"”","err"); return; }
+  CG.modal("History — "+esc(p.tag), '<div id="rapBody" class="caption">Loading…</div>', '<button class="btn btn-ghost" data-close>Close</button>');
+  CG.sb.rpc("player_rap_sheet",{ p_profile:p.id }).then(function(r){
+    var el=document.getElementById("rapBody"); if(!el) return;
+    if(r.error){ el.textContent=r.error.message||"Couldn’t load"; return; }
+    function dl(x){ return x.mode==="games"?(x.games+"-game suspension"):x.mode==="seasons"?("suspension through Season "+x.until_season):x.mode==="date"?("suspension until "+(x.ends_at?CG.fmtDay(Date.parse(x.ends_at)):"—")):x.mode; }
+    var d=r.data||{}, s=d.suspensions||[], w=d.warnings||[], c=d.cases||[], h='';
+    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Suspensions</b>'+(s.length?'<div class="stack" style="gap:6px;margin-top:6px">'+s.map(function(x){ return '<div class="small">'+esc(dl(x))+' <span class="caption">· '+esc(x.reason||"no reason")+' · '+CG.fmtDay(Date.parse(x.at))+' · '+esc(x.status)+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
+    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Warnings</b>'+(w.length?'<div class="stack" style="gap:6px;margin-top:6px">'+w.map(function(x){ return '<div class="small">'+esc(x.reason||"formal warning")+' <span class="caption">· '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
+    h+='<div><b style="font-family:var(--f-disp)">Prior cases about them</b>'+(c.length?'<div class="stack" style="gap:6px;margin-top:6px">'+c.map(function(x){ return '<div class="small">'+esc((CG.ACTION_META[x.type]||{}).label||x.type)+(x.subject?' — '+esc(x.subject):"")+' <span class="caption">· '+esc(x.status)+' · '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None.</p>')+'</div>';
+    el.innerHTML=h;
+  });
+};
 CG.AFTER._complaintsLive = function(){
   document.querySelectorAll("[data-file-action]").forEach(function(c){
     var go = function(){ CG.fileActionRequest(c.getAttribute("data-file-action")); };
     c.addEventListener("click", go);
     c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
   });
+  document.querySelectorAll("[data-case-filter]").forEach(function(b){ b.addEventListener("click", function(){
+    CG._caseFilter = this.getAttribute("data-case-filter"); if(CG.router) CG.router();
+  }); });
   document.querySelectorAll("[data-reply-send]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-reply-send");
     var inp=document.querySelector('[data-reply-for="'+id+'"]');
     var body=(inp&&inp.value||"").trim();
     if(!body){ CG.toast("Write the reply first","err"); return; }
-    CG.sb.from("action_messages").insert({ request_id:id, author_id:CG.auth.user.id, body:body }).then(function(r){
+    var att=((document.querySelector('[data-reply-att="'+id+'"]')||{}).value||"").trim();
+    if (att && !/^https?:\/\//i.test(att)){ CG.toast("Attachments must be an http(s) link","err"); return; }
+    var internalEl=document.querySelector('[data-reply-internal="'+id+'"]');
+    var row={ request_id:id, author_id:CG.auth.user.id, body:body, internal:!!(internalEl&&internalEl.checked) };
+    if (att) row.attachments=[att];
+    CG.sb.from("action_messages").insert(row).then(function(r){
       if(r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
-      CG.toast("Reply added","ok"); CG.refreshActions();
+      CG.toast(row.internal?"Staff-only note added":"Reply added","ok"); CG.refreshActions();
     });
   }); });
+  document.querySelectorAll("[data-case-claim]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-claim"), p_assignee:CG.auth.user.id }).then(function(r){
+      if(r.error){ CG.toast(r.error.message||"Couldn’t claim","err"); return; } CG.toast("Case claimed — it’s yours","ok"); CG.refreshActions(); }); }); });
+  document.querySelectorAll("[data-case-unclaim]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-unclaim"), p_assignee:null }).then(function(r){
+      if(r.error){ CG.toast(r.error.message||"Couldn’t release","err"); return; } CG.toast("Released back to the queue","ok"); CG.refreshActions(); }); }); });
+  document.querySelectorAll("[data-case-discipline]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target")); }); });
+  document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.caseHistoryModal(this.getAttribute("data-target")); }); });
   document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
     CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
@@ -3391,6 +3525,148 @@ CG.hubComplaintDetail = function(){ return CG.hubComplaintsLive({}); };
    STAFF DESK — one page for the officials: cases, discipline,
    import spot-checks, and tonight's slate. Staff + commissioner.
    ================================================================ */
+/* ================================================================
+   STAFF DESK data cards — EA import triage, shared task list, staff
+   directory, and the activity feed. Data comes from CG._staffExtras
+   (loaded by CG.loadStaffExtras for staff/commissioners).
+   ================================================================ */
+CG._auditLabel = function(a){
+  var m = { role_change:"changed a member’s role", season_rollover:"ran the season rollover",
+    case_assign:"assigned a case", discipline_from_case:"issued discipline from a case",
+    season_award_finalized:"finalized a season award", playoff_round:"generated a playoff round",
+    playoff_clear:"cleared a playoff round", season_status:"changed a season’s status",
+    team_upsert:"edited a club", division_upsert:"edited a division", ea_reingest:"re-ran an EA import" };
+  return m[a] || String(a||"acted").replace(/_/g," ");
+};
+CG.staffEaCard = function(){
+  var ea = CG._staffExtras && CG._staffExtras.ea; if (!ea) return "";
+  var un = ea.unmatched||[], ms = ea.missing_stats||[];
+  if (!un.length && !ms.length) return "";
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>EA imports needing a look</h3><span class="chip chip-warn">'+(un.length+ms.length)+'</span></div>';
+  if (un.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Unmatched imports</span>'+
+    un.slice(0,8).map(function(u){
+      return '<div style="display:flex;gap:10px;align-items:baseline;padding:7px 0;border-top:1px solid var(--line-soft)">'+
+        '<span class="mono caption" style="flex-shrink:0">#'+esc(String(u.match_id||"").slice(0,10))+'</span>'+
+        '<span class="small" style="flex:1;color:var(--steel)">'+esc(u.reason||"couldn’t match to a scheduled game")+'</span>'+
+        '<span class="caption">'+(u.at?CG.fmtDay(Date.parse(u.at)):"")+'</span></div>'; }).join("")+
+    '<p class="caption" style="margin-top:8px">These EA matches couldn’t be tied to a game — usually an unlinked club EA ID or no game near that time. Link clubs in <a href="#/admin/eastats" style="font-weight:700;border-bottom:2px solid var(--chrome)">EA stats</a>.</p></div>';
+  if (ms.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Finals missing box scores</span>'+
+    ms.slice(0,8).map(function(m){ return '<div class="small" style="padding:6px 0;border-top:1px solid var(--line-soft)">'+esc(m.away||"?")+' @ '+esc(m.home||"?")+'<span class="caption"> · '+(m.at?CG.fmtDay(Date.parse(m.at)):"")+'</span></div>'; }).join("")+'</div>';
+  return h+'</div>';
+};
+CG.staffTasksCard = function(){
+  var ex = CG._staffExtras; if (!ex) return "";
+  var tasks = (ex.tasks||[]), uid = CG.auth.user && CG.auth.user.id;
+  var open = tasks.filter(function(t){ return t.status==="open"; });
+  var mine = open.filter(function(t){ return t.assignee===uid; });
+  var unassigned = open.filter(function(t){ return !t.assignee; });
+  var names = {}; ((ex.directory)||[]).forEach(function(d){ names[d.id]=d.gamertag; });
+  function row(t){
+    var who = t.assignee ? (names[t.assignee]||"assigned") : null;
+    return '<div class="card-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<div style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+esc(t.title)+'</b>'+
+      (t.detail?'<p class="caption" style="margin-top:2px">'+esc(t.detail)+'</p>':"")+
+      (who?'<span class="chip chip-chrome" style="font-size:9px;margin-top:4px">'+esc(who)+'</span>':'<span class="chip chip-warn" style="font-size:9px;margin-top:4px">Unassigned</span>')+'</div>'+
+      (t.assignee!==uid?'<button class="btn btn-ghost btn-sm" data-task-claim="'+t.id+'">Claim</button>':"")+
+      '<button class="btn btn-ghost btn-sm" data-task-done="'+t.id+'">Done</button>'+
+      '<button class="btn btn-ghost btn-sm" data-task-del="'+t.id+'" aria-label="Delete task">'+CG.ic("x",14)+'</button></div>';
+  }
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff tasks</h3>'+
+    '<button class="btn btn-chrome btn-sm" data-task-add>New task</button></div>';
+  if (!open.length){ h += '<div class="card-b"><p class="caption">No open tasks. Spin one up with <b>New task</b> — assign it to yourself or leave it in the pool for whoever’s free.</p></div>'; }
+  else {
+    if (mine.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Yours</span></div>'+mine.map(row).join(""); }
+    var others = open.filter(function(t){ return t.assignee!==uid; });
+    if (others.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">'+(unassigned.length?"Unassigned & others":"Assigned to others")+'</span></div>'+others.map(row).join(""); }
+  }
+  return h+'</div>';
+};
+CG.staffDirectoryCard = function(){
+  var ex = CG._staffExtras; if (!ex || !ex.directory) return "";
+  var dir = ex.directory, uid = CG.auth.user && CG.auth.user.id, isCommish = CG.role()==="commish";
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League staff</h3><span class="chip">'+dir.length+'</span></div>';
+  h += dir.map(function(s){
+    var depts = (s.departments||[]).map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" ");
+    var canEdit = isCommish || s.id===uid;
+    return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<span class="chip '+(s.role==="commissioner"?"chip-chrome":"")+'" style="font-size:9px">'+(s.role==="commissioner"?"COMMISH":"STAFF")+'</span>'+
+      '<b style="font-family:var(--f-disp);min-width:120px">'+esc(s.gamertag||"—")+'</b>'+
+      '<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap">'+(depts||'<span class="caption">no departments set</span>')+'</span>'+
+      (s.timezone?'<span class="caption mono">'+esc(s.timezone)+'</span>':"")+
+      (canEdit?'<button class="btn btn-ghost btn-sm" data-staff-edit="'+s.id+'">Edit</button>':"")+'</div>';
+  }).join("");
+  return h+'</div>';
+};
+CG.staffActivityCard = function(){
+  var acts = (CG._staffExtras && CG._staffExtras.activity)||[]; if (!acts.length) return "";
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent staff activity</h3><span class="chip">audit log</span></div>'+
+    '<div class="card-b" style="padding-top:6px">'+acts.slice(0,12).map(function(a){
+      return '<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line-soft)">'+
+        '<b class="small" style="font-family:var(--f-disp);min-width:110px">'+esc(a.actor||"League office")+'</b>'+
+        '<span class="small" style="flex:1;color:var(--steel)">'+esc(CG._auditLabel(a.action))+'</span>'+
+        '<span class="caption mono">'+(a.at?CG.fmtFull(Date.parse(a.at)):"")+'</span></div>';
+    }).join("")+'</div></div>';
+};
+CG.staffTaskAddModal = function(){
+  var dir = (CG._staffExtras&&CG._staffExtras.directory)||[];
+  var opts = '<option value="">Leave in the pool</option>'+dir.map(function(d){ return '<option value="'+d.id+'">'+esc(d.gamertag||"staff")+'</option>'; }).join("");
+  CG.modal("New staff task",
+    '<label class="fld"><span>Task</span><input id="stTitle" placeholder="e.g. Re-link CHI’s EA club ID" maxlength="140"></label>'+
+    '<label class="fld"><span>Detail (optional)</span><textarea id="stDetail" rows="3"></textarea></label>'+
+    '<label class="fld"><span>Assign to</span><select id="stWho">'+opts+'</select></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="stGo">Create task</button>');
+  document.getElementById("stGo").addEventListener("click", function(){
+    var title=(document.getElementById("stTitle").value||"").trim();
+    if(!title){ CG.toast("Give the task a title","err"); return; }
+    var btn=this; btn.disabled=true;
+    CG.sb.from("staff_tasks").insert({ title:title, detail:(document.getElementById("stDetail").value||"").trim()||null,
+      assignee:(document.getElementById("stWho").value||null), created_by:CG.auth.user.id }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); return; }
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Task created","ok"); CG.refreshStaffExtras();
+    });
+  });
+};
+CG.staffProfileEditModal = function(entry){
+  var picked = entry.departments||[];
+  var chips = CG.STAFF_DEPARTMENTS.map(function(d){ var on=picked.indexOf(d[0])>=0;
+    return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-dept="'+d[0]+'" aria-pressed="'+on+'" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
+  CG.modal("Staff profile — "+esc(entry.gamertag||""),
+    '<label class="fld"><span>Departments</span></label><div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>'+
+    '<label class="fld"><span>Time zone</span><input id="spTz" value="'+esc(entry.timezone||"")+'" placeholder="e.g. ET, PT, GMT"></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="spGo">Save</button>');
+  var sel = picked.slice();
+  document.querySelectorAll("[data-dept]").forEach(function(b){ b.addEventListener("click", function(){
+    var k=this.getAttribute("data-dept"), i=sel.indexOf(k);
+    if(i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
+    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
+  }); });
+  document.getElementById("spGo").addEventListener("click", function(){
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("set_staff_profile",{ p_target:entry.id, p_departments:sel, p_timezone:(document.getElementById("spTz").value||"") }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Staff profile updated","ok"); CG.refreshStaffExtras();
+    });
+  });
+};
+CG.wireStaffExtras = function(){
+  var t = document.querySelector("[data-task-add]"); if (t) t.addEventListener("click", CG.staffTaskAddModal);
+  document.querySelectorAll("[data-task-claim]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).then(function(r){
+      if(r.error){ CG.toast("Couldn’t claim","err"); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
+  document.querySelectorAll("[data-task-done]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.from("staff_tasks").update({ status:"done", completed_at:new Date().toISOString() }).eq("id",this.getAttribute("data-task-done")).then(function(r){
+      if(r.error){ CG.toast("Couldn’t update","err"); return; } CG.toast("Task done","ok"); CG.refreshStaffExtras(); }); }); });
+  document.querySelectorAll("[data-task-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-task-del");
+    CG.confirm("Delete this task?","It’s removed for the whole staff.","Delete", function(){
+      CG.sb.from("staff_tasks").delete().eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete","err"); return; } CG.toast("Task deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
+  document.querySelectorAll("[data-staff-edit]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
+    if(entry) CG.staffProfileEditModal(entry); }); });
+};
 /* Consolidated "Needs attention" triage card — the in-app twin of the daily #league-staff
    briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
    client-side (open cases, applications, suspensions) if the RPC hasn't returned yet. */
@@ -3432,7 +3708,8 @@ CG.hubStaffDesk = function(){
   var reqs = (lg._actionReqs||[]);
   /* terminal statuses are 'resolved' and 'denied' — a denied case is closed, not open */
   var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
-  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
+  /* warnings live in the same table but never count as suspensions */
+  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active" && s.mode!=="warning"; });
   var now = Date.now();
   var finals = (lg.allResults||[]).slice().sort(function(a,b){ return b.at-a.at; });
   var weekFinals = finals.filter(function(r){ return now - r.at < 7*86400000; });
@@ -3531,6 +3808,12 @@ CG.hubStaffDesk = function(){
     : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
   h += '</div>';
 
+  /* staff tools — actionable first (tasks, EA triage), then reference (directory, activity) */
+  h += CG.staffTasksCard();
+  h += CG.staffEaCard();
+  h += CG.staffDirectoryCard();
+  h += CG.staffActivityCard();
+
   /* season award ballots — staff vote all season; the commissioner finalizes after the finale */
   var BALLOT_CATS = [
     ["mvp","Most Valuable Player", null],
@@ -3570,6 +3853,8 @@ CG.AFTER._staffdesk = function(){
     CG.setOwnerAppStatus(this.getAttribute("data-oapp-approve"), "approved"); }); });
   document.querySelectorAll("[data-oapp-deny]").forEach(function(b){ b.addEventListener("click", function(){
     CG.setOwnerAppStatus(this.getAttribute("data-oapp-deny"), "denied"); }); });
+
+  CG.wireStaffExtras();
 
   /* ---- season award ballots ---- */
   var sid = CG.SEASON && CG.SEASON.id;
