@@ -110,7 +110,7 @@ export default async (req) => {
       const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
       // same target set the sync enforces: registered ids + everything under a Staff category
       const staffCatIds = chans.filter((c) => c.type === 4 && /^staff\b/i.test(c.name || "")).map((c) => c.id);
-      const ids = [...new Set([...configured, ...chans.filter((c) => c.type === 0 && staffCatIds.includes(c.parent_id)).map((c) => c.id)])];
+      const ids = [...new Set([...configured, ...chans.filter((c) => c.type !== 4 && staffCatIds.includes(c.parent_id)).map((c) => c.id)])];
       const report = ids.map((cid) => {
         const c = chans.find((x) => x.id === cid);
         if (!c) return { channel: null, configuredId: cid, exists: false };
@@ -233,7 +233,9 @@ export default async (req) => {
       // room months from now should not have to remember to register its id here — if it lives in
       // the staff category it is staff-only, and this pass makes it so within five minutes.
       const staffCatIds = guildChannels.filter((c) => c.type === 4 && /^staff\b/i.test(c.name || "")).map((c) => c.id);
-      const inCategory = guildChannels.filter((c) => c.type === 0 && staffCatIds.includes(c.parent_id)).map((c) => c.id);
+      // every channel type, not just text — a staff voice room or forum is exactly as private as a
+      // staff text room, and VIEW_CHANNEL is what gates all of them
+      const inCategory = guildChannels.filter((c) => c.type !== 4 && staffCatIds.includes(c.parent_id)).map((c) => c.id);
       const staffChanIds = [...new Set([...configured, ...inCategory])];
       for (const cid of staffChanIds) {
         sum.staffChecked++;
