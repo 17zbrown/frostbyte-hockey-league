@@ -3545,11 +3545,12 @@ CG.staffEaCard = function(){
   var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>EA imports needing a look</h3><span class="chip chip-warn">'+(un.length+ms.length)+'</span></div>';
   if (un.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Unmatched imports</span>'+
     un.slice(0,8).map(function(u){
-      return '<div style="display:flex;gap:10px;align-items:baseline;padding:7px 0;border-top:1px solid var(--line-soft)">'+
+      return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line-soft)">'+
         '<span class="mono caption" style="flex-shrink:0">#'+esc(String(u.match_id||"").slice(0,10))+'</span>'+
-        '<span class="small" style="flex:1;color:var(--steel)">'+esc(u.reason||"couldn’t match to a scheduled game")+'</span>'+
-        '<span class="caption">'+(u.at?CG.fmtDay(Date.parse(u.at)):"")+'</span></div>'; }).join("")+
-    '<p class="caption" style="margin-top:8px">These EA matches couldn’t be tied to a game — usually an unlinked club EA ID or no game near that time. Link clubs in <a href="#/admin/eastats" style="font-weight:700;border-bottom:2px solid var(--chrome)">EA stats</a>.</p></div>';
+        '<span class="small" style="flex:1;min-width:180px;color:var(--steel)">'+esc(u.reason||"couldn’t match to a scheduled game")+'</span>'+
+        '<span class="caption">'+(u.at?CG.fmtDay(Date.parse(u.at)):"")+'</span>'+
+        '<button class="btn btn-ghost btn-sm" data-ea-dismiss="'+esc(String(u.match_id||""))+'">Dismiss</button></div>'; }).join("")+
+    '<p class="caption" style="margin-top:8px">These EA matches couldn’t be tied to a league game — usually a club EA ID that isn’t linked, or a pickup game against a club outside CGHL. Link clubs in <a href="#/admin/eastats" style="font-weight:700;border-bottom:2px solid var(--chrome)">EA stats</a>, or dismiss the ones that aren’t league games.</p></div>';
   if (ms.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Finals missing box scores</span>'+
     ms.slice(0,8).map(function(m){ return '<div class="small" style="padding:6px 0;border-top:1px solid var(--line-soft)">'+esc(m.away||"?")+' @ '+esc(m.home||"?")+'<span class="caption"> · '+(m.at?CG.fmtDay(Date.parse(m.at)):"")+'</span></div>'; }).join("")+'</div>';
   return h+'</div>';
@@ -3652,6 +3653,13 @@ CG.staffProfileEditModal = function(entry){
 };
 CG.wireStaffExtras = function(){
   var t = document.querySelector("[data-task-add]"); if (t) t.addEventListener("click", CG.staffTaskAddModal);
+  document.querySelectorAll("[data-ea-dismiss]").forEach(function(b){ b.addEventListener("click", function(){
+    var mid=this.getAttribute("data-ea-dismiss"), btn=this; btn.disabled=true;
+    CG.sb.rpc("ea_dismiss_import",{ p_match_id:mid }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t dismiss","err"); return; }
+      CG.toast("Import dismissed — not a league game","ok"); CG.refreshStaffExtras();
+    }); }); });
   document.querySelectorAll("[data-task-claim]").forEach(function(b){ b.addEventListener("click", function(){
     CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).then(function(r){
       if(r.error){ CG.toast("Couldn’t claim","err"); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
@@ -4008,14 +4016,16 @@ CG.AUTOMATIONS = [
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
   /* #league-staff channel configuration — turns on the staff notifications */
-  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>#league-staff channel</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
+  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Staff Discord channels</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
     '<div class="card-b">'+
-    '<p class="caption" style="margin-bottom:12px;max-width:74ch">Paste a Discord webhook for your <b>#league-staff</b> channel to switch on staff notifications — new staff, applications, cases, discipline, forfeits, and a daily backlog briefing. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Leave the role ID blank unless you want urgent pings to @mention a staff role (right-click the role → Copy ID, with Developer Mode on).</p>'+
-    '<label class="fld"><span>#league-staff webhook URL</span><input id="staffWh" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Staff role ID to ping (optional)</span><input id="staffRole" placeholder="e.g. 1524970…" autocomplete="off"></label>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-chrome btn-sm" id="staffChanSave">Save staff channel</button>'+
-    '<button class="btn btn-ghost btn-sm" id="staffChanTest">Send test message</button></div>'+
-    '<p class="caption" style="margin-top:10px">For your privacy the saved webhook is never shown back here — re-paste to change it. Clearing the field and saving turns the notifications off.</p></div></div>';
+    '<p class="caption" style="margin-bottom:14px;max-width:74ch">One webhook per staff channel. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Each channel below falls back to <b>general</b> until you set it, so nothing is ever lost.</p>'+
+    '<label class="fld"><span>Staff general — applications, daily briefing, weekly report</span><input id="staffWh" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Staff welcome — the bot’s welcome post for each new staff member</span><input id="staffWhWelcome" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Casework &amp; enforcement — cases filed, discipline issued, forfeit rulings</span><input id="staffWhCase" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Staff role ID to ping on urgent items (optional)</span><input id="staffRole" placeholder="e.g. 1524970…" autocomplete="off"></label>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-chrome btn-sm" id="staffChanSave">Save channels</button>'+
+    '<button class="btn btn-ghost btn-sm" id="staffChanTest">Send test to general</button></div>'+
+    '<p class="caption" style="margin-top:10px">Saved webhooks are never shown back here — re-paste to change one. A blank field leaves that channel as-is.</p></div></div>';
   h += '<div class="card">'+CG.AUTOMATIONS.map(function(a,i){
     return '<div class="card-b" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
       '<div style="flex:1;min-width:220px"><b style="font-family:var(--f-disp)">'+esc(a.name)+'</b>'+
@@ -4036,20 +4046,22 @@ CG.AFTER._admAutomations = function(){
     function refreshChip(){
       CG.sb.rpc("staff_channel_status").then(function(r){
         var d = (r&&!r.error&&r.data)||{};
-        chSt.textContent = d.configured ? (d.has_role?"Connected · pings on":"Connected") : "Not set up";
-        chSt.className = "chip "+(d.configured?"chip-win":"chip-warn");
+        var on = [d.configured&&"general", d.welcome&&"welcome", d.casework&&"casework"].filter(Boolean);
+        chSt.textContent = on.length ? on.join(" · ")+(d.has_role?" · pings on":"") : "Not set up";
+        chSt.className = "chip "+(d.configured?(on.length===3?"chip-win":"chip-chrome"):"chip-warn");
       });
     }
     refreshChip();
     var saveBtn = document.getElementById("staffChanSave");
     if (saveBtn) saveBtn.addEventListener("click", function(){
-      var wh=(document.getElementById("staffWh").value||"").trim(), role=(document.getElementById("staffRole").value||"").trim();
+      var v=function(id){ return (document.getElementById(id).value||"").trim(); };
       var btn=this; btn.disabled=true;
-      CG.sb.rpc("set_staff_channel",{ p_webhook:wh, p_role_id:role }).then(function(r){
+      CG.sb.rpc("set_staff_channels",{ p_general:v("staffWh"), p_welcome:v("staffWhWelcome"),
+        p_casework:v("staffWhCase"), p_role_id:v("staffRole") }).then(function(r){
         btn.disabled=false;
         if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
-        CG.toast(wh?"Staff channel saved":"Staff notifications turned off","ok");
-        document.getElementById("staffWh").value=""; document.getElementById("staffRole").value="";
+        CG.toast("Staff channels saved","ok");
+        ["staffWh","staffWhWelcome","staffWhCase","staffRole"].forEach(function(id){ document.getElementById(id).value=""; });
         refreshChip();
       });
     });
