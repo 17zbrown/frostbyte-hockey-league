@@ -63,8 +63,15 @@ async function botDiag() {
     out.membershipScreening = (guild.features || []).includes("MEMBER_VERIFICATION_GATE_ENABLED");
     out.community = (guild.features || []).includes("COMMUNITY");
 
-    const meRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD}/members/@me`, { headers: dh });
+    // resolve the bot's own user id first (@me is NOT valid on the guild-members endpoint),
+    // then read its real guild member object — the definitive "is the bot in the guild" check
+    const selfRes = await fetch("https://discord.com/api/v10/users/@me", { headers: dh });
+    const self = selfRes.ok ? await selfRes.json() : null;
+    out.botUserId = self && self.id;
+    out.botUsername = self && self.username;
+    const meRes = self ? await fetch(`https://discord.com/api/v10/guilds/${GUILD}/members/${self.id}`, { headers: dh }) : { ok: false, status: 0 };
     out.botInGuild = meRes.ok;
+    out.botMemberStatus = meRes.status;
     const me = meRes.ok ? await meRes.json() : null;
     const rolesRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD}/roles`, { headers: dh });
     const roles = rolesRes.ok ? await rolesRes.json() : [];
