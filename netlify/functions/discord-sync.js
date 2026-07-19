@@ -63,12 +63,45 @@ async function dApi(method, path, body) {
 function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
 export default async (req) => {
-  // ?diag=staff — read-only proof of who can actually see the staff rooms. Returns booleans and
-  // role names only (never ids, tokens, or message content) so it is safe to hit from anywhere.
-  // This exists because "the sync changed nothing" is ambiguous on its own: it means either
-  // already-correct or wrongly-judged-correct, and privacy is not something to infer.
+  // Read-only diagnostics. ?diag=staff proves who can actually see the staff rooms (the sync
+  // reporting "changed nothing" is ambiguous between already-correct and wrongly-judged-correct,
+  // and privacy is not something to infer); ?diag=guild dumps the server's structure for audits.
+  // GATED: describing a private room — even just its name and who may read it — is itself
+  // information about the league office, so this requires app_config.diag_key and 404s otherwise.
+  // Never returns ids, tokens, or message content.
+  const diag = (() => { try { return new URL(req.url).searchParams; } catch { return new URLSearchParams(); } })();
+  const diagMode = diag.get("diag");
+  if (diagMode) {
+    const keyRow = await sbGet("app_config?key=eq.diag_key&select=value").catch(() => []);
+    const want = keyRow[0] && keyRow[0].value;
+    const got = diag.get("key") || req.headers.get("x-diag-key") || "";
+    // constant-length compare is overkill for a diagnostic, but never 401 — a 404 doesn't
+    // confirm the endpoint exists to someone probing for it
+    if (!want || got !== want) return new Response("Not found", { status: 404 });
+  }
   try {
-    if (BOT && GUILD && new URL(req.url).searchParams.get("diag") === "staff") {
+    if (BOT && GUILD && diagMode === "guild") {
+      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+      const TYPE = { 0: "text", 2: "voice", 4: "category", 5: "announcement", 13: "stage", 15: "forum" };
+      const catName = Object.fromEntries(chans.filter((c) => c.type === 4).map((c) => [c.id, c.name]));
+      const priv = (c) => {
+        const ev = (c.permission_overwrites || []).find((o) => o.id === GUILD);
+        return !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n;
+      };
+      return new Response(JSON.stringify({
+        roles: roles.filter((r) => r.name !== "@everyone")
+          .sort((a, b) => b.position - a.position)
+          .map((r) => ({ name: r.name, color: r.color, hoisted: r.hoist, mentionable: r.mentionable, managed: r.managed })),
+        channels: chans.filter((c) => c.type !== 4).sort((a, b) => a.position - b.position).map((c) => ({
+          name: c.name, type: TYPE[c.type] || c.type, category: catName[c.parent_id] || null,
+          private: priv(c), topic: c.topic || null, nsfw: !!c.nsfw, slowmode: c.rate_limit_per_user || 0,
+        })),
+        categories: chans.filter((c) => c.type === 4).sort((a, b) => a.position - b.position).map((c) => c.name),
+      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    if (BOT && GUILD && diagMode === "staff") {
       const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
       const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
       const office = roles.filter((r) => ["commissioner", "staff"].includes(r.name.toLowerCase()));
