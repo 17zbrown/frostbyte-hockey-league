@@ -287,11 +287,16 @@ export default async (req) => {
     const rows = await sbGet("app_config?key=eq.discord_channel_topics&select=value");
     const want = rows[0] && rows[0].value ? JSON.parse(rows[0].value) : null;
     if (want) {
+      // Only text-like channels carry a topic — voice and stage reject it outright with a 400.
+      const TOPIC_TYPES = [0, 5, 15];
       for (const [name, topic] of Object.entries(want)) {
-        const chan = guildChannels.find((c) => c.name === name && c.type !== 4);
+        const chan = guildChannels.find((c) => c.name === name && TOPIC_TYPES.includes(c.type));
         if (!chan || (chan.topic || "") === topic) continue;
-        await dApi("PATCH", `/channels/${chan.id}`, { topic });
-        sum.topicsFixed = (sum.topicsFixed || 0) + 1;
+        // one unhappy channel must not abandon the rest of the map
+        try {
+          await dApi("PATCH", `/channels/${chan.id}`, { topic });
+          sum.topicsFixed = (sum.topicsFixed || 0) + 1;
+        } catch (e) { sum.errors.push({ channelTopic: name, error: String(e.message || e).slice(0, 140) }); }
       }
     }
   } catch (e) { sum.errors.push({ channelTopics: String(e.message || e) }); }
