@@ -33,5 +33,23 @@ head = head.replace(
 );
 
 const body = PARTS.map((f) => fs.readFileSync(path.join(DIR, f), "utf8")).join("\n");
+
+/* Every byte in here is downloaded by every visitor before the page can do anything, so inlined
+   artwork is uniquely expensive. Two prototype club logos and a set of bundled avatars once cost
+   ~113 KB of the bundle while being unreachable in the live build. Small inline SVG/icon data URIs
+   are fine; anything sizeable belongs in Supabase storage behind a URL the browser can cache. */
+const MAX_INLINE_IMAGE = 2048;
+const oversized = [];
+for (const m of (head + body).matchAll(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+/g)) {
+  if (m[0].length > MAX_INLINE_IMAGE) oversized.push(m[0].length);
+}
+if (oversized.length) {
+  throw new Error(
+    `refusing to build: ${oversized.length} inlined image(s) over ${MAX_INLINE_IMAGE} bytes ` +
+    `(${oversized.map((n) => `${(n / 1024).toFixed(0)}KB`).join(", ")}). ` +
+    `Upload the artwork and reference it by URL instead.`
+  );
+}
+
 fs.writeFileSync(OUT, head + "\n" + body);
 console.log(`built ${OUT} (${(head.length + body.length)} bytes)`);
