@@ -3361,7 +3361,7 @@ CG.actionCard = function(a, review){
     h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
       (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
       (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
-      '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'">Issue discipline</button>'+
+      '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'" data-target-id="'+esc(a.target_profile_id||"")+'">Issue discipline</button>'+
       '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
       (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
         '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':"")+
@@ -3403,6 +3403,58 @@ CG.hubComplaintsLive = function(opts){
   h += '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
   return h;
 };
+/* Everyone in the league, not just everyone on a roster. A complaint can name a free agent or a
+   player between clubs, and the roster-derived list can't see them. Sorted so exact-prefix matches
+   feel right when typing, and each entry says where the person actually sits. */
+CG.memberIndex = function(){
+  var lg = CG.lg || {}, rostered = lg._rosteredIds || {};
+  var byId = {}; (lg.players||[]).forEach(function(p){ byId[p.id] = p; });
+  return (lg._profilesRaw||[])
+    .filter(function(pr){ return !pr.banned; })
+    .map(function(pr){
+      var p = byId[pr.id];
+      var name = pr.gamertag || pr.display_name || "Member";
+      var sub = p && CG.TEAM[p.team]
+        ? CG.TEAM[p.team].name+" · "+p.pos+(p.jersey?" · #"+p.jersey:"")
+        : (rostered[pr.id] ? "Rostered" : "Free agent");
+      return { kind:"player", id:pr.id, label:name, sub:sub, team:(p&&p.team)||null };
+    })
+    .sort(function(a,b){ return a.label.localeCompare(b.label); });
+};
+/* attachAC indexes players off the roster; "members" widens it to the whole league for the places
+   that need to name someone rather than look up a rostered player. */
+CG._origAcIndex = CG.acIndex;
+CG.acIndex = function(kinds){
+  if ((kinds||[]).indexOf("members") >= 0) return CG.memberIndex();
+  return CG._origAcIndex.call(CG, kinds||[]);
+};
+/* A free-text name is unmatchable later, so every "who is this about?" field is a combobox that
+   resolves to a real profile. Returns { name, id } — id is null when nothing was picked, which is
+   allowed: the field is optional and a member may need to name someone off-roster. */
+CG.memberPickerField = function(id, label, hint){
+  return '<label class="fld"><span>'+esc(label)+'</span>'+
+    '<input id="'+id+'" type="text" autocomplete="off" placeholder="Start typing a name…">'+
+    (hint ? '<small class="caption" style="display:block;margin-top:5px">'+esc(hint)+'</small>' : '')+
+    '</label>';
+};
+CG.wireMemberPicker = function(id){
+  var el = document.getElementById(id);
+  if (el && CG.attachAC) CG.attachAC(el, { kinds:["members"] });
+  return el;
+};
+CG.readMemberPicker = function(id){
+  var el = document.getElementById(id);
+  if (!el) return { name:null, id:null };
+  var name = (el.value||"").trim();
+  if (!name) return { name:null, id:null };
+  var picked = el.dataset.acId || null;
+  /* typed the whole name without touching the menu — resolve it rather than lose the link */
+  if (!picked){
+    var hit = CG.memberIndex().find(function(m){ return m.label.toLowerCase() === name.toLowerCase(); });
+    if (hit) picked = hit.id;
+  }
+  return { name:name, id:picked };
+};
 CG.fileActionRequest = function(type){
   if (!CG.auth.user){ CG.toast("Sign in with Discord first","err"); return; }
   var meta = CG.ACTION_META[type]; if(!meta) return;
@@ -3412,7 +3464,8 @@ CG.fileActionRequest = function(type){
     var subs = type==="complaint" ? CG.COMPLAINT_SUBJECTS : CG.APPEAL_SUBJECTS;
     fields += '<label class="fld"><span>'+(type==="complaint"?"What’s the complaint about?":"What are you appealing?")+'</span><select id="acSubject"><option value="">Select one…</option>'+subs.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join("")+'</select></label>';
     if (type==="complaint"){
-      fields += '<label class="fld"><span>Who is this about? (optional)</span><select id="acTarget"><option value="">—</option>'+CG.lg.players.map(function(p){ return '<option>'+esc(p.tag)+'</option>'; }).join("")+'</select></label>';
+      fields += CG.memberPickerField("acTarget", "Who is this about? (optional)",
+        "Type a name and pick from the list — that links the case to their record.");
     }
   }
   if (type==="position_change"){
@@ -3426,15 +3479,17 @@ CG.fileActionRequest = function(type){
     '<p class="caption">'+(meta.route==="manager"?"Private to your club’s management.":"Goes to the league office — commissioners are notified instantly.")+'</p>';
   CG.modal("File — "+esc(meta.label), fields,
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="acGo">Submit</button>');
+  CG.wireMemberPicker("acTarget");
   document.getElementById("acGo").addEventListener("click", function(){
     var subEl=document.getElementById("acSubject");
     var subject = subEl ? subEl.value : null;
     if (subEl && !subject){ CG.toast("Pick what this is about","err"); return; }
     var details = (document.getElementById("acDetails").value||"").trim();
     if (!details){ CG.toast("Add details — describe what happened","err"); return; }
+    var tgt = CG.readMemberPicker("acTarget");
     var payload = { profile_id: CG.auth.user.id, type:type, route:meta.route, details:details,
       season_id: (CG.SEASON&&CG.SEASON.id)||null, subject: subject||null,
-      target: (document.getElementById("acTarget")||{}).value||null };
+      target: tgt.name, target_profile_id: tgt.id };
     if (type==="trade_request") payload.team_id = (CG.lg._codeToId||{})[me.team]||null;
     if (type==="position_change"){
       payload.current_position = document.getElementById("acCur").value;
@@ -3452,9 +3507,13 @@ CG.fileActionRequest = function(type){
   });
 };
 /* issue a warning or suspension straight from a case — resolves it and links the record */
-CG.caseDisciplineModal = function(caseId, targetName){
+CG.caseDisciplineModal = function(caseId, targetName, targetId){
   var players = (CG.lg.players||[]).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
-  var match = players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
+  /* Prefer the profile the filer actually picked. Falling back to a name comparison is what the
+     old behaviour did everywhere, and it silently stops matching the moment someone changes their
+     gamertag — so it's now only the path for cases filed before the picker existed. */
+  var match = (targetId && players.find(function(p){ return p.id===targetId; }))
+    || players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
   var opts = '<option value="">— pick the player —</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
   var cur = (CG.SEASON&&CG.SEASON.number)||1;
   CG.modal("Issue discipline",
@@ -3538,7 +3597,7 @@ CG.AFTER._complaintsLive = function(){
     CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-unclaim"), p_assignee:null }).then(function(r){
       if(r.error){ CG.toast(r.error.message||"Couldn’t release","err"); return; } CG.toast("Released back to the queue","ok"); CG.refreshActions(); }); }); });
   document.querySelectorAll("[data-case-discipline]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target")); }); });
+    CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target"), this.getAttribute("data-target-id")||null); }); });
   document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
     CG.caseHistoryModal(this.getAttribute("data-target")); }); });
   document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
