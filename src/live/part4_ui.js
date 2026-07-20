@@ -214,7 +214,7 @@ CG.crest = function(code, size, opts){
   var deco = !!(opts && opts.decorative);
   if (t.logo)
     return '<img class="crest" src="'+t.logo+'" width="'+s+'" height="'+Math.round(s*1.05)+'" '+
-      'style="object-fit:contain" alt="'+(deco?"":esc(t.name)+' logo')+'">';
+      'loading="lazy" decoding="async" style="object-fit:contain" alt="'+(deco?"":esc(t.name)+' logo')+'">';
   var lum = (function(hex){ var c=hex.replace("#",""); return (0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255; })(t.color);
   var fg = lum > .62 ? "#101519" : "#FFFFFF";
   var id = "cr"+(CG.crestSeq++);

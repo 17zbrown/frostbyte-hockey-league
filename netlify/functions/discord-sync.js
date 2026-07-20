@@ -278,6 +278,24 @@ export default async (req) => {
     }
   } catch (e) { sum.errors.push({ lockPrivate: String(e.message || e) }); }
 
+  // A room's topic states who it's for, and the sweep above states who can actually read it — when
+  // those disagree the topic is the one that misleads (#design-suggestions announced itself as
+  // "Staff-only" while sitting in the commissioners-only category). Canonical topics live in
+  // app_config.discord_channel_topics as {"channel-name": "topic"} so they can be corrected without
+  // a deploy, and are reconciled here the same way club topics are.
+  try {
+    const rows = await sbGet("app_config?key=eq.discord_channel_topics&select=value");
+    const want = rows[0] && rows[0].value ? JSON.parse(rows[0].value) : null;
+    if (want) {
+      for (const [name, topic] of Object.entries(want)) {
+        const chan = guildChannels.find((c) => c.name === name && c.type !== 4);
+        if (!chan || (chan.topic || "") === topic) continue;
+        await dApi("PATCH", `/channels/${chan.id}`, { topic });
+        sum.topicsFixed = (sum.topicsFixed || 0) + 1;
+      }
+    }
+  } catch (e) { sum.errors.push({ channelTopics: String(e.message || e) }); }
+
   // (0) keep each team's Discord ROLE (name + color) + CHANNEL name in sync with the site
   for (const t of teams) {
     try {

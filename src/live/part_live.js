@@ -3077,6 +3077,31 @@ CG.deleteDivision = function(id, name, count){
    silently falls back to the anon key in the storage client, which reads as
    "violates row-level security". So we fetch the session ourselves, prove it
    server-side, send it explicitly, and retry once through a refresh. */
+/* Club artwork arrives at whatever resolution the club had to hand — one upload was 2357x2357 —
+   while the largest crest the site ever paints is 104 CSS px (about 312 device px on a 3x screen).
+   Shipping the originals made the eight logos 884 KB, roughly two-thirds of the home page. Resize
+   once here, at upload, so the cost isn't paid by every visitor on every load.
+   WebP where the browser can encode it (all current ones can, and it holds transparency); the
+   original blob is returned untouched if anything about the decode fails, so a club can never be
+   blocked from uploading by this optimisation. */
+CG.shrinkImage = async function(file, cap){
+  var fallback = { blob:file, type:file.type||"image/png", ext:null };
+  try {
+    if (!/^image\//.test(file.type||"") || /svg/.test(file.type||"")) return fallback;
+    var bmp = await createImageBitmap(file);
+    var scale = Math.min(1, cap/Math.max(bmp.width, bmp.height));
+    var w = Math.max(1, Math.round(bmp.width*scale)), h = Math.max(1, Math.round(bmp.height*scale));
+    var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    var ctx = cv.getContext("2d");
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close && bmp.close();
+    var out = await new Promise(function(res){ cv.toBlob(res, "image/webp", 0.92); });
+    if (!out) out = await new Promise(function(res){ cv.toBlob(res, "image/png"); });
+    if (!out || out.size >= file.size) return fallback;   // never upload a bigger file than we got
+    return { blob:out, type:out.type, ext:(out.type==="image/webp"?"webp":"png") };
+  } catch (e) { return fallback; }
+};
 CG.uploadTeamLogo = async function(file, code){
   var s = await CG.sb.auth.getSession();
   var session = s && s.data && s.data.session;
@@ -3094,13 +3119,17 @@ CG.uploadTeamLogo = async function(file, code){
     isComm = await CG.sb.rpc("is_commissioner");
     if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
   }
-  var ext = ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
+  var shrunk = await CG.shrinkImage(file, 384);
+  var body = shrunk.blob, type = shrunk.type;
+  var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
   var path = (code||"logo").toLowerCase()+"-"+Date.now()+"."+ext;
   async function put(tok){
     return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+encodeURIComponent(path), {
       method:"POST",
-      headers:{ "Authorization":"Bearer "+tok, "apikey":CG.SB_KEY, "Content-Type":file.type||"image/png", "x-upsert":"true", "cache-control":"3600" },
-      body:file
+      /* every upload gets a fresh timestamped path, so the bytes at a given URL never change and
+         can be cached for a year — the old 3600 made every visitor revalidate eight logos hourly */
+      headers:{ "Authorization":"Bearer "+tok, "apikey":CG.SB_KEY, "Content-Type":type, "x-upsert":"true", "cache-control":"public, max-age=31536000, immutable" },
+      body:body
     });
   }
   var res = await put(session.access_token);
