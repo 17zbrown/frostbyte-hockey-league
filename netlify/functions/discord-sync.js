@@ -108,9 +108,9 @@ export default async (req) => {
       const cfg = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
       const configured = String((cfg[0] && cfg[0].value) || "").split(",").map((s) => s.trim()).filter(Boolean);
       const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
-      // same target set the sync enforces: registered ids + everything under a Staff category
-      const staffCatIds = chans.filter((c) => c.type === 4 && /^staff\b/i.test(c.name || "")).map((c) => c.id);
-      const ids = [...new Set([...configured, ...chans.filter((c) => c.type !== 4 && staffCatIds.includes(c.parent_id)).map((c) => c.id)])];
+      // same target set the sync enforces: every room under a private category, plus pinned ids
+      const privCatIds = chans.filter((c) => c.type === 4 && (/^staff\b/i.test(c.name || "") || /^commissioners?\b/i.test(c.name || ""))).map((c) => c.id);
+      const ids = [...new Set([...configured, ...chans.filter((c) => c.type !== 4 && privCatIds.includes(c.parent_id)).map((c) => c.id)])];
       const report = ids.map((cid) => {
         const c = chans.find((x) => x.id === cid);
         if (!c) return { channel: null, configuredId: cid, exists: false };
@@ -125,7 +125,7 @@ export default async (req) => {
       });
       return new Response(JSON.stringify({
         officeRoles: office.map((r) => r.name),
-        staffCategories: chans.filter((c) => staffCatIds.includes(c.id)).map((c) => c.name),
+        privateCategories: chans.filter((c) => privCatIds.includes(c.id)).map((c) => c.name),
         staffChannels: report,
       }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
@@ -218,48 +218,65 @@ export default async (req) => {
     } catch (e) { sum.errors.push({ lockChannel: t.name, error: String(e.message || e) }); }
   }
 
-  // The staff rooms (general / welcome / casework) are private to the league office: only the
-  // Commissioner and Staff roles may see them. They carry complaints, discipline, and staff-only
-  // case notes, so this self-heals on every pass exactly like the club rooms. Channel ids come
-  // from app_config.discord_staff_channel_ids (comma-separated).
-  // SAFETY: if neither office role resolves, do nothing — denying @everyone with no allow would
-  // hide the rooms from everybody, including staff.
+  // Private categories, and exactly who may read each. The league office is NOT one audience:
+  // #commissioner-chat is commissioners only, while the staff rooms are commissioners AND staff.
+  // Widening one regex to cover both categories would quietly hand Staff the commissioners' room,
+  // so the permitted roles are declared per category instead.
+  const PRIVATE_CATEGORIES = [
+    { match: /^staff\b/i,          roles: ["commissioner", "staff"] },
+    { match: /^commissioners?\b/i, roles: ["commissioner"] },
+  ];
+
+  // Each private room is self-healed on every pass, exactly like the club rooms. Membership comes
+  // from the category a channel sits in, so a room added months from now is covered without anyone
+  // remembering to register it — plus any ids pinned in app_config.discord_staff_channel_ids.
+  // SAFETY: a category whose roles don't resolve is skipped entirely. Denying @everyone with no
+  // allow in place would hide the room from everybody, including the people who need it.
   try {
-    if (staffRoleIds.length) {
-      const cfgRows = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
-      const configured = String((cfgRows[0] && cfgRows[0].value) || "")
-        .split(",").map((s) => s.trim()).filter(Boolean);
-      // Also sweep every channel sitting under a Staff category. A commissioner adding a new staff
-      // room months from now should not have to remember to register its id here — if it lives in
-      // the staff category it is staff-only, and this pass makes it so within five minutes.
-      const staffCatIds = guildChannels.filter((c) => c.type === 4 && /^staff\b/i.test(c.name || "")).map((c) => c.id);
-      // every channel type, not just text — a staff voice room or forum is exactly as private as a
-      // staff text room, and VIEW_CHANNEL is what gates all of them
-      const inCategory = guildChannels.filter((c) => c.type !== 4 && staffCatIds.includes(c.parent_id)).map((c) => c.id);
-      const staffChanIds = [...new Set([...configured, ...inCategory])];
-      for (const cid of staffChanIds) {
+    const cfgRows = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
+    const pinned = String((cfgRows[0] && cfgRows[0].value) || "")
+      .split(",").map((s) => s.trim()).filter(Boolean);
+
+    // channel id -> the role ids permitted to see it
+    const target = new Map();
+    for (const spec of PRIVATE_CATEGORIES) {
+      const allowIds = spec.roles.map((n) => roleId[n]).filter(Boolean);
+      if (allowIds.length !== spec.roles.length) {
+        sum.errors.push({ lockPrivate: `roles ${spec.roles.join("+")} did not all resolve — category skipped rather than risk hiding it from everyone` });
+        continue;
+      }
+      const catIds = guildChannels.filter((c) => c.type === 4 && spec.match.test(c.name || "")).map((c) => c.id);
+      // every channel type, not just text — a private voice room or forum is exactly as private as
+      // a text room, and VIEW_CHANNEL is what gates all of them
+      for (const c of guildChannels) {
+        if (c.type !== 4 && catIds.includes(c.parent_id)) target.set(c.id, allowIds);
+      }
+    }
+    // pinned ids default to the staff audience, which is what they were registered for
+    if (staffRoleIds.length) for (const id of pinned) if (!target.has(id)) target.set(id, staffRoleIds);
+
+    if (target.size) {
+      for (const [cid, allowIds] of target) {
         sum.staffChecked++;
         const chan = guildChannels.find((c) => c.id === cid);
-        // a configured room that no longer exists is a misconfiguration, not an outage — count it
+        // a pinned room that no longer exists is a misconfiguration, not an outage — count it
         // so the Automations panel shows it, but don't page the watchdog over a deleted channel
         if (!chan) { sum.staffMissing++; continue; }
         const ow = chan.permission_overwrites || [];
         const everyone = ow.find((o) => o.id === GUILD);
         const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
-        const officeOk = staffRoleIds.every((rid) => {
+        const officeOk = allowIds.every((rid) => {
           const a = ow.find((o) => o.id === rid);
           return a && (BigInt(a.allow || "0") & 1024n) === 1024n;
         });
         if (hidden && officeOk) continue; // already correct
-        // grant the office roles FIRST, then hide from @everyone (never the other way round)
-        for (const rid of staffRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+        // grant the permitted roles FIRST, then hide from @everyone (never the other way round)
+        for (const rid of allowIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
         await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
         sum.staffLocked++;
       }
-    } else {
-      sum.errors.push({ lockStaffChannels: "no Commissioner/Staff role found — skipped so the rooms aren't hidden from everyone" });
     }
-  } catch (e) { sum.errors.push({ lockStaffChannels: String(e.message || e) }); }
+  } catch (e) { sum.errors.push({ lockPrivate: String(e.message || e) }); }
 
   // (0) keep each team's Discord ROLE (name + color) + CHANNEL name in sync with the site
   for (const t of teams) {
