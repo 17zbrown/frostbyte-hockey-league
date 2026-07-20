@@ -94,6 +94,11 @@ CG.buildLiveLeague = async function(){
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=CG.pickCurrentSeason(q[2].data||[]),
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
+      /* Both public feeds are scoped to the season being displayed. Prototype-era rows carry a
+         null season_id, so this is what keeps retired clubs ("Circuit Breakers signed…") and games
+         that were never played off the home page — and it keeps Season 1's ledger out of Season 2
+         for free. Every writer stamps season_id; see the guard in CG.saveNews. */
+      _inSeason = function(r){ return !!(season && r && r.season_id === season.id); },
       draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[],
       leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[],
       gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[],
@@ -101,6 +106,8 @@ CG.buildLiveLeague = async function(){
       siteCfgRaw=(q[14]&&!q[14].error&&q[14].data)||[],
       suspRaw=(q[15]&&!q[15].error&&q[15].data)||[],
       awardsRaw=(q[16]&&!q[16].error&&q[16].data)||[];
+  transactions = transactions.filter(_inSeason);
+  news = news.filter(_inSeason);
 
   /* public config: feature flags (homepage modules etc.) + site_config (rankings override) */
   CG._flags = {}; flagsRaw.forEach(function(f){ CG._flags[f.key] = !!f.enabled; });
@@ -4169,8 +4176,13 @@ CG.newsForm = function(slug){
     if (!body){ CG.toast("Write the story body","err"); return; }
     var rec={ title:t, category:document.getElementById("nwC").value, body:body };
     var btn=this; btn.disabled=true;
+    /* The newsroom feed only renders rows stamped with the current season, so publishing without
+       one would write an article that is invisible the moment it saves. Refuse instead. */
+    if (isNew && !(CG.SEASON && CG.SEASON.id)){
+      btn.disabled=false; CG.toast("No active season — create one before publishing","err"); return;
+    }
     var q = isNew
-      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"Commissioner")+" — Commissioner", published_at:new Date().toISOString(), season_id:(CG.SEASON&&CG.SEASON.id)||null }))
+      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"Commissioner")+" — Commissioner", published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
       : CG.sb.from("news").update(rec).eq("id", slug);
     q.then(function(r){
       btn.disabled=false;
