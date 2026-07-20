@@ -9,6 +9,13 @@ CG.pageHead = function(eyebrow, title, lede, right){
     (lede?'<p class="lede" style="margin-top:10px">'+lede+'</p>':"")+
     '</div>'+(right||"")+'</div></div></section>';
 };
+/* Empty state for a table that has to keep its <table> element: CG.AFTER.stats binds column
+   sorting to #statTbl with no null guard, so swapping the node out for a standalone .empty div
+   throws and takes every other handler on the page down with it. One full-width row instead.
+   (Sorting a single-row tbody never invokes the comparator, so the short row is safe.) */
+CG.emptyRow = function(cols, title, note){
+  return '<tr><td colspan="'+cols+'"><div class="empty"><b>'+esc(title)+'</b><p>'+esc(note)+'</p></div></td></tr>';
+};
 /* ---- Twitch (ported from the classic site): profiles.twitch + profiles.live ----
    Twitch purple is used ONLY on Twitch elements (brand use), never as site color. */
 CG.TWITCH_PURPLE = "#9146ff";
@@ -83,6 +90,28 @@ CG.standTable = function(div, opts){
     (opts.caption?'<caption class="'+(opts.srCaption?"sr":"")+'">'+esc(opts.caption)+'</caption>':"")+
     '<thead><tr>'+cols+'</tr></thead><tbody>'+CG.standRows(div,opts)+'</tbody></table></div>';
 };
+/* Before a single game is played every club is 0-0-0, the standings comparator returns 0 for every
+   pair, and the table publishes alphabetical order as a verdict. This is what runs in its place:
+   the division's clubs stated as clubs, with no rank column and no implied order. */
+CG.divisionField = function(div){
+  var byTeam = (CG.lg && CG.lg.byTeam) || {};
+  return CG.TEAMS.filter(function(t){ return t.div===div; })
+    .slice().sort(function(a,b){ return a.name<b.name?-1:a.name>b.name?1:0; })
+    .map(function(t){
+      var n = (byTeam[t.code]||[]).length;
+      return '<div class="notif" style="align-items:center" data-go="#/team/'+t.code+'" role="link" tabindex="0">'+
+        CG.crest(t.code,30)+'<span style="min-width:0"><b>'+esc(t.name)+'</b>'+
+        '<p>'+esc(t.city)+' · '+n+' player'+(n===1?"":"s")+' signed</p></span>'+
+        '<span class="nf-t">0-0-0</span></div>';
+    }).join("");
+};
+/* the honest footer under a pre-season field: what the table will mean, and when it starts */
+CG.fieldNote = function(){
+  var start = CG.seasonStartMs();
+  return '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
+    'No games played yet, so there is nothing to rank. The table starts filling in'+
+    (start ? ' '+CG.fmtDay(start) : ' at puck drop')+' — two points for a win, one for an overtime loss.</span></div>';
+};
 CG.gameCard = function(g){
   var lg = CG.lg;
   var res = (lg.allResults||lg.results).find(function(r){ return r.id===g.id; });
@@ -91,8 +120,13 @@ CG.gameCard = function(g){
   else if (Math.abs(g.at - CG.now()) < 10*3600000 && g.at > CG.now()) tag = '<span class="chip chip-live"><span class="live-dot"></span>Tonight</span>';
   else if (g.at < CG.now()) tag = '<span class="chip chip-warn">Awaiting result</span>';
   else tag = '<span class="chip">'+(g.stage==="preseason"?"Pre-season · Wk "+g.week:g.stage==="playoff"?"Playoffs · Wk "+g.week:"Week "+g.week)+'</span>';
+  /* "Wed, Sep 23" -> weekday over date over time. .gc-when is a fixed grid track (74px / 60px
+     on mobile), so the date stacks under the weekday instead of widening the column. */
+  var day = CG.fmtDay(g.at), wd = day.split(",")[0], mmdd = day.slice(wd.length+1).trim();
   return '<div class="gamecard" data-go="#/matchup/'+g.id+'" role="link" tabindex="0">'+
-    '<div class="gc-when"><b>'+CG.fmtDay(g.at).split(",")[0]+'</b><span>'+CG.fmtTime(g.at)+'</span></div>'+
+    '<div class="gc-when"><b>'+esc(wd)+'</b>'+
+      '<span style="display:block;font-size:11px;color:var(--ink);margin:2px 0 3px">'+esc(mmdd)+'</span>'+
+      '<span>'+CG.fmtTime(g.at)+'</span></div>'+
     '<div class="gc-match">'+CG.crest(g.away,26)+esc(CG.TEAM[g.away].name)+
       (res?'<span class="gc-score num">'+res.score[g.away]+'</span>':"")+
       '<span class="at">'+(res?"—":"@")+'</span>'+
@@ -195,7 +229,6 @@ CG.HOMEMODS = [
   { key:"tonight",   label:"Tonight’s Games" },
   { key:"standings", label:"League Standings" },
   { key:"leaders",   label:"Statistical Leaders" },
-  { key:"video",     label:"Intermission Report (video)" },
   { key:"news",      label:"Latest News" },
   { key:"honors",    label:"Three Stars & Weekly Honors" },
   { key:"deadlines", label:"League Deadlines" }
@@ -272,33 +305,49 @@ CG.seasonTimeline = function(){
 CG.ROUTES.home = function(){
   var lg = CG.lg, C = CG.CONTENT;
   var pre = CG.isPreseason();
-  var html = "";
+  /* the front page's own heading — the hero headline lives inside a rotating carousel, so it
+     can't be the document h1. Visually hidden, but it makes the page start at level 1. */
+  var html = '<h1 class="sr-only">'+esc(CG.seasonTag())+' — Chel Gaming Hockey League</h1>';
+  /* sign-ups run right up to puck drop; registration_deadline is only the draft-eligibility
+     cutoff. Both strips below key off registration_open and stop once the season is live. */
+  var regOpen = !!(CG.SEASON && CG.SEASON.registration_open && CG.SEASON.status !== "active");
   /* free-agency countdown — pinned to the top of the front page while the window is open */
   var faO = CG.SEASON && CG.SEASON.free_agency_opens_at ? Date.parse(CG.SEASON.free_agency_opens_at) : null;
   var faC = CG.SEASON && CG.SEASON.free_agency_closes_at ? Date.parse(CG.SEASON.free_agency_closes_at) : null;
-  if (faO && faC && Date.now() >= faO && Date.now() < faC){
+  var faLive = !!(faO && faC && Date.now() >= faO && Date.now() < faC);
+  if (faLive){
     html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
       '<span class="chip chip-live"><span class="live-dot"></span>Free agency is open</span>'+
-      '<span style="color:var(--on-ink-dim);font-size:13px">Clubs can sign free agents until '+CG.fmtFull(faC)+'</span>'+
-      '<span style="margin-left:auto;display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Closes in</span>'+
+      '<span style="color:var(--on-ink-dim);font-size:13px">Clubs can sign free agents until '+CG.fmtFull(faC)+
+        (regOpen?' — register now and you’re in the pool they’re signing from':"")+'</span>'+
+      '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Closes in</span>'+
       '<b id="faCountdown" class="num" data-close="'+faC+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>'+
+      (regOpen?'<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a>':"")+'</span>'+
     '</div></section>';
   }
-  /* registration countdown — pinned while sign-ups are open ahead of the eligibility deadline */
+  /* registration strip — stays up for the whole sign-up window, not just the eligibility run-up */
   var regDl = CG.SEASON && CG.SEASON.registration_deadline ? Date.parse(CG.SEASON.registration_deadline) : null;
-  if (CG.SEASON && CG.SEASON.registration_open && regDl && Date.now() < regDl && !(faO && faC && Date.now() >= faO && Date.now() < faC)){
+  if (regOpen && !faLive){
+    var draftEligible = !!(regDl && Date.now() < regDl);
     html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
       '<span class="chip chip-chrome">'+esc(CG.seasonTag())+' registration is open</span>'+
-      '<span style="color:var(--on-ink-dim);font-size:13px">Register by '+CG.fmtFull(regDl)+' to be draft-eligible</span>'+
-      '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Deadline in</span>'+
-      '<b id="regCountdown" class="num" data-close="'+regDl+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>'+
+      '<span style="color:var(--on-ink-dim);font-size:13px">'+(draftEligible
+        ? 'Register by '+CG.fmtFull(regDl)+' to be draft-eligible'
+        : 'The draft-eligibility deadline has passed — sign up now and you’re placed on a club automatically after the draft')+'</span>'+
+      '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+      (draftEligible?'<span style="display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Deadline in</span>'+
+        '<b id="regCountdown" class="num" data-close="'+regDl+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>':"")+
       '<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a></span>'+
     '</div></section>';
   }
   /* HERO */
   var railGames = pre ? lg.schedule.filter(function(g){ return g.at>CG.now(); }).sort(function(a,b){return a.at-b.at;}).slice(0,4) : lg.tonight;
-  var railLabel = pre ? "Opening games"
-    : "Tonight"+(railGames.length ? " · "+(railGames[0].stage==="preseason"?"Pre-season week ":"Week ")+railGames[0].week : "");
+  /* one stage label for both branches so the pre-season rail can never be captioned as
+     regular-season "Opening games" (and playoffs read as playoffs on either path) */
+  var stageWk = function(g){ return (g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week; };
+  var railLabel = pre
+    ? (railGames.length ? "Next up · "+stageWk(railGames[0]) : "Opening games")
+    : "Tonight"+(railGames.length ? " · "+stageWk(railGames[0]) : "");
   html += '<section id="hero"><div class="shell hero-grid">'+
     '<div class="caro" id="heroCaro" aria-label="Featured stories"></div>'+
     '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+railLabel+'</span>'+
@@ -317,11 +366,19 @@ CG.ROUTES.home = function(){
   /* quick fact strip */
   if (pre){
     var days = CG.daysToStart(), start = CG.seasonStartMs();
+    /* The signed-player count only means something once it's league-sized. Published at 2 next to
+       "8 clubs" it reads as a fabricated stat, so below a full 6v6 night's worth of players the
+       slot carries the sign-up state instead. */
+    var signed = lg.players.length, signedFloor = CG.TEAMS.length * 6;
     html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
       '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Off-season")+'</b><span>inaugural season</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>day'+(days===1?"":"s")+' to puck drop'+(start?" · "+CG.fmtDay(start):"")+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/teams"><b class="num">'+CG.TEAMS.length+'</b><span>clubs · '+(CG.DIVISIONS?CG.DIVISIONS.length:2)+' divisions</span></div>'+
-      '<div style="cursor:pointer" data-go="#/players"><b class="num">'+lg.players.length+'</b><span>players signed</span></div>'+
+      (signed >= signedFloor
+        ? '<div style="cursor:pointer" data-go="#/players"><b class="num">'+signed+'</b><span>players signed</span></div>'
+        : regOpen
+          ? '<div style="cursor:pointer" data-go="#/register"><b>Open</b><span>sign-ups · anyone can join</span></div>'
+          : '<div style="cursor:pointer" data-go="#/rulebook"><b>6v6</b><span>EA NHL · published rulebook</span></div>')+
     '</div></div></section>';
   } else {
     var lead = CG.skaterLeaders(lg,"p")[0];
@@ -360,21 +417,32 @@ CG.ROUTES.home = function(){
   /* STANDINGS + rail */
   if (CG.modOn("standings")){
     html += '<section class="sec"><div class="shell">'+
-      '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">The race, division by division</h2></div>'+
+      '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">'+
+        (pre?'The field, division by division':'The race, division by division')+'</h2></div>'+
         '<a class="sec-link" href="#/standings">Full standings</a></div>'+
       '<div class="grid g2">'+
         (CG.DIVISIONS||["East","West"]).map(function(dv){
-          return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable(dv,{cutline:true})+'</div>';
+          return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+
+            (pre ? CG.divisionField(dv)+CG.fieldNote() : CG.standTable(dv,{cutline:true}))+'</div>';
         }).join("")+
       '</div>'+
       '<div class="grid g2" style="margin-top:18px;align-items:start">'+
+        /* Pre-season this list is a seeding order, not a results ranking — say so, or it reads as a
+           contradiction of the "nothing to rank yet" note in the cards above. Don't name the basis
+           more precisely than that: the order is the engine's roster-strength seed UNLESS the league
+           office has set a manual override, and neither is the same figure as teamRatings.ovr, which
+           is derived from played results. Asserting a number alongside it would be a claim we can't
+           keep, so pre-season the value column stays empty. */
         '<div class="card"><div class="card-h"><h3>Power Rankings</h3><a class="sec-link" href="#/rankings">Full list</a></div>'+
+          (pre?'<div class="card-b" style="border-bottom:1px solid var(--line)"><span class="caption">'+
+            (lg.prManual ? 'Pre-season seeding, set by the league office.' : 'No results to rank yet — this is the pre-season seeding order.')+
+            ' It becomes a results ranking after the first game night.</span></div>':"")+
           lg.powerRankings.map(function(pr){
             var t = CG.TEAM[pr.team];
             return '<div class="leaderrow'+(pr.rank===1?" top":"")+'" data-go="#/team/'+pr.team+'"><span class="rk num">'+pr.rank+'</span>'+
               CG.crest(pr.team,30)+'<span style="min-width:0"><b style="font-family:var(--f-disp);font-size:14px">'+esc(t.name)+'</b>'+
-              '<small style="display:block" class="caption">'+lg.teams[pr.team].w+"-"+lg.teams[pr.team].l+"-"+lg.teams[pr.team].otl+' · '+esc(t.div)+' Division</small></span>'+
-              '<span class="val">'+CG.moveArrow(pr.move)+'</span></div>';
+              '<small style="display:block" class="caption">'+(pre?"":lg.teams[pr.team].w+"-"+lg.teams[pr.team].l+"-"+lg.teams[pr.team].otl+' · ')+esc(t.div)+' Division</small></span>'+
+              '<span class="val">'+(pre?"":CG.moveArrow(pr.move))+'</span></div>';
           }).join("")+'</div>'+
         '<div class="card"><div class="card-h"><h3>Transactions</h3><span class="chip">'+esc(CG.seasonTag())+' log</span></div>'+
           ((lg.liveTransactions||[]).length ? lg.liveTransactions.slice(0,7).map(function(tx){
@@ -404,20 +472,6 @@ CG.ROUTES.home = function(){
         leadCard("Goals", gls, function(p){ var s=lg.pstats[p.id]; return [s.g, s.gp+" GP"]; })+
         leadCard("Goaltending", gs, function(p){ var s=lg.pstats[p.id]; return [(s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,""), s.w+"-"+s.l+"-"+s.otl]; })+
       '</div></div></section>';
-  }
-  /* VIDEO — Intermission Report */
-  if (CG.modOn("video") && !pre){
-    var vid = CG.store.get("prefs").video;
-    html += '<section class="sec-tight"><div class="shell"><div class="grid g32" style="align-items:center">'+
-      '<div><span class="eyebrow chr">Intermission report</span><h2 class="h-sec" style="margin:12px 0 10px">The week in one sitting</h2>'+
-      '<p class="lede">A commissioner-curated highlight reel runs here on loop. Upload an MP4 or WebM in the Control Center — muted autoplay, poster fallback, and reduced-motion support are built in.</p>'+
-      (CG.role()==="commish"?'<a class="btn btn-ink" style="margin-top:16px" href="#/admin/homepage">Manage the reel</a>':"")+'</div>'+
-      '<div class="vidbox">'+
-        (vid ? '<video src="'+esc(vid)+'" autoplay muted loop playsinline controls></video>'
-             : '<div class="vb-fallback"><div style="text-align:center">'+CG.ic("film",34)+'<p style="margin-top:10px;font-family:var(--f-mono);font-size:12px">No video published for this week</p>'+
-               '<p class="caption" style="color:var(--on-ink-dim)">Static poster shown until the commissioner uploads one.</p></div></div>')+
-        '<div class="vb-overlay"><b style="font-family:var(--f-disp)">The week in review</b></div>'+
-      '</div></div></div></section>';
   }
   /* NEWS */
   if (CG.modOn("news") && !pre){
@@ -475,8 +529,17 @@ CG.ROUTES.home = function(){
           return '<div class="note chr"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">'+esc(m[1])+'</b>'+esc(m[2])+
             '<span class="caption" style="display:block;margin-top:8px">'+CG.fmtFull(Date.parse(m[0]))+'</span></div>';
         }).join("")+
-        '<div class="note"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">Availability window</b>'+esc(CG.WEEK8.label)+' submissions close '+CG.fmtFull(CG.WEEK8.deadline)+' (Rule 5.1). '+
-          (CG.can("availability.submit")?'<a href="#/hub/availability" style="font-weight:700;border-bottom:2px solid var(--chrome)">Submit yours →</a>':'<a href="#/signin" style="font-weight:700;border-bottom:2px solid var(--chrome)">Sign in to submit →</a>')+'</div>'+
+        /* every signed-in role reaches the availability page — staff and commissioners play too,
+           and "availability.submit" excludes them. Guests get the ask that actually applies to them. */
+        '<div class="note"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:var(--ink)">Availability window</b>'+
+          (CG.WEEK8.open
+            ? esc(CG.WEEK8.label)+' submissions close '+CG.fmtFull(CG.WEEK8.deadline)+' (Rule 5.1). '
+            : 'Opens with the first game week of the schedule (Rule 5.1). ')+
+          (CG.role()!=="guest"
+            ? '<a href="#/hub/availability" style="font-weight:700;border-bottom:2px solid var(--chrome)">Submit yours →</a>'
+            : regOpen
+              ? '<a href="#/register" style="font-weight:700;border-bottom:2px solid var(--chrome)">Register to play →</a>'
+              : '<a href="#/signin" style="font-weight:700;border-bottom:2px solid var(--chrome)">Sign in →</a>')+'</div>'+
       '</div></div></section>';
     }
   }
@@ -649,6 +712,19 @@ CG.playoffBracket = function(){
   }
 
   /* ----- PROJECTION: seed the field from today's table (Rule 8.1) ----- */
+  /* With no results the seed comparator ties on every field, so a "projected bracket" is just
+     the club list in alphabetical order — dressed up as six qualifiers. Publish the format and
+     the date instead; the bracket returns the moment there are points to seed it with. */
+  if (CG.isPreseason()){
+    var poAt = CG.SEASON && CG.SEASON.playoffs_start_at ? Date.parse(CG.SEASON.playoffs_start_at) : null;
+    return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff format</h3>'+
+      '<span class="chip">Seeded once games are played</span></div><div class="card-b">'+
+      '<p class="small" style="color:var(--steel);line-height:1.65">Top three in each division qualify — six clubs, three rounds. '+
+      'Division winners take seeds 1 and 2 and skip the quarter-finals; the other four seed by points, then wins, '+
+      'then goal differential (Rule 8.1). The bracket appears here as soon as there are results to seed it.</p>'+
+      '<span class="caption" style="display:block;margin-top:10px">'+
+      (poAt ? 'Playoffs begin '+CG.fmtDay(poAt)+'.' : 'Playoff dates are set with the season schedule.')+'</span></div></div>';
+  }
   var pWinners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
   pWinners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
   var pRest = [];
@@ -715,6 +791,17 @@ CG.ROUTES.standings = function(param, qs){
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Two weeks, rosters filled by random assignment. Pre-season results never touch the league standings — they exist so every player logs the five games that make them draft-eligible.</span></div></div>';
   } else if (view==="league"){
     body = '<div class="card"><div class="card-h"><h3>Overall league table</h3><span class="chip">'+CG.TEAMS.length+' clubs</span></div>'+CG.standTable(null,{full:true,caption:"League standings — all clubs"})+'</div>';
+  } else if (view==="wildcard" && CG.isPreseason()){
+    /* Nobody is in or out at 0-0-0 — "below the cut · 0 pts back of the line" is the comparator
+       tie rendered as a verdict. Show the field and the rule that will decide it. */
+    body = '<div class="grid g2">'+
+      DIVS.map(function(dv){
+        return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+
+          CG.divisionField(dv)+CG.fieldNote()+'</div>';
+      }).join("")+
+    '</div><p class="note" style="margin-top:16px">Nobody is in or out yet — every club sits at 0-0-0. '+
+    'Three clubs per division qualify; division winners take the top seeds and the rest seed by points (Rule 8.1). '+
+    'This page splits into the field and the chasers after the first game night.</p>';
   } else if (view==="wildcard"){
     var byDiv = DIVS.map(function(dv){ return { name:dv, rows:CG.standings(CG.lg,dv) }; });
     body = '<div class="grid g2">'+
@@ -782,6 +869,14 @@ CG.seasonPicker = function(cur){
 /* Editorial one-liner computed from live results — always factually current. */
 CG.teamLine = function(code){
   var lg = CG.lg, t = CG.TEAM[code], s = lg.teams[code];
+  /* "Top of the East" before a puck is dropped is the standings comparator tying and the club
+     landing first alphabetically. State what is actually known about the club instead. */
+  if (CG.isPreseason()){
+    var n = (lg.byTeam[code]||[]).length;
+    var start = CG.seasonStartMs();
+    return (n ? n+" player"+(n===1?"":"s")+" signed" : "No players signed yet")+
+      (start ? ". First puck drop "+CG.fmtDay(start)+"." : ".");
+  }
   var div = CG.standings(lg, t.div);
   var rank = div.findIndex(function(r){ return r.code===code; }) + 1;
   var pos = rank===1 ? "Top of the "+t.div : rank===div.length ? "Bottom of the "+t.div : ["","","Second","Third"][rank]+" in the "+t.div;
@@ -803,8 +898,10 @@ CG.ROUTES.teams = function(){
       '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:46px;height:46px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:7.5px;letter-spacing:.12em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:20px;line-height:1">'+topL.tier+'</b></div>'+
       '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
     '</div>' : "";
-  var head = CG.pageHead("The clubs","Eight franchises. One trophy.","Every club runs a real room — front office, 12-player roster, and a rivalry waiting to happen.", tierBadge);
+  var head = CG.pageHead("The clubs","Eight franchises. One trophy.",
+    "Every club runs a real room — front office, "+(CG.ROSTER_MAX||15)+"-player roster, and a rivalry waiting to happen.", tierBadge);
   var pr = {}; lg.powerRankings.forEach(function(p){ pr[p.team]=p.rank; });
+  var preT = CG.isPreseason();
   var cards = CG.TEAMS.map(function(t){
     var s = lg.teams[t.code];
     var note = CG.teamLine(t.code);
@@ -818,8 +915,10 @@ CG.ROUTES.teams = function(){
         '<div style="display:flex;gap:16px;align-items:center;font-family:var(--f-mono);font-size:12px;flex-wrap:wrap">'+
           '<span><b class="num">'+s.w+"-"+s.l+"-"+s.otl+'</b> record</span>'+
           '<span><b class="num">'+s.pts+'</b> pts</span>'+
-          '<span>#'+pr[t.code]+' power ranking</span>'+CG.form5(s.last5)+'</div>'+
-        '<div style="display:flex;gap:8px"><span class="chip">'+t.div+' Division</span>'+(CG.standings(lg,t.div)[0].code===t.code?'<span class="chip chip-chrome">Division lead</span>':"")+'</div>'+
+          '<span>#'+pr[t.code]+(preT?' pre-season seed':' power ranking')+'</span>'+CG.form5(s.last5)+'</div>'+
+        /* nobody leads a division at 0-0-0 — the badge would land on whichever club sorts first */
+        '<div style="display:flex;gap:8px"><span class="chip">'+t.div+' Division</span>'+
+          (!preT && CG.standings(lg,t.div)[0].code===t.code?'<span class="chip chip-chrome">Division lead</span>':"")+'</div>'+
       '</div></div>';
   }).join("");
   return head + '<div class="shell" style="padding-bottom:40px"><div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">'+cards+'</div></div>';
@@ -885,7 +984,10 @@ CG.ROUTES.team = function(code, qs){
           '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
           '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px">'+line+'</td>'+
           (archived?"":'<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td>')+'</tr>';
-      }).join("")+'</tbody></table></div></div>';
+      }).join("")+
+      (roster.length ? "" : CG.emptyRow(archived?5:6, "No players on this roster yet",
+        "Clubs fill up at the draft and in free agency. Signings show here the moment they’re made."))+
+      '</tbody></table></div></div>';
   }
   if (tab==="games"){
     if (archived){
@@ -977,7 +1079,10 @@ CG.AFTER.team = function(code, qs){
 CG.ROUTES.players = function(param, qs){
   var lg = CG.lg;
   var fTeam = qs.team||"", fPos = qs.pos||"", fQ = (qs.q||"").toLowerCase(), fFlag = qs.flag||"";
-  var head = CG.pageHead("Player directory","Every skater. Every tendy.","96 rostered players across eight clubs. Ratings update nightly from real box scores.");
+  var nRostered = lg.players.length;
+  var head = CG.pageHead("Player directory","Every skater. Every tendy.",
+    esc(nRostered+" rostered player"+(nRostered===1?"":"s")+" across "+CG.TEAMS.length+" clubs. "+
+      "Overalls are the league's scouting baseline; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
     '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+'</select>'+
@@ -1050,11 +1155,16 @@ CG.ROUTES.player = function(pid, qs){
   var isG = p.pos==="G";
   var me = CG.me();
   var canSeeAvail = CG.role()==="commish" || CG.role()==="staff" || (me && me.team===p.team && CG.can("availability.viewTeam")) || (me && me.id===p.id);
+  /* "no games" has to mean no games at ANY stage: s.gp is regular-season only, and a player
+     with five pre-season appearances does have a sample to talk about. */
+  var preS = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
+  var anyGp = (s.gp||0) + ((preS && preS.gp)||0);
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
     '<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
+      /* decorative here — the club name is the very next thing a screen reader reads, in the eyebrow */
       (t.logo
-        ? '<img class="crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="'+esc(t.name)+' logo">'
-        : '<div style="flex-shrink:0">'+CG.crest(p.team,84)+'</div>')+
+        ? '<img class="crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="">'
+        : '<div style="flex-shrink:0">'+CG.crest(p.team,52)+'</div>')+
       '<div style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
@@ -1068,8 +1178,10 @@ CG.ROUTES.player = function(pid, qs){
             : '<span class="chip chip-loss">Suspended</span>') : "")+
           (canSeeAvail?'<span class="chip chip-win">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
+      /* OVR is the staff scouting number on the profile — the live adapter sets it from
+         profiles.overall for every player, played games or not. It is never derived from results. */
       '<div style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
-        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Overall · from results</span></div></div>'+
+        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Overall · scouted</span></div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
       (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>':'<span class="chip chip-win">Live — updates after every final</span>')+
@@ -1087,12 +1199,20 @@ CG.ROUTES.player = function(pid, qs){
       ? '<div class="card"><div class="card-h"><h3>'+esc(SD.label)+'</h3><span class="chip">Final</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">This season is archived — the line above is final and read-only. Overall ratings are computed per season, so archived seasons keep their stat lines while the rating on the header always reflects the current campaign.</p>'+
         '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/player/'+p.id+'">Back to the current season</a></div></div>'
-      : '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
+      /* the breakdown bars are computed from box scores. At zero games they read "Production 0 ·
+         Discipline 100" — a scouting verdict on a player who has never taken a shift, printed
+         right under a card that correctly says there are no conclusions yet. */
+      : (anyGp===0
+        ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
+          '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
+          'The '+r.ovr+' overall is the staff scouting number from registration; production, defence, and discipline bars '+
+          'appear here once box scores exist.</p></div></div>'
+        : '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
         Object.keys(r.parts).map(function(k){
           return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+r.parts[k]+'%"></span></span><span class="rb-v num">'+r.parts[k]+'</span></div>';
         }).join("")+
-        '<p class="caption" style="margin-top:10px">Weighted blend, regressed toward league average under small samples. Weights are commissioner-configurable; every input is a real recorded stat.</p>'+
-      '</div></div>';
+        '<p class="caption" style="margin-top:10px">Bars are a weighted blend of recorded stats, regressed toward league average under small samples; the weights are commissioner-configurable. The overall itself is the staff scouting number.</p>'+
+      '</div></div>');
     var scout = archived
       ? p.tag+" finished the preseason with "+(p.pos==="G"
           ? (s.gp? s.gp+" appearance"+(s.gp>1?"s":"")+", a "+(s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—")+" save percentage and a "+s.w+"-"+s.l+"-"+s.otl+" record." : "no game action.")
@@ -1112,7 +1232,7 @@ CG.ROUTES.player = function(pid, qs){
       advCells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<p class="caption" style="margin-top:12px">Every figure is pulled automatically from the EA NHL match record — no manual entry.</p></div></div>' : '';
     /* pre-season line — separate from the season, but part of the overall rating */
-    var ps = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
+    var ps = preS;
     var preCard = (ps && ps.gp>0) ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Pre-season</h3><span class="chip">'+ps.gp+' GP · counts toward overall</span></div><div class="card-b">'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
       (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
@@ -1252,6 +1372,15 @@ CG.AFTER.player = function(pid, qs){
 CG.ROUTES.stats = function(param, qs){
   var lg = CG.lg;
   var tab = qs.tab||"skaters", minGp = qs.min===undefined? 3 : +qs.min, fTeam = qs.team||"";
+  /* an empty table has two very different causes, and the reader can only act on one of them */
+  var noGames = !(lg.allResults||lg.results).length;
+  var emptyStats = function(cols, what){
+    return noGames
+      ? CG.emptyRow(cols, "No "+what+" yet",
+          "The season hasn’t started. Every column here fills in automatically from EA box scores after the first final.")
+      : CG.emptyRow(cols, "No "+what+" match this view",
+          "Lower the minimum GP or pick a different club — the filters above are hiding everyone.");
+  };
   var head = CG.pageHead("Stat central","League statistics",
     "Sortable, filterable, exportable. "+(lg.results.length
       ? "Auto-imported from EA box scores after every final — "+lg.results.length+" game"+(lg.results.length===1?"":"s")+" recorded."
@@ -1279,7 +1408,8 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s.shots?100*s.g/s.shots:0).toFixed(1)+'">'+(s.shots?(100*s.g/s.shots).toFixed(1):"—")+'</td>'+
         '<td data-v="'+s.hits+'">'+s.hits+'</td><td data-v="'+s.blk+'">'+s.blk+'</td><td data-v="'+s.tk+'">'+s.tk+'</td>'+
         '<td data-v="'+s.pim+'" class="'+(s.pim?"":"z")+'">'+s.pim+'</td><td data-v="'+s.gwg+'" class="'+(s.gwg?"":"z")+'">'+s.gwg+'</td>'+
-        '<td data-v="'+(s.fot?100*s.fow/s.fot:0).toFixed(1)+'">'+(s.fot?(100*s.fow/s.fot).toFixed(1):"—")+'</td></tr>'; }).join("")+'</tbody></table>';
+        '<td data-v="'+(s.fot?100*s.fow/s.fot:0).toFixed(1)+'">'+(s.fot?(100*s.fow/s.fot).toFixed(1):"—")+'</td></tr>'; }).join("")+
+      (list.length ? "" : emptyStats(15,"skater stats"))+'</tbody></table>';
   } else if (tab==="advanced"){
     var la = lg.players.filter(function(p){ return p.pos!=="G" && lg.pstats[p.id].gp>=minGp && (!fTeam||p.team===fTeam); })
       .sort(function(a,b){ return (lg.pstats[b.id].toi||0)-(lg.pstats[a.id].toi||0); });
@@ -1299,7 +1429,8 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s.sat||0)+'">'+(s.sat||0)+'</td><td data-v="'+(s.intc||0)+'">'+(s.intc||0)+'</td><td data-v="'+(s.pdrawn||0)+'">'+(s.pdrawn||0)+'</td>'+
         '<td data-v="'+(s._ratN?+s.ratOff:0).toFixed(1)+'">'+(s._ratN?(+s.ratOff).toFixed(1):"—")+'</td>'+
         '<td data-v="'+(s._ratN?+s.ratDef:0).toFixed(1)+'">'+(s._ratN?(+s.ratDef).toFixed(1):"—")+'</td>'+
-        '<td data-v="'+(s._ratN?+s.ratTeam:0).toFixed(1)+'">'+(s._ratN?(+s.ratTeam).toFixed(1):"—")+'</td></tr>'; }).join("")+'</tbody></table>';
+        '<td data-v="'+(s._ratN?+s.ratTeam:0).toFixed(1)+'">'+(s._ratN?(+s.ratTeam).toFixed(1):"—")+'</td></tr>'; }).join("")+
+      (la.length ? "" : emptyStats(15,"advanced metrics"))+'</tbody></table>';
   } else if (tab==="goalies"){
     var gl = lg.players.filter(function(p){ return p.pos==="G" && lg.pstats[p.id].gp>=Math.min(minGp,3) && (!fTeam||p.team===fTeam); })
       .sort(function(a,b){ var A=lg.pstats[a.id],B=lg.pstats[b.id]; return B.sv/Math.max(1,B.sa)-A.sv/Math.max(1,A.sa); });
@@ -1314,7 +1445,8 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s.gp?s.ga/s.gp:99).toFixed(2)+'">'+(s.gp?(s.ga/s.gp).toFixed(2):"—")+'</td>'+
         '<td data-v="'+s.so+'" class="'+(s.so?"":"z")+'">'+s.so+'</td><td data-v="'+s.qs+'">'+s.qs+'</td>'+
         '<td data-v="'+(s.brkShots?Math.round(100*s.brkSv/s.brkShots):0)+'">'+(s.brkShots?Math.round(100*s.brkSv/s.brkShots)+"%":"—")+'</td>'+
-        '<td data-v="'+(s.pokes||0)+'">'+(s.pokes||0)+'</td></tr>'; }).join("")+'</tbody></table>';
+        '<td data-v="'+(s.pokes||0)+'">'+(s.pokes||0)+'</td></tr>'; }).join("")+
+      (gl.length ? "" : emptyStats(13,"goaltender stats"))+'</tbody></table>';
   } else {
     table = '<table class="tbl keepcols" id="statTbl"><caption>Team statistics</caption><thead><tr>'+
       '<th class="tleft">Club</th><th class="sortable">GP</th><th class="sortable">GF/GP</th><th class="sortable">GA/GP</th><th class="sortable sorted">DIFF</th><th class="sortable">S/GP</th><th class="sortable">SA/GP</th><th class="sortable">S%</th><th class="sortable">Home</th><th class="sortable">Road</th><th class="sortable">PTS%</th></tr></thead><tbody>'+

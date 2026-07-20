@@ -265,9 +265,12 @@ CG.tonightCard = function(me, myGame, inLineup){
 CG.hubAvailability = function(){
   var me = CG.me(), lg = CG.lg, r = CG.role();
   if (!CG.can("availability.submit") && !CG.can("availability.viewTeam")) return CG.unauthorized();
-  var closed = CG.now() > CG.WEEK8.deadline;
+  /* with no game week scheduled the window isn't "closed", it hasn't opened — and `now > null`
+     coerces to true, which would otherwise show the deadline-passed state before a season exists */
+  var closed = CG.WEEK8.open && CG.now() > CG.WEEK8.deadline;
   var mine = me ? CG.availGet(me.id) : null;
-  var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+' · deadline '+CG.fmtFull(CG.WEEK8.deadline)+'</span>'+
+  var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+
+      (CG.WEEK8.open ? ' · deadline '+CG.fmtFull(CG.WEEK8.deadline) : ' · not yet scheduled')+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Weekly availability</h1>'+
     '<p class="lede" style="margin-top:8px">Two nights next week. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
   var form = !me

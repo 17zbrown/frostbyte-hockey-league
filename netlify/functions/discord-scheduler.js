@@ -30,21 +30,60 @@ async function claim(kind, ref) {
   console.error(`claim ${kind}/${ref} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
   return false; // on any other error, stay safe and don't post
 }
-// POST to Discord, honoring 429 Retry-After (bulk reminder loops can otherwise trip rate limits).
+// Hand a one-shot claim back so the next tick can retry. Only call this when Discord PROVABLY
+// never took the message (non-2xx, or 429s we gave up on) — a transport error is ambiguous, the
+// message may well have landed, and releasing on those would double-post.
+async function release(kind, ref) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.${encodeURIComponent(kind)}&ref=eq.${encodeURIComponent(ref)}`,
+      { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } });
+    if (!r.ok) console.error(`release ${kind}/${ref} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
+  } catch (e) { console.error(`release ${kind}/${ref} -> ${String(e.message || e)}`); }
+}
+// The single choke point for every Discord delivery, so it is also the only place that decides
+// what "delivered" means. Always resolves to an outcome object — never undefined, never a raw
+// Response — so an exhausted retry loop can't be mistaken for success by a caller that ignores it.
+// `ambiguous` marks the one case where we don't know whether the message landed.
 async function postWithRetry(url, headers, payload) {
-  for (let i = 0; i < 4; i++) {
-    const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
-    if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((s) => setTimeout(s, (ra + 0.3) * 1000)); continue; }
-    return r;
+  const ATTEMPTS = 4;
+  for (let i = 0; i < ATTEMPTS; i++) {
+    let r;
+    try {
+      r = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+    } catch (e) {
+      return { ok: false, status: 0, ambiguous: true, error: `network error: ${String(e.message || e)}` };
+    }
+    if (r.ok) return { ok: true, status: r.status };
+    if (r.status !== 429) {
+      // A 4xx is a definitive rejection: bad payload, deleted webhook, missing permission. The
+      // message did not land, so the claim is safe to release and retry.
+      // A 5xx (or the Cloudflare error page that fronts Discord) may mean the message WAS delivered
+      // and only the response was lost. Releasing on that would post the same reminder twice, which
+      // is a worse outcome than missing one — so it stays claimed.
+      const ambiguous = r.status >= 500 || r.status === 408;
+      return { ok: false, status: r.status, ambiguous, error: `${r.status} ${(await r.text()).slice(0, 160)}` };
+    }
+    if (i === ATTEMPTS - 1) break; // out of attempts: don't burn the Retry-After wait we'll never use
+    const ra = +(r.headers.get("retry-after") || 1);
+    await new Promise((s) => setTimeout(s, (ra + 0.3) * 1000));
   }
+  return { ok: false, status: 429, error: `rate limited, gave up after ${ATTEMPTS} attempts` };
 }
-async function postWebhook(url, content) {
-  if (!url) return;
-  await postWithRetry(url, { "Content-Type": "application/json" }, { content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } });
+// Informational posts (the schedule slate, the standings table) name every club, and every club
+// name is a role mention — parse:["roles"] would fire a league-wide notification twice a week for
+// a table, which trains people to mute the exact channels that later carry game reminders. The
+// role pills still RENDER with parse:[], they just don't notify. Pass { ping: true } only when the
+// post is genuinely FOR the people it names.
+async function postWebhook(url, content, opts = {}) {
+  if (!url) return { ok: false, status: 0, error: "no webhook url" };
+  return postWithRetry(url, { "Content-Type": "application/json" },
+    { content: content.slice(0, 1990), allowed_mentions: opts.ping ? { parse: ["users", "roles"] } : { parse: [] } });
 }
+// Game reminders go to a club's own private room and are addressed to that club — this ping is
+// the whole point of the message, so it keeps parse:["roles"].
 async function postChannel(channelId, content) {
-  if (!BOT || !channelId) return;
-  await postWithRetry(`https://discord.com/api/v10/channels/${channelId}/messages`,
+  if (!BOT || !channelId) return { ok: false, status: 0, error: BOT ? "no channel id" : "no bot token" };
+  return postWithRetry(`https://discord.com/api/v10/channels/${channelId}/messages`,
     { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
     { content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } });
 }
@@ -75,7 +114,9 @@ const fmtDay = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/Ne
 export default async () => {
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
   if (await ranRecently("discord-scheduler", 60)) return json({ skipped: "ran moments ago" });
-  const now = new Date(), et = etParts(now), sum = {};
+  // Delivery failures land in sum.errors rather than throwing, so a dead standings webhook can't
+  // take the game reminders down with it. Both feed the ok/errCount record the Automations chip reads.
+  const now = new Date(), et = etParts(now), sum = { errors: [] };
   try {
     const seasons = await sbGet("seasons?select=id,number&order=number.desc&limit=1");
     const season = seasons[0];
@@ -86,17 +127,18 @@ export default async () => {
     const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code&order=scheduled_at`);
 
     // (A) weekly schedule — Tuesday 5:00-5:09pm ET
-    if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg);
+    if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors);
     // (B) standings — Friday 11pm ET through Saturday 2am ET, once the week's games are all final
-    if ((et.wd === 5 && et.hr >= 23) || (et.wd === 6 && et.hr < 2)) sum.standings = await weeklyStandings(games, teamById, cfg);
+    if ((et.wd === 5 && et.hr >= 23) || (et.wd === 6 && et.hr < 2)) sum.standings = await weeklyStandings(games, teamById, cfg, sum.errors);
     // (C) team reminders — ~30 min before a club's first game of the night
-    sum.reminders = await gameReminders(games, teamById, now);
+    sum.reminders = await gameReminders(games, teamById, now, sum.errors);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
+  const errs = (sum.error ? [sum.error] : []).concat(sum.errors);
   try {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "rl_discord-scheduler_result", value: JSON.stringify({
-        at: new Date().toISOString(), ok: !sum.error, errCount: sum.error ? 1 : 0, lastError: sum.error || null
+        at: new Date().toISOString(), ok: errs.length === 0, errCount: errs.length, lastError: errs[0] ? String(errs[0]).slice(0, 200) : null
       }), updated_at: new Date().toISOString() }) });
   } catch {}
   return json(sum);
@@ -119,42 +161,69 @@ const nameOf = (teamById, id) => (teamById[id] || {}).name || "?";
 // A club's role mention (pings everyone on the club) when we know its Discord role, else the plain name.
 const teamTag = (teamById, id) => { const t = teamById[id] || {}; return t.discord_role_id ? `<@&${t.discord_role_id}>` : (t.name || "?"); };
 
+// Captions are bare noun phrases — the line they land on already reads "AWAY @ HOME — **caption**",
+// so a caption with a verb ("visits") has to agree with a club name, and 7 of the 8 are plural.
+// Each game carries a RANKED LIST of captions rather than one string: three featured games can
+// easily share a headline fact (two same-division games in a week; on opening night every game
+// falls into the same one or two early-season buckets), and the list lets the assignment below give
+// each game something nobody else took. If a game genuinely has nothing left to say it gets NO
+// caption — better a bare matchup line than a repeated one or an invented distinction.
 function pickFeatured(weekGames, allGames, teamById) {
   const st = computeStandings(allGames, teamById);
-  const finalCount = allGames.filter((g) => g.status === "final").length;
+  const finals = allGames.filter((g) => g.status === "final");
   const ranked = Object.values(st).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.gf - b.ga) - (a.gf - a.ga));
   const rank = {}; ranked.forEach((tm, i) => (rank[tm.id] = i + 1));
-  const nm = (id) => nameOf(teamById, id);
+  const met = (x, y) => finals.some((g) => (g.home_team_id === x && g.away_team_id === y) || (g.home_team_id === y && g.away_team_id === x));
   const scored = weekGames.map((g) => {
     const h = st[g.home_team_id], a = st[g.away_team_id];
-    if (!h || !a) return { g, s: -1, why: "" };
+    if (!h || !a) return { g, s: -1, whys: [] };
     const sameDiv = h.division && h.division === a.division;
-    if (finalCount < 6) { // early season: standings not meaningful yet
-      return { g, s: 2 + (sameDiv ? 5 : 0), why: sameDiv ? `${h.division} Division rivalry` : "an early-season measuring stick" };
+    const whys = [];
+    if (finals.length < 6) { // early season: standings aren't meaningful yet, so lead with what is
+      const debut = h.gp === 0 && a.gp === 0;
+      if (sameDiv) {
+        if (debut) whys.push(`${h.division} Division opener`);
+        whys.push(`${h.division} Division rivalry`);
+        if (!met(g.home_team_id, g.away_team_id)) whys.push(`first ${h.division} Division meeting of the season`);
+        whys.push(`${h.division} Division points on the line`);
+      } else {
+        if (debut) whys.push("cross-division opener");
+        whys.push("early-season measuring stick");
+        if (!met(g.home_team_id, g.away_team_id)) whys.push("first meeting of the season");
+      }
+      return { g, s: 2 + (sameDiv ? 5 : 0), whys };
     }
     const gap = Math.abs(h.pts - a.pts), topClash = rank[g.home_team_id] <= 3 && rank[g.away_team_id] <= 3;
     const s = (h.pts + a.pts) - gap * 0.6 + (sameDiv ? 4 : 0) + (topClash ? 8 : 0);
-    let why;
-    if (topClash) why = `top-of-the-table clash — #${rank[g.away_team_id]} ${nm(g.away_team_id)} at #${rank[g.home_team_id]} ${nm(g.home_team_id)}`;
-    else if (sameDiv && gap <= 3) why = `${h.division} Division rivalry with seeding on the line`;
-    else if (sameDiv) why = `${h.division} Division rivalry`;
-    else if (gap <= 3) why = "two clubs neck-and-neck in the table";
-    else why = `#${rank[g.away_team_id]} ${nm(g.away_team_id)} visits #${rank[g.home_team_id]} ${nm(g.home_team_id)}`;
-    return { g, s, why };
+    if (topClash) whys.push(`top-of-the-table clash — #${rank[g.away_team_id]} at #${rank[g.home_team_id]}`);
+    if (sameDiv && gap <= 3) whys.push(`${h.division} Division rivalry with seeding on the line`);
+    if (sameDiv) whys.push(`${h.division} Division rivalry`);
+    if (gap <= 3) whys.push("two clubs neck-and-neck in the table");
+    whys.push(`#${rank[g.away_team_id]} at #${rank[g.home_team_id]} in the table`);
+    return { g, s, whys };
   }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
-  return scored.slice(0, 3);
+
+  // Highest-scoring game gets first pick of its captions; the rest take the best one still free.
+  const top = scored.slice(0, 3), taken = new Set();
+  for (const f of top) {
+    f.why = f.whys.find((w) => !taken.has(w)) || "";
+    if (f.why) taken.add(f.why);
+  }
+  return top;
 }
 
-async function weeklySchedule(games, teamById, cfg) {
+async function weeklySchedule(games, teamById, cfg, errors) {
   const nowMs = Date.now();
   const wk = games.filter((g) => g.status !== "final" && new Date(g.scheduled_at).getTime() < nowMs + 6 * 864e5 && new Date(g.scheduled_at).getTime() > nowMs - 3600e3);
   if (!wk.length) return "no upcoming games this week";
+  const url = cfg.discord_schedule_webhook || cfg.discord_default_webhook;
+  if (!url) return "no schedule webhook configured"; // checked before claim() so the slot isn't burned
   const ref = "sched-" + etParts(new Date(wk[0].scheduled_at)).ymd;
   if (!(await claim("weekly_schedule", ref))) return "already posted";
   const tag = (id) => teamTag(teamById, id);
   const byDay = {};
   for (const g of wk) (byDay[fmtDay(g.scheduled_at)] = byDay[fmtDay(g.scheduled_at)] || []).push(g);
-  const lines = ["📅 **This Week in the Chel Gaming League**", ""];
+  const lines = ["📅 **This Week in the CGHL**", ""];
   for (const day of Object.keys(byDay)) {
     lines.push(`__${day}__`);
     for (const g of byDay[day].sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)))
@@ -164,32 +233,53 @@ async function weeklySchedule(games, teamById, cfg) {
   const feat = pickFeatured(wk, games, teamById);
   if (feat.length) {
     lines.push("⭐ **Featured Matchups**");
-    for (const f of feat) lines.push(`• ${tag(f.g.away_team_id)} @ ${tag(f.g.home_team_id)} — **${f.why}**`);
+    for (const f of feat) lines.push(`• ${tag(f.g.away_team_id)} @ ${tag(f.g.home_team_id)}${f.why ? ` — **${f.why}**` : ""}`);
   }
-  await postWebhook(cfg.discord_schedule_webhook || cfg.discord_default_webhook, lines.join("\n"));
+  const res = await postWebhook(url, lines.join("\n"));
+  if (!res.ok) {
+    errors.push(`weekly schedule: ${res.error}`);
+    if (!res.ambiguous) await release("weekly_schedule", ref); // nothing landed — let a later tick retry
+    return `post failed: ${res.error}`;
+  }
   return `posted ${wk.length} games`;
 }
 
-async function weeklyStandings(games, teamById, cfg) {
+async function weeklyStandings(games, teamById, cfg, errors) {
   const nowMs = Date.now();
   const wk = games.filter((g) => { const t = new Date(g.scheduled_at).getTime(); return t > nowMs - 5 * 864e5 && t <= nowMs; });
   if (!wk.length) return "no games this week";
   if (wk.some((g) => g.status !== "final")) return "week not complete yet"; // re-checks next tick
+  const url = cfg.discord_standings_webhook || cfg.discord_default_webhook;
+  if (!url) return "no standings webhook configured"; // checked before claim() so the slot isn't burned
   const anchor = wk.reduce((m, g) => (g.scheduled_at > m ? g.scheduled_at : m), wk[0].scheduled_at);
   const ref = "standings-" + etParts(new Date(anchor)).ymd; // stable across the Fri-night / Sat-early window
   if (!(await claim("weekly_standings", ref))) return "already posted";
   const rows = Object.values(computeStandings(games, teamById)).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.gf - b.ga) - (a.gf - a.ga));
-  // Ranked list (not a code block) so the club role mentions render + ping.
-  const lines = [`🏒 **Chel Gaming League Standings** — through ${fmtDay(anchor)}`, ""];
+  // Ranked list rather than a code block so the club role mentions render as pills (they don't ping).
+  const lines = [`🏒 **CGHL Standings** — through ${fmtDay(anchor)}`, ""];
   rows.forEach((t, i) => {
     const diff = (t.gf - t.ga >= 0 ? "+" : "") + (t.gf - t.ga);
     lines.push(`\`${String(i + 1).padStart(2)}\` ${teamTag(teamById, t.id)} — **${t.pts}** PTS · ${t.w}-${t.l}-${t.otl} · ${diff}`);
   });
-  await postWebhook(cfg.discord_standings_webhook || cfg.discord_default_webhook, lines.join("\n"));
+  const res = await postWebhook(url, lines.join("\n"));
+  if (!res.ok) {
+    errors.push(`weekly standings: ${res.error}`);
+    if (!res.ambiguous) await release("weekly_standings", ref); // nothing landed — let a later tick retry
+    return `post failed: ${res.error}`;
+  }
   return `posted standings (${rows.length} clubs)`;
 }
 
-async function gameReminders(games, teamById, now) {
+// A reminder becomes eligible 35 min out and STAYS eligible until puck drop, rather than living in a
+// 25-35 min slot. On a healthy */5 cron the first eligible tick is still ~30-35 min out, so the normal
+// timing is unchanged — but if that tick is lost to a cold start or a deploy, every later tick is a
+// catch-up instead of the reminder vanishing for the night. claim() is what keeps this idempotent:
+// the first tick to post takes the (team, night) row and every later tick short-circuits on it, so a
+// wider window can never double-post. Games already under way are filtered out above, which is what
+// closes the window at puck drop.
+const REMINDER_LEAD_MAX = 35;
+
+async function gameReminders(games, teamById, now, errors) {
   const nowMs = now.getTime(), byTeam = {};
   for (const g of games) {
     if (g.status === "final" || new Date(g.scheduled_at).getTime() < nowMs) continue;
@@ -200,10 +290,11 @@ async function gameReminders(games, teamById, now) {
     const team = teamById[tid]; if (!team || !team.discord_channel_id) continue;
     const list = byTeam[tid].sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
     const firstMs = new Date(list[0].scheduled_at).getTime(), mins = (firstMs - nowMs) / 60000;
-    if (mins < 25 || mins > 35) continue; // only fire ~30 min before the night's first game
+    if (mins > REMINDER_LEAD_MAX) continue;
     const nightYmd = etParts(new Date(list[0].scheduled_at)).ymd;
     const tonight = list.filter((g) => etParts(new Date(g.scheduled_at)).ymd === nightYmd);
-    if (!(await claim("game_reminder", `${tid}:${nightYmd}`))) continue;
+    const ref = `${tid}:${nightYmd}`;
+    if (!(await claim("game_reminder", ref))) continue;
     const nm = (id) => nameOf(teamById, id);
     const lines = [`${teamTag(teamById, tid)} 🚨 **Game night!** You've got ${tonight.length} matchup${tonight.length > 1 ? "s" : ""} tonight:`, ""];
     for (const g of tonight) {
@@ -211,8 +302,16 @@ async function gameReminders(games, teamById, now) {
       const ha = g.home_team_id === tid ? "vs" : "@";
       lines.push(`• ${ha} **${opp}** — ${fmtTime(g.scheduled_at)}${g.game_code ? ` · lobby \`${g.game_code}\`` : ""}`);
     }
-    lines.push("", "⏰ Lineups + server picks lock **30 minutes before puck drop** — set yours: https://chelgamingleague.com");
-    await postChannel(team.discord_channel_id, lines.join("\n"));
+    // On a catch-up post the lock has already passed, so don't tell them to go set a lineup they can't change.
+    lines.push("", mins >= 30
+      ? "⏰ Lineups + server picks lock **30 minutes before puck drop** — set yours: https://chelgamingleague.com"
+      : `⏰ Puck drop in about ${Math.max(1, Math.round(mins))} min — lineups + server picks are already locked: https://chelgamingleague.com`);
+    const res = await postChannel(team.discord_channel_id, lines.join("\n"));
+    if (!res.ok) {
+      errors.push(`game reminder ${team.name || tid}: ${res.error}`);
+      if (!res.ambiguous) await release("game_reminder", ref); // nothing landed — a later tick can still catch it
+      continue;
+    }
     posted++;
   }
   return `sent ${posted} reminder(s)`;

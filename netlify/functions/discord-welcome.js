@@ -98,7 +98,7 @@ const chanRef = (id, fallback) => (id ? `<#${id}>` : fallback);
 function welcomeText(userId, ch) {
   return `🏒 Welcome to **Chel Gaming**, <@${userId}>! Glad to have you on the ice.\n\n` +
     `• New here? Skim ${chanRef(ch.rules, "**#rules**")} to get the lay of the land.\n` +
-    `• Ready to play? Claim your spot in ${chanRef(ch.signups, "**#season-signups**")}.\n` +
+    `• Ready to play? Register at https://chelgamingleague.com/#/register — sign-ups happen on the site.\n` +
     `• Say hey in ${chanRef(ch.general, "**#general-chat**")} — tell us your team and platform.\n\n` +
     `The full league hub lives at https://chelgamingleague.com — lace 'em up. 🥅`;
 }
@@ -119,7 +119,7 @@ export default async () => {
     const override = await cfgGet("discord_welcome_channel_id");
     const welcomeChan = override || textByName["welcome"];
     if (!welcomeChan) { console.log("discord-welcome: no #welcome channel found — skipping"); return new Response("skipped: no #welcome", { status: 200 }); }
-    const ch = { rules: textByName["rules"], signups: textByName["season-signups"], general: textByName["general-chat"] };
+    const ch = { rules: textByName["rules"], general: textByName["general-chat"] };
 
     // Real, non-bot members currently in the guild.
     const members = (await allMembers()).filter((m) => m.user && !m.user.bot);

@@ -6,7 +6,7 @@
 CG.ROUTES.awards = function(param, qs){
   var lg = CG.lg, C = CG.CONTENT;
   var tab = qs.tab||"stars";
-  var head = CG.pageHead("Hardware","Awards & honors","Three Stars every game night, Players of the Week every Monday, season hardware in August.");
+  var head = CG.pageHead("Hardware","Awards & honors","Three Stars every game night, Players of the Week every Monday, season hardware after the December finale.");
   if (CG.isPreseason && CG.isPreseason()){
     return head + '<div class="shell" style="padding-bottom:48px"><div class="card"><div class="empty" style="padding:70px 20px">'+
       '<div class="e-art">'+CG.ic("trophy",22)+'</div><b>Awards begin when the season does</b>'+
@@ -232,6 +232,34 @@ CG.AFTER.rulebook = function(param, qs){
   if (qs.rule){ var el = $("#rule-"+CSS.escape(qs.rule)); if (el) setTimeout(function(){ el.scrollIntoView({block:"center", behavior:"instant"}); }, 420); }
 };
 
+/* ---------- COUNTDOWN (shared) ---------- */
+/* One countdown format for the whole site. A target months out rendered as a running clock
+   reads 1585:14:41 — unusable — so anything past two days reads in days, and only inside two
+   days does it become a clock worth watching.
+   part5a_public.js still carries two copy-paste clones of this (the free-agency and
+   registration strips); collapse them onto this. */
+CG.fmtCountdown = function(ms){
+  var t = Math.max(0, Math.floor(ms/1000));
+  var d = Math.floor(t/86400), h = Math.floor(t%86400/3600);
+  if (d >= 7) return d+" days";                                    /* hours are noise this far out */
+  if (d >= 2) return d+" days"+(h?", "+h+" hr"+(h===1?"":"s"):"");
+  var hh = d*24+h;
+  return (hh?hh+":":"")+String(Math.floor(t%3600/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");
+};
+/* Drives an element off CG.fmtCountdown until the target passes. Ticks once a minute while the
+   display is in days mode — a per-second repaint there changes nothing on screen — and stops
+   for good once the element is detached, so a re-render or route change can't leak a timer. */
+CG.countdown = function(el, targetMs, onElapsed){
+  if (!el) return;
+  (function tick(){
+    if (!document.body.contains(el)) return;
+    var ms = targetMs - CG.now();
+    if (ms <= 0){ if (onElapsed) onElapsed(el); return; }
+    el.textContent = CG.fmtCountdown(ms);
+    setTimeout(tick, ms > 48*3600000 ? 60000 : 1000);
+  })();
+};
+
 /* ---------- MATCHUP CENTER ---------- */
 CG.gameCode = function(id){
   /* prefer a real EA lobby code assigned to the game (EA club codes are 6-digit numbers) */
@@ -259,8 +287,13 @@ CG.ROUTES.matchup = function(id){
   if (!g) return CG.ROUTES._404();
   var res = (lg.allResults||lg.results).find(function(r){ return r.id===id; });
   var now = CG.now();
-  var th = lg.teams[g.home], ta = lg.teams[g.away];
-  var prPos = {}; lg.powerRankings.forEach(function(p){ prPos[p.team]=p.rank; });
+  var prPos = {}; (lg.powerRankings||[]).forEach(function(p){ prPos[p.team]=p.rank; });
+  /* power rankings don't exist until a game has gone final — before that the club line is
+     record + overall, not "#undefined PR" */
+  function mxRec(code){
+    var s = lg.teams[code];
+    return s.w+"-"+s.l+"-"+s.otl+(prPos[code]?" · #"+prPos[code]+" PR":"")+" · OVR "+lg.teamRatings[code].ovr;
+  }
   /* head-to-head from results */
   var h2h = { home:0, away:0 };
   lg.results.forEach(function(r){
@@ -279,15 +312,17 @@ CG.ROUTES.matchup = function(id){
       '<span class="chip chip-ink" style="border-color:#39434B">'+CG.fmtFull(g.at)+' · '+esc(CG.TEAM[g.home].arena)+'</span></div>'+
     '<div class="mx-teams">'+
       '<div class="mx-side">'+CG.crest(g.away,64)+'<div><div class="mx-nm">'+esc(CG.TEAM[g.away].name)+'</div>'+
-        '<div class="mx-rec">'+ta.w+"-"+ta.l+"-"+ta.otl+' · #'+prPos[g.away]+' PR · OVR '+lg.teamRatings[g.away].ovr+'</div></div></div>'+
+        '<div class="mx-rec">'+mxRec(g.away)+'</div></div></div>'+
       '<div class="mx-mid">'+(res
         ? '<div class="mx-score num">'+res.score[g.away]+' — '+res.score[g.home]+'</div><div class="mx-t">'+(res.ot?"Overtime final":"Final")+'</div>'
         : '<div class="mx-score num" id="mxCount">—</div><div class="mx-t">to puck drop</div>')+'</div>'+
       '<div class="mx-side away">'+CG.crest(g.home,64)+'<div><div class="mx-nm">'+esc(CG.TEAM[g.home].name)+'</div>'+
-        '<div class="mx-rec">'+th.w+"-"+th.l+"-"+th.otl+' · #'+prPos[g.home]+' PR · OVR '+lg.teamRatings[g.home].ovr+'</div></div></div>'+
+        '<div class="mx-rec">'+mxRec(g.home)+'</div></div></div>'+
     '</div>'+
     '<div style="display:flex;gap:16px;margin-top:22px;justify-content:center;font-family:var(--f-mono);font-size:11px;color:var(--on-ink-dim);flex-wrap:wrap">'+
-      '<span>Season series: '+esc(CG.TEAM[g.away].code)+' '+h2h.away+' — '+h2h.home+' '+esc(CG.TEAM[g.home].code)+'</span>'+
+      (h2h.home+h2h.away
+        ? '<span>Season series: '+esc(CG.TEAM[g.away].code)+' '+h2h.away+' — '+h2h.home+' '+esc(CG.TEAM[g.home].code)+'</span>'
+        : '<span>First meeting of the season</span>')+
       (g.feature?'<span style="color:var(--chrome)">MARQUEE GAME</span>':"")+'</div>'+
     '</div></div></section>';
   var body = '<div class="shell" style="padding:6px 0 40px">';
@@ -381,13 +416,21 @@ CG.ROUTES.matchup = function(id){
     }
     body += '</div>';
     /* team leaders comparison */
-    body += '<div class="card"><div class="card-h"><h3>Players to watch</h3></div><div class="grid g2" style="gap:0">'+
+    /* nobody has a point before Week 1 — rank on rating rather than print six zeroes */
+    var pre = CG.isPreseason && CG.isPreseason();
+    function mxOvr(p){ return (lg.ratings[p.id]||{}).ovr||0; }
+    function mxPts(p){ return (lg.pstats[p.id]||{}).p||0; }
+    body += '<div class="card"><div class="card-h"><h3>'+(pre?"Top-rated skaters":"Players to watch")+'</h3>'+
+      (pre?'<span class="chip">Ratings only · no games played</span>':"")+'</div><div class="grid g2" style="gap:0">'+
       [g.away,g.home].map(function(code){
-        var top = lg.byTeam[code].filter(function(p){ return p.pos!=="G"; }).sort(function(a,b){ return lg.pstats[b.id].p-lg.pstats[a.id].p; }).slice(0,3);
+        var top = (lg.byTeam[code]||[]).filter(function(p){ return p.pos!=="G"; })
+          .sort(function(a,b){ return pre ? mxOvr(b)-mxOvr(a) : mxPts(b)-mxPts(a); }).slice(0,3);
+        if (!top.length) return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><p class="caption">No skaters signed yet.</p></div>';
         return '<div style="border-top:1px solid var(--line-soft)">'+top.map(function(p,i){
-          var s = lg.pstats[p.id];
+          var s = lg.pstats[p.id]||{ g:0, a:0 };
           return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(code,26)+
-            '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b></span><span class="val"><b class="num">'+s.p+'</b><span>'+s.g+'G '+s.a+'A</span></span></div>';
+            '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b></span>'+
+            '<span class="val"><b class="num">'+(pre?mxOvr(p):mxPts(p))+'</b><span>'+(pre?"OVR":s.g+"G "+s.a+"A")+'</span></span></div>';
         }).join("")+'</div>';
       }).join("")+'</div></div>';
     if (g.feature){
@@ -420,24 +463,15 @@ CG.ROUTES.matchup = function(id){
 CG.AFTER.matchup = function(id){
   var g = CG.lg.schedule.find(function(x){ return x.id===id; });
   var el = $("#mxCount");
-  if (el && g){
-    function tick(){
-      var ms = g.at - CG.now();
-      if (ms<=0){ el.textContent = "LIVE"; return; }
-      var h = Math.floor(ms/3600000), m = Math.floor(ms%3600000/60000), s = Math.floor(ms%60000/1000);
-      el.textContent = (h?h+":":"")+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
-    }
-    tick();
-    var iv = setInterval(function(){ if (!document.body.contains(el)){ clearInterval(iv); return; } tick(); }, 1000);
-  }
+  if (el && g) CG.countdown(el, g.at, function(node){ node.textContent = "LIVE"; });
 };
 
-/* ---------- SIGN IN (Discord-first, with auto-join — same flow as the live site) ---------- */
+/* ---------- SIGN IN (Discord-first — same flow as the live site) ---------- */
 CG.ROUTES.signin = function(){
   return '<section class="sec"><div class="shell" style="max-width:900px">'+
     '<div style="text-align:center;margin-bottom:30px"><span class="eyebrow chr">One account for everything</span>'+
     '<h1 class="h-page" style="margin-top:10px">Sign in with Discord</h1>'+
-    '<p class="lede" style="margin:12px auto 0">Your Discord account is your league account. Not in the Chel Gaming server yet? Signing in <b>adds you to our Discord automatically</b> and signs you into the site in one step.</p>'+
+    '<p class="lede" style="margin:12px auto 0">Your Discord account is your league account — sign in once and you’re in. Not in the Chel Gaming server yet? We’ll send you the invite right after you sign in.</p>'+
     '<button class="btn btn-lg" id="dcSignIn" style="margin-top:22px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
     '<p class="caption" style="margin-top:12px">Scope: identify — exactly what the live site requests. The prototype simulates the OAuth handshake.</p></div>'+
     '<div style="display:flex;align-items:center;gap:14px;margin:26px 0"><span style="flex:1;height:1px;background:var(--line)"></span>'+

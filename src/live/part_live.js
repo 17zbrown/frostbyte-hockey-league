@@ -22,13 +22,6 @@ CG.fmtToi = function(sec){ sec = Math.max(0, Math.round(+sec||0)); var m=Math.fl
 /* seconds -> whole minutes, for per-game averages */
 CG.toiMin = function(sec){ return Math.round((+sec||0)/60); };
 
-/* real site identity (the static head still says "Platform Prototype") */
-try {
-  document.title = "Chel Gaming Hockey League";
-  var _md = document.querySelector('meta[name="description"]');
-  if (_md) _md.setAttribute("content", "The competitive home of 6v6 EA Sports NHL — schedules, standings, rosters, salary cap, trades, and the league rulebook.");
-} catch(e){}
-
 CG.LIVE = { loaded:false, error:null };
 
 /* PostgREST caps a single response at 1,000 rows and truncates silently. Any table that
@@ -61,20 +54,23 @@ CG.buildLiveLeague = async function(){
     sb.from("teams").select("*"),
     sb.from("divisions").select("*").order("sort_order"),
     sb.from("seasons").select("*").order("number", { ascending:false }),
-    sb.from("profiles").select("*"),
+    CG.sbAll("profiles","*","id"),
     CG.sbAll("roster_spots","*","id"),
     CG.sbAll("contracts","*","id"),
     CG.sbAll("games","*","scheduled_at"),
     CG.sbAll("transactions","*","occurred_at",false),
-    sb.from("news").select("*").order("published_at", { ascending:false }),
-    sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
-    sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at, profiles(gamertag,ea_id)"),
+    CG.sbAll("news","*","published_at",false),
+    /* both orders go through the builder: sbAll applies filterFn before its own orderCol, so
+       passing season_number as orderCol would demote it below round and invert the sort */
+    CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",null,true,
+      function(qb){ return qb.order("season_number").order("round"); }),
+    CG.sbAll("season_registrations","id,profile_id,season_id,status,position,scout_ovr,created_at, profiles(gamertag,ea_id)","id"),
     sb.from("leagues").select("*").order("sort_order"),
     CG.sbAll("game_stats","*","id"),
     sb.from("feature_flags").select("key,enabled"),
     sb.from("site_config").select("key,value"),
-    sb.from("suspensions").select("*").order("created_at",{ ascending:false }),
-    sb.from("awards").select("*").order("week")
+    CG.sbAll("suspensions","*","created_at",false),
+    CG.sbAll("awards","*","week")
   ]);
   /* first 9 are public-readable and required; draft_picks + season_registrations
      (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
@@ -444,7 +440,17 @@ CG.buildLiveLeague = async function(){
     CG.WEEK8 = { key:(avStage==="preseason"?"pre":avStage==="playoff"?"po":"w")+avWk,
       label:(avStage==="preseason"?"Pre-season week ":avStage==="playoff"?"Playoff week ":"Week ")+avWk,
       deadline: Date.parse(dlDay+"T20:00:00-04:00"),
-      nights: [ { key:"n1", at:nights[0] }, { key:"n2", at:nights[1] } ] };
+      nights: [ { key:"n1", at:nights[0] }, { key:"n2", at:nights[1] } ], open:true };
+  } else {
+    /* No unplayed games — off-season, or before a schedule exists. Without this the prototype
+       seed from part6_hub survives and the site publicly advertises a dead 2026 deadline.
+       It stays an OBJECT (never null) because consumers across the hub, profiles, the Staff Desk
+       and the notification bell read .key/.label/.nights unguarded; `open` is the real signal. */
+    /* No scheduled game week. `open:false` is the flag every consumer should branch on, but the
+       label stays a real string: it lands inside esc() in a dozen places, and null renders as the
+       literal "null". The deadline stays null on purpose — there genuinely isn't one — so anything
+       that prints a date MUST check .open first (Intl.format(null) happily returns Dec 31 1969). */
+    CG.WEEK8 = { key:null, label:"Game week", deadline:null, nights:[], open:false };
   }
   /* real data: no fabricated availability — unanswered means unanswered */
   CG.avFor = function(playerId){
@@ -527,7 +533,7 @@ CG.buildLiveLeague = async function(){
 
 /* ================================================================
    REAL AUTH — Discord OAuth via Supabase, replacing the demo-seat
-   system. Role is derived from profiles.role + team management pointers.
+   system. Role is derived from profiles.role + club management pointers.
    ================================================================ */
 CG.auth = { user:null, profile:null, role:"guest" };
 CG._guildTok = null;
@@ -550,18 +556,19 @@ CG.computeRole = function(profile){
 CG.applySession = async function(session){
   CG.auth.user = session ? session.user : null;
   if (CG.auth.user){
-    try { var r = await CG.sb.from("profiles").select("*").eq("id", CG.auth.user.id).maybeSingle(); CG.auth.profile = r.data || null; }
-    catch(e){ CG.auth.profile = null; }
-    /* the user's registration for the open season (for the Register flow) */
-    CG.auth.registration = null; CG.auth.ownerApp = null;
-    if (CG.auth.user && CG.SEASON && CG.SEASON.id){
-      try { var rg = await CG.sb.from("season_registrations").select("*").eq("season_id", CG.SEASON.id).eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.registration = rg.data || null; }
-      catch(e){ CG.auth.registration = null; }
-    }
-    try { var sa = await CG.sb.from("staff_applications").select("*").eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.staffApp = sa.data || null; }
-    catch(e){ CG.auth.staffApp = null; }
-    try { var oa = await CG.sb.from("owner_applications").select("*").eq("profile_id", CG.auth.user.id).maybeSingle(); CG.auth.ownerApp = oa.data || null; }
-    catch(e){ CG.auth.ownerApp = null; }
+    var uid = CG.auth.user.id, sidA = (CG.SEASON && CG.SEASON.id) || null;
+    /* Four independent single-row lookups that run for EVERY signed-in user before the first
+       paint — batched rather than awaited one at a time. Each resolves to null on its own
+       failure so one denied policy can't blank the other three. */
+    var one = function(qb){ return qb.then(function(r){ return (r && r.data) || null; }, function(){ return null; }); };
+    var mine = await Promise.all([
+      one(CG.sb.from("profiles").select("*").eq("id", uid).maybeSingle()),
+      sidA ? one(CG.sb.from("season_registrations").select("*").eq("season_id", sidA).eq("profile_id", uid).maybeSingle()) : null,
+      one(CG.sb.from("staff_applications").select("*").eq("profile_id", uid).maybeSingle()),
+      one(CG.sb.from("owner_applications").select("*").eq("profile_id", uid).maybeSingle())
+    ]);
+    CG.auth.profile = mine[0]; CG.auth.registration = mine[1];
+    CG.auth.staffApp = mine[2]; CG.auth.ownerApp = mine[3];
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
@@ -622,45 +629,47 @@ CG.loadManagerData = async function(){
        leftover or future-season picks can never desync the desk from the controls */
     var curSn = (CG.SEASON && CG.SEASON.number) || 1;
     CG.lg.draftState = states.find(function(s){ return s.season_number===curSn; }) || null;
-    /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
-    CG.lg._myBoard = CG.lg._myBoard || [];
+    /* Everything below is mutually independent, so it goes out as one batch instead of six
+       serial round trips. Each job owns its own rejection handler — a single RLS denial must
+       not blank the other panels the way one shared try/catch did. */
     var myBoardTeam = CG.myManagedTeam && CG.myManagedTeam();
+    var myCode = CG.myClub && CG.myClub(), myTid = (CG.lg._codeToId||{})[myCode];
+    var upcoming = myTid ? (CG.lg.schedule||[]).filter(function(g){ return (g.home===myCode||g.away===myCode) && g.status!=="final"; }) : [];
+    var upIds = upcoming.map(function(g){ return g.id; });
+    CG.lg._myBoard = CG.lg._myBoard || [];
+    CG.lg._myTrades = [];
+    if (myTid){ CG.lg._vetoes = {}; CG.lg._servers = {}; CG.lg._lineups = {}; }
+    var jobs = [];
+    /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
     if (myBoardTeam && myBoardTeam.id && CG.SEASON && CG.SEASON.id){
-      var db = await CG.sb.from("draft_boards").select("profile_id,rank")
-        .eq("season_id", CG.SEASON.id).eq("team_id", myBoardTeam.id).order("rank");
-      if (db && !db.error) CG.lg._myBoard = (db.data||[]).map(function(r){ return r.profile_id; });
+      jobs.push(CG.sb.from("draft_boards").select("profile_id,rank")
+        .eq("season_id", CG.SEASON.id).eq("team_id", myBoardTeam.id).order("rank")
+        .then(function(db){ if (db && !db.error) CG.lg._myBoard = (db.data||[]).map(function(r){ return r.profile_id; }); }, function(){}));
     }
     if (role==="commish" || role==="staff"){
-      var oa = await CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
-      CG.lg._ownerApps = (oa && !oa.error && oa.data) || [];
-      var sa2 = await CG.sb.from("staff_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false});
-      CG.lg._staffApps = (sa2 && !sa2.error && sa2.data) || [];
+      jobs.push(CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false})
+        .then(function(oa){ CG.lg._ownerApps = (oa && !oa.error && oa.data) || []; }, function(){ CG.lg._ownerApps = []; }));
+      jobs.push(CG.sb.from("staff_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false})
+        .then(function(sa2){ CG.lg._staffApps = (sa2 && !sa2.error && sa2.data) || []; }, function(){ CG.lg._staffApps = []; }));
     }
-    /* my club's live trades (incoming + outgoing, still open) */
-    CG.lg._myTrades = [];
-    var myCode = CG.myClub && CG.myClub(), myTid = (CG.lg._codeToId||{})[myCode];
     if (myTid){
-      try {
-        var tr = await CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false});
-        CG.lg._myTrades = (tr && !tr.error && tr.data) || [];
-      } catch(e){ CG.lg._myTrades = []; }
-      /* server vetoes + resolved servers for my club's upcoming games, and my saved lineups */
-      CG.lg._vetoes = {}; CG.lg._servers = {}; CG.lg._lineups = {};
-      try {
-        var upcoming = (CG.lg.schedule||[]).filter(function(g){ return (g.home===myCode||g.away===myCode) && g.status!=="final"; });
-        var upIds = upcoming.map(function(g){ return g.id; });
-        if (upIds.length){
-          var vv = await CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds);
-          (vv && !vv.error && vv.data || []).forEach(function(v){ if(v.team_id===myTid) CG.lg._vetoes[v.game_id]=v; });
-          var lockedIds = upcoming.filter(function(g){ return CG.now() >= g.at - (CG.VETO_LOCK_MS||1800000); }).map(function(g){ return g.id; });
-          await Promise.all(lockedIds.map(function(id){ return CG.sb.rpc("resolve_game_server",{p_game:id}).then(function(r){ if(r && !r.error && r.data) CG.lg._servers[id]=r.data; }).catch(function(){}); }));
-        }
-        if (CG.SEASON && CG.SEASON.id){
-          var lu = await CG.sb.from("lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid);
-          (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.night]=row; });
-        }
-      } catch(e){}
+      /* my club's live trades (incoming + outgoing, still open) */
+      jobs.push(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false})
+        .then(function(tr){ CG.lg._myTrades = (tr && !tr.error && tr.data) || []; }, function(){ CG.lg._myTrades = []; }));
+      /* server vetoes + resolved servers for my club's upcoming games */
+      if (upIds.length){
+        jobs.push(CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds)
+          .then(function(vv){ (vv && !vv.error && vv.data || []).forEach(function(v){ if(v.team_id===myTid) CG.lg._vetoes[v.game_id]=v; }); }, function(){}));
+        upcoming.filter(function(g){ return CG.now() >= g.at - (CG.VETO_LOCK_MS||1800000); }).forEach(function(g){
+          jobs.push(CG.sb.rpc("resolve_game_server",{p_game:g.id}).then(function(r){ if(r && !r.error && r.data) CG.lg._servers[g.id]=r.data; }).catch(function(){}));
+        });
+      }
+      if (CG.SEASON && CG.SEASON.id){
+        jobs.push(CG.sb.from("lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+          .then(function(lu){ (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.night]=row; }); }, function(){}));
+      }
     }
+    await Promise.all(jobs);
   } catch(e){}
 };
 /* re-read the leagues/tiers table (after creating a tier) and recompute counts */
@@ -722,7 +731,7 @@ CG.notifIcon = function(type){
 };
 /* staff/commish backlog summary from the DB (open cases, apps, unmatched EA imports, finals
    missing box scores, active suspensions). Powers the Staff Desk "Needs attention" card and
-   mirrors the daily #league-staff briefing. */
+   mirrors the daily #staff-general briefing. */
 CG.loadStaffAttention = async function(){
   if (!CG.sb || !CG.auth.user){ CG._staffAttention = null; return; }
   try { var r = await CG.sb.rpc("staff_needs_attention");
@@ -1006,10 +1015,16 @@ CG.ROUTES.register = function(){
   var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
     "Register for the season", "One form puts you in the player pool. The commissioner assigns roster spots from there.");
   if (!CG.auth.profile){
+    /* site_config is anon-readable, so guests get the real join link at the exact moment they're
+       told they need it — the site cannot add them to the server on their behalf */
+    var inviteOut = CG._siteCfg && CG._siteCfg.discord_invite;
     return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
       '<div class="e-art">'+CG.ic("user",22)+'</div><b>Sign in to register</b>'+
-      '<p>Your Discord account is your league account — signing in also adds you to the Chel Gaming Discord.</p>'+
-      '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
+      '<p>Your Discord account is your league account. You also need to be in the Chel Gaming server to register — join it now, or we’ll send you the invite right after you sign in.</p>'+
+      '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">'+
+        '<button class="btn btn-lg" id="dcSignIn" style="background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
+        (inviteOut?'<a class="btn btn-lg btn-ghost" href="'+esc(inviteOut)+'" target="_blank" rel="noopener">Join the Discord server</a>':"")+
+      '</div></div></div></div>';
   }
   if (!open){
     return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
@@ -1032,8 +1047,9 @@ CG.ROUTES.register = function(){
   if (myCt && !reg){
     statusCard = '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re under contract with '+esc(ctName)+' through Season '+(myCt.end_season||snumR)+' — but a contract doesn’t replace registration.</b> Until you sign up you can’t play, and your '+CG.fmtMoney(myCt.salary||0)+' salary sits on the club’s cap as dead money. If '+esc(ctName)+' takes on a new owner and you still haven’t signed up after the deadline, the deal is voided and you’re suspended through Season '+(myCt.end_season||snumR)+' (Rule 2.5). Registering — any time — puts you straight back on the roster.</div>' + statusCard;
   }
-  /* signing in normally auto-joins the Discord; when that failed (denied scope, expired token)
-     this is the recovery path instead of a dead-end toast at submit */
+  /* Auto-join is retired — sign-in requests `identify` only, so the member joins the server
+     themselves. Registration is hard-gated on in_guild, so the link belongs here, up front,
+     rather than as a dead-end toast at submit. */
   var invite = CG._siteCfg && CG._siteCfg.discord_invite;
   var guildCard = (!p.in_guild && invite)
     ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("msg",15)+
@@ -1169,7 +1185,7 @@ CG.franchisePicksLine = function(a){
   }).join(" · ")+'</span>';
 };
 CG.ROUTES.owner = function(){
-  var head = CG.pageHead("Run a club","Apply to own a team",
+  var head = CG.pageHead("Run a club","Apply to own a club",
     "Owners set their club’s identity, hire a GM, and build the roster. Applications are tied to your Discord so the commissioners know who applied. Rather officiate than own? Apply to join the staff instead.");
   if (!CG.auth.profile){
     return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
@@ -1285,7 +1301,7 @@ CG.ROUTES.staffapply = function(){
       '<button class="btn btn-chrome" id="sa-submit"'+(lockedFromStaff?" disabled":"")+'>'+(app?"Update application":"Submit application")+'</button>'+
       '<span class="caption">Staff review the queue on the <b>Staff Desk</b>; approval adds the Discord Staff role automatically.</span></div>'+
     '</div></div>'+
-    '<p class="caption" style="margin-top:14px">Looking to run a club instead? <a href="#/owner" style="font-weight:700;border-bottom:2px solid var(--chrome)">Apply to own a team →</a></p>'+
+    '<p class="caption" style="margin-top:14px">Looking to run a club instead? <a href="#/owner" style="font-weight:700;border-bottom:2px solid var(--chrome)">Apply to own a club →</a></p>'+
   '</div>';
 };
 CG.AFTER.staffapply = function(){
@@ -2153,10 +2169,13 @@ CG.loadAvailability = async function(){
     CG._avail[row.week_key+":"+row.profile_id] = { at: Date.parse(row.submitted_at), nights: row.nights||{} };
   });
 };
-CG.availGet = function(pid){ return CG._avail[CG.WEEK8.key+":"+pid] || null; };
+CG.availGet = function(pid){ return (CG.WEEK8 && CG.WEEK8.open) ? (CG._avail[CG.WEEK8.key+":"+pid] || null) : null; };
 CG.availSave = function(entry, cb){
   var uid = CG.auth.user && CG.auth.user.id;
   if (!uid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Sign in to submit availability","err"); if(cb)cb(false); return; }
+  /* no scheduled week means there is nothing to be available FOR — a null week_key would
+     violate the availability primary key and surface as a raw Postgres error */
+  if (!CG.WEEK8 || !CG.WEEK8.open){ CG.toast("No game week is scheduled yet — availability opens when the schedule is posted","err"); if(cb)cb(false); return; }
   CG.sb.from("availability").upsert({
     season_id: CG.SEASON.id, profile_id: uid, week_key: CG.WEEK8.key,
     nights: entry.nights, submitted_at: new Date().toISOString()
@@ -2389,7 +2408,7 @@ CG.admPreseason = function(){
         '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-app-approve="'+a.id+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
         '<button class="btn btn-ghost btn-sm" data-app-deny="'+a.id+'"'+(a.status==="denied"?" disabled":"")+'>Deny</button></div></div>';
     }).join("");
-  } else { h+='<div class="card-b"><p class="caption">No owner applications yet. They appear here when members apply from the “Apply to own a team” page.</p></div>'; }
+  } else { h+='<div class="card-b"><p class="caption">No owner applications yet. They appear here when members apply from the “Apply to own a club” page.</p></div>'; }
   h+='</div>';
   /* staff applications — reviewed here or on the Staff Desk; approval promotes to staff */
   var pendSApps=sapps.filter(function(a){ return a.status==="pending"; }).length;
@@ -2610,7 +2629,7 @@ CG.admUsersLive = function(){
      (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
   var conflicts = profs.filter(function(pr){ return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id]; });
   h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation is on.</b> '+
-    'Commissioners and staff can’t own or manage a club — it keeps votes on team management and staff impartial. They can still play as rostered members. New assignments that break the rule are blocked automatically.'+
+    'Commissioners and staff can’t own or manage a club — it keeps votes on club management and staff impartial. They can still play as rostered members. New assignments that break the rule are blocked automatically.'+
     (conflicts.length?' <span style="display:block;margin-top:8px">Grandfathered for Season 1 (keep both hats until the Season 2 rollover): '+
       conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
@@ -3420,7 +3439,7 @@ CG.caseDisciplineModal = function(caseId, targetName){
     '<div id="dcDate" class="fld" style="display:none"><label><span>Ends after</span><input id="dcDateN" type="date"></label></div>'+
     '<div id="dcSeasons" class="fld" style="display:none"><label><span>Through season number</span><input id="dcSeasonsN" type="number" min="'+cur+'" value="'+cur+'"></label></div>'+
     '<label class="fld"><span>Reason (recorded on the player and the case)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
-    '<p class="caption">This resolves the case, posts to #league-staff, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
+    '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
   function sync(){ var t=document.getElementById("dcType").value;
     document.getElementById("dcGames").style.display=t==="games"?"block":"none";
@@ -3682,7 +3701,7 @@ CG.wireStaffExtras = function(){
     var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
     if(entry) CG.staffProfileEditModal(entry); }); });
 };
-/* Consolidated "Needs attention" triage card — the in-app twin of the daily #league-staff
+/* Consolidated "Needs attention" triage card — the in-app twin of the daily #staff-general
    briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
    client-side (open cases, applications, suspensions) if the RPC hasn't returned yet. */
 CG.staffAttentionCard = function(){
@@ -3776,7 +3795,7 @@ CG.hubStaffDesk = function(){
     }).join("");
   }
   if (!staffApps.length && !ownerApps.length){
-    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply at <b>Apply to own a team</b> (#/owner) and <b>Apply to join the staff</b> (#/staffapply) — both linked in the site footer.</p></div>';
+    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply at <b>Apply to own a club</b> (#/owner) and <b>Apply to join the staff</b> (#/staffapply) — both linked in the site footer.</p></div>';
   } else {
     h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Approving a staff application promotes the member immediately (Discord role follows on the next sync). Approving an owner application green-lights them — the commissioner then hands them their club in Users &amp; roles → Club role.</span></div>';
   }
@@ -4016,13 +4035,13 @@ CG.AUTOMATIONS = [
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
   { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
-  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #league-staff — suppressed when nothing needs attention.", rpc:"staff_briefing" },
+  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
   { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
   { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
-  /* #league-staff channel configuration — turns on the staff notifications */
+  /* staff channel configuration — turns on the staff notifications */
   h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Staff Discord channels</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
     '<div class="card-b">'+
     '<p class="caption" style="margin-bottom:14px;max-width:74ch">One webhook per staff channel. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Each channel below falls back to <b>general</b> until you set it, so nothing is ever lost.</p>'+
@@ -4045,7 +4064,7 @@ CG.admAutomationsLive = function(){
   return h;
 };
 CG.AFTER._admAutomations = function(){
-  /* #league-staff channel config */
+  /* staff channel config */
   var chSt = document.getElementById("staffChanSt");
   if (chSt){
     /* refresh only the status chip — NOT the whole AFTER binder (re-running it would
@@ -4076,9 +4095,9 @@ CG.AFTER._admAutomations = function(){
     if (testBtn) testBtn.addEventListener("click", function(){
       var btn=this; btn.disabled=true; btn.textContent="Sending…";
       CG.sb.rpc("staff_channel_test").then(function(r){
-        btn.disabled=false; btn.textContent="Send test message";
+        btn.disabled=false; btn.textContent="Send test to general";
         if(r.error){ CG.toast(r.error.message||"Test failed","err"); return; }
-        CG.toast(r.data==="sent"?"Test posted to #league-staff":"Set up the webhook first",r.data==="sent"?"ok":"err");
+        CG.toast(r.data==="sent"?"Test posted to #staff-general":"Set up the webhook first",r.data==="sent"?"ok":"err");
       });
     });
   }
@@ -4570,7 +4589,7 @@ CG.seasonForm = function(id){
   var isNew = !s;
   var maxN = (CG._seasonsRaw||[]).reduce(function(m,x){ return Math.max(m, x.number||0); }, 0);
   s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:true,
-             salary_cap:60000000, roster_max:12, trade_deadline_week:6, moves_lock_override:"auto" };
+             salary_cap:60000000, roster_max:15, trade_deadline_week:6, moves_lock_override:"auto" };
   function dt(v){ /* ISO -> datetime-local in ET */
     if (!v) return "";
     var p = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date(v));
@@ -4595,7 +4614,7 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
     '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
     '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||60000000)/1e6)+'"></label>'+
-    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||12)+'"></label>'+
+    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||15)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
     '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed + Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, 9 regular-season weeks, and playoffs the Wednesday after. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Weeks touching Christmas, Canada Day, or July 4 are skipped. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
@@ -4661,7 +4680,7 @@ CG.seasonForm = function(id){
       owner_app_deadline:iso("ssOwnDl"), draft_at:iso("ssDraft"),
       preseason_starts_at:iso("ssPre"), free_agency_opens_at:iso("ssFaOpen"),
       free_agency_closes_at:iso("ssFaClose"), playoffs_start_at:iso("ssPlayoffs"),
-      salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||12,
+      salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||15,
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
       moves_lock_override:document.getElementById("ssMoves").value };
     var btn=this; btn.disabled=true;
@@ -5026,7 +5045,7 @@ CG.AFTER._admAudit = function(){
 CG.hubScheduleLive = function(){
   var me = CG.me(), lg = CG.lg;
   var club = CG.myClub(), t = CG.TEAM[club];
-  if (!me || !t) return '<div class="note">This account doesn’t run a club — the schedule desk belongs to team management.</div>';
+  if (!me || !t) return '<div class="note">This account doesn’t run a club — the schedule desk belongs to club management.</div>';
   var upcoming = lg.schedule.filter(function(g){ return (g.home===club||g.away===club) && g.status!=="final"; })
     .sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · game operations</span>'+
@@ -5153,7 +5172,7 @@ CG.hubFreeAgents = function(){
   var lg=CG.lg, s=CG.SEASON||{};
   var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
   var t=(CG.TEAMS||[]).find(function(x){ return uid && (x.owner===uid||x.gm===uid||x.agm===uid); });
-  if (!t) return '<div class="note">This account doesn’t run a club — the free-agent board belongs to team management.</div>';
+  if (!t) return '<div class="note">This account doesn’t run a club — the free-agent board belongs to club management.</div>';
   var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;
   var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
   var nowMs = Date.now();
@@ -5258,7 +5277,7 @@ CG.hubTradeHubLive = function(qs){
     (kids||[]).forEach(function(kid){ out.push('<div class="caption" style="margin-top:6px">'+esc(CG.pickLabel(CG.tPick(kid)))+' pick</div>'); });
     return out.length?out.join(""):'<span class="caption">—</span>';
   }
-  var h='<div style="margin-bottom:18px"><span class="eyebrow chr">'+esc(t.name)+' · team management</span>'+
+  var h='<div style="margin-bottom:18px"><span class="eyebrow chr">'+esc(t.name)+' · club management</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Trade Hub</h1>'+
     '<p class="lede" style="margin-top:8px">Offer players and draft picks, review incoming offers, and propose deals — all live. Nothing changes hands until the other club accepts.</p></div>';
   h+='<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Confidential to management.</b> Offers and notes are visible to your Owner, GM, and AGM (Rule 2.3).</span></div>';

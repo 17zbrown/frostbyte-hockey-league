@@ -203,18 +203,23 @@ CG.seasonYear = function(){
   if (s.starts_at) return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date(s.starts_at));
   return String(new Date().getFullYear());
 };
-CG.crest = function(code, size){
+/* opts.decorative suppresses the accessible name — pass it wherever the club is already named in
+   adjacent text, so a screen reader doesn't read the club twice per row. */
+CG.crest = function(code, size, opts){
   var t = CG.TEAM[code]; if (!t) return "";
-  var s = size||28;
-  /* clubs with an uploaded logo (from the live site's media library) use it everywhere;
-     logo artwork carries its own padding, so it renders at twice the crest size to read clearly */
-  if (t.logo){ var si = s*2;
-    return '<img class="crest" src="'+t.logo+'" width="'+si+'" height="'+Math.round(si*1.05)+'" '+
-      'style="object-fit:contain" alt="'+esc(t.name)+' logo">'; }
+  /* crest artwork carries its own padding, so it renders at twice the nominal size to read clearly.
+     Both branches share the scale: the generated fallback is what a club without an uploaded logo
+     gets, and it has to sit at the same size as its neighbours. */
+  var s = (size||28)*2;
+  var deco = !!(opts && opts.decorative);
+  if (t.logo)
+    return '<img class="crest" src="'+t.logo+'" width="'+s+'" height="'+Math.round(s*1.05)+'" '+
+      'style="object-fit:contain" alt="'+(deco?"":esc(t.name)+' logo')+'">';
   var lum = (function(hex){ var c=hex.replace("#",""); return (0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255; })(t.color);
   var fg = lum > .62 ? "#101519" : "#FFFFFF";
   var id = "cr"+(CG.crestSeq++);
-  return '<svg class="crest" width="'+s+'" height="'+Math.round(s*1.1)+'" viewBox="0 0 40 44" role="img" aria-label="'+esc(t.name)+' crest">'+
+  return '<svg class="crest" width="'+s+'" height="'+Math.round(s*1.1)+'" viewBox="0 0 40 44" '+
+    (deco ? 'aria-hidden="true"' : 'role="img" aria-label="'+esc(t.name)+' crest"')+'>'+
     '<defs><linearGradient id="'+id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+t.color+'"/><stop offset="1" stop-color="'+t.color+'" stop-opacity=".78"/></linearGradient></defs>'+
     '<path d="M3 4 Q3 1.5 5.5 1.5 H34.5 Q37 1.5 37 4 V24 Q37 35 20 42 Q3 35 3 24 Z" fill="url(#'+id+')" stroke="#101519" stroke-width="2"/>'+
     '<text x="20" y="29" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="12.5" letter-spacing="-.3" fill="'+fg+'">'+t.code+'</text></svg>';
@@ -268,7 +273,7 @@ CG.attachAC = function(input, opts){
         : esc(it.label);
       return '<button type="button" class="ac-item'+(i===sel?" on":"")+'" role="option" aria-selected="'+(i===sel)+'" data-i="'+i+'">'+
         CG.crest(it.team,20)+'<span style="min-width:0"><b>'+lab+'</b><small>'+esc(it.sub)+'</small></span>'+
-        '<span class="chip" style="margin-left:auto;font-size:9px;flex-shrink:0">'+(it.kind==="team"?"Club":"Player")+'</span></button>';
+        '<span class="chip chip-xs" style="margin-left:auto;flex-shrink:0">'+(it.kind==="team"?"Club":"Player")+'</span></button>';
     }).join("");
   }
   function run(){
@@ -393,9 +398,17 @@ CG.ic = function(name, size){
 
 /* ---------- shared render bits ---------- */
 CG.ovrClass = function(v){ return v>=88?"":"mid"; };
+/* Last-five form. Shape carries the result — filled / half / hollow — because the old green-vs-red
+   dots sit at ~1.26:1 for a deuteranope, which is colour-alone encoding (SC 1.4.1). A letter inside
+   an 8px dot would just trade that for a 1.4.3 failure, so the dots stay wordless and the strip is
+   announced once as a single image. */
+CG.FORM5_CLASS = { W:"fd-w", OT:"fd-otl", L:"fd-l" };
 CG.form5 = function(res){
-  return '<span class="form5" aria-label="Last five">'+res.map(function(r){
-    return '<i class="'+(r==="W"?"w":r==="OT"?"o":"l")+'"></i>'; }).join("")+'</span>';
+  /* the standings exporter hands last5 around as a joined string; never let that render as dots */
+  res = Array.isArray(res) ? res : [];
+  if (!res.length) return '<span class="form5" aria-hidden="true"></span>';
+  return '<span class="form5" role="img" aria-label="Last '+res.length+': '+esc(res.join(" "))+'">'+
+    res.map(function(r){ return '<i class="'+(CG.FORM5_CLASS[r]||CG.FORM5_CLASS.L)+'"></i>'; }).join("")+'</span>';
 };
 CG.playerRoute = function(p){ return "#/player/"+p.id; };
 CG.slugTeam = function(code){ return "#/team/"+code; };
@@ -447,7 +460,9 @@ CG.baseNotifs = function(){
   var feat = lg.tonight.find(function(g){ return g.feature; });
   if (lg.tonight.length) n.push({ id:"n-codes", t:CG.now()-2*3600000, icon:"code",
     title:"Game night — codes at T-30", body:"Tonight's private lobby codes go live on each matchup page 30 minutes before puck drop.", route: feat ? "#/matchup/"+feat.id : "#/schedule" });
-  n.push({ id:"n-avail", t:CG.now()-24*3600000, icon:"cal",
+  /* nothing to submit against until a game week exists — and with no deadline there is no date to
+     put in the body, so the whole notification is withheld rather than shown half-empty */
+  if (CG.WEEK8.open) n.push({ id:"n-avail", t:CG.now()-24*3600000, icon:"cal",
     title:CG.WEEK8.label+" availability is open", body:"Submit before "+CG.fmtFull(CG.WEEK8.deadline)+" (Rule 5.1).", route:"#/hub/availability" });
   if (lg.results.length) n.push({ id:"n-rank", t:CG.now()-12*3600000, icon:"chart",
     title:"Power rankings updated", body:"Recomputed from the latest finals.", route:"#/rankings" });
@@ -608,7 +623,9 @@ CG.renderChrome = function(){
             (CG.unreadCount()?'<span class="bub">'+CG.unreadCount()+'</span>':"")+'</button>'
         : "")+
       (CG.role()==="guest"
-        ? '<a class="btn btn-sm" href="#/signin" style="min-height:42px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in</a>'
+        /* for a guest this button IS the sign-up: Discord OAuth creates the account. "Sign in"
+           read as members-only and hid the funnel entry from everyone who hadn't joined yet. */
+        ? '<a class="btn btn-sm" href="#/signin" style="min-height:42px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Join with Discord</a>'
         : '<button class="avatar" id="avBtn" aria-label="Account menu" title="'+esc(p.tag||"")+'">'+CG.avatarHtml()+'</button>')+
       '<button class="icon-btn mh-burger" id="burger" aria-label="Menu">'+CG.ic("menu")+'</button>'+
     '</div></div>';
@@ -631,7 +648,10 @@ CG.renderChrome = function(){
       (CG.LIVE_MODE?'</div>':'<div style="margin-top:16px"><span class="protopill"><span class="live-dot"></span>Prototype — demo data, not the live site</span></div></div>')+
       '<div><h4>League</h4><a class="fl" href="#/schedule">Schedule</a><a class="fl" href="#/standings">Standings</a><a class="fl" href="#/rankings">Power Rankings</a><a class="fl" href="#/awards">Awards</a></div>'+
       '<div><h4>Clubs & Players</h4><a class="fl" href="#/teams">All Clubs</a><a class="fl" href="#/players">Player Directory</a><a class="fl" href="#/stats">Stat Central</a></div>'+
-      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+(CG.LIVE_MODE?'<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
+      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+
+        /* the only registration entry points were both on the homepage; the footer is on every page */
+        (CG.SEASON && CG.SEASON.registration_open ? '<a class="fl" href="#/register">Register to play</a>' : "")+
+        (CG.LIVE_MODE?'<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
       '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+(CG.LIVE_MODE?'':'<a class="fl" href="#/signin">Switch demo role</a>')+'</div>'+
     '</div>'+
     '<div class="ft-base"><span>© '+CG.seasonYear()+' Chel Gaming Hockey League · '+esc(CG.seasonTag())+'</span><span><a href="#/legal" style="color:inherit">Terms &amp; Privacy</a> · All times Eastern</span></div>'+
@@ -836,6 +856,54 @@ CG.openBell = function(){
 /* ---------- router ---------- */
 CG.ROUTES = {};  /* filled by page files: CG.ROUTES.home = fn(param) -> html; CG.AFTER.home = fn(param) */
 CG.AFTER = {};
+
+/* Document titles. This is a hash-routed SPA, so nothing updates the title for free — without
+   this every one of the 26 routes shares the boot title, which breaks browser history, bookmarks,
+   tab-switching, and the page announcement most screen readers make on navigation.
+   These constants are the fallback on purpose: reading document.title to seed a default would
+   pick up whatever the PREVIOUS route left behind (or a clobbered value) rather than the truth. */
+CG.SITE_TITLE = "Chel Gaming Hockey League";
+CG.HOME_TITLE = "Chel Gaming Hockey League — Competitive 6v6 EA NHL";
+CG.ROUTE_TITLES = {
+  standings:  "Standings",
+  schedule:   "Schedule",
+  rankings:   "Power Rankings",
+  stats:      "Stat Central",
+  awards:     "Awards",
+  teams:      "All Clubs",
+  team:       "Club",
+  players:    "Player Directory",
+  player:     "Player",
+  matchup:    "Matchup",
+  news:       "News",
+  article:    "News",
+  rulebook:   "Rulebook",
+  draft:      "Draft Room",
+  register:   "Register to play",
+  owner:      "Apply to own a club",
+  staffapply: "Apply to join the staff",
+  signin:     "Sign in",
+  hub:        "My Dashboard",
+  admin:      "Control Center",
+  messages:   "Messages",
+  search:     "Search",
+  legal:      "Terms & Privacy",
+  blueprint:  "Platform Blueprint",
+  _404:       "Page not found"
+};
+/* A rendered <h1> names the actual subject (this club, this player, this headline), so it beats the
+   generic map wherever a page has one. Home is the exception: its h1 is a visually-hidden landmark
+   heading, and the marketing title is what belongs in the tab. */
+CG.pageTitleFor = function(name, root){
+  if (name==="home") return CG.HOME_TITLE;
+  var h1 = root && root.querySelector("h1");
+  var lead = h1 ? h1.textContent.replace(/\s+/g," ").trim() : "";
+  /* long article headlines get cut at a word boundary — a tab strip only shows the first few words
+     anyway, and a mid-word stub reads like a rendering bug */
+  if (lead.length > 70) lead = lead.slice(0,70).replace(/\s+\S*$/,"")+"…";
+  if (!lead) lead = CG.ROUTE_TITLES[name] || CG.ROUTE_TITLES._404;
+  return lead===CG.SITE_TITLE ? lead : lead+" · "+CG.SITE_TITLE;
+};
 CG.router = function(){
   var h = location.hash || "#/home";
   var parts = h.replace(/^#\//,"").split("?")[0].split("/");
@@ -854,6 +922,8 @@ CG.router = function(){
     if (!el.hasAttribute("role")) el.setAttribute("role","link");
   });
   if (CG.AFTER[name]) CG.AFTER[name](param, qs);
+  /* must land before focus moves: screen readers read the title when #app takes focus */
+  document.title = CG.pageTitleFor(CG.ROUTES[name] ? name : "_404", app);
   app.focus({preventScroll:true});
 };
 

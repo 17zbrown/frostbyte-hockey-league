@@ -15,10 +15,16 @@
 <meta property="og:description" content="A competitive 6v6 EA Sports NHL league — eight clubs, two divisions, a full season with standings, stats, trades, and playoffs. Sign in with Discord to claim your spot.">
 <meta property="og:url" content="https://chelgamingleague.com/">
 <meta property="og:image" content="https://chelgamingleague.com/og.png">
+<!-- declared dimensions let Discord and iMessage reserve the card before the image arrives -->
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="Chel Gaming Hockey League — competitive 6v6 EA NHL, eight clubs across two divisions.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Chel Gaming Hockey League — Competitive 6v6 EA NHL">
 <meta name="twitter:description" content="A competitive 6v6 EA Sports NHL league — eight clubs, two divisions, standings, stats, trades, and playoffs. Sign in with Discord to claim your spot.">
 <meta name="twitter:image" content="https://chelgamingleague.com/og.png">
+<meta name="twitter:image:alt" content="Chel Gaming Hockey League — competitive 6v6 EA NHL, eight clubs across two divisions.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -30,7 +36,7 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
 /* ================================================================
    CHEL GAMING DESIGN SYSTEM — "FRESH SHEET"
    Palette (6): Ice #F5F6F2 · Paper #FFF · Jersey Ink #101519 ·
-   Steel #5C6B75 · Chrome Yellow #FFE500 · Goal Red #D6453D /
+   Steel #5C6B75 · Chrome Yellow #FFE500 · Goal Red #C63A32 /
    Win Green #1F9D58 (semantic only).
    Type: Archivo (display/UI) · IBM Plex Sans (body) · IBM Plex Mono (data).
    ================================================================ */
@@ -38,7 +44,12 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
   --ice:#F5F6F2; --paper:#FFFFFF; --ink:#101519; --ink-2:#1A2127; --ink-3:#242D34;
   --steel:#5C6B75; --steel-2:#8595A0; --line:#E3E6DF; --line-soft:#EDEFE9;
   --chrome:#FFE500; --chrome-deep:#E5C900; --chrome-tint:#FFFBD6;
-  --red:#D6453D; --red-tint:#FBEDEC; --green:#1F9D58; --green-tint:#EAF6EF;
+  /* Semantic hues split in two: --red/--green are FILLS (light text sits on them, so they must stay
+     dark in both themes); --*-ink are the TEXT/mark colors and flip per theme. Never use a fill token
+     as a foreground — it cannot clear 4.5:1 on both a light and a dark surface at once. */
+  --red:#C63A32; --red-tint:#FBEDEC; --red-ink:#B5342D;
+  --green:#1F9D58; --green-tint:#EAF6EF; --green-ink:#177A44;
+  --amber-ink:#8A6D00;
   --on-ink:#F2F4F0; --on-ink-dim:#9AA8B0;
   --bc:#101519; --bc2:#1A2127; --bc3:#242D34;   /* broadcast surfaces — constant in both themes */
   --f-disp:'Archivo',-apple-system,system-ui,sans-serif;
@@ -55,6 +66,7 @@ html[data-theme="dark"]{
   --steel:#9AA9AF; --steel-2:#75848B; --line:#262E34; --line-soft:#1D252B;
   --chrome-deep:#D8BE00; --chrome-tint:#2E2A0E;
   --red-tint:#3A1D1B; --green-tint:#15311F;
+  --red-ink:#F08880; --green-ink:#4FC486; --amber-ink:#E8D34F;
   --sh-1:0 1px 2px rgba(0,0,0,.5),0 8px 24px -14px rgba(0,0,0,.6);
   --sh-2:0 2px 4px rgba(0,0,0,.55),0 24px 48px -18px rgba(0,0,0,.72);
   color-scheme:dark;
@@ -62,8 +74,7 @@ html[data-theme="dark"]{
 html[data-theme="dark"] #masthead{background:rgba(15,18,21,.92)}
 html[data-theme="dark"] .chip-win{border-color:#1E4A31}
 html[data-theme="dark"] .chip-loss{border-color:#57302D}
-html[data-theme="dark"] .chip-warn{color:#E8D34F;border-color:#4A431C}
-html[data-theme="dark"] .avcell.mb{color:#E8D34F}
+html[data-theme="dark"] .chip-warn{border-color:#4A431C}
 html[data-theme="dark"] .kpi.alert{border-color:#8A3A34}
 *{box-sizing:border-box} html{scroll-behavior:smooth}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
@@ -79,6 +90,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .skip{position:absolute;left:-9999px;top:0;background:var(--chrome);color:#101519;
   padding:10px 16px;font-weight:700;z-index:200;border-radius:0 0 var(--r-s) 0}
 .skip:focus{left:0}
+/* screen-reader-only, permanently — unlike .skip it never reveals on focus, so only put
+   non-interactive text in it (headings, labels, table captions) */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .shell{max-width:var(--shell);margin:0 auto;padding:0 26px}
 .mono{font-family:var(--f-mono)} .num{font-variant-numeric:tabular-nums}
 .eyebrow{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.2em;
@@ -88,7 +103,6 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
   margin-right:9px;vertical-align:0}
 .sec-dark .eyebrow{color:var(--on-ink-dim)}
 .sec-dark .eyebrow.chr{color:var(--on-ink)}
-.h-display{font-size:clamp(38px,5.2vw,62px);font-weight:900;letter-spacing:-.03em;line-height:.98}
 .h-page{font-size:clamp(28px,3.6vw,42px);font-weight:800;letter-spacing:-.025em}
 .h-sec{font-size:clamp(21px,2.4vw,27px);font-weight:800}
 .h-card{font-size:16.5px;font-weight:700;letter-spacing:-.01em}
@@ -119,9 +133,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .chip-ink{background:var(--bc);color:var(--on-ink);border-color:var(--bc)}
 .chip-chrome{background:var(--chrome);color:#101519;border-color:var(--chrome)}
 .chip-live{background:var(--red);color:#fff;border-color:var(--red)}
-.chip-win{background:var(--green-tint);color:var(--green);border-color:#BFE3CE}
-.chip-loss{background:var(--red-tint);color:var(--red);border-color:#F0C7C4}
-.chip-warn{background:var(--chrome-tint);color:#8a6d00;border-color:#EBD98A}
+.chip-win{background:var(--green-tint);color:var(--green-ink);border-color:#BFE3CE}
+.chip-loss{background:var(--red-tint);color:var(--red-ink);border-color:#F0C7C4}
+.chip-warn{background:var(--chrome-tint);color:var(--amber-ink);border-color:#EBD98A}
+/* size-only modifier — padding stays put so it can be dropped on any existing chip */
+.chip-xs{font-size:9px}
 .live-dot{width:7px;height:7px;border-radius:50%;background:currentColor;animation:blink 1.6s ease-in-out infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
 @media(prefers-reduced-motion:reduce){.live-dot{animation:none}}
@@ -135,7 +151,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 #demobar .db-roles button:hover{color:#fff}
 #demobar .db-roles button.on{background:var(--chrome);color:#101519;font-weight:600}
 #demobar .db-reset{color:var(--on-ink-dim);text-decoration:underline dotted}
-#ticker{background:var(--bc);color:var(--on-ink);height:var(--tick-h);overflow:hidden;position:relative}
+/* the ticker sits on the constant-dark broadcast surface, so the page's fill-red reads too dark as
+   text here (the TONIGHT label is inline-styled var(--red)) — lift it to the dark-theme ink */
+#ticker{background:var(--bc);color:var(--on-ink);height:var(--tick-h);overflow:hidden;position:relative;--red:#F08880}
 #ticker .tk-track{display:flex;width:max-content;height:100%;align-items:center;animation:tkscroll 60s linear infinite}
 #ticker:hover .tk-track,#ticker:focus-within .tk-track{animation-play-state:paused}
 @keyframes tkscroll{to{transform:translateX(-50%)}}
@@ -266,10 +284,15 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .sec-dark .tbl th{color:var(--on-ink-dim);border-bottom-color:#3A444C}
 .sec-dark .tbl td{border-bottom-color:#232B31}
 
-/* form5 = last-5 dots */
+/* form5 = last-5 dots. Result is carried by SHAPE first — solid / hollow / half — so the row still
+   reads with the color stripped out. Colour is the second signal, never the only one.
+   Legacy .w/.l/.o are kept as aliases until every caller emits the semantic names. */
 .form5{display:inline-flex;gap:3px}
-.form5 i{width:8px;height:8px;border-radius:2px;background:var(--line)}
-.form5 i.w{background:var(--green)} .form5 i.l{background:var(--red)} .form5 i.o{background:var(--chrome-deep)}
+.form5 i{width:8px;height:8px;border-radius:2px;background:transparent;border:2px solid var(--steel-2)}
+.form5 i.fd-w,.form5 i.w{background:var(--green-ink);border-color:var(--green-ink)}
+.form5 i.fd-l,.form5 i.l{background:transparent;border-color:var(--red-ink)}
+.form5 i.fd-otl,.form5 i.o{border-color:var(--amber-ink);
+  background:linear-gradient(var(--amber-ink) 0 50%,transparent 50%)}
 
 /* ---------- crest ---------- */
 .crest{flex-shrink:0;display:block}
@@ -312,7 +335,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .szn-fill{position:absolute;left:8px;top:11px;height:2px;background:var(--chrome)}
 .szn-stop{position:relative;min-width:0;padding-top:0}
 .szn-node{position:relative;display:block;width:16px;height:16px;border-radius:50%;
-  background:var(--bg);border:2px solid var(--steel-2);margin-bottom:14px;z-index:1}
+  background:var(--ice);border:2px solid var(--steel-2);margin-bottom:14px;z-index:1}
 .szn-stop.done .szn-node{background:var(--ink);border-color:var(--ink)}
 .szn-stop.now .szn-node{background:var(--chrome);border-color:var(--ink);box-shadow:0 0 0 5px color-mix(in srgb, var(--chrome) 30%, transparent)}
 .szn-date{display:block;font-family:var(--f-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--steel);margin-bottom:5px;white-space:nowrap}
@@ -365,9 +388,12 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
   border:1.5px solid var(--line);border-radius:var(--r-m);padding:14px 18px;cursor:pointer;
   transition:transform .15s,border-color .15s,box-shadow .15s}
 .gamecard:hover{border-color:var(--ink);transform:translateX(3px);box-shadow:var(--sh-1)}
-.gamecard .gc-when{border-right:1px solid var(--line);padding-right:14px}
-.gamecard .gc-when b{font-family:var(--f-disp);font-weight:800;font-size:14px;display:block}
-.gamecard .gc-when span{font-family:var(--f-mono);font-size:10.5px;color:var(--steel)}
+/* the when-track holds day / date / time stacked in a fixed 74px column, so it drives the card's
+   height — stretch the rule and centre the stack rather than widening the track */
+.gamecard .gc-when{border-right:1px solid var(--line);padding-right:14px;align-self:stretch;
+  display:flex;flex-direction:column;justify-content:center}
+.gamecard .gc-when b{font-family:var(--f-disp);font-weight:800;font-size:14px;display:block;line-height:1.2}
+.gamecard .gc-when span{display:block;font-family:var(--f-mono);font-size:10.5px;line-height:1.35;color:var(--steel)}
 .gamecard .gc-match{display:flex;align-items:center;gap:10px;font-family:var(--f-disp);font-weight:700;font-size:14.5px;flex-wrap:wrap}
 .gamecard .gc-match .at{font-family:var(--f-mono);font-size:10px;color:var(--steel);margin:0 2px}
 .gamecard .gc-score{font-family:var(--f-disp);font-weight:900;font-size:19px;letter-spacing:.02em}
@@ -407,7 +433,7 @@ label.fld{display:block;margin-bottom:14px}
 label.fld>span{display:block;font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--steel);margin-bottom:6px;font-weight:600}
 .fld .hint{font-size:12px;color:var(--steel);margin-top:5px}
-.fld .err{font-size:12.5px;color:var(--red);margin-top:5px;font-weight:500}
+.fld .err{font-size:12.5px;color:var(--red-ink);margin-top:5px;font-weight:500}
 .logo-drop{display:flex;align-items:center;justify-content:center;gap:12px;min-height:96px;padding:14px;
   border:1.5px dashed var(--line);border-radius:var(--r-s);background:var(--paper);cursor:pointer;
   text-align:center;transition:border-color .15s,background .15s}
@@ -515,14 +541,16 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
   background:var(--paper);min-height:40px}
 .av-opt button:hover{border-color:var(--ink)}
 .av-opt button.on{background:var(--ink);color:var(--ice);border-color:var(--ink)}
-.av-opt button.on.yes{background:var(--green);border-color:var(--green)}
-.av-opt button.on.no{background:var(--red);border-color:var(--red)}
+/* these two pin their own foreground: --ice flips with the theme and cannot clear AA on a fill
+   that does not flip with it */
+.av-opt button.on.yes{background:var(--green);border-color:var(--green);color:#101519}
+.av-opt button.on.no{background:var(--red);border-color:var(--red);color:#fff}
 .avcell{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:7px;
   font-family:var(--f-mono);font-size:11px;font-weight:600}
-.avcell.yes{background:var(--green-tint);color:var(--green)}
-.avcell.no{background:var(--red-tint);color:var(--red)}
-.avcell.mb{background:var(--chrome-tint);color:#8a6d00}
-.avcell.nr{background:var(--line-soft);color:var(--steel-2)}
+.avcell.yes{background:var(--green-tint);color:var(--green-ink)}
+.avcell.no{background:var(--red-tint);color:var(--red-ink)}
+.avcell.mb{background:var(--chrome-tint);color:var(--amber-ink)}
+.avcell.nr{background:var(--line-soft);color:var(--steel)}
 
 /* ---------- matchup ---------- */
 .mx-hero{background:var(--bc);color:var(--on-ink);border-radius:var(--r-l);padding:clamp(22px,3.4vw,40px);position:relative;overflow:hidden}
@@ -656,6 +684,7 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
   .rk-line{grid-template-columns:1fr}
   .rk-line.d2,.rk-line.g1{max-width:100%}
   .gamecard{grid-template-columns:60px 1fr}
+  .gamecard .gc-when{padding-right:10px}
   .gamecard .gc-tag{display:none}
   footer.site .ft-top{grid-template-columns:1fr 1fr}
   .tbl th:nth-child(n+7):not(:last-child),.tbl td:nth-child(n+7):not(:last-child){display:none}
