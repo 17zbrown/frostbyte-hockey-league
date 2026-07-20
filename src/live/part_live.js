@@ -3281,16 +3281,30 @@ CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Chea
 CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
 CG.loadActionRequests = async function(){
   if (!CG.sb || !CG.lg || !CG.auth.user) return;
+  CG._actionLoadError = null;
   try {
     var q = await Promise.all([
-      CG.sb.from("action_requests").select("*, profiles(gamertag)").order("created_at",{ascending:false}),
+      /* action_requests has THREE foreign keys to profiles — filer, assignee and the case subject —
+         so a bare profiles(...) embed is ambiguous and PostgREST rejects the whole query (PGRST201).
+         Name the constraint. `profiles` stays the response key, so consumers are unchanged. */
+      CG.sb.from("action_requests")
+        .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
+        .order("created_at",{ascending:false}),
       CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true})
     ]);
-    CG.lg._actionReqs = (q[0]&&!q[0].error&&q[0].data)||[];
+    /* This used to fall back to [] on any error, so a failed query was indistinguishable from an
+       empty queue — the Staff Desk read "the room is clean" while cases sat unanswered. Keep
+       whatever we already had and say so loudly instead of inventing an empty case list. */
+    if (q[0] && q[0].error) throw new Error("cases: "+(q[0].error.message||q[0].error.code||"query failed"));
+    if (q[1] && q[1].error) throw new Error("case messages: "+(q[1].error.message||q[1].error.code||"query failed"));
+    CG.lg._actionReqs = (q[0] && q[0].data) || [];
     var msgs = {};
-    ((q[1]&&!q[1].error&&q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
+    ((q[1] && q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
     CG.lg._actionMsgs = msgs;
-  } catch(e){}
+  } catch(e){
+    CG._actionLoadError = String((e && e.message) || e);
+    console.error("loadActionRequests:", CG._actionLoadError);
+  }
 };
 /* Case data is read by six surfaces — the hub dashboard tile, hub complaints, the Staff Desk (its
    KPIs, queue and assigned list), the admin overview and admin complaints — but only the complaints
@@ -3909,7 +3923,11 @@ CG.hubStaffDesk = function(){
         '<b style="font-family:var(--f-disp);flex:1;min-width:160px">'+esc(a.subject||a.kind||"Request")+'</b>'+
         '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>';
     }).join("")
-    : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
+    : CG._actionLoadError
+      /* never report an empty queue we aren't sure about — an unanswered case looks identical to
+         a clean room, and that is exactly how two open cases went unseen */
+      ? '<div class="card-b"><p class="caption" style="color:var(--red-ink)"><b>Couldn’t load the case queue.</b> '+esc(CG._actionLoadError)+' — the count above comes straight from the database, so cases may be waiting. Reload; if it persists this is a bug worth reporting.</p></div>'
+      : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
   h += '</div>';
 
   /* active discipline */
