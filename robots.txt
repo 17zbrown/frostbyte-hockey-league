@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# The site is a single hash-routed page, so every public route lives at /. These paths are the
+# repo's working files rather than the site itself; they are also 404'd in netlify.toml, and this
+# keeps them out of crawler queues in the meantime.
+Disallow: /src/
+Disallow: /tools/
+Disallow: /docs/
+Disallow: /.netlify/
+
+Sitemap: https://chelgamingleague.com/sitemap.xml

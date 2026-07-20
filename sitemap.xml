@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The site is a single hash-routed page: every public view lives under /#/… and a crawler only
+     ever sees one document. Listing hash routes here would be dishonest — they are not separate
+     URLs — so this declares the one real page. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://chelgamingleague.com/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

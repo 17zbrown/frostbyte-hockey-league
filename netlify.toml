@@ -27,6 +27,55 @@
   to = "/.netlify/functions/discord-join"
   status = 200
 
+# `publish = "."` serves the repo root, which means the working tree is reachable on the public
+# domain: /src/live/part_live.js (421 KB of raw source), /server.js, /package.json, both READMEs and
+# the internal design standards all returned 200. Nothing is secret and nothing at runtime fetches
+# them — the built index.html is fully self-contained — so they simply shouldn't be served.
+[[redirects]]
+  from = "/src/*"
+  to = "/"
+  status = 404
+[[redirects]]
+  from = "/tools/*"
+  to = "/"
+  status = 404
+[[redirects]]
+  from = "/server.js"
+  to = "/"
+  status = 404
+[[redirects]]
+  from = "/package.json"
+  to = "/"
+  status = 404
+[[redirects]]
+  from = "/README*"
+  to = "/"
+  status = 404
+[[redirects]]
+  from = "/CLAUDE*"
+  to = "/"
+  status = 404
+[[redirects]]
+  from = "/docs/*"
+  to = "/"
+  status = 404
+
+# Fingerprint-free assets that change rarely. index.html deliberately stays uncached — it is
+# regenerated on every deploy and carries the whole app, so a stale copy is the one thing we
+# can't afford.
+[[headers]]
+  for = "/favicon.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+[[headers]]
+  for = "/og.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
 # Security headers for the static site.
 [[headers]]
   for = "/*"
