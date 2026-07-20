@@ -3342,7 +3342,10 @@ CG.actionCard = function(a, review){
   var uid = CG.auth.user && CG.auth.user.id, names = (CG.lg&&CG.lg._profName)||{};
   var metaBits = [];
   if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
-  if (a.target) metaBits.push("About: "+esc(a.target));
+  /* prefer the subject's current gamertag over the text captured when the case was filed, so a
+     rename doesn't leave the case pointing at a name nobody recognises any more */
+  var aboutName = (a.target_profile && a.target_profile.gamertag) || a.target;
+  if (aboutName) metaBits.push("About: "+esc(aboutName));
   metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
   var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
