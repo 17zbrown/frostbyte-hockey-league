@@ -8,6 +8,10 @@
 <link rel="canonical" href="https://chelgamingleague.com/">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="mask-icon" href="/favicon.svg" color="#ffe500">
+<!-- Raster icons are composited on the ink background rather than cut from favicon.svg: iOS puts
+     an opaque tile behind whatever it's given, and the mark is light-on-dark. -->
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <meta name="theme-color" content="#101519">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Chel Gaming Hockey League">
@@ -25,6 +29,10 @@
 <meta name="twitter:description" content="A competitive 6v6 EA Sports NHL league — eight clubs, two divisions, standings, stats, trades, and playoffs. Sign in with Discord to claim your spot.">
 <meta name="twitter:image" content="https://chelgamingleague.com/og.png">
 <meta name="twitter:image:alt" content="Chel Gaming Hockey League — competitive 6v6 EA NHL, eight clubs across two divisions.">
+<!-- The Supabase origin isn't named in any tag, only inside JS, so the preload scanner can't warm
+     it — yet every one of the ~25 boot queries waits on that first handshake. Preconnecting buys
+     the TLS negotiation back. (jsDelivr needs no hint: its script tag is right below.) -->
+<link rel="preconnect" href="https://bzbuyclwdhmhdzujxeqd.supabase.co" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">

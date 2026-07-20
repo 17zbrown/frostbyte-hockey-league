@@ -26,10 +26,17 @@ const PARTS = [
 let head = fs.readFileSync(path.join(DIR, "part1_head.html"), "utf8");
 const ANCHOR = '<div id="toast-root" aria-live="polite"></div>\n<script>';
 if (!head.includes(ANCHOR)) throw new Error("head anchor not found");
+/* Pinned, not floating. `@2` meant any 2.x publish became this site's boot path unattended, and
+   without an integrity hash a bad or tampered build would run with full access to the session.
+   The whole app is behind this script — if it fails, the page is the error panel. Bump both values
+   together; the hash is `openssl dgst -sha384 -binary <file> | openssl base64 -A`. */
+const SUPABASE_JS = "2.110.7";
+const SUPABASE_SRI = "sha384-BmlQlKlDvXvKoxkn5OQuUo/aJQCTXeB+Kls6EccBmG4Kf8AXvp89RtO9MtPxP/r5";
 head = head.replace(
   ANCHOR,
   '<div id="toast-root" aria-live="polite"></div>\n' +
-  '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>\n<script>'
+  `<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPABASE_JS}" ` +
+  `integrity="${SUPABASE_SRI}" crossorigin="anonymous"></script>\n<script>`
 );
 
 const body = PARTS.map((f) => fs.readFileSync(path.join(DIR, f), "utf8")).join("\n");
