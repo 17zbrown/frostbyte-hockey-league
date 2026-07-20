@@ -580,7 +580,7 @@ CG.applySession = async function(session){
   if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
   /* complaints & requests (league office) — RLS returns what this user may see */
-  if (CG.auth.user){ CG.loadActionRequests().then(function(){ if(/complaint/.test(location.hash)&&CG.router)CG.router(); }); }
+  if (CG.auth.user){ CG.loadActionRequests().then(function(){ CG.rerenderIfShowingCases(); }); }
   else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
   /* staff/commish: the "needs attention" backlog + the Staff Desk data cards */
   if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); CG.loadStaffExtras(); }
@@ -3292,10 +3292,21 @@ CG.loadActionRequests = async function(){
     CG.lg._actionMsgs = msgs;
   } catch(e){}
 };
+/* Case data is read by six surfaces — the hub dashboard tile, hub complaints, the Staff Desk (its
+   KPIs, queue and assigned list), the admin overview and admin complaints — but only the complaints
+   routes ever asked for a redraw when the rows finally arrived. That is why the Staff Desk could
+   show "Nothing open" and "0 open cases" directly under a banner counting two: the banner comes
+   from an RPC that does re-render (loadStaffAttention), the cards from an array that didn't.
+   One predicate for every view that renders cases, so a new surface can't be forgotten again. */
+CG.viewShowsCases = function(){ return /#\/(hub|admin)/.test(location.hash); };
+CG.rerenderIfShowingCases = function(){
+  /* never redraw out from under an open modal — the user may be mid-way through filing */
+  var ov = document.getElementById("overlay-root");
+  if (ov && ov.innerHTML.trim()) return;
+  if (CG.viewShowsCases() && CG.router) CG.router();
+};
 CG.refreshActions = function(){
-  CG.loadActionRequests().then(function(){
-    if (/complaint|admin\/complaints/.test(location.hash) && CG.router) CG.router();
-  });
+  CG.loadActionRequests().then(CG.rerenderIfShowingCases);
 };
 /* dashboard tiles + counts read this — map real rows to the prototype shape */
 CG.visibleComplaints = function(){
