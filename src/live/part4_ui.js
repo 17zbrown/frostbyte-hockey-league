@@ -625,7 +625,10 @@ CG.renderChrome = function(){
       (CG.role()==="guest"
         /* for a guest this button IS the sign-up: Discord OAuth creates the account. "Sign in"
            read as members-only and hid the funnel entry from everyone who hadn't joined yet. */
-        ? '<a class="btn btn-sm" href="#/signin" style="min-height:42px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Join with Discord</a>'
+        /* "with Discord" drops below 520px — at 375 the full label plus the burger overflowed the
+           header and gave the whole document a horizontal scrollbar. The glyph carries the meaning
+           once the words are gone, so the accessible name stays complete either way. */
+        ? '<a class="btn btn-sm" href="#/signin" aria-label="Join with Discord" style="min-height:42px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Join<span class="hide-xs"> with Discord</span></a>'
         : '<button class="avatar" id="avBtn" aria-label="Account menu" title="'+esc(p.tag||"")+'">'+CG.avatarHtml()+'</button>')+
       '<button class="icon-btn mh-burger" id="burger" aria-label="Menu">'+CG.ic("menu")+'</button>'+
     '</div></div>';

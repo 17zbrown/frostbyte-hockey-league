@@ -208,6 +208,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .avatar.guest{background:var(--paper);color:var(--steel);border-color:var(--line)}
 .avatar{overflow:hidden;padding:0}
 .mh-burger{display:none}
+/* drops secondary words from a label on narrow screens; the element keeps its full accessible
+   name via aria-label, so only the visual text shortens */
+@media (max-width:520px){ .hide-xs{display:none} }
 .seasel{font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;border:1.5px solid var(--line);
   background:var(--paper);border-radius:var(--r-s);padding:8px 10px;color:var(--steel);min-height:42px}
 
