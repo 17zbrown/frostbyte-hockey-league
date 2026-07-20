@@ -146,6 +146,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .chip-warn{background:var(--chrome-tint);color:var(--amber-ink);border-color:#EBD98A}
 /* size-only modifier — padding stays put so it can be dropped on any existing chip */
 .chip-xs{font-size:9px}
+/* a card row that navigates. Focus is visible because these are reached by keyboard as often as
+   by pointer — the global data-go handler activates them on Enter and Space. */
+.row-go{cursor:pointer;transition:background .12s}
+.row-go:hover{background:var(--ice)}
+.row-go:focus-visible{outline:2px solid var(--chrome);outline-offset:-2px;background:var(--ice)}
 .live-dot{width:7px;height:7px;border-radius:50%;background:currentColor;animation:blink 1.6s ease-in-out infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
 @media(prefers-reduced-motion:reduce){.live-dot{animation:none}}

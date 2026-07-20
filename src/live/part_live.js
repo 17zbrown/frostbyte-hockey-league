@@ -3661,7 +3661,40 @@ CG.AFTER._complaintsLive = function(){
 };
 /* route the hub + admin complaint views to the live system */
 CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
-CG.hubComplaintDetail = function(){ return CG.hubComplaintsLive({}); };
+/* Open one case from anywhere it's listed. The conversation itself is CG.actionCard — the same
+   component the list uses — so there is exactly one implementation of a case thread and replies,
+   attachments, staff-only notes and the ruling buttons behave identically however you reached it.
+   Its handlers are bound by AFTER._complaints, which already covers the "complaint" route. */
+CG.findCase = function(caseId){
+  var all = (CG.lg && CG.lg._actionReqs) || [], id = String(caseId||"").trim();
+  if (!id) return null;
+  return all.find(function(a){ return a.id === id; })
+      /* links written elsewhere carry only the first 8 characters of the id */
+      || all.find(function(a){ return String(a.id||"").slice(0, id.length) === id; })
+      || null;
+};
+CG.hubComplaintDetail = function(caseId){
+  var review = CG.role()==="commish" || CG.role()==="staff";
+  var a = CG.findCase(caseId);
+  var back = '<a class="sec-link" href="#/hub/complaints">'+CG.ic("back",14)+' All cases</a>';
+  if (!a){
+    /* a failed load and a genuinely missing case are different problems — say which */
+    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("flag",22)+'</div>'+
+      '<b>'+(CG._actionLoadError ? "Couldn’t load this case" : "That case isn’t here")+'</b>'+
+      '<p>'+(CG._actionLoadError ? esc(CG._actionLoadError)+" — reload and try again."
+                                 : "It may have been deleted, or it isn’t one you have access to.")+'</p>'+
+      '</div></div>';
+  }
+  var meta = CG.ACTION_META[a.type] || { label:a.type };
+  return '<div style="margin-bottom:18px">'+back+
+    '<h1 class="h-sec" style="margin-top:10px">'+esc(meta.label)+'</h1>'+
+    '<p class="lede" style="margin-top:6px">'+
+      (review ? "The filer sees every reply here except staff-only notes."
+              : "Replies from the league office appear here — you’ll be notified when one lands.")+
+    '</p></div>'+
+    CG.actionCard(a, review);
+};
 
 /* ================================================================
    STAFF DESK — one page for the officials: cases, discipline,
@@ -3921,10 +3954,20 @@ CG.hubStaffDesk = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Case queue</h3>'+
     '<a class="sec-link" href="#/hub/complaints">Open the queue</a></div>';
   h += open.length ? open.slice(0,5).map(function(a){
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      var meta = CG.ACTION_META[a.type] || { label:a.type };
+      var replies = ((lg._actionMsgs||{})[a.id]||[]).length;
+      var names = (lg&&lg._profName)||{};
+      return '<div class="card-b row-go" data-go="#/hub/complaint?id='+esc(a.id)+'" role="link" tabindex="0" '+
+        'aria-label="Open case: '+esc(a.subject||meta.label)+'" '+
+        'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
         '<span class="chip chip-warn" style="text-transform:capitalize">'+esc(a.status||"open")+'</span>'+
-        '<b style="font-family:var(--f-disp);flex:1;min-width:160px">'+esc(a.subject||a.kind||"Request")+'</b>'+
-        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>';
+        '<span style="flex:1;min-width:160px">'+
+          '<b style="font-family:var(--f-disp);display:block">'+esc(a.subject||meta.label)+'</b>'+
+          '<span class="caption">'+esc(meta.label)+' · filed by '+esc((a.profiles&&a.profiles.gamertag)||"member")+
+          (a.assigned_to ? ' · claimed by '+esc(names[a.assigned_to]||"a colleague") : '')+'</span></span>'+
+        (replies ? '<span class="chip chip-xs">'+replies+' repl'+(replies===1?"y":"ies")+'</span>' : "")+
+        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
+        '<span class="caption" aria-hidden="true">→</span></div>';
     }).join("")
     : CG._actionLoadError
       /* never report an empty queue we aren't sure about — an unanswered case looks identical to
