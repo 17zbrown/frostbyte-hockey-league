@@ -4468,10 +4468,33 @@ CG.clearSchedule = function(stage){
     });
   });
 };
+/* The generator anchors each stage on its configured date, but nothing re-checks that afterwards —
+   so editing a season date once the games exist leaves the two silently disagreeing. That is exactly
+   how the pre-season came to run Sep 23 - Oct 2 while preseason_starts_at said Sep 16, putting half
+   of it AFTER draft night and inside free agency, with the 5-game eligibility gate judged on games
+   that hadn't been played. Dates are compared as calendar days in league time, never as instants. */
+CG.scheduleIssues = function(){
+  var lg = CG.lg, s = CG.SEASON, out = [];
+  if (!s || !lg || !lg.schedule || !lg.schedule.length) return out;
+  var day = function(v){ return v ? CG.etYMD(v) : null; };
+  var pre = lg.schedule.filter(function(g){ return g.stage==="preseason"; }).sort(function(a,b){ return a.at-b.at; });
+  var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason"; }).sort(function(a,b){ return a.at-b.at; });
+
+  if (pre.length && s.preseason_starts_at && day(pre[0].at) !== day(s.preseason_starts_at))
+    out.push("Pre-season opens "+CG.fmtDate(day(pre[0].at))+" but Seasons says "+CG.fmtDate(day(s.preseason_starts_at))+".");
+  if (pre.length && s.draft_at && pre[pre.length-1].at >= Date.parse(s.draft_at))
+    out.push("Pre-season runs to "+CG.fmtDate(day(pre[pre.length-1].at))+", on or after draft night ("+CG.fmtDate(day(s.draft_at))+"). Clubs would be drafted before their pre-season finished.");
+  if (reg.length && s.starts_at && day(reg[0].at) !== day(s.starts_at))
+    out.push("The season opens "+CG.fmtDate(day(reg[0].at))+" but Seasons says "+CG.fmtDate(day(s.starts_at))+".");
+  if (pre.length && reg.length && pre[pre.length-1].at >= reg[0].at)
+    out.push("Pre-season overlaps the regular season.");
+  return out;
+};
 CG.admScheduleLive = function(){
   var lg = CG.lg;
   var pre = lg.schedule.filter(function(g){ return g.stage==="preseason"; });
   var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason"; });
+  var issues = CG.scheduleIssues();
   var future = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px"><div><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+
     (lg.schedule.length ? future.length+' games to play. Move any game — the EA auto-import matches by clubs + date, so stats follow a rescheduled game automatically.'
@@ -4481,6 +4504,12 @@ CG.admScheduleLive = function(){
                 : '<button class="btn btn-ghost" id="preGen">'+CG.ic("plus",15)+'Generate pre-season</button>')+
     (reg.length ? '<button class="btn btn-ghost" id="schedClear">Clear season ('+reg.length+')</button>'
                 : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Generate season</button>')+'</span></div>';
+  if (issues.length)
+    h += '<div class="card" style="margin-bottom:16px;border-color:var(--red)"><div class="card-h"><h3>The schedule disagrees with the season dates</h3>'+
+      '<span class="chip chip-warn">'+issues.length+' to resolve</span></div><div class="card-b">'+
+      '<ul style="margin:0 0 10px;padding-left:20px;display:grid;gap:6px">'+
+        issues.map(function(t){ return '<li>'+esc(t)+'</li>'; }).join("")+'</ul>'+
+      '<p class="caption">Either correct the dates in Seasons, or clear and regenerate the affected stage — the generator always builds from the dates set there.</p></div></div>';
   h += '<div class="card"><div class="card-h"><h3>Upcoming slate</h3><span class="chip">next '+Math.min(future.length,16)+' shown</span></div>'+
     future.slice(0,16).map(function(g){
       return '<div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
