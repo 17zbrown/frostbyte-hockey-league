@@ -667,6 +667,10 @@ CG.loadManagerData = async function(){
     if (CG.auth.user){
       jobs.push(CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
         .then(function(mm){ CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); }, function(){ CG.lg._appMsgs = {}; }));
+      /* GM/AGM appointment applications — two FKs to profiles (submitter + nominee) so qualify both.
+         RLS: the office sees all; an owner their own; a nominee theirs. */
+      jobs.push(CG.sb.from("management_applications").select("*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)").order("created_at",{ascending:false})
+        .then(function(ma){ CG.lg._mgmtApps = (ma && !ma.error && ma.data) || []; }, function(){ CG.lg._mgmtApps = []; }));
     }
     if (myTid){
       /* my club's live trades (incoming + outgoing, still open) */
@@ -1566,8 +1570,18 @@ CG.STAFF_DEPARTMENTS = [
   ["officiating","Officiating","Game-night disputes, forfeits, and rule calls"],
   ["statistics","Statistics","Spot-check the EA imports and keep the record clean"],
   ["player-relations","Player relations","Work the complaint and appeal case queue"],
+  ["applications","Applications review","Cast the deciding vote on owner, GM, AGM, and staff applications"],
   ["media","Media & broadcast","News, recaps, and stream nights"]
 ];
+/* the reviewer pool: staff carrying the 'applications' department. Their votes decide every
+   application by 50%+1 once all of them have voted (the DB enforces it; this mirrors it for UI). */
+CG.appReviewers = function(){
+  return ((CG.lg && CG.lg._profilesRaw) || []).filter(function(p){ return p.role==="staff" && (p.departments||[]).indexOf("applications")>=0; });
+};
+CG.isAppReviewer = function(){
+  var p = CG.auth && CG.auth.profile;
+  return !!(p && p.role==="staff" && (p.departments||[]).indexOf("applications")>=0);
+};
 CG.ROUTES.staffapply = function(){
   var head = CG.pageHead("Join the league office","Apply to join the staff",
     "Staff work the case queue, verify imported stats, and keep game nights honest. Applications are tied to your Discord account.");
@@ -4245,7 +4259,7 @@ CG.subscribeAppMessages = function(){
         var m = payload && payload.new;
         if (!m || m.sender_id === me) return;   /* my own send already refreshed the thread */
         CG.loadAppMessages().then(function(){
-          var onThread = /#\/hub\/application\b/.test(location.hash) || /#\/(owner|staffapply)\b/.test(location.hash);
+          var onThread = /#\/hub\/application\b/.test(location.hash) || /#\/(owner|staffapply)\b/.test(location.hash) || /#\/hub\/roster\b/.test(location.hash);
           if (onThread && CG.router){
             /* keep a half-typed message across the live re-render */
             var cur = document.querySelector("[data-appchat-input]");
@@ -4313,6 +4327,90 @@ CG.wireAppChat = function(){
     });
   }); });
 };
+/* ---- club management appointments: owners must APPLY to appoint a GM/AGM; the reviewer vote
+   approves. Rendered on the roster page (Team HQ). ---- */
+CG.clubMgmt = function(){
+  var club = CG.myClub && CG.myClub(); if(!club) return null;
+  var t = CG.TEAM[club]; if(!t) return null;
+  var uid = CG.auth.user && CG.auth.user.id;
+  return { club:club, t:t, teamId:t.id, isOwner: !!(uid && t.owner===uid) };
+};
+CG.clubManagementCard = function(){
+  var m = CG.clubMgmt(); if(!m) return "";
+  var lg = CG.lg||{}, names = lg._profName||{};
+  var apps = (lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId; });
+  var pending = apps.filter(function(a){ return a.status==="pending"; });
+  function seat(role, label){
+    var holderId = role==="gm" ? m.t.gm : m.t.agm;
+    var holder = holderId ? (names[holderId]||"Assigned") : null;
+    var pend = pending.find(function(a){ return a.role===role; });
+    var right = pend ? '<span class="chip chip-warn chip-xs">'+esc(((pend.nominee&&pend.nominee.gamertag)||"A nominee"))+' — pending</span>'
+      : m.isOwner ? '<button class="btn btn-ghost btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>' : "";
+    return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:10px 0">'+
+      '<span class="chip chip-chrome chip-xs">'+esc(role.toUpperCase())+'</span>'+
+      '<span style="flex:1;min-width:140px"><b style="font-family:var(--f-disp)">'+esc(label)+'</b>'+
+        '<span class="caption" style="display:block">'+(holder?esc(holder):"Vacant")+'</span></span>'+right+'</div>';
+  }
+  var h = '<div class="card" style="margin-bottom:18px;margin-top:20px"><div class="card-h"><h3>Club management</h3>'+
+    (m.isOwner?'<span class="chip chip-xs">You own this club</span>':"")+'</div><div class="card-b" style="padding-top:4px">'+
+    seat("gm","General Manager")+seat("agm","Assistant GM")+
+    '<p class="caption" style="border-top:1px solid var(--line);padding-top:10px;margin-top:8px">'+
+    (m.isOwner ? "Nominate a member as your GM or AGM. The league office’s application reviewers vote to approve — 50%+1 appoints them automatically."
+               : "Only the club owner can nominate a GM or AGM. Appointments are approved by the league office’s reviewer vote.")+'</p></div></div>';
+  /* the owner talks to the office about a pending nomination right here */
+  if (m.isOwner) pending.forEach(function(a){
+    var roleLabel = a.role==="gm"?"General Manager":"Assistant GM";
+    h += '<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(roleLabel)+'</h3>'+
+      '<span class="chip chip-warn chip-xs">Pending the reviewer vote</span></div><div class="card-b">'+
+      '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw="'+a.id+'">Withdraw this nomination</button></div></div>';
+    h += CG.appChatSection("management", a.id, {office:false});
+  });
+  return h;
+};
+CG.nominateManagerModal = function(role){
+  var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
+  var label = role==="gm"?"General Manager":"Assistant GM";
+  CG.modal("Nominate a "+label,
+    '<p class="caption" style="margin-bottom:12px">Pick the member you want as your club’s '+esc(label)+'. The league office’s reviewers vote to approve the appointment.</p>'+
+    CG.memberPickerField("mgNominee","Member","Start typing a gamertag")+
+    '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
+  CG.wireMemberPicker("mgNominee");
+  var go = document.getElementById("mgGo");
+  if (go) go.addEventListener("click", function(){
+    var pick = CG.readMemberPicker("mgNominee");
+    if(!pick || !pick.id){ CG.toast("Pick a member first","err"); return; }
+    this.disabled = true;
+    CG.submitMgmtApp(role, pick.id, ((document.getElementById("mgPitch")||{}).value||"").trim()||null);
+  });
+};
+CG.submitMgmtApp = function(role, nomineeId, pitch){
+  var m = CG.clubMgmt(); if(!m || !m.isOwner){ CG.toast("Only the club owner can nominate management","err"); return; }
+  CG.sb.from("management_applications").insert({ team_id:m.teamId, role:role, submitted_by:CG.auth.user.id, nominee_id:nomineeId, pitch:pitch }).select("id").then(function(r){
+    if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+    if(!r.data||!r.data.length){ CG.toast("You can only nominate management for your own club","err"); return; }
+    if(CG.closeOverlay) CG.closeOverlay();
+    CG.toast("Nomination submitted — the reviewers will vote","ok"); CG.reloadLeague();
+  });
+};
+/* inject the management card into the roster page + wire its controls */
+CG._origHubRoster = CG.hubRoster;
+CG.hubRoster = function(qs){ return CG._origHubRoster(qs) + CG.clubManagementCard(); };
+CG._origAfterRoster = CG.AFTER._roster;
+CG.AFTER._roster = function(){
+  if (CG._origAfterRoster) CG._origAfterRoster();
+  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
+  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-mgmt-withdraw");
+    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
+      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
+        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
+        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+  CG.wireAppChat();
+};
 /* Staff ballot on an application — each official casts an advisory approve/deny (with an optional
    reason). Visible ONLY to staff + commissioners: the application_ballots RLS enforces office-only
    read, so the applicant never sees the votes, only the final decision. */
@@ -4325,44 +4423,68 @@ CG.loadAppBallots = function(){
     .select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
     .then(function(vb){ if(CG.lg) CG.lg._appBallots = (vb && !vb.error && vb.data) || []; return true; }, function(){ return false; });
 };
+/* The reviewer vote IS the decision. Once every reviewer (staff carrying the 'applications'
+   department) has voted, the DB auto-applies 50%+1. Commissioners don't vote but can override. */
 CG.appBallotSection = function(type, a, decided){
-  var votes = CG.appBallotsFor(type, a.id);
   var uid = CG.auth.user && CG.auth.user.id;
-  var yes = votes.filter(function(v){ return v.vote==="approve"; }).length;
-  var no  = votes.filter(function(v){ return v.vote==="deny"; }).length;
-  var mine = votes.find(function(v){ return v.voter_id===uid; });
-  var tally = votes.length
-    ? '<span class="chip chip-win chip-xs">'+yes+' approve</span> <span class="chip chip-loss chip-xs">'+no+' deny</span>'
-    : '<span class="chip chip-xs">no votes yet</span>';
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff ballot</h3>'+tally+'</div><div class="card-b">';
-  if (votes.length){
-    h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+votes.slice().sort(function(x,y){
-        return ((x.voter&&x.voter.gamertag)||"").localeCompare((y.voter&&y.voter.gamertag)||""); }).map(function(v){
-      var nm = (v.voter && v.voter.gamertag) || ((CG.lg&&CG.lg._profName)||{})[v.voter_id] || "An official";
-      return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
-        '<span class="chip '+(v.vote==="approve"?"chip-win":"chip-loss")+' chip-xs" style="flex-shrink:0">'+(v.vote==="approve"?"Approve":"Deny")+'</span>'+
-        '<b style="font-family:var(--f-disp);font-size:13px">'+esc(nm)+(v.voter_id===uid?' · you':"")+'</b>'+
-        (v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
+  var reviewers = CG.appReviewers();
+  var N = reviewers.length, need = Math.floor(N/2)+1;
+  var voteBy = {}; CG.appBallotsFor(type, a.id).forEach(function(v){ voteBy[v.voter_id] = v; });
+  var cast = reviewers.filter(function(r){ return voteBy[r.id]; }).length;
+  var yes = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="approve"; }).length;
+  var no  = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="deny"; }).length;
+  var mine = voteBy[uid], isReviewer = CG.isAppReviewer(), isCommish = CG.role()==="commish";
+
+  var head = decided
+    ? '<span class="chip '+(a.status==="approved"?"chip-win":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
+    : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
+
+  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+    '<span class="chip chip-win chip-xs">'+yes+' approve</span><span class="chip chip-loss chip-xs">'+no+' deny</span>'+
+    (N?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';
+
+  if (N){
+    h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+reviewers.slice().sort(function(x,y){ return (x.gamertag||"").localeCompare(y.gamertag||""); }).map(function(r){
+      var v = voteBy[r.id];
+      var chip = v ? '<span class="chip '+(v.vote==="approve"?"chip-win":"chip-loss")+' chip-xs">'+(v.vote==="approve"?"Approve":"Deny")+'</span>'
+                   : '<span class="chip chip-warn chip-xs">Pending</span>';
+      return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+chip+
+        '<b style="font-family:var(--f-disp);font-size:13px">'+esc(r.gamertag||"An official")+(r.id===uid?" · you":"")+'</b>'+
+        (v&&v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
     }).join("")+'</div>';
+  } else if (!decided){
+    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)">No application reviewers are assigned yet. A commissioner needs to add staff to the <b>Applications review</b> department — or decide this directly below.</p>';
   }
-  if (!decided){
+
+  if (!decided && isReviewer){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
-      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time before the decision":"Cast your vote")+'</span>'+
-      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
+      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time until the last reviewer votes":"Cast your vote")+'</span>'+
+      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
         '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
         '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
         (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
   }
-  h += '<p class="caption" style="margin-top:12px">Ballots are advisory and visible only to staff and commissioners. The applicant sees only the final decision.</p>';
+  if (!decided && isCommish){
+    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px">'+
+      '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
+        '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button></div></div>';
+  }
+
+  h += '<p class="caption" style="margin-top:12px">'+(decided
+    ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
+    : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
   return h + '</div></div>';
 };
 CG.hubApplicationDetail = function(id, type){
   var review = CG.role()==="commish" || CG.role()==="staff";
   var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
   if (!review) return CG.unauthorized("Applications are reviewed by league staff.");
-  var isOwner = type==="owner";
-  var list = isOwner ? (CG.lg._ownerApps||[]) : (CG.lg._staffApps||[]);
+  var isOwner = type==="owner", isMgmt = type==="management";
+  var list = isMgmt ? (CG.lg._mgmtApps||[]) : isOwner ? (CG.lg._ownerApps||[]) : (CG.lg._staffApps||[]);
   var idS = String(id||"");
   var a = list.find(function(x){ return x.id===id; })
        || list.find(function(x){ return String(x.id||"").slice(0, idS.length)===idS; });
@@ -4371,94 +4493,95 @@ CG.hubApplicationDetail = function(id, type){
       '<div class="e-art">'+CG.ic("flag",22)+'</div><b>That application isn’t here</b>'+
       '<p>It may have been withdrawn or already decided. Head back to the Staff Desk.</p></div></div>';
   }
-  var prof = a.profiles||{}, name = prof.gamertag||"Applicant";
-  var decided = a.status==="approved" || a.status==="denied";
+  var decided = a.status==="approved" || a.status==="denied" || a.status==="withdrawn";
   function row(label, val){ return val ? '<div style="display:flex;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft)"><span class="caption" style="min-width:118px;flex-shrink:0">'+esc(label)+'</span><span class="small" style="flex:1">'+val+'</span></div>' : ''; }
-  var fields = '';
-  if (isOwner){
-    fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
-    fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
-    fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
-    fields += row("Franchise picks", CG.franchisePicksLine(a));
-    fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
-    fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
-  } else if (a.departments && a.departments.length){
-    fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
+
+  var name, eyebrow, eyeClass, lede, fields = '';
+  if (isMgmt){
+    var clubCode = (CG.lg._idToCode||{})[a.team_id];
+    var clubName = (clubCode && CG.TEAM && CG.TEAM[clubCode] && CG.TEAM[clubCode].name) || clubCode || "the club";
+    var roleLabel = a.role==="gm" ? "General Manager" : "Assistant GM";
+    name = ((a.nominee&&a.nominee.gamertag)||"A member");
+    eyebrow = a.role==="gm" ? "GM" : "AGM"; eyeClass = "chip-chrome";
+    lede = "Nominated as "+roleLabel+" of "+clubName+".";
+    fields += row("Club", esc(clubName)+(clubCode?' <span class="caption">('+esc(clubCode)+')</span>':""));
+    fields += row("Role", esc(roleLabel));
+    fields += row("Nominee", esc((a.nominee&&a.nominee.gamertag)||"—"));
+    fields += row("Submitted by", esc((a.submitter&&a.submitter.gamertag)||"the owner"));
+    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
+  } else {
+    var prof = a.profiles||{}; name = prof.gamertag||"Applicant";
+    eyebrow = isOwner ? "OWNER" : "STAFF"; eyeClass = isOwner ? "chip" : "chip-chrome";
+    lede = isOwner ? "Application to own a club." : "Application to join the league staff.";
+    if (isOwner){
+      fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
+      fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
+      fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
+      fields += row("Franchise picks", CG.franchisePicksLine(a));
+      fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
+      fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
+    } else if (a.departments && a.departments.length){
+      fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
+    }
+    fields += row("Timezone", a.timezone?esc(a.timezone):"");
+    fields += row("Availability", a.availability?esc(a.availability):"");
+    fields += row("Experience", a.experience?esc(a.experience):"");
+    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
   }
-  fields += row("Timezone", a.timezone?esc(a.timezone):"");
-  fields += row("Availability", a.availability?esc(a.availability):"");
-  fields += row("Experience", a.experience?esc(a.experience):"");
-  fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
 
   var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
     : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
+    : a.status==="withdrawn" ? '<span class="chip">Withdrawn</span>'
     : '<span class="chip chip-warn">Pending</span>';
 
   var h = '<div style="margin-bottom:18px">'+back+
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">'+
-      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+(isOwner?"OWNER":"STAFF")+'</span>'+
+      '<span class="chip '+eyeClass+' chip-xs">'+esc(eyebrow)+'</span>'+
       '<h1 class="h-sec">'+esc(name)+'</h1>'+statusChip+'</div>'+
-    '<p class="lede" style="margin-top:8px">'+(isOwner?"Application to own a club.":"Application to join the league staff.")+'</p></div>';
+    '<p class="lede" style="margin-top:8px">'+esc(lede)+'</p></div>';
 
   h += '<div class="card" style="margin-bottom:18px"><div class="card-b">'+fields+
-    (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">Their pitch</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
+    (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">'+(isMgmt?"The owner’s case":"Their pitch")+'</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
     '</div></div>';
 
-  /* the applicant chat sits above the ballot: talk to the applicant, then the office deliberates */
+  /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
   h += CG.appChatSection(type, a.id, {office:true});
-  /* the staff ballot — who has voted and how — sits above the decision so it informs it */
+  /* the reviewer vote IS the decision — no manual approve/deny */
   h += CG.appBallotSection(type, a, decided);
-
-  if (decided){
-    var whoName = (a.decided_by && (CG.lg._profName||{})[a.decided_by]) || "the league office";
-    h += '<div class="note '+(a.status==="approved"?"grn":"red")+'"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+
-      (a.status==="approved"?"Approved":"Denied")+' by '+esc(whoName)+(a.decided_at?' · '+CG.fmtFull(Date.parse(a.decided_at)):"")+'</b>'+
-      (a.response?'“'+esc(a.response)+'”':"No note was left for the applicant.")+'</div>';
-  } else {
-    h += '<div class="card"><div class="card-h"><h3>Respond &amp; decide</h3></div><div class="card-b">'+
-      '<label class="fld"><span>Response to the applicant (optional)</span>'+
-      '<textarea id="appResp" rows="4" placeholder="A note delivered to '+esc(name)+' with your decision — a welcome, next steps, or why not this time."></textarea></label>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+
-        '<button class="btn btn-chrome" data-app-decide="approve" data-app-id="'+a.id+'" data-app-type="'+esc(type)+'" data-name="'+esc(name)+'">Approve</button>'+
-        '<button class="btn btn-ghost" data-app-decide="deny" data-app-id="'+a.id+'" data-app-type="'+esc(type)+'" data-name="'+esc(name)+'">Deny</button></div>'+
-      '<p class="caption" style="margin-top:10px">'+(isOwner
-        ? "Approving green-lights them — a commissioner then hands them their club in Users &amp; roles."
-        : "Approving promotes them to staff immediately; the Discord role follows on the next sync.")+' Your note is delivered to them with the decision.</p>'+
-    '</div></div>';
-  }
   return h;
 };
 CG.AFTER._applicationDetail = function(){
-  document.querySelectorAll("[data-app-decide]").forEach(function(b){ b.addEventListener("click", function(){
-    var approve = this.getAttribute("data-app-decide")==="approve";
-    var id = this.getAttribute("data-app-id"), type = this.getAttribute("data-app-type"), name = this.getAttribute("data-name");
-    var resp = (document.getElementById("appResp")||{}).value || "";
-    var all = document.querySelectorAll("[data-app-decide]"); all.forEach(function(x){ x.disabled = true; });
-    var rpc = type==="owner" ? "decide_owner_application" : "decide_staff_application";
-    CG.sb.rpc(rpc, { p_id:id, p_approve:approve, p_response:(resp.trim()||null) }).then(function(r){
-      if (r.error){ all.forEach(function(x){ x.disabled=false; }); CG.toast("Couldn’t decide: "+r.error.message,"err"); return; }
-      CG.toast((r.data||name)+(approve?" — approved":" — denied"),"ok");
-      CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
+  /* commissioner override — decide immediately, bypassing the reviewer vote */
+  document.querySelectorAll("[data-app-override]").forEach(function(b){ b.addEventListener("click", function(){
+    var approve = this.getAttribute("data-app-override")==="approve";
+    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
+    CG.confirm((approve?"Approve":"Deny")+" this now?","This overrides the reviewer vote and applies the decision immediately.",(approve?"Approve":"Deny")+" now", function(){
+      CG.sb.rpc("override_application_decision", { p_type:t, p_id:id, p_approve:approve }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t override: "+r.error.message,"err"); return; }
+        CG.toast("Decision applied — "+(approve?"approved":"denied"),"ok");
+        CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
+      });
     });
   }); });
-  /* staff ballot — cast/change/retract an advisory vote; .select() so an RLS-blocked write (a
-     non-official) is reported honestly instead of a false success */
+  /* the reviewer vote — cast/change/retract; .select() so an RLS-blocked write (a non-reviewer)
+     is reported honestly instead of a false success. Casting the last vote auto-resolves server-side. */
   document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
     var v=this.getAttribute("data-vote-cast"), t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
     var note=((document.getElementById("appVoteNote")||{}).value||"").trim();
     var btns=document.querySelectorAll("[data-vote-cast],[data-vote-retract]"); btns.forEach(function(x){ x.disabled=true; });
     CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null), updated_at:new Date().toISOString() }, {onConflict:"app_type,application_id,voter_id"}).select("id").then(function(r){
       if(r.error){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Couldn’t save your vote: "+r.error.message,"err"); return; }
-      if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only league staff can vote on applications.","err"); return; }
+      if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only assigned application reviewers can vote.","err"); return; }
       CG.toast("Vote recorded — "+(v==="approve"?"approve":"deny"),"ok");
-      CG.loadAppBallots().then(function(){ if(CG.router) CG.router(); });
+      /* full reload — casting the final vote may resolve the application (status + role assignment) */
+      CG.reloadLeague();
     });
   }); });
   document.querySelectorAll("[data-vote-retract]").forEach(function(b){ b.addEventListener("click", function(){
     var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
     CG.sb.from("application_ballots").delete().eq("app_type",t).eq("application_id",id).eq("voter_id",CG.auth.user.id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t retract: "+r.error.message,"err"); return; }
-      CG.toast("Vote retracted","ok"); CG.loadAppBallots().then(function(){ if(CG.router) CG.router(); });
+      CG.toast("Vote retracted","ok"); CG.reloadLeague();
     });
   }); });
   CG.wireAppChat();
@@ -4478,19 +4601,29 @@ CG.allTickets = function(){
       isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
       route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
   });
+  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":"Pending"; }
   (lg._staffApps||[]).forEach(function(a){
-    var closed = a.status==="approved" || a.status==="denied";
+    var closed = a.status!=="pending";
     out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
       title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
-      result: a.status==="approved"?"Approved":a.status==="denied"?"Denied":"Pending", isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=staff", replies:0 });
+      result: appResult(a.status), isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=staff", replies:CG.appMsgsFor("staff",a.id).length });
   });
   (lg._ownerApps||[]).forEach(function(a){
-    var closed = a.status==="approved" || a.status==="denied";
+    var closed = a.status!=="pending";
     out.push({ group:"owner", typeLabel:"Owner application", icon:"shield",
       title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
-      result: a.status==="approved"?"Approved":a.status==="denied"?"Denied":"Pending", isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=owner", replies:0 });
+      result: appResult(a.status), isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=owner", replies:CG.appMsgsFor("owner",a.id).length });
+  });
+  (lg._mgmtApps||[]).forEach(function(a){
+    var closed = a.status!=="pending";
+    var code = (lg._idToCode||{})[a.team_id];
+    var club = (code && CG.TEAM && CG.TEAM[code] && CG.TEAM[code].name) || code || "a club";
+    out.push({ group:"management", typeLabel:(a.role==="gm"?"GM application":"AGM application"), icon:"shield",
+      title:((a.nominee&&a.nominee.gamertag)||"A member")+" · "+club, who:(a.submitter&&a.submitter.gamertag)||"owner",
+      result: appResult(a.status), isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=management", replies:CG.appMsgsFor("management",a.id).length });
   });
   return out.sort(function(x,y){ return y.at - x.at; });
 };
@@ -4520,7 +4653,7 @@ CG.hubTicketArchive = function(){
       '<span class="caption">'+(t.at?CG.fmtDay(t.at):"")+'</span>'+
       '<span class="caption" aria-hidden="true">→</span></div>';
   }
-  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"]];
+  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"],["management","GM / AGM"]];
   var statusF = [["all","All"],["open","Open / pending"],["closed","Resolved / decided"]];
 
   var h = '<div style="margin-bottom:18px"><a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>'+
@@ -4576,23 +4709,34 @@ CG.hubStaffDesk = function(){
   /* applications — owner + staff, decided right here */
   var ownerApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
   var staffApps = (lg._staffApps||[]).filter(function(a){ return a.status==="pending"; });
+  var mgmtApps  = (lg._mgmtApps||[]).filter(function(a){ return a.status==="pending"; });
+  var pendCount = ownerApps.length+staffApps.length+mgmtApps.length;
+  var revCount = CG.appReviewers().length;
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3>'+
-    '<span class="chip '+((ownerApps.length+staffApps.length)?"chip-warn":"chip-win")+'">'+
-    ((ownerApps.length+staffApps.length)?(ownerApps.length+staffApps.length)+" awaiting a decision":"none pending")+'</span></div>';
-  /* each row opens the application into its own page (CG.hubApplicationDetail) to review it in full
-     and respond — the same open-to-decide flow as the case queue. */
+    '<span class="chip '+(pendCount?"chip-warn":"chip-win")+'">'+(pendCount?pendCount+" awaiting the vote":"none pending")+'</span></div>';
+  /* each row opens the application into its own page (CG.hubApplicationDetail) — the reviewer vote
+     decides it there. Glance-level tally shows where the vote stands. */
   function appRow(a, type){
-    var prof = a.profiles||{}, isOwner = type==="owner";
-    var sub = isOwner ? CG.franchisePicksLine(a)
-      : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
-    /* how the staff ballot stands so far — a glance-level tally before you open it */
+    var isOwner=type==="owner", isMgmt=type==="management";
+    var chipLabel = isMgmt ? (a.role==="gm"?"GM":"AGM") : isOwner?"OWNER":"STAFF";
+    var title, sub;
+    if (isMgmt){
+      var code=(lg._idToCode||{})[a.team_id], club=(code&&CG.TEAM&&CG.TEAM[code]&&CG.TEAM[code].name)||code||"a club";
+      title=(a.nominee&&a.nominee.gamertag)||"A member";
+      sub=(a.role==="gm"?"General Manager":"Assistant GM")+" · "+esc(club)+" · by "+esc((a.submitter&&a.submitter.gamertag)||"owner");
+    } else {
+      var prof=a.profiles||{}; title=prof.gamertag||"Applicant";
+      sub = isOwner ? CG.franchisePicksLine(a)
+        : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
+    }
     var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
-    var tally = vb.length ? '<span class="chip chip-xs" title="Staff ballot so far">'+vy+' approve · '+vn+' deny</span>' : "";
+    var tally = (vb.length ? '<span class="chip chip-xs" title="Reviewer vote so far">'+vy+' approve · '+vn+' deny</span>' : "")
+      + (revCount ? '<span class="caption">'+vb.length+'/'+revCount+' voted</span>' : "");
     return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
-      'aria-label="Open '+(isOwner?"owner":"staff")+' application from '+esc(prof.gamertag||"applicant")+'" '+
+      'aria-label="Open '+esc(chipLabel)+' application: '+esc(title)+'" '+
       'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+(isOwner?"OWNER":"STAFF")+'</span>'+
-      '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(prof.gamertag||"Applicant")+'</b>'+
+      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+esc(chipLabel)+'</span>'+
+      '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(title)+'</b>'+
         '<span class="caption">'+sub+'</span></span>'+
       tally+
       '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
@@ -4600,10 +4744,13 @@ CG.hubStaffDesk = function(){
   }
   if (staffApps.length) h += staffApps.map(function(a){ return appRow(a,"staff"); }).join("");
   if (ownerApps.length) h += ownerApps.map(function(a){ return appRow(a,"owner"); }).join("");
-  if (!staffApps.length && !ownerApps.length){
-    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply at <b>Apply to own a club</b> (#/owner) and <b>Apply to join the staff</b> (#/staffapply) — both linked in the site footer.</p></div>';
+  if (mgmtApps.length)  h += mgmtApps.map(function(a){ return appRow(a,"management"); }).join("");
+  if (!pendCount){
+    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply to own a club (#/owner) or join the staff (#/staffapply); owners nominate a GM/AGM from their Team HQ.</p></div>';
   } else {
-    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to review it in full and respond. Approving a staff application promotes the member immediately (Discord role follows on the next sync); approving an owner application green-lights them, and a commissioner then hands them their club in Users &amp; roles → Club role.</span></div>';
+    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to read it and cast your vote. '+
+      (revCount ? 'Once all <b>'+revCount+'</b> application reviewer'+(revCount===1?"":"s")+' vote, 50%+1 decides it automatically.'
+                : '<b style="color:var(--amber-ink)">No reviewers are assigned</b> — a commissioner must add staff to the Applications review department, or decide with the commissioner override.')+'</span></div>';
   }
   h += '</div>';
 
