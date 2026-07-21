@@ -579,6 +579,9 @@ CG.applySession = async function(session){
   /* direct messages: load + subscribe on sign-in, tear down on sign-out */
   if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
+  /* application chat: live thread updates (the load itself runs in buildLiveLeague) */
+  if (CG.auth.user){ CG.subscribeAppMessages(); }
+  else { CG.teardownAppMessages && CG.teardownAppMessages(); }
   /* complaints & requests (league office) — RLS returns what this user may see */
   if (CG.auth.user){ CG.loadActionRequests().then(function(){ CG.rerenderIfShowingCases(); }); }
   else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
@@ -4228,6 +4231,34 @@ CG.loadAppMessages = function(){
   if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
   return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
     .then(function(mm){ if(CG.lg) CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); return true; }, function(){ return false; });
+};
+/* live thread: subscribe to application_messages inserts. No recipient filter — Supabase Realtime
+   applies the table's RLS, so the office receives every thread and an applicant only their own
+   (same model as direct_messages). A new message re-renders the open thread in place. */
+CG._appMsgChannel = null;
+CG.subscribeAppMessages = function(){
+  if (!CG.sb || !CG.auth.user || CG._appMsgChannel) return;
+  var me = CG.auth.user.id;
+  try {
+    CG._appMsgChannel = CG.sb.channel("appmsg-"+me)
+      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"application_messages" }, function(payload){
+        var m = payload && payload.new;
+        if (!m || m.sender_id === me) return;   /* my own send already refreshed the thread */
+        CG.loadAppMessages().then(function(){
+          var onThread = /#\/hub\/application\b/.test(location.hash) || /#\/(owner|staffapply)\b/.test(location.hash);
+          if (onThread && CG.router){
+            /* keep a half-typed message across the live re-render */
+            var cur = document.querySelector("[data-appchat-input]");
+            var draft = cur ? cur.value : "", hadFocus = cur && document.activeElement===cur;
+            CG.router();
+            if (draft){ var ni = document.querySelector("[data-appchat-input]"); if(ni){ ni.value = draft; if(hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
+          } else { CG.toast("New message on an application","ok"); }
+        });
+      }).subscribe();
+  } catch(e){}
+};
+CG.teardownAppMessages = function(){
+  if (CG._appMsgChannel){ try{ CG.sb.removeChannel(CG._appMsgChannel); }catch(e){} CG._appMsgChannel = null; }
 };
 /* opts.office = the league-office view (staff/commish) vs the applicant's own view. Both can send;
    labels differ so the applicant sees "League office" rather than a specific official's name. */
