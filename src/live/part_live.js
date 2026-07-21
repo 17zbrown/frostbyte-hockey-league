@@ -1155,10 +1155,12 @@ CG.ROUTES.brand = function(){
         '<span><b style="color:'+(ok?"var(--green-ink)":"var(--red-ink)")+';font-family:var(--f-disp);letter-spacing:.04em">'+(ok?"DO":"DON’T")+'</b> · '+esc(label)+'</span></p></div>';
   }
   function swatch(hex, token, role){
-    return '<div style="border:1.5px solid var(--line);border-radius:var(--r-s);overflow:hidden;background:var(--paper)">'+
+    /* the card is --paper, so its text must be --ink (both flip together per theme). Without this the
+       name inherits the sec-dark section's light colour and vanishes on the white card in light mode. */
+    return '<div style="border:1.5px solid var(--line);border-radius:var(--r-s);overflow:hidden;background:var(--paper);color:var(--ink)">'+
       '<div style="height:62px;background:'+hex+'"></div>'+
       '<div style="padding:9px 11px">'+
-        '<b style="font-family:var(--f-disp);font-size:13px;display:block;letter-spacing:-.01em">'+esc(token)+'</b>'+
+        '<b style="font-family:var(--f-disp);font-size:13px;display:block;letter-spacing:-.01em;color:var(--ink)">'+esc(token)+'</b>'+
         '<span class="caption mono" style="display:block;text-transform:uppercase">'+esc(hex)+'</span>'+
         '<span class="caption" style="display:block;margin-top:2px;line-height:1.4">'+esc(role)+'</span></div></div>';
   }
