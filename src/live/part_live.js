@@ -1118,6 +1118,57 @@ CG.ROUTES.legal = function(){
   '</div>';
 };
 
+/* Download any displayed logo as a PNG. The three mark variants map to the shipped 1024px files
+   (a plain <a download> — instant, perfect); the wordmark lockups have no file, so they're composed
+   to a canvas here using the page's real Archivo/Plex fonts, pixel-accurate and with no round-trip. */
+CG.saveBlob = function(blob, name){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+};
+CG.dlWordmark = async function(onDark){
+  try {
+    if (document.fonts && document.fonts.ready){
+      await document.fonts.ready;
+      try { await document.fonts.load("900 100px Archivo"); await document.fonts.load('600 100px "IBM Plex Mono"'); } catch(e){}
+    }
+    var S = 3;  /* supersample for a crisp asset */
+    var mark = onDark
+      ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>'
+      : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#101519" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#D9A800" stroke-width="3.6" stroke-linecap="round"/></svg>';
+    var markPx = 132*S, pad = 30*S, gap = 22*S;
+    var titleSize = 56*S, eyeSize = 21*S, lineGap = 12*S, eyeLS = 5*S;
+    var titleFont = "900 "+titleSize+"px Archivo, sans-serif";
+    var eyeFont = '600 '+eyeSize+'px "IBM Plex Mono", monospace';
+    var meas = document.createElement("canvas").getContext("2d"), i;
+    meas.font = titleFont; var titleW = meas.measureText("CHEL GAMING").width;
+    var eyeText = "HOCKEY LEAGUE"; meas.font = eyeFont;
+    var eyeW = 0; for (i=0;i<eyeText.length;i++) eyeW += meas.measureText(eyeText[i]).width + eyeLS;
+    var W = Math.ceil(pad + markPx + gap + Math.max(titleW, eyeW) + pad);
+    var H = Math.ceil(pad + markPx + pad);
+    var cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    var ctx = cv.getContext("2d");
+    var img = new Image();
+    await new Promise(function(res,rej){ img.onload=res; img.onerror=rej; img.src = "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(mark); });
+    ctx.drawImage(img, pad, (H-markPx)/2, markPx, markPx);
+    var tx = pad + markPx + gap, ty = (H - (titleSize+lineGap+eyeSize))/2;
+    ctx.textBaseline = "top";
+    ctx.fillStyle = onDark ? "#FFFFFF" : "#101519"; ctx.font = titleFont;
+    ctx.fillText("CHEL GAMING", tx, ty);
+    ctx.fillStyle = onDark ? "#9AA8B0" : "#5C6B75"; ctx.font = eyeFont;
+    var ex = tx, eyTop = ty + titleSize + lineGap;
+    for (i=0;i<eyeText.length;i++){ ctx.fillText(eyeText[i], ex, eyTop); ex += meas.measureText(eyeText[i]).width + eyeLS; }
+    cv.toBlob(function(b){ b ? CG.saveBlob(b, "chel-gaming-wordmark"+(onDark?"":"-light")+".png") : CG.toast("Couldn’t render the PNG","err"); }, "image/png");
+  } catch(e){ CG.toast("Couldn’t generate the PNG","err"); }
+};
+CG.AFTER.brand = function(){
+  document.querySelectorAll("[data-dl-wordmark]").forEach(function(b){
+    b.addEventListener("click", function(){ CG.dlWordmark(this.getAttribute("data-dl-wordmark")==="dark"); });
+  });
+};
+
 /* The brand bible, as a page. It documents the system AND is built entirely from it — every colour
    is a token, every heading is on the scale, the one accent is used once per section. The canonical
    text lives in BRAND.md; if the two drift, the tokens in part1_head.html are what actually render. */
@@ -1139,10 +1190,17 @@ CG.ROUTES.brand = function(){
   function wordmark(onDark, s){  /* the full lockup: mark + text, sized to the mark */
     return '<span style="display:inline-flex;align-items:center;gap:13px">'+mk(onDark?"reversed":"light", s||40)+wtext(onDark)+'</span>';
   }
-  /* a framed specimen: the mark on the background it's built for */
-  function logoCell(bg, inner, label, note){
-    return '<div class="card">'+
-      '<div style="background:'+bg+';display:flex;align-items:center;justify-content:center;padding:38px 20px;min-height:120px">'+inner+'</div>'+
+  /* a framed specimen: the mark on the background it's built for. Pass dl to make the panel a
+     one-click PNG download — {href} for a shipped file, {wm,dark} for a canvas-composed wordmark. */
+  function logoCell(bg, inner, label, note, dl){
+    var panel = '<div style="position:relative;background:'+bg+';display:flex;align-items:center;justify-content:center;padding:38px 20px;min-height:120px">'+
+      inner + (dl ? '<span class="logo-dl-cue">'+CG.ic("dl",12)+' PNG</span>' : '') + '</div>';
+    var open = dl && dl.href
+      ? '<a class="logo-dl" download href="'+dl.href+'" aria-label="Download '+esc(label)+' logo as PNG" title="Download PNG">'
+      : dl && dl.wm
+        ? '<button type="button" class="logo-dl" data-dl-wordmark="'+(dl.dark?"dark":"light")+'" aria-label="Download the '+esc(label)+' as PNG" title="Download PNG">'
+        : null;
+    return '<div class="card">'+ (open ? open+panel+(dl.href?'</a>':'</button>') : panel) +
       '<div class="card-b"><b class="h-card" style="display:block">'+esc(label)+'</b>'+
         '<p class="caption" style="margin-top:4px;line-height:1.55">'+note+'</p></div></div>';
   }
@@ -1188,14 +1246,15 @@ CG.ROUTES.brand = function(){
       '<h2 class="h-sec">A "C" for Chel, crossed by the "G"</h2>'+
       '<p class="lede">One shape carries both letters — a power mark that reads as a play button. Match the logo to its background: the crossbar is the point of the whole thing, and it disappears on the wrong surface.</p></div></div>'+
     '<div class="grid g3">'+
-      logoCell("var(--bc)", mk("badge",64), "Primary badge", "The default. Dark and neutral surfaces — the masthead, the footer, the Discord avatar, the share card.")+
-      logoCell("var(--paper)", mk("light",64), "Light mark", "Transparent, ink C + gold crossbar. Any light background — a white page, print, a light email header.")+
-      logoCell("var(--ice)", mk("lighttile",64), "Light tile", "The badge form for light surfaces — avatars and app tiles that need a contained shape.")+
+      logoCell("var(--bc)", mk("badge",64), "Primary badge", "The default. Dark and neutral surfaces — the masthead, the footer, the Discord avatar, the share card.", {href:"/chel-gaming-logo-1024.png"})+
+      logoCell("var(--paper)", mk("light",64), "Light mark", "Transparent, ink C + gold crossbar. Any light background — a white page, print, a light email header.", {href:"/chel-gaming-logo-light-1024.png"})+
+      logoCell("var(--ice)", mk("lighttile",64), "Light tile", "The badge form for light surfaces — avatars and app tiles that need a contained shape.", {href:"/chel-gaming-logo-light-tile-1024.png"})+
     '</div>'+
     '<div class="grid g2" style="margin-top:18px;align-items:stretch">'+
-      logoCell("var(--bc)", wordmark(true,44), "Wordmark lockup", "The mark with the name. Headers, credits, anywhere the two appear together. On dark, the mark reverses to a light C.")+
-      logoCell("var(--paper)", '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center">'+mk("light",44)+wtext(false)+'</div>', "On light", "The same lockup on paper — ink wordmark, gold crossbar. Clear space stays equal to the mark's corner radius.")+
+      logoCell("var(--bc)", wordmark(true,44), "Wordmark lockup", "The mark with the name. Headers, credits, anywhere the two appear together. On dark, the mark reverses to a light C.", {wm:true, dark:true})+
+      logoCell("var(--paper)", '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center">'+mk("light",44)+wtext(false)+'</div>', "On light", "The same lockup on paper — ink wordmark, gold crossbar. Clear space stays equal to the mark's corner radius.", {wm:true, dark:false})+
     '</div>'+
+    '<p class="caption" style="margin-top:12px;display:flex;gap:6px;align-items:center">'+CG.ic("dl",13)+'Click any logo above to download its PNG.</p>'+
 
     '<h3 class="h-card" style="margin:34px 0 4px">Clear space &amp; minimum size</h3>'+
     '<p class="lede" style="margin-bottom:16px">Keep free space around the mark equal to at least the tile’s corner radius. Below 24px the crossbar closes up — that’s the floor for a favicon; 20px in dense UI.</p>'+
@@ -1339,7 +1398,7 @@ CG.ROUTES.brand = function(){
        ["Light tile","/chel-gaming-logo-light-tile-1024.png","PNG · 1024 · white tile"],
        ["Favicon","/favicon.svg","SVG · the badge at 48px"],
        ["Share card","/og.png","PNG · 1200×630 · social preview"]
-      ].map(function(a){ return '<a class="card raise" href="'+a[1]+'" target="_blank" rel="noopener" style="display:block;text-decoration:none;background:var(--bc2);border-color:#2A343B">'+
+      ].map(function(a){ return '<a class="card raise" href="'+a[1]+'" download rel="noopener" style="display:block;text-decoration:none;background:var(--bc2);border-color:#2A343B">'+
         '<div class="card-b" style="display:flex;align-items:center;gap:12px">'+CG.ic("dl",16)+
         '<span><b style="font-family:var(--f-disp);color:#fff;display:block">'+esc(a[0])+'</b><span class="caption mono" style="color:var(--on-ink-dim)">'+esc(a[2])+'</span></span></div></a>'; }).join("")+
     '</div>'+

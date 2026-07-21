@@ -154,6 +154,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .row-go{cursor:pointer;transition:background .12s}
 .row-go:hover{background:var(--ice)}
 .row-go:focus-visible{outline:2px solid var(--chrome);outline-offset:-2px;background:var(--ice)}
+/* a logo specimen that downloads its PNG on click. The cue is chrome-on-ink so it reads on any
+   panel background — dark badge, white paper, or ice — and only appears on hover/focus. */
+.logo-dl{display:block;width:100%;padding:0;border:none;background:none;color:inherit;font:inherit;cursor:pointer}
+.logo-dl:focus-visible{outline:2px solid var(--chrome);outline-offset:-2px}
+.logo-dl-cue{position:absolute;top:10px;right:10px;display:inline-flex;align-items:center;gap:4px;
+  font-family:var(--f-mono);font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:#101519;background:var(--chrome);border-radius:100px;padding:3px 8px;opacity:0;transition:opacity .15s;pointer-events:none}
+.logo-dl:hover .logo-dl-cue,.logo-dl:focus-visible .logo-dl-cue{opacity:1}
 .live-dot{width:7px;height:7px;border-radius:50%;background:currentColor;animation:blink 1.6s ease-in-out infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
 @media(prefers-reduced-motion:reduce){.live-dot{animation:none}}
