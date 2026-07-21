@@ -647,9 +647,12 @@ CG.loadManagerData = async function(){
         .then(function(db){ if (db && !db.error) CG.lg._myBoard = (db.data||[]).map(function(r){ return r.profile_id; }); }, function(){}));
     }
     if (role==="commish" || role==="staff"){
-      jobs.push(CG.sb.from("owner_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false})
+      /* both tables now have TWO fkeys to profiles (the applicant + decided_by), so a bare
+         profiles(...) embed is ambiguous and PostgREST rejects the whole query. Name the applicant
+         constraint; the key stays "profiles" so the render code is unchanged. */
+      jobs.push(CG.sb.from("owner_applications").select("*, profiles!owner_applications_profile_id_fkey(gamertag)").order("created_at",{ascending:false})
         .then(function(oa){ CG.lg._ownerApps = (oa && !oa.error && oa.data) || []; }, function(){ CG.lg._ownerApps = []; }));
-      jobs.push(CG.sb.from("staff_applications").select("*, profiles(gamertag)").order("created_at",{ascending:false})
+      jobs.push(CG.sb.from("staff_applications").select("*, profiles!staff_applications_profile_id_fkey(gamertag)").order("created_at",{ascending:false})
         .then(function(sa2){ CG.lg._staffApps = (sa2 && !sa2.error && sa2.data) || []; }, function(){ CG.lg._staffApps = []; }));
     }
     if (myTid){
@@ -4176,6 +4179,88 @@ CG.staffAttentionCard = function(){
       return '<button class="chip '+(it.warn?"chip-loss":"chip-chrome")+'" style="cursor:pointer;padding:8px 12px" data-go="'+it.go+'">'+esc(it.label)+' →</button>';
     }).join("")+'</div></div>';
 };
+/* One application opened into its own page — the full submission, plus a written response and the
+   decision, the same way a case opens from the queue. type is "staff" or "owner". */
+CG.hubApplicationDetail = function(id, type){
+  var review = CG.role()==="commish" || CG.role()==="staff";
+  var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
+  if (!review) return CG.unauthorized("Applications are reviewed by league staff.");
+  var isOwner = type==="owner";
+  var list = isOwner ? (CG.lg._ownerApps||[]) : (CG.lg._staffApps||[]);
+  var idS = String(id||"");
+  var a = list.find(function(x){ return x.id===id; })
+       || list.find(function(x){ return String(x.id||"").slice(0, idS.length)===idS; });
+  if (!a){
+    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("flag",22)+'</div><b>That application isn’t here</b>'+
+      '<p>It may have been withdrawn or already decided. Head back to the Staff Desk.</p></div></div>';
+  }
+  var prof = a.profiles||{}, name = prof.gamertag||"Applicant";
+  var decided = a.status==="approved" || a.status==="denied";
+  function row(label, val){ return val ? '<div style="display:flex;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft)"><span class="caption" style="min-width:118px;flex-shrink:0">'+esc(label)+'</span><span class="small" style="flex:1">'+val+'</span></div>' : ''; }
+  var fields = '';
+  if (isOwner){
+    fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
+    fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
+    fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
+    fields += row("Franchise picks", CG.franchisePicksLine(a));
+    fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
+    fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
+  } else if (a.departments && a.departments.length){
+    fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
+  }
+  fields += row("Timezone", a.timezone?esc(a.timezone):"");
+  fields += row("Availability", a.availability?esc(a.availability):"");
+  fields += row("Experience", a.experience?esc(a.experience):"");
+  fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
+
+  var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
+    : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
+    : '<span class="chip chip-warn">Pending</span>';
+
+  var h = '<div style="margin-bottom:18px">'+back+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">'+
+      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+(isOwner?"OWNER":"STAFF")+'</span>'+
+      '<h1 class="h-sec">'+esc(name)+'</h1>'+statusChip+'</div>'+
+    '<p class="lede" style="margin-top:8px">'+(isOwner?"Application to own a club.":"Application to join the league staff.")+'</p></div>';
+
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-b">'+fields+
+    (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">Their pitch</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
+    '</div></div>';
+
+  if (decided){
+    var whoName = (a.decided_by && (CG.lg._profName||{})[a.decided_by]) || "the league office";
+    h += '<div class="note '+(a.status==="approved"?"grn":"red")+'"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+
+      (a.status==="approved"?"Approved":"Denied")+' by '+esc(whoName)+(a.decided_at?' · '+CG.fmtFull(Date.parse(a.decided_at)):"")+'</b>'+
+      (a.response?'“'+esc(a.response)+'”':"No note was left for the applicant.")+'</div>';
+  } else {
+    h += '<div class="card"><div class="card-h"><h3>Respond &amp; decide</h3></div><div class="card-b">'+
+      '<label class="fld"><span>Response to the applicant (optional)</span>'+
+      '<textarea id="appResp" rows="4" placeholder="A note delivered to '+esc(name)+' with your decision — a welcome, next steps, or why not this time."></textarea></label>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+
+        '<button class="btn btn-chrome" data-app-decide="approve" data-app-id="'+a.id+'" data-app-type="'+esc(type)+'" data-name="'+esc(name)+'">Approve</button>'+
+        '<button class="btn btn-ghost" data-app-decide="deny" data-app-id="'+a.id+'" data-app-type="'+esc(type)+'" data-name="'+esc(name)+'">Deny</button></div>'+
+      '<p class="caption" style="margin-top:10px">'+(isOwner
+        ? "Approving green-lights them — a commissioner then hands them their club in Users &amp; roles."
+        : "Approving promotes them to staff immediately; the Discord role follows on the next sync.")+' Your note is delivered to them with the decision.</p>'+
+    '</div></div>';
+  }
+  return h;
+};
+CG.AFTER._applicationDetail = function(){
+  document.querySelectorAll("[data-app-decide]").forEach(function(b){ b.addEventListener("click", function(){
+    var approve = this.getAttribute("data-app-decide")==="approve";
+    var id = this.getAttribute("data-app-id"), type = this.getAttribute("data-app-type"), name = this.getAttribute("data-name");
+    var resp = (document.getElementById("appResp")||{}).value || "";
+    var all = document.querySelectorAll("[data-app-decide]"); all.forEach(function(x){ x.disabled = true; });
+    var rpc = type==="owner" ? "decide_owner_application" : "decide_staff_application";
+    CG.sb.rpc(rpc, { p_id:id, p_approve:approve, p_response:(resp.trim()||null) }).then(function(r){
+      if (r.error){ all.forEach(function(x){ x.disabled=false; }); CG.toast("Couldn’t decide: "+r.error.message,"err"); return; }
+      CG.toast((r.data||name)+(approve?" — approved":" — denied"),"ok");
+      CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
+    });
+  }); });
+};
 CG.hubStaffDesk = function(){
   var lg = CG.lg;
   var reqs = (lg._actionReqs||[]);
@@ -4206,37 +4291,27 @@ CG.hubStaffDesk = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3>'+
     '<span class="chip '+((ownerApps.length+staffApps.length)?"chip-warn":"chip-win")+'">'+
     ((ownerApps.length+staffApps.length)?(ownerApps.length+staffApps.length)+" awaiting a decision":"none pending")+'</span></div>';
-  if (staffApps.length){
-    h += staffApps.map(function(a){ var prof=a.profiles||{};
-      return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
-        '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
-        '<span><span class="chip chip-chrome" style="font-size:9px">STAFF</span> <b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b></span>'+
-        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>'+
-        ((a.departments&&a.departments.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+a.departments.map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join("")+'</div>':"")+
-        '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+(a.availability?'<span>'+esc(a.availability)+'</span>':"")+(a.experience?'<span>'+esc(a.experience)+'</span>':"")+'</div>'+
-        (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
-        '<div style="display:flex;gap:8px;margin-top:10px">'+
-        '<button class="btn btn-chrome btn-sm" data-sapp-approve="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'">Approve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-sapp-deny="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'">Deny</button></div></div>';
-    }).join("");
+  /* each row opens the application into its own page (CG.hubApplicationDetail) to review it in full
+     and respond — the same open-to-decide flow as the case queue. */
+  function appRow(a, type){
+    var prof = a.profiles||{}, isOwner = type==="owner";
+    var sub = isOwner ? CG.franchisePicksLine(a)
+      : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
+    return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
+      'aria-label="Open '+(isOwner?"owner":"staff")+' application from '+esc(prof.gamertag||"applicant")+'" '+
+      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+(isOwner?"OWNER":"STAFF")+'</span>'+
+      '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(prof.gamertag||"Applicant")+'</b>'+
+        '<span class="caption">'+sub+'</span></span>'+
+      '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
+      '<span class="caption" aria-hidden="true">→</span></div>';
   }
-  if (ownerApps.length){
-    h += ownerApps.map(function(a){ var prof=a.profiles||{};
-      return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
-        '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
-        '<span><span class="chip" style="font-size:9px">OWNER</span> <b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b></span>'+
-        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span></div>'+
-        '<div class="caption">'+CG.franchisePicksLine(a)+'</div>'+
-        (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
-        '<div style="display:flex;gap:8px;margin-top:10px">'+
-        '<button class="btn btn-chrome btn-sm" data-oapp-approve="'+a.id+'">Approve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-oapp-deny="'+a.id+'">Deny</button></div></div>';
-    }).join("");
-  }
+  if (staffApps.length) h += staffApps.map(function(a){ return appRow(a,"staff"); }).join("");
+  if (ownerApps.length) h += ownerApps.map(function(a){ return appRow(a,"owner"); }).join("");
   if (!staffApps.length && !ownerApps.length){
     h += '<div class="card-b"><p class="caption">No applications waiting. Members apply at <b>Apply to own a club</b> (#/owner) and <b>Apply to join the staff</b> (#/staffapply) — both linked in the site footer.</p></div>';
   } else {
-    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Approving a staff application promotes the member immediately (Discord role follows on the next sync). Approving an owner application green-lights them — the commissioner then hands them their club in Users &amp; roles → Club role.</span></div>';
+    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to review it in full and respond. Approving a staff application promotes the member immediately (Discord role follows on the next sync); approving an owner application green-lights them, and a commissioner then hands them their club in Users &amp; roles → Club role.</span></div>';
   }
   h += '</div>';
 
@@ -5596,6 +5671,10 @@ CG.ROUTES.hub = function(param, qs){
     return CG.can("roster.manage") ? CG.hubShell("freeagents", CG.hubFreeAgents())
       : CG.unauthorized("The free-agent board is a team-management tool.");
   }
+  if (param==="application"){
+    if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("Applications are reviewed by league staff.");
+    return CG.hubShell("staffdesk", CG.hubApplicationDetail(qs.id, qs.type==="owner"?"owner":"staff"));
+  }
   return CG._origHubRoute(param, qs);
 };
 CG._origHubAfter = CG.AFTER.hub;
@@ -5603,6 +5682,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="messages"){ CG.AFTER.messages(); return; }
   if (param==="draft"){ CG.AFTER._hubDraft(); return; }
   if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
+  if (param==="application"){ CG.AFTER._applicationDetail(); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   var sl=document.getElementById("sSaveLive");
