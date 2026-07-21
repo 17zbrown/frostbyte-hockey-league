@@ -223,11 +223,25 @@ CG.crest = function(code, size, opts){
     '<text x="20" y="29" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="12.5" letter-spacing="-.3" fill="'+fg+'">'+t.code+'</text></svg>';
 };
 /* the league's real brand mark — same C/G power mark as chelgamingleague.com */
-CG.leagueMark = function(s){
-  return '<svg class="crest" width="'+s+'" height="'+s+'" viewBox="0 0 48 48" role="img" aria-label="Chel Gaming">'+
-    '<rect width="48" height="48" rx="11" fill="#0a0a0a"/>'+
-    '<path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/>'+
-    '<path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>';
+/* The C/G power mark. Default is the dark badge (light C + chrome crossbar on a near-black tile),
+   which is what every current caller sits on — the masthead, mobile nav and footer all live on the
+   constant-dark broadcast surface. Pass a variant for light surfaces:
+     "light"      transparent, ink C + gold crossbar — drops onto any light background
+     "light-tile" the same mark on a white tile with a hairline border — the badge form
+   Chrome yellow (#FFE500) is ~1.07:1 on white, so the light variants deepen it to gold to stay
+   legible while reading as the same brand yellow. */
+CG.leagueMark = function(s, variant){
+  var open = '<svg class="crest" width="'+s+'" height="'+s+'" viewBox="0 0 48 48" role="img" aria-label="Chel Gaming">';
+  var cArc = function(stroke){ return '<path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="'+stroke+'" stroke-width="3.4" stroke-linecap="round"/>'; };
+  var cross = function(stroke){ return '<path d="M35 24 H28" fill="none" stroke="'+stroke+'" stroke-width="3.6" stroke-linecap="round"/>'; };
+  if (variant==="light")
+    return open + cArc("#101519") + cross("#D9A800") + '</svg>';
+  if (variant==="light-tile")
+    return open + '<rect x="1" y="1" width="46" height="46" rx="10.5" fill="#FFFFFF" stroke="#E3E6DF" stroke-width="1.4"/>'
+      + cArc("#101519") + cross("#D9A800") + '</svg>';
+  return open + '<rect width="48" height="48" rx="11" fill="#0a0a0a"/>'
+    + '<path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/>'
+    + '<path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>';
 };
 CG.DISCORD_GLYPH = '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.5a14.6 14.6 0 0 1 4.3 2.2 13.5 13.5 0 0 0-11-.1A14.3 14.3 0 0 1 8.9 3.5L8.6 3a19.7 19.7 0 0 0-4.9 1.4A20.9 20.9 0 0 0 .1 18.6a19.9 19.9 0 0 0 6 3l.7-1.1a12.9 12.9 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l.7 1.1a19.8 19.8 0 0 0 6-3 20.8 20.8 0 0 0-3.6-14.2ZM8.3 15.3c-1.2 0-2.1-1.1-2.1-2.4S7.1 10.5 8.3 10.5s2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Zm7.4 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Z"/></svg>';
 

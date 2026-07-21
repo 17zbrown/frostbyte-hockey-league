@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Chel Gaming">
+  <!-- Light-background variant of the C/G power mark: the C flips to ink and the crossbar deepens
+       from chrome (#FFE500, invisible on white) to gold, so the mark reads on any light surface.
+       Transparent — drops onto white, the site's ice tone, print, or a light email header. -->
+  <path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#101519" stroke-width="3.4" stroke-linecap="round"/>
+  <path d="M35 24 H28" fill="none" stroke="#D9A800" stroke-width="3.6" stroke-linecap="round"/>
+</svg>
