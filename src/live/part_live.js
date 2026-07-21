@@ -3633,6 +3633,11 @@ CG.actionCard = function(a, review){
   var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
   var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
   var uid = CG.auth.user && CG.auth.user.id, names = (CG.lg&&CG.lg._profName)||{};
+  /* conflict of interest: a staff member who filed this case or is named in it can't rule on it —
+     RLS enforces the same at the database (silently), so the ruling tools are hidden here to match.
+     Commissioners are unrestricted. */
+  var isCommish = CG.role()==="commish";
+  var conflicted = review && !isCommish && !!uid && (a.profile_id===uid || a.target_profile_id===uid);
   var metaBits = [];
   if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
   /* prefer the subject's current gamertag over the text captured when the case was filed, so a
@@ -3650,8 +3655,8 @@ CG.actionCard = function(a, review){
     var who = a.assigned_to ? (names[a.assigned_to]||"a colleague") : null;
     h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
       (who ? '<span class="chip chip-chrome" style="font-size:9px">'+esc("Claimed by "+who)+'</span>' : '<span class="chip chip-warn" style="font-size:9px">Unclaimed</span>')+
-      (a.assigned_to===uid ? '<button class="btn btn-ghost btn-sm" data-case-unclaim="'+a.id+'">Release</button>'
-        : '<button class="btn btn-ghost btn-sm" data-case-claim="'+a.id+'">Claim</button>')+'</div>';
+      (conflicted ? '' : (a.assigned_to===uid ? '<button class="btn btn-ghost btn-sm" data-case-unclaim="'+a.id+'">Release</button>'
+        : '<button class="btn btn-ghost btn-sm" data-case-claim="'+a.id+'">Claim</button>'))+'</div>';
   }
   h += (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
     '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
@@ -3676,9 +3681,9 @@ CG.actionCard = function(a, review){
       '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
         '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>'+
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input data-reply-att="'+a.id+'" placeholder="Attach a link (optional)" style="flex:1;min-width:180px">'+
-        (review?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
+        (review && !conflicted?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
   }
-  if (review){
+  if (review && !conflicted){
     h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
       (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
       (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
@@ -3686,7 +3691,11 @@ CG.actionCard = function(a, review){
       '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
       (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
         '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':"")+
-      '<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button></div>';
+      /* deletion is a commissioner-only power (RLS enforces it too); staff never see a Delete they can't use */
+      (isCommish?'<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button>':"")+'</div>';
+  } else if (conflicted){
+    h += '<div class="note" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">You’re involved in this case</b>'+
+      'You filed it or you’re named in it, so another official has to rule on it. You can still add a reply as a participant.</div>';
   }
   return h+'</div></div>';
 };
@@ -3923,8 +3932,11 @@ CG.AFTER._complaintsLive = function(){
     CG.caseHistoryModal(this.getAttribute("data-target")); }); });
   document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
-    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
+    /* .select() so a row blocked by RLS (a conflict of interest) comes back as 0 rows, not a
+       silent success — otherwise the official is told the case was ruled when nothing changed */
+    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+      if(!r.data||!r.data.length){ CG.toast("You can’t rule on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
       CG.toast("Case "+st,"ok"); CG.refreshActions();
     });
   }); });
@@ -3936,8 +3948,9 @@ CG.AFTER._complaintsLive = function(){
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="arGo">Save response</button>');
     document.getElementById("arGo").addEventListener("click", function(){
       var txt=(document.getElementById("arResp").value||"").trim();
-      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).then(function(r){
+      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
         if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        if(!r.data||!r.data.length){ CG.toast("You can’t respond on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
         if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Response saved","ok"); CG.refreshActions();
       });
     });
@@ -3945,8 +3958,9 @@ CG.AFTER._complaintsLive = function(){
   document.querySelectorAll("[data-act-del]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-act-del");
     CG.confirm("Delete this case?","It’s removed permanently for everyone. This can’t be undone.","Delete case", function(){
-      CG.sb.from("action_requests").delete().eq("id",id).then(function(r){
+      CG.sb.from("action_requests").delete().eq("id",id).select("id").then(function(r){
         if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        if(!r.data||!r.data.length){ CG.toast("Only a commissioner can delete a case.","err"); return; }
         CG.toast("Case deleted","ok"); CG.refreshActions();
       });
     });
