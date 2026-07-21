@@ -4247,7 +4247,7 @@ CG.appChatSection = function(type, appId, opts){
       return '<div style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
         '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
           '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
-          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtDay(Date.parse(m.created_at)):"")+'</span></div>'+
+          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtFull(Date.parse(m.created_at)):"")+'</span></div>'+
           '<span class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
     }).join("")+'</div>';
   } else {
@@ -4256,7 +4256,7 @@ CG.appChatSection = function(type, appId, opts){
       : "No messages yet. The league office may reach out here about your application, and you can message them any time. You’ll get a notification when they reply.")+'</p>';
   }
   var key = type+":"+appId;
-  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" autocomplete="off" style="flex:1">'+
+  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" aria-label="Write a message to '+(office?"the applicant":"the league office")+'" autocomplete="off" style="flex:1">'+
     '<button class="btn btn-ink btn-sm" data-appchat-send="'+esc(key)+'">Send</button></div>';
   h += '<p class="caption" style="margin-top:10px">'+(office
     ? "The applicant can read and reply to this thread. The staff ballot below stays private to the league office."
