@@ -1576,11 +1576,11 @@ CG.STAFF_DEPARTMENTS = [
 /* the reviewer pool: staff carrying the 'applications' department. Their votes decide every
    application by 50%+1 once all of them have voted (the DB enforces it; this mirrors it for UI). */
 CG.appReviewers = function(){
-  return ((CG.lg && CG.lg._profilesRaw) || []).filter(function(p){ return p.role==="staff" && (p.departments||[]).indexOf("applications")>=0; });
+  return ((CG.lg && CG.lg._profilesRaw) || []).filter(function(p){ return (p.role==="staff"||p.role==="commissioner") && (p.departments||[]).indexOf("applications")>=0; });
 };
 CG.isAppReviewer = function(){
   var p = CG.auth && CG.auth.profile;
-  return !!(p && p.role==="staff" && (p.departments||[]).indexOf("applications")>=0);
+  return !!(p && (p.role==="staff"||p.role==="commissioner") && (p.departments||[]).indexOf("applications")>=0);
 };
 CG.ROUTES.staffapply = function(){
   var head = CG.pageHead("Join the league office","Apply to join the staff",
