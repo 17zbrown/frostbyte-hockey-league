@@ -1335,7 +1335,7 @@ CG.ROUTES.brand = function(){
        ["Favicon","/favicon.svg","SVG · the badge at 48px"],
        ["Share card","/og.png","PNG · 1200×630 · social preview"]
       ].map(function(a){ return '<a class="card raise" href="'+a[1]+'" target="_blank" rel="noopener" style="display:block;text-decoration:none;background:var(--bc2);border-color:#2A343B">'+
-        '<div class="card-b" style="display:flex;align-items:center;gap:12px">'+CG.ic("link",16)+
+        '<div class="card-b" style="display:flex;align-items:center;gap:12px">'+CG.ic("dl",16)+
         '<span><b style="font-family:var(--f-disp);color:#fff;display:block">'+esc(a[0])+'</b><span class="caption mono" style="color:var(--on-ink-dim)">'+esc(a[2])+'</span></span></div></a>'; }).join("")+
     '</div>'+
     '<p class="caption" style="margin-top:22px;color:var(--on-ink-dim)">Not affiliated with EA Sports, the NHL, Discord, or Twitch. Club names and marks belong to their owners.</p>'+
