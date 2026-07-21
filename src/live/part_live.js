@@ -1118,6 +1118,232 @@ CG.ROUTES.legal = function(){
   '</div>';
 };
 
+/* The brand bible, as a page. It documents the system AND is built entirely from it — every colour
+   is a token, every heading is on the scale, the one accent is used once per section. The canonical
+   text lives in BRAND.md; if the two drift, the tokens in part1_head.html are what actually render. */
+CG.ROUTES.brand = function(){
+  /* the mark, drawn the right way for each surface. leagueMark carries the three shipped variants;
+     the reversed form (light C + chrome crossbar, no tile) is what belongs on a dark ground. */
+  function mk(kind, s){
+    if (kind==="light")     return CG.leagueMark(s, "light");
+    if (kind==="lighttile") return CG.leagueMark(s, "light-tile");
+    if (kind==="reversed")  return '<svg width="'+s+'" height="'+s+'" viewBox="0 0 48 48" role="img" aria-label="Chel Gaming">'+
+      '<path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/>'+
+      '<path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>';
+    return CG.leagueMark(s); /* default dark badge */
+  }
+  function wtext(onDark){  /* the CHEL GAMING / HOCKEY LEAGUE text block, no mark */
+    return '<span style="line-height:1.05"><b style="font-family:var(--f-disp);font-weight:900;font-size:22px;letter-spacing:-.01em;display:block;color:'+(onDark?"#fff":"var(--ink)")+'">CHEL GAMING</b>'+
+      '<span class="eyebrow" style="letter-spacing:.28em;'+(onDark?"color:var(--on-ink-dim)":"")+'">Hockey League</span></span>';
+  }
+  function wordmark(onDark, s){  /* the full lockup: mark + text, sized to the mark */
+    return '<span style="display:inline-flex;align-items:center;gap:13px">'+mk(onDark?"reversed":"light", s||40)+wtext(onDark)+'</span>';
+  }
+  /* a framed specimen: the mark on the background it's built for */
+  function logoCell(bg, inner, label, note){
+    return '<div class="card">'+
+      '<div style="background:'+bg+';display:flex;align-items:center;justify-content:center;padding:38px 20px;min-height:120px">'+inner+'</div>'+
+      '<div class="card-b"><b class="h-card" style="display:block">'+esc(label)+'</b>'+
+        '<p class="caption" style="margin-top:4px;line-height:1.55">'+note+'</p></div></div>';
+  }
+  /* correct vs incorrect usage, keyed by colour AND the site's real check/x icons — never by colour alone */
+  function judged(ok, inner, label){
+    return '<div>'+
+      '<div style="background:var(--ice);border:1.5px solid '+(ok?"var(--green)":"var(--red)")+';border-radius:var(--r-m);padding:20px;display:flex;align-items:center;justify-content:center;min-height:104px">'+inner+'</div>'+
+      '<p class="caption" style="margin-top:8px;display:flex;gap:6px;align-items:flex-start">'+
+        '<span style="color:'+(ok?"var(--green-ink)":"var(--red-ink)")+';flex-shrink:0">'+CG.ic(ok?"check":"x",13)+'</span>'+
+        '<span><b style="color:'+(ok?"var(--green-ink)":"var(--red-ink)")+';font-family:var(--f-disp);letter-spacing:.04em">'+(ok?"DO":"DON’T")+'</b> · '+esc(label)+'</span></p></div>';
+  }
+  function swatch(hex, token, role){
+    return '<div style="border:1.5px solid var(--line);border-radius:var(--r-s);overflow:hidden;background:var(--paper)">'+
+      '<div style="height:62px;background:'+hex+'"></div>'+
+      '<div style="padding:9px 11px">'+
+        '<b style="font-family:var(--f-disp);font-size:13px;display:block;letter-spacing:-.01em">'+esc(token)+'</b>'+
+        '<span class="caption mono" style="display:block;text-transform:uppercase">'+esc(hex)+'</span>'+
+        '<span class="caption" style="display:block;margin-top:2px;line-height:1.4">'+esc(role)+'</span></div></div>';
+  }
+  function specimen(face, sample, note){
+    return '<div class="card"><div class="card-b">'+
+      '<div style="'+face+';color:var(--ink);overflow:hidden">'+sample+'</div>'+
+      '<p class="caption" style="margin-top:12px;border-top:1px solid var(--line-soft);padding-top:10px">'+note+'</p></div></div>';
+  }
+  var chr = 'border-bottom:2px solid var(--chrome)';
+
+  var h = '';
+
+  /* ---- hero: the thesis is the mark ---- */
+  h += '<section class="sec-dark" style="padding:clamp(40px,6vw,80px) 0">'+
+    '<div class="shell"><div style="max-width:720px">'+
+      '<span class="eyebrow chr">The Chel Gaming brand</span>'+
+      '<div style="margin:22px 0 26px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">'+mk("reversed",64)+wtext(true)+'</div>'+
+      '<h1 class="h-page" style="color:#fff">One mark. One voice. One accent.</h1>'+
+      '<p class="lede" style="color:var(--on-ink-dim);margin-top:14px;max-width:60ch">How the league looks and sounds — the logos, the colour, the type, and the handful of rules that keep every surface, from the site to the Discord to a printed sheet, unmistakably Chel Gaming.</p>'+
+    '</div></div></section>';
+
+  /* ---- logo ---- */
+  h += '<section class="sec"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">The mark</span>'+
+      '<h2 class="h-sec">A "C" for Chel, crossed by the "G"</h2>'+
+      '<p class="lede">One shape carries both letters — a power mark that reads as a play button. Match the logo to its background: the crossbar is the point of the whole thing, and it disappears on the wrong surface.</p></div></div>'+
+    '<div class="grid g3">'+
+      logoCell("var(--bc)", mk("badge",64), "Primary badge", "The default. Dark and neutral surfaces — the masthead, the footer, the Discord avatar, the share card.")+
+      logoCell("var(--paper)", mk("light",64), "Light mark", "Transparent, ink C + gold crossbar. Any light background — a white page, print, a light email header.")+
+      logoCell("var(--ice)", mk("lighttile",64), "Light tile", "The badge form for light surfaces — avatars and app tiles that need a contained shape.")+
+    '</div>'+
+    '<div class="grid g2" style="margin-top:18px;align-items:stretch">'+
+      logoCell("var(--bc)", wordmark(true,44), "Wordmark lockup", "The mark with the name. Headers, credits, anywhere the two appear together. On dark, the mark reverses to a light C.")+
+      logoCell("var(--paper)", '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center">'+mk("light",44)+wtext(false)+'</div>', "On light", "The same lockup on paper — ink wordmark, gold crossbar. Clear space stays equal to the mark's corner radius.")+
+    '</div>'+
+
+    '<h3 class="h-card" style="margin:34px 0 4px">Clear space &amp; minimum size</h3>'+
+    '<p class="lede" style="margin-bottom:16px">Keep free space around the mark equal to at least the tile’s corner radius. Below 24px the crossbar closes up — that’s the floor for a favicon; 20px in dense UI.</p>'+
+    '<div class="card"><div class="card-b" style="display:flex;gap:32px;align-items:flex-end;flex-wrap:wrap;background:var(--ice)">'+
+      ["16","20","24","36","48"].map(function(px){ return '<div style="text-align:center"><div style="padding:10px">'+mk("light",+px)+'</div><span class="caption mono">'+px+'px</span></div>'; }).join("")+
+    '</div></div>'+
+
+    '<h3 class="h-card" style="margin:34px 0 14px">Correct &amp; incorrect</h3>'+
+    '<div class="grid g4">'+
+      judged(true, mk("badge",56), "Badge on a dark or neutral surface")+
+      judged(true, mk("light",56), "Light mark on a light surface")+
+      judged(false, '<svg width="56" height="56" viewBox="0 0 48 48"><rect width="48" height="48" rx="11" fill="#0a0a0a"/><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#8b5cf6" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#a855f7" stroke-width="3.4" stroke-linecap="round"/></svg>', "Recolour the mark off-palette")+
+      judged(false, '<svg width="86" height="52" viewBox="0 0 48 48" preserveAspectRatio="none"><rect width="48" height="48" rx="11" fill="#0a0a0a"/><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>', "Stretch or squash it")+
+    '</div>'+
+    '<div class="grid g4" style="margin-top:16px">'+
+      judged(false, '<svg width="56" height="56" viewBox="0 0 48 48"><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#101519" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>', "Chrome crossbar on white — it vanishes")+
+      judged(false, '<svg width="56" height="56" viewBox="-4 -4 56 56"><defs><filter id="bg1" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ffe500" flood-opacity="0.9"/></filter></defs><g filter="url(#bg1)"><rect width="48" height="48" rx="11" fill="#0a0a0a"/><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></g></svg>', "Add a glow, shadow, or outline")+
+      judged(false, '<svg width="56" height="56" viewBox="0 0 48 48" style="transform:rotate(-16deg)"><rect width="48" height="48" rx="11" fill="#0a0a0a"/><path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/><path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/></svg>', "Rotate or tilt it")+
+      judged(false, mk("badge",56), '')+  /* placeholder replaced below */
+    '</div>'+
+  '</div></section>';
+  /* the 8th judged cell reads "badge on a busy photo" — swap its inner for a photo-ish ground */
+  h = h.replace(judged(false, mk("badge",56), ''),
+    '<div><div style="background:linear-gradient(135deg,#3a4a58,#6b7b6b 40%,#9aa88f);border:1.5px solid var(--red);border-radius:var(--r-m);padding:20px;display:flex;align-items:center;justify-content:center;min-height:104px">'+mk("badge",56)+'</div>'+
+    '<p class="caption" style="margin-top:8px;display:flex;gap:6px;align-items:flex-start"><span style="color:var(--red-ink);flex-shrink:0">'+CG.ic("x",13)+'</span><span><b style="color:var(--red-ink);font-family:var(--f-disp);letter-spacing:.04em">DON’T</b> · Place it on a busy or low-contrast image</span></p></div>');
+
+  /* ---- colour ---- */
+  h += '<section class="sec-dark"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Colour</span>'+
+      '<h2 class="h-sec">A quiet base, one loud accent</h2>'+
+      '<p class="lede" style="color:var(--on-ink-dim)">Confident neutrals do the work; chrome yellow is a spotlight used once per view. Semantic colour means status — never decoration.</p></div></div></div>'+
+    '<div class="shell">'+
+    '<p class="eyebrow" style="margin-bottom:12px;color:var(--on-ink)">Neutrals</p>'+
+    '<div class="grid g4">'+
+      swatch("#101519","Ink","Primary text & marks")+
+      swatch("#5C6B75","Steel","Secondary text, captions")+
+      swatch("#F5F6F2","Ice","Page ground")+
+      swatch("#FFFFFF","Paper","Cards, raised surfaces")+
+    '</div>'+
+    '<p class="eyebrow" style="margin:26px 0 12px;color:var(--on-ink)">Accent — one per view</p>'+
+    '<div class="grid g4">'+
+      swatch("#FFE500","Chrome","The accent — CTA, eyebrow tick, live pulse")+
+      swatch("#E5C900","Chrome deep","Chrome that needs more weight")+
+      swatch("#D9A800","Gold","The accent, deepened to hold on white")+
+      swatch("#101519","Broadcast","The dark bands, ticker, hero — constant in both themes")+
+    '</div>'+
+    '<p class="eyebrow" style="margin:26px 0 12px;color:var(--on-ink)">Semantic — status only</p>'+
+    '<div class="grid g4">'+
+      swatch("#1F9D58","Green","Win, live, positive")+
+      swatch("#C63A32","Red","Loss, danger, destructive")+
+      swatch("#8A6D00","Amber ink","Warning, needs attention")+
+      swatch("#E3E6DF","Line","Borders, hairlines")+
+    '</div>'+
+    '<div class="note chr" style="margin-top:24px;background:var(--bc2);color:var(--on-ink);border-color:var(--chrome)">'+
+      '<b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:#fff">The fill-vs-ink rule</b>'+
+      'Red and green are <b>fills</b> — light text sits on them, so they stay dark in both themes. The <span class="mono">––*-ink</span> values are the <b>text</b> colours and flip per theme. Never use a fill as a foreground; it can’t clear 4.5:1 on both a light and dark surface at once. Contrast floor is WCAG AA, enforced.'+
+    '</div>'+
+    '</div></section>';
+
+  /* ---- typography ---- */
+  h += '<section class="sec"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Typography</span>'+
+      '<h2 class="h-sec">Three faces, each with a job</h2>'+
+      '<p class="lede">A display face for confidence, a body face for reading, a mono face for anything that’s a number. Numbers always use tabular figures so columns line up.</p></div></div>'+
+    '<div class="grid g3">'+
+      specimen("font-family:var(--f-disp);font-weight:900;font-size:44px;letter-spacing:-.03em;line-height:.98", "Puck drop.", "<b>Archivo</b> · display / headings · 400–900 · tight tracking, balanced wrap")+
+      specimen("font-family:var(--f-body);font-size:15.5px;line-height:1.6;color:var(--ink-3)", "Eight clubs across two divisions play a full season — live standings, imported box scores, trades, and a playoff bracket.", "<b>IBM Plex Sans</b> · body · 400 / 500 / 600 · line-height ~1.6")+
+      specimen("font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums;line-height:1.7;color:var(--ink)", "2‑1‑0 · W3<br>.932 SV%<br>21:34 TOI · #97", "<b>IBM Plex Mono</b> · data & labels · tabular figures for every stat")+
+    '</div>'+
+
+    '<div class="grid g2" style="margin-top:18px;align-items:start">'+
+      '<div class="card"><div class="card-h"><h3>The scale</h3></div><div class="card-b" style="display:grid;gap:14px">'+
+        [["h-page","Page title","font-family:var(--f-disp);font-weight:800;font-size:32px;letter-spacing:-.025em"],
+         ["h-sec","Section heading","font-family:var(--f-disp);font-weight:800;font-size:23px"],
+         ["h-card","Card title","font-family:var(--f-disp);font-weight:700;font-size:16.5px"],
+         ["lede","Standfirst","font-size:16px;color:var(--steel)"],
+         ["body","Running text","font-size:15px"],
+         ["caption","Metadata","font-size:12px;color:var(--steel)"],
+         ["eyebrow","Kicker","font-family:var(--f-mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--steel)"]
+        ].map(function(r){ return '<div style="display:flex;justify-content:space-between;gap:16px;align-items:baseline;border-bottom:1px solid var(--line-soft);padding-bottom:12px"><span style="'+r[2]+'">'+esc(r[1])+'</span><span class="caption mono" style="flex-shrink:0">.'+r[0]+'</span></div>'; }).join("")+
+      '</div></div>'+
+      '<div class="card"><div class="card-h"><h3>The eyebrow tick</h3></div><div class="card-b">'+
+        '<span class="eyebrow chr">Standings</span>'+
+        '<p class="lede" style="margin-top:12px">The signature device — a small chrome bar before a kicker, like a broadcast lower-third. It opens a titled section. Use it to lead; don’t scatter it.</p>'+
+        '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)"><span class="eyebrow chr">The race, division by division</span></div>'+
+      '</div></div>'+
+    '</div>'+
+  '</div></section>';
+
+  /* ---- voice ---- */
+  h += '<section class="sec-dark"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Voice</span>'+
+      '<h2 class="h-sec">Broadcast-grade, player-run</h2>'+
+      '<p class="lede" style="color:var(--on-ink-dim)">Write from the reader’s side of the screen. Plain and specific, active voice, real numbers. A control says exactly what it does; an error says how to fix it.</p></div></div></div>'+
+    '<div class="shell"><div class="grid g2">'+
+      [["“Unlock your competitive journey today!”","“Register to play — sign-ups close the Monday before the draft.”"],
+       ["“An error occurred.”","“Couldn’t save — your sign-in expired. Sign out and back in, then retry.”"],
+       ["“96 players and counting 🔥”","“Eight clubs. Rosters fill through the draft.”"],
+       ["“Admin backend”","“Control Center” · “the league office”"]
+      ].map(function(p){ return '<div class="card" style="background:var(--bc2);border-color:#2A343B"><div class="card-b" style="display:grid;gap:12px">'+
+        '<div style="display:flex;gap:9px;align-items:flex-start"><span style="color:var(--red-ink);flex-shrink:0">'+CG.ic("x",14)+'</span><span class="small" style="color:var(--on-ink-dim)">'+esc(p[0])+'</span></div>'+
+        '<div style="display:flex;gap:9px;align-items:flex-start;border-top:1px solid #2A343B;padding-top:12px"><span style="color:#4FC486;flex-shrink:0">'+CG.ic("check",14)+'</span><span class="small" style="color:#fff">'+esc(p[1])+'</span></div>'+
+      '</div></div>'; }).join("")+
+    '</div></div></section>';
+
+  /* ---- UI language ---- */
+  h += '<section class="sec"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">UI language</span>'+
+      '<h2 class="h-sec">Components with fixed meaning</h2>'+
+      '<p class="lede">A member learns the system once. A chrome button is the one primary action; a chip states a fact; a card is a thing you can open.</p></div></div>'+
+    '<div class="grid g2" style="align-items:start">'+
+      '<div class="card"><div class="card-h"><h3>Buttons</h3></div><div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
+        '<button class="btn btn-chrome" type="button">Register to play</button>'+
+        '<button class="btn btn-ink" type="button">Open the queue</button>'+
+        '<button class="btn btn-ghost" type="button">Cancel</button>'+
+        '<p class="caption" style="width:100%;margin-top:4px">Chrome = the one primary action, at most once per view. Ink = strong secondary. Ghost = low-stakes.</p>'+
+      '</div></div>'+
+      '<div class="card"><div class="card-h"><h3>Chips</h3></div><div class="card-b" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<span class="chip chip-chrome">Marquee</span>'+
+        '<span class="chip chip-win">Win</span>'+
+        '<span class="chip chip-loss">Loss</span>'+
+        '<span class="chip chip-warn">Needs attention</span>'+
+        '<span class="chip">Open</span>'+
+        '<p class="caption" style="width:100%;margin-top:4px">A chip states a fact — outcome, status, a label. It is never a button.</p>'+
+      '</div></div>'+
+    '</div>'+
+  '</div></section>';
+
+  /* ---- downloads ---- */
+  h += '<section class="sec-dark"><div class="shell">'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Assets</span>'+
+      '<h2 class="h-sec">Grab the logos</h2>'+
+      '<p class="lede" style="color:var(--on-ink-dim)">Everything served straight from the site. Match the file to the background, and don’t alter it.</p></div></div></div>'+
+    '<div class="shell"><div class="grid g3">'+
+      [["Dark badge","/chel-gaming-logo-1024.png","PNG · 1024 · for dark & neutral"],
+       ["Light mark","/logo-light.svg","SVG · transparent · for light"],
+       ["Light mark","/chel-gaming-logo-light-1024.png","PNG · 1024 · transparent"],
+       ["Light tile","/chel-gaming-logo-light-tile-1024.png","PNG · 1024 · white tile"],
+       ["Favicon","/favicon.svg","SVG · the badge at 48px"],
+       ["Share card","/og.png","PNG · 1200×630 · social preview"]
+      ].map(function(a){ return '<a class="card raise" href="'+a[1]+'" target="_blank" rel="noopener" style="display:block;text-decoration:none;background:var(--bc2);border-color:#2A343B">'+
+        '<div class="card-b" style="display:flex;align-items:center;gap:12px">'+CG.ic("link",16)+
+        '<span><b style="font-family:var(--f-disp);color:#fff;display:block">'+esc(a[0])+'</b><span class="caption mono" style="color:var(--on-ink-dim)">'+esc(a[2])+'</span></span></div></a>'; }).join("")+
+    '</div>'+
+    '<p class="caption" style="margin-top:22px;color:var(--on-ink-dim)">Not affiliated with EA Sports, the NHL, Discord, or Twitch. Club names and marks belong to their owners.</p>'+
+    '</div></section>';
+
+  return h;
+};
+
 CG.promptEaId = function(){
   CG.modal("Add your EA ID",
     '<label class="fld"><span>EA ID / gamertag used in-game</span><input id="eaInput" placeholder="e.g. YourEAName" value="'+esc((CG.auth.profile||{}).ea_id||"")+'"></label><p class="caption">Shown to league staff for lobby verification; hidden from the public directory unless you opt in.</p>',

@@ -663,7 +663,7 @@ CG.renderChrome = function(){
       (CG.LIVE_MODE?'</div>':'<div style="margin-top:16px"><span class="protopill"><span class="live-dot"></span>Prototype — demo data, not the live site</span></div></div>')+
       '<div><h4>League</h4><a class="fl" href="#/schedule">Schedule</a><a class="fl" href="#/standings">Standings</a><a class="fl" href="#/rankings">Power Rankings</a><a class="fl" href="#/awards">Awards</a></div>'+
       '<div><h4>Clubs & Players</h4><a class="fl" href="#/teams">All Clubs</a><a class="fl" href="#/players">Player Directory</a><a class="fl" href="#/stats">Stat Central</a></div>'+
-      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/hub/complaints">Complaints</a>'+
+      '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/brand">Brand</a><a class="fl" href="#/hub/complaints">Complaints</a>'+
         /* the only registration entry points were both on the homepage; the footer is on every page */
         (CG.SEASON && CG.SEASON.registration_open ? '<a class="fl" href="#/register">Register to play</a>' : "")+
         (CG.LIVE_MODE?'<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
@@ -745,6 +745,7 @@ CG.carousel = function(rootSel, slides, opts){
 /* ---------- global search ---------- */
 CG.searchIndex = function(){
   var lg = CG.lg, ix = [];
+  ix.push({ cat:"Pages", label:"Brand & identity", sub:"Logos, colour, type, and voice", route:"#/brand", key:"brand identity logo logos colour color typography font voice guidelines press kit" });
   lg.players.forEach(function(p){
     ix.push({ cat:"Players", label:p.tag, sub:CG.TEAM[p.team].name+" · "+p.pos, route:CG.playerRoute(p), key:p.tag.toLowerCase() });
   });
@@ -903,6 +904,7 @@ CG.ROUTE_TITLES = {
   messages:   "Messages",
   search:     "Search",
   legal:      "Terms & Privacy",
+  brand:      "Brand & identity",
   blueprint:  "Platform Blueprint",
   _404:       "Page not found"
 };

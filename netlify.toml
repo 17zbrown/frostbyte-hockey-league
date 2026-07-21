@@ -63,6 +63,13 @@
   to = "/"
   status = 404
   force = true
+# Repo markdown (BRAND.md, etc.) is working-doc source — the public face is the rendered page
+# (BRAND.md -> /#/brand). Nothing at runtime fetches a .md.
+[[redirects]]
+  from = "/*.md"
+  to = "/"
+  status = 404
+  force = true
 [[redirects]]
   from = "/docs/*"
   to = "/"

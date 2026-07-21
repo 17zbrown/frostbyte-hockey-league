@@ -52,6 +52,9 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
   --ice:#F5F6F2; --paper:#FFFFFF; --ink:#101519; --ink-2:#1A2127; --ink-3:#242D34;
   --steel:#5C6B75; --steel-2:#8595A0; --line:#E3E6DF; --line-soft:#EDEFE9;
   --chrome:#FFE500; --chrome-deep:#E5C900; --chrome-tint:#FFFBD6;
+  /* the accent, deepened to hold on white — chrome yellow is ~1.07:1 on paper. Constant in both
+     themes on purpose: it is the light-background logo colour and must not shift under the theme. */
+  --gold:#D9A800;
   /* Semantic hues split in two: --red/--green are FILLS (light text sits on them, so they must stay
      dark in both themes); --*-ink are the TEXT/mark colors and flip per theme. Never use a fill token
      as a foreground — it cannot clear 4.5:1 on both a light and a dark surface at once. */
