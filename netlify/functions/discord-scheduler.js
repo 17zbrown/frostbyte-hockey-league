@@ -111,9 +111,12 @@ function etParts(d = new Date()) {
 const fmtTime = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso)) + " ET";
 const fmtDay = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
 
-export default async () => {
+export default async (req) => {
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
-  if (await ranRecently("discord-scheduler", 60)) return json({ skipped: "ran moments ago" });
+  // ?run=casework|signups bypasses the time gate for a manual check; &dry=1 computes without posting.
+  const params = (() => { try { return new URL(req.url).searchParams; } catch { return new URLSearchParams(); } })();
+  const forceRun = params.get("run"), dry = params.get("dry") === "1";
+  if (!forceRun && await ranRecently("discord-scheduler", 60)) return json({ skipped: "ran moments ago" });
   // Delivery failures land in sum.errors rather than throwing, so a dead standings webhook can't
   // take the game reminders down with it. Both feed the ok/errCount record the Automations chip reads.
   const now = new Date(), et = etParts(now), sum = { errors: [] };
@@ -132,6 +135,10 @@ export default async () => {
     if ((et.wd === 5 && et.hr >= 23) || (et.wd === 6 && et.hr < 2)) sum.standings = await weeklyStandings(games, teamById, cfg, sum.errors);
     // (C) team reminders — ~30 min before a club's first game of the night
     sum.reminders = await gameReminders(games, teamById, now, sum.errors);
+    // (D) casework nudge — daily 12pm ET: @ reviewers who still owe an application vote, and staff
+    //     sitting on a claimed case. (E) sign-up reminder — daily 6pm ET: ping the "Not Signed Up" role.
+    if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors);
+    if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
   const errs = (sum.error ? [sum.error] : []).concat(sum.errors);
@@ -315,6 +322,78 @@ async function gameReminders(games, teamById, now, errors) {
     posted++;
   }
   return `sent ${posted} reminder(s)`;
+}
+
+// (D) Daily nudge to #staff-casework: for every pending application, @ the reviewers who still owe a
+// vote; for every claimed-but-unresolved case, @ the assignee. Posts only when something's outstanding.
+async function caseworkNudge(cfg, teamById, et, dry, errors) {
+  const url = cfg.discord_staff_casework_webhook || cfg.discord_default_webhook;
+  if (!url) return "no casework webhook";
+  const [profs, links, oa, sa, ma, ballots, cases] = await Promise.all([
+    sbGet("profiles?select=id,role,departments,gamertag"),
+    sbGet("discord_links?select=profile_id,discord_id"),
+    sbGet("owner_applications?status=eq.pending&select=id,profile_id"),
+    sbGet("staff_applications?status=eq.pending&select=id,profile_id"),
+    sbGet("management_applications?status=eq.pending&select=id,role,team_id,nominee_id"),
+    sbGet("application_ballots?select=app_type,application_id,voter_id"),
+    sbGet("action_requests?status=not.in.(resolved,denied)&assigned_to=not.is.null&select=id,subject,type,assigned_to"),
+  ]);
+  const did = Object.fromEntries(links.filter((l) => l.discord_id).map((l) => [l.profile_id, l.discord_id]));
+  const gt = Object.fromEntries(profs.map((p) => [p.id, p.gamertag || "a member"]));
+  const mention = (pid) => (did[pid] ? `<@${did[pid]}>` : `**${gt[pid] || "a reviewer"}**`);
+  const reviewers = profs.filter((p) => (p.role === "staff" || p.role === "commissioner") && Array.isArray(p.departments) && p.departments.includes("applications"));
+  const votedBy = {};
+  for (const b of ballots) (votedBy[b.app_type + ":" + b.application_id] = votedBy[b.app_type + ":" + b.application_id] || new Set()).add(b.voter_id);
+
+  const appLines = [];
+  const owe = (key) => reviewers.filter((r) => !(votedBy[key] || new Set()).has(r.id));
+  for (const a of oa) { const o = owe("owner:" + a.id); if (o.length) appLines.push(`• **Owner application** — ${gt[a.profile_id]} · still needs: ${o.map((r) => mention(r.id)).join(" ")}`); }
+  for (const a of sa) { const o = owe("staff:" + a.id); if (o.length) appLines.push(`• **Staff application** — ${gt[a.profile_id]} · still needs: ${o.map((r) => mention(r.id)).join(" ")}`); }
+  for (const a of ma) {
+    const o = owe("management:" + a.id); if (!o.length) continue;
+    const club = (teamById[a.team_id] || {}).name || "a club";
+    appLines.push(`• **${a.role === "gm" ? "GM" : "AGM"} application** — ${gt[a.nominee_id]} (${club}) · still needs: ${o.map((r) => mention(r.id)).join(" ")}`);
+  }
+  const caseLines = cases.map((c) => `• ${c.subject || c.type || "Case"} · ${mention(c.assigned_to)}`);
+
+  if (!appLines.length && !caseLines.length) return "nothing outstanding";
+  const lines = ["🗳️ **League office — items awaiting you**"];
+  if (appLines.length) { lines.push("", "__Applications awaiting your vote__", ...appLines); }
+  if (caseLines.length) { lines.push("", "__Claimed cases awaiting a ruling__", ...caseLines); }
+  lines.push("", "Open the Staff Desk to act: https://chelgamingleague.com/#/hub/staffdesk");
+  const content = lines.join("\n");
+  if (dry) return { would_post: content, apps: appLines.length, cases: caseLines.length };
+  if (!(await claim("casework_nudge", et.ymd))) return "already posted today";
+  const res = await postWebhook(url, content, { ping: true });
+  if (!res.ok) { errors.push(`casework nudge: ${res.error}`); if (!res.ambiguous) await release("casework_nudge", et.ymd); return `post failed: ${res.error}`; }
+  return `nudged (${appLines.length} apps, ${caseLines.length} cases)`;
+}
+
+// (E) Daily #season-signups reminder while registration is open: one clean ping of the bot-maintained
+// "Not Signed Up" role (discord-sync keeps its membership current). Skips when nobody's left.
+async function signupReminder(cfg, et, dry, errors) {
+  const url = cfg.discord_signup_webhook || cfg.discord_default_webhook;
+  const roleId = cfg.discord_not_signed_up_role_id;
+  if (!url) return "no signup webhook";
+  if (!roleId) return "not-signed-up role not provisioned yet";
+  const s = (await sbGet("seasons?select=id,name,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0];
+  if (!s) return "no season";
+  const deadline = s.signup_deadline_at || s.registration_deadline;
+  if (!(s.registration_open && (!deadline || Date.now() < Date.parse(deadline)))) return "registration closed";
+  const [members, regs] = await Promise.all([
+    sbGet("profiles?select=id&role=eq.member&banned=eq.false&in_guild=eq.true"),
+    sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`),
+  ]);
+  const reg = new Set(regs.map((r) => r.profile_id));
+  const remaining = members.filter((m) => !reg.has(m.id)).length;
+  if (remaining === 0) return "everyone signed up";
+  const content = `⏰ **${s.name} sign-ups are open!** <@&${roleId}> — you haven't registered yet.\n` +
+    `Grab your spot${deadline ? ` before **${fmtDay(deadline)}**` : ""}: https://chelgamingleague.com/#/register`;
+  if (dry) return { would_post: content, remaining };
+  if (!(await claim("signup_reminder", et.ymd))) return "already posted today";
+  const res = await postWebhook(url, content, { ping: true });
+  if (!res.ok) { errors.push(`signup reminder: ${res.error}`); if (!res.ambiguous) await release("signup_reminder", et.ymd); return `post failed: ${res.error}`; }
+  return `pinged the not-signed-up role (${remaining} remaining)`;
 }
 
 function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } }); }

@@ -62,6 +62,60 @@ async function dApi(method, path, body) {
 // Discord channel-name slug (lowercase, hyphens) to compare against team names
 function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
+async function sbUpsertCfg(key, value) {
+  await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ key, value: String(value), updated_at: new Date().toISOString() }) });
+}
+
+// Ensure the "Team Management" category + its rooms exist, private to the front office. Idempotent:
+// looks up by name, creates only what's missing, and drops a webhook on #management-moves so the DB
+// trigger can post appointments/removals. VIEW(1024)+SEND(2048)+READ_HISTORY(65536)=68608.
+async function ensureMgmtCategory(guildChannels, roleId, sum) {
+  const owner = roleId["owner"], gm = roleId["general manager"], agm = roleId["assistant general manager"];
+  const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
+  if (!owner || !gm || !agm || office.length < 2) return; // roles not provisioned yet — try next run
+  const MGMT_ALLOW = "68608";
+  const ow = (ids) => [{ id: GUILD, type: 0, deny: "1024", allow: "0" }, ...ids.map((id) => ({ id, type: 0, allow: MGMT_ALLOW, deny: "0" }))];
+  const ownerAud = [owner, ...office];
+  const mgmtAud = [owner, gm, agm, ...office];
+
+  let cat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team management");
+  if (!cat) {
+    cat = await dApi("POST", `/guilds/${GUILD}/channels`, { name: "Team Management", type: 4, permission_overwrites: ow(mgmtAud) });
+    guildChannels.push(cat); sum.mgmtCatCreated = 1;
+  }
+  const catId = cat.id;
+  async function ensure(name, type, allowIds, topic) {
+    const found = guildChannels.find((c) => c.name === name && c.parent_id === catId);
+    if (found) return found;
+    const base = { name, parent_id: catId, permission_overwrites: ow(allowIds) };
+    if (type === 0 || type === 15) base.topic = topic;
+    try {
+      const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { ...base, type });
+      guildChannels.push(ch); sum.mgmtChansCreated = (sum.mgmtChansCreated || 0) + 1; return ch;
+    } catch (e) {
+      // a forum (type 15) needs a Community server; fall back to a text room so the space still exists
+      if (type === 15) {
+        try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { ...base, type: 0 }); guildChannels.push(ch); sum.mgmtHelpFellBackToText = 1; return ch; }
+        catch (e2) { sum.errors.push({ mgmtChan: name, error: String(e2.message || e2) }); return null; }
+      }
+      sum.errors.push({ mgmtChan: name, error: String(e.message || e) }); return null;
+    }
+  }
+  await ensure("owners-chat", 0, ownerAud, "Club owners only (plus the league office). Talk shop with your fellow owners.");
+  await ensure("management-chat", 0, mgmtAud, "Everyone in club management — owners, GMs, and AGMs. Anything goes.");
+  await ensure("management-help", 15, mgmtAud, "Ask the league office anything — post a thread and staff will help.");
+  const moves = await ensure("management-moves", 0, mgmtAud, "Front-office moves: new owners, GMs, and AGMs voted in, and departures. Auto-posted.");
+  if (moves && moves.id) {
+    try {
+      const hooks = await dApi("GET", `/channels/${moves.id}/webhooks`);
+      let hook = Array.isArray(hooks) ? hooks.find((h) => h.name === "CGHL Moves" && h.token) : null;
+      if (!hook) hook = await dApi("POST", `/channels/${moves.id}/webhooks`, { name: "CGHL Moves" });
+      if (hook && hook.id && hook.token) { await sbUpsertCfg("discord_mgmt_moves_webhook", `https://discord.com/api/webhooks/${hook.id}/${hook.token}`); sum.mgmtMovesHook = 1; }
+    } catch (e) { sum.errors.push({ mgmtMovesHook: String(e.message || e) }); }
+  }
+}
+
 export default async (req) => {
   // Read-only diagnostics. ?diag=staff proves who can actually see the staff rooms (the sync
   // reporting "changed nothing" is ambiguous between already-correct and wrongly-judged-correct,
@@ -340,17 +394,36 @@ export default async (req) => {
   }
 
   // managed role ids = static roles + position roles (by name) + every team's role (by stored id)
-  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Staff", "Free Agent", ...POSITION_ROLES];
-  // ensure the Staff role exists (mentionable — members ping the officials)
-  if (!roleId["staff"]) {
+  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Staff", "Free Agent", "Not Signed Up", ...POSITION_ROLES];
+  // ensure the mentionable roles the automations depend on exist (created once, then reused):
+  //  Staff (members ping the officials), the front-office roles (gate the Team Management rooms),
+  //  and "Not Signed Up" (the daily sign-up reminder pings this one role).
+  const ENSURE_ROLES = [["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["Not Signed Up", true]];
+  for (const [name, mentionable] of ENSURE_ROLES) {
+    if (roleId[name.toLowerCase()]) continue;
     try {
-      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: "Staff", mentionable: true });
-      if (created && created.id) { roleId["staff"] = created.id; roleNameById[created.id] = "Staff"; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
-    } catch (e) { sum.errors.push({ role: "Staff", error: String(e.message || e) }); }
+      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name, mentionable });
+      if (created && created.id) { roleId[name.toLowerCase()] = created.id; roleNameById[created.id] = name; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+    } catch (e) { sum.errors.push({ role: name, error: String(e.message || e) }); }
   }
+  if (roleId["not signed up"]) await sbUpsertCfg("discord_not_signed_up_role_id", roleId["not signed up"]);
+  // the Team Management category + its rooms (private to the front office)
+  try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
+
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
   for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
+
+  // who still needs to register for the open season → drives the "Not Signed Up" role
+  let regOpen = false; const registered = new Set();
+  try {
+    const s = (await sbGet("seasons?select=id,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0];
+    if (s) {
+      const deadline = s.signup_deadline_at || s.registration_deadline;
+      regOpen = !!s.registration_open && (!deadline || Date.now() < Date.parse(deadline));
+      if (regOpen) for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
+    }
+  } catch (e) { sum.errors.push({ regStatus: String(e.message || e) }); }
 
   // Guild ban list (paginated), fetched once per run. Two jobs:
   //  * stop re-PUTting the same ban every 5 minutes for already-banned members
@@ -410,6 +483,10 @@ export default async (req) => {
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
       // league officials: staff wear Staff; the commissioner is staff too
       if ((m.role === "staff" || m.role === "commissioner") && roleId["staff"]) desired.add(roleId["staff"]);
+      // "Not Signed Up" — a plain member who hasn't registered for the open season (the daily
+      // #season-signups reminder pings this role). Cleared automatically once they register or the
+      // window closes, since it's a managed role reconciled to `desired` every run.
+      if (regOpen && m.role === "member" && !registered.has(m.profile_id) && roleId["not signed up"]) desired.add(roleId["not signed up"]);
       // position role (Center / Left Wing / … / Goalie) from their current-season position
       const posName = POS_LABEL[posOf[m.profile_id]];
       if (posName && roleId[posName.toLowerCase()]) desired.add(roleId[posName.toLowerCase()]);
