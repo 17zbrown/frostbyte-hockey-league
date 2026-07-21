@@ -1228,30 +1228,33 @@ CG.ROUTES.brand = function(){
       '<h2 class="h-sec">A quiet base, one loud accent</h2>'+
       '<p class="lede" style="color:var(--on-ink-dim)">Confident neutrals do the work; chrome yellow is a spotlight used once per view. Semantic colour means status — never decoration.</p></div></div></div>'+
     '<div class="shell">'+
-    '<p class="eyebrow" style="margin-bottom:12px;color:var(--on-ink)">Neutrals</p>'+
+    /* every swatch sits under the heading it actually belongs to — surfaces and structure are
+       Neutrals, the accent trio stands alone, and Semantic holds only status colours. Grouping had
+       to be honest here of all places: the section's own lede promises "status — never decoration". */
+    '<p class="eyebrow" style="margin-bottom:12px;color:var(--on-ink)">Neutrals &amp; surfaces</p>'+
     '<div class="grid g4">'+
       swatch("#101519","Ink","Primary text & marks")+
       swatch("#5C6B75","Steel","Secondary text, captions")+
+      swatch("#E3E6DF","Line","Borders, hairlines")+
       swatch("#F5F6F2","Ice","Page ground")+
       swatch("#FFFFFF","Paper","Cards, raised surfaces")+
+      swatch("#101519","Broadcast","The dark bands, ticker, hero — constant in both themes")+
     '</div>'+
     '<p class="eyebrow" style="margin:26px 0 12px;color:var(--on-ink)">Accent — one per view</p>'+
     '<div class="grid g4">'+
       swatch("#FFE500","Chrome","The accent — CTA, eyebrow tick, live pulse")+
       swatch("#E5C900","Chrome deep","Chrome that needs more weight")+
       swatch("#D9A800","Gold","The accent, deepened to hold on white")+
-      swatch("#101519","Broadcast","The dark bands, ticker, hero — constant in both themes")+
     '</div>'+
     '<p class="eyebrow" style="margin:26px 0 12px;color:var(--on-ink)">Semantic — status only</p>'+
     '<div class="grid g4">'+
       swatch("#1F9D58","Green","Win, live, positive")+
       swatch("#C63A32","Red","Loss, danger, destructive")+
       swatch("#8A6D00","Amber ink","Warning, needs attention")+
-      swatch("#E3E6DF","Line","Borders, hairlines")+
     '</div>'+
     '<div class="note chr" style="margin-top:24px;background:var(--bc2);color:var(--on-ink);border-color:var(--chrome)">'+
       '<b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:#fff">The fill-vs-ink rule</b>'+
-      'Red and green are <b>fills</b> — light text sits on them, so they stay dark in both themes. The <span class="mono">––*-ink</span> values are the <b>text</b> colours and flip per theme. Never use a fill as a foreground; it can’t clear 4.5:1 on both a light and dark surface at once. Contrast floor is WCAG AA, enforced.'+
+      'Red and green are <b>fills</b> — light text sits on them, so they stay dark in both themes. The <span class="mono">--*-ink</span> values are the <b>text</b> colours and flip per theme. Never use a fill as a foreground; it can’t clear 4.5:1 on both a light and dark surface at once. Contrast floor is WCAG AA, enforced.'+
     '</div>'+
     '</div></section>';
 
@@ -1263,7 +1266,7 @@ CG.ROUTES.brand = function(){
     '<div class="grid g3">'+
       specimen("font-family:var(--f-disp);font-weight:900;font-size:44px;letter-spacing:-.03em;line-height:.98", "Puck drop.", "<b>Archivo</b> · display / headings · 400–900 · tight tracking, balanced wrap")+
       specimen("font-family:var(--f-body);font-size:15.5px;line-height:1.6;color:var(--ink-3)", "Eight clubs across two divisions play a full season — live standings, imported box scores, trades, and a playoff bracket.", "<b>IBM Plex Sans</b> · body · 400 / 500 / 600 · line-height ~1.6")+
-      specimen("font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums;line-height:1.7;color:var(--ink)", "2‑1‑0 · W3<br>.932 SV%<br>21:34 TOI · #97", "<b>IBM Plex Mono</b> · data & labels · tabular figures for every stat")+
+      specimen("font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums;line-height:1.7;color:var(--ink)", "2‑1‑0 · W2<br>.932 SV%<br>21:34 TOI · #97", "<b>IBM Plex Mono</b> · data & labels · tabular figures for every stat")+
     '</div>'+
 
     '<div class="grid g2" style="margin-top:18px;align-items:start">'+
