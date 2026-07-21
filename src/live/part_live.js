@@ -4261,6 +4261,92 @@ CG.AFTER._applicationDetail = function(){
     });
   }); });
 };
+/* Every ticket the league office has handled, in one place — complaints, appeals, trade and
+   position requests, and staff/owner applications, open or closed. Each row opens its own detail
+   page (the case thread or the application response), so the whole history is browsable. */
+CG.allTickets = function(){
+  var lg = CG.lg || {}, out = [];
+  (lg._actionReqs||[]).forEach(function(a){
+    var meta = CG.ACTION_META[a.type] || { label:a.type, icon:"flag" };
+    var closed = a.status==="resolved" || a.status==="denied";
+    out.push({ group:a.type, typeLabel:meta.label, icon:meta.icon||"flag",
+      title: a.subject || (a.details||"Request").slice(0,64),
+      who: (a.profiles&&a.profiles.gamertag)||"member",
+      result: a.status==="resolved" ? "Resolved" : a.status==="denied" ? "Denied" : "Open",
+      isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
+      route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
+  });
+  (lg._staffApps||[]).forEach(function(a){
+    var closed = a.status==="approved" || a.status==="denied";
+    out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
+      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
+      result: a.status==="approved"?"Approved":a.status==="denied"?"Denied":"Pending", isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=staff", replies:0 });
+  });
+  (lg._ownerApps||[]).forEach(function(a){
+    var closed = a.status==="approved" || a.status==="denied";
+    out.push({ group:"owner", typeLabel:"Owner application", icon:"shield",
+      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
+      result: a.status==="approved"?"Approved":a.status==="denied"?"Denied":"Pending", isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=owner", replies:0 });
+  });
+  return out.sort(function(x,y){ return y.at - x.at; });
+};
+CG.hubTicketArchive = function(){
+  if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
+  var type = CG._arcType||"all", status = CG._arcStatus||"all";
+  var shown = CG.allTickets().filter(function(t){
+    if (type!=="all" && t.group!==type) return false;
+    if (status==="open" && !t.isOpen) return false;
+    if (status==="closed" && t.isOpen) return false;
+    return true;
+  });
+  function fbtn(attr, cur, val, label){ return '<button type="button" class="chip '+(cur===val?"chip-chrome":"")+'" style="cursor:pointer" '+attr+'="'+val+'" aria-pressed="'+(cur===val)+'">'+esc(label)+'</button>'; }
+  function resultChip(t){
+    var cls = (t.result==="Resolved"||t.result==="Approved") ? "chip-win" : t.result==="Denied" ? "chip-loss" : "chip-warn";
+    return '<span class="chip '+cls+' chip-xs">'+esc(t.result)+'</span>';
+  }
+  function row(t){
+    return '<div class="card-b row-go" data-go="'+esc(t.route)+'" role="link" tabindex="0" '+
+      'data-arc-text="'+esc((t.title+" "+t.who+" "+t.typeLabel).toLowerCase())+'" '+
+      'aria-label="Open '+esc(t.typeLabel)+': '+esc(t.title)+'" '+
+      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<span style="color:var(--steel);flex-shrink:0">'+CG.ic(t.icon,15)+'</span>'+
+      '<span style="flex:1;min-width:170px"><b style="font-family:var(--f-disp);display:block">'+esc(t.title)+'</b>'+
+        '<span class="caption">'+esc(t.typeLabel)+' · '+esc(t.who)+(t.replies?' · '+t.replies+' repl'+(t.replies===1?"y":"ies"):"")+'</span></span>'+
+      resultChip(t)+
+      '<span class="caption">'+(t.at?CG.fmtDay(t.at):"")+'</span>'+
+      '<span class="caption" aria-hidden="true">→</span></div>';
+  }
+  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"]];
+  var statusF = [["all","All"],["open","Open / pending"],["closed","Resolved / decided"]];
+
+  var h = '<div style="margin-bottom:18px"><a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>'+
+    '<h1 class="h-sec" style="margin-top:10px">Ticket archive</h1>'+
+    '<p class="lede" style="margin-top:8px">Every complaint, appeal, request, and application — open or closed — with its result. Open any one to read the full conversation and the decision.</p></div>';
+  h += '<div class="card" style="margin-bottom:16px"><div class="card-b" style="display:grid;gap:12px">'+
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Type</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+typeF.map(function(f){ return fbtn("data-arc-type",type,f[0],f[1]); }).join("")+'</div></div>'+
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Status</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+statusF.map(function(f){ return fbtn("data-arc-status",status,f[0],f[1]); }).join("")+'</div></div>'+
+    '<div style="display:flex;gap:12px;align-items:center"><span class="caption" style="min-width:54px">Search</span><input id="arcSearch" type="search" placeholder="Filter by name, subject, or type…" style="flex:1" autocomplete="off"></div>'+
+  '</div></div>';
+  h += '<div class="card"><div class="card-h"><h3>Tickets</h3><span class="chip" id="arcCount">'+shown.length+'</span></div>'+
+    (shown.length ? shown.map(row).join("") : '<div class="card-b"><p class="caption">No tickets match these filters. Try widening them above.</p></div>')+'</div>';
+  return h;
+};
+CG.AFTER._ticketArchive = function(){
+  document.querySelectorAll("[data-arc-type]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcType = this.getAttribute("data-arc-type"); if(CG.router) CG.router(); }); });
+  document.querySelectorAll("[data-arc-status]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcStatus = this.getAttribute("data-arc-status"); if(CG.router) CG.router(); }); });
+  var s = document.getElementById("arcSearch");
+  if (s) s.addEventListener("input", function(){
+    /* live filter without a re-render, so the search box keeps focus */
+    var q = this.value.trim().toLowerCase(), n = 0;
+    document.querySelectorAll("[data-arc-text]").forEach(function(r){
+      var hit = !q || r.getAttribute("data-arc-text").indexOf(q) >= 0;
+      r.style.display = hit ? "" : "none"; if (hit) n++;
+    });
+    var c = document.getElementById("arcCount"); if (c) c.textContent = n;
+  });
+};
 CG.hubStaffDesk = function(){
   var lg = CG.lg;
   var reqs = (lg._actionReqs||[]);
@@ -4340,6 +4426,13 @@ CG.hubStaffDesk = function(){
       ? '<div class="card-b"><p class="caption" style="color:var(--red-ink)"><b>Couldn’t load the case queue.</b> '+esc(CG._actionLoadError)+' — the count above comes straight from the database, so cases may be waiting. Reload; if it persists this is a bug worth reporting.</p></div>'
       : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
   h += '</div>';
+
+  /* ticket archive — the full history, open or closed */
+  var arcAll = CG.allTickets(), arcClosed = arcAll.filter(function(t){ return !t.isOpen; }).length;
+  h += '<div class="card raise" style="margin-bottom:18px;cursor:pointer" data-go="#/hub/archive" role="link" tabindex="0" aria-label="Open the ticket archive">'+
+    '<div class="card-h"><h3>Ticket archive</h3><span class="sec-link">'+CG.ic("db",14)+' Open the archive</span></div>'+
+    '<div class="card-b"><p class="caption">Every complaint, appeal, request, and application the league office has handled — open or closed — with its result and full conversation. '+
+      '<b>'+arcAll.length+'</b> ticket'+(arcAll.length===1?"":"s")+' on file'+(arcClosed?', '+arcClosed+' resolved':"")+'.</p></div></div>';
 
   /* active discipline */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3><span class="chip">'+sus.length+'</span></div>';
@@ -5675,6 +5768,10 @@ CG.ROUTES.hub = function(param, qs){
     if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("Applications are reviewed by league staff.");
     return CG.hubShell("staffdesk", CG.hubApplicationDetail(qs.id, qs.type==="owner"?"owner":"staff"));
   }
+  if (param==="archive"){
+    if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
+    return CG.hubShell("staffdesk", CG.hubTicketArchive());
+  }
   return CG._origHubRoute(param, qs);
 };
 CG._origHubAfter = CG.AFTER.hub;
@@ -5683,6 +5780,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="draft"){ CG.AFTER._hubDraft(); return; }
   if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
   if (param==="application"){ CG.AFTER._applicationDetail(); return; }
+  if (param==="archive"){ CG.AFTER._ticketArchive(); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   var sl=document.getElementById("sSaveLive");
