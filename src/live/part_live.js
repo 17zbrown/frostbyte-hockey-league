@@ -659,6 +659,12 @@ CG.loadManagerData = async function(){
       jobs.push(CG.sb.from("application_ballots").select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
         .then(function(vb){ CG.lg._appBallots = (vb && !vb.error && vb.data) || []; }, function(){ CG.lg._appBallots = []; }));
     }
+    /* application chat — loaded for ANY signed-in user; RLS returns the office everything and an
+       applicant only their own application's thread (this is applicant-visible, unlike the ballot) */
+    if (CG.auth.user){
+      jobs.push(CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
+        .then(function(mm){ CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); }, function(){ CG.lg._appMsgs = {}; }));
+    }
     if (myTid){
       /* my club's live trades (incoming + outgoing, still open) */
       jobs.push(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false})
@@ -727,6 +733,10 @@ CG.notifRoute = function(view, param){
     case "staffdesk":    return "#/hub/staffdesk";
     case "stafftasks":   return "#/hub/staffdesk";
     case "complaints":   return "#/hub/complaints";
+    /* application chat: staff land on the office detail page; applicants on their own application */
+    case "application":  return param ? "#/hub/application?"+param : "#/hub/staffdesk";
+    case "ownerapp":     return "#/owner";
+    case "staffapp":     return "#/staffapply";
     /* the invite is an external URL; the notification click handler opens http(s) routes in a
        new tab. Fall back to the register page (which also carries a Join button) if unset. */
     case "discord":      return (CG._siteCfg && CG._siteCfg.discord_invite) || "#/register";
@@ -734,7 +744,7 @@ CG.notifRoute = function(view, param){
   }
 };
 CG.notifIcon = function(type){
-  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", request:"flag" }[type] || "bell";
+  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", app_message:"msg", request:"flag" }[type] || "bell";
 };
 /* staff/commish backlog summary from the DB (open cases, apps, unmatched EA imports, finals
    missing box scores, active suspensions). Powers the Staff Desk "Needs attention" card and
@@ -1511,11 +1521,14 @@ CG.ROUTES.owner = function(){
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="ow-submit"'+(lockedFromOwning?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
   '</div></div>';
-  return head + '<div class="shell" style="max-width:720px;padding-bottom:48px">'+statusCard+body+'</div>';
+  /* once they've applied, a chat with the league office sits between the status and the form */
+  var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false}) : "";
+  return head + '<div class="shell" style="max-width:720px;padding-bottom:48px">'+statusCard+chat+body+'</div>';
 };
 CG.AFTER.owner = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
   var sub=document.getElementById("ow-submit"); if(sub) sub.addEventListener("click", CG.submitOwnerApp);
+  CG.wireAppChat();
 };
 CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
@@ -1534,9 +1547,10 @@ CG.submitOwnerApp = async function(){
     availability:v("ow-avail")||null, experience:v("ow-exp")||null,
     preferred_club:fr1, franchise_2:fr2, franchise_3:fr3,
     pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
-  var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"});
+  var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"}).select().maybeSingle();
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-  CG.auth.ownerApp=payload; CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
+  CG.auth.ownerApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
+  CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
 };
 
 /* ================================================================
@@ -1579,7 +1593,8 @@ CG.ROUTES.staffapply = function(){
     : "";
   var v = function(k){ return app ? esc(app[k]||"") : ""; };
   var pickedDepts = (app && app.departments) || [];
-  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+
+  var chat = app && app.id ? CG.appChatSection("staff", app.id, {office:false}) : "";
+  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+chat+
     '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
       (app?'<span class="chip '+(app.status==="pending"?"chip-warn":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
     '<div class="fld"><span>Departments *</span><p class="caption" style="margin:2px 0 8px">Pick every department you’d work — the league office assigns duties from here.</p>'+
@@ -1611,6 +1626,7 @@ CG.AFTER.staffapply = function(){
     var chip = this.querySelector(".chip");
     if (chip){ chip.classList.toggle("chip-chrome", on); chip.textContent = on ? "IN" : "—"; }
   }); });
+  CG.wireAppChat();
 };
 CG.staffDeptLabel = function(key){
   var d = (CG.STAFF_DEPARTMENTS||[]).find(function(x){ return x[0]===key; });
@@ -1628,9 +1644,10 @@ CG.submitStaffApp = async function(){
   if(!pitch){ CG.toast("Tell the league office why you — the pitch is the application","err"); return; }
   var payload={ profile_id: CG.auth.user.id, departments:depts, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
     experience:v("sa-exp")||null, pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
-  var r=await CG.sb.from("staff_applications").upsert(payload,{onConflict:"profile_id"});
+  var r=await CG.sb.from("staff_applications").upsert(payload,{onConflict:"profile_id"}).select().maybeSingle();
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-  CG.auth.staffApp=payload; CG.toast("Application submitted — the league office will review it","ok"); CG.router();
+  CG.auth.staffApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
+  CG.toast("Application submitted — the league office will review it","ok"); CG.router();
 };
 CG.decideStaffApp = function(id, approve, name){
   CG.confirm((approve?"Approve":"Deny")+" "+esc(name)+"’s staff application?",
@@ -4199,6 +4216,72 @@ CG.staffAttentionCard = function(){
 };
 /* One application opened into its own page — the full submission, plus a written response and the
    decision, the same way a case opens from the queue. type is "staff" or "owner". */
+/* Application chat — a two-way thread between the applicant and the league office. UNLIKE the
+   staff ballot, this is applicant-visible: RLS lets the applicant read/write their own thread and
+   the office read/write any. Both sides are notified on each message (trg_application_message). */
+CG._groupAppMsgs = function(rows){
+  var map = {}; (rows||[]).forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
+  return map;
+};
+CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[type+":"+id] || []; };
+CG.loadAppMessages = function(){
+  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
+  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
+    .then(function(mm){ if(CG.lg) CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); return true; }, function(){ return false; });
+};
+/* opts.office = the league-office view (staff/commish) vs the applicant's own view. Both can send;
+   labels differ so the applicant sees "League office" rather than a specific official's name. */
+CG.appChatSection = function(type, appId, opts){
+  opts = opts || {}; var office = !!opts.office;
+  var uid = CG.auth.user && CG.auth.user.id;
+  var msgs = CG.appMsgsFor(type, appId);
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(office?"Messages with the applicant":"Messages with the league office")+'</h3>'+
+    (msgs.length?'<span class="chip chip-xs">'+msgs.length+' message'+(msgs.length===1?"":"s")+'</span>':"")+'</div><div class="card-b">';
+  if (msgs.length){
+    h += '<div class="stack" style="gap:10px;margin-bottom:14px">'+msgs.map(function(m){
+      var mine = m.sender_id===uid;
+      var isStaff = m.sender && (m.sender.role==="staff" || m.sender.role==="commissioner");
+      var who = mine ? "You"
+        : isStaff ? (office ? ((m.sender&&m.sender.gamertag)||"Official")+" · league office" : "League office")
+        : ((m.sender&&m.sender.gamertag)||"Applicant");
+      return '<div style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
+        '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
+          '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
+          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtDay(Date.parse(m.created_at)):"")+'</span></div>'+
+          '<span class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
+    }).join("")+'</div>';
+  } else {
+    h += '<p class="caption" style="margin-bottom:14px">'+(office
+      ? "No messages yet. Reach out to the applicant with any questions before the ballot or a decision — they can read and reply here."
+      : "No messages yet. The league office may reach out here about your application, and you can message them any time. You’ll get a notification when they reply.")+'</p>';
+  }
+  var key = type+":"+appId;
+  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" autocomplete="off" style="flex:1">'+
+    '<button class="btn btn-ink btn-sm" data-appchat-send="'+esc(key)+'">Send</button></div>';
+  h += '<p class="caption" style="margin-top:10px">'+(office
+    ? "The applicant can read and reply to this thread. The staff ballot below stays private to the league office."
+    : "Both sides are notified of new messages.")+'</p>';
+  return h + '</div></div>';
+};
+/* shared binder — used by the office detail page and both applicant views */
+CG.wireAppChat = function(){
+  document.querySelectorAll("[data-appchat-send]").forEach(function(b){ b.addEventListener("click", function(){
+    var key = this.getAttribute("data-appchat-send"), btn = this;
+    var inp = document.querySelector('[data-appchat-input="'+key+'"]');
+    var body = ((inp && inp.value) || "").trim();
+    if (!body){ CG.toast("Write a message first","err"); return; }
+    var i = key.indexOf(":"), type = key.slice(0,i), appId = key.slice(i+1);
+    btn.disabled = true;
+    CG.sb.from("application_messages").insert({ app_type:type, application_id:appId, sender_id:CG.auth.user.id, body:body }).select("id").then(function(r){
+      btn.disabled = false;
+      if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
+      if (!r.data || !r.data.length){ CG.toast("You can’t message on this application.","err"); return; }
+      if (inp) inp.value = "";
+      CG.toast("Message sent","ok");
+      CG.loadAppMessages().then(function(){ if(CG.router) CG.router(); });
+    });
+  }); });
+};
 /* Staff ballot on an application — each official casts an advisory approve/deny (with an optional
    reason). Visible ONLY to staff + commissioners: the application_ballots RLS enforces office-only
    read, so the applicant never sees the votes, only the final decision. */
@@ -4290,6 +4373,8 @@ CG.hubApplicationDetail = function(id, type){
     (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">Their pitch</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
     '</div></div>';
 
+  /* the applicant chat sits above the ballot: talk to the applicant, then the office deliberates */
+  h += CG.appChatSection(type, a.id, {office:true});
   /* the staff ballot — who has voted and how — sits above the decision so it informs it */
   h += CG.appBallotSection(type, a, decided);
 
@@ -4345,6 +4430,7 @@ CG.AFTER._applicationDetail = function(){
       CG.toast("Vote retracted","ok"); CG.loadAppBallots().then(function(){ if(CG.router) CG.router(); });
     });
   }); });
+  CG.wireAppChat();
 };
 /* Every ticket the league office has handled, in one place — complaints, appeals, trade and
    position requests, and staff/owner applications, open or closed. Each row opens its own detail
