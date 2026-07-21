@@ -2736,8 +2736,7 @@ CG.admPreseason = function(){
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
         '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+CG.franchisePicksLine(a)+(a.ea_id?'<span>EA '+esc(a.ea_id)+'</span>':"")+'</div>'+
         (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
-        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-app-approve="'+a.id+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-app-deny="'+a.id+'"'+(a.status==="denied"?" disabled":"")+'>Deny</button></div></div>';
+        (a.status==="pending"?'<div style="margin-top:10px"><a class="btn btn-ghost btn-sm" href="#/hub/application?id='+a.id+'&type=owner">Open — the reviewer vote decides here →</a></div>':"")+'</div>';
     }).join("");
   } else { h+='<div class="card-b"><p class="caption">No owner applications yet. They appear here when members apply from the “Apply to own a club” page.</p></div>'; }
   h+='</div>';
@@ -2751,10 +2750,9 @@ CG.admPreseason = function(){
         ((a.departments&&a.departments.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+a.departments.map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join("")+'</div>':"")+
         '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+(a.timezone?'<span>TZ '+esc(a.timezone)+'</span>':"")+(a.availability?'<span>'+esc(a.availability)+'</span>':"")+(a.experience?'<span>'+esc(a.experience)+'</span>':"")+'</div>'+
         (a.pitch?'<p class="small" style="color:var(--steel);margin-top:8px;font-style:italic">“'+esc(a.pitch)+'”</p>':"")+
-        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-chrome btn-sm" data-sapp-approve="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'"'+(a.status==="approved"?" disabled":"")+'>Approve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-sapp-deny="'+a.id+'" data-name="'+esc(prof.gamertag||"the applicant")+'"'+(a.status==="denied"?" disabled":"")+'>Deny</button></div></div>';
+        (a.status==="pending"?'<div style="margin-top:10px"><a class="btn btn-ghost btn-sm" href="#/hub/application?id='+a.id+'&type=staff">Open — the reviewer vote decides here →</a></div>':"")+'</div>';
     }).join("");
-  } else { h+='<div class="card-b"><p class="caption">No staff applications yet. They appear here when members apply from the “Apply to join the staff” page. Approving one promotes the member to staff (the Discord Staff role follows on the next sync).</p></div>'; }
+  } else { h+='<div class="card-b"><p class="caption">No staff applications yet. They appear here when members apply from the “Apply to join the staff” page. Decisions are made by the Applications-review vote on the Staff Desk.</p></div>'; }
   h+='</div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Roster fill</h3><span class="chip">max '+rosterMax+' per club</span></div><div class="card-b">'+
     CG.TEAMS.map(function(t){ var n=(lg.byTeam[t.code]||[]).length, pct=Math.round(100*n/rosterMax);
@@ -2775,10 +2773,7 @@ CG.AFTER._preseason = function(){
       });
     });
   });
-  document.querySelectorAll("[data-app-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-approve"),"approved"); }); });
-  document.querySelectorAll("[data-app-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.setOwnerAppStatus(this.getAttribute("data-app-deny"),"denied"); }); });
-  document.querySelectorAll("[data-sapp-approve]").forEach(function(b){ b.addEventListener("click", function(){ CG.decideStaffApp(this.getAttribute("data-sapp-approve"), true, this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-sapp-deny]").forEach(function(b){ b.addEventListener("click", function(){ CG.decideStaffApp(this.getAttribute("data-sapp-deny"), false, this.getAttribute("data-name")); }); });
+  /* owner/staff application decisions are made by the reviewer vote (Staff Desk), not here */
   var paa=document.getElementById("preAssignAll"); if (paa) paa.addEventListener("click", CG.preseasonRandomAssign);
   var prn=document.getElementById("preReleaseNow"); if (prn) prn.addEventListener("click", CG.preseasonRelease);
   var prk=document.getElementById("preRookies"); if (prk) prk.addEventListener("click", CG.distributeRookies);
@@ -4476,7 +4471,9 @@ CG.appBallotSection = function(type, a, decided){
 
   h += '<p class="caption" style="margin-top:12px">'+(decided
     ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
-    : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
+    : N===0
+      ? "There’s no reviewer vote yet — no staff are assigned to Applications review. A commissioner can add reviewers or decide with the override above."
+      : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
   return h + '</div></div>';
 };
 CG.hubApplicationDetail = function(id, type){
@@ -4853,15 +4850,7 @@ CG.hubStaffDesk = function(){
   return h;
 };
 CG.AFTER._staffdesk = function(){
-  document.querySelectorAll("[data-sapp-approve]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.decideStaffApp(this.getAttribute("data-sapp-approve"), true, this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-sapp-deny]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.decideStaffApp(this.getAttribute("data-sapp-deny"), false, this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-oapp-approve]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.setOwnerAppStatus(this.getAttribute("data-oapp-approve"), "approved"); }); });
-  document.querySelectorAll("[data-oapp-deny]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.setOwnerAppStatus(this.getAttribute("data-oapp-deny"), "denied"); }); });
-
+  /* applications open into their own page (the reviewer vote decides there) — no inline decide */
   CG.wireStaffExtras();
 
   /* ---- season award ballots ---- */
@@ -6119,7 +6108,8 @@ CG.ROUTES.hub = function(param, qs){
   }
   if (param==="application"){
     if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("Applications are reviewed by league staff.");
-    return CG.hubShell("staffdesk", CG.hubApplicationDetail(qs.id, qs.type==="owner"?"owner":"staff"));
+    var appType = qs.type==="owner"?"owner":qs.type==="management"?"management":"staff";
+    return CG.hubShell("staffdesk", CG.hubApplicationDetail(qs.id, appType));
   }
   if (param==="archive"){
     if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
