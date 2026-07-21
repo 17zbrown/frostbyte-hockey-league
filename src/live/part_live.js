@@ -654,6 +654,10 @@ CG.loadManagerData = async function(){
         .then(function(oa){ CG.lg._ownerApps = (oa && !oa.error && oa.data) || []; }, function(){ CG.lg._ownerApps = []; }));
       jobs.push(CG.sb.from("staff_applications").select("*, profiles!staff_applications_profile_id_fkey(gamertag)").order("created_at",{ascending:false})
         .then(function(sa2){ CG.lg._staffApps = (sa2 && !sa2.error && sa2.data) || []; }, function(){ CG.lg._staffApps = []; }));
+      /* staff ballots on applications — RLS on application_ballots keeps these office-only, so the
+         applicant can never read them however this loads */
+      jobs.push(CG.sb.from("application_ballots").select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
+        .then(function(vb){ CG.lg._appBallots = (vb && !vb.error && vb.data) || []; }, function(){ CG.lg._appBallots = []; }));
     }
     if (myTid){
       /* my club's live trades (incoming + outgoing, still open) */
@@ -4195,6 +4199,50 @@ CG.staffAttentionCard = function(){
 };
 /* One application opened into its own page — the full submission, plus a written response and the
    decision, the same way a case opens from the queue. type is "staff" or "owner". */
+/* Staff ballot on an application — each official casts an advisory approve/deny (with an optional
+   reason). Visible ONLY to staff + commissioners: the application_ballots RLS enforces office-only
+   read, so the applicant never sees the votes, only the final decision. */
+CG.appBallotsFor = function(type, id){
+  return ((CG.lg && CG.lg._appBallots) || []).filter(function(v){ return v.app_type===type && v.application_id===id; });
+};
+CG.loadAppBallots = function(){
+  if (!CG.sb) return Promise.resolve(false);
+  return CG.sb.from("application_ballots")
+    .select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
+    .then(function(vb){ if(CG.lg) CG.lg._appBallots = (vb && !vb.error && vb.data) || []; return true; }, function(){ return false; });
+};
+CG.appBallotSection = function(type, a, decided){
+  var votes = CG.appBallotsFor(type, a.id);
+  var uid = CG.auth.user && CG.auth.user.id;
+  var yes = votes.filter(function(v){ return v.vote==="approve"; }).length;
+  var no  = votes.filter(function(v){ return v.vote==="deny"; }).length;
+  var mine = votes.find(function(v){ return v.voter_id===uid; });
+  var tally = votes.length
+    ? '<span class="chip chip-win chip-xs">'+yes+' approve</span> <span class="chip chip-loss chip-xs">'+no+' deny</span>'
+    : '<span class="chip chip-xs">no votes yet</span>';
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff ballot</h3>'+tally+'</div><div class="card-b">';
+  if (votes.length){
+    h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+votes.slice().sort(function(x,y){
+        return ((x.voter&&x.voter.gamertag)||"").localeCompare((y.voter&&y.voter.gamertag)||""); }).map(function(v){
+      var nm = (v.voter && v.voter.gamertag) || ((CG.lg&&CG.lg._profName)||{})[v.voter_id] || "An official";
+      return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
+        '<span class="chip '+(v.vote==="approve"?"chip-win":"chip-loss")+' chip-xs" style="flex-shrink:0">'+(v.vote==="approve"?"Approve":"Deny")+'</span>'+
+        '<b style="font-family:var(--f-disp);font-size:13px">'+esc(nm)+(v.voter_id===uid?' · you':"")+'</b>'+
+        (v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
+    }).join("")+'</div>';
+  }
+  if (!decided){
+    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
+      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time before the decision":"Cast your vote")+'</span>'+
+      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
+        '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
+        (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
+  }
+  h += '<p class="caption" style="margin-top:12px">Ballots are advisory and visible only to staff and commissioners. The applicant sees only the final decision.</p>';
+  return h + '</div></div>';
+};
 CG.hubApplicationDetail = function(id, type){
   var review = CG.role()==="commish" || CG.role()==="staff";
   var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
@@ -4242,6 +4290,9 @@ CG.hubApplicationDetail = function(id, type){
     (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">Their pitch</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
     '</div></div>';
 
+  /* the staff ballot — who has voted and how — sits above the decision so it informs it */
+  h += CG.appBallotSection(type, a, decided);
+
   if (decided){
     var whoName = (a.decided_by && (CG.lg._profName||{})[a.decided_by]) || "the league office";
     h += '<div class="note '+(a.status==="approved"?"grn":"red")+'"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+
@@ -4272,6 +4323,26 @@ CG.AFTER._applicationDetail = function(){
       if (r.error){ all.forEach(function(x){ x.disabled=false; }); CG.toast("Couldn’t decide: "+r.error.message,"err"); return; }
       CG.toast((r.data||name)+(approve?" — approved":" — denied"),"ok");
       CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
+    });
+  }); });
+  /* staff ballot — cast/change/retract an advisory vote; .select() so an RLS-blocked write (a
+     non-official) is reported honestly instead of a false success */
+  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
+    var v=this.getAttribute("data-vote-cast"), t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
+    var note=((document.getElementById("appVoteNote")||{}).value||"").trim();
+    var btns=document.querySelectorAll("[data-vote-cast],[data-vote-retract]"); btns.forEach(function(x){ x.disabled=true; });
+    CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null), updated_at:new Date().toISOString() }, {onConflict:"app_type,application_id,voter_id"}).select("id").then(function(r){
+      if(r.error){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Couldn’t save your vote: "+r.error.message,"err"); return; }
+      if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only league staff can vote on applications.","err"); return; }
+      CG.toast("Vote recorded — "+(v==="approve"?"approve":"deny"),"ok");
+      CG.loadAppBallots().then(function(){ if(CG.router) CG.router(); });
+    });
+  }); });
+  document.querySelectorAll("[data-vote-retract]").forEach(function(b){ b.addEventListener("click", function(){
+    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
+    CG.sb.from("application_ballots").delete().eq("app_type",t).eq("application_id",id).eq("voter_id",CG.auth.user.id).select("id").then(function(r){
+      if(r.error){ CG.toast("Couldn’t retract: "+r.error.message,"err"); return; }
+      CG.toast("Vote retracted","ok"); CG.loadAppBallots().then(function(){ if(CG.router) CG.router(); });
     });
   }); });
 };
@@ -4397,12 +4468,16 @@ CG.hubStaffDesk = function(){
     var prof = a.profiles||{}, isOwner = type==="owner";
     var sub = isOwner ? CG.franchisePicksLine(a)
       : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
+    /* how the staff ballot stands so far — a glance-level tally before you open it */
+    var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
+    var tally = vb.length ? '<span class="chip chip-xs" title="Staff ballot so far">'+vy+' approve · '+vn+' deny</span>' : "";
     return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
       'aria-label="Open '+(isOwner?"owner":"staff")+' application from '+esc(prof.gamertag||"applicant")+'" '+
       'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
       '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+(isOwner?"OWNER":"STAFF")+'</span>'+
       '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(prof.gamertag||"Applicant")+'</b>'+
         '<span class="caption">'+sub+'</span></span>'+
+      tally+
       '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
       '<span class="caption" aria-hidden="true">→</span></div>';
   }
