@@ -4236,8 +4236,8 @@ CG.appBallotSection = function(type, a, decided){
       '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time before the decision":"Cast your vote")+'</span>'+
       '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
-        '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
+        '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
+        '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
         (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
   }
   h += '<p class="caption" style="margin-top:12px">Ballots are advisory and visible only to staff and commissioners. The applicant sees only the final decision.</p>';
