@@ -63,10 +63,11 @@
   to = "/"
   status = 404
   force = true
-# Repo markdown (BRAND.md, etc.) is working-doc source — the public face is the rendered page
-# (BRAND.md -> /#/brand). Nothing at runtime fetches a .md.
+# BRAND.md is working-doc source — the public face is the rendered page (/#/brand). Netlify only
+# supports a trailing `*` or `:param` in `from`, so an extension glob like `/*.md` never matches;
+# block the file by its prefix, the way README*/CLAUDE* are.
 [[redirects]]
-  from = "/*.md"
+  from = "/BRAND*"
   to = "/"
   status = 404
   force = true
