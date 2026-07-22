@@ -210,8 +210,8 @@
   '.lede{font-size:15.5px;line-height:1.65}'+
   '.card{border-width:1px;border-color:var(--line-soft);border-radius:16px;overflow:hidden}'+
   '.card-h{border-bottom-color:var(--line-soft)}'+
-  '.chip{font-family:var(--f-sharp);font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;'+
-    'background:var(--ice);border-color:transparent;border-radius:999px}'+
+  '.chip{font-family:var(--f-sharp);font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;border-radius:999px}'+
+  '.chip:not(.chip-chrome):not(.chip-live):not(.chip-ink){background:var(--ice);border-color:transparent}'+
   '.note{border-width:1px;border-color:var(--line-soft);border-radius:14px}'+
   '.btn{font-family:var(--f-sharp);font-weight:600;letter-spacing:0;border-radius:999px}'+
   '.tbl th{font-size:10px;letter-spacing:.1em;color:var(--steel)}'+
