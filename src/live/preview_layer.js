@@ -39,8 +39,10 @@
   /* ---- the dark, warmly lit surround + the floating canvas ---- */
   'html[data-theme="light"] body,body{background:#191410!important}'+
   '#pv-aura{position:fixed;inset:0;z-index:0;pointer-events:none;background:'+
-    'radial-gradient(1150px 720px at 82% -6%,rgba(255,166,54,.45),transparent 62%),'+
-    'radial-gradient(950px 660px at 3% 12%,rgba(255,92,44,.30),transparent 62%),'+
+    /* a quiet scrim across the header band, so the tab rests in shade and the glow blooms below it */
+    'linear-gradient(180deg,rgba(20,15,11,.92) 0,rgba(20,15,11,.55) 110px,rgba(20,15,11,0) 260px),'+
+    'radial-gradient(1150px 760px at 84% 6%,rgba(255,166,54,.40),transparent 63%),'+
+    'radial-gradient(950px 680px at 2% 20%,rgba(255,92,44,.27),transparent 62%),'+
     'radial-gradient(1050px 780px at 52% 106%,rgba(255,196,64,.26),transparent 66%),'+
     'radial-gradient(760px 540px at 95% 70%,rgba(255,124,40,.18),transparent 62%)}'+
   '#pv-ribbon{position:relative;z-index:1}'+
