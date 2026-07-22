@@ -273,6 +273,23 @@
   '.pv-anim.go .pv-hbars i{transform:scaleY(1)}'+
   '.pvw-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:end;margin-bottom:16px}'+
   '@media(max-width:640px){.pvw-grid{grid-template-columns:1fr}}'+
+  /* compact variant: the widget as a sidebar feature card */
+  '.pvw-mini{padding:16px 17px;border-radius:18px}'+
+  '.pvw-mini .pvw-h{margin-bottom:10px;gap:8px}'+
+  '.pvw-mini .pvw-ic{width:26px;height:26px;border-radius:9px}'+
+  '.pvw-mini .pvw-ic svg{width:13px;height:13px}'+
+  '.pvw-mini .pvw-h b{font-size:12.5px}'+
+  '.pvw-mini .pv-mt{gap:4px}'+
+  '.pvw-mini .pv-mt button{font-size:10px;padding:3px 9px}'+
+  '.pvw-mini .pv-gauge{max-width:172px;margin:0 auto}'+
+  '.pvw-mini .pvw-big{font-size:26px;margin-top:-22px!important}'+
+  '.pvw-mini .pvw-sub{font-size:10px}'+
+  '.pvw-mini .pv-hbars{height:38px;gap:5px}'+
+  '.pvw-mini .pv-hbars i{border-radius:5px 5px 3px 3px}'+
+  '.pvw-mini .pvm-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 6px}'+
+  '.pvw-mini .pvm-row span.k{font-family:var(--f-sharp);font-weight:300;font-size:10.5px;color:rgba(237,239,233,.55)}'+
+  '.pvw-mini .pvm-row b{font-family:var(--f-sharp);font-weight:600;font-size:12.5px;color:#fff}'+
+  '.pvw-mini .caption{font-size:10.5px;margin-top:8px!important}'+
   '.pvw .pv-mt button{border-color:rgba(237,239,233,.22);color:rgba(237,239,233,.6)}'+
   '.pvw .pv-mt button.on{background:var(--chrome);color:#101519;border-color:var(--chrome)}'+
   '.pvw .caption{color:rgba(237,239,233,.5)}'+
@@ -673,49 +690,44 @@
     {opp:"ANA",g:1,a:2},{opp:"COL",g:0,a:1},{opp:"DAL",g:1,a:0},{opp:"BOS",g:2,a:2},
     {opp:"TOR",g:0,a:1},{opp:"CHI",g:1,a:1}
   ].map(function(g){ g.p = g.g + g.a; return g; });
-  function trendChartHtml(games, metric, sample){
+  function trendChartHtml(games, metric, sample, h){
     var run = 0;
     var pts = games.map(function(gm, i){
       run += gm[metric];
       var name = metric==="p"?"pts":metric==="g"?"G":"A";
       return { v: run, label: "<b>"+(sample?"Sample game ":"Game ")+(i+1)+"</b> \u00b7 vs "+esc(gm.opp)+" \u00b7 +"+gm[metric]+" \u00b7 <b>"+run+" "+name+"</b>" };
     });
-    return pvLine(pts, { color: "#D9A800", h: 130 });
+    return pvLine(pts, { color: "#D9A800", h: h || 130 });
   }
   function renderPlayerTrend(games, metric, sample){
     var name = metric==="p"?"points":metric==="g"?"goals":"assists";
+    var short = metric==="p"?"pts":metric==="g"?"G":"A";
     var tot = games.reduce(function(a,g){ return a+g[metric]; }, 0);
     var per = tot / games.length;
     var last5 = games.slice(-5);
     var lastG = games[games.length-1], prevG = games[games.length-2];
-    return '<div class="pvw-grid">'+
-      '<div>'+pvGauge(Math.min(1, per/3),
-        '<span data-count-skip>'+per.toFixed(1)+'</span>',
-        name+' per game'+(sample?' \u00b7 sample':''))+'</div>'+
-      '<div>'+pvHBars(
-        last5.map(function(g){ return g[metric]; }),
-        last5.map(function(g,i){ return "<b>"+(sample?"Sample game":"Game")+"</b> vs "+esc(g.opp)+" \u00b7 <b>+"+g[metric]+"</b>"; }),
-        '+'+lastG[metric]+' <span style="font-size:14px;font-weight:300;color:rgba(237,239,233,.55)">last game</span>'+
-          (prevG ? pvDelta(lastG[metric]-prevG[metric], 'vs prior') : ''),
-        'last five games \u00b7 '+name)+'</div></div>'+
-      '<div class="ndh" style="display:flex;justify-content:space-between;font-family:var(--f-sharp);font-size:11.5px;font-weight:300;color:rgba(237,239,233,.6);margin:2px 0 6px"><span>Season curve \u00b7 hover the line</span><b style="color:#fff">'+tot+' '+name+'</b></div>'+
-      trendChartHtml(games, metric, sample);
+    return pvGauge(Math.min(1, per/3), per.toFixed(1), short+' per game')+
+      '<div class="pvm-row"><span class="k">Last five</span>'+
+        (prevG ? pvDelta(lastG[metric]-prevG[metric], 'last game') : '')+'</div>'+
+      pvHBars(last5.map(function(g){ return g[metric]; }),
+        last5.map(function(g){ return "<b>"+(sample?"Sample game":"Game")+"</b> vs "+esc(g.opp)+" \u00b7 <b>+"+g[metric]+"</b>"; }))+
+      '<div class="pvm-row"><span class="k">Season curve</span><b>'+tot+' '+short+'</b></div>'+
+      trendChartHtml(games, metric, sample, 62);
   }
   function playerTrendCard(pid){
     var games = playerGames(pid), sample = false;
     if (games.length < 2){ games = SAMPLE_GAMES; sample = true; }
-    return '<section class="sec-tight"><div class="shell"><div class="pvw"><div class="pvw-h">'+
+    return '<div class="pvw pvw-mini"><div class="pvw-h">'+
       '<span class="pvw-ic">'+ICW.gauge+'</span><b>Trends</b>'+
-      (sample?'<span class="chip chip-chrome">Sample</span>':'')+
+      (sample?'<span class="chip chip-chrome" style="font-size:9.5px;padding:2px 7px">Sample</span>':'')+
       '<span class="sp pv-mt" data-pv-owner="'+(sample?"sample":esc(String(pid)))+'">'+
-      [["p","Points"],["g","Goals"],["a","Assists"]].map(function(m,i){
+      [["p","P"],["g","G"],["a","A"]].map(function(m,i){
         return '<button type="button" data-pvmt="'+m[0]+'"'+(i===0?' class="on"':'')+'>'+m[1]+'</button>';
       }).join("")+'</span></div>'+
       '<div id="pv-ptrend">'+renderPlayerTrend(games, "p", sample)+'</div>'+
-      '<p class="caption" style="margin-top:10px">'+
-      (sample
-        ? 'Sample numbers to preview the feature \u2014 this switches to the player\u2019s real box scores automatically once the season starts.'
-        : 'Season to date, game by game.')+'</p></div></div></section>';
+      '<p class="caption">'+(sample
+        ? 'Sample \u2014 switches to real box scores once the season starts.'
+        : 'Season to date, game by game.')+'</p></div>';
   }
   document.addEventListener("click", function(ev){
     var b = ev.target && ev.target.closest && ev.target.closest("[data-pvmt]");
@@ -786,7 +798,12 @@
       try {
         var pid = decodeURIComponent(param||"");
         var pl = ((CG.lg && CG.lg.players) || []).find(function(x){ return x.id===pid || x.tag===pid; });
-        h += playerTrendCard(pl ? pl.id : pid);
+        var card = playerTrendCard(pl ? pl.id : pid);
+        var mark = '<div class="stack">';
+        var i = h.indexOf(mark);
+        /* the profile's sidebar: the widget rides up as a feature card, no scrolling needed */
+        if (i > -1) h = h.slice(0, i + mark.length) + card + h.slice(i + mark.length);
+        else h += '<section class="sec-tight"><div class="shell">'+card+'</div></section>';
       } catch(e){}
       return h;
     };
