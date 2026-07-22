@@ -204,7 +204,7 @@
     .stories{grid-template-columns:1fr}
     .clubs{grid-template-columns:repeat(2,1fr)}
     .hero h1{font-size:clamp(38px,11vw,48px)}
-    .mast-cta .btn span.t{display:none}
+    .hero .facts{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   }
 </style>
 </head>
@@ -266,7 +266,8 @@
       <button id="burger" aria-label="Open menu" aria-expanded="false">
         <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 1h16M1 7h16M1 13h16"/></svg>
       </button>
-      <a class="btn btn-chrome" href="#"><span class="t">Register to play</span><span aria-hidden="true">→</span></a>
+      <!-- ghost, not chrome: the hero owns the one filled-chrome action per view -->
+      <a class="btn btn-ghost-d" href="#">Register</a>
     </div>
   </div>
 </header>
