@@ -263,8 +263,8 @@
   '.pv-gauge .vg{fill:none;stroke:url(#pvgg);stroke-width:5;stroke-linecap:round;'+
     'transition:stroke-dashoffset 1.25s cubic-bezier(.3,.8,.3,1) .2s}'+
   '.pv-gauge .gdot{opacity:0;transition:opacity .4s ease 1.25s;filter:drop-shadow(0 0 6px rgba(255,229,0,.85))}'+
-  '.pv-anim.go .pv-gauge .vg{stroke-dashoffset:0!important}'+
-  '.pv-anim.go .pv-gauge .gdot{opacity:1}'+
+  '.pv-gauge.go .vg,.pv-anim.go .pv-gauge .vg{stroke-dashoffset:0!important}'+
+  '.pv-gauge.go .gdot,.pv-anim.go .pv-gauge .gdot{opacity:1}'+
   '.pv-hbars{display:flex;align-items:flex-end;gap:8px;height:76px}'+
   '.pv-hbars i{flex:1;border-radius:8px 8px 4px 4px;cursor:default;'+
     'background:repeating-linear-gradient(45deg,rgba(237,239,233,.24) 0 4px,rgba(237,239,233,.06) 4px 9px);'+
