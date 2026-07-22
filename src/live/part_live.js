@@ -3784,10 +3784,24 @@ CG.memberIndex = function(){
     })
     .sort(function(a,b){ return a.label.localeCompare(b.label); });
 };
+/* GM/AGM candidates: ANY player signed up for the upcoming season — a club's own roster is not the
+   limit. A roster spot counts too (being rostered means they're in the season). */
+CG.seasonPlayerIndex = function(){
+  var lg = CG.lg||{}, sid = (CG.SEASON && CG.SEASON.id) || null, ok = {};
+  (lg._registrationsRaw||[]).forEach(function(r){
+    if ((!r.season_id || r.season_id===sid) && r.status!=="declined") ok[r.profile_id] = true;
+  });
+  Object.keys(lg._rosteredIds||{}).forEach(function(id){ ok[id] = true; });
+  /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker */
+  var office = {};
+  (lg._profilesRaw||[]).forEach(function(p){ if (p.role==="staff" || p.role==="commissioner") office[p.id] = true; });
+  return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id]; });
+};
 /* attachAC indexes players off the roster; "members" widens it to the whole league for the places
    that need to name someone rather than look up a rostered player. */
 CG._origAcIndex = CG.acIndex;
 CG.acIndex = function(kinds){
+  if ((kinds||[]).indexOf("seasonplayers") >= 0) return CG.seasonPlayerIndex();
   if ((kinds||[]).indexOf("members") >= 0) return CG.memberIndex();
   return CG._origAcIndex.call(CG, kinds||[]);
 };
@@ -3800,9 +3814,9 @@ CG.memberPickerField = function(id, label, hint){
     (hint ? '<small class="caption" style="display:block;margin-top:5px">'+esc(hint)+'</small>' : '')+
     '</label>';
 };
-CG.wireMemberPicker = function(id){
+CG.wireMemberPicker = function(id, kinds){
   var el = document.getElementById(id);
-  if (el && CG.attachAC) CG.attachAC(el, { kinds:["members"] });
+  if (el && CG.attachAC) CG.attachAC(el, { kinds: kinds || ["members"] });
   return el;
 };
 CG.readMemberPicker = function(id){
@@ -4335,23 +4349,29 @@ CG.clubManagementCard = function(){
   var lg = CG.lg||{}, names = lg._profName||{};
   var apps = (lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId; });
   var pending = apps.filter(function(a){ return a.status==="pending"; });
-  function seat(role, label){
+  function seat(role, label, required){
     var holderId = role==="gm" ? m.t.gm : m.t.agm;
     var holder = holderId ? (names[holderId]||"Assigned") : null;
     var pend = pending.find(function(a){ return a.role===role; });
     var right = pend ? '<span class="chip chip-warn chip-xs">'+esc(((pend.nominee&&pend.nominee.gamertag)||"A nominee"))+' — pending</span>'
-      : m.isOwner ? '<button class="btn btn-ghost btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>' : "";
+      : m.isOwner ? '<button class="btn '+(required && !holder ? "btn-chrome" : "btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>' : "";
+    var status = holder ? esc(holder)
+      : required ? '<span style="color:var(--amber-ink)">Vacant — required</span>' : "Vacant — optional";
     return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:10px 0">'+
       '<span class="chip chip-chrome chip-xs">'+esc(role.toUpperCase())+'</span>'+
       '<span style="flex:1;min-width:140px"><b style="font-family:var(--f-disp)">'+esc(label)+'</b>'+
-        '<span class="caption" style="display:block">'+(holder?esc(holder):"Vacant")+'</span></span>'+right+'</div>';
+        '<span class="caption" style="display:block">'+status+'</span></span>'+right+'</div>';
   }
+  /* a club must have an active GM before its first regular-season game */
+  var needsGm = !m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
   var h = '<div class="card" style="margin-bottom:18px;margin-top:20px"><div class="card-h"><h3>Club management</h3>'+
     (m.isOwner?'<span class="chip chip-xs">You own this club</span>':"")+'</div><div class="card-b" style="padding-top:4px">'+
-    seat("gm","General Manager")+seat("agm","Assistant GM")+
+    (needsGm && m.isOwner ? '<div class="note" style="margin:6px 0 2px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">You need a General Manager</b>'+
+      'Every club must have an active GM before its first regular-season game. Nominate one below — the reviewers approve it.</div>' : "")+
+    seat("gm","General Manager", true)+seat("agm","Assistant GM", false)+
     '<p class="caption" style="border-top:1px solid var(--line);padding-top:10px;margin-top:8px">'+
-    (m.isOwner ? "Nominate a member as your GM or AGM. The league office’s application reviewers vote to approve — 50%+1 appoints them automatically."
-               : "Only the club owner can nominate a GM or AGM. Appointments are approved by the league office’s reviewer vote.")+'</p></div></div>';
+    (m.isOwner ? "Nominate any player signed up for the season — they don’t have to be on your roster. The league office’s application reviewers vote to approve; 50%+1 appoints them automatically. A GM is required; an AGM is optional."
+               : "Only the club owner can nominate a GM or AGM. Appointments are approved by the league office’s reviewer vote. A GM is required; an AGM is optional.")+'</p></div></div>';
   /* the owner talks to the office about a pending nomination right here */
   if (m.isOwner) pending.forEach(function(a){
     var roleLabel = a.role==="gm"?"General Manager":"Assistant GM";
@@ -4366,11 +4386,12 @@ CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
   var label = role==="gm"?"General Manager":"Assistant GM";
   CG.modal("Nominate a "+label,
-    '<p class="caption" style="margin-bottom:12px">Pick the member you want as your club’s '+esc(label)+'. The league office’s reviewers vote to approve the appointment.</p>'+
-    CG.memberPickerField("mgNominee","Member","Start typing a gamertag")+
+    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
+      (role==="gm" ? ' Every club needs an active GM before its first regular-season game.' : ' An AGM is optional.')+'</p>'+
+    CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
     '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
-  CG.wireMemberPicker("mgNominee");
+  CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
   var go = document.getElementById("mgGo");
   if (go) go.addEventListener("click", function(){
     var pick = CG.readMemberPicker("mgNominee");
