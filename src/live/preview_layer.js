@@ -14,7 +14,7 @@
   /* serif display + Sora for everything else */
   var fl = document.createElement("link");
   fl.rel = "stylesheet";
-  fl.href = "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Sora:wght@300;400;600;700&display=swap";
+  fl.href = "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Sora:wght@300;400;600;700;800&display=swap";
   document.head.appendChild(fl);
 
   /* Zuume (Adobe Fonts): paste the web-project id from fonts.adobe.com and the
@@ -32,7 +32,7 @@
      chip, table cell, and stat number is Sora; display headings are Zuume */
   ':root{--f-body:"Sora",-apple-system,sans-serif;--f-disp:"Sora",-apple-system,sans-serif;'+
     '--f-mono:"Sora",-apple-system,sans-serif}'+
-  '.num,.tbl td,.val,.statline b,.pv-kpi b{font-variant-numeric:tabular-nums}'+
+  '.num,.mono,.tbl td,.val,.statline b,.pv-kpi b,.kpi b,.ovrbox{font-variant-numeric:tabular-nums}'+
   '#app svg text{font-family:var(--f-sharp)}'+
   '.pop{border-color:var(--line)!important;border-radius:16px;box-shadow:0 18px 50px rgba(16,21,25,.14)}'+
 
@@ -331,10 +331,101 @@
   '.card-h{border-bottom-color:var(--line-soft)}'+
   '.chip{font-family:var(--f-sharp);font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;border-radius:999px}'+
   '.chip:not(.chip-chrome):not(.chip-live):not(.chip-ink){background:var(--ice);border-color:transparent}'+
-  '.note{border-width:1px;border-color:var(--line-soft);border-radius:14px}'+
+  '.note{border-width:1px 1px 1px 4px;border-color:var(--line-soft);border-radius:14px}'+
+  '.note.chr{border-left-color:var(--chrome)}'+
   '.btn{font-family:var(--f-sharp);font-weight:600;letter-spacing:0;border-radius:999px}'+
   '.tbl th{font-size:10px;letter-spacing:.1em;color:var(--steel)}'+
-  '.statline>div b{font-family:var(--f-sharp);font-weight:700}';
+  '.statline>div b{font-family:var(--f-sharp);font-weight:700}'+
+
+  /* ================= interior pages: the same language everywhere ================= */
+  /* controls — one pill idiom for segmented views, filters, and form fields */
+  '.seg{border:0;background:var(--ice);border-radius:999px;padding:3px;gap:2px;overflow:visible}'+
+  '.seg button{border-right:0;border-radius:999px;padding:7px 15px;min-height:34px;'+
+    'font-family:var(--f-sharp);font-weight:600;font-size:12.5px;letter-spacing:0;text-transform:none;color:var(--steel)}'+
+  '.seg button:hover:not(.on){color:var(--ink)}'+
+  '.seg button.on{background:var(--paper);color:var(--ink);box-shadow:0 1px 5px rgba(16,21,25,.10)}'+
+  '.filters{gap:8px}'+
+  '.filters select,.filters input[type=search],.filters input[type=text]{appearance:none;-webkit-appearance:none;'+
+    'border:1px solid var(--line-soft);background:var(--ice);border-radius:999px;padding:0 16px;min-height:40px;'+
+    'width:auto;font-family:var(--f-sharp);font-weight:600;font-size:13px;color:var(--ink)}'+
+  'input,select,textarea{border-width:1px;border-color:var(--line);border-radius:12px;background:var(--ice);'+
+    'font-family:var(--f-sharp);font-weight:400}'+
+  'input:focus,select:focus,textarea:focus{border-color:var(--steel);background:var(--paper)}'+
+  'label.fld>span,.fld>span{font-family:var(--f-sharp);font-weight:600;letter-spacing:.06em;text-transform:none;font-size:11.5px}'+
+  '.btn-ghost{border-width:1px;border-color:var(--line);background:var(--paper)}'+
+  '.btn-ghost:hover{border-color:var(--line);background:var(--ice)}'+
+  '.btn-lg{padding:13px 24px;font-size:15px}'+
+
+  /* surfaces — hairlines, softer corners, lift instead of snap */
+  '.card.raise:hover{box-shadow:0 10px 28px rgba(16,21,25,.08)}'+
+  '.card-h{padding:15px 18px}'+
+  '.kpi{border-width:1px;border-color:var(--line-soft);border-radius:16px;padding:18px 20px}'+
+  '.kpi:hover{border-color:var(--line);background:var(--ice)}'+
+  '.kpi b{font-family:var(--f-sharp);font-weight:300;font-size:clamp(27px,2.3vw,33px);letter-spacing:-.01em;line-height:1.05}'+
+  '.kpi span{font-family:var(--f-sharp);font-weight:600;font-size:10px;letter-spacing:.12em}'+
+  '.gamecard{border-width:1px;border-color:var(--line-soft);border-radius:16px}'+
+  '.gamecard:hover{border-color:var(--line);background:var(--ice);transform:translateY(-2px);box-shadow:0 8px 22px rgba(16,21,25,.07)}'+
+  '.gamecard .gc-when b{font-family:var(--f-display);font-weight:700;font-size:17px;text-transform:uppercase;letter-spacing:.02em}'+
+  '.gamecard .gc-when span{font-family:var(--f-sharp);font-weight:300}'+
+  '.gamecard .gc-match{font-family:var(--f-sharp);font-weight:600;font-size:14px}'+
+  '.newscard{border-width:1px;border-color:var(--line-soft);border-radius:18px}'+
+  '.newscard:hover{transform:translateY(-3px);border-color:var(--line);box-shadow:0 14px 34px rgba(16,21,25,.10)}'+
+  '.newscard h3{font-family:var(--f-sharp);font-weight:700;letter-spacing:-.015em}'+
+  '.newscard .nc-meta{font-family:var(--f-sharp);font-weight:300;letter-spacing:0}'+
+  '.starcard{border:0;background:var(--ice);border-radius:16px}'+
+  /* the dashed-circle placeholder was the most dated idiom on the site */
+  '.empty{padding:46px 24px}'+
+  '.empty .e-art{width:52px;height:52px;border:0;border-radius:18px;background:var(--ice);color:var(--steel)}'+
+  '.empty b{font-family:var(--f-display);font-weight:700;font-size:19px;text-transform:uppercase;letter-spacing:.015em}'+
+  '.empty p{font-family:var(--f-sharp);font-weight:300;font-size:13.5px}'+
+  '.codebox{border:0;background:#12161B;border-radius:18px;position:relative;overflow:hidden}'+
+  '.codebox::before{content:"";position:absolute;inset:0;pointer-events:none;'+
+    'background:radial-gradient(320px 200px at 82% -14%,rgba(255,166,54,.16),transparent 60%)}'+
+  '.codebox>*{position:relative}'+
+  '.mx-hero{border-radius:26px;position:relative;overflow:hidden}'+
+  '.mx-hero::before{content:"";position:absolute;inset:0;pointer-events:none;'+
+    'background:radial-gradient(620px 380px at 84% -10%,rgba(255,166,54,.18),transparent 60%)}'+
+  '.mx-hero>*{position:relative}'+
+
+  /* tables — lighter rules, banded head, readable rank + points */
+  '.tbl th{border-bottom-width:1px;border-bottom-color:var(--line);background:var(--ice);'+
+    'font-family:var(--f-sharp);font-weight:600;padding-top:11px;padding-bottom:11px}'+
+  '.tbl td{border-bottom-color:var(--line-soft);font-family:var(--f-sharp);font-weight:400}'+
+  '.tbl .rankn{font-family:var(--f-sharp);font-weight:600;color:var(--steel)}'+
+  '.tbl td.pts{font-family:var(--f-sharp);font-weight:700;font-size:15px;color:var(--ink)}'+
+  '.tbl .nm{font-family:var(--f-sharp);font-weight:600}'+
+  '.tbl caption{font-family:var(--f-sharp);font-weight:600;letter-spacing:.02em;text-transform:none}'+
+
+  /* micro-components — form strip, ranked rows, ratings, side nav */
+  '.form5{display:inline-flex;gap:3px;align-items:flex-end;height:18px}'+
+  '.form5 i{width:6px;height:6px;border:0;border-radius:3px;background:var(--line)}'+
+  '.form5 i.fd-w{height:18px;background:var(--chrome)}'+
+  '.form5 i.fd-otl{height:11px;background:var(--steel)}'+
+  '.form5 i.fd-l{height:6px;background:var(--line)}'+
+  '.leaderrow{border-radius:14px}'+
+  '.leaderrow .rk{width:26px;height:26px;border-radius:50%;background:var(--ice);display:grid;place-items:center;'+
+    'font-family:var(--f-sharp);font-weight:600;font-size:12px;color:var(--steel)}'+
+  '.leaderrow.top .rk{background:var(--chrome);color:#101519}'+
+  '.leaderrow .val b{font-family:var(--f-sharp);font-weight:300;font-size:24px;letter-spacing:-.01em;line-height:1}'+
+  '.leaderrow .val span{font-family:var(--f-sharp);font-weight:600;font-size:9.5px;letter-spacing:.1em}'+
+  '.ovrbox{border-radius:10px;font-family:var(--f-sharp);font-weight:600;font-size:14px}'+
+  '.statline b{font-family:var(--f-sharp);font-weight:300;font-size:26px;letter-spacing:-.01em}'+
+  '.statline span{font-family:var(--f-sharp);font-weight:600;font-size:9.5px;letter-spacing:.12em}'+
+  '.hub-side a{border-radius:999px;padding:9px 14px;font-family:var(--f-sharp);font-weight:600}'+
+  '.hub-side a.on{background:var(--ink);color:var(--paper)}'+
+  '.hub-side .hs-group{font-family:var(--f-sharp);font-weight:600;letter-spacing:.14em}'+
+  '.sec-link{font-family:var(--f-sharp);font-weight:600;border-bottom-width:2px}'+
+  '.tabs button{font-family:var(--f-sharp);font-weight:600;font-size:13.5px}'+
+  '.rbar .rb-fill{background:linear-gradient(90deg,#3BD98A,var(--chrome))}'+
+
+  /* points bar under the standings PTS cell (filled by the route override) */
+  '.tbl td.pts{position:relative;padding-bottom:15px}'+
+  '.pv-ptsbar{position:absolute;left:7px;right:9px;bottom:6px;height:3px;border-radius:999px;background:var(--line-soft)}'+
+  '.pv-ptsbar::after{content:"";display:block;height:100%;width:calc(var(--p)*100%);border-radius:999px;'+
+    'background:var(--chrome);transform:scaleX(0);transform-origin:left;transition:transform .9s cubic-bezier(.22,.8,.24,1)}'+
+  '.in .pv-ptsbar::after,.pv-ptsbar.go::after{transform:scaleX(1)}'+
+  '.tbl .pv-delta,.leaderrow .pv-delta{opacity:1;transform:none}'+
+  '@media(prefers-reduced-motion:reduce){.pv-ptsbar::after{transform:scaleX(1);transition:none}}';
   var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 
   /* ---- ribbon + the floating canvas frame ---- */
@@ -810,6 +901,45 @@
         ? 'Sample numbers to preview the feature \u2014 real results take over automatically once the club plays.'
         : 'Cumulative standings points \u2014 hover for each result.')+'</p></div></div></section>';
   }
+  /* ---- standings rows: PTS counts up over a leader-scaled bar; DIFF becomes a signed pill
+         (the base markup tints DIFF with an inline colour, which is colour-alone encoding) ---- */
+  if (CG.standRows){
+    var _srows = CG.standRows;
+    CG.standRows = function(div, opts){
+      var html = _srows(div, opts);
+      try {
+        var rows = CG.standings(CG.lg, div);
+        var lead = Math.max.apply(null, rows.map(function(r){ return r.pts; }).concat([1]));
+        rows.forEach(function(r){
+          var ptsCell = '<td class="pts" data-v="'+r.pts+'">'+r.pts+'</td>';
+          if (html.indexOf(ptsCell) < 0) return;
+          html = html.replace(ptsCell,
+            '<td class="pts" data-v="'+r.pts+'"><span data-count="'+r.pts+'">0</span>'+
+            '<span class="pv-ptsbar" style="--p:'+(r.pts/lead).toFixed(3)+'"></span></td>');
+          var diffCell = '<td data-v="'+r.diff+'" style="color:'+(r.diff>0?"var(--green)":r.diff<0?"var(--red)":"inherit")+'">'+(r.diff>0?"+":"")+r.diff+'</td>';
+          if (html.indexOf(diffCell) > -1)
+            html = html.replace(diffCell, '<td data-v="'+r.diff+'">'+pvDelta(r.diff, "")+'</td>');
+        });
+      } catch(e){}
+      return html;
+    };
+  }
+  /* ---- results: the winning score carries the weight (both were identical before) ---- */
+  if (CG.gameCard){
+    var _gcard = CG.gameCard;
+    CG.gameCard = function(g, opts){
+      var html = _gcard(g, opts);
+      try {
+        if (g && g.score && g.home && g.away){
+          var hs = g.score[g.home], as = g.score[g.away];
+          if (hs != null && as != null && hs !== as)
+            html = html.replace('class="gc-score"', 'class="gc-score pv-final" data-w="'+(hs>as?"home":"away")+'"');
+        }
+      } catch(e){}
+      return html;
+    };
+  }
+
   if (CG.ROUTES.player){
     var _plr = CG.ROUTES.player;
     CG.ROUTES.player = function(param, qs){
