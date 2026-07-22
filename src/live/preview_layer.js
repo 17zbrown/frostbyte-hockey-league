@@ -14,11 +14,20 @@
   /* serif display + Sora for everything else */
   var fl = document.createElement("link");
   fl.rel = "stylesheet";
-  fl.href = "https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Sora:wght@300;400;600;700&display=swap";
+  fl.href = "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Sora:wght@300;400;600;700&display=swap";
   document.head.appendChild(fl);
 
+  /* Zuume (Adobe Fonts): paste the web-project id from fonts.adobe.com and the
+     real face takes over everywhere; until then Bebas Neue stands in. */
+  var TYPEKIT_ID = "";
+  if (TYPEKIT_ID){
+    var tk = document.createElement("link");
+    tk.rel = "stylesheet"; tk.href = "https://use.typekit.net/" + TYPEKIT_ID + ".css";
+    document.head.appendChild(tk);
+  }
+
   var css = ''+
-  ':root{--f-sharp:"Sora",-apple-system,sans-serif;--f-display:"Instrument Serif",Georgia,serif}'+
+  ':root{--f-sharp:"Sora",-apple-system,sans-serif;--f-display:"zuume","Bebas Neue",Impact,sans-serif}'+
 
   /* ---- the dark, warmly lit surround + the floating canvas ---- */
   'html[data-theme="light"] body,body{background:#16110C!important;background-image:'+
@@ -57,8 +66,8 @@
   /* ---- serif hero, centered like the reference ---- */
   '#hero{background:var(--paper);color:var(--ink)}'+
   '.pv-soft{text-align:center;padding-top:clamp(56px,8vw,104px);padding-bottom:clamp(40px,5.5vw,72px)}'+
-  '.pv-soft h2.big{font-family:var(--f-display);font-weight:400;font-size:clamp(46px,7vw,92px);line-height:1;'+
-    'letter-spacing:-.01em;color:var(--ink);margin:0 auto 20px;max-width:14ch;text-wrap:balance}'+
+  '.pv-soft h2.big{font-family:var(--f-display);font-weight:700;font-size:clamp(58px,9vw,132px);line-height:.92;'+
+    'letter-spacing:.01em;text-transform:uppercase;color:var(--ink);margin:0 auto 18px;max-width:16ch;text-wrap:balance}'+
   '.pv-soft .dek{font-family:var(--f-sharp);font-weight:300;font-size:clamp(15px,1.3vw,17.5px);line-height:1.65;'+
     'color:var(--steel);max-width:46ch;margin:0 auto}'+
   '.pv-soft .row{display:flex;align-items:center;justify-content:center;gap:24px;margin-top:32px;flex-wrap:wrap}'+
@@ -137,9 +146,9 @@
     '.pv-ch .dotp{opacity:1;transition:none}.pv-prog i,.pv-bar i{transform:scaleX(1);transition:none}}'+
 
   /* ---- skin, site-wide: serif display, Sora UI, soft pills and cards ---- */
-  '.h-page,.h-sec{font-family:var(--f-display);font-weight:400;text-transform:none;letter-spacing:0}'+
-  '.h-page{font-size:clamp(32px,4vw,48px);line-height:1.04}'+
-  '.h-sec{font-size:clamp(26px,2.8vw,36px);line-height:1.08}'+
+  '.h-page,.h-sec{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.015em}'+
+  '.h-page{font-size:clamp(36px,4.6vw,58px);line-height:.98}'+
+  '.h-sec{font-size:clamp(30px,3.2vw,44px);line-height:1}'+
   '.h-card,.card-h h3{font-family:var(--f-sharp);font-weight:700;text-transform:none;letter-spacing:-.01em;font-size:15px}'+
   '.eyebrow{font-family:var(--f-sharp);font-weight:600;letter-spacing:.15em;font-size:10px}'+
   '.lede,.caption{font-family:var(--f-sharp);font-weight:300}'+
