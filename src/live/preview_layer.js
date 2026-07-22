@@ -83,6 +83,8 @@
   '.pv-line a:hover{color:var(--ink)}'+
   '.pv-line .more{margin-left:auto;flex:0 0 auto;font-weight:600;color:var(--ink)}'+
   '.pv-line .sep{opacity:.45}'+
+  'html[data-theme="dark"] .pv-line .k,html[data-theme="dark"] .pv-line .more{color:#E9EEEB}'+
+  '.pv-line a,.pv-line .k,.pv-line .more{transition:none}'+
 
   /* ---- serif hero, centered like the reference ---- */
   '#hero{background:var(--paper);color:var(--ink)}'+
