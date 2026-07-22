@@ -940,6 +940,38 @@
     };
   }
 
+  /* ---- brand page: the typography section describes the fonts ACTUALLY rendering.
+         The layer swaps the type system, so hardcoded face names ("Archivo", "IBM Plex")
+         would document a system the page no longer runs. Read the live stack instead. ---- */
+  if (CG.ROUTES.brand){
+    var _brand = CG.ROUTES.brand;
+    CG.ROUTES.brand = function(param, qs){
+      var html = _brand(param, qs);
+      try {
+        var cs = getComputedStyle(document.documentElement);
+        var first = function(tok, fallback){
+          var v = (cs.getPropertyValue(tok) || "").split(",")[0].replace(/["']/g, "").trim();
+          if (!v) return fallback;
+          /* the display token carries a lowercase Adobe family id — title-case it for reading */
+          return v.charAt(0).toUpperCase() + v.slice(1);
+        };
+        var disp = first("--f-display", first("--f-disp", "Archivo"));
+        var body = first("--f-sharp", first("--f-body", "IBM Plex Sans"));
+        html = html
+          .replace("<b>Archivo</b> · display / headings · 400–900 · tight tracking, balanced wrap",
+                   "<b>"+esc(disp)+"</b> · display / headings · condensed caps · tight tracking")
+          .replace("<b>IBM Plex Sans</b> · body · 400 / 500 / 600 · line-height ~1.6",
+                   "<b>"+esc(body)+"</b> · body · 300 / 400 / 600 / 700 · line-height ~1.6")
+          .replace("<b>IBM Plex Mono</b> · data & labels · tabular figures for every stat",
+                   "<b>"+esc(body)+"</b> · data & labels · tabular figures for every stat")
+          .replace("Three faces, each with a job", "Two faces, each with a job")
+          .replace("A display face for confidence, a body face for reading, a mono face for anything that’s a number.",
+                   "A condensed display face for confidence and one text face across body copy, labels, and data.");
+      } catch(e){}
+      return html;
+    };
+  }
+
   if (CG.ROUTES.player){
     var _plr = CG.ROUTES.player;
     CG.ROUTES.player = function(param, qs){
