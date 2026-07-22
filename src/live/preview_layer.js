@@ -32,7 +32,7 @@
 
   /* ---- soft hero ---- */
   '#hero{background:var(--paper);color:var(--ink)}'+
-  '.pv-soft{padding:clamp(56px,9vw,120px) 0 clamp(40px,6vw,80px)}'+
+  '.pv-soft{padding-top:clamp(56px,9vw,120px);padding-bottom:clamp(40px,6vw,80px)}'+
   '.pv-soft .kick{font-size:11.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--steel)}'+
   '.pv-soft h2.big{font-family:var(--f-serif);font-weight:520;font-size:clamp(38px,5.2vw,62px);line-height:1.04;'+
     'letter-spacing:-.015em;color:var(--ink);margin:18px 0 16px;max-width:20ch;text-wrap:balance}'+
@@ -136,6 +136,9 @@
     _renderChrome.apply(this, arguments);
     try {
       ensureRibbon();
+      var saved = null;
+      try { saved = (JSON.parse(localStorage.getItem("cgproto:v1")||"{}").prefs||{}).theme; } catch(e){}
+      if (!saved || saved === "auto") document.documentElement.setAttribute("data-theme","light");
       var t = document.getElementById("ticker"), mast = document.getElementById("masthead");
       if (t) t.innerHTML = lineHtml();
       if (t && mast && mast.parentNode && (mast.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_PRECEDING)){
