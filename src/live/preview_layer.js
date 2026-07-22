@@ -403,15 +403,34 @@
   /* ---- audit persona (preview only): renders signed-in LAYOUTS while signed out.
          Client-side cosplay for design review — RLS still guards every row, and any
          write would be refused by the database. Refuses to touch a real session. ---- */
+  var _hubRoute = null;
+  function installPersonaGuards(){
+    if (_hubRoute) return;
+    _hubRoute = CG.ROUTES.hub;
+    CG.ROUTES.hub = function(param, qs){
+      if (param === "messages" && CG._pvReal){
+        return CG.hubShell("messages",
+          '<div style="margin-bottom:20px"><span class="eyebrow chr">Direct messages</span>'+
+          '<h1 class="h-sec" style="margin-top:8px">Messages</h1></div>'+
+          '<div class="card"><div class="card-b"><p class="lede">The audit persona has no real account, so private '+
+          'conversations cannot load here. Sign in normally to use Messages.</p></div></div>');
+      }
+      return _hubRoute(param, qs);
+    };
+  }
+
   window.PVAS = function(role){
     try {
       if (!CG.auth) CG.auth = {};
+      installPersonaGuards();
       if (CG.auth.role && CG.auth.role !== "guest" && !CG._pvReal) return "real session — refusing";
-      if (!CG._pvReal) CG._pvReal = { role: CG.auth.role || "guest", profile: CG.auth.profile || null };
+      if (!CG._pvReal) CG._pvReal = { role: CG.auth.role || "guest", profile: CG.auth.profile || null, user: CG.auth.user || null };
       if (!role || role === "guest"){
-        CG.auth.role = CG._pvReal.role; CG.auth.profile = CG._pvReal.profile; CG._pvReal = null;
+        CG.auth.role = CG._pvReal.role; CG.auth.profile = CG._pvReal.profile;
+        CG.auth.user = CG._pvReal.user; CG._pvReal = null;
       } else {
         CG.auth.role = role;
+        CG.auth.user = { id: "00000000-0000-4000-8000-000000000000" };
         CG.auth.profile = { id: "00000000-0000-4000-8000-000000000000", gamertag: "Design Audit",
           display_name: "Design Audit", avatar_url: null, is_admin: false,
           role: role === "commish" ? "commissioner" : (role === "mgmt" ? "member" : role),
