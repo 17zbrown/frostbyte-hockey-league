@@ -237,6 +237,49 @@
     'border-radius:999px;border:1px solid var(--line-soft);background:transparent;color:var(--steel);cursor:pointer}'+
   '.pv-mt button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}'+
 
+  /* ---- stat-widget kit (dark cards, gauge, hatched bars, delta pills) ---- */
+  '.pvw{background:#12161B;border-radius:22px;color:#EDEFE9;padding:20px 22px;position:relative;overflow:hidden}'+
+  '.pvw::before{content:"";position:absolute;inset:0;pointer-events:none;background:'+
+    'radial-gradient(460px 280px at 88% -12%,rgba(255,166,54,.15),transparent 60%),'+
+    'radial-gradient(380px 260px at 4% 108%,rgba(255,92,44,.10),transparent 60%)}'+
+  '.pvw>*{position:relative}'+
+  '.pvw-h{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}'+
+  '.pvw-ic{width:30px;height:30px;border-radius:10px;background:rgba(237,239,233,.08);display:grid;'+
+    'place-items:center;color:var(--chrome)}'+
+  '.pvw-ic svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}'+
+  '.pvw-h b{font-family:var(--f-sharp);font-weight:600;font-size:13.5px;color:#fff}'+
+  '.pvw-h .sp{margin-left:auto}'+
+  '.pvw-big{font-family:var(--f-sharp);font-weight:300;font-size:clamp(30px,2.8vw,40px);color:#fff;'+
+    'font-variant-numeric:tabular-nums;line-height:1}'+
+  '.pvw-sub{font-family:var(--f-sharp);font-weight:300;font-size:11px;color:rgba(237,239,233,.55)}'+
+  '.pv-delta{display:inline-flex;align-items:center;gap:4px;font-family:var(--f-sharp);font-weight:600;'+
+    'font-size:11px;border-radius:999px;padding:2px 9px;opacity:0;transform:translateY(4px);'+
+    'transition:opacity .5s ease .9s,transform .5s ease .9s}'+
+  '.go .pv-delta,.pv-anim.go .pv-delta{opacity:1;transform:none}'+
+  '.pv-delta.up{color:#3BD98A;background:rgba(59,217,138,.13)}'+
+  '.pv-delta.dn{color:#FF8A66;background:rgba(255,138,102,.13)}'+
+  '.pv-gauge svg{width:100%;display:block}'+
+  '.pv-gauge .trk{fill:none;stroke:rgba(237,239,233,.10);stroke-width:5;stroke-linecap:round}'+
+  '.pv-gauge .vg{fill:none;stroke:url(#pvgg);stroke-width:5;stroke-linecap:round;'+
+    'transition:stroke-dashoffset 1.25s cubic-bezier(.3,.8,.3,1) .2s}'+
+  '.pv-gauge .gdot{opacity:0;transition:opacity .4s ease 1.25s;filter:drop-shadow(0 0 6px rgba(255,229,0,.85))}'+
+  '.pv-anim.go .pv-gauge .vg{stroke-dashoffset:0!important}'+
+  '.pv-anim.go .pv-gauge .gdot{opacity:1}'+
+  '.pv-hbars{display:flex;align-items:flex-end;gap:8px;height:76px}'+
+  '.pv-hbars i{flex:1;border-radius:8px 8px 4px 4px;cursor:default;'+
+    'background:repeating-linear-gradient(45deg,rgba(237,239,233,.24) 0 4px,rgba(237,239,233,.06) 4px 9px);'+
+    'transform:scaleY(0);transform-origin:bottom;transition:transform .7s cubic-bezier(.34,1.45,.5,1)}'+
+  '.pv-hbars i.cur{background:var(--chrome)}'+
+  '.pv-anim.go .pv-hbars i{transform:scaleY(1)}'+
+  '.pvw-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:end;margin-bottom:16px}'+
+  '@media(max-width:640px){.pvw-grid{grid-template-columns:1fr}}'+
+  '.pvw .pv-mt button{border-color:rgba(237,239,233,.22);color:rgba(237,239,233,.6)}'+
+  '.pvw .pv-mt button.on{background:var(--chrome);color:#101519;border-color:var(--chrome)}'+
+  '.pvw .caption{color:rgba(237,239,233,.5)}'+
+  '@media(prefers-reduced-motion:reduce){.pv-gauge .vg{stroke-dashoffset:0!important;transition:none}'+
+    '.pv-gauge .gdot{opacity:1;transition:none}.pv-hbars i{transform:scaleY(1);transition:none}'+
+    '.pv-delta{opacity:1;transform:none;transition:none}}'+
+
   /* ---- dark mode, treated deliberately: warm depth instead of flat black ---- */
   'html[data-theme="dark"]{--paper:#14181D;--ice:#1B2127;--line:#2C343C;--line-soft:#242B32;--steel:#93A0AB}'+
   'html[data-theme="dark"] #pv-frame{background:#14181D;'+
@@ -499,7 +542,7 @@
   }
   function chartGo(root){
     requestAnimationFrame(function(){ requestAnimationFrame(function(){
-      (root || document).querySelectorAll(".pv-chart:not(.go)").forEach(function(c){ c.classList.add("go"); });
+      (root || document).querySelectorAll(".pv-chart:not(.go), .pv-anim:not(.go)").forEach(function(c){ c.classList.add("go"); });
     }); });
   }
   document.addEventListener("mousemove", function(ev){
@@ -560,12 +603,17 @@
         var pts = j.games.map(function(g, i){
           return { v: g.pts, label: "<b>Game "+(i+1)+"</b> \u00b7 vs "+g.opp+" \u00b7 <b>"+g.r+" "+g.gf+"\u2013"+g.ga+"</b> \u00b7 "+g.pts+" pts" };
         });
-        var last10 = j.games.slice(-10).map(function(g){
-          return '<i class="'+g.r+'" data-tip="vs '+g.opp+' \u00b7 <b>'+g.r+" "+g.gf+"\u2013"+g.ga+'</b>"></i>';
-        }).join("");
-        nd.innerHTML = '<div class="ndh"><span>Cumulative points \u00b7 hover the line</span><b>'+j.games.length+' games</b></div>'+
-          pvLine(pts, { color: color, h: 110 })+
-          '<div class="ndh" style="margin-top:12px"><span>Last 10</span></div><div class="pv-l10">'+last10+'</div>';
+        var l10g = j.games.slice(-10);
+        var totPts = j.games[j.games.length-1].pts;
+        nd.innerHTML = '<div class="pvw-grid" style="margin-top:10px">'+
+          '<div>'+pvGauge(totPts/(j.games.length*2), String(totPts), 'of '+(j.games.length*2)+' possible points')+'</div>'+
+          '<div>'+pvHBars(
+            l10g.map(function(g){ return g.pts0!==undefined?g.pts0:(g.r==="W"?2:(g.r==="OTL"?1:0)); }),
+            l10g.map(function(g){ return "vs "+g.opp+" \u00b7 <b>"+g.r+" "+g.gf+"\u2013"+g.ga+"</b>"; }),
+            l10g.filter(function(g){ return g.r==="W"; }).length+' <span style="font-size:14px;font-weight:300;color:rgba(237,239,233,.55)">wins in the last 10</span>',
+            'points earned, last ten games')+'</div></div>'+
+          '<div class="ndh"><span>Cumulative points \u00b7 hover the line</span><b>'+j.games.length+' games</b></div>'+
+          pvLine(pts, { color: color, h: 110 });
         nd.setAttribute("data-filled","1");
         chartGo(nd);
       })
@@ -573,6 +621,41 @@
         nd.innerHTML = '<p style="font-family:var(--f-sharp);font-weight:300;font-size:12px;color:rgba(237,239,233,.5);padding:8px 0">Couldn\u2019t reach the NHL API.</p>';
       });
   });
+
+  /* ---- widget helpers: arc gauge, hatched bars, delta pills ---- */
+  var ICW = {
+    gauge: '<svg viewBox="0 0 16 16"><path d="M2.5 12a5.5 5.5 0 1 1 11 0"/><path d="M8 12l2.6-4"/></svg>',
+    bars: '<svg viewBox="0 0 16 16"><path d="M3 13V9M8 13V5M13 13V7"/></svg>'
+  };
+  function pvGauge(pct, bigHtml, sub){
+    pct = Math.max(0.02, Math.min(1, pct));
+    var cx=100, cy=88, r=76;
+    var phi = Math.PI * (1 - pct);
+    var ex = cx + r*Math.cos(phi), ey = cy - r*Math.sin(phi);
+    return '<div class="pv-gauge pv-anim"><svg viewBox="0 0 200 96" aria-hidden="true">'+
+      '<defs><linearGradient id="pvgg" x1="0" y1="0" x2="1" y2="0">'+
+      '<stop offset="0" stop-color="#3BD98A"/><stop offset="1" stop-color="#FFE500"/></linearGradient></defs>'+
+      '<path class="trk" d="M'+(cx-r)+' '+cy+' A'+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy+'"/>'+
+      '<path class="vg" pathLength="1" stroke-dasharray="'+pct.toFixed(3)+' 1" stroke-dashoffset="'+pct.toFixed(3)+'" '+
+        'd="M'+(cx-r)+' '+cy+' A'+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy+'"/>'+
+      '<circle class="gdot" cx="'+ex.toFixed(1)+'" cy="'+ey.toFixed(1)+'" r="4" fill="#fff"/></svg>'+
+      '<div class="pvw-big" style="text-align:center;margin-top:-30px">'+bigHtml+'</div>'+
+      '<div class="pvw-sub" style="text-align:center;margin-top:3px">'+sub+'</div></div>';
+  }
+  function pvHBars(vals, tips, bigHtml, sub){
+    var max = Math.max.apply(null, vals.concat([1]));
+    var bars = vals.map(function(v, i){
+      return '<i class="'+(i===vals.length-1?'cur':'')+'" style="height:'+Math.max(8, Math.round(100*v/max))+'%;'+
+        'transition-delay:'+(i*70)+'ms"'+(tips && tips[i] ? ' data-tip="'+tips[i]+'"' : '')+'></i>';
+    }).join("");
+    return '<div class="pv-anim"><div class="pv-hbars">'+bars+'</div>'+
+      (bigHtml?'<div class="pvw-big" style="margin-top:10px">'+bigHtml+'</div>':'')+
+      (sub?'<div class="pvw-sub" style="margin-top:3px">'+sub+'</div>':'')+'</div>';
+  }
+  function pvDelta(diff, label){
+    if (diff === 0) return '<span class="pv-delta up">= '+label+'</span>';
+    return '<span class="pv-delta '+(diff>0?'up':'dn')+'">'+(diff>0?'\u2191 +':'\u2193 ')+diff+' '+label+'</span>';
+  }
 
   /* ---- CGHL trend cards: self-activating once EA box scores exist ---- */
   function playerGames(pid){
@@ -598,21 +681,40 @@
     });
     return pvLine(pts, { color: "#D9A800", h: 130 });
   }
+  function renderPlayerTrend(games, metric, sample){
+    var name = metric==="p"?"points":metric==="g"?"goals":"assists";
+    var tot = games.reduce(function(a,g){ return a+g[metric]; }, 0);
+    var per = tot / games.length;
+    var last5 = games.slice(-5);
+    var lastG = games[games.length-1], prevG = games[games.length-2];
+    return '<div class="pvw-grid">'+
+      '<div>'+pvGauge(Math.min(1, per/3),
+        '<span data-count-skip>'+per.toFixed(1)+'</span>',
+        name+' per game'+(sample?' \u00b7 sample':''))+'</div>'+
+      '<div>'+pvHBars(
+        last5.map(function(g){ return g[metric]; }),
+        last5.map(function(g,i){ return "<b>"+(sample?"Sample game":"Game")+"</b> vs "+esc(g.opp)+" \u00b7 <b>+"+g[metric]+"</b>"; }),
+        '+'+lastG[metric]+' <span style="font-size:14px;font-weight:300;color:rgba(237,239,233,.55)">last game</span>'+
+          (prevG ? pvDelta(lastG[metric]-prevG[metric], 'vs prior') : ''),
+        'last five games \u00b7 '+name)+'</div></div>'+
+      '<div class="ndh" style="display:flex;justify-content:space-between;font-family:var(--f-sharp);font-size:11.5px;font-weight:300;color:rgba(237,239,233,.6);margin:2px 0 6px"><span>Season curve \u00b7 hover the line</span><b style="color:#fff">'+tot+' '+name+'</b></div>'+
+      trendChartHtml(games, metric, sample);
+  }
   function playerTrendCard(pid){
     var games = playerGames(pid), sample = false;
     if (games.length < 2){ games = SAMPLE_GAMES; sample = true; }
-    return '<section class="sec-tight"><div class="shell"><div class="card"><div class="card-h">'+
-      '<h3 style="display:flex;align-items:center;gap:10px">Trends'+
-      (sample?'<span class="chip chip-chrome">Sample</span>':'')+'</h3>'+
-      '<span class="pv-mt" data-pv-owner="'+(sample?"sample":esc(String(pid)))+'">'+
+    return '<section class="sec-tight"><div class="shell"><div class="pvw"><div class="pvw-h">'+
+      '<span class="pvw-ic">'+ICW.gauge+'</span><b>Trends</b>'+
+      (sample?'<span class="chip chip-chrome">Sample</span>':'')+
+      '<span class="sp pv-mt" data-pv-owner="'+(sample?"sample":esc(String(pid)))+'">'+
       [["p","Points"],["g","Goals"],["a","Assists"]].map(function(m,i){
         return '<button type="button" data-pvmt="'+m[0]+'"'+(i===0?' class="on"':'')+'>'+m[1]+'</button>';
       }).join("")+'</span></div>'+
-      '<div class="card-b" id="pv-ptrend">'+trendChartHtml(games, "p", sample)+
-      '<p class="caption" style="margin-top:8px">'+
+      '<div id="pv-ptrend">'+renderPlayerTrend(games, "p", sample)+'</div>'+
+      '<p class="caption" style="margin-top:10px">'+
       (sample
-        ? 'Sample numbers to preview the feature \u2014 this chart switches to the player\u2019s real box scores automatically once the season starts.'
-        : 'Season to date, game by game \u2014 hover for each night.')+'</p></div></div></div></section>';
+        ? 'Sample numbers to preview the feature \u2014 this switches to the player\u2019s real box scores automatically once the season starts.'
+        : 'Season to date, game by game.')+'</p></div></div></section>';
   }
   document.addEventListener("click", function(ev){
     var b = ev.target && ev.target.closest && ev.target.closest("[data-pvmt]");
@@ -623,8 +725,7 @@
     var owner = wrap.getAttribute("data-pv-owner");
     var sample = owner === "sample";
     var games = sample ? SAMPLE_GAMES : playerGames(owner);
-    box.firstChild.remove();
-    box.insertAdjacentHTML("afterbegin", trendChartHtml(games, b.getAttribute("data-pvmt"), sample));
+    box.innerHTML = renderPlayerTrend(games, b.getAttribute("data-pvmt"), sample);
     chartGo(box);
   });
   function teamPoints(code){
@@ -638,14 +739,44 @@
         return { v: run, label: "<b>Game "+(i+1)+"</b> \u00b7 vs "+(r.home===code?r.away:r.home)+" \u00b7 <b>"+(us>them?"W":(r.ot?"OTL":"L"))+" "+us+"\u2013"+them+"</b> \u00b7 "+run+" pts" };
       });
   }
+  var SAMPLE_TEAM = [
+    {opp:"TOR",us:3,them:2,ot:false},{opp:"CHI",us:1,them:4,ot:false},{opp:"PIT",us:2,them:1,ot:true},
+    {opp:"WPG",us:5,them:2,ot:false},{opp:"ANA",us:2,them:3,ot:true},{opp:"COL",us:4,them:1,ot:false},
+    {opp:"BOS",us:1,them:2,ot:false},{opp:"DAL",us:3,them:1,ot:false},{opp:"TOR",us:2,them:0,ot:false},
+    {opp:"CHI",us:4,them:3,ot:true}
+  ];
   function teamTrendCard(code){
-    var pts = teamPoints(code);
-    if (pts.length < 2) return "";
+    var real = teamPoints(code), sample = real.length < 2;
+    var pts, gamesArr;
+    if (sample){
+      var run = 0;
+      pts = SAMPLE_TEAM.map(function(g, i){
+        var p = g.us > g.them ? 2 : (g.ot ? 1 : 0); run += p;
+        return { v: run, label: "<b>Sample game "+(i+1)+"</b> \u00b7 vs "+g.opp+" \u00b7 <b>"+(g.us>g.them?"W":(g.ot?"OTL":"L"))+" "+g.us+"\u2013"+g.them+"</b> \u00b7 "+run+" pts" };
+      });
+      gamesArr = SAMPLE_TEAM;
+    } else { pts = real; gamesArr = null; }
     var team = (CG.TEAMS||[]).find(function(x){ return x.code === code; });
-    return '<section class="sec-tight"><div class="shell"><div class="card"><div class="card-h"><h3>The points race</h3>'+
-      '<span class="chip">Game by game</span></div>'+
-      '<div class="card-b">'+pvLine(pts, { color: (team && team.color) || "#D9A800", h: 130 })+
-      '<p class="caption" style="margin-top:8px">Cumulative standings points \u2014 hover for each result.</p></div></div></div></section>';
+    var color = (team && team.color) || "#D9A800";
+    var totPts = pts[pts.length-1].v, gp = pts.length;
+    var gaugeHtml = pvGauge(totPts/(gp*2), String(totPts), 'of '+(gp*2)+' possible points'+(sample?' \u00b7 sample':''));
+    var barsHtml = "";
+    if (sample){
+      barsHtml = pvHBars(
+        gamesArr.map(function(g){ return g.us; }),
+        gamesArr.map(function(g){ return "vs "+g.opp+" \u00b7 <b>"+g.us+"\u2013"+g.them+"</b>"; }),
+        String(gamesArr[gamesArr.length-1].us)+' <span style="font-size:14px;font-weight:300;color:rgba(237,239,233,.55)">goals last game</span>',
+        'goals for, last ten \u00b7 sample');
+    }
+    return '<section class="sec-tight"><div class="shell"><div class="pvw"><div class="pvw-h">'+
+      '<span class="pvw-ic">'+ICW.bars+'</span><b>The points race</b>'+
+      (sample?'<span class="chip chip-chrome">Sample</span>':'<span class="chip">Game by game</span>')+'</div>'+
+      '<div class="pvw-grid"><div>'+gaugeHtml+'</div><div>'+(barsHtml||'')+'</div></div>'+
+      pvLine(pts, { color: color, h: 120 })+
+      '<p class="caption" style="margin-top:10px">'+
+      (sample
+        ? 'Sample numbers to preview the feature \u2014 real results take over automatically once the club plays.'
+        : 'Cumulative standings points \u2014 hover for each result.')+'</p></div></div></section>';
   }
   if (CG.ROUTES.player){
     var _plr = CG.ROUTES.player;
