@@ -309,6 +309,79 @@
   'html[data-theme="dark"] .pv-cta .dot{background:#101519;color:var(--chrome)}'+
   'html[data-theme="dark"] .pv-soft .quiet{color:#F2F4F0}'+
 
+  /* ---- motion & dimension kit: 3D tilt, spring bubbles, flip-in crests, trophy ---- */
+  '.pv-tilt{transform-style:preserve-3d;will-change:transform;transition:transform .35s cubic-bezier(.22,.8,.24,1);position:relative}'+
+  '.pv-tilt.tilting{transition:transform .06s linear}'+
+  '.pv-tilt .pv-glare{position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;'+
+    'background:radial-gradient(420px 300px at var(--gx,50%) var(--gy,50%),rgba(255,255,255,.14),transparent 60%);'+
+    'transition:opacity .3s ease;z-index:4}'+
+  '.pv-tilt.tilting .pv-glare{opacity:1}'+
+  /* spring pop for stat bubbles */
+  '@keyframes pvPop{0%{transform:scale(.65);opacity:0}70%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}'+
+  '.pv-kpi{border-radius:18px;background:#F6F8F5;padding:14px 16px;transition:transform .25s cubic-bezier(.34,1.56,.64,1),box-shadow .25s ease}'+
+  '.pv-kpi:hover{transform:translateY(-3px) scale(1.03);box-shadow:0 10px 24px rgba(16,21,25,.10)}'+
+  '.in .pv-kpis .pv-kpi{animation:pvPop .55s cubic-bezier(.34,1.56,.64,1) both}'+
+  '.in .pv-kpis .pv-kpi:nth-child(2){animation-delay:.08s}'+
+  '.in .pv-kpis .pv-kpi:nth-child(3){animation-delay:.16s}'+
+  '.in .pv-kpis .pv-kpi:nth-child(4){animation-delay:.24s}'+
+  /* 3D crest treatment: staggered flip-in entrance, coin-spin on hover */
+  '.pv-crests{perspective:900px}'+
+  '.pv-crests a{opacity:0;transform:rotateY(70deg)}'+
+  '@keyframes pvFlip{0%{opacity:0;transform:rotateY(70deg)}100%{opacity:1;transform:rotateY(0)}}'+
+  '.in .pv-crests a{animation:pvFlip .7s cubic-bezier(.22,.8,.24,1) both}'+
+  ['','',''].map(function(_,i){return '';}).join('')+
+  '.in .pv-crests a:nth-child(2){animation-delay:.07s}.in .pv-crests a:nth-child(3){animation-delay:.14s}'+
+  '.in .pv-crests a:nth-child(4){animation-delay:.21s}.in .pv-crests a:nth-child(5){animation-delay:.28s}'+
+  '.in .pv-crests a:nth-child(6){animation-delay:.35s}.in .pv-crests a:nth-child(7){animation-delay:.42s}'+
+  '.in .pv-crests a:nth-child(8){animation-delay:.49s}'+
+  '.pv-crests a img,.pv-crests a svg{transition:transform .8s cubic-bezier(.22,.8,.24,1)}'+
+  '.pv-crests a:hover img,.pv-crests a:hover svg{transform:rotateY(360deg)}'+
+  /* every crest sitewide gets a gentle dimensional hover */
+  '.crest{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}'+
+  'a:hover>.crest,[data-go]:hover .crest,.rowlink:hover .crest{transform:translateY(-1px) scale(1.12) rotate(-4deg)}'+
+  /* shine sweep utility for cards and bars */
+  '@keyframes pvSweep{0%{transform:translateX(-130%) skewX(-18deg)}100%{transform:translateX(240%) skewX(-18deg)}}'+
+  '.pv-nrow:hover .pv-nbar i::after{content:"";position:absolute;inset:0;width:45%;'+
+    'background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);'+
+    'animation:pvSweep .9s ease}'+
+  '.pv-nbar i{position:relative;overflow:hidden}'+
+  /* ring gauge: full-circle percentile ring */
+  '.pv-ring{position:relative;display:inline-grid;place-items:center}'+
+  '.pv-ring svg{display:block;transform:rotate(-90deg)}'+
+  '.pv-ring .rtrk{fill:none;stroke:#F0F2EE;stroke-width:7}'+
+  '.pv-ring .rval{fill:none;stroke:url(#pvgg);stroke-width:7;stroke-linecap:round;'+
+    'transition:stroke-dashoffset 1.2s cubic-bezier(.3,.8,.3,1) .25s}'+
+  '.pv-ring.go .rval,.pv-anim.go .pv-ring .rval{stroke-dashoffset:0!important}'+
+  '.pv-ring .rc{position:absolute;text-align:center}'+
+  '.pv-ring .rc b{font-family:var(--f-sharp);font-weight:300;font-size:22px;color:#101519;display:block;line-height:1;font-variant-numeric:tabular-nums}'+
+  '.pv-ring .rc span{font-family:var(--f-sharp);font-weight:600;font-size:8.5px;letter-spacing:.08em;color:#5C6B75;text-transform:uppercase}'+
+  /* chart endpoint ripple */
+  '@keyframes pvPing{0%{transform:scale(.4);opacity:.7}100%{transform:scale(2.4);opacity:0}}'+
+  '.pv-chart .plz{transform-origin:center;transform-box:fill-box;opacity:0}'+
+  '.pv-chart.go .plz{animation:pvPing 1.6s ease-out 1.3s 3}'+
+  /* the trophy: vector, chrome, glinting, floating */
+  '@keyframes pvFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}'+
+  '@keyframes pvGlint{0%,55%{transform:translateX(-140%) skewX(-20deg)}85%,100%{transform:translateX(220%) skewX(-20deg)}}'+
+  '.pv-trophy{position:relative;filter:drop-shadow(0 18px 30px rgba(0,0,0,.45))}'+
+  '.pv-trophy.float{animation:pvFloat 5s ease-in-out infinite}'+
+  '.pv-trophy .glint{overflow:hidden}'+
+  '.pv-trophy .glint rect{animation:pvGlint 3.6s ease-in-out infinite}'+
+  '.pv-awhero{position:relative;border-radius:26px;overflow:hidden;margin-bottom:22px;background:#12161B;'+
+    'color:#EDEFE9;display:flex;align-items:center;gap:clamp(18px,4vw,54px);padding:clamp(22px,4vw,44px);flex-wrap:wrap}'+
+  '.pv-awhero::before{content:"";position:absolute;inset:0;pointer-events:none;background:'+
+    'radial-gradient(560px 360px at 82% 20%,rgba(255,196,64,.20),transparent 60%),'+
+    'radial-gradient(420px 320px at 8% 100%,rgba(255,124,40,.12),transparent 60%)}'+
+  '.pv-awhero>*{position:relative}'+
+  '.pv-awhero h2{font-family:var(--f-display);font-weight:700;font-size:clamp(32px,4.4vw,58px);'+
+    'text-transform:uppercase;letter-spacing:.015em;color:#fff;line-height:.95}'+
+  '.pv-awhero p{font-family:var(--f-sharp);font-weight:300;font-size:14px;color:rgba(237,239,233,.8);margin-top:8px;max-width:50ch}'+
+  '@media(prefers-reduced-motion:reduce){'+
+    '.in .pv-kpis .pv-kpi,.in .pv-crests a{animation:none;opacity:1;transform:none}'+
+    '.pv-crests a{opacity:1;transform:none}'+
+    '.pv-trophy.float,.pv-trophy .glint rect,.pv-chart.go .plz{animation:none}'+
+    '.pv-tilt{transition:none}'+
+    '.pv-ring .rval{stroke-dashoffset:0!important;transition:none}}'+
+
   /* ---- gentle reveals + hover motion (off under reduced motion) ---- */
   '.pv-rv{opacity:0;transform:translateY(14px);transition:opacity .65s ease,transform .65s ease}'+
   '.pv-rv.in{opacity:1;transform:none}'+
@@ -653,6 +726,7 @@
       '<path class="ar2" d="'+area+'" fill="'+color+'"/>'+
       '<path class="ln2 drw" pathLength="1" d="'+line+'" stroke="'+color+'"/>'+
       '<line class="gd" x1="-9" x2="-9" y1="6" y2="'+(H-6)+'"/>'+
+      '<circle class="plz" cx="'+xy[xy.length-1][0].toFixed(1)+'" cy="'+xy[xy.length-1][1].toFixed(1)+'" r="5" fill="none" stroke="'+color+'" stroke-width="1.5"/>'+
       '<circle class="cur" r="3.5" fill="'+color+'" cx="-9" cy="-9"/></svg></div>';
   }
   /* rAF gives the browser a frame to paint start styles so transitions run; the timeout is the
@@ -783,6 +857,71 @@
   function pvDelta(diff, label){
     if (diff === 0) return '<span class="pv-delta up">= '+label+'</span>';
     return '<span class="pv-delta '+(diff>0?'up':'dn')+'">'+(diff>0?'\u2191 +':'\u2193 ')+diff+' '+label+'</span>';
+  }
+
+  /* ---- 3D tilt: one delegated pointer engine for .pv-tilt targets ---- */
+  var tiltEl = null;
+  var TILT_SEL = ".pvw, .pv-dash, [data-go^=\"#/team/\"].card";
+  function tiltTargets(node){
+    var t = node && node.closest && node.closest(TILT_SEL);
+    return (t && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) ? t : null;
+  }
+  document.addEventListener("pointermove", function(ev){
+    var t = tiltTargets(ev.target);
+    if (tiltEl && tiltEl !== t){
+      tiltEl.classList.remove("tilting"); tiltEl.style.transform = "";
+      tiltEl = null;
+    }
+    if (!t) return;
+    if (!t.classList.contains("pv-tilt")){
+      t.classList.add("pv-tilt");
+      if (!t.querySelector(".pv-glare")){
+        var g = document.createElement("i"); g.className = "pv-glare"; t.appendChild(g);
+      }
+    }
+    tiltEl = t;
+    var r = t.getBoundingClientRect();
+    var px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height;
+    t.classList.add("tilting");
+    t.style.transform = "perspective(850px) rotateX(" + ((py - .5) * -7).toFixed(2) + "deg) rotateY(" + ((px - .5) * 9).toFixed(2) + "deg)";
+    t.style.setProperty("--gx", (px * 100).toFixed(1) + "%");
+    t.style.setProperty("--gy", (py * 100).toFixed(1) + "%");
+  });
+  document.addEventListener("pointerleave", function(){
+    if (tiltEl){ tiltEl.classList.remove("tilting"); tiltEl.style.transform = ""; tiltEl = null; }
+  }, true);
+
+  /* ---- ring gauge: full-circle stat bubble ---- */
+  function pvRing(pct, valHtml, label, size){
+    pct = Math.max(0.02, Math.min(1, pct));
+    var S = size || 96, r = (S - 10) / 2, C = S / 2;
+    return '<div class="pv-ring pv-anim" style="width:'+S+'px;height:'+S+'px">'+
+      '<svg width="'+S+'" height="'+S+'" viewBox="0 0 '+S+' '+S+'" aria-hidden="true">'+
+      '<defs><linearGradient id="pvgg" x1="0" y1="0" x2="1" y2="0">'+
+      '<stop offset="0" stop-color="#3BD98A"/><stop offset="1" stop-color="#FFE500"/></linearGradient></defs>'+
+      '<circle class="rtrk" cx="'+C+'" cy="'+C+'" r="'+r+'"/>'+
+      '<circle class="rval" cx="'+C+'" cy="'+C+'" r="'+r+'" pathLength="1" '+
+        'stroke-dasharray="'+pct.toFixed(3)+' 1" stroke-dashoffset="'+pct.toFixed(3)+'"/></svg>'+
+      '<span class="rc"><b>'+valHtml+'</b><span>'+label+'</span></span></div>';
+  }
+
+  /* ---- the trophy: brand-drawn vector with glint + float ---- */
+  function pvTrophy(size){
+    var S = size || 150;
+    return '<svg class="pv-trophy float" width="'+S+'" height="'+Math.round(S*1.15)+'" viewBox="0 0 100 115" aria-hidden="true">'+
+      '<defs><linearGradient id="pvtg" x1="0" y1="0" x2="1" y2="1">'+
+        '<stop offset="0" stop-color="#FFF3B0"/><stop offset=".45" stop-color="#FFE500"/>'+
+        '<stop offset=".75" stop-color="#D9A800"/><stop offset="1" stop-color="#A87F00"/></linearGradient>'+
+      '<clipPath id="pvtc"><path d="M30 12h40v18c0 16-8 26-20 26S30 46 30 30z"/></clipPath></defs>'+
+      '<path d="M30 12h40v18c0 16-8 26-20 26S30 46 30 30z" fill="url(#pvtg)"/>'+
+      '<path d="M30 16H16c0 16 6 24 16 26" fill="none" stroke="url(#pvtg)" stroke-width="6" stroke-linecap="round"/>'+
+      '<path d="M70 16h14c0 16-6 24-16 26" fill="none" stroke="url(#pvtg)" stroke-width="6" stroke-linecap="round"/>'+
+      '<path d="M46 56h8l3 16h-14z" fill="url(#pvtg)"/>'+
+      '<rect x="34" y="74" width="32" height="8" rx="2" fill="url(#pvtg)"/>'+
+      '<rect x="28" y="84" width="44" height="12" rx="2.5" fill="#1A2127"/>'+
+      '<rect x="28" y="98" width="44" height="5" rx="2" fill="url(#pvtg)"/>'+
+      '<g class="glint" clip-path="url(#pvtc)"><rect x="20" y="6" width="14" height="56" fill="rgba(255,255,255,.55)"/></g>'+
+      '<circle cx="50" cy="34" r="9" fill="rgba(16,21,25,.22)"/></svg>';
   }
 
   /* ---- CGHL trend cards: self-activating once EA box scores exist ---- */
@@ -972,6 +1111,23 @@
     };
   }
 
+  if (CG.ROUTES.awards){
+    var _aw = CG.ROUTES.awards;
+    CG.ROUTES.awards = function(param, qs){
+      var h = _aw(param, qs);
+      try {
+        var mSec = h.indexOf('<section');
+        if (mSec > -1){
+          var band = '<section class="sec-tight"><div class="shell"><div class="pv-awhero">'+
+            pvTrophy(140)+
+            '<div><h2>Honors</h2><p>Player of the Week, season awards, and the championship record '+
+            '\u2014 decided on the ice, kept forever.</p></div></div></div></section>';
+          h = h.slice(0, mSec) + band + h.slice(mSec);
+        }
+      } catch(e){}
+      return h;
+    };
+  }
   if (CG.ROUTES.player){
     var _plr = CG.ROUTES.player;
     CG.ROUTES.player = function(param, qs){
