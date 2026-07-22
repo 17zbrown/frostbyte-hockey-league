@@ -19,7 +19,7 @@
 
   /* Zuume (Adobe Fonts): paste the web-project id from fonts.adobe.com and the
      real face takes over everywhere; until then Bebas Neue stands in. */
-  var TYPEKIT_ID = "";
+  var TYPEKIT_ID = "dvf3fqu";
   if (TYPEKIT_ID){
     var tk = document.createElement("link");
     tk.rel = "stylesheet"; tk.href = "https://use.typekit.net/" + TYPEKIT_ID + ".css";
