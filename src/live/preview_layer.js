@@ -28,6 +28,13 @@
 
   var css = ''+
   ':root{--f-sharp:"Sora",-apple-system,sans-serif;--f-display:"zuume","Bebas Neue",Impact,sans-serif}'+
+  /* the whole base type system routes into the new fonts: every label, date,
+     chip, table cell, and stat number is Sora; display headings are Zuume */
+  ':root{--f-body:"Sora",-apple-system,sans-serif;--f-disp:"Sora",-apple-system,sans-serif;'+
+    '--f-mono:"Sora",-apple-system,sans-serif}'+
+  '.num,.tbl td,.val,.statline b,.pv-kpi b{font-variant-numeric:tabular-nums}'+
+  '#app svg text{font-family:var(--f-sharp)}'+
+  '.pop{border-color:var(--line)!important;border-radius:16px;box-shadow:0 18px 50px rgba(16,21,25,.14)}'+
 
   /* ---- the dark, warmly lit surround + the floating canvas ---- */
   'html[data-theme="light"] body,body{background:#16110C!important;background-image:'+
@@ -61,6 +68,10 @@
   '#masthead a[aria-label="Join with Discord"]{background:#fff!important;border:0!important;'+
     'color:var(--ink)!important;border-radius:999px!important;font-weight:600}'+
   '#masthead .shell{max-width:1680px}'+
+  '#masthead .mh{min-height:76px}'+
+  '@media(min-width:1200px){#masthead .mh{position:relative}'+
+    '#masthead .mh-nav{position:absolute;left:50%;bottom:0;transform:translateX(-50%);margin:0}'+
+    '#masthead .mh-right{margin-left:auto}}'+
   '@media(max-width:900px){#masthead .mh-nav::before,#masthead .mh-nav::after{display:none}}'+
 
   /* ---- the "up next" whisper line ---- */
