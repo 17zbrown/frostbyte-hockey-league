@@ -584,25 +584,35 @@
         return { at: r.at, opp: team===r.home ? r.away : r.home, g: line.g||0, a: line.a||0, p: (line.g||0)+(line.a||0) };
       }).filter(Boolean);
   }
-  function trendChartHtml(games, metric){
+  var SAMPLE_GAMES = [
+    {opp:"TOR",g:1,a:0},{opp:"CHI",g:0,a:1},{opp:"PIT",g:2,a:1},{opp:"WPG",g:0,a:0},
+    {opp:"ANA",g:1,a:2},{opp:"COL",g:0,a:1},{opp:"DAL",g:1,a:0},{opp:"BOS",g:2,a:2},
+    {opp:"TOR",g:0,a:1},{opp:"CHI",g:1,a:1}
+  ].map(function(g){ g.p = g.g + g.a; return g; });
+  function trendChartHtml(games, metric, sample){
     var run = 0;
     var pts = games.map(function(gm, i){
       run += gm[metric];
       var name = metric==="p"?"pts":metric==="g"?"G":"A";
-      return { v: run, label: "<b>Game "+(i+1)+"</b> \u00b7 vs "+esc(gm.opp)+" \u00b7 +"+gm[metric]+" \u00b7 <b>"+run+" "+name+"</b>" };
+      return { v: run, label: "<b>"+(sample?"Sample game ":"Game ")+(i+1)+"</b> \u00b7 vs "+esc(gm.opp)+" \u00b7 +"+gm[metric]+" \u00b7 <b>"+run+" "+name+"</b>" };
     });
     return pvLine(pts, { color: "#D9A800", h: 130 });
   }
   function playerTrendCard(pid){
-    var games = playerGames(pid);
-    if (games.length < 2) return "";
-    return '<section class="sec-tight"><div class="shell"><div class="card"><div class="card-h"><h3>Trends</h3>'+
-      '<span class="pv-mt" data-pv-owner="'+esc(String(pid))+'">'+
+    var games = playerGames(pid), sample = false;
+    if (games.length < 2){ games = SAMPLE_GAMES; sample = true; }
+    return '<section class="sec-tight"><div class="shell"><div class="card"><div class="card-h">'+
+      '<h3 style="display:flex;align-items:center;gap:10px">Trends'+
+      (sample?'<span class="chip chip-chrome">Sample</span>':'')+'</h3>'+
+      '<span class="pv-mt" data-pv-owner="'+(sample?"sample":esc(String(pid)))+'">'+
       [["p","Points"],["g","Goals"],["a","Assists"]].map(function(m,i){
         return '<button type="button" data-pvmt="'+m[0]+'"'+(i===0?' class="on"':'')+'>'+m[1]+'</button>';
       }).join("")+'</span></div>'+
-      '<div class="card-b" id="pv-ptrend">'+trendChartHtml(games, "p")+
-      '<p class="caption" style="margin-top:8px">Season to date, game by game \u2014 hover for each night.</p></div></div></div></section>';
+      '<div class="card-b" id="pv-ptrend">'+trendChartHtml(games, "p", sample)+
+      '<p class="caption" style="margin-top:8px">'+
+      (sample
+        ? 'Sample numbers to preview the feature \u2014 this chart switches to the player\u2019s real box scores automatically once the season starts.'
+        : 'Season to date, game by game \u2014 hover for each night.')+'</p></div></div></div></section>';
   }
   document.addEventListener("click", function(ev){
     var b = ev.target && ev.target.closest && ev.target.closest("[data-pvmt]");
@@ -610,9 +620,11 @@
     var wrap = b.closest(".pv-mt"); var box = document.getElementById("pv-ptrend");
     if (!wrap || !box) return;
     wrap.querySelectorAll("button").forEach(function(x){ x.classList.toggle("on", x===b); });
-    var games = playerGames(wrap.getAttribute("data-pv-owner"));
+    var owner = wrap.getAttribute("data-pv-owner");
+    var sample = owner === "sample";
+    var games = sample ? SAMPLE_GAMES : playerGames(owner);
     box.firstChild.remove();
-    box.insertAdjacentHTML("afterbegin", trendChartHtml(games, b.getAttribute("data-pvmt")));
+    box.insertAdjacentHTML("afterbegin", trendChartHtml(games, b.getAttribute("data-pvmt"), sample));
     chartGo(box);
   });
   function teamPoints(code){
