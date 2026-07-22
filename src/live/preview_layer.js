@@ -400,6 +400,28 @@
     '</div></section>';
   }
 
+  /* ---- audit persona (preview only): renders signed-in LAYOUTS while signed out.
+         Client-side cosplay for design review — RLS still guards every row, and any
+         write would be refused by the database. Refuses to touch a real session. ---- */
+  window.PVAS = function(role){
+    try {
+      if (!CG.auth) CG.auth = {};
+      if (CG.auth.role && CG.auth.role !== "guest" && !CG._pvReal) return "real session — refusing";
+      if (!CG._pvReal) CG._pvReal = { role: CG.auth.role || "guest", profile: CG.auth.profile || null };
+      if (!role || role === "guest"){
+        CG.auth.role = CG._pvReal.role; CG.auth.profile = CG._pvReal.profile; CG._pvReal = null;
+      } else {
+        CG.auth.role = role;
+        CG.auth.profile = { id: "00000000-0000-4000-8000-000000000000", gamertag: "Design Audit",
+          display_name: "Design Audit", avatar_url: null, is_admin: false,
+          role: role === "commish" ? "commissioner" : (role === "mgmt" ? "member" : role),
+          departments: (role === "staff" || role === "commish") ? ["applications"] : [] };
+      }
+      CG.renderChrome(); CG.router();
+      return "as " + CG.auth.role;
+    } catch(e){ return "ERR " + (e && e.message); }
+  };
+
   /* ---- Namesake Watch: real NHL Stats API numbers for the eight namesakes ---- */
   var nhlCache = null, nhlLoading = false;
   function nhlSection(){
