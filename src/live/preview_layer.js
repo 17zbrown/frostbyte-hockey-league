@@ -369,6 +369,7 @@
       if (!e.isIntersecting) return;
       e.target.classList.add("in");
       runCounters(e.target);
+      chartGo(e.target);
       io.unobserve(e.target);
     });
   }, { rootMargin: "0px 0px -8% 0px" }) : null;
