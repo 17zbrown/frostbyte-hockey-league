@@ -398,11 +398,17 @@
         el.classList.add("pv-rv");
         el.style.transitionDelay = Math.min(i * 45, 220) + "ms";
         io.observe(el);
+        /* if the observer never reports (a broken or paused compositor), nothing should stay
+           hidden — reveal and animate it anyway shortly after. */
+        setTimeout(function(){
+          if (el.classList.contains("in")) return;
+          el.classList.add("in"); runCounters(el); chartGo(el);
+        }, 2500);
       });
   }
   var app = document.getElementById("app");
   if (app && "MutationObserver" in window){
-    new MutationObserver(function(){ requestAnimationFrame(function(){ attachReveals(); fillNhl(); }); })
+    new MutationObserver(function(){ pvSchedule(function(){ attachReveals(); fillNhl(); }); })
       .observe(app, { childList: true });
   }
 
@@ -558,6 +564,14 @@
       '<line class="gd" x1="-9" x2="-9" y1="6" y2="'+(H-6)+'"/>'+
       '<circle class="cur" r="3.5" fill="'+color+'" cx="-9" cy="-9"/></svg></div>';
   }
+  /* rAF gives the browser a frame to paint start styles so transitions run; the timeout is the
+     safety net for contexts where rAF is paused (background tabs, embedded webviews) — without it
+     the reveal system never runs and faded-in content would stay invisible. Both paths are safe
+     to run: every step below is idempotent. */
+  function pvSchedule(fn){
+    requestAnimationFrame(function(){ requestAnimationFrame(fn); });
+    setTimeout(fn, 140);
+  }
   function chartGo(root){
     var run = function(){
       (root || document).querySelectorAll(".pv-chart:not(.go), .pv-anim:not(.go)")
@@ -566,8 +580,7 @@
     /* the double rAF lets the start styles paint so the transition actually runs. The timeout is
        the safety net: where rAF is paused (background tabs, embedded webviews) the widgets would
        otherwise stay frozen at zero height instead of simply skipping the animation. */
-    requestAnimationFrame(function(){ requestAnimationFrame(run); });
-    setTimeout(run, 140);
+    pvSchedule(run);
   }
   document.addEventListener("mousemove", function(ev){
     var tip = ensureTip();
