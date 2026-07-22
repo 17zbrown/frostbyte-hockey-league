@@ -1,57 +1,57 @@
 /* ================================================================
    PREVIEW LAYER — loaded ONLY in preview.html (never index.html).
-   Direction: soft, classy, editorial. A calm first viewport (nav,
-   one quiet "up next" line, a serif hero with a single action),
-   boxless icon modules, gentle reveal animations, and a softened
-   skin across every page. Every route, module, and behavior is the
-   production code untouched; overrides fail safe to the original.
+   Direction: clean, sharp, modern. Sora carries the whole page —
+   heavy for headlines, light for the small text. A stripped hero
+   (headline, one line, one action, one meta line, icon labels),
+   gentle reveal animations, and a softened skin on every page.
+   Every route, module, and behavior is the production code
+   untouched; overrides fail safe to the original rendering.
    ================================================================ */
 (function(){
   "use strict";
 
-  /* the display serif that replaces the poster caps */
+  /* one family, full range: 300 for the small text, 700/800 for the display */
   var fl = document.createElement("link");
   fl.rel = "stylesheet";
-  fl.href = "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,420;9..144,520;9..144,600&display=swap";
+  fl.href = "https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&display=swap";
   document.head.appendChild(fl);
 
   var css = ''+
-  ':root{--f-serif:"Fraunces",Georgia,serif}'+
+  ':root{--f-sharp:"Sora",-apple-system,sans-serif}'+
   '#pv-ribbon{background:var(--gold);color:#101519;font-size:11px;font-weight:600;letter-spacing:.06em;'+
     'text-transform:uppercase;text-align:center;padding:5px 12px}'+
 
   /* ---- the "up next" whisper line in place of the ticker ---- */
   '#ticker{height:auto;background:var(--ice);border-bottom:1px solid var(--line-soft)}'+
   '.pv-line{display:flex;align-items:center;gap:14px;max-width:1240px;margin:0 auto;padding:8px clamp(16px,3.5vw,40px);'+
-    'font-size:12.5px;color:var(--steel);white-space:nowrap;overflow:hidden}'+
+    'font-family:var(--f-sharp);font-size:12px;font-weight:300;color:var(--steel);white-space:nowrap;overflow:hidden}'+
   '.pv-line .k{font-weight:600;color:var(--ink);flex:0 0 auto}'+
   '.pv-line a{color:var(--steel);transition:color .25s}'+
   '.pv-line a:hover{color:var(--ink)}'+
   '.pv-line .more{margin-left:auto;flex:0 0 auto;font-weight:600;color:var(--ink)}'+
   '.pv-line .sep{opacity:.45}'+
 
-  /* ---- soft hero ---- */
+  /* ---- stripped hero ---- */
   '#hero{background:var(--paper);color:var(--ink)}'+
-  '.pv-soft{padding-top:clamp(56px,9vw,120px);padding-bottom:clamp(40px,6vw,80px)}'+
-  '.pv-soft .kick{font-size:11.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--steel)}'+
-  '.pv-soft h2.big{font-family:var(--f-serif);font-weight:520;font-size:clamp(38px,5.2vw,62px);line-height:1.04;'+
-    'letter-spacing:-.015em;color:var(--ink);margin:18px 0 16px;max-width:20ch;text-wrap:balance}'+
-  '.pv-soft .dek{font-size:clamp(15.5px,1.35vw,18px);line-height:1.65;color:var(--steel);max-width:56ch}'+
-  '.pv-soft .row{display:flex;align-items:center;gap:22px;margin-top:30px;flex-wrap:wrap}'+
-  '.pv-soft .quiet{font-family:var(--f-serif);font-weight:520;font-size:15px;color:var(--ink);'+
-    'border-bottom:1.5px solid var(--chrome);padding-bottom:2px;transition:border-color .25s,color .25s}'+
+  '.pv-soft{padding-top:clamp(64px,10vw,130px);padding-bottom:clamp(36px,5vw,64px)}'+
+  '.pv-soft h2.big{font-family:var(--f-sharp);font-weight:800;font-size:clamp(38px,5.2vw,64px);line-height:1.02;'+
+    'letter-spacing:-.03em;color:var(--ink);margin:0 0 18px;max-width:18ch;text-wrap:balance}'+
+  '.pv-soft .dek{font-family:var(--f-sharp);font-weight:300;font-size:clamp(15.5px,1.35vw,18.5px);line-height:1.6;'+
+    'color:var(--steel);max-width:52ch}'+
+  '.pv-soft .row{display:flex;align-items:center;gap:24px;margin-top:32px;flex-wrap:wrap}'+
+  '.pv-soft .quiet{font-family:var(--f-sharp);font-weight:600;font-size:14px;color:var(--ink);'+
+    'border-bottom:2px solid var(--chrome);padding-bottom:2px;transition:color .25s}'+
   '.pv-soft .quiet:hover{color:var(--gold)}'+
-  '.pv-count{margin-top:26px;font-size:13px;color:var(--steel)}'+
-  '.pv-count b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}'+
+  '.pv-meta{margin-top:22px;font-family:var(--f-sharp);font-weight:300;font-size:13px;color:var(--steel)}'+
+  '.pv-meta b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}'+
 
-  /* ---- boxless icon modules ---- */
-  '.pv-icons{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(20px,3vw,44px);'+
-    'padding:clamp(28px,4vw,52px) 0;border-top:1px solid var(--line-soft)}'+
-  '.pv-ic svg{width:30px;height:30px;stroke:var(--ink);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}'+
-  '.pv-ic svg .acc{stroke:var(--gold)}'+
-  '.pv-ic b{display:block;font-family:var(--f-serif);font-weight:520;font-size:17px;color:var(--ink);margin:10px 0 3px}'+
-  '.pv-ic span{font-size:13px;line-height:1.5;color:var(--steel)}'+
-  '@media(max-width:820px){.pv-icons{grid-template-columns:1fr 1fr;gap:22px}}'+
+  /* ---- icon labels: one quiet spec line, no boxes, no captions ---- */
+  '.pv-specs{display:flex;gap:clamp(22px,3.5vw,48px);flex-wrap:wrap;align-items:center;'+
+    'margin-top:clamp(36px,5vw,60px);padding-top:clamp(20px,2.5vw,30px);border-top:1px solid var(--line-soft)}'+
+  '.pv-sp{display:inline-flex;align-items:center;gap:10px}'+
+  '.pv-sp svg{width:22px;height:22px;stroke:var(--ink);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}'+
+  '.pv-sp svg .acc{stroke:var(--gold)}'+
+  '.pv-sp span{font-family:var(--f-sharp);font-weight:400;font-size:13.5px;color:var(--ink)}'+
 
   /* ---- gentle reveals + hover motion (off under reduced motion) ---- */
   '.pv-rv{opacity:0;transform:translateY(14px);transition:opacity .65s ease,transform .65s ease}'+
@@ -61,23 +61,23 @@
   '.card.raise:hover{transform:translateY(-2px);border-color:var(--line)}'+
   '@media(prefers-reduced-motion:reduce){.pv-rv{opacity:1;transform:none;transition:none}}'+
 
-  /* ---- soft skin, site-wide: editorial serif, sentence case, fewer boxes ---- */
-  '.h-page,.h-sec{font-family:var(--f-serif);font-weight:520;text-transform:none;letter-spacing:-.012em}'+
-  '.h-page{font-size:clamp(30px,3.8vw,44px);line-height:1.08}'+
-  '.h-sec{font-size:clamp(23px,2.5vw,30px);line-height:1.12}'+
-  '.h-card,.card-h h3{font-family:var(--f-serif);font-weight:520;text-transform:none;letter-spacing:0;font-size:16.5px}'+
-  '.eyebrow{font-family:var(--f-body);font-weight:600;letter-spacing:.15em;font-size:10.5px}'+
+  /* ---- sharp skin, site-wide: heavy display, light small text ---- */
+  '.h-page,.h-sec{font-family:var(--f-sharp);font-weight:800;text-transform:none;letter-spacing:-.025em}'+
+  '.h-page{font-size:clamp(28px,3.6vw,42px);line-height:1.05}'+
+  '.h-sec{font-size:clamp(22px,2.4vw,29px);line-height:1.1}'+
+  '.h-card,.card-h h3{font-family:var(--f-sharp);font-weight:700;text-transform:none;letter-spacing:-.01em;font-size:15.5px}'+
+  '.eyebrow{font-family:var(--f-sharp);font-weight:600;letter-spacing:.15em;font-size:10px}'+
+  '.lede,.caption{font-family:var(--f-sharp);font-weight:300}'+
   '.lede{font-size:15.5px;line-height:1.65}'+
-  /* boxes breathe: hairlines, not frames */
   '.card{border-width:1px;border-color:var(--line-soft)}'+
   '.card-h{border-bottom-color:var(--line-soft)}'+
-  '.chip{font-family:var(--f-body);font-size:11.5px;font-weight:600;letter-spacing:0;text-transform:none;'+
+  '.chip{font-family:var(--f-sharp);font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;'+
     'background:var(--ice);border-color:transparent}'+
   '.note{border-width:1px;border-color:var(--line-soft)}'+
-  '.btn{font-family:var(--f-body);font-weight:600;letter-spacing:.01em}'+
-  '.mh-nav a{font-weight:600}'+
+  '.btn{font-family:var(--f-sharp);font-weight:600;letter-spacing:0}'+
+  '.mh-nav a{font-family:var(--f-sharp);font-weight:600}'+
   '.tbl th{font-size:10px;letter-spacing:.1em;color:var(--steel)}'+
-  '.statline>div b{font-family:var(--f-serif);font-weight:520}'+
+  '.statline>div b{font-family:var(--f-sharp);font-weight:800}'+
   '#masthead a[aria-label="Join with Discord"]{background:transparent!important;'+
     'border:1.5px solid #5865F2!important;color:var(--ink)!important}';
   var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
@@ -97,7 +97,7 @@
   }, { rootMargin: "0px 0px -8% 0px" }) : null;
   function attachReveals(){
     if (!io) return;
-    document.querySelectorAll("#app .sec, #app .sec-tight, #app .sec-dark, .pv-soft > .shell > *, .pv-icons > *")
+    document.querySelectorAll("#app .sec, #app .sec-tight, #app .sec-dark, .pv-soft > *")
       .forEach(function(el, i){
         if (el.classList.contains("pv-rv")) return;
         el.classList.add("pv-rv");
@@ -162,49 +162,43 @@
       '<path d="M10.5 14v5M8 16.5h5"/><circle class="acc" cx="22" cy="15" r="1" /><circle class="acc" cx="25" cy="18" r="1"/></svg>'
   };
 
-  /* ---- the soft home: calm hero + icon modules; roadmap and the data
-         sections follow untouched (softened by the skin) ---- */
+  /* ---- the stripped home hero: headline, one line, one action, one meta line,
+         icon labels. The data sections follow untouched, softened by the skin. ---- */
   function softHero(){
     var s = CG.SEASON || {};
     var regOpen = !!(s.registration_open && s.status !== "active");
     var active = s.status === "active";
     var startMs = CG.seasonStartMs && CG.seasonStartMs();
-    var head = active
-      ? esc(s.name||"The season")+" is under way."
-      : "The puck drops "+(startMs ? esc(CG.fmtDay(startMs).replace(/^[A-Za-z]+, /,"")) : "soon")+".";
-    var dek = "Eight clubs, two divisions, and a fresh sheet. "+
-      (regOpen && s.registration_deadline
-        ? "Sign up by "+esc(CG.fmtDay(Date.parse(s.registration_deadline)))+" and hear your name on draft night."
-        : "Every box score imports straight from EA — the standings keep themselves.");
-    /* the live countdowns keep their ids so the untouched AFTER.home wiring drives them */
+    var startTag = startMs ? esc(CG.fmtDay(startMs).replace(/^[A-Za-z]+, /,"")) : "soon";
+    var head = active ? esc(s.name||"The season")+" is under way." : "The puck drops "+startTag+".";
+    var dek = "Eight clubs, two divisions, and a fresh sheet.";
+
+    /* one meta line: the live countdown keeps its id so the untouched AFTER.home drives it */
     var regDl = s.registration_deadline ? Date.parse(s.registration_deadline) : null;
     var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;
     var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
     var faLive = !!(faO && faC && Date.now() >= faO && Date.now() < faC);
-    var count = "";
+    var meta = "";
     if (faLive)
-      count = '<p class="pv-count">Free agency closes in <b id="faCountdown" data-close="'+faC+'">—</b></p>';
+      meta = '<p class="pv-meta">Free agency closes in <b id="faCountdown" data-close="'+faC+'">—</b></p>';
     else if (regOpen && regDl && Date.now() < regDl)
-      count = '<p class="pv-count">Registration closes in <b id="regCountdown" data-close="'+regDl+'">—</b></p>';
+      meta = '<p class="pv-meta">Registration closes '+esc(CG.fmtDay(regDl))+' · <b id="regCountdown" data-close="'+regDl+'">—</b></p>';
 
-    var facts = [];
-    facts.push([IC.pad, "6v6 · EA Sports NHL", "Full games, real box scores, nothing typed in by hand."]);
-    if (s.draft_at) facts.push([IC.cal, "Draft night "+esc(CG.fmtDay(Date.parse(s.draft_at)).replace(/^[A-Za-z]+, /,"")),
-      "Clubs build their rosters live on the site."]);
-    if (CG.CAP) facts.push([IC.cap, "$"+(CG.CAP/1e6)+"M salary cap", "Every contract counts against it."]);
-    facts.push([IC.puck, active ? "Wednesdays and Fridays" : "Puck drop "+(startMs ? esc(CG.fmtDay(startMs).replace(/^[A-Za-z]+, /,"")) : "soon"),
-      active ? "Three games a night, every point counting." : "The regular season begins."]);
+    var specs = [];
+    specs.push([IC.pad, "6v6 · EA Sports NHL"]);
+    if (s.draft_at) specs.push([IC.cal, "Draft night "+esc(CG.fmtDay(Date.parse(s.draft_at)).replace(/^[A-Za-z]+, /,""))]);
+    if (CG.CAP) specs.push([IC.cap, "$"+(CG.CAP/1e6)+"M salary cap"]);
+    specs.push([IC.puck, active ? "Wednesdays & Fridays" : "Puck drop "+startTag]);
 
     return '<section id="hero"><div class="shell pv-soft">'+
-      '<span class="kick">'+esc((CG.seasonTag&&CG.seasonTag())||"Season 1")+' · Inaugural</span>'+
       '<h2 class="big">'+head+'</h2>'+
       '<p class="dek">'+dek+'</p>'+
       '<div class="row">'+
         (regOpen ? '<a class="btn btn-chrome" href="#/register">Register to play</a>' : '<a class="btn btn-chrome" href="#/schedule">See the schedule</a>')+
         '<a class="quiet" href="#/rulebook">How the season works</a></div>'+
-      count+
-      '<div class="pv-icons">'+facts.slice(0,4).map(function(f){
-        return '<div class="pv-ic">'+f[0]+'<b>'+f[1]+'</b><span>'+f[2]+'</span></div>';
+      meta+
+      '<div class="pv-specs">'+specs.slice(0,4).map(function(f){
+        return '<span class="pv-sp">'+f[0]+'<span>'+f[1]+'</span></span>';
       }).join("")+'</div>'+
     '</div></section>';
   }
@@ -217,8 +211,8 @@
       var endMark = '</aside></div></section>';
       var b = html.indexOf(endMark, a);
       if (a < 0 || b < 0) return html;            /* markers moved — ship the original untouched */
-      /* a calm open: the banner strips fold into the hero (countdowns included),
-         and the stat boxes fold into the icon modules */
+      /* a calm open: the banner strips fold into the hero (countdown included),
+         and the stat boxes fold into the icon labels */
       var h1 = html.indexOf('</h1>');
       var head = h1 > -1 ? html.slice(0, h1 + 5) : "";
       html = head + softHero() + html.slice(b + endMark.length);
@@ -232,5 +226,5 @@
     } catch(e){ return html; }
   };
   /* AFTER.home stays the original: the carousel no-ops, and the countdown ids
-     (#regCountdown / #faCountdown) are provided by the soft hero. */
+     (#regCountdown / #faCountdown) are provided by the hero's meta line. */
 })();
