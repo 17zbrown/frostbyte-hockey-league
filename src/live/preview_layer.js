@@ -47,7 +47,27 @@
   '.pv-rail time{font-family:var(--f-mono);font-size:10px;color:var(--on-ink-dim)}'+
   '@media(max-width:820px){.pv-hero-grid{grid-template-columns:1fr}'+
     '.pv-rail{border-left:0;padding-left:0;border-top:1px solid #232B31;padding-top:10px}}'+
-  '@media(max-width:560px){.pv-facts{display:grid;grid-template-columns:1fr 1fr;gap:16px}}';
+  '@media(max-width:560px){.pv-facts{display:grid;grid-template-columns:1fr 1fr;gap:16px}}'+
+
+  /* ---- full-site skin: the league-site visual language on EVERY page ---- */
+  /* poster display type: big, heavy, uppercase */
+  '.h-page,.h-sec{font-family:var(--f-disp);font-weight:900;text-transform:uppercase;letter-spacing:-.02em}'+
+  '.h-page{font-size:clamp(30px,4.4vw,52px);line-height:.98}'+
+  '.h-sec{font-size:clamp(24px,3vw,34px);line-height:1.02}'+
+  '.h-card{font-weight:800}'+
+  /* panel headers: compact mono-caps broadcast labels */
+  '.card-h h3{font-family:var(--f-disp);font-weight:900;font-size:14.5px;letter-spacing:.03em}'+
+  '.tbl th{font-size:9.5px;letter-spacing:.13em}'+
+  /* controls: display face, decisive */
+  '.btn{font-family:var(--f-disp);font-weight:700}'+
+  '.mh-nav a{font-weight:700}'+
+  '.chip{font-family:var(--f-mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}'+
+  /* stat readouts: heavy numerals */
+  '.statline>div b{font-family:var(--f-disp);font-weight:900}'+
+  '.kpi b.num{font-family:var(--f-disp);font-weight:900}'+
+  /* story/news cards: kicker + hover lift, square */
+  '.card.raise{transition:transform .18s ease,border-color .18s ease}'+
+  '.card.raise:hover{transform:translateY(-3px);border-color:var(--steel)}';
   var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 
   /* ---- preview ribbon (so nobody mistakes this for the live site) ---- */
@@ -100,6 +120,10 @@
       ensureRibbon();
       var t = document.getElementById("ticker");
       if (t) t.innerHTML = stripHtml();
+      /* calm the masthead CTA: outline treatment, chrome stays the page's only filled accent.
+         (Inline-styled by the shell, so it's restyled here rather than via CSS.) */
+      var dj = document.querySelector('#masthead a[aria-label="Join with Discord"]');
+      if (dj){ dj.style.background = "transparent"; dj.style.border = "1.5px solid #5865F2"; dj.style.color = "var(--on-ink)"; }
     } catch(e){ /* fail safe: the original ticker stays */ }
   };
 
