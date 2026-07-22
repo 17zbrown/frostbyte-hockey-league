@@ -14,16 +14,23 @@ const path = require("path");
 
 const DIR = __dirname;
 const OUT = process.argv[2] || path.join(DIR, "../../chelgaming-live.html");
+/* Optional override layer (argv[3]) — inserted after part_live.js, before init.
+   Used to build preview.html with the redesign layer while index.html stays stock. */
+const LAYER = process.argv[3] || null;
 
 // Prototype build order + the live data adapter (part_live) just before init (part8),
 // so CG.LIVE_MODE is set before part8's guarded init runs.
 const PARTS = [
   "part2_engine.js", "part3_content.js", "part4_ui.js",
   "part5a_public.js", "part5b_public2.js", "part6_hub.js",
-  "part7_admin.js", "part_live.js", "part8_blueprint_init.js",
+  "part7_admin.js", "part_live.js",
+  ...(LAYER ? [LAYER] : []),           /* filename relative to src/live, e.g. preview_layer.js */
+  "part8_blueprint_init.js",
 ];
 
 let head = fs.readFileSync(path.join(DIR, "part1_head.html"), "utf8");
+/* preview builds must never be indexed as the real site */
+if (LAYER) head = head.replace('<meta name="viewport"', '<meta name="robots" content="noindex">\n  <meta name="viewport"');
 const ANCHOR = '<div id="toast-root" aria-live="polite"></div>\n<script>';
 if (!head.includes(ANCHOR)) throw new Error("head anchor not found");
 /* Pinned, not floating. `@2` meant any 2.x publish became this site's boot path unattended, and

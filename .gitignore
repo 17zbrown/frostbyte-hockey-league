@@ -24,6 +24,7 @@ npm-debug.log*
 # index.html is built by Netlify at deploy time (see netlify.toml); the staging/
 # prototype builds aren't shipped. Keeps git history from carrying ~700KB blobs.
 index.html
+preview.html
 chelgaming-live.html
 chelgaming-preview.html
 redesign-preview.html

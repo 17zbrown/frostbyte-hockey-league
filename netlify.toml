@@ -4,7 +4,7 @@
 # blob per edit). No dependencies — the build is a pure Node file concatenation (~1s).
 
 [build]
-  command = "node src/live/build.cjs index.html"
+  command = "node src/live/build.cjs index.html && node src/live/build.cjs preview.html preview_layer.js"
   publish = "."
   functions = "netlify/functions"
 
