@@ -37,10 +37,13 @@
   '.pop{border-color:var(--line)!important;border-radius:16px;box-shadow:0 18px 50px rgba(16,21,25,.14)}'+
 
   /* ---- the dark, warmly lit surround + the floating canvas ---- */
-  'html[data-theme="light"] body,body{background:#16110C!important;background-image:'+
-    'radial-gradient(900px 520px at 85% -5%,rgba(255,170,60,.30),transparent 60%),'+
-    'radial-gradient(820px 540px at 6% 18%,rgba(255,84,40,.18),transparent 60%),'+
-    'radial-gradient(1100px 720px at 50% 112%,rgba(255,229,0,.10),transparent 65%)!important}'+
+  'html[data-theme="light"] body,body{background:#191410!important}'+
+  '#pv-aura{position:fixed;inset:0;z-index:0;pointer-events:none;background:'+
+    'radial-gradient(1150px 720px at 82% -6%,rgba(255,166,54,.45),transparent 62%),'+
+    'radial-gradient(950px 660px at 3% 12%,rgba(255,92,44,.30),transparent 62%),'+
+    'radial-gradient(1050px 780px at 52% 106%,rgba(255,196,64,.26),transparent 66%),'+
+    'radial-gradient(760px 540px at 95% 70%,rgba(255,124,40,.18),transparent 62%)}'+
+  '#pv-ribbon{position:relative;z-index:1}'+
   '#pv-frame{width:calc(100% - clamp(20px,3.5vw,56px));max-width:1720px;margin:0 auto 48px;'+
     'border-radius:30px;overflow:clip;background:var(--paper);box-shadow:0 30px 90px rgba(0,0,0,.55);position:relative}'+
   '#pv-ribbon{background:transparent;color:#E8C05A;font-family:var(--f-sharp);font-size:10.5px;font-weight:600;'+
@@ -73,6 +76,10 @@
     '#masthead .mh-nav{position:absolute;left:0;right:0;bottom:0;width:fit-content;margin:0 auto}'+
     '#masthead .mh-right{margin-left:auto}}'+
   '@media(max-width:900px){#masthead .mh-nav::before,#masthead .mh-nav::after{display:none}}'+
+  '@media(min-width:1101px) and (max-width:1199px){#masthead .mh{flex-wrap:wrap;justify-content:space-between}'+
+    '#masthead .mh-nav{order:9;flex:0 1 auto;margin:0 auto}}'+
+  '@media(max-width:1100px){#masthead .mh{min-height:0;align-items:center;padding:10px 0}'+
+    '#masthead .mh>*:not(.mh-nav){margin-bottom:0}}'+
 
   /* ---- the "up next" whisper line ---- */
   '#ticker{height:auto;background:transparent;border-bottom:1px solid var(--line-soft)}'+
@@ -156,7 +163,9 @@
   '.pv-bar i{display:block;height:100%;border-radius:999px;background:#101519;'+
     'transform:scaleX(0);transform-origin:left;transition:transform .9s ease .4s}'+
   '.in .pv-bar i{transform:scaleX(1)}'+
-  '@media(max-width:900px){.pv-stage-grid{grid-template-columns:1fr}.pv-kpis{grid-template-columns:1fr 1fr}}'+
+  '@media(max-width:1060px){.pv-stage-grid{grid-template-columns:1fr}.pv-dash{max-width:640px}}'+
+  '@media(max-width:640px){.pv-kpis{grid-template-columns:1fr 1fr}}'+
+  '@media(max-width:1020px){.pv-nrow{grid-template-columns:118px 148px 1fr 76px}}'+
 
   /* ---- Namesake Watch: NHL Stats API, club-coloured bar race ---- */
   '.pv-nhl-panel{position:relative;border-radius:26px;background:#12161B;color:#EDEFE9;overflow:hidden;'+
@@ -190,6 +199,18 @@
   '@media(max-width:700px){.pv-nrow{grid-template-columns:104px 1fr 64px}.pv-nrow .rec{display:none}}'+
   '@media(prefers-reduced-motion:reduce){.pv-nbar i{transform:scaleX(1);transition:none}}'+
 
+  /* ---- dark mode, treated deliberately: warm depth instead of flat black ---- */
+  'html[data-theme="dark"]{--paper:#14181D;--ice:#1B2127;--line:#2C343C;--line-soft:#242B32;--steel:#93A0AB}'+
+  'html[data-theme="dark"] #pv-frame{background:#14181D;'+
+    'box-shadow:0 36px 100px rgba(0,0,0,.72),0 0 0 1px rgba(255,190,80,.08)}'+
+  'html[data-theme="dark"] #masthead .mh-nav{border:1px solid #242B32;border-bottom:0}'+
+  'html[data-theme="dark"] .pv-crests a{opacity:.62}'+
+  'html[data-theme="dark"] .pv-stage,html[data-theme="dark"] .pv-nhl-panel{background:#0E1319;'+
+    'box-shadow:0 0 0 1px rgba(255,190,80,.06)}'+
+  'html[data-theme="dark"] .pv-cta{background:var(--chrome);color:#101519}'+
+  'html[data-theme="dark"] .pv-cta .dot{background:#101519;color:var(--chrome)}'+
+  'html[data-theme="dark"] .pv-soft .quiet{color:#F2F4F0}'+
+
   /* ---- gentle reveals + hover motion (off under reduced motion) ---- */
   '.pv-rv{opacity:0;transform:translateY(14px);transition:opacity .65s ease,transform .65s ease}'+
   '.pv-rv.in{opacity:1;transform:none}'+
@@ -219,6 +240,12 @@
   var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 
   /* ---- ribbon + the floating canvas frame ---- */
+  function ensureAura(){
+    if (document.getElementById("pv-aura")) return;
+    var a = document.createElement("div");
+    a.id = "pv-aura"; a.setAttribute("aria-hidden","true");
+    document.body.insertBefore(a, document.body.firstChild);
+  }
   function ensureRibbon(){
     if (document.getElementById("pv-ribbon")) return;
     var r = document.createElement("div");
@@ -306,6 +333,7 @@
   CG.renderChrome = function(){
     _renderChrome.apply(this, arguments);
     try {
+      ensureAura();
       ensureRibbon();
       ensureFrame();
       var saved = null;
