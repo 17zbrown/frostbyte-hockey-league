@@ -200,6 +200,43 @@
   '@media(max-width:700px){.pv-nrow{grid-template-columns:104px 1fr 64px}.pv-nrow .rec{display:none}}'+
   '@media(prefers-reduced-motion:reduce){.pv-nbar i{transform:scaleX(1);transition:none}}'+
 
+  /* ---- interactive charts: tooltip, guide, draw-in ---- */
+  '#pv-tip{position:fixed;z-index:999;pointer-events:none;background:#101519;color:#F2F4F0;'+
+    'font-family:var(--f-sharp);font-size:11.5px;font-weight:300;padding:7px 11px;border-radius:10px;'+
+    'box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;transition:opacity .15s;white-space:nowrap}'+
+  '#pv-tip b{font-weight:600;color:#fff}'+
+  '.pv-chart{position:relative;cursor:crosshair}'+
+  '.pv-chart svg{width:100%;display:block}'+
+  '.pv-chart .ln2{fill:none;stroke-width:2;stroke-linecap:round}'+
+  '.pv-chart .ar2{opacity:.14}'+
+  '.pv-chart .drw{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 1.1s ease .15s}'+
+  '.pv-chart.go .drw{stroke-dashoffset:0}'+
+  '.pv-chart .gd{stroke:rgba(140,150,160,.4);stroke-width:1;stroke-dasharray:3 3;opacity:0}'+
+  '.pv-chart .cur{opacity:0}'+
+  '.pv-chart:hover .gd,.pv-chart:hover .cur{opacity:1}'+
+  '@media(prefers-reduced-motion:reduce){.pv-chart .drw{stroke-dashoffset:0;transition:none}}'+
+
+  /* ---- namesake rows expand into season trends ---- */
+  '.pv-ng{border-bottom:1px solid rgba(237,239,233,.08)}'+
+  '.pv-ng:last-child{border-bottom:0}'+
+  'button.pv-nrow{width:100%;background:none;border:0;cursor:pointer;text-align:left;color:inherit;'+
+    'font:inherit;border-bottom:0;transition:background .2s;border-radius:10px}'+
+  'button.pv-nrow:hover{background:rgba(237,239,233,.05)}'+
+  '.pv-nd{padding:2px 2px 16px}'+
+  '.pv-nd .ndh{display:flex;justify-content:space-between;gap:10px;font-family:var(--f-sharp);'+
+    'font-size:11.5px;font-weight:300;color:rgba(237,239,233,.6);margin:6px 0 8px}'+
+  '.pv-nd .ndh b{font-weight:600;color:#fff}'+
+  '.pv-l10{display:flex;gap:5px;margin-top:12px}'+
+  '.pv-l10 i{flex:1;height:24px;border-radius:6px;background:rgba(200,60,50,.5)}'+
+  '.pv-l10 i.W{background:var(--chrome)}'+
+  '.pv-l10 i.OTL{background:rgba(237,239,233,.4)}'+
+
+  /* ---- CGHL trend cards (player / team pages) ---- */
+  '.pv-mt{display:inline-flex;gap:6px}'+
+  '.pv-mt button{font-family:var(--f-sharp);font-size:11px;font-weight:600;padding:4px 12px;'+
+    'border-radius:999px;border:1px solid var(--line-soft);background:transparent;color:var(--steel);cursor:pointer}'+
+  '.pv-mt button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}'+
+
   /* ---- dark mode, treated deliberately: warm depth instead of flat black ---- */
   'html[data-theme="dark"]{--paper:#14181D;--ice:#1B2127;--line:#2C343C;--line-soft:#242B32;--steel:#93A0AB}'+
   'html[data-theme="dark"] #pv-frame{background:#14181D;'+
@@ -432,6 +469,193 @@
     '</div></section>';
   }
 
+  /* ---- interactive chart engine: registry + shared tooltip + hover guides ---- */
+  var pvCharts = {}, pvCid = 0;
+  function ensureTip(){
+    var t = document.getElementById("pv-tip");
+    if (!t){ t = document.createElement("div"); t.id = "pv-tip"; document.body.appendChild(t); }
+    return t;
+  }
+  function pvLine(points, opts){
+    if (!points || points.length < 2) return "";
+    var W = 480, H = (opts && opts.h) || 120, pad = 6;
+    var vs = points.map(function(p){ return p.v; });
+    var max = Math.max.apply(null, vs), min = Math.min.apply(null, vs);
+    if (max === min) max = min + 1;
+    var xy = points.map(function(p, i){
+      return [ pad + (i/(points.length-1))*(W-2*pad), H - 8 - ((p.v-min)/(max-min))*(H-22) ];
+    });
+    var line = xy.map(function(p,i){ return (i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1); }).join(" ");
+    var area = line + " L"+(W-pad)+" "+H+" L"+pad+" "+H+" Z";
+    var id = "c" + (++pvCid);
+    pvCharts[id] = { xy: xy, labels: points.map(function(p){ return p.label; }), W: W, H: H };
+    var color = (opts && opts.color) || "#D9A800";
+    return '<div class="pv-chart" data-pvchart="'+id+'">'+
+      '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'+
+      '<path class="ar2" d="'+area+'" fill="'+color+'"/>'+
+      '<path class="ln2 drw" pathLength="1" d="'+line+'" stroke="'+color+'"/>'+
+      '<line class="gd" x1="-9" x2="-9" y1="6" y2="'+(H-6)+'"/>'+
+      '<circle class="cur" r="3.5" fill="'+color+'" cx="-9" cy="-9"/></svg></div>';
+  }
+  function chartGo(root){
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      (root || document).querySelectorAll(".pv-chart:not(.go)").forEach(function(c){ c.classList.add("go"); });
+    }); });
+  }
+  document.addEventListener("mousemove", function(ev){
+    var tip = ensureTip();
+    var el = ev.target && ev.target.closest && ev.target.closest("[data-pvchart]");
+    if (!el){
+      var d = ev.target && ev.target.closest && ev.target.closest("[data-tip]");
+      if (d){
+        tip.innerHTML = d.getAttribute("data-tip");
+        tip.style.opacity = 1;
+        tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
+        tip.style.top = (ev.clientY - 34) + "px";
+        return;
+      }
+      tip.style.opacity = 0; return;
+    }
+    var c = pvCharts[el.getAttribute("data-pvchart")]; if (!c) return;
+    var r = el.getBoundingClientRect();
+    var fx = (ev.clientX - r.left) / r.width * c.W;
+    var best = 0, bd = 1e9;
+    for (var i = 0; i < c.xy.length; i++){ var d2 = Math.abs(c.xy[i][0] - fx); if (d2 < bd){ bd = d2; best = i; } }
+    var gd = el.querySelector(".gd"), cur = el.querySelector(".cur");
+    if (gd){ gd.setAttribute("x1", c.xy[best][0]); gd.setAttribute("x2", c.xy[best][0]); }
+    if (cur){ cur.setAttribute("cx", c.xy[best][0]); cur.setAttribute("cy", c.xy[best][1]); }
+    tip.innerHTML = c.labels[best];
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
+    tip.style.top = (ev.clientY - 34) + "px";
+  });
+
+  /* ---- namesake rows expand: the franchise's real season, drawn ---- */
+  var nhlSeason = "20252026", nhlClubCache = {};
+  document.addEventListener("click", function(ev){
+    var b = ev.target && ev.target.closest && ev.target.closest("[data-ns]");
+    if (!b) return;
+    var code = b.getAttribute("data-ns");
+    var nd = b.parentNode.querySelector(".pv-nd");
+    if (!nd) return;
+    if (nd.getAttribute("data-filled")){
+      nd.hidden = !nd.hidden;
+      b.setAttribute("aria-expanded", String(!nd.hidden));
+      if (!nd.hidden) chartGo(nd);
+      return;
+    }
+    nd.hidden = false;
+    b.setAttribute("aria-expanded","true");
+    nd.innerHTML = '<p style="font-family:var(--f-sharp);font-weight:300;font-size:12px;color:rgba(237,239,233,.5);padding:8px 0">Drawing the season\u2026</p>';
+    fetch("/.netlify/functions/nhl-stats?club="+encodeURIComponent(code)+"&season="+nhlSeason)
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j || !j.games || j.games.length < 2){
+          nd.innerHTML = '<p style="font-family:var(--f-sharp);font-weight:300;font-size:12px;color:rgba(237,239,233,.5);padding:8px 0">Couldn\u2019t load the season right now.</p>';
+          return;
+        }
+        nhlClubCache[code] = j;
+        var team = (CG.TEAMS||[]).find(function(x){ return x.code === code; });
+        var color = (team && team.color) || "#FFE500";
+        var pts = j.games.map(function(g, i){
+          return { v: g.pts, label: "<b>Game "+(i+1)+"</b> \u00b7 vs "+g.opp+" \u00b7 <b>"+g.r+" "+g.gf+"\u2013"+g.ga+"</b> \u00b7 "+g.pts+" pts" };
+        });
+        var last10 = j.games.slice(-10).map(function(g){
+          return '<i class="'+g.r+'" data-tip="vs '+g.opp+' \u00b7 <b>'+g.r+" "+g.gf+"\u2013"+g.ga+'</b>"></i>';
+        }).join("");
+        nd.innerHTML = '<div class="ndh"><span>Cumulative points \u00b7 hover the line</span><b>'+j.games.length+' games</b></div>'+
+          pvLine(pts, { color: color, h: 110 })+
+          '<div class="ndh" style="margin-top:12px"><span>Last 10</span></div><div class="pv-l10">'+last10+'</div>';
+        nd.setAttribute("data-filled","1");
+        chartGo(nd);
+      })
+      .catch(function(){
+        nd.innerHTML = '<p style="font-family:var(--f-sharp);font-weight:300;font-size:12px;color:rgba(237,239,233,.5);padding:8px 0">Couldn\u2019t reach the NHL API.</p>';
+      });
+  });
+
+  /* ---- CGHL trend cards: self-activating once EA box scores exist ---- */
+  function playerGames(pid){
+    return ((CG.lg && CG.lg.allResults) || []).slice().sort(function(a,b){ return a.at-b.at; })
+      .map(function(r){
+        var line = (r.box && ((r.box[r.home]||{})[pid] || (r.box[r.away]||{})[pid]));
+        if (!line || line.goalie) return null;
+        var team = (r.box[r.home]||{})[pid] ? r.home : r.away;
+        return { at: r.at, opp: team===r.home ? r.away : r.home, g: line.g||0, a: line.a||0, p: (line.g||0)+(line.a||0) };
+      }).filter(Boolean);
+  }
+  function trendChartHtml(games, metric){
+    var run = 0;
+    var pts = games.map(function(gm, i){
+      run += gm[metric];
+      var name = metric==="p"?"pts":metric==="g"?"G":"A";
+      return { v: run, label: "<b>Game "+(i+1)+"</b> \u00b7 vs "+esc(gm.opp)+" \u00b7 +"+gm[metric]+" \u00b7 <b>"+run+" "+name+"</b>" };
+    });
+    return pvLine(pts, { color: "#D9A800", h: 130 });
+  }
+  function playerTrendCard(pid){
+    var games = playerGames(pid);
+    if (games.length < 2) return "";
+    return '<section class="sec-tight"><div class="shell"><div class="card"><div class="card-h"><h3>Trends</h3>'+
+      '<span class="pv-mt" data-pv-owner="'+esc(String(pid))+'">'+
+      [["p","Points"],["g","Goals"],["a","Assists"]].map(function(m,i){
+        return '<button type="button" data-pvmt="'+m[0]+'"'+(i===0?' class="on"':'')+'>'+m[1]+'</button>';
+      }).join("")+'</span></div>'+
+      '<div class="card-b" id="pv-ptrend">'+trendChartHtml(games, "p")+
+      '<p class="caption" style="margin-top:8px">Season to date, game by game \u2014 hover for each night.</p></div></div></div></section>';
+  }
+  document.addEventListener("click", function(ev){
+    var b = ev.target && ev.target.closest && ev.target.closest("[data-pvmt]");
+    if (!b) return;
+    var wrap = b.closest(".pv-mt"); var box = document.getElementById("pv-ptrend");
+    if (!wrap || !box) return;
+    wrap.querySelectorAll("button").forEach(function(x){ x.classList.toggle("on", x===b); });
+    var games = playerGames(wrap.getAttribute("data-pv-owner"));
+    box.firstChild.remove();
+    box.insertAdjacentHTML("afterbegin", trendChartHtml(games, b.getAttribute("data-pvmt")));
+    chartGo(box);
+  });
+  function teamPoints(code){
+    var run = 0;
+    return ((CG.lg && CG.lg.results) || []).slice().sort(function(a,b){ return a.at-b.at; })
+      .filter(function(r){ return r.home===code || r.away===code; })
+      .map(function(r, i){
+        var us = r.score[code], them = r.score[r.home===code ? r.away : r.home];
+        var p = us > them ? 2 : (r.ot ? 1 : 0);
+        run += p;
+        return { v: run, label: "<b>Game "+(i+1)+"</b> \u00b7 vs "+(r.home===code?r.away:r.home)+" \u00b7 <b>"+(us>them?"W":(r.ot?"OTL":"L"))+" "+us+"\u2013"+them+"</b> \u00b7 "+run+" pts" };
+      });
+  }
+  function teamTrendCard(code){
+    var pts = teamPoints(code);
+    if (pts.length < 2) return "";
+    var team = (CG.TEAMS||[]).find(function(x){ return x.code === code; });
+    return '<section class="sec-tight"><div class="shell"><div class="card"><div class="card-h"><h3>The points race</h3>'+
+      '<span class="chip">Game by game</span></div>'+
+      '<div class="card-b">'+pvLine(pts, { color: (team && team.color) || "#D9A800", h: 130 })+
+      '<p class="caption" style="margin-top:8px">Cumulative standings points \u2014 hover for each result.</p></div></div></div></section>';
+  }
+  if (CG.ROUTES.player){
+    var _plr = CG.ROUTES.player;
+    CG.ROUTES.player = function(param, qs){
+      var h = _plr(param, qs);
+      try {
+        var pid = decodeURIComponent(param||"");
+        var pl = ((CG.lg && CG.lg.players) || []).find(function(x){ return x.id===pid || x.tag===pid; });
+        h += playerTrendCard(pl ? pl.id : pid);
+      } catch(e){}
+      return h;
+    };
+  }
+  if (CG.ROUTES.team){
+    var _tmr = CG.ROUTES.team;
+    CG.ROUTES.team = function(param, qs){
+      var h = _tmr(param, qs);
+      try { h += teamTrendCard(String(param||"").toUpperCase()); } catch(e){}
+      return h;
+    };
+  }
+
   /* ---- audit persona (preview only): renders signed-in LAYOUTS while signed out.
          Client-side cosplay for design review — RLS still guards every row, and any
          write would be refused by the database. Refuses to touch a real session. ---- */
@@ -489,6 +713,7 @@
     if (!ts.length){ hideNhl(); return; }
     var max = ts[0].pts || 1;
     var live = ts.some(function(t){ return t.gp > 0 && t.gp < 82; });
+    if (ts[0].season) nhlSeason = String(ts[0].season);
     var tag = document.getElementById("pv-nhl-season");
     if (tag){
       var sn = ts[0].season ? String(ts[0].season) : "";
@@ -499,14 +724,15 @@
       var team = (CG.TEAMS||[]).find(function(x){ return x.code === t.code; });
       var color = (team && team.color) || "#FFE500";
       var proj = (live && t.gp > 0 && t.gp < 82) ? Math.round(t.pts / t.gp * 82) : null;
-      return '<div class="pv-nrow"><span class="tm">'+CG.crest(t.code, 26)+esc(t.code)+'</span>'+
+      return '<div class="pv-ng"><button type="button" class="pv-nrow" data-ns="'+esc(t.code)+'" aria-expanded="false"><span class="tm">'+CG.crest(t.code, 26)+esc(t.code)+'</span>'+
         '<span class="rec">'+t.w+'-'+t.l+'-'+t.otl+(t.l10 ? ' \u00b7 L10 '+esc(t.l10) : "")+'</span>'+
         '<div class="pv-nbar"><i style="width:'+Math.round(100*t.pts/max)+'%;background:'+esc(color)+';transition-delay:'+(i*70)+'ms"></i></div>'+
         '<b class="pts"><span data-count="'+t.pts+'">0</span><small>'+
-          (proj ? '<span class="pv-proj">82-game pace \u00b7 '+proj+'</span>' : 'PTS')+'</small></b></div>';
+          (proj ? '<span class="pv-proj">82-game pace \u00b7 '+proj+'</span>' : 'PTS')+'</small></b></button><div class="pv-nd" hidden></div></div>';
     }).join("");
     el.setAttribute("data-filled","1");
     runCounters(el);
+    chartGo(el);
     requestAnimationFrame(function(){ requestAnimationFrame(function(){ el.classList.add("go"); }); });
   }
   function fillNhl(){
