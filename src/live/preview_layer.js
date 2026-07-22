@@ -60,6 +60,7 @@
   '#masthead .mh-burger{color:#fff}'+
   '#masthead a[aria-label="Join with Discord"]{background:#fff!important;border:0!important;'+
     'color:var(--ink)!important;border-radius:999px!important;font-weight:600}'+
+  '#masthead .shell{max-width:1680px}'+
   '@media(max-width:900px){#masthead .mh-nav::before,#masthead .mh-nav::after{display:none}}'+
 
   /* ---- the "up next" whisper line ---- */
@@ -144,6 +145,38 @@
   '.in .pv-bar i{transform:scaleX(1)}'+
   '@media(max-width:900px){.pv-stage-grid{grid-template-columns:1fr}.pv-kpis{grid-template-columns:1fr 1fr}}'+
 
+  /* ---- Namesake Watch: NHL Stats API, club-coloured bar race ---- */
+  '.pv-nhl-panel{position:relative;border-radius:26px;background:#12161B;color:#EDEFE9;overflow:hidden;'+
+    'padding:clamp(24px,4vw,48px)}'+
+  '.pv-nhl-panel::before{content:"";position:absolute;inset:0;pointer-events:none;background:'+
+    'radial-gradient(600px 400px at 14% 0%,rgba(255,160,64,.20),transparent 60%),'+
+    'radial-gradient(540px 400px at 92% 100%,rgba(255,72,40,.15),transparent 60%)}'+
+  '.pv-nhl-h{position:relative;display:flex;align-items:baseline;justify-content:space-between;gap:14px;'+
+    'flex-wrap:wrap;margin-bottom:8px}'+
+  '.pv-nhl-h h3{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,2.8vw,38px);'+
+    'text-transform:uppercase;letter-spacing:.015em;color:#fff}'+
+  '.pv-nhl-h span{font-family:var(--f-sharp);font-weight:300;font-size:12px;color:rgba(237,239,233,.6)}'+
+  '.pv-nhl-cap{position:relative;font-family:var(--f-sharp);font-weight:300;font-size:13px;'+
+    'color:rgba(237,239,233,.72);max-width:66ch;margin-bottom:clamp(16px,2.5vw,26px)}'+
+  '#pv-nhl{position:relative}'+
+  '.pv-nrow{display:grid;grid-template-columns:150px 130px 1fr 84px;align-items:center;gap:14px;'+
+    'padding:9px 0;border-bottom:1px solid rgba(237,239,233,.08)}'+
+  '.pv-nrow:last-child{border-bottom:0}'+
+  '.pv-nrow .tm{display:flex;align-items:center;gap:10px;font-family:var(--f-sharp);font-weight:600;'+
+    'font-size:13.5px;color:#fff}'+
+  '.pv-nrow .rec{font-family:var(--f-sharp);font-weight:300;font-size:12px;color:rgba(237,239,233,.65);'+
+    'font-variant-numeric:tabular-nums}'+
+  '.pv-nbar{height:10px;border-radius:999px;background:rgba(237,239,233,.10);overflow:hidden}'+
+  '.pv-nbar i{display:block;height:100%;border-radius:999px;transform:scaleX(0);transform-origin:left;'+
+    'transition:transform 1s cubic-bezier(.22,.8,.24,1)}'+
+  '#pv-nhl.go .pv-nbar i{transform:scaleX(1)}'+
+  '.pv-nrow .pts{text-align:right;font-family:var(--f-sharp);font-weight:700;font-size:16px;color:#fff;'+
+    'font-variant-numeric:tabular-nums}'+
+  '.pv-nrow .pts small{display:block;font-weight:300;font-size:9.5px;color:rgba(237,239,233,.55);letter-spacing:.05em}'+
+  '.pv-proj{color:var(--chrome);font-weight:600}'+
+  '@media(max-width:700px){.pv-nrow{grid-template-columns:104px 1fr 64px}.pv-nrow .rec{display:none}}'+
+  '@media(prefers-reduced-motion:reduce){.pv-nbar i{transform:scaleX(1);transition:none}}'+
+
   /* ---- gentle reveals + hover motion (off under reduced motion) ---- */
   '.pv-rv{opacity:0;transform:translateY(14px);transition:opacity .65s ease,transform .65s ease}'+
   '.pv-rv.in{opacity:1;transform:none}'+
@@ -185,7 +218,7 @@
     var mast = document.getElementById("masthead");
     if (!mast || !mast.parentNode) return;
     var f = document.createElement("div"); f.id = "pv-frame";
-    mast.parentNode.insertBefore(f, mast);
+    mast.parentNode.insertBefore(f, mast.nextSibling);
     ["ticker","app","sitefoot"].forEach(function(id){
       var el = document.getElementById(id); if (el) f.appendChild(el);
     });
@@ -230,7 +263,7 @@
   }
   var app = document.getElementById("app");
   if (app && "MutationObserver" in window){
-    new MutationObserver(function(){ requestAnimationFrame(attachReveals); })
+    new MutationObserver(function(){ requestAnimationFrame(function(){ attachReveals(); fillNhl(); }); })
       .observe(app, { childList: true });
   }
 
@@ -354,6 +387,55 @@
     '</div></section>';
   }
 
+  /* ---- Namesake Watch: real NHL Stats API numbers for the eight namesakes ---- */
+  var nhlCache = null, nhlLoading = false;
+  function nhlSection(){
+    return '<section class="sec" id="pv-nhl-sec" style="padding-top:0;padding-bottom:clamp(28px,4vw,52px)"><div class="shell">'+
+      '<div class="pv-nhl-panel"><div class="pv-nhl-h"><h3>Namesake watch</h3><span id="pv-nhl-season"></span></div>'+
+      '<p class="pv-nhl-cap">CGHL clubs carry NHL franchise names. This is how the namesakes are doing in the real '+
+        'NHL — points race, records, and pace, straight from the NHL Stats API.</p>'+
+      '<div id="pv-nhl"><p style="font-family:var(--f-sharp);font-weight:300;font-size:13px;color:rgba(237,239,233,.5)">Pulling the numbers\u2026</p></div>'+
+    '</div></div></section>';
+  }
+  function hideNhl(){ var sec = document.getElementById("pv-nhl-sec"); if (sec) sec.style.display = "none"; }
+  function renderNhl(el, j){
+    var ts = (j.teams||[]).slice().sort(function(a,b){ return b.pts - a.pts; });
+    if (!ts.length){ hideNhl(); return; }
+    var max = ts[0].pts || 1;
+    var live = ts.some(function(t){ return t.gp > 0 && t.gp < 82; });
+    var tag = document.getElementById("pv-nhl-season");
+    if (tag){
+      var sn = ts[0].season ? String(ts[0].season) : "";
+      tag.textContent = (sn ? sn.slice(0,4)+"\u2013"+sn.slice(6)+" NHL season" : "NHL")+
+        (live ? " \u00b7 in progress" : " \u00b7 final records");
+    }
+    el.innerHTML = ts.map(function(t, i){
+      var team = (CG.TEAMS||[]).find(function(x){ return x.code === t.code; });
+      var color = (team && team.color) || "#FFE500";
+      var proj = (live && t.gp > 0 && t.gp < 82) ? Math.round(t.pts / t.gp * 82) : null;
+      return '<div class="pv-nrow"><span class="tm">'+CG.crest(t.code, 26)+esc(t.code)+'</span>'+
+        '<span class="rec">'+t.w+'-'+t.l+'-'+t.otl+(t.l10 ? ' \u00b7 L10 '+esc(t.l10) : "")+'</span>'+
+        '<div class="pv-nbar"><i style="width:'+Math.round(100*t.pts/max)+'%;background:'+esc(color)+';transition-delay:'+(i*70)+'ms"></i></div>'+
+        '<b class="pts"><span data-count="'+t.pts+'">0</span><small>'+
+          (proj ? '<span class="pv-proj">82-game pace \u00b7 '+proj+'</span>' : 'PTS')+'</small></b></div>';
+    }).join("");
+    el.setAttribute("data-filled","1");
+    runCounters(el);
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){ el.classList.add("go"); }); });
+  }
+  function fillNhl(){
+    var el = document.getElementById("pv-nhl");
+    if (!el || el.getAttribute("data-filled")) return;
+    if (nhlCache){ renderNhl(el, nhlCache); return; }
+    if (nhlLoading) return;
+    nhlLoading = true;
+    fetch("/.netlify/functions/nhl-stats").then(function(r){ return r.json(); }).then(function(j){
+      nhlLoading = false;
+      if (j && j.teams && j.teams.length){ nhlCache = j; var e2 = document.getElementById("pv-nhl"); if (e2) renderNhl(e2, j); }
+      else hideNhl();
+    }).catch(function(){ nhlLoading = false; hideNhl(); });
+  }
+
   /* ---- the serif hero: centered, minimal, with the crest strip ---- */
   function softHero(){
     var s = CG.SEASON || {};
@@ -400,7 +482,7 @@
       if (a < 0 || b < 0) return html;            /* markers moved — ship the original untouched */
       var h1 = html.indexOf('</h1>');
       var head = h1 > -1 ? html.slice(0, h1 + 5) : "";
-      html = head + softHero() + stageHtml() + html.slice(b + endMark.length);
+      html = head + softHero() + stageHtml() + nhlSection() + html.slice(b + endMark.length);
       var sIdx = html.indexOf('class="statline"');
       if (sIdx > -1){
         var sOpen = html.lastIndexOf('<section', sIdx);
