@@ -77,7 +77,9 @@
   '.btn{font-family:var(--f-body);font-weight:600;letter-spacing:.01em}'+
   '.mh-nav a{font-weight:600}'+
   '.tbl th{font-size:10px;letter-spacing:.1em;color:var(--steel)}'+
-  '.statline>div b{font-family:var(--f-serif);font-weight:520}';
+  '.statline>div b{font-family:var(--f-serif);font-weight:520}'+
+  '#masthead a[aria-label="Join with Discord"]{background:transparent!important;'+
+    'border:1.5px solid #5865F2!important;color:var(--ink)!important}';
   var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 
   /* ---- preview ribbon (so nobody mistakes this for the live site) ---- */
@@ -144,8 +146,6 @@
       if (t && mast && mast.parentNode && (mast.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_PRECEDING)){
         mast.parentNode.insertBefore(t, mast.nextSibling);
       }
-      var dj = document.querySelector('#masthead a[aria-label="Join with Discord"]');
-      if (dj){ dj.style.background = "transparent"; dj.style.border = "1.5px solid #5865F2"; dj.style.color = "var(--on-ink)"; }
     } catch(e){ /* fail safe */ }
   };
 
