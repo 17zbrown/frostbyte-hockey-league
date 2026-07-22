@@ -305,9 +305,10 @@ async function gameReminders(games, teamById, now, errors) {
     const nm = (id) => nameOf(teamById, id);
     const lines = [`${teamTag(teamById, tid)} 🚨 **Game night!** You've got ${tonight.length} matchup${tonight.length > 1 ? "s" : ""} tonight:`, ""];
     for (const g of tonight) {
-      const opp = g.home_team_id === tid ? nm(g.away_team_id) : nm(g.home_team_id);
+      // the opponent is a club too — render it as its role pill, not bold text
+      const oppId = g.home_team_id === tid ? g.away_team_id : g.home_team_id;
       const ha = g.home_team_id === tid ? "vs" : "@";
-      lines.push(`• ${ha} **${opp}** — ${fmtTime(g.scheduled_at)}${g.game_code ? ` · lobby \`${g.game_code}\`` : ""}`);
+      lines.push(`• ${ha} ${teamTag(teamById, oppId)} — ${fmtTime(g.scheduled_at)}${g.game_code ? ` · lobby \`${g.game_code}\`` : ""}`);
     }
     // On a catch-up post the lock has already passed, so don't tell them to go set a lineup they can't change.
     lines.push("", mins >= 30
@@ -347,12 +348,12 @@ async function caseworkNudge(cfg, teamById, et, dry, errors) {
 
   const appLines = [];
   const owe = (key) => reviewers.filter((r) => !(votedBy[key] || new Set()).has(r.id));
-  for (const a of oa) { const o = owe("owner:" + a.id); if (o.length) appLines.push(`• **Owner application** — ${gt[a.profile_id]} · still needs: ${o.map((r) => mention(r.id)).join(" ")}`); }
-  for (const a of sa) { const o = owe("staff:" + a.id); if (o.length) appLines.push(`• **Staff application** — ${gt[a.profile_id]} · still needs: ${o.map((r) => mention(r.id)).join(" ")}`); }
+  // the applicant/nominee and their club are named here too — all three render as mentions
+  for (const a of oa) { const o = owe("owner:" + a.id); if (o.length) appLines.push(`• **Owner application** — ${mention(a.profile_id)} · still needs: ${o.map((r) => mention(r.id)).join(" ")}`); }
+  for (const a of sa) { const o = owe("staff:" + a.id); if (o.length) appLines.push(`• **Staff application** — ${mention(a.profile_id)} · still needs: ${o.map((r) => mention(r.id)).join(" ")}`); }
   for (const a of ma) {
     const o = owe("management:" + a.id); if (!o.length) continue;
-    const club = (teamById[a.team_id] || {}).name || "a club";
-    appLines.push(`• **${a.role === "gm" ? "GM" : "AGM"} application** — ${gt[a.nominee_id]} (${club}) · still needs: ${o.map((r) => mention(r.id)).join(" ")}`);
+    appLines.push(`• **${a.role === "gm" ? "GM" : "AGM"} application** — ${mention(a.nominee_id)} (${teamTag(teamById, a.team_id)}) · still needs: ${o.map((r) => mention(r.id)).join(" ")}`);
   }
   const caseLines = cases.map((c) => `• ${c.subject || c.type || "Case"} · ${mention(c.assigned_to)}`);
 

@@ -407,6 +407,14 @@ export default async (req) => {
     } catch (e) { sum.errors.push({ role: name, error: String(e.message || e) }); }
   }
   if (roleId["not signed up"]) await sbUpsertCfg("discord_not_signed_up_role_id", roleId["not signed up"]);
+  // Publish a name->id map of the league roles so the DATABASE can render @role pills too
+  // (public._role_tag reads this). Without it the DB can only bold a role name.
+  try {
+    const wanted = ["staff", "commissioner", "owner", "general manager", "assistant general manager", "player", "free agent", "not signed up"];
+    const map = {};
+    for (const n of wanted) if (roleId[n]) map[n] = roleId[n];
+    if (Object.keys(map).length) await sbUpsertCfg("discord_role_ids", JSON.stringify(map));
+  } catch (e) { sum.errors.push({ roleIdMap: String(e.message || e) }); }
   // the Team Management category + its rooms (private to the front office)
   try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
 
