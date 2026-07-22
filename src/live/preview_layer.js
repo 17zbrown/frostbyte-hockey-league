@@ -328,12 +328,12 @@
   '.pv-crests{perspective:900px}'+
   '.pv-crests a{opacity:0;transform:rotateY(70deg)}'+
   '@keyframes pvFlip{0%{opacity:0;transform:rotateY(70deg)}100%{opacity:1;transform:rotateY(0)}}'+
-  '.in .pv-crests a{animation:pvFlip .7s cubic-bezier(.22,.8,.24,1) both}'+
+  '.pv-crests.in a,.in .pv-crests a{animation:pvFlip .7s cubic-bezier(.22,.8,.24,1) both}'+
   ['','',''].map(function(_,i){return '';}).join('')+
-  '.in .pv-crests a:nth-child(2){animation-delay:.07s}.in .pv-crests a:nth-child(3){animation-delay:.14s}'+
-  '.in .pv-crests a:nth-child(4){animation-delay:.21s}.in .pv-crests a:nth-child(5){animation-delay:.28s}'+
-  '.in .pv-crests a:nth-child(6){animation-delay:.35s}.in .pv-crests a:nth-child(7){animation-delay:.42s}'+
-  '.in .pv-crests a:nth-child(8){animation-delay:.49s}'+
+  '.pv-crests.in a:nth-child(2),.in .pv-crests a:nth-child(2){animation-delay:.07s}.pv-crests.in a:nth-child(3),.in .pv-crests a:nth-child(3){animation-delay:.14s}'+
+  '.pv-crests.in a:nth-child(4),.in .pv-crests a:nth-child(4){animation-delay:.21s}.pv-crests.in a:nth-child(5),.in .pv-crests a:nth-child(5){animation-delay:.28s}'+
+  '.pv-crests.in a:nth-child(6),.in .pv-crests a:nth-child(6){animation-delay:.35s}.pv-crests.in a:nth-child(7),.in .pv-crests a:nth-child(7){animation-delay:.42s}'+
+  '.pv-crests.in a:nth-child(8),.in .pv-crests a:nth-child(8){animation-delay:.49s}'+
   '.pv-crests a img,.pv-crests a svg{transition:transform .8s cubic-bezier(.22,.8,.24,1)}'+
   '.pv-crests a:hover img,.pv-crests a:hover svg{transform:rotateY(360deg)}'+
   /* every crest sitewide gets a gentle dimensional hover */
@@ -506,6 +506,8 @@
     if (document.getElementById("pv-aura")) return;
     var a = document.createElement("div");
     a.id = "pv-aura"; a.setAttribute("aria-hidden","true");
+    /* two drifting glow layers ride inside the aura; the cinema kit animates them */
+    a.innerHTML = '<div id="pv-aura-a"></div><div id="pv-aura-b"></div>';
     document.body.insertBefore(a, document.body.firstChild);
   }
   function ensureRibbon(){
@@ -534,19 +536,14 @@
       el.setAttribute("data-done","1");
       var end = parseFloat(el.getAttribute("data-count")) || 0;
       var pre = el.getAttribute("data-pre") || "", post = el.getAttribute("data-post") || "";
-      if (reduce){ el.textContent = pre + end + post; return; }
-      var t0 = null, D = 950;
-      function tick(ts){
-        if (!t0) t0 = ts;
-        var p = Math.min(1, (ts - t0) / D); p = 1 - Math.pow(1 - p, 3);
-        el.textContent = pre + Math.round(end * p) + post;
-        if (p < 1) requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
+      /* rolling odometer columns (pv3); the module itself falls back to
+         instant text under reduced motion or if it failed to initialize */
+      pv3Odometer(el, end, pre, post);
     });
   }
   var io = ("IntersectionObserver" in window) ? new IntersectionObserver(function(es){
     es.forEach(function(e){
+      e.target.__pvSeen = true;   /* the observer HAS reported; the timeout net stands down */
       if (!e.isIntersecting) return;
       e.target.classList.add("in");
       runCounters(e.target);
@@ -565,15 +562,32 @@
         /* if the observer never reports (a broken or paused compositor), nothing should stay
            hidden — reveal and animate it anyway shortly after. */
         setTimeout(function(){
-          if (el.classList.contains("in")) return;
+          if (el.classList.contains("in") || el.__pvSeen) return;
           el.classList.add("in"); runCounters(el); chartGo(el);
         }, 2500);
       });
   }
   var app = document.getElementById("app");
+  var pv3EnterT = 0;
   if (app && "MutationObserver" in window){
-    new MutationObserver(function(){ pvSchedule(function(){ attachReveals(); fillNhl(); }); })
-      .observe(app, { childList: true });
+    new MutationObserver(function(){
+      /* synchronous: split the fresh headlines + restart the route-enter
+         choreography BEFORE the next paint, so nothing flashes unstyled */
+      try {
+        if (typeof pv3HeroText === "function") pv3HeroText();
+        if (typeof PV3 !== "undefined" && !PV3.reduced){
+          app.classList.remove("pv3-enter");
+          void app.offsetWidth;   /* restart the animation set — one reflow per route change */
+          app.classList.add("pv3-enter");
+          clearTimeout(pv3EnterT);
+          pv3EnterT = setTimeout(function(){ app.classList.remove("pv3-enter"); }, 760);
+        }
+      } catch(e){}
+      pvSchedule(function(){
+        attachReveals(); fillNhl();
+        try { if (typeof PV3 !== "undefined") PV3.route(); } catch(e){}
+      });
+    }).observe(app, { childList: true });
   }
 
   var _renderChrome = CG.renderChrome;
@@ -583,9 +597,11 @@
       ensureAura();
       ensureRibbon();
       ensureFrame();
+      if (typeof window.pv3EnsureCinema === "function") window.pv3EnsureCinema();
       var saved = null;
       try { saved = (JSON.parse(localStorage.getItem("cgproto:v1")||"{}").prefs||{}).theme; } catch(e){}
-      if (!saved || saved === "auto") document.documentElement.setAttribute("data-theme","light");
+      /* the cinematic reset is dark-first: dark is the designed default, light stays a choice */
+      if (!saved || saved === "auto") document.documentElement.setAttribute("data-theme","dark");
     } catch(e){ /* fail safe */ }
   };
 
@@ -690,7 +706,7 @@
   }
   function stageHtml(){
     return '<section class="sec" style="padding-top:0;padding-bottom:clamp(28px,4vw,52px)"><div class="shell">'+
-      '<div class="pv-stage"><div class="pv-stage-grid">'+
+      '<div class="pv-stage" data-pv3-par="0.05"><div class="pv-stage-grid">'+
         '<div>'+dashHtml()+'</div>'+
         '<div><p class="cap">Every game writes itself into the record. Box scores import straight from EA within '+
           'minutes of the final horn — standings, player stats, and salaries update on their own.</p>'+
@@ -734,8 +750,10 @@
      the reveal system never runs and faded-in content would stay invisible. Both paths are safe
      to run: every step below is idempotent. */
   function pvSchedule(fn){
-    requestAnimationFrame(function(){ requestAnimationFrame(fn); });
-    setTimeout(fn, 140);
+    var done = false;
+    function run(){ if (done) return; done = true; fn(); }
+    requestAnimationFrame(function(){ requestAnimationFrame(run); });
+    setTimeout(run, 140);
   }
   function chartGo(root){
     var run = function(){
@@ -747,32 +765,36 @@
        otherwise stay frozen at zero height instead of simply skipping the animation. */
     pvSchedule(run);
   }
+  var pvTipEl = null, pvTipRect = null;
+  addEventListener("scroll", function(){ pvTipRect = null; }, { passive: true, capture: true });
+  addEventListener("resize", function(){ pvTipRect = null; }, { passive: true });
+  function tipShow(tip, html, x, y){
+    if (tip._h !== html){ tip._h = html; tip.innerHTML = html; tip._w = tip.offsetWidth; }
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(x + 14, innerWidth - (tip._w || 0) - 8) + "px";
+    tip.style.top = (y - 34) + "px";
+  }
   document.addEventListener("mousemove", function(ev){
     var tip = ensureTip();
     var el = ev.target && ev.target.closest && ev.target.closest("[data-pvchart]");
     if (!el){
       var d = ev.target && ev.target.closest && ev.target.closest("[data-tip]");
       if (d){
-        tip.innerHTML = d.getAttribute("data-tip");
-        tip.style.opacity = 1;
-        tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
-        tip.style.top = (ev.clientY - 34) + "px";
+        tipShow(tip, d.getAttribute("data-tip"), ev.clientX, ev.clientY);
         return;
       }
       tip.style.opacity = 0; return;
     }
     var c = pvCharts[el.getAttribute("data-pvchart")]; if (!c) return;
-    var r = el.getBoundingClientRect();
+    if (el !== pvTipEl){ pvTipEl = el; pvTipRect = null; }
+    var r = pvTipRect || (pvTipRect = el.getBoundingClientRect());
     var fx = (ev.clientX - r.left) / r.width * c.W;
     var best = 0, bd = 1e9;
     for (var i = 0; i < c.xy.length; i++){ var d2 = Math.abs(c.xy[i][0] - fx); if (d2 < bd){ bd = d2; best = i; } }
     var gd = el.querySelector(".gd"), cur = el.querySelector(".cur");
     if (gd){ gd.setAttribute("x1", c.xy[best][0]); gd.setAttribute("x2", c.xy[best][0]); }
     if (cur){ cur.setAttribute("cx", c.xy[best][0]); cur.setAttribute("cy", c.xy[best][1]); }
-    tip.innerHTML = c.labels[best];
-    tip.style.opacity = 1;
-    tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
-    tip.style.top = (ev.clientY - 34) + "px";
+    tipShow(tip, c.labels[best], ev.clientX, ev.clientY);
   });
 
   /* ---- namesake rows expand: the franchise's real season, drawn ---- */
@@ -867,6 +889,7 @@
     return (t && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) ? t : null;
   }
   document.addEventListener("pointermove", function(ev){
+    if (ev.pointerType && ev.pointerType !== "mouse") return;   /* touch taps must not wobble cards */
     var t = tiltTargets(ev.target);
     if (tiltEl && tiltEl !== t){
       tiltEl.classList.remove("tilting"); tiltEl.style.transform = "";
@@ -1071,8 +1094,11 @@
       try {
         if (g && g.score && g.home && g.away){
           var hs = g.score[g.home], as = g.score[g.away];
-          if (hs != null && as != null && hs !== as)
-            html = html.replace('class="gc-score"', 'class="gc-score pv-final" data-w="'+(hs>as?"home":"away")+'"');
+          if (hs != null && as != null && hs !== as){
+            var win = hs > as ? hs : as;
+            html = html.replace('<span class="gc-score num">' + win + '</span>',
+              '<span class="gc-score num pv-final">' + win + '</span>');
+          }
         }
       } catch(e){}
       return html;
@@ -1149,7 +1175,15 @@
     var _tmr = CG.ROUTES.team;
     CG.ROUTES.team = function(param, qs){
       var h = _tmr(param, qs);
-      try { h += teamTrendCard(String(param||"").toUpperCase()); } catch(e){}
+      var code = String(param||"").toUpperCase();
+      try {
+        /* the 3D showcase medallion leads the page; club-colour ambience follows */
+        var mark = '<div class="shell">';
+        var i = h.indexOf(mark);
+        if (i > -1) h = h.slice(0, i + mark.length) + pv3TeamHero(code) + h.slice(i + mark.length);
+        if (typeof pv3ClubTint === "function") pv3ClubTint(code);
+      } catch(e){}
+      try { h += teamTrendCard(code); } catch(e){}
       return h;
     };
   }
@@ -1199,7 +1233,7 @@
   var nhlCache = null, nhlLoading = false;
   function nhlSection(){
     return '<section class="sec" id="pv-nhl-sec" style="padding-top:0;padding-bottom:clamp(28px,4vw,52px)"><div class="shell">'+
-      '<div class="pv-nhl-panel"><div class="pv-nhl-h"><h3>Namesake watch</h3><span id="pv-nhl-season"></span></div>'+
+      '<div class="pv-nhl-panel" data-pv3-par="0.04"><div class="pv-nhl-h"><h3>Namesake watch</h3><span id="pv-nhl-season"></span></div>'+
       '<p class="pv-nhl-cap">CGHL clubs carry NHL franchise names. This is how the namesakes are doing in the real '+
         'NHL — points race, records, and pace, straight from the NHL Stats API.</p>'+
       '<div id="pv-nhl"><p style="font-family:var(--f-sharp);font-weight:300;font-size:13px;color:rgba(237,239,233,.5)">Pulling the numbers\u2026</p></div>'+
@@ -1231,7 +1265,7 @@
     el.setAttribute("data-filled","1");
     runCounters(el);
     chartGo(el);
-    requestAnimationFrame(function(){ requestAnimationFrame(function(){ el.classList.add("go"); }); });
+    pvSchedule(function(){ el.classList.add("go"); });
   }
   function fillNhl(){
     var el = document.getElementById("pv-nhl");
@@ -1267,7 +1301,9 @@
       meta = '<p class="pv-meta">Registration closes '+esc(CG.fmtDay(regDl))+' · <b id="regCountdown" data-close="'+regDl+'">—</b></p>';
 
     var crests = (CG.TEAMS||[]).map(function(t){
-      return '<a href="#/team/'+esc(t.code)+'" aria-label="'+esc(t.name)+'">'+CG.crest(t.code, 38)+'</a>';
+      /* 3D medallion pucks; the anchor keeps href + aria-label, the puck
+         takes over the entrance + hover duties (pv3-crest-a hands them off) */
+      return '<a class="pv3-crest-a" href="#/team/'+esc(t.code)+'" aria-label="'+esc(t.name)+'">'+pv3Puck(t.code, 64)+'</a>';
     }).join("");
 
     return '<section id="hero"><div class="shell pv-soft">'+
@@ -1278,7 +1314,7 @@
                  : '<a class="pv-cta" href="#/schedule">See the schedule<span class="dot">→</span></a>')+
         '<a class="quiet" href="#/rulebook">How the season works</a></div>'+
       meta+
-      (crests ? '<div class="pv-crests">'+crests+'</div>' : "")+
+      (crests ? '<div class="pv-crests" data-pv3-par="-0.06">'+crests+'</div>' : "")+
     '</div></section>';
   }
 
@@ -1304,4 +1340,822 @@
   };
   /* AFTER.home stays the original: the carousel no-ops, and the countdown ids
      (#regCountdown / #faCountdown) are provided by the hero's meta line. */
+
+  /* ================================================================
+     PV3 — the cinematic kit. One shared kernel (single rAF loop,
+     capability flags), then each motion module in its own guarded
+     block. Everything below is additive and fails safe.
+     ================================================================ */
+  var PV3 = (function(){
+    var mqF = window.matchMedia ? matchMedia("(pointer: fine)") : null;
+    var mqR = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+    var K = {
+      fine: !!(mqF && mqF.matches),
+      reduced: !!(mqR && mqR.matches),
+      lerp: function(a, b, k){ return a + (b - a) * k; }
+    };
+    if (mqR && mqR.addEventListener) mqR.addEventListener("change", function(e){ K.reduced = e.matches; });
+    var subs = [], running = false;
+    function loop(t){
+      if (!subs.length || document.hidden){ running = false; return; }
+      var list = subs.slice();   /* callbacks may unsubscribe mid-frame */
+      for (var i = 0; i < list.length; i++){ try { list[i](t); } catch(e){} }
+      if (!subs.length){ running = false; return; }
+      requestAnimationFrame(loop);
+    }
+    K.on = function(fn){
+      subs.push(fn);
+      if (!running){ running = true; requestAnimationFrame(loop); }
+      return function(){ var i = subs.indexOf(fn); if (i > -1) subs.splice(i, 1); };
+    };
+    document.addEventListener("visibilitychange", function(){
+      if (!document.hidden && subs.length && !running){ running = true; requestAnimationFrame(loop); }
+    });
+    /* route hooks: modules push callbacks; fired after every #app render */
+    K.routeHooks = [];
+    K.route = function(){
+      for (var i = 0; i < K.routeHooks.length; i++){ try { K.routeHooks[i](); } catch(e){} }
+    };
+    return K;
+  })();
+  window.PV3 = PV3;   /* pv3-cursor and pv3-scroll gate on the global */
+
+    /* ---- pv3 stylesheet: one plain-CSS string injected AFTER the base sheet.
+         Later-rule cascade order is load-bearing: the module overrides
+         (crest entrance handoff, dark ladder, card-hover upgrades) must
+         out-rank equal-specificity base rules by source order. ---- */
+  var pv3st = document.createElement("style");
+  pv3st.textContent = "/* ================================================================\n   pv3-text — cinematic typography motion\n   (split-text hero cascade, gradient shimmer, route-enter\n   choreography, section-heading mask reveal)\n   ================================================================ */\n\n/* ---- split-text cascade: overflow-hidden word masks, staggered letters ----\n   Single-phase: the animation runs as soon as the spans are inserted, with\n   `both` fill, so nothing can ever be stranded hidden waiting for a class. */\n.pv3-split .pv3-w{display:inline-block;overflow:hidden;vertical-align:top;\n  padding:0 .02em .1em;margin-bottom:-.1em}\n.pv3-split .pv3-l{display:inline-block;\n  animation:pv3-letter-in .62s cubic-bezier(.22,.9,.3,1) both}\n@keyframes pv3-letter-in{\n  0%{transform:translateY(110%) rotate(6deg)}\n  100%{transform:translateY(0) rotate(0)}\n}\n@media(prefers-reduced-motion:reduce){\n  .pv3-split .pv3-l{animation:none;transform:none}\n}\n\n/* ---- gradient shimmer: specular sweep inside the glyphs ----\n   Base = currentColor: -webkit-text-fill-color:transparent does NOT change\n   the `color` property, so the gradient base always equals the heading's\n   live color in BOTH themes. Solid-color fallback where clip:text is\n   unsupported (the class is simply inert). Sheen is theme-scoped. */\n.pv3-shimmer{--pv3-sheen:#FFE500}\nhtml[data-theme=\"light\"] .pv3-shimmer{--pv3-sheen:#A87E00}\n@supports ((-webkit-background-clip:text) or (background-clip:text)){\n  .pv3-shimmer{\n    background-image:linear-gradient(100deg,\n      currentColor 0%,currentColor 42%,\n      var(--pv3-sheen) 50%,\n      currentColor 58%,currentColor 100%);\n    background-size:250% 100%;\n    background-position:115% 0;\n    -webkit-background-clip:text;\n    background-clip:text;\n    -webkit-text-fill-color:transparent;\n    animation:pv3-shimmer-sweep 5.4s ease-in-out 1s 3 both;\n  }\n}\n/* the tile edges are both currentColor, so the default background-repeat\n   keeps the off-canvas regions painted (no transparent glyph gaps at the\n   overshoot positions) */\n@keyframes pv3-shimmer-sweep{\n  0%{background-position:115% 0}\n  55%{background-position:-15% 0}\n  100%{background-position:-15% 0}\n}\n@media(prefers-reduced-motion:reduce){\n  .pv3-shimmer{animation:none;background-image:none;\n    -webkit-text-fill-color:currentColor}\n}\n\n/* ---- route-enter choreography: #app direct children fade up + deblur ----\n   The lead adds .pv3-enter on #app at each route render and removes it\n   after the cascade (see integration notes). `both` fill pins children at\n   their final state until the class is removed, so a late removal is safe. */\n#app.pv3-enter .pg>*{animation:pv3-route-in .48s cubic-bezier(.22,.9,.3,1) both}\n#app.pv3-enter .pg>:nth-child(2){animation-delay:40ms}\n#app.pv3-enter .pg>:nth-child(3){animation-delay:80ms}\n#app.pv3-enter .pg>:nth-child(4){animation-delay:120ms}\n#app.pv3-enter .pg>:nth-child(5){animation-delay:160ms}\n#app.pv3-enter .pg>:nth-child(n+6){animation-delay:200ms}\n@keyframes pv3-route-in{\n  0%{opacity:0;transform:translateY(14px);filter:blur(6px)}\n  100%{opacity:1;transform:translateY(0);filter:blur(0)}\n}\n@media(prefers-reduced-motion:reduce){\n  #app.pv3-enter .pg>*{animation:none}\n}\n\n/* ---- section heading mask reveal: rides the EXISTING .pv-rv/.in observer,\n   CSS only. The .h-sec.pv-rv variant re-declares the FULL transition list so\n   it cannot clobber the reveal layer's opacity/transform transition.\n   Negative insets leave breathing room so glyph edges never clip at rest. */\n.pv-rv .h-sec,.h-sec.pv-rv{clip-path:inset(-8% -6% 102% -6%)}\n.pv-rv .h-sec{transition:clip-path .8s cubic-bezier(.22,.9,.3,1) .1s}\n.h-sec.pv-rv{transition:opacity .65s ease,transform .65s ease,\n  clip-path .8s cubic-bezier(.22,.9,.3,1) .1s}\n.pv-rv.in .h-sec,.h-sec.pv-rv.in{clip-path:inset(-8% -6% -12% -6%)}\n@media(prefers-reduced-motion:reduce){\n  .pv-rv .h-sec,.h-sec.pv-rv{clip-path:none;transition:none}\n}\n\n/* ===== pv3-odometer: rolling-digit counters =====\n   Layout contract: the odometer block occupies EXACTLY the plain-text width\n   (1ch per digit + natural separator widths, tabular figures) and 1em height,\n   so surrounding text never reflows during or after the spin. Inherits color\n   and font from its host, so both html[data-theme=dark] and light work as-is. */\n.pv3-odo{\n  display:inline-flex;\n  align-items:flex-start;\n  vertical-align:top;\n  line-height:1;\n  white-space:nowrap;\n  font-variant-numeric:tabular-nums;\n}\n.pv3-odo-col{\n  display:inline-block;\n  width:1ch;\n  height:1em;\n  overflow:hidden;\n}\n.pv3-odo-sep{\n  display:inline-block;\n  height:1em;\n  line-height:1;\n}\n.pv3-odo-strip{\n  display:block;\n  transform:translateY(0);\n  transition-property:transform;\n  transition-timing-function:cubic-bezier(.22,.9,.3,1);\n  transition-duration:.9s; /* per-column duration is set inline by JS (550–1250ms) */\n  will-change:transform;\n}\n.pv3-odo-d{\n  display:block;\n  height:1em;\n  line-height:1;\n}\n/* screen readers get the finished value once; the animated strips are aria-hidden */\n.pv3-odo-sr{\n  position:absolute;\n  width:1px;\n  height:1px;\n  margin:-1px;\n  padding:0;\n  border:0;\n  overflow:hidden;\n  clip:rect(0 0 0 0);\n  clip-path:inset(50%);\n  white-space:nowrap;\n}\n@media(prefers-reduced-motion:reduce){\n  /* snap, never freeze: transition off means the transform applies instantly,\n     so a strip mid-flight lands on the correct final digit */\n  .pv3-odo-strip{transition:none!important}\n}\n\n/* ================================================================\n   pv3-cursor — cursor presence system (desktop only)\n   The JS gates init on PV3.fine && !PV3.reduced; this CSS carries a\n   reduced-motion belt-and-braces override anyway. The native cursor\n   is never hidden. Ring + ripple sit above everything (#pv-tip is\n   z-index 999; these use 1199/1200) and are pointer-events:none, so\n   dropdowns (.pop), forms, and focus outlines are untouched.\n   ================================================================ */\n\n#pv3-cursor-ring{\n  position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;\n  border-radius:50%;border:1.5px solid rgba(255,229,0,.60);\n  box-shadow:0 0 14px rgba(255,166,54,.35),0 0 3px rgba(255,166,54,.28);\n  pointer-events:none;z-index:1200;opacity:0;will-change:transform,opacity;\n  transition:opacity .3s ease,border-color .25s ease,box-shadow .25s ease}\n#pv3-cursor-ring.pv3-live{opacity:1}\n#pv3-cursor-ring.pv3-amp{\n  border-color:rgba(255,229,0,.95);\n  box-shadow:0 0 24px rgba(255,166,54,.55),0 0 6px rgba(255,229,0,.45)}\n#pv3-cursor-ring.pv3-hide{opacity:0}\n\n/* light theme: chrome yellow is low-contrast on the paper canvas — lean on the darker gold */\nhtml[data-theme=\"light\"] #pv3-cursor-ring{\n  border-color:rgba(217,168,0,.70);\n  box-shadow:0 0 12px rgba(255,166,54,.30),0 0 2px rgba(255,166,54,.22)}\nhtml[data-theme=\"light\"] #pv3-cursor-ring.pv3-amp{\n  border-color:rgba(217,168,0,.95);\n  box-shadow:0 0 20px rgba(255,166,54,.50),0 0 5px rgba(217,168,0,.40)}\n\n/* click ripple: one-shot burst, element removed on animationend (JS) */\n.pv3-ripple{\n  position:fixed;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;\n  border:2px solid rgba(255,229,0,.85);box-shadow:0 0 16px rgba(255,166,54,.45);\n  pointer-events:none;z-index:1199;\n  animation:pv3-burst .55s cubic-bezier(.2,.7,.3,1) forwards}\nhtml[data-theme=\"light\"] .pv3-ripple{border-color:rgba(217,168,0,.85)}\n@keyframes pv3-burst{\n  0%{transform:scale(.5);opacity:.9}\n  100%{transform:scale(2.6);opacity:0}}\n\n/* magnetic CTAs: while the module owns motion (html.pv3-cursor-on), the old\n   .pv-cta:hover translateY stands down so there is ONE source of truth for\n   transform — the inline magnetic translate written by JS. The box-shadow\n   hover from the base layer keeps working. */\nhtml.pv3-cursor-on .pv-cta:hover{transform:none}\nhtml.pv3-cursor-on .pv-cta,\nhtml.pv3-cursor-on #masthead a[aria-label=\"Join with Discord\"]{\n  will-change:transform;\n  transition:transform .22s cubic-bezier(.22,.8,.3,1.15),box-shadow .25s ease,\n    color .22s ease,background .22s ease,border-color .22s ease}\n\n@media(prefers-reduced-motion:reduce){\n  #pv3-cursor-ring,.pv3-ripple{display:none!important}\n  /* module tears itself down under reduced motion; if the html class lingers\n     for a frame, restore the original hover lift so nothing feels dead */\n  html.pv3-cursor-on .pv-cta:hover{transform:translateY(-1px)}\n}\n\n/* ================= pv3-medallion — 3D club-logo pucks =================\n   Pure CSS 3D. All motion is transform/opacity except the mandated\n   specular background-position sweep (tiny, contained, 6s cycle).\n   Must be injected AFTER the existing preview CSS so later-rule wins\n   settle the .pv-crests entrance override. */\n\n.pv3-puck{position:relative;display:inline-block;width:var(--pk-size,64px);height:var(--pk-size,64px);\n  perspective:calc(var(--pk-size,64px)*3.4)}\n/* children never take pointer events: hit target stays the puck/anchor,\n   so delegated tracking sees one element and link clicks pass through */\n.pv3-puck>span{pointer-events:none}\n\n.pv3-puck-disc{position:absolute;inset:0;border-radius:50%;transform-style:preserve-3d;\n  will-change:transform;animation:pv3-idle 7s ease-in-out infinite}\n.pv3-puck.pv3-live .pv3-puck-disc{animation:none;transition:transform .12s ease-out}\n.pv3-puck.pv3-settle .pv3-puck-disc{animation:none;transition:transform .5s cubic-bezier(.22,1.4,.36,1)}\n/* starts and ends at 0deg so the idle loop resumes seamlessly after a settle */\n@keyframes pv3-idle{0%,100%{transform:rotateY(0deg)}25%{transform:rotateY(10deg)}75%{transform:rotateY(-10deg)}}\n\n/* metallic rim: warm chrome conic edge */\n.pv3-puck-rim{position:absolute;inset:0;border-radius:50%;\n  background:conic-gradient(from 210deg,#23272E,#8E97A2 12%,#1B1F25 26%,#C9A45A 38%,#2B3038 52%,\n    #757E88 66%,#171B20 80%,#8E97A2 92%,#23272E);\n  box-shadow:0 calc(var(--pk-size,64px)*.02) calc(var(--pk-size,64px)*.08) rgba(0,0,0,.5),\n    inset 0 0 0 1px rgba(255,255,255,.08)}\n\n/* face: club-colour tint sunk into near-black rubber */\n.pv3-puck-face{position:absolute;inset:5.5%;border-radius:50%;\n  transform:translateZ(calc(var(--pk-size,64px)*.045));\n  background:radial-gradient(circle at 32% 26%,rgba(255,255,255,.15),transparent 44%),\n    linear-gradient(rgba(10,13,17,.66),rgba(10,13,17,.84)),\n    radial-gradient(circle at 50% 44%,var(--pk-c,#FFE500),#080B0F 82%);\n  box-shadow:inset 0 calc(var(--pk-size,64px)*-.02) calc(var(--pk-size,64px)*.07) rgba(0,0,0,.55),\n    inset 0 1px 0 rgba(255,255,255,.10)}\n\n/* crest sits proud of the face (real 3D parallax under tilt) */\n.pv3-puck-crest{position:absolute;left:19%;top:19%;width:62%;height:62%;\n  display:flex;align-items:center;justify-content:center;\n  transform:translateZ(calc(var(--pk-size,64px)*.07));\n  filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}\n.pv3-puck-crest img,.pv3-puck-crest svg{width:100%!important;height:100%!important;object-fit:contain}\n/* neutralise the sitewide crest hover transforms + the .pv-crests coin-spin inside a puck */\n.pv3-puck .crest{transform:none!important;transition:none!important}\n\n/* specular sweep: passes every 6s; while pointer-tracked it becomes a\n   highlight that follows --gx/--gy (same var idiom as the tilt glare) */\n.pv3-puck-spec{position:absolute;inset:2%;border-radius:50%;\n  transform:translateZ(calc(var(--pk-size,64px)*.08));\n  background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.20) 45%,\n    rgba(255,229,140,.28) 50%,rgba(255,255,255,.16) 55%,transparent 68%);\n  background-size:260% 260%;background-position:130% 0;background-repeat:no-repeat;\n  animation:pv3-sweep 6s ease-in-out 4;opacity:.85}\n@keyframes pv3-sweep{0%,52%{background-position:130% 0}88%,100%{background-position:-30% 0}}\n.pv3-puck.pv3-live .pv3-puck-spec{animation:none;background-size:100% 100%;background-position:0 0;\n  background-image:radial-gradient(closest-side circle at var(--gx,50%) var(--gy,35%),\n    rgba(255,255,255,.30),rgba(255,213,120,.12) 46%,transparent 72%)}\n\n/* soft elliptical ground shadow; JS drives --pk-sx / --pk-ss under tilt */\n.pv3-puck-shadow{position:absolute;left:6%;right:6%;bottom:calc(var(--pk-size,64px)*-.13);\n  height:calc(var(--pk-size,64px)*.17);border-radius:50%;\n  background:radial-gradient(closest-side,rgba(0,0,0,.55),transparent 72%);\n  transform:translateX(calc(var(--pk-sx,0)*1px)) scale(var(--pk-ss,1));\n  transition:transform .5s cubic-bezier(.22,1.4,.36,1)}\nhtml[data-theme=\"light\"] .pv3-puck-shadow{opacity:.6}\n\n/* ---- home hero strip: anchors hand entrance + dim/grayscale duties to the puck ---- */\n.pv-crests a.pv3-crest-a{opacity:1;filter:none;animation:none;transform:none}\n.pv-crests a:has(.pv3-puck){opacity:1;filter:none;animation:none;transform:none}\n.pv-crests .pv3-puck{opacity:0;transform:rotateY(70deg) scale(.7)}\n@keyframes pv3-flip{0%{opacity:0;transform:rotateY(70deg) scale(.7)}100%{opacity:1;transform:none}}\n.pv-crests.in .pv3-puck,.in .pv-crests .pv3-puck{animation:pv3-flip .7s cubic-bezier(.22,.8,.24,1) both}\n.pv-crests.in a:nth-child(2) .pv3-puck,.in .pv-crests a:nth-child(2) .pv3-puck{animation-delay:.07s}\n.pv-crests.in a:nth-child(3) .pv3-puck,.in .pv-crests a:nth-child(3) .pv3-puck{animation-delay:.14s}\n.pv-crests.in a:nth-child(4) .pv3-puck,.in .pv-crests a:nth-child(4) .pv3-puck{animation-delay:.21s}\n.pv-crests.in a:nth-child(5) .pv3-puck,.in .pv-crests a:nth-child(5) .pv3-puck{animation-delay:.28s}\n.pv-crests.in a:nth-child(6) .pv3-puck,.in .pv-crests a:nth-child(6) .pv3-puck{animation-delay:.35s}\n.pv-crests.in a:nth-child(7) .pv3-puck,.in .pv-crests a:nth-child(7) .pv3-puck{animation-delay:.42s}\n.pv-crests.in a:nth-child(8) .pv3-puck,.in .pv-crests a:nth-child(8) .pv3-puck{animation-delay:.49s}\n\n/* ---- team-page showcase ---- */\n.pv3-teamhero{float:right;margin:6px 0 22px 26px}\n@media(max-width:760px){.pv3-teamhero{float:none;display:flex;justify-content:center;margin:0 0 18px}}\n\n/* ---- reduced motion: everything static, everything visible ---- */\n@media(prefers-reduced-motion:reduce){\n  .pv3-puck-disc,.pv3-puck-spec{animation:none!important;transition:none!important}\n  .pv3-puck-shadow{transition:none}\n  .pv-crests .pv3-puck{opacity:1;transform:none;animation:none!important}\n}\n\n/* ================================================================\n   pv3-cinema — cinematic ambient layer + vibrancy\n   Inject AFTER the existing preview_layer <style> element: the dark\n   ladder below deliberately out-cascades the existing dark block.\n   ================================================================ */\n\n/* ---- upgraded dark treatment: a deeper surface ladder --------------\n   body #0C1015 (deepest backdrop) < frame/--paper #101519 (canvas +\n   the mh-nav tab, which fuses into the frame via var(--paper) and its\n   corner radials, so they stay in lockstep automatically) < cards\n   #12161B (elevated). .pv-dash (#fff) and the light-theme nav tab are\n   NOT touched — their fixed colors were contrast-audited. */\nhtml[data-theme=\"dark\"]{--paper:#101519}\nhtml[data-theme=\"dark\"] body{background:#0C1015!important}\nhtml[data-theme=\"dark\"] #pv-frame{background:#101519;\n  box-shadow:0 36px 110px rgba(0,0,0,.8),0 0 0 1px rgba(255,190,80,.12),0 0 70px -8px rgba(255,166,54,.16)}\nhtml[data-theme=\"dark\"] .card,\nhtml[data-theme=\"dark\"] .kpi,\nhtml[data-theme=\"dark\"] .gamecard,\nhtml[data-theme=\"dark\"] .newscard{background:#12161B}\n/* hover lightening still wins: .kpi:hover / .gamecard:hover etc. carry\n   higher specificity (0-2-0) than the rules above (0-1-2). */\n\n/* ---- animated aura: two drifting glow layers inside #pv-aura ------- */\n#pv-aura{overflow:hidden}\n#pv-aura-a,#pv-aura-b{position:absolute;inset:-12%;pointer-events:none}\n#pv-aura-a{background:\n  radial-gradient(1000px 700px at 80% 8%,rgba(255,166,54,.20),transparent 62%),\n  radial-gradient(820px 620px at 6% 32%,rgba(255,92,44,.15),transparent 60%),\n  radial-gradient(940px 680px at 50% 106%,var(--pv3-club-glow,rgba(0,0,0,0)),transparent 65%);\n  animation:pv3-drift-a 45s ease-in-out infinite alternate,pv3-breathe 26s ease-in-out infinite alternate}\n#pv-aura-b{background:\n  radial-gradient(900px 680px at 56% 102%,rgba(255,196,64,.16),transparent 64%),\n  radial-gradient(720px 520px at 94% 64%,rgba(255,124,40,.12),transparent 60%),\n  radial-gradient(760px 560px at 12% 88%,var(--pv3-club-glow,rgba(0,0,0,0)),transparent 62%);\n  animation:pv3-drift-b 70s ease-in-out infinite alternate,pv3-breathe 34s ease-in-out infinite alternate;\n  animation-delay:0s,-9s}\n@keyframes pv3-drift-a{from{transform:translate3d(-2.5%,-1.5%,0) scale(1)}to{transform:translate3d(2.5%,2%,0) scale(1.08)}}\n@keyframes pv3-drift-b{from{transform:translate3d(2%,1.5%,0) scale(1.06)}to{transform:translate3d(-2.5%,-2%,0) scale(1)}}\n@keyframes pv3-breathe{from{opacity:.85}to{opacity:1}}\n\n/* ---- film grain: fixed, above #pv-aura, below #pv-frame ------------\n   (z-order by DOM position: the div sits right after #pv-aura, both at\n   z-index:0; #pv-frame is positioned later in the DOM so it paints on\n   top.) Inline feTurbulence SVG tile, ~300 bytes. Not animated, so it\n   is already reduced-motion-safe. */\n#pv3-grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.05;\n  background-image:url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='180'%20height='180'%3E%3Cfilter%20id='pv3n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='.8'%20numOctaves='2'%20stitchTiles='stitch'/%3E%3C/filter%3E%3Crect%20width='180'%20height='180'%20filter='url(%23pv3n)'/%3E%3C/svg%3E\");\n  background-size:180px 180px}\n\n/* ---- aurora sweeps on the dark panels ------------------------------\n   ::before is taken by the static glows on every one of these panels;\n   ::after is free on all five (verified). All five panels carry\n   overflow:hidden/clip, so the oversized rotating pseudo is masked to\n   the panel. It paints above content by DOM order, which is fine at\n   opacity .06 + screen blending — it reads as a glass sheen. */\n.pv-stage::after,.pv-nhl-panel::after,.pvw::after,.codebox::after,.pv-awhero::after{\n  content:\"\";position:absolute;inset:-45%;pointer-events:none;\n  background:conic-gradient(from 0deg at 50% 50%,transparent 0deg,rgba(255,214,120,.55) 42deg,transparent 84deg,transparent 198deg,rgba(255,166,54,.4) 240deg,transparent 284deg);\n  opacity:.06;mix-blend-mode:screen;animation:pv3-aurora 60s linear 2}\n@keyframes pv3-aurora{to{transform:rotate(1turn)}}\n\n/* ---- vibrancy: chrome→gold gradient numerals -----------------------\n   .pvw-big always sits on the fixed-dark widget cards, so it gets the\n   gradient in both themes. The hero countdown (.pv-meta b) only gets\n   it in dark — chrome on light paper cannot clear contrast. Fallback:\n   outside @supports, the existing solid colors simply remain. */\n@supports((-webkit-background-clip:text) or (background-clip:text)){\n  .pv3-grad,.pvw-big,html[data-theme=\"dark\"] .pv-meta b{\n    background-image:linear-gradient(115deg,var(--chrome) 15%,var(--gold) 85%);\n    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}\n  /* the mixed muted spans inside .pvw-big (e.g. \"goals last game\") keep\n     their own inline color instead of inheriting the gradient */\n  .pvw-big span,.pvw-big small{-webkit-text-fill-color:currentColor;background-image:none}\n}\n\n/* ---- live chip pulse: static shadow on a pseudo, opacity/transform\n   keyframe only (no per-frame shadow painting). .chip-live has no\n   pseudo-elements in the base layer (verified part1_head.html:146). */\n.chip-live{position:relative}\n.chip-live::after{content:\"\";position:absolute;inset:-3px;border-radius:inherit;pointer-events:none;\n  box-shadow:0 0 10px 2px rgba(255,110,60,.55);opacity:.12;animation:pv3-livepulse 2.2s ease-in-out infinite}\n@keyframes pv3-livepulse{0%,100%{opacity:.12;transform:scale(.97)}50%{opacity:.7;transform:scale(1.02)}}\n\n/* ---- scroll progress: 2px chrome bar, very top, above the ribbon.\n   z-index 240 clears everything in the base map (toasts are 130);\n   pointer-events:none so it can never block a control. */\n#pv3-scrollbar{position:fixed;top:0;left:0;width:100%;height:2px;z-index:240;pointer-events:none;\n  background:linear-gradient(90deg,var(--chrome),var(--gold));\n  box-shadow:0 0 10px rgba(255,229,0,.45);\n  transform:scaleX(0);transform-origin:left center}\n\n/* ---- reduced motion: aura static, aurora off, pulse off; the grain\n   is static by construction and the progress bar is scroll-tied. */\n@media(prefers-reduced-motion:reduce){\n  #pv-aura-a,#pv-aura-b{animation:none;opacity:1;transform:none}\n  .pv-stage::after,.pv-nhl-panel::after,.pvw::after,.codebox::after,.pv-awhero::after{animation:none;display:none}\n  .chip-live::after{animation:none;display:none}\n}\n\n/* ================================================================\n   pv3-scroll — scroll parallax + depth choreography\n   Loads AFTER the existing preview css: equal-specificity hover\n   overrides below win by source order.\n   ================================================================ */\n\n/* ---- parallax targets: transform-only, compositor-friendly ---- */\n@media(pointer:fine){[data-pv3-par]{will-change:transform}}\n\n/* An element that both reveals (.pv-rv, added by attachReveals — e.g. .pv-crests\n   via the \".pv-soft > *\" selector) and parallaxes must NOT transition transform,\n   or every scroll update would smear through the reveal's 650ms ease. The reveal\n   keeps its fade; parallax owns all movement. Specificity (0,2,0) beats both\n   .pv-rv and .pv-rv.in that come earlier. */\n.pv-rv[data-pv3-par]{transform:none;transition:opacity .65s ease}\n\n/* ---- depth hover: raise-cards lift a touch higher over a soft chrome underglow.\n   Selectors verified against the existing blocks:\n   \".card.raise:hover{transform:translateY(-2px);border-color:var(--line)}\" and\n   \".card.raise:hover{box-shadow:0 10px 28px rgba(16,21,25,.08)}\" — same\n   specificity, these later rules win. The base .card transition never included\n   box-shadow (it snapped); .card.raise below fixes that with a spring. ---- */\n.card.raise{transition:transform .35s cubic-bezier(.34,1.56,.64,1),box-shadow .35s ease,border-color .3s ease,background .3s ease}\n.card.raise:hover{transform:translateY(-4px);border-color:var(--line);box-shadow:0 14px 34px rgba(16,21,25,.10),0 6px 18px -6px rgba(255,166,54,.22)}\nhtml[data-theme=\"dark\"] .card.raise:hover{box-shadow:0 18px 44px rgba(0,0,0,.55),0 8px 22px -8px rgba(255,166,54,.30)}\n\n/* ---- gamecard / newscard: same 350ms spring, a whisper of scale (1.01).\n   The existing \"a,button{transition:color…}\" element rule loses to these class\n   rules, so color/border/background transitions are re-declared here to keep\n   the original feel intact. Overrides\n   \".gamecard:hover{…translateY(-2px)…}\" and \".newscard:hover{…translateY(-3px)…}\"\n   at equal specificity, later in source. ---- */\n.gamecard,.newscard{transition:transform .35s cubic-bezier(.34,1.56,.64,1),box-shadow .35s ease,border-color .3s ease,background .3s ease,color .22s ease}\n.gamecard:hover{border-color:var(--line);background:var(--ice);transform:translateY(-2px) scale(1.01);box-shadow:0 10px 26px rgba(16,21,25,.08),0 6px 18px -6px rgba(255,166,54,.20)}\n.newscard:hover{transform:translateY(-3px) scale(1.01);border-color:var(--line);box-shadow:0 16px 38px rgba(16,21,25,.11),0 8px 22px -8px rgba(255,166,54,.20)}\nhtml[data-theme=\"dark\"] .gamecard:hover{box-shadow:0 12px 30px rgba(0,0,0,.50),0 6px 18px -6px rgba(255,166,54,.26)}\nhtml[data-theme=\"dark\"] .newscard:hover{box-shadow:0 18px 42px rgba(0,0,0,.55),0 8px 22px -8px rgba(255,166,54,.26)}\n\n/* ---- footer entrance: rises a little deeper than the standard reveal.\n   pv3FootReveal() (JS below) adds .pv-rv to the footer children and hands them\n   to the existing observer; only the styling lives here. ---- */\n#sitefoot .pv-rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}\n#sitefoot .pv-rv.in{opacity:1;transform:none}\n\n/* ---- reduced motion: parallax dead (belt to the JS gate's suspenders), footer\n   reveal instant. The footer override is REQUIRED here — the existing\n   reduced-motion \".pv-rv\" reset is (0,1,0) and would lose to the (1,1,0)\n   \"#sitefoot .pv-rv\" base rule above, stranding the footer invisible. ---- */\n@media(prefers-reduced-motion:reduce){\n  [data-pv3-par]{will-change:auto;transform:none!important}\n  #sitefoot .pv-rv{opacity:1;transform:none;transition:none}\n  .card.raise,.gamecard,.newscard{transition:none}\n  .card.raise:hover,.gamecard:hover,.newscard:hover{transform:none}\n}";
+  pv3st.textContent += "\n/* ---- odometer host-proofing: hosts like .pv-kpi span / .kpi span style every\n   descendant span (font-size 10.5px, display:block, letter-spacing). These rules\n   tie or beat that specificity and sit later in the cascade, so the odometer\n   keeps its geometry inside any host. ---- */\n.pv3-odo,.pv3-odo span{font:inherit;color:inherit;margin:0;letter-spacing:inherit}\nspan.pv3-odo{font:inherit;display:inline-flex;align-items:flex-start;vertical-align:top;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums}\n.pv3-odo span.pv3-odo-col{display:inline-block;width:1ch;height:1em;overflow:hidden}\n.pv3-odo span.pv3-odo-strip{display:block;line-height:1}\n.pv3-odo span.pv3-odo-d{display:block;height:1em;line-height:1}\n.pv3-odo span.pv3-odo-sep{display:inline-block;height:1em;line-height:1}\n/* the showcase medallion IS the club identity on team pages — the flat header crest stands down */\n.pv3-teamhero+div>.crest{display:none}";
+  pv3st.textContent += "\n/* ---- review fixes: focus on fixed-dark panels, winner emphasis, touch budgets ---- */\n.pv-stage :focus-visible,.pv-nhl-panel :focus-visible,.pvw :focus-visible,.codebox :focus-visible,.pv-awhero :focus-visible{outline-color:var(--chrome)}\n.gc-score.pv-final{font-weight:800;color:var(--ink)}\nhtml[data-theme=\"light\"] #pv3-grain{opacity:.028}\n@media(pointer:coarse){\n.pv3-shimmer{animation:none}\n.pv3-puck-spec{animation:none}\n.pv-stage::after,.pv-nhl-panel::after,.pvw::after,.codebox::after,.pv-awhero::after{animation:none;display:none}\n@keyframes pv3-route-in{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}\n}";
+  document.head.appendChild(pv3st);
+
+/* ================================================================
+   pv3-odometer — rolling-digit counters.
+   pv3Odometer(el, end, pre, post) replaces the interior of the old
+   runCounters tween: per final digit a 1ch x 1em clipped column whose
+   0–9 strip translateY's to the target digit. CSS-transition driven
+   (no per-frame JS), transform-only, no layout reads, no listeners.
+   Declared as `var` + assignment (NOT a block function declaration)
+   so it stays visible to runCounters in the IIFE's strict-mode scope.
+   ================================================================ */
+var pv3Odometer;
+try {
+  (function(){
+
+    /* format the target: integers stay integers; anything fractional keeps
+       exactly one decimal place (matches CAP/1e6 values like 40.5).
+       Today's data has no thousands separators, so none are produced. */
+    function pv3OdoText(end){
+      if (typeof end !== "number" || !isFinite(end)) return String(end == null ? "" : end);
+      if (Math.round(end) === end) return String(end);
+      return (Math.round(end * 10) / 10).toFixed(1);
+    }
+
+    pv3Odometer = function(el, end, pre, post){
+      pre = pre == null ? "" : String(pre);
+      post = post == null ? "" : String(post);
+      var str = pv3OdoText(end);
+      var flat = pre + str + post;
+      try {
+        var digitCount = str.replace(/[^0-9]/g, "").length;
+        /* instant paths: reduced motion (live PV3 flag), degenerate values,
+           >6 digits, or a browser with no CSS transitions */
+        if (PV3.reduced || digitCount === 0 || digitCount > 6 ||
+            !("transition" in document.documentElement.style)){
+          el.textContent = flat;
+          return;
+        }
+
+        var wrap = document.createElement("span");
+        wrap.className = "pv3-odo";
+        wrap.setAttribute("aria-hidden", "true");
+
+        if (pre) wrap.appendChild(document.createTextNode(pre));
+
+        var strips = [];
+        var digitsHtml = "";
+        var d;
+        for (d = 0; d <= 9; d++) digitsHtml += '<span class="pv3-odo-d">' + d + '</span>';
+
+        var i, ch;
+        for (i = 0; i < str.length; i++){
+          ch = str.charAt(i);
+          if (ch >= "0" && ch <= "9"){
+            var col = document.createElement("span");
+            col.className = "pv3-odo-col";
+            var strip = document.createElement("span");
+            strip.className = "pv3-odo-strip";
+            strip.innerHTML = digitsHtml;
+            strip.setAttribute("data-pv3-digit", ch);
+            col.appendChild(strip);
+            wrap.appendChild(col);
+            strips.push(strip);
+          } else {
+            /* "." (and defensively "," or "-") ride along as static glyphs */
+            var sep = document.createElement("span");
+            sep.className = "pv3-odo-sep";
+            sep.textContent = ch;
+            wrap.appendChild(sep);
+          }
+        }
+
+        if (post) wrap.appendChild(document.createTextNode(post));
+
+        /* per-column duration, shortest on the left, longest on the right:
+           550ms .. 1250ms — the rightmost digit keeps spinning last */
+        var n = strips.length, k;
+        for (k = 0; k < n; k++){
+          var dur = (n === 1) ? 900 : Math.round(550 + (k / (n - 1)) * 700);
+          strips[k].style.transitionDuration = dur + "ms";
+        }
+
+        /* accessible flat value first, then the aria-hidden mechanism */
+        var sr = document.createElement("span");
+        sr.className = "pv3-odo-sr";
+        sr.textContent = flat;
+
+        el.textContent = "";
+        el.appendChild(sr);
+        el.appendChild(wrap);
+
+        /* pvSchedule paints the start state (translateY(0)) before the flip;
+           its 140ms timeout arm covers paused-rAF contexts. Setting the same
+           transform twice is idempotent, so both arms are safe. If the
+           transition itself cannot run, the transform still applies instantly
+           and the strip sits EXACTLY on the final digit. */
+        pvSchedule(function(){
+          for (var m = 0; m < strips.length; m++){
+            strips[m].style.transform =
+              "translateY(-" + strips[m].getAttribute("data-pv3-digit") + "em)";
+          }
+        });
+      } catch(err){
+        /* any surprise inside the build → the correct final text, no animation */
+        try { el.textContent = flat; } catch(e2){}
+      }
+    };
+  })();
+} catch(e){ /* module must never break the app */ }
+/* last-resort stub so runCounters can always call it */
+if (!pv3Odometer){
+  pv3Odometer = function(el, end, pre, post){
+    el.textContent = (pre || "") + end + (post || "");
+  };
+}
+
+/* ================================================================
+   pv3-cursor — cursor presence system (desktop only).
+   Self-initializing. Assumes the PV3 kernel exists. Everything is
+   wrapped so a thrown error can never break the app.
+   ================================================================ */
+try {
+  (function(){
+    var pv3CursorOn = false;      /* module initialized? */
+    var pv3CurUnsub = null;       /* PV3.on unsubscribe */
+    var pv3Ring = null;
+    var pv3Seen = false;          /* first pointermove seen (snap, then lerp) */
+    var pv3Tx = -100, pv3Ty = -100;   /* target (pointer) */
+    var pv3Rx = -100, pv3Ry = -100;   /* rendered (lerped) */
+    var pv3Ts = 1, pv3S = 1;          /* target / rendered scale */
+    var pv3MagEl = null, pv3MagRect = null;  /* magnetic CTA + cached halo rect */
+
+    var PV3_MAG_SEL = '.pv-cta,#masthead a[aria-label="Join with Discord"]';
+    var PV3_AMP_SEL = 'a,button,[data-go],input,select,textarea,.pv-cta';
+    var PV3_TEXTY = { text:1, search:1, email:1, password:1, url:1, tel:1, number:1 };
+
+    function pv3RingEl(){
+      /* appended to document.body ONCE, id-guarded — survives #app rerenders */
+      var r = document.getElementById("pv3-cursor-ring");
+      if (!r){
+        r = document.createElement("div");
+        r.id = "pv3-cursor-ring";
+        r.setAttribute("aria-hidden", "true");
+        document.body.appendChild(r);
+      }
+      return r;
+    }
+
+    /* one shared rAF via PV3.on — transform+opacity only, zero layout reads */
+    function pv3Frame(){
+      if (!pv3Ring) return;
+      pv3Rx = PV3.lerp(pv3Rx, pv3Tx, 0.16);
+      pv3Ry = PV3.lerp(pv3Ry, pv3Ty, 0.16);
+      pv3S  = PV3.lerp(pv3S,  pv3Ts, 0.2);
+      if (Math.abs(pv3Rx - pv3Tx) < 0.03 && Math.abs(pv3Ry - pv3Ty) < 0.03 &&
+          Math.abs(pv3S - pv3Ts) < 0.002){
+        /* settled — release the shared loop; pv3Move/pv3Over re-arm it */
+        if (pv3CurUnsub){ pv3CurUnsub(); pv3CurUnsub = null; }
+        return;
+      }
+      pv3Ring.style.transform = "translate3d(" + pv3Rx.toFixed(2) + "px," +
+        pv3Ry.toFixed(2) + "px,0) scale(" + pv3S.toFixed(3) + ")";
+    }
+
+    function pv3CurWake(){ if (pv3CursorOn && !pv3CurUnsub) pv3CurUnsub = PV3.on(pv3Frame); }
+
+    function pv3MagRelease(){
+      /* spring-back: clear the inline transform; the CSS transition on
+         html.pv3-cursor-on .pv-cta carries it home */
+      if (!pv3MagEl) return;
+      try { pv3MagEl.style.transform = ""; } catch(e){}
+      pv3MagEl = null; pv3MagRect = null;
+    }
+
+    function pv3Move(ev){
+      if (ev.pointerType && ev.pointerType !== "mouse") return;
+      pv3Tx = ev.clientX; pv3Ty = ev.clientY;
+      pv3CurWake();
+      if (!pv3Seen){
+        pv3Seen = true; pv3Rx = pv3Tx; pv3Ry = pv3Ty;  /* snap in, don't fly in */
+        if (pv3Ring) pv3Ring.classList.add("pv3-live");
+      }
+      /* ---- magnetic pull: cached rect only, no per-frame layout reads ---- */
+      if (pv3MagEl && !pv3MagEl.isConnected) pv3MagRelease();  /* route rerender */
+      if (pv3MagEl){
+        var rc = pv3MagRect;
+        if (ev.clientX < rc.hl || ev.clientX > rc.hr || ev.clientY < rc.ht || ev.clientY > rc.hb){
+          pv3MagRelease();
+        } else {
+          var mx = Math.max(-5, Math.min(5, (ev.clientX - rc.cx) / rc.w * 10));
+          var my = Math.max(-5, Math.min(5, (ev.clientY - rc.cy) / rc.h * 10));
+          pv3MagEl.style.transform = "translate(" + mx.toFixed(1) + "px," + my.toFixed(1) + "px)";
+        }
+      }
+      if (!pv3MagEl){
+        var m = ev.target && ev.target.closest && ev.target.closest(PV3_MAG_SEL);
+        if (m){
+          var r = m.getBoundingClientRect();  /* read once, on acquire */
+          pv3MagEl = m;
+          pv3MagRect = {
+            hl: r.left - 30, hr: r.right + 30, ht: r.top - 30, hb: r.bottom + 30,
+            cx: r.left + r.width / 2, cy: r.top + r.height / 2,
+            w: Math.max(r.width, 1), h: Math.max(r.height, 1)
+          };
+        }
+      }
+    }
+
+    /* ---- interactive amplification: state set on pointerover, not per-frame ---- */
+    function pv3Over(ev){
+      if (!pv3Ring) return;
+      var t = ev.target && ev.target.closest && ev.target.closest(PV3_AMP_SEL);
+      var amp = false, hide = false;
+      if (t){
+        var tag = t.tagName;
+        if (tag === "TEXTAREA") hide = true;
+        else if (tag === "INPUT"){
+          var ty = (t.getAttribute("type") || "text").toLowerCase();
+          hide = !!PV3_TEXTY[ty];
+          amp = !hide;
+        } else amp = true;
+      }
+      pv3Ts = amp ? 1.7 : 1;
+      pv3CurWake();
+      pv3Ring.classList.toggle("pv3-amp", amp);
+      pv3Ring.classList.toggle("pv3-hide", hide);
+    }
+
+    /* ---- click ripple: one-shot, removed on animationend (+ timeout net) ---- */
+    function pv3Down(ev){
+      if (PV3.reduced) return;
+      if (ev.pointerType && ev.pointerType !== "mouse") return;
+      if (ev.button) return;   /* primary button only */
+      if (pv3Ring && pv3Ring.classList.contains("pv3-hide")) return;  /* not over text inputs */
+      var b = document.createElement("div");
+      b.className = "pv3-ripple";
+      b.style.left = ev.clientX + "px";
+      b.style.top = ev.clientY + "px";
+      document.body.appendChild(b);
+      var gone = false;
+      function drop(){
+        if (gone) return; gone = true;
+        if (b.parentNode) b.parentNode.removeChild(b);
+      }
+      b.addEventListener("animationend", drop);
+      setTimeout(drop, 900);   /* net for paused rAF / suppressed animations */
+    }
+
+    function pv3Leave(ev){
+      /* fires on document when the pointer leaves the window */
+      pv3Seen = false;
+      if (pv3Ring) pv3Ring.classList.remove("pv3-live");
+      pv3MagRelease();
+    }
+
+    /* cached rects go stale on scroll/resize — release, re-acquire on next move */
+    function pv3Drop(){ pv3MagRelease(); }
+
+    function pv3CursorInit(){
+      if (pv3CursorOn) return;
+      if (!window.PV3 || !PV3.fine || PV3.reduced) return;
+      if (!document.body){
+        document.addEventListener("DOMContentLoaded", pv3CursorInit);
+        return;
+      }
+      pv3CursorOn = true;
+      pv3Ring = pv3RingEl();
+      document.documentElement.classList.add("pv3-cursor-on");
+      document.addEventListener("pointermove", pv3Move, { passive: true });
+      document.addEventListener("pointerover", pv3Over, { passive: true });
+      document.addEventListener("pointerdown", pv3Down, { passive: true });
+      document.addEventListener("pointerleave", pv3Leave);
+      document.addEventListener("scroll", pv3Drop, { passive: true, capture: true });
+      window.addEventListener("resize", pv3Drop, { passive: true });
+      pv3CurUnsub = PV3.on(pv3Frame);
+    }
+
+    function pv3CursorTeardown(){
+      if (!pv3CursorOn) return;
+      pv3CursorOn = false;
+      if (pv3CurUnsub){ try { pv3CurUnsub(); } catch(e){} pv3CurUnsub = null; }
+      document.removeEventListener("pointermove", pv3Move);
+      document.removeEventListener("pointerover", pv3Over);
+      document.removeEventListener("pointerdown", pv3Down);
+      document.removeEventListener("pointerleave", pv3Leave);
+      document.removeEventListener("scroll", pv3Drop, true);
+      window.removeEventListener("resize", pv3Drop);
+      pv3MagRelease();
+      document.documentElement.classList.remove("pv3-cursor-on");
+      if (pv3Ring) pv3Ring.classList.remove("pv3-live", "pv3-amp", "pv3-hide");
+      pv3Seen = false;
+    }
+
+    /* live reduced-motion flips: tear down / come back without a reload */
+    var pv3RmMq = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+    function pv3RmSync(){
+      if (pv3RmMq && pv3RmMq.matches) pv3CursorTeardown();
+      else pv3CursorInit();
+    }
+    if (pv3RmMq){
+      if (pv3RmMq.addEventListener) pv3RmMq.addEventListener("change", pv3RmSync);
+      else if (pv3RmMq.addListener) pv3RmMq.addListener(pv3RmSync);
+    }
+
+    pv3CursorInit();
+  })();
+} catch(e){ /* pv3-cursor must never break the app */ }
+
+/* ================================================================
+   pv3-text — cinematic typography motion (JS)
+   Assumes PV3 + CG/esc/pvSchedule exist. Additive only; ES5.
+   ================================================================ */
+try {
+
+  /* Split a TEXT-ONLY element into overflow-hidden word masks holding
+     letter spans, cascading in via the pv3-letter-in animation.
+     Returns the total cascade time in ms, or 0 when it bailed and left
+     the element untouched (reduced motion, element children, already
+     split, empty). Screen readers get ONE string: aria-label on the
+     element, aria-hidden on every word mask. */
+  var pv3SplitIn = function(el){
+    try {
+      if (!el || el.nodeType !== 1) return 0;
+      if (el.getAttribute("data-pv3split")) return 0;
+      if (PV3.reduced) return 0;                     /* bail entirely: untouched */
+      var i, node;
+      for (i = 0; i < el.childNodes.length; i++){
+        node = el.childNodes[i];
+        if (node.nodeType !== 3) return 0;           /* element/comment child: bail */
+      }
+      var clean = String(el.textContent || "").replace(/\s+/g, " ");
+      if (!clean.replace(/ /g, "")) return 0;
+      var words = clean.split(" ");
+      var letterTotal = clean.replace(/ /g, "").length;
+      /* ~40ms per letter, compressed so the whole stagger caps at 700ms */
+      var STEP = Math.min(40, 700 / Math.max(1, letterTotal - 1));
+      var DUR = 620, out = [], li = 0, last = 0, w, ls, j;
+      for (i = 0; i < words.length; i++){
+        w = words[i];
+        if (!w) continue;
+        ls = "";
+        for (j = 0; j < w.length; j++){
+          last = Math.round(li * STEP);
+          ls += '<span class="pv3-l" style="animation-delay:' + last + 'ms">' +
+                esc(w.charAt(j)) + '</span>';
+          li++;
+        }
+        out.push('<span class="pv3-w" aria-hidden="true">' + ls + '</span>');
+      }
+      if (!out.length) return 0;
+      el.setAttribute("aria-label", clean.replace(/^ | $/g, ""));
+      el.setAttribute("data-pv3split", "1");
+      el.classList.add("pv3-split");
+      el.innerHTML = out.join(" ");                  /* real spaces keep word wrap */
+      return last + DUR;
+    } catch(e){ return 0; }
+  };
+
+  /* Auto-apply after each route render: the home hero headline and interior
+     page titles, each exactly once (data-pv3split marks them). The hero also
+     receives the shimmer once its cascade settles. Idempotent and cheap —
+     safe to call repeatedly (pvSchedule double-fires by design). */
+  var pv3HeroText = function(){
+    try {
+      var hero = document.querySelector("#app .pv-soft h2.big");
+      if (hero && !hero.getAttribute("data-pv3split")){
+        var t = pv3SplitIn(hero);
+        if (t){
+          setTimeout(function(){
+            /* the route may have rerendered since; only shimmer the element
+               still in the document */
+            if (document.contains(hero) && hero.getAttribute("data-pv3split")){
+              /* the cascade is done and the spans have served their purpose.
+                 Restore the plain string BEFORE adding the shimmer: clip:text
+                 cannot paint into per-letter spans (each is its own composited
+                 layer), which left the headline fully transparent — the one
+                 failure class this layer must never ship. */
+              var full = hero.getAttribute("aria-label");
+              if (full){ hero.textContent = full; hero.removeAttribute("aria-label"); }
+              hero.classList.add("pv3-shimmer");
+            }
+          }, t + 260);
+        }
+      }
+      var heads = document.querySelectorAll("#app .h-page:not([data-pv3split])");
+      for (var i = 0; i < heads.length; i++) pv3SplitIn(heads[i]);
+    } catch(e){}
+  };
+
+  /* expose for the lead's wiring (same-IIFE call is preferred; the window
+     handle is a convenience for console QA) */
+  window.pv3SplitIn = pv3SplitIn;
+  window.pv3HeroText = pv3HeroText;
+
+} catch(e){ /* pv3-text must never break the app */ }
+
+/* ================= pv3-medallion — 3D club pucks (JS) =================
+   Assumes PV3, CG, esc exist. ES5, additive, delegated, error-shielded.
+   Exposes: pv3Puck(code, size)  and  pv3TeamHero(code). */
+var pv3Puck, pv3TeamHero;
+try {
+  (function(){
+
+    function pv3Team(code){
+      var list = CG.TEAMS || [], i;
+      for (i = 0; i < list.length; i++) if (list[i].code === code) return list[i];
+      return null;
+    }
+
+    /* builder: outer perspective wrapper > shadow + disc(rim, face, crest, specular).
+       CG.crest renders at 2x its nominal px, so nominal ~= size*0.31 keeps the
+       intrinsic attributes near the 62% slot; CSS forces the exact fit anyway. */
+    pv3Puck = function(code, size){
+      var S = Math.max(24, size || 64);
+      var t = pv3Team(code);
+      var color = (t && t.color) || "#FFE500";
+      var crest = "";
+      try { crest = CG.crest(code, Math.max(12, Math.round(S * 0.31)), { decorative: true }) || ""; } catch(e){}
+      return '<span class="pv3-puck" data-code="' + esc(String(code || "")) + '" ' +
+          'style="--pk-size:' + S + 'px;--pk-c:' + esc(color) + '">' +
+        '<span class="pv3-puck-shadow" aria-hidden="true"></span>' +
+        '<span class="pv3-puck-disc">' +
+          '<span class="pv3-puck-rim" aria-hidden="true"></span>' +
+          '<span class="pv3-puck-face" aria-hidden="true"></span>' +
+          '<span class="pv3-puck-crest">' + crest + '</span>' +
+          '<span class="pv3-puck-spec" aria-hidden="true"></span>' +
+        '</span></span>';
+    };
+
+    pv3TeamHero = function(code){
+      return '<div class="pv3-teamhero" data-pv3-par="-0.05">' + pv3Puck(String(code || "").toUpperCase(), 200) + '</div>';
+    };
+
+    /* ---- delegated pointer tracking (same pattern as the .pv-tilt engine) ----
+       Rect is cached on acquire and invalidated on resize/scroll — no per-frame
+       layout reads. Inner spans are pointer-events:none, so the event target is
+       always the wrapper: one acquire per hover, no child-crossing churn. */
+    var el = null, rect = null, disc = null;
+
+    function reset(){
+      if (!el) return;
+      var e0 = el, d0 = disc;
+      e0.classList.remove("pv3-live");
+      e0.classList.add("pv3-settle");            /* spring-back transition window */
+      if (d0) d0.style.transform = "";
+      e0.style.setProperty("--pk-sx", "0");
+      e0.style.setProperty("--pk-ss", "1");
+      setTimeout(function(){ e0.classList.remove("pv3-settle"); }, 560); /* then idle resumes at 0deg */
+      el = null; rect = null; disc = null;
+    }
+
+    document.addEventListener("pointermove", function(ev){
+      if (!PV3.fine || PV3.reduced){ if (el) reset(); return; }
+      var t = ev.target && ev.target.closest && ev.target.closest(".pv3-puck");
+      if (el && el !== t) reset();
+      if (!t) return;
+      if (t !== el){
+        el = t;
+        disc = t.querySelector(".pv3-puck-disc");
+        rect = t.getBoundingClientRect();
+        t.classList.remove("pv3-settle");
+        t.classList.add("pv3-live");
+      }
+      if (!rect) rect = el.getBoundingClientRect();   /* invalidated by resize/scroll */
+      if (!disc || !rect.width) return;
+      var px = (ev.clientX - rect.left) / rect.width;
+      var py = (ev.clientY - rect.top) / rect.height;
+      px = px < 0 ? 0 : (px > 1 ? 1 : px);
+      py = py < 0 ? 0 : (py > 1 ? 1 : py);
+      var ry = (px - .5) * 44;                        /* +-22deg */
+      var rx = (.5 - py) * 44;
+      disc.style.transform = "rotateX(" + rx.toFixed(2) + "deg) rotateY(" + ry.toFixed(2) + "deg) scale(1.06)";
+      el.style.setProperty("--gx", (px * 100).toFixed(1) + "%");
+      el.style.setProperty("--gy", (py * 100).toFixed(1) + "%");
+      el.style.setProperty("--pk-sx", (ry * 0.35).toFixed(1));
+      el.style.setProperty("--pk-ss", (1.05 + Math.abs(ry) * 0.004).toFixed(3));
+    });
+    /* capture-phase leave on document mirrors the existing tilt engine's cleanup */
+    document.addEventListener("pointerleave", function(){ reset(); }, true);
+    window.addEventListener("resize", function(){ rect = null; }, { passive: true });
+    window.addEventListener("scroll", function(){ rect = null; }, { passive: true });
+  })();
+} catch(e){ /* shield: a failure here must never break the app */ }
+
+/* hard fallbacks so lead-integrated call sites never throw even if init failed */
+if (!pv3Puck) pv3Puck = function(code, size){
+  try { return CG.crest(code, Math.round((size || 64) / 2)) || ""; } catch(e){ return ""; }
+};
+if (!pv3TeamHero) pv3TeamHero = function(code){
+  try { return CG.crest(code, 84) || ""; } catch(e){ return ""; }
+};
+
+/* ================================================================
+   pv3-cinema — grain + scroll progress + club tint (additive).
+   Assumes PV3 kernel + CG globals exist. Wrapped so a throw can
+   never break the app.
+   ================================================================ */
+(function(){
+  try{
+
+    /* ---- ensure the fixed cinema layers exist (idempotent).
+       Grain goes right after #pv-aura so DOM order gives the right
+       z stratum (above aura, below #pv-frame). The scrollbar is a
+       body-level div, so route rerenders of #app never destroy it. */
+    function pv3EnsureCinema(){
+      try{
+        if (!document.body) return;
+        if (!document.getElementById("pv3-grain")){
+          var g = document.createElement("div");
+          g.id = "pv3-grain"; g.setAttribute("aria-hidden","true");
+          var aura = document.getElementById("pv-aura");
+          if (aura && aura.parentNode) aura.parentNode.insertBefore(g, aura.nextSibling);
+          else document.body.insertBefore(g, document.body.firstChild);
+        }
+        if (!document.getElementById("pv3-scrollbar")){
+          var s = document.createElement("div");
+          s.id = "pv3-scrollbar"; s.setAttribute("aria-hidden","true");
+          document.body.appendChild(s);
+        }
+      }catch(e){}
+    }
+    window.pv3EnsureCinema = pv3EnsureCinema;
+
+    /* ---- scroll progress ------------------------------------------
+       All layout reads happen in event handlers (scroll/resize) or a
+       debounced route-change hook — the PV3.on frame callback only
+       lerps a number and writes one transform, and skips the write
+       entirely once settled. */
+    var pv3ST = 0, pv3SC = -1, pv3SMax = 1, pv3Bar = null, pv3Last = -1;
+    function pv3Scroll(){
+      var y = window.pageYOffset || 0;
+      pv3ST = y <= 0 ? 0 : (y >= pv3SMax ? 1 : y / pv3SMax);
+      pv3BarWake();
+    }
+    function pv3Measure(){
+      try{
+        var d = document.documentElement;
+        pv3SMax = Math.max(1, (d ? d.scrollHeight : 1) - (window.innerHeight || 1));
+        pv3Scroll();
+      }catch(e){}
+    }
+    window.addEventListener("scroll", pv3Scroll, { passive:true });
+    window.addEventListener("resize", pv3Measure);
+    var pv3BarSub = null;
+    function pv3BarWake(){ if (!pv3BarSub) pv3BarSub = PV3.on(pv3BarFrame); }
+    function pv3BarFrame(){
+      if (!pv3Bar || !pv3Bar.isConnected) pv3Bar = document.getElementById("pv3-scrollbar");
+      if (!pv3Bar) return;
+      if (PV3.reduced){ pv3SC = pv3ST; }
+      else {
+        pv3SC = pv3SC < 0 ? pv3ST : PV3.lerp(pv3SC, pv3ST, .22);
+        if (Math.abs(pv3SC - pv3ST) < .0008) pv3SC = pv3ST;
+      }
+      var w = Math.round(pv3SC * 1000) / 1000;
+      if (w === pv3Last){
+        /* settled — release the shared loop until the next scroll/measure */
+        if (pv3SC === pv3ST && pv3BarSub){ pv3BarSub(); pv3BarSub = null; }
+        return;
+      }
+      pv3Last = w;
+      pv3Bar.style.transform = "scaleX(" + w + ")";
+    }
+    pv3BarWake();
+    /* remeasure after every route render (own observer; coexists with
+       the existing #app observer, childList only, debounced) */
+    var pv3App = document.getElementById("app");
+    if (pv3App && "MutationObserver" in window){
+      var pv3MT = null;
+      new MutationObserver(function(){
+        clearTimeout(pv3MT);
+        pv3MT = setTimeout(pv3Measure, 200);
+      }).observe(pv3App, { childList:true });
+    }
+
+    /* ---- team-page ambience: --pv3-club-glow feeds the aura layers.
+       pv3ClubTint(code) is exposed for the lead; the hashchange hook
+       below also drives it automatically (and clears it) so no route
+       wiring is strictly required. */
+    function pv3ClubTint(code){
+      try{
+        var root = document.documentElement;
+        if (!code){ root.style.removeProperty("--pv3-club-glow"); return; }
+        var up = String(code).toUpperCase();
+        var team = ((window.CG && CG.TEAMS) || []).filter(function(t){ return t.code === up; })[0];
+        var hex = (team && team.color) ? String(team.color).replace("#","") : "";
+        if (hex.length === 3)
+          hex = hex.charAt(0)+hex.charAt(0)+hex.charAt(1)+hex.charAt(1)+hex.charAt(2)+hex.charAt(2);
+        if (!/^[0-9A-Fa-f]{6}$/.test(hex)){ root.style.removeProperty("--pv3-club-glow"); return; }
+        var n = parseInt(hex, 16);
+        root.style.setProperty("--pv3-club-glow",
+          "rgba(" + ((n>>16)&255) + "," + ((n>>8)&255) + "," + (n&255) + ",0.16)");
+      }catch(e){}
+    }
+    window.pv3ClubTint = pv3ClubTint;
+    function pv3RouteTint(){
+      var m = /^#\/team\/([^\/?]+)/.exec(location.hash || "");
+      pv3ClubTint(m ? decodeURIComponent(m[1]) : null);
+    }
+    window.addEventListener("hashchange", pv3RouteTint);
+
+    /* ---- boot ---- */
+    pv3EnsureCinema();
+    pv3Measure();
+    pv3RouteTint();
+  }catch(e){ /* cinema is decoration; never let it take the app down */ }
+})();
+
+/* ================================================================
+   pv3-scroll — scroll parallax + depth choreography (JS half).
+   Paste INSIDE the main preview IIFE, AFTER all existing code, so
+   the closure can reach `io` and `pvSchedule` (both are feature-
+   checked; the module degrades gracefully if either is missing).
+   ================================================================ */
+try {
+  (function(){
+    if (!window.PV3 || !window.CG) return;
+
+    /* ---------- parallax registry ---------- */
+    var pv3ParItems = [];                       /* [{el,k,top,h,y}] — rects cached, never read per-frame */
+    var pv3ScrollY = window.pageYOffset || 0;   /* recorded by the passive scroll listener */
+    var pv3VH = window.innerHeight || 800;      /* recorded on refresh/resize */
+    var pv3ParDirty = false;
+    var pv3ParApplied = false;
+    var pv3RszT = null;
+    var PV3_PAR_MAX = 24;                       /* px clamp, both directions */
+
+    function pv3ParClear(){
+      for (var i = 0; i < pv3ParItems.length; i++){
+        pv3ParItems[i].el.style.transform = "";
+        pv3ParItems[i].y = 0;
+      }
+      pv3ParApplied = false;
+    }
+
+    /* Rebuilds the {top,height} cache. The ONE place allowed to read layout,
+       and it runs only on boot / resize / route render — never per frame.
+       Writes first (clear stale inline transforms so rects measure true),
+       then a single read pass. */
+    function pv3ParRefresh(){
+      var i, el, k, r;
+      for (i = 0; i < pv3ParItems.length; i++) pv3ParItems[i].el.style.transform = "";
+      pv3ParItems = [];
+      pv3ParApplied = false;
+      if (PV3.reduced || !PV3.fine) return;
+      var els = document.querySelectorAll("[data-pv3-par]");
+      if (!els.length) return;
+      for (i = 0; i < els.length; i++) els[i].style.transform = "";
+      pv3VH = window.innerHeight || pv3VH;
+      pv3ScrollY = window.pageYOffset || 0;
+      for (i = 0; i < els.length; i++){
+        el = els[i];
+        k = parseFloat(el.getAttribute("data-pv3-par"));
+        if (!k || k !== k) continue;            /* 0 and NaN are no-ops */
+        if (k > 0.2) k = 0.2;
+        if (k < -0.2) k = -0.2;
+        r = el.getBoundingClientRect();
+        if (!r.height) continue;
+        pv3ParItems.push({ el: el, k: k, top: r.top + pv3ScrollY, h: r.height, y: 0 });
+      }
+      pv3ParDirty = true;                       /* first frame paints initial offsets */
+      pv3ParWake();
+    }
+    window.pv3ParRefresh = pv3ParRefresh;
+
+    /* One shared frame pass on the PV3 loop: zero layout reads (cached rects +
+       recorded scrollY only), transform writes only when the value actually moved. */
+    var pv3ParSub = null;
+    function pv3ParWake(){ if (!pv3ParSub) pv3ParSub = PV3.on(pv3ParFrame); }
+    function pv3ParFrame(){
+      try {
+        if (PV3.reduced || !PV3.fine){          /* live gate — reduced can flip mid-session */
+          if (pv3ParApplied) pv3ParClear();
+          if (pv3ParSub){ pv3ParSub(); pv3ParSub = null; }
+          return;
+        }
+        if (!pv3ParDirty || !pv3ParItems.length){
+          /* nothing to move — release the shared loop; scroll/refresh re-arm it */
+          if (pv3ParSub){ pv3ParSub(); pv3ParSub = null; }
+          return;
+        }
+        pv3ParDirty = false;
+        var half = pv3VH / 2;
+        for (var i = 0; i < pv3ParItems.length; i++){
+          var it = pv3ParItems[i];
+          var y = ((it.top + it.h / 2 - pv3ScrollY) - half) * it.k;
+          if (y > PV3_PAR_MAX) y = PV3_PAR_MAX;
+          else if (y < -PV3_PAR_MAX) y = -PV3_PAR_MAX;
+          if (y - it.y < 0.25 && it.y - y < 0.25) continue;
+          it.y = y;
+          it.el.style.transform = "translate3d(0," + y.toFixed(2) + "px,0)";
+          pv3ParApplied = true;
+        }
+      } catch(e){ /* a bad frame must never poison the shared loop */ }
+    }
+    pv3ParWake();
+
+    window.addEventListener("scroll", function(){
+      pv3ScrollY = window.pageYOffset || 0;
+      pv3ParDirty = true;
+      pv3ParWake();
+    }, { passive: true });
+
+    window.addEventListener("resize", function(){
+      if (pv3RszT) clearTimeout(pv3RszT);
+      pv3RszT = setTimeout(pv3ParRefresh, 120);
+    }, { passive: true });
+
+    /* fonts/images landing late can shift the cached rects once */
+    window.addEventListener("load", function(){ pv3ParRefresh(); });
+
+    /* route renders replace #app children — rebuild the cache after paint.
+       Own observer; the existing one (attachReveals/fillNhl) is untouched. */
+    var pv3App = document.getElementById("app");
+    if (pv3App && "MutationObserver" in window){
+      new MutationObserver(function(){
+        if (typeof pvSchedule === "function") pvSchedule(pv3ParRefresh);
+        else setTimeout(pv3ParRefresh, 140);
+      }).observe(pv3App, { childList: true });
+    }
+
+    /* ---------- footer entrance: ride the existing .pv-rv observer ----------
+       attachReveals never touches #sitefoot (its selector list is scoped to
+       #app + .pv-soft), so this hands the footer children to the shared `io`
+       directly, with the same 2.5s can't-strand-content fallback the file uses. */
+    function pv3FootReveal(){
+      var foot = document.getElementById("sitefoot");
+      if (!foot) return;
+      var kids = foot.querySelectorAll(".shell > *");
+      if (!kids.length) kids = foot.children;
+      var hasIO = (typeof io !== "undefined") && io;
+      for (var i = 0; i < kids.length; i++){
+        (function(el, idx){
+          if (!el.classList || el.classList.contains("pv-rv")) return;
+          el.classList.add("pv-rv");
+          el.style.transitionDelay = Math.min(idx * 60, 240) + "ms";
+          if (hasIO){
+            io.observe(el);
+            setTimeout(function(){
+              if (!el.classList.contains("in") && !el.__pvSeen) el.classList.add("in");
+            }, 2500);
+          } else {
+            el.classList.add("in");             /* no observer → instant, never hidden */
+          }
+        })(kids[i], i);
+      }
+    }
+    window.pv3FootReveal = pv3FootReveal;
+
+    /* renderChrome rebuilds the footer; decorate the CURRENT renderer (which is
+       already the preview layer's own decorator) — never replace it. */
+    var _pv3Chrome = CG.renderChrome;
+    CG.renderChrome = function(){
+      _pv3Chrome.apply(this, arguments);
+      try {
+        if (typeof pvSchedule === "function"){
+          pvSchedule(function(){ pv3FootReveal(); pv3ParRefresh(); });
+        } else {
+          setTimeout(function(){ pv3FootReveal(); pv3ParRefresh(); }, 140);
+        }
+      } catch(e){}
+    };
+
+    /* ---------- boot ---------- */
+    if (typeof pvSchedule === "function"){
+      pvSchedule(function(){ pv3FootReveal(); pv3ParRefresh(); });
+    } else {
+      setTimeout(function(){ pv3FootReveal(); pv3ParRefresh(); }, 140);
+    }
+  })();
+} catch(e){ /* pv3-scroll must never break the app */ }
 })();
