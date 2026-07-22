@@ -81,17 +81,8 @@
   '@media(max-width:1100px){#masthead .mh{min-height:0;align-items:center;padding:10px 0}'+
     '#masthead .mh>*:not(.mh-nav){margin-bottom:0}}'+
 
-  /* ---- the "up next" whisper line ---- */
-  '#ticker{height:auto;background:transparent;border-bottom:1px solid var(--line-soft)}'+
-  '.pv-line{display:flex;align-items:center;gap:14px;max-width:1240px;margin:0 auto;padding:7px clamp(16px,3.5vw,40px);'+
-    'font-family:var(--f-sharp);font-size:12px;font-weight:300;color:var(--steel);white-space:nowrap;overflow:hidden}'+
-  '.pv-line .k{font-weight:600;color:var(--ink);flex:0 0 auto}'+
-  '.pv-line a{color:var(--steel);transition:color .25s}'+
-  '.pv-line a:hover{color:var(--ink)}'+
-  '.pv-line .more{margin-left:auto;flex:0 0 auto;font-weight:600;color:var(--ink)}'+
-  '.pv-line .sep{opacity:.45}'+
-  'html[data-theme="dark"] .pv-line .k,html[data-theme="dark"] .pv-line .more{color:#E9EEEB}'+
-  '.pv-line a,.pv-line .k,.pv-line .more{transition:none}'+
+  /* ---- the ticker band is retired; Up-next lives in the League Pulse card ---- */
+  '#ticker{display:none}'+
 
   /* ---- serif hero, centered like the reference ---- */
   '#hero{background:var(--paper);color:var(--ink)}'+
@@ -159,6 +150,14 @@
   '.pv-pos .p em{font-style:normal;font-family:var(--f-sharp);font-weight:300;font-size:10.5px;color:#5C6B75;'+
     'display:flex;justify-content:space-between;margin-bottom:5px}'+
   '.pv-pos .p em b{font-weight:600;color:#101519}'+
+  '.pv-un{margin-top:16px;border-top:1px solid #F0F2EE;padding-top:13px}'+
+  '.pv-un h4{font-family:var(--f-sharp);font-weight:600;font-size:12px;color:#5C6B75;margin:0 0 6px}'+
+  '.pv-unr{display:flex;align-items:center;gap:10px;padding:6px 0;color:#101519}'+
+  '.pv-unr .d{width:7px;height:7px;border-radius:50%;background:var(--chrome);flex-shrink:0}'+
+  '.pv-unr b{font-family:var(--f-sharp);font-weight:600;font-size:13.5px;color:#101519;display:flex;align-items:center;gap:7px}'+
+  '.pv-unr time{margin-left:auto;font-family:var(--f-sharp);font-weight:300;font-size:12px;color:#5C6B75;'+
+    'font-variant-numeric:tabular-nums;white-space:nowrap}'+
+  'a.pv-unr:hover b{color:var(--gold)}'+
   '.pv-bar{height:6px;border-radius:999px;background:#F0F2EE;overflow:hidden}'+
   '.pv-bar i{display:block;height:100%;border-radius:999px;background:#101519;'+
     'transform:scaleX(0);transform-origin:left;transition:transform .9s ease .4s}'+
@@ -307,28 +306,6 @@
       .observe(app, { childList: true });
   }
 
-  /* ---- the "up next" line: next games when they exist, else the next real milestones ---- */
-  function lineHtml(){
-    var lg = CG.lg || {}, items = [];
-    var upcoming = (lg.schedule||[]).filter(function(g){ return g.at > CG.now(); })
-      .sort(function(a,b){ return a.at-b.at; }).slice(0, 3);
-    if (upcoming.length){
-      items = upcoming.map(function(g){
-        return '<a href="#/matchup/'+g.id+'">'+esc(g.away)+' @ '+esc(g.home)+' · '+esc(CG.fmtTime(g.at))+'</a>';
-      });
-    } else {
-      var s = CG.SEASON || {};
-      items = [["Sign-up deadline", s.registration_deadline, "#/register"], ["Draft night", s.draft_at, "#/schedule"],
-               ["Puck drop", s.starts_at, "#/schedule"]]
-        .filter(function(m){ return m[1] && Date.parse(m[1]) > CG.now(); }).slice(0, 2)
-        .map(function(m){ return '<a href="'+m[2]+'">'+esc(m[0])+' · '+esc(CG.fmtDay(Date.parse(m[1])))+'</a>'; });
-    }
-    if (!items.length) return "";
-    return '<div class="pv-line"><span class="k">Up next</span>'+
-      items.join('<span class="sep">·</span>')+
-      '<a class="more" href="#/schedule">Schedule</a></div>';
-  }
-
   var _renderChrome = CG.renderChrome;
   CG.renderChrome = function(){
     _renderChrome.apply(this, arguments);
@@ -339,8 +316,6 @@
       var saved = null;
       try { saved = (JSON.parse(localStorage.getItem("cgproto:v1")||"{}").prefs||{}).theme; } catch(e){}
       if (!saved || saved === "auto") document.documentElement.setAttribute("data-theme","light");
-      var t = document.getElementById("ticker");
-      if (t) t.innerHTML = lineHtml();
     } catch(e){ /* fail safe */ }
   };
 
@@ -395,6 +370,33 @@
     return '<div class="pv-ch"><h4>Road to puck drop · '+pct+'% of the off-season gone</h4>'+
       '<div class="pv-prog"><i style="width:'+pct+'%"></i></div></div>';
   }
+  function upNextBlock(){
+    var lg = CG.lg || {}, rows = [];
+    var upcoming = (lg.schedule||[]).filter(function(g){ return g.at > CG.now(); })
+      .sort(function(a,b){ return a.at-b.at; }).slice(0, 3);
+    if (upcoming.length){
+      rows = upcoming.map(function(g){
+        return '<a class="pv-unr" href="#/matchup/'+g.id+'"><span class="d"></span>'+
+          '<b>'+CG.crest(g.away,18)+esc(g.away)+' @ '+CG.crest(g.home,18)+esc(g.home)+'</b>'+
+          '<time>'+esc(CG.fmtDay(g.at))+' \u00b7 '+esc(CG.fmtTime(g.at))+'</time></a>';
+      });
+    } else {
+      var sn = CG.SEASON || {};
+      var regOpen = !!(sn.registration_open && sn.status !== "active");
+      rows = [["Pre-season opens", sn.preseason_starts_at], ["Draft night", sn.draft_at],
+              ["Free agency opens", sn.free_agency_opens_at], ["Puck drop", sn.starts_at],
+              ["Playoffs", sn.playoffs_start_at]]
+        .concat(regOpen ? [] : [["Sign-up deadline", sn.registration_deadline]])
+        .filter(function(m){ return m[1] && Date.parse(m[1]) > CG.now(); })
+        .sort(function(a,b){ return Date.parse(a[1]) - Date.parse(b[1]); }).slice(0, 3)
+        .map(function(m){
+          return '<div class="pv-unr"><span class="d"></span><b>'+esc(m[0])+'</b>'+
+            '<time>'+esc(CG.fmtDay(Date.parse(m[1])))+'</time></div>';
+        });
+    }
+    if (!rows.length) return "";
+    return '<div class="pv-un"><h4>Up next</h4>'+rows.join("")+'</div>';
+  }
   function dashHtml(){
     var s = CG.SEASON || {};
     var regs = seasonRegs();
@@ -414,7 +416,7 @@
     return '<div class="pv-dash"><div class="dh"><b>League pulse</b><span>'+esc((CG.seasonTag&&CG.seasonTag())||"Season 1")+' · live from the database</span></div>'+
       '<div class="pv-kpis">'+kpis.slice(0,4).map(function(k){
         return '<div class="pv-kpi">'+k[0]+'<span>'+k[1]+'</span></div>';
-      }).join("")+'</div>'+chart+pos+'</div>';
+      }).join("")+'</div>'+chart+pos+upNextBlock()+'</div>';
   }
   function stageHtml(){
     return '<section class="sec" style="padding-top:0;padding-bottom:clamp(28px,4vw,52px)"><div class="shell">'+
