@@ -47,7 +47,7 @@
     'letter-spacing:.14em;text-transform:uppercase;text-align:center;padding:9px 12px 3px}'+
 
   /* ---- masthead on the dark surround; the nav is a white tab fused to the canvas ---- */
-  '#masthead{position:static!important;background:transparent!important;border-bottom:0!important;color:#fff}'+
+  '#masthead{position:relative!important;z-index:60;background:transparent!important;border-bottom:0!important;color:#fff}'+
   '#masthead .mh{align-items:flex-end;padding-top:8px}'+
   '#masthead .mh>*:not(.mh-nav){margin-bottom:15px}'+
   '#masthead .wm b{color:#fff!important}'+
@@ -70,7 +70,7 @@
   '#masthead .shell{max-width:1680px}'+
   '#masthead .mh{min-height:76px}'+
   '@media(min-width:1200px){#masthead .mh{position:relative}'+
-    '#masthead .mh-nav{position:absolute;left:50%;bottom:0;transform:translateX(-50%);margin:0}'+
+    '#masthead .mh-nav{position:absolute;left:0;right:0;bottom:0;width:fit-content;margin:0 auto}'+
     '#masthead .mh-right{margin-left:auto}}'+
   '@media(max-width:900px){#masthead .mh-nav::before,#masthead .mh-nav::after{display:none}}'+
 
