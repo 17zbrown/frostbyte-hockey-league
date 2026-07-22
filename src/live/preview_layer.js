@@ -255,7 +255,7 @@
   '.pv-delta{display:inline-flex;align-items:center;gap:4px;font-family:var(--f-sharp);font-weight:600;'+
     'font-size:11px;border-radius:999px;padding:2px 9px;opacity:0;transform:translateY(4px);'+
     'transition:opacity .5s ease .9s,transform .5s ease .9s}'+
-  '.go .pv-delta,.pv-anim.go .pv-delta{opacity:1;transform:none}'+
+  '.go .pv-delta,.pv-anim.go .pv-delta,.in .pv-delta,.pvw .pv-delta{opacity:1;transform:none}'+
   '.pv-delta.up{color:#3BD98A;background:rgba(59,217,138,.13)}'+
   '.pv-delta.dn{color:#FF8A66;background:rgba(255,138,102,.13)}'+
   '.pv-gauge svg{width:100%;display:block}'+
