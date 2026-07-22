@@ -392,7 +392,7 @@
   }, { rootMargin: "0px 0px -8% 0px" }) : null;
   function attachReveals(){
     if (!io){ document.querySelectorAll("[data-count]").forEach(function(el){ runCounters(el.parentNode||el); }); return; }
-    document.querySelectorAll("#app .sec, #app .sec-tight, #app .sec-dark, .pv-soft > *")
+    document.querySelectorAll("#app .sec, #app .sec-tight, #app .sec-dark, #app .pvw, .pv-soft > *")
       .forEach(function(el, i){
         if (el.classList.contains("pv-rv")) return;
         el.classList.add("pv-rv");
