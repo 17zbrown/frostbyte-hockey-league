@@ -43,7 +43,7 @@
 
   /* ---- featured hero: big featured story left, slides rail right (dark) ---- */
   '.pv-hero-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:clamp(22px,3.5vw,54px);align-items:stretch}'+
-  '.pv-feat{display:flex;flex-direction:column;background:var(--ink-2);border:1px solid #232B31}'+
+  '.pv-feat{display:flex;flex-direction:column;background:#151B21;border:1px solid #232B31}'+
   '.pv-feat .art{aspect-ratio:16/7.5;min-height:0;overflow:hidden}'+
   '.pv-feat .art svg{width:100%;height:100%;display:block}'+
   '.pv-feat .fb{padding:clamp(16px,2vw,26px);display:flex;flex-direction:column;gap:9px;flex:1}'+
@@ -176,8 +176,8 @@
         if (!m[1]) return;
         var ms = Date.parse(m[1]);
         out.push(dateCard(ms));
-        out.push('<a class="pv-game" href="'+m[2]+'"><span class="pv-st">'+esc(m[0].toUpperCase())+'</span>'+
-          '<span class="pv-row"><b>'+esc(CG.fmtDay(ms))+'</b></span></a>');
+        out.push('<a class="pv-game" href="'+m[2]+'"><span class="pv-st">'+esc(((CG.seasonTag&&CG.seasonTag())||"Season 1").toUpperCase())+'</span>'+
+          '<span class="pv-row"><b>'+esc(m[0])+'</b></span></a>');
       });
     }
     return '<button class="pv-arr l" data-pv-arr="-1" aria-label="Scroll games back">&#9664;</button>'+
@@ -260,7 +260,7 @@
   function storiesBand(){
     var arts = ((CG.CONTENT && CG.CONTENT.articles) || []).slice()
       .sort(function(a,b){ return (b.dateIso||"").localeCompare(a.dateIso||""); }).slice(0, 10);
-    if (!arts.length) return "";
+    if (arts.length < 2) return "";
     var week = 7*24*3600*1000;
     return '<section class="sec sec-dark" style="padding-top:clamp(26px,3.5vw,44px);padding-bottom:clamp(26px,3.5vw,44px)"><div class="shell">'+
       '<div class="sec-head"><div class="lead"><h2 class="h-sec" style="color:#fff">Top stories</h2></div>'+
