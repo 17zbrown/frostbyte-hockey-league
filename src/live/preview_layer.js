@@ -559,9 +559,15 @@
       '<circle class="cur" r="3.5" fill="'+color+'" cx="-9" cy="-9"/></svg></div>';
   }
   function chartGo(root){
-    requestAnimationFrame(function(){ requestAnimationFrame(function(){
-      (root || document).querySelectorAll(".pv-chart:not(.go), .pv-anim:not(.go)").forEach(function(c){ c.classList.add("go"); });
-    }); });
+    var run = function(){
+      (root || document).querySelectorAll(".pv-chart:not(.go), .pv-anim:not(.go)")
+        .forEach(function(c){ c.classList.add("go"); });
+    };
+    /* the double rAF lets the start styles paint so the transition actually runs. The timeout is
+       the safety net: where rAF is paused (background tabs, embedded webviews) the widgets would
+       otherwise stay frozen at zero height instead of simply skipping the animation. */
+    requestAnimationFrame(function(){ requestAnimationFrame(run); });
+    setTimeout(run, 140);
   }
   document.addEventListener("mousemove", function(ev){
     var tip = ensureTip();
