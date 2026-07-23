@@ -138,7 +138,7 @@ const STAFF_DEPARTMENTS = [
   { key: "officiating",  role: "Officials",    channel: "officials",    topic: "Officials — game-night disputes, forfeits, and rule calls." },
   { key: "operations",   role: "Operations",   channel: "operations",   topic: "Operations — scheduling, reschedules, game codes, and no-show follow-up." },
   { key: "draft",        role: "Draft Room",   channel: "draft-room",   topic: "Draft Room — draft night and the free-agency bidding board." },
-  { key: "transactions", role: "Transactions", channel: "transactions", topic: "Transactions — trades, waivers, and cap & contract compliance." },
+  { key: "transactions", role: "Transactions", channel: "transactions-desk", alt: ["transactions"], topic: "Transactions — trades, waivers, and cap & contract compliance." },
   { key: "community",    role: "Community",     channel: "community",    topic: "Community — Discord moderation, welcome, and onboarding." },
   { key: "statistics",   role: "Statistics",   channel: "statistics",   topic: "Statistics — EA import accuracy and the record book." },
   { key: "media",        role: "Media",         channel: "media",        topic: "Media — news, recaps, broadcast, and socials." },
@@ -174,6 +174,15 @@ async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) 
     const rid = roleId[d.role.toLowerCase()];
     if (!rid) continue;
     if (guildChannels.find((c) => c.name === d.channel && c.parent_id === cat.id)) continue;
+    // a room created under a prior name (e.g. before a rename to dodge a public channel clash) is
+    // renamed in place rather than duplicated
+    if (d.alt) {
+      const old = guildChannels.find((c) => d.alt.includes(c.name) && c.parent_id === cat.id);
+      if (old) {
+        try { await dApi("PATCH", `/channels/${old.id}`, { name: d.channel, topic: d.topic }); old.name = d.channel; sum.deptChansRenamed = (sum.deptChansRenamed || 0) + 1; continue; }
+        catch (e) { sum.errors.push({ deptRename: d.channel, error: String(e.message || e) }); }
+      }
+    }
     try {
       const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: d.channel, type: 0, parent_id: cat.id, topic: d.topic,
         permission_overwrites: [{ id: GUILD, type: 0, deny: "1024", allow: "0" },
