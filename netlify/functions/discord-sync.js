@@ -22,6 +22,19 @@ const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
 
+// A transient network failure ("fetch failed" from undici — a DNS blip, connection reset, or
+// timeout) throws BEFORE any HTTP response, so the 429 handling in dApi never sees it and one blip
+// aborts the whole sweep (this is what kept failing lockPrivate). Retry the fetch itself a few
+// times with backoff so a momentary hiccup doesn't fail the run.
+async function rfetch(url, opts, tries = 3) {
+  let err;
+  for (let i = 0; i < tries; i++) {
+    try { return await fetch(url, opts); }
+    catch (e) { err = e; await new Promise((r) => setTimeout(r, 400 * (i + 1))); }
+  }
+  throw err;
+}
+
 // This endpoint is publicly HTTP-invocable (the site pings it for instant sync). Debounce so a
 // flood of anonymous POSTs can't drive endless Discord/DB work. Fail-open on any guard error.
 async function ranRecently(key, sec) {
@@ -35,18 +48,18 @@ async function ranRecently(key, sec) {
   } catch (e) { return false; }
 }
 async function sbGet(path) {
-  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
+  const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
   if (!r.ok) throw new Error(`GET ${path} -> ${r.status} ${await r.text()}`);
   return r.json();
 }
 async function sbPatch(path, body) {
-  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { method: "PATCH", headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify(body) });
+  const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { method: "PATCH", headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
 }
 async function dApi(method, path, body) {
   // Retry on 429 (respect Retry-After) so a busy run doesn't skip members and mis-flag them.
   for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await fetch(`https://discord.com/api/v10${path}`, {
+    const r = await rfetch(`https://discord.com/api/v10${path}`, {
       method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
@@ -63,7 +76,7 @@ async function dApi(method, path, body) {
 function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
 async function sbUpsertCfg(key, value) {
-  await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+  await rfetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ key, value: String(value), updated_at: new Date().toISOString() }) });
 }
 
@@ -113,6 +126,60 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
       if (!hook) hook = await dApi("POST", `/channels/${moves.id}/webhooks`, { name: "CGHL Moves" });
       if (hook && hook.id && hook.token) { await sbUpsertCfg("discord_mgmt_moves_webhook", `https://discord.com/api/webhooks/${hook.id}/${hook.token}`); sum.mgmtMovesHook = 1; }
     } catch (e) { sum.errors.push({ mgmtMovesHook: String(e.message || e) }); }
+  }
+}
+
+// Staff departments — one Discord role + one private room per office lane, all under the Staff
+// category. Each room is visible to its department AND the commissioners (oversight), not to all
+// staff. `key` mirrors the site's CG.STAFF_DEPARTMENTS and profiles.departments, so picking a
+// department on the site grants the matching Discord role, which opens that department's room.
+const STAFF_DEPARTMENTS = [
+  { key: "applications", role: "Review Board", channel: "review-board", topic: "Review Board — the deciding vote on owner, GM, AGM, and staff applications." },
+  { key: "officiating",  role: "Officials",    channel: "officials",    topic: "Officials — game-night disputes, forfeits, and rule calls." },
+  { key: "operations",   role: "Operations",   channel: "operations",   topic: "Operations — scheduling, reschedules, game codes, and no-show follow-up." },
+  { key: "draft",        role: "Draft Room",   channel: "draft-room",   topic: "Draft Room — draft night and the free-agency bidding board." },
+  { key: "transactions", role: "Transactions", channel: "transactions", topic: "Transactions — trades, waivers, and cap & contract compliance." },
+  { key: "community",    role: "Community",     channel: "community",    topic: "Community — Discord moderation, welcome, and onboarding." },
+  { key: "statistics",   role: "Statistics",   channel: "statistics",   topic: "Statistics — EA import accuracy and the record book." },
+  { key: "media",        role: "Media",         channel: "media",        topic: "Media — news, recaps, broadcast, and socials." },
+];
+
+// Ensure the department roles (mentionable) and a private room per department under the Staff
+// category. Idempotent: creates only what's missing, never deletes. VIEW+SEND+READ_HISTORY=68608.
+async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) {
+  const commish = roleId["commissioner"], staff = roleId["staff"];
+  if (!commish || !staff) return; // office roles not provisioned yet — next run
+  const ALLOW = "68608";
+  // (a) a Discord role per department
+  for (const d of STAFF_DEPARTMENTS) {
+    if (roleId[d.role.toLowerCase()]) continue;
+    try {
+      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: d.role, mentionable: true });
+      if (created && created.id) { roleId[d.role.toLowerCase()] = created.id; roleNameById[created.id] = d.role; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+    } catch (e) { sum.errors.push({ deptRole: d.role, error: String(e.message || e) }); }
+  }
+  // (b) the Staff category (created office-private if it doesn't exist)
+  let cat = guildChannels.find((c) => c.type === 4 && /^staff\b/i.test(c.name || ""));
+  if (!cat) {
+    try {
+      cat = await dApi("POST", `/guilds/${GUILD}/channels`, { name: "Staff", type: 4,
+        permission_overwrites: [{ id: GUILD, type: 0, deny: "1024", allow: "0" },
+          { id: commish, type: 0, allow: ALLOW, deny: "0" }, { id: staff, type: 0, allow: ALLOW, deny: "0" }] });
+      guildChannels.push(cat); sum.staffCatCreated = 1;
+    } catch (e) { sum.errors.push({ staffCat: String(e.message || e) }); return; }
+  }
+  // (c) one private room per department — visible to that department + the commissioners. The grant
+  //     goes in the SAME create call as the @everyone deny, so the room is never briefly public.
+  for (const d of STAFF_DEPARTMENTS) {
+    const rid = roleId[d.role.toLowerCase()];
+    if (!rid) continue;
+    if (guildChannels.find((c) => c.name === d.channel && c.parent_id === cat.id)) continue;
+    try {
+      const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: d.channel, type: 0, parent_id: cat.id, topic: d.topic,
+        permission_overwrites: [{ id: GUILD, type: 0, deny: "1024", allow: "0" },
+          { id: commish, type: 0, allow: ALLOW, deny: "0" }, { id: rid, type: 0, allow: ALLOW, deny: "0" }] });
+      if (ch && ch.id) { guildChannels.push(ch); sum.deptChansCreated = (sum.deptChansCreated || 0) + 1; }
+    } catch (e) { sum.errors.push({ deptChan: d.channel, error: String(e.message || e) }); }
   }
 }
 
@@ -193,6 +260,9 @@ export default async (req) => {
   if (await ranRecently("discord-sync", 6)) return new Response("skipped: ran moments ago", { status: 200 });
 
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username");
+  // staff department picks (site) -> department Discord roles for the officials who chose them
+  const deptByProfile = {};
+  try { for (const p of await sbGet("profiles?select=id,departments&role=in.(staff,commissioner)")) deptByProfile[p.id] = p.departments || []; } catch (e) {}
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
   // current in_guild per profile, so we only write when it changes
   const inGuildById = {};
@@ -232,6 +302,18 @@ export default async (req) => {
 
   const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0,
     staffChecked: 0, staffLocked: 0, staffMissing: 0, errors: [] };
+
+  // Department roles + their Staff-category rooms first, so the private-channel sweep below can
+  // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
+  // (its role + commissioners) instead of the category default (all staff).
+  try { await ensureStaffDepartments(guildChannels, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
+  const deptRoleByChannel = {};
+  for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) deptRoleByChannel[d.channel] = rid; }
+  try {
+    const dmap = {};
+    for (const d of STAFF_DEPARTMENTS) if (roleId[d.role.toLowerCase()]) dmap[d.key] = roleId[d.role.toLowerCase()];
+    if (Object.keys(dmap).length) await sbUpsertCfg("discord_dept_role_ids", JSON.stringify(dmap));
+  } catch (e) { sum.errors.push({ deptRoleIds: String(e.message || e) }); }
 
   // Keep #free-agency and #trade-block private to team management — self-heals if the @everyone
   // view permission ever gets re-added. VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608.
@@ -303,7 +385,11 @@ export default async (req) => {
       // every channel type, not just text — a private voice room or forum is exactly as private as
       // a text room, and VIEW_CHANNEL is what gates all of them
       for (const c of guildChannels) {
-        if (c.type !== 4 && catIds.includes(c.parent_id)) target.set(c.id, allowIds);
+        if (c.type !== 4 && catIds.includes(c.parent_id)) {
+          // a department room stays private to ITS role + the commissioners, not all of staff
+          const deptRid = deptRoleByChannel[c.name];
+          target.set(c.id, deptRid ? [roleId["commissioner"], deptRid].filter(Boolean) : allowIds);
+        }
       }
     }
     // pinned ids default to the staff audience, which is what they were registered for
@@ -421,6 +507,8 @@ export default async (req) => {
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
   for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
+  // department roles are managed too, so they're added/removed as officials change their picks
+  for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) managedIds.add(rid); }
 
   // who still needs to register for the open season → drives the "Not Signed Up" role
   let regOpen = false; const registered = new Set();
@@ -491,6 +579,14 @@ export default async (req) => {
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
       // league officials: staff wear Staff; the commissioner is staff too
       if ((m.role === "staff" || m.role === "commissioner") && roleId["staff"]) desired.add(roleId["staff"]);
+      // department roles the official signed up for on the site — these open the department rooms
+      if (m.role === "staff" || m.role === "commissioner") {
+        for (const key of (deptByProfile[m.profile_id] || [])) {
+          const d = STAFF_DEPARTMENTS.find((x) => x.key === key);
+          const rid = d && roleId[d.role.toLowerCase()];
+          if (rid) desired.add(rid);
+        }
+      }
       // "Not Signed Up" — a plain member who hasn't registered for the open season (the daily
       // #season-signups reminder pings this role). Cleared automatically once they register or the
       // window closes, since it's a managed role reconciled to `desired` every run.

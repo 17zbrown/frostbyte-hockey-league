@@ -1615,12 +1615,17 @@ CG.submitOwnerApp = async function(){
    ================================================================ */
 /* the league office's departments — what a staff applicant can sign up to work */
 CG.STAFF_DEPARTMENTS = [
-  ["officiating","Officiating","Game-night disputes, forfeits, and rule calls"],
-  ["statistics","Statistics","Spot-check the EA imports and keep the record clean"],
-  ["player-relations","Player relations","Work the complaint and appeal case queue"],
-  ["applications","Applications review","Cast the deciding vote on owner, GM, AGM, and staff applications"],
-  ["media","Media & broadcast","News, recaps, and stream nights"]
+  ["applications","Review Board","Cast the deciding vote on owner, GM, AGM, and staff applications"],
+  ["officiating","Officials","Rule on game-night disputes, forfeits, and calls"],
+  ["operations","Operations","Run the schedule — reschedules, game codes, and no-show follow-up"],
+  ["draft","Draft Room","Run draft night and the free-agency bidding board"],
+  ["transactions","Transactions","Review trades, waivers, and cap & contract compliance"],
+  ["community","Community","Moderate Discord, welcome new members, and onboarding"],
+  ["statistics","Statistics","Spot-check the EA imports and keep the record book"],
+  ["media","Media","News, recaps, broadcasts, and socials"]
 ];
+/* legacy department key -> new key, so anyone carrying the old label still reads right in the UI */
+CG.DEPT_ALIAS = { "player-relations": "community" };
 /* the reviewer pool: staff carrying the 'applications' department. Their votes decide every
    application by 50%+1 once all of them have voted (the DB enforces it; this mirrors it for UI). */
 CG.appReviewers = function(){
@@ -1694,6 +1699,7 @@ CG.AFTER.staffapply = function(){
   CG.wireAppChat();
 };
 CG.staffDeptLabel = function(key){
+  key = (CG.DEPT_ALIAS && CG.DEPT_ALIAS[key]) || key;
   var d = (CG.STAFF_DEPARTMENTS||[]).find(function(x){ return x[0]===key; });
   return d ? d[1] : key;
 };
