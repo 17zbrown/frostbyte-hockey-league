@@ -238,7 +238,7 @@
   '.pv-mt button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}'+
 
   /* ---- stat-widget kit (dark cards, gauge, hatched bars, delta pills) ---- */
-  '.pvw{background:#12161B;border-radius:22px;color:#EDEFE9;padding:20px 22px;position:relative;overflow:hidden}'+
+  '.pvw{background:#12161B;border-radius:22px;color:#EDEFE9;padding:16px 18px;position:relative;overflow:hidden}'+
   '.pvw::before{content:"";position:absolute;inset:0;pointer-events:none;background:'+
     'radial-gradient(460px 280px at 88% -12%,rgba(255,166,54,.15),transparent 60%),'+
     'radial-gradient(380px 260px at 4% 108%,rgba(255,92,44,.10),transparent 60%)}'+
@@ -249,7 +249,7 @@
   '.pvw-ic svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}'+
   '.pvw-h b{font-family:var(--f-sharp);font-weight:600;font-size:13.5px;color:#fff}'+
   '.pvw-h .sp{margin-left:auto}'+
-  '.pvw-big{font-family:var(--f-sharp);font-weight:300;font-size:clamp(30px,2.8vw,40px);color:#fff;'+
+  '.pvw-big{font-family:var(--f-sharp);font-weight:300;font-size:clamp(22px,1.8vw,28px);color:#fff;'+
     'font-variant-numeric:tabular-nums;line-height:1}'+
   '.pvw-sub{font-family:var(--f-sharp);font-weight:300;font-size:11px;color:rgba(237,239,233,.55)}'+
   '.pv-delta{display:inline-flex;align-items:center;gap:4px;font-family:var(--f-sharp);font-weight:600;'+
@@ -258,6 +258,7 @@
   '.go .pv-delta,.pv-anim.go .pv-delta,.in .pv-delta,.pvw .pv-delta{opacity:1;transform:none}'+
   '.pv-delta.up{color:#3BD98A;background:rgba(59,217,138,.13)}'+
   '.pv-delta.dn{color:#FF8A66;background:rgba(255,138,102,.13)}'+
+  '.pv-gauge{max-width:190px;margin:0 auto}'+
   '.pv-gauge svg{width:100%;display:block}'+
   '.pv-gauge .trk{fill:none;stroke:rgba(237,239,233,.10);stroke-width:5;stroke-linecap:round}'+
   '.pv-gauge .vg{fill:none;stroke:url(#pvgg);stroke-width:5;stroke-linecap:round;'+
@@ -265,7 +266,7 @@
   '.pv-gauge .gdot{opacity:0;transition:opacity .4s ease 1.25s;filter:drop-shadow(0 0 6px rgba(255,229,0,.85))}'+
   '.pv-gauge.go .vg,.pv-anim.go .pv-gauge .vg{stroke-dashoffset:0!important}'+
   '.pv-gauge.go .gdot,.pv-anim.go .pv-gauge .gdot{opacity:1}'+
-  '.pv-hbars{display:flex;align-items:flex-end;gap:8px;height:76px}'+
+  '.pv-hbars{display:flex;align-items:flex-end;gap:6px;height:52px}'+
   '.pv-hbars i{flex:1;border-radius:8px 8px 4px 4px;cursor:default;'+
     'background:repeating-linear-gradient(45deg,rgba(237,239,233,.24) 0 4px,rgba(237,239,233,.06) 4px 9px);'+
     'transform:scaleY(0);transform-origin:bottom;transition:transform .7s cubic-bezier(.34,1.45,.5,1)}'+
@@ -833,7 +834,7 @@
             l10g.filter(function(g){ return g.r==="W"; }).length+' <span style="font-size:14px;font-weight:300;color:rgba(237,239,233,.55)">wins in the last 10</span>',
             'points earned, last ten games')+'</div></div>'+
           '<div class="ndh"><span>Cumulative points \u00b7 hover the line</span><b>'+j.games.length+' games</b></div>'+
-          pvLine(pts, { color: color, h: 110 });
+          pvLine(pts, { color: color, h: 84 });
         nd.setAttribute("data-filled","1");
         chartGo(nd);
       })
@@ -859,7 +860,7 @@
       '<path class="vg" pathLength="1" stroke-dasharray="'+pct.toFixed(3)+' 1" stroke-dashoffset="'+pct.toFixed(3)+'" '+
         'd="M'+(cx-r)+' '+cy+' A'+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy+'"/>'+
       '<circle class="gdot" cx="'+ex.toFixed(1)+'" cy="'+ey.toFixed(1)+'" r="4" fill="#fff"/></svg>'+
-      '<div class="pvw-big" style="text-align:center;margin-top:-30px">'+bigHtml+'</div>'+
+      '<div class="pvw-big" style="text-align:center;margin-top:-24px">'+bigHtml+'</div>'+
       '<div class="pvw-sub" style="text-align:center;margin-top:3px">'+sub+'</div></div>';
   }
   function pvHBars(vals, tips, bigHtml, sub){
@@ -1018,11 +1019,12 @@
         String(gamesArr[gamesArr.length-1].us)+' <span style="font-size:14px;font-weight:300;color:rgba(237,239,233,.55)">goals last game</span>',
         'goals for, last ten \u00b7 sample');
     }
-    return '<section class="sec-tight"><div class="shell"><div class="pvw"><div class="pvw-h">'+
+    return '<section class="sec-tight"><div class="shell"><div class="pvw" style="max-width:680px">'+
+      '<div class="pvw-h">'+
       '<span class="pvw-ic">'+ICW.bars+'</span><b>The points race</b>'+
       (sample?'<span class="chip chip-chrome">Sample</span>':'<span class="chip">Game by game</span>')+'</div>'+
       '<div class="pvw-grid"><div>'+gaugeHtml+'</div><div>'+(barsHtml||'')+'</div></div>'+
-      pvLine(pts, { color: color, h: 120 })+
+      pvLine(pts, { color: color, h: 84 })+
       '<p class="caption" style="margin-top:10px">'+
       (sample
         ? 'Sample numbers to preview the feature \u2014 real results take over automatically once the club plays.'
