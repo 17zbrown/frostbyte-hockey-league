@@ -3369,6 +3369,59 @@ CG.reloadLeague = async function(){
     CG.renderChrome(); CG.router();
   } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
 };
+
+/* ================================================================
+   LIVE LEAGUE DATA — scores, standings and stats update themselves.
+   A game import writes several rows (the game, then every player's
+   box-score line), so the realtime events are coalesced into ONE
+   reload after a short quiet period. The reload is single-flight
+   (never two builds at once) and gentle: it keeps your scroll
+   position, and while you're typing in a field or have a dialog
+   open it refreshes the data in memory but waits to re-draw until
+   you're done, so nothing you're doing is interrupted.
+   ================================================================ */
+CG._liveT = null; CG._liveBusy = false; CG._liveAgain = false;
+function pvBusyInteracting(){
+  var a = document.activeElement, tn = a && a.tagName;
+  if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT" || (a && a.isContentEditable)) return true;
+  var ov = document.getElementById("overlay-root");
+  return !!(ov && ov.innerHTML.trim());   /* a modal / drawer / palette is open */
+}
+CG.liveReload = function(){
+  clearTimeout(CG._liveT);
+  CG._liveT = setTimeout(function run(){
+    if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
+    CG._liveBusy = true;
+    CG.buildLiveLeague().then(function(lg){
+      CG.lg = lg;
+      return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
+    }).then(function(){
+      /* don't yank the page out from under an active interaction — the data is
+         already fresh in memory, so the next navigation shows it. Otherwise
+         re-draw in place and hold the scroll position. */
+      if (!pvBusyInteracting()){
+        var y = window.pageYOffset;
+        if (CG.renderChrome) CG.renderChrome();
+        if (CG.router) CG.router();
+        window.scrollTo(0, y);
+      }
+    }).catch(function(){}).then(function(){
+      CG._liveBusy = false;
+      if (CG._liveAgain){ CG._liveAgain = false; CG.liveReload(); }
+    });
+  }, 1000);
+};
+/* one public channel — scores/standings/stats are the same for everyone, so this
+   runs for signed-out viewers too. Idempotent: subscribed once for the session. */
+CG.subscribeLeague = function(){
+  if (!CG.sb || CG._leagueChannel) return;
+  try {
+    CG._leagueChannel = CG.sb.channel("league-live")
+      .on("postgres_changes",{ event:"*", schema:"public", table:"games" },      function(){ CG.liveReload(); })
+      .on("postgres_changes",{ event:"*", schema:"public", table:"game_stats" }, function(){ CG.liveReload(); })
+      .subscribe();
+  } catch(e){}
+};
 CG.admTeamsLive = function(){
   var teams = (CG.TEAMS||[]).slice();
   var h='<div style="margin-bottom:16px"><h2 class="h-sec">Teams</h2><p class="lede" style="margin-top:6px">Every club in the league — identity, division, and home arena. Edits go straight to the database and the whole site updates with them.</p></div>';
@@ -6579,6 +6632,7 @@ CG.bootLive = async function(){
     return;
   }
   CG.renderChrome();
+  CG.subscribeLeague();   /* scores, standings and stats now update live for everyone */
   /* land back where the user was before the OAuth round-trip (stashed by CG.signIn just
      before redirecting; consumed only within 10 minutes so a stale stash can't hijack boot) */
   var ret = null;
