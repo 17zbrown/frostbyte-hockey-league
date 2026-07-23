@@ -184,7 +184,8 @@ CG.buildLiveLeague = async function(){
         salary: (c && c.salary!=null) ? c.salary : (rs.salary||0),
         term: c ? Math.max(1, (c.end_season||1) - (c.start_season||1) + 1) : 1,
         mgmt: mgmt, mgmtSalary: (mgmt==="owner"||mgmt==="gm"),
-        onBlock: !!rs.on_block, status: rs.status || "active", origin: rs.origin || "assigned"
+        onBlock: !!rs.on_block, status: rs.status || "active", origin: rs.origin || "assigned",
+        spotId: rs.id, squad: rs.squad || "pro", squadMoves: rs.squad_moves || 0
       };
     })
     .filter(Boolean);
@@ -4415,6 +4416,21 @@ CG.hubRoster = function(qs){ return CG._origHubRoster(qs) + CG.clubManagementCar
 CG._origAfterRoster = CG.AFTER._roster;
 CG.AFTER._roster = function(){
   if (CG._origAfterRoster) CG._origAfterRoster();
+  /* Pro roster <-> training camp (Rule 2.1). Every limit — the 2/4/6 position
+     caps, the 3-player camp, and the 3-swaps-a-season ceiling — is enforced by
+     the database trigger, so the button never has to be the last line of
+     defence: whatever the DB refuses comes back as its own rule message. */
+  document.querySelectorAll("[data-squad]").forEach(function(b){ b.addEventListener("click", function(){
+    var spot = this.getAttribute("data-squad"), to = this.getAttribute("data-squad-to"), btn = this;
+    btn.disabled = true;
+    CG.sb.rpc("set_roster_squad", { p_spot: spot, p_squad: to }).then(function(r){
+      if (r.error){ btn.disabled = false; CG.toast(r.error.message, "err"); return; }
+      var left = (r.data && r.data.moves_left);
+      CG.toast((to==="tc" ? "Moved to training camp" : "Moved to the pro roster")+
+        (left!=null ? " · "+left+" swap"+(left===1?"":"s")+" left this season" : ""), "ok");
+      CG.reloadLeague();
+    }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
+  }); });
   document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
   document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-mgmt-withdraw");

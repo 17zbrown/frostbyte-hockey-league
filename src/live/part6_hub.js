@@ -649,6 +649,19 @@ CG.clubSeasonGames = function(club){
   return n || CG.GAMES_PER_CLUB || 54;
 };
 CG.playoffMinGames = function(club){ return Math.ceil(CG.PLAYOFF_MIN_PCT * CG.clubSeasonGames(club)); };
+CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||pos==="RD") ? "D" : "F"; };
+/* Rule 2.1 — pro roster 2 G / 4 D / 6 F, training camp 3, and no player may
+   change squads more than 3 times a season. The database enforces all three
+   (guard_squad_move); this button only keeps the UI honest about it. */
+CG.SQUAD_CAPS = { G:2, D:4, F:6, TC:3 };
+function squadBtn(p){
+  if (!p.spotId) return "";
+  var left = CG.SQUAD_CAPS.TC && (3 - (p.squadMoves||0));
+  var to = p.squad==="tc" ? "pro" : "tc";
+  var label = p.squad==="tc" ? "To pro roster" : "To camp";
+  if (left <= 0) return '<button class="btn btn-ghost btn-sm" disabled title="Swap limit reached — a player may change squads only 3 times a season (Rule 2.1)">Locked</button>';
+  return '<button class="btn btn-ghost btn-sm" data-squad="'+p.spotId+'" data-squad-to="'+to+'" title="'+left+' of 3 squad changes left this season">'+label+'</button>';
+}
 CG.hubRoster = function(qs){
   var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];
   var roster = lg.byTeam[club].slice().sort(function(a,b){
@@ -672,11 +685,14 @@ CG.hubRoster = function(qs){
       : mrole ? '<span class="chip chip-chrome">'+mrole+'</span>'
       : onBlk ? '<span class="chip chip-warn">On block</span>'
       : '<span class="chip chip-win">Active</span>';
+    if (p.spotId && p.squad === "tc")
+      status += ' <span class="chip chip-warn" title="Training camp — may dress in at most 3 games a week (Rule 2.1)">Camp</span>';
     var actions = p.mgmt
       ? '<span class="caption">Management contract — protected</span>'
       : (waived
         ? '<button class="btn btn-ghost btn-sm" data-reinstate="'+p.id+'">Reinstate</button>'
         : '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+          squadBtn(p)+
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
           '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
@@ -693,6 +709,25 @@ CG.hubRoster = function(qs){
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
   }).join("");
+  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !CG.isWaived(p.id); });
+  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !CG.isWaived(p.id); });
+  if (roster.some(function(p){ return p.spotId; })){
+    var gN=proSq.filter(function(p){return CG.posGroup(p.pos)==="G";}).length;
+    var dN=proSq.filter(function(p){return CG.posGroup(p.pos)==="D";}).length;
+    var fN=proSq.filter(function(p){return CG.posGroup(p.pos)==="F";}).length;
+    function meter(label,nv,cap){
+      var over = nv>cap;
+      return '<div><b class="num" style="font-size:22px;color:'+(over?"var(--red)":"inherit")+'">'+nv+' / '+cap+'</b>'+
+        '<span class="caption" style="display:block">'+label+'</span></div>';
+    }
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
+      '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp</span></div><div class="card-b">'+
+      '<div style="display:flex;gap:26px;flex-wrap:wrap">'+meter("goaltenders",gN,2)+meter("defensemen",dN,4)+
+      meter("forwards",fN,6)+meter("training camp",tcSq.length,3)+'</div>'+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — the pro roster carries 2 goaltenders, 4 defensemen and 6 forwards; training camp holds 3. '+
+      'Camp players may dress in at most 3 games a week and can fill any position, while everyone else plays only their own. '+
+      'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';
+  }
   var seasonGames = CG.clubSeasonGames(club), minGames = CG.playoffMinGames(club);
   var eligN = roster.filter(function(p){ return ((lg.pstats[p.id]||{}).gp||0) >= minGames; }).length;
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Playoff eligibility</h3>'+

@@ -102,3 +102,59 @@ CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Str
   if (rb.changelog[0] && rb.changelog[0].version === "1.6") return;
   rb.changelog.unshift({"version": "1.6", "dateIso": "2026-07-19", "summary": "Season 1 will be played on EA Sports NHL 27, which releases September 11, 2026 — ahead of the September 16 pre-season and the October 7 puck drop. Rule 4.1 and the site now name NHL 27 as the official title; the game settings themselves are unchanged (World of Chel 6v6: three 4-minute periods, continuous full-length 5-on-5 sudden-death overtime, no shootout)."});
 })();
+
+/* ---- rulebook v1.7 — roster structure, training camp, position locking,
+       the ten-round draft, and the two free-agency tracks ----
+   Targeted overwrites of 2.1 and 5.2 (both carried language the new rules
+   contradict), additive paragraphs on 2.2, and a substring fix in 2.8.
+   No rule IDs change, so every in-app citation stays valid. Idempotent. ---- */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "1.7") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+
+  /* 2.1 — the roster is now a fixed 15 with a binding position assignment.
+     The prior text left the limit to "the league office" and expressly said
+     position assignments did NOT restrict play; both are superseded. */
+  var s21 = sec(2,"2.1");
+  if (s21) s21.paragraphs = [
+    "Each club carries fifteen (15) players: a twelve-player pro roster of two (2) goaltenders, four (4) defensemen, and six (6) forwards, plus three (3) training-camp players. The pro roster must at all times hold enough eligible players to ice a full 6v6 lineup, including a goaltender. A club that falls below that minimum through departures or suspensions must notify the league office immediately and restore compliance through the free agent process.",
+    "Every player is assigned a primary position group — forward, defense, or goaltender — and the assignment is binding on lineups. A defenseman may be dressed only on defense, a forward only at forward, and a goaltender only in goal. The single exception is a training-camp player, who may be dressed at any position for as long as he is carried in training camp.",
+    "Training camp holds three (3) players. A training-camp player may dress in no more than three (3) games in a game week. Management may move players between the pro roster and training camp freely, provided the club still satisfies the composition limits above; a single player, however, may change squads with the same club no more than three (3) times in a season, counting each move in either direction. Team HQ enforces the composition limits, the position groups, and the swap cap, and refuses any move that would breach them."
+  ];
+
+  /* 2.2 — free agency splits into two tracks */
+  var s22 = sec(2,"2.2");
+  if (s22 && s22.paragraphs.join(" ").indexOf("rookie free agency") < 0){
+    s22.paragraphs.push(
+      "Free agency runs on two tracks. A first-year player who met the five-game pre-season minimum of Rule 2.8 but went undrafted enters rookie free agency, which is conducted as an open bidding process: any club with an open roster spot and the cap room to carry him may bid, and the first bid placed on a player starts a twelve (12) hour countdown. When the countdown expires the highest bid on file wins the player’s rights; later bids do not extend the clock, and a tie is settled in favor of the bid placed first."
+    );
+    s22.paragraphs.push(
+      "A returning player whose contract has expired enters open re-signing. Club management negotiates directly with the player on the terms of his next deal — salary and term for the upcoming season or seasons — within the cap and contract limits of Rule 2.5. The signing takes effect when the player and the club’s management confirm the agreed terms and the league office posts it to the official transaction log."
+    );
+  }
+
+  /* 2.8 — the draft is fixed at ten rounds */
+  var s28 = sec(2,"2.8");
+  if (s28 && s28.paragraphs.length){
+    var OLD = "over the number of rounds the commissioner sets";
+    for (var i=0;i<s28.paragraphs.length;i++){
+      if (s28.paragraphs[i].indexOf(OLD) > -1)
+        s28.paragraphs[i] = s28.paragraphs[i].split(OLD).join("over ten (10) rounds");
+    }
+  }
+
+  /* 5.2 — lineups must respect the position assignment, and the old
+     "no weekly maximum" language now carries the training-camp carve-out */
+  var s52 = sec(5,"5.2");
+  if (s52) s52.paragraphs = [
+    "A lineup is eligible when every dressed player is on the club’s confirmed active roster, is not under suspension, is dressed at a position his assignment permits under Rule 2.1, and satisfies the position requirements of the settings sheet, including a rostered goaltender. Dressing an ineligible player results in forfeiture of the game in which the player dressed, without prejudice to further discipline under Chapter 7.",
+    "A player on the pro roster has no ceiling on appearances: he may dress for any number of games in a given week, including every game his club plays. A training-camp player is capped at three (3) games in a game week under Rule 2.1. Apart from that cap the league imposes no weekly or nightly maximum — only the playoff-eligibility floor of Rule 8.3 rewards regular participation."
+  ];
+
+  rb.changelog.unshift({
+    version: "1.7", dateIso: "2026-07-23",
+    summary: "Roster structure fixed at fifteen players — a twelve-player pro roster of 2 goaltenders, 4 defensemen and 6 forwards, plus 3 training-camp players (Rule 2.1). Position assignments are now binding: defensemen play defense and forwards play forward, and only a training-camp player may fill any position. Training-camp players are capped at 3 games a week (Rules 2.1, 5.2), and a player may swap between the pro roster and training camp no more than 3 times a season — all of it enforced in Team HQ. The entry draft is fixed at ten rounds (Rule 2.8). Free agency now runs on two tracks (Rule 2.2): undrafted rookies who met the five-game pre-season minimum are bid on, with a 12-hour countdown starting at the first bid, while returning players whose contracts expired negotiate open re-signings with club management."
+  });
+})();
