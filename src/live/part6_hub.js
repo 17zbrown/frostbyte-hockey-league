@@ -542,7 +542,9 @@ CG.AFTER._lineup = function(){
   }
   function validate(p, pos){
     if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — only a commissioner override can change it now.";
-    if (p.pos!==pos) return p.tag+" is a "+CG.POS_NAME[p.pos]+" — this slot needs a "+CG.POS_NAME[pos]+".";
+    /* Rule 2.1 — position groups are binding, but a training-camp player fills any slot */
+    if (p.squad!=="tc" && CG.posGroup(p.pos)!==CG.posGroup(pos))
+      return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
     if (avNightKey && (CG.avFor(p.id).nights[avNightKey]||{}).st==="no") return p.tag+" is marked unavailable for this night.";
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
@@ -562,8 +564,8 @@ CG.AFTER._lineup = function(){
       $$(".bp").forEach(function(x){ x.classList.remove("sel"); });
       el.classList.add("sel");
       var p = CG.playerById(lg, sel);
-      msg("Selected "+p.tag+" — now click the "+CG.POS_NAME[p.pos]+" slot.");
-      $$(".slot").forEach(function(s){ s.classList.toggle("target", s.getAttribute("data-slot")===p.pos); });
+      msg("Selected "+p.tag+" — now click "+(p.squad==="tc" ? "any slot (camp players fill any position)" : "a "+CG.posGroup(p.pos)+" slot")+".");
+      $$(".slot").forEach(function(s){ s.classList.toggle("target", p.squad==="tc" || CG.posGroup(s.getAttribute("data-slot"))===CG.posGroup(p.pos)); });
     });
     el.addEventListener("dragstart", function(ev){ ev.dataTransfer.setData("text/plain", el.getAttribute("data-bench")); });
   });
@@ -587,11 +589,13 @@ CG.AFTER._lineup = function(){
   if (auto) auto.addEventListener("click", function(){
     if (isLocked()){ CG.toast("Lineup is locked (Rule 5.3)","err"); return; }
     ["LW","C","RW","LD","RD","G"].forEach(function(pos){
-      var cands = lg.byTeam[me.team].filter(function(p){
-        return p.pos===pos && !validate(p,pos) || (p.pos===pos && state.slots[pos]===p.id);
-      }).sort(function(a,b){ return lg.ratings[b.id].ovr-lg.ratings[a.id].ovr; });
-      var pick = lg.byTeam[me.team].filter(function(p){ return p.pos===pos; })
-        .sort(function(a,b){ return lg.ratings[b.id].ovr-lg.ratings[a.id].ovr; })
+      /* group-based eligibility (matches the DB); camp players are eligible anywhere
+         but sort last so auto-fill spends a pro player before a camp player's cap */
+      var pick = lg.byTeam[me.team].filter(function(p){ return p.squad==="tc" || CG.posGroup(p.pos)===CG.posGroup(pos); })
+        .sort(function(a,b){
+          var ac=a.squad==="tc"?1:0, bc=b.squad==="tc"?1:0;
+          return ac-bc || lg.ratings[b.id].ovr-lg.ratings[a.id].ovr;
+        })
         .find(function(p){ return !validate(p,pos) || state.slots[pos]===p.id; });
       if (pick) state.slots[pos]=pick.id;
     });
@@ -654,13 +658,33 @@ CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||po
    change squads more than 3 times a season. The database enforces all three
    (guard_squad_move); this button only keeps the UI honest about it. */
 CG.SQUAD_CAPS = { G:2, D:4, F:6, TC:3 };
+/* How many pro spots a club is using at a player's position group — a one-way move
+   into the pro roster (or into camp) is only possible when there is slack. When the
+   roster is full at that shape, the only legal move is a same-position swap, so the
+   button offers "Swap" and opens a picker of eligible counterparts. */
+function squadMovesLeft(p){ return 3 - (p.squadMoves||0); }
+function squadRoom(club, p){
+  var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
+  if (p.squad==="tc"){
+    var grp = CG.posGroup(p.pos), cap = grp==="G"?2:grp==="D"?4:6;
+    return roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp; }).length < cap;
+  }
+  return roster.filter(function(x){ return x.squad==="tc"; }).length < 3;
+}
 function squadBtn(p){
   if (!p.spotId) return "";
-  var left = CG.SQUAD_CAPS.TC && (3 - (p.squadMoves||0));
-  var to = p.squad==="tc" ? "pro" : "tc";
-  var label = p.squad==="tc" ? "To pro roster" : "To camp";
-  if (left <= 0) return '<button class="btn btn-ghost btn-sm" disabled title="Swap limit reached — a player may change squads only 3 times a season (Rule 2.1)">Locked</button>';
-  return '<button class="btn btn-ghost btn-sm" data-squad="'+p.spotId+'" data-squad-to="'+to+'" title="'+left+' of 3 squad changes left this season">'+label+'</button>';
+  var left = squadMovesLeft(p);
+  if (left <= 0) return '<button class="btn btn-ghost btn-sm" disabled title="Swap limit reached — a player may change squads only 3 times a season (Rule 2.1)">Squad locked</button>';
+  var club = CG.myClub();
+  var title = left+' of 3 squad changes left this season';
+  if (squadRoom(club, p)){
+    var to = p.squad==="tc" ? "pro" : "tc";
+    return '<button class="btn btn-ghost btn-sm" data-squad="'+p.spotId+'" data-squad-to="'+to+'" title="'+title+'">'+
+      (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
+  }
+  /* roster full at this shape — a straight same-position swap is the only legal move */
+  return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="Roster full — swap for a '+
+    (p.squad==="tc"?"pro":"camp")+' player of the same position ('+title+')">Swap…</button>';
 }
 CG.hubRoster = function(qs){
   var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];

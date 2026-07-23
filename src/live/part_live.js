@@ -4431,6 +4431,44 @@ CG.AFTER._roster = function(){
       CG.reloadLeague();
     }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
   }); });
+  /* Full roster: a straight, same-position pro<->camp swap (Rule 2.1). The picker
+     only lists legal counterparts (opposite squad, same position group, a swap
+     still left); the database validates the exchange as one atomic move. */
+  document.querySelectorAll("[data-squad-swap]").forEach(function(b){ b.addEventListener("click", function(){
+    var spot = this.getAttribute("data-squad-swap");
+    var club = CG.myClub(), roster = (CG.lg.byTeam[club]||[]);
+    var me = roster.find(function(x){ return x.spotId===spot; });
+    if (!me) return;
+    var grp = CG.posGroup(me.pos), wantSquad = me.squad==="tc" ? "pro" : "tc";
+    var opts = roster.filter(function(x){
+      return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
+        CG.posGroup(x.pos)===grp && (3-(x.squadMoves||0))>0;
+    });
+    if (!opts.length){
+      CG.toast("No eligible "+(wantSquad==="tc"?"camp":"pro")+" "+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+
+        " to swap with — everyone at this position has used their 3 changes.", "err");
+      return;
+    }
+    var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
+    CG.modal("Swap "+esc(me.tag),
+      '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
+      ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
+      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+'. Each player uses one of their three season swaps.</p>'+
+      '<div class="stack" style="gap:6px">'+opts.map(function(x){
+        return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
+          '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+(3-(x.squadMoves||0))+' swaps left</span></button>';
+      }).join("")+'</div>');
+    document.querySelectorAll("[data-swap-with]").forEach(function(sb){ sb.addEventListener("click", function(){
+      var other = this.getAttribute("data-swap-with");
+      var proSpot = pro ? pro.spotId : other, tcSpot = camp ? camp.spotId : other;
+      this.disabled = true;
+      CG.sb.rpc("swap_roster_squad", { p_pro_spot: proSpot, p_tc_spot: tcSpot }).then(function(r){
+        if (r.error){ CG.toast(r.error.message, "err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast("Squads swapped", "ok"); CG.reloadLeague();
+      }, function(e){ CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
+    }); });
+  }); });
   document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
   document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-mgmt-withdraw");
