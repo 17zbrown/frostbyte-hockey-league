@@ -1645,16 +1645,22 @@ CG.ROUTES.staffapply = function(){
       '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
   }
   var r = CG.role();
-  /* Role separation: commissioners can't be staff, and staff are already staff — so neither
-     submits here. They still see the exact form members see (Control Center → View as… is the
-     cleaner preview). The Staff Desk stays one click away. */
-  var lockedFromStaff = (r==="staff" || r==="commish");
+  /* Rule 2.7 — the league office (commissioners + staff) and a club's front office (Owner/GM/AGM)
+     can't be held at once. Commissioners already carry full staff access and existing staff are
+     already staff, so neither needs to apply; and anyone holding a club seat is blocked until they
+     step down. Everyone still sees the exact form members see. */
+  var lockedFromStaff = (r==="staff" || r==="commish" || r==="mgmt");
+  var lockMsg = r==="commish"
+    ? 'As a commissioner you already have full staff access — there’s nothing to apply for. The Staff Desk is in your hub.'
+    : r==="staff"
+    ? 'You’re already on the league staff. This is the form exactly as members see it; there’s nothing to submit.'
+    : r==="mgmt"
+    ? 'You currently own or manage a club, and club management and a staff seat can’t be held at the same time (Rule 2.7). Step down from your Owner, GM, or AGM seat first, then you can apply.'
+    : '';
   var staffNote = lockedFromStaff
     ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
-      '<span style="flex:1">'+(r==="commish"
-        ? 'Commissioners can’t join the staff — it keeps rulings impartial. This is the form exactly as members see it; submitting is disabled for you.'
-        : 'You’re already on the league staff. This is the form exactly as members see it; there’s nothing to submit.')+'</span>'+
-      '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a></div>'
+      '<span style="flex:1">'+lockMsg+'</span>'+
+      (r==="mgmt" ? '<a class="btn btn-ghost btn-sm" href="#/hub">Team HQ</a>' : '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a>')+'</div>'
     : "";
   var app = CG.auth.staffApp;
   var statusNote = app
@@ -1706,8 +1712,9 @@ CG.staffDeptLabel = function(key){
 CG.submitStaffApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   var r0=CG.role();
-  if(r0==="commish"){ CG.toast("Commissioners can’t join the staff — it keeps rulings impartial","err"); return; }
+  if(r0==="commish"){ CG.toast("As a commissioner you already have staff access — no application needed","err"); return; }
   if(r0==="staff"){ CG.toast("You’re already on the league staff","err"); return; }
+  if(r0==="mgmt"){ CG.toast("Club management can’t also be staff — step down from your club seat first (Rule 2.7)","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   var pitch=v("sa-pitch");
   var depts=[].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });

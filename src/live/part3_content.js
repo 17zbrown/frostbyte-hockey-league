@@ -187,3 +187,22 @@ CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Str
     summary: "The salary cap is stated as what it is — a season setting the commissioner controls — and Rule 2.5 now shows the live figure for the current season rather than a number frozen into the text. Rule 2.1 gains the operative form of the training-camp game cap: because the two game nights together run past three games, a camp player may be dressed on only one of them, and the lineup builder now enforces it."
   });
 })();
+
+/* ---- rulebook v1.9 — commissioners may serve as staff; the conflict is office vs. club seat ----
+   Corrects Rule 2.7: the old text barred a commissioner from being staff. The real separation is
+   between the LEAGUE OFFICE (commissioners and staff) and a CLUB'S front office (Owner/GM/AGM) —
+   nobody holds both at once — while commissioners and staff work the office together. Idempotent. */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "1.9") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  var s27 = sec(2,"2.7");
+  if (s27 && s27.paragraphs.length){
+    s27.paragraphs[0] = "The league office and a club's front office may not be held at once. A commissioner or staff member may not own or manage a club — no Owner, General Manager, or Assistant General Manager role — and, the other way round, anyone holding a club's Owner, GM, or AGM seat may not sit on the staff. Within the office, a commissioner may serve as staff: commissioners and staff work disputes, discipline, and applications together. What the separation forbids is holding a league-office seat and a club's front-office seat at the same time, so decisions about teams and staff are made without a stake in the outcome.";
+  }
+  rb.changelog.unshift({
+    version: "1.9", dateIso: "2026-07-23",
+    summary: "Rule 2.7 corrected: a commissioner may serve as league staff — the two offices work together. The separation that still holds is between the league office (commissioners and staff) and a club's front office (Owner, GM, AGM): no one holds a seat in both at the same time, in either direction. The staff application reflects this — anyone currently owning or managing a club must step down from that seat before joining the staff, and vice versa."
+  });
+})();
