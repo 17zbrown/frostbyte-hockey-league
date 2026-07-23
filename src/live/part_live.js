@@ -831,7 +831,7 @@ CG.loadNotifs = async function(){
   if (!CG.sb || !CG.auth.user){ CG._notifs = null; return; }
   try {
     var r = await CG.sb.from("notifications")
-      .select("id,type,title,body,link_view,link_param,read,created_at")
+      .select("id,type,title,body,link_view,link_param,read,created_at,silent")
       .order("created_at",{ascending:false}).limit(50);
     if (r.error){ CG._notifs = []; return; }
     var readMap = CG.store.get("read");
@@ -851,7 +851,10 @@ CG.loadNotifs = async function(){
           (CG._notifs = CG._notifs||[]).unshift({ id:n.id, t:Date.parse(n.created_at||new Date().toISOString()),
             icon:CG.notifIcon(n.type), title:n.title||"League update", body:n.body||"", read:false,
             route:CG.notifRoute(n.link_view, n.link_param) });
-          if (CG.sound) CG.sound.play();   /* audible ping for the new alert */
+          /* chime only for alerts about something someone ELSE did — a self-
+             confirmation (you filed the complaint, you waived the player) lands
+             in the bell but stays quiet. The DB flags it via create_notification. */
+          if (CG.sound && !n.silent) CG.sound.play();
           if (CG.renderChrome) CG.renderChrome();
         }).subscribe();
     }
