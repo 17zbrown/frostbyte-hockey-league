@@ -584,8 +584,8 @@ CG.applySession = async function(session){
   if (CG.auth.user){ CG.subscribeAppMessages(); }
   else { CG.teardownAppMessages && CG.teardownAppMessages(); }
   /* complaints & requests (league office) — RLS returns what this user may see */
-  if (CG.auth.user){ CG.loadActionRequests().then(function(){ CG.rerenderIfShowingCases(); }); }
-  else if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; }
+  if (CG.auth.user){ CG.loadActionRequests().then(function(){ CG.rerenderIfShowingCases(); }); CG.subscribeActions(); }
+  else { if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; } CG.teardownActions && CG.teardownActions(); }
   /* staff/commish: the "needs attention" backlog + the Staff Desk data cards */
   if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); CG.loadStaffExtras(); }
   else { CG._staffAttention = null; CG._staffExtras = null; }
@@ -784,6 +784,49 @@ CG.loadStaffExtras = async function(){
   } catch(e){ CG._staffExtras = null; }
 };
 CG.refreshStaffExtras = function(){ CG.loadStaffExtras(); };
+/* ================================================================
+   AUDIBLE ALERTS — a short synthesized chime for new messages,
+   replies, applications, complaints, trades, and league alerts.
+   Web Audio so there is no asset to load and nothing external to
+   fetch (CSP-clean). Off/on is remembered per browser; browsers
+   only allow sound after a user gesture, so the context is unlocked
+   on the first click/keypress.
+   ================================================================ */
+CG.sound = (function(){
+  var ctx = null, last = 0, unlocked = false;
+  var pref = null; try { pref = CG.store.get("soundOn"); } catch(e){}
+  var on = (pref === null || pref === undefined) ? true : !!pref;
+  function ac(){ if (ctx) return ctx; try { var A = window.AudioContext||window.webkitAudioContext; if (A) ctx = new A(); } catch(e){} return ctx; }
+  function unlock(){ if (unlocked) return; unlocked = true; var c = ac(); if (c && c.state === "suspended"){ try { c.resume(); } catch(e){} } }
+  ["pointerdown","keydown","touchstart"].forEach(function(ev){ document.addEventListener(ev, unlock, { passive:true }); });
+  function chime(){
+    var c = ac(); if (!c) return;
+    if (c.state === "suspended"){ try { c.resume(); } catch(e){} }
+    var t = c.currentTime;
+    /* two soft sine notes — a gentle "ding-dong", not a harsh beep */
+    [[880,0],[1174.66,0.10]].forEach(function(n){
+      var o = c.createOscillator(), g = c.createGain(), t0 = t + n[1];
+      o.type = "sine"; o.frequency.value = n[0];
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.40);
+      o.connect(g); g.connect(c.destination);
+      o.start(t0); o.stop(t0 + 0.42);
+    });
+  }
+  return {
+    isOn: function(){ return !!on; },
+    set: function(v){ on = !!v; try { CG.store.set("soundOn", on); } catch(e){} },
+    toggle: function(){ this.set(!on); if (on){ unlock(); try { chime(); } catch(e){} } return on; },
+    play: function(){
+      if (!on) return;
+      var now = Date.now(); if (now - last < 1100) return;   /* one chime per burst */
+      last = now;
+      try { chime(); } catch(e){}
+    }
+  };
+})();
+
 CG.loadNotifs = async function(){
   if (!CG.sb || !CG.auth.user){ CG._notifs = null; return; }
   try {
@@ -808,6 +851,7 @@ CG.loadNotifs = async function(){
           (CG._notifs = CG._notifs||[]).unshift({ id:n.id, t:Date.parse(n.created_at||new Date().toISOString()),
             icon:CG.notifIcon(n.type), title:n.title||"League update", body:n.body||"", read:false,
             route:CG.notifRoute(n.link_view, n.link_param) });
+          if (CG.sound) CG.sound.play();   /* audible ping for the new alert */
           if (CG.renderChrome) CG.renderChrome();
         }).subscribe();
     }
@@ -2479,7 +2523,7 @@ CG.subscribeDMs = function(){
         var m=payload.new; if(!m||CG._dm.msgs.find(function(x){return x.id===m.id;})) return;
         CG._dm.msgs.push(m);
         var onView = location.hash.indexOf("/messages")>=0;
-        var finish=function(){ CG.renderChrome(); if(onView) CG.router(); else CG.toast("New message from "+CG.dmName(m.sender_id),"ok"); };
+        var finish=function(){ if(CG.sound) CG.sound.play(); CG.renderChrome(); if(onView) CG.router(); else CG.toast("New message from "+CG.dmName(m.sender_id),"ok"); };
         if(!CG._dm.profiles[m.sender_id]){ CG.sb.from("profiles").select(CG._DM_SEL).eq("id",m.sender_id).maybeSingle().then(function(res){ if(res.data)CG._dm.profiles[res.data.id]=res.data; finish(); }); }
         else finish();
       }).subscribe();
@@ -4283,6 +4327,28 @@ CG.subscribeAppMessages = function(){
 };
 CG.teardownAppMessages = function(){
   if (CG._appMsgChannel){ try{ CG.sb.removeChannel(CG._appMsgChannel); }catch(e){} CG._appMsgChannel = null; }
+};
+/* complaints & tickets: the case thread and the Staff Desk queue now update live.
+   A new reply / new case reloads the case data and re-renders any case surface in
+   place. The chime rides the notification stream (notify_action_message writes a
+   notification to the OTHER party), so there is no double ping and no self-ping. */
+CG.subscribeActions = function(){
+  if (!CG.sb || !CG.auth.user || CG._actionChannel) return;
+  var me = CG.auth.user.id;
+  try {
+    CG._actionChannel = CG.sb.channel("actions-"+me)
+      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"action_messages" }, function(payload){
+        var m = payload && payload.new;
+        if (!m || m.author_id === me) return;   /* my own reply already re-rendered the thread */
+        if (CG.refreshActions) CG.refreshActions();
+      })
+      .on("postgres_changes",{ event:"*", schema:"public", table:"action_requests" }, function(){
+        if (CG.refreshActions) CG.refreshActions();
+      }).subscribe();
+  } catch(e){}
+};
+CG.teardownActions = function(){
+  if (CG._actionChannel){ try{ CG.sb.removeChannel(CG._actionChannel); }catch(e){} CG._actionChannel = null; }
 };
 /* opts.office = the league-office view (staff/commish) vs the applicant's own view. Both can send;
    labels differ so the applicant sees "League office" rather than a specific official's name. */

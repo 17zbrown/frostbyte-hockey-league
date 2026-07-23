@@ -367,6 +367,8 @@ CG.confirm = function(title, msg, okLabel, fn){
 CG.IC = {
   x:'<path d="M6 6l12 12M18 6L6 18"/>', search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
   bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+  sound:'<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
+  mute:'<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/>',
   menu:'<path d="M4 7h16M4 12h16M4 17h16"/>', arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
   back:'<path d="M19 12H5M11 18l-6-6 6-6"/>', cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>',
   chart:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>', shield:'<path d="M12 2 4 6v6c0 5 3.4 8.3 8 10 4.6-1.7 8-5 8-10V6l-8-4z"/>',
@@ -853,9 +855,12 @@ CG.openBell = function(){
   var read = CG.store.get("read");
   var list = CG.baseNotifs();
   CG.drawer("Notifications",
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">'+
       '<span class="caption">'+list.filter(function(n){return !read[n.id];}).length+' unread</span>'+
-      '<button class="btn btn-ghost btn-sm" id="markAll">Mark all as read</button></div>'+
+      '<span style="display:flex;gap:6px">'+
+        (CG.sound ? '<button class="btn btn-ghost btn-sm" id="soundToggle" title="Play a sound for new alerts and messages" aria-pressed="'+(CG.sound.isOn()?"true":"false")+'">'+
+          CG.ic(CG.sound.isOn()?"sound":"mute",15)+(CG.sound.isOn()?"Sound on":"Muted")+'</button>' : '')+
+        '<button class="btn btn-ghost btn-sm" id="markAll">Mark all as read</button></span></div>'+
     '<div class="card">'+ (list.length ? list.map(function(n){
       return '<div class="notif'+(read[n.id]?"":" unread")+'" data-notif="'+n.id+'" data-route="'+esc(n.route||"")+'">'+
         '<span class="nf-ic">'+CG.ic(n.icon||"bell",16)+'</span>'+
@@ -866,6 +871,13 @@ CG.openBell = function(){
     var r = CG.store.get("read");
     list.forEach(function(n){ r[n.id]=true; });
     CG.store.set("read", r); CG.closeOverlay(); CG.renderChrome();
+  });
+  var st = $("#soundToggle");
+  if (st) st.addEventListener("click", function(){
+    var on = CG.sound.toggle();   /* plays a sample chime when turning on */
+    this.setAttribute("aria-pressed", on?"true":"false");
+    this.innerHTML = CG.ic(on?"sound":"mute",15)+(on?"Sound on":"Muted");
+    CG.toast(on?"Notification sound on":"Notification sound muted","ok");
   });
 };
 
