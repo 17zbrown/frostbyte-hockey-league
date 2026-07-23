@@ -158,3 +158,32 @@ CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Str
     summary: "Roster structure fixed at fifteen players — a twelve-player pro roster of 2 goaltenders, 4 defensemen and 6 forwards, plus 3 training-camp players (Rule 2.1). Position assignments are now binding: defensemen play defense and forwards play forward, and only a training-camp player may fill any position. Training-camp players are capped at 3 games a week (Rules 2.1, 5.2), and a player may swap between the pro roster and training camp no more than 3 times a season — all of it enforced in Team HQ. The entry draft is fixed at ten rounds (Rule 2.8). Free agency now runs on two tracks (Rule 2.2): undrafted rookies who met the five-game pre-season minimum are bid on, with a 12-hour countdown starting at the first bid, while returning players whose contracts expired negotiate open re-signings with club management."
   });
 })();
+
+/* ---- rulebook v1.8 — the salary cap is a season setting, not a fixed number,
+       and the training-camp weekly cap gets its operative mechanism ----
+   The commissioner changes the cap between seasons, so Rule 2.5 now carries a
+   {{CAP}} token that the rulebook renderer fills from the live season instead
+   of a figure that goes stale the moment it is changed. Idempotent. ---- */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "1.8") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+
+  /* 2.5 — stop hard-coding the cap; the commissioner sets it each season */
+  var s25 = sec(2,"2.5");
+  if (s25 && s25.paragraphs.length){
+    s25.paragraphs[0] = "Every club operates under a hard salary cap, set by the commissioner for each season and published on every club’s cap sheet — {{CAP}} for the current season. A club may not ice a lineup, complete a trade, or claim a waived player if the move would push its active payroll above the cap. Compliance is checked automatically at every roster move, and the league office may void any transaction that breaches it.";
+  }
+
+  /* 2.1 — say how the three-game camp cap is actually applied */
+  var s21 = sec(2,"2.1");
+  if (s21 && s21.paragraphs.length >= 3 && s21.paragraphs[2].indexOf("only one night") < 0){
+    s21.paragraphs[2] += " Because a club’s two game nights together run past three games — the standard schedule is three a night, Wednesday and Friday — a training-camp player may hold a slot in only one night’s lineup, and the lineup builder refuses the second. A player acquired by trade joins his new club on the pro roster, and his swap count starts fresh there, since the three changes are counted with one club.";
+  }
+
+  rb.changelog.unshift({
+    version: "1.8", dateIso: "2026-07-23",
+    summary: "The salary cap is stated as what it is — a season setting the commissioner controls — and Rule 2.5 now shows the live figure for the current season rather than a number frozen into the text. Rule 2.1 gains the operative form of the training-camp game cap: because the two game nights together run past three games, a camp player may be dressed on only one of them, and the lineup builder now enforces it."
+  });
+})();

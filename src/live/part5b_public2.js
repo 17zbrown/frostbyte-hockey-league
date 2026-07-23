@@ -201,6 +201,11 @@ CG.ROUTES.rulebook = function(param, qs){
     return '<div class="card" style="margin-bottom:18px" id="ch'+ch.num+'"><div class="card-h"><h3>Chapter '+ch.num+' — '+esc(ch.title)+'</h3></div><div class="card-b">'+
       secs.map(function(s){
         var text = edits[s.id] ? edits[s.id] : s.paragraphs.join("\n\n");
+        /* Season settings the commissioner controls are written as tokens, not
+           figures, so the rulebook can never quote a stale cap. */
+        if (text.indexOf("{{CAP}}") > -1)
+          text = text.split("{{CAP}}").join(
+            (CG.CAP != null && CG.fmtMoney) ? CG.fmtMoney(CG.CAP) : "the published cap");
         var hl = target===s.id;
         return '<div id="rule-'+s.id+'" style="padding:14px;border-radius:10px;margin-bottom:8px;'+(hl?"background:var(--chrome-tint);border:1.5px solid var(--chrome-deep)":"")+'">'+
           '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:13px;color:var(--steel)">'+s.id+'</b>'+
