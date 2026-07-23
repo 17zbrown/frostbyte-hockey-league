@@ -393,7 +393,7 @@
   '.h-page,.h-sec{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.015em}'+
   '.h-page{font-size:clamp(36px,4.6vw,58px);line-height:.98}'+
   '.h-sec{font-size:clamp(30px,3.2vw,44px);line-height:1}'+
-  '.h-card,.card-h h3{font-family:var(--f-sharp);font-weight:700;text-transform:none;letter-spacing:-.01em;font-size:15px}'+
+  '.h-card,.card-h h3{font-family:var(--f-sharp);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:15px}'+
   '.eyebrow{font-family:var(--f-sharp);font-weight:600;letter-spacing:.15em;font-size:10px}'+
   '.lede,.caption{font-family:var(--f-sharp);font-weight:300}'+
   '.lede{font-size:15.5px;line-height:1.65}'+
