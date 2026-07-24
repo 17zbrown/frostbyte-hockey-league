@@ -623,9 +623,9 @@ CG.renderChrome = function(){
       var sN = CG.SEASON || {};
       items.push('<span class="tk-item"><span class="tk-lab">SEASON 1</span><b>The inaugural season</b></span>');
       items.push('<span class="tk-item"><span class="tk-lab">LEAGUE</span><b>8 founding clubs · 2 divisions</b></span>');
-      if (sN.registration_deadline) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtDate(Date.parse(sN.registration_deadline))+'</b></a>');
-      if (sN.draft_at) items.push('<span class="tk-item"><span class="tk-lab">DRAFT</span><b>'+CG.fmtDate(Date.parse(sN.draft_at))+'</b></span>');
-      if (sN.starts_at) items.push('<a class="tk-item" href="#/schedule"><span class="tk-lab">PUCK DROP</span><b>'+CG.fmtDate(Date.parse(sN.starts_at))+'</b></a>');
+      if (sN.registration_deadline) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtDate(sN.registration_deadline)+'</b></a>');
+      if (sN.draft_at) items.push('<span class="tk-item"><span class="tk-lab">DRAFT</span><b>'+CG.fmtDate(sN.draft_at)+'</b></span>');
+      if (sN.starts_at) items.push('<a class="tk-item" href="#/schedule"><span class="tk-lab">PUCK DROP</span><b>'+CG.fmtDate(sN.starts_at)+'</b></a>');
     }
   }
   var tk = items.join("");

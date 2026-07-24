@@ -372,10 +372,10 @@ CG.ROUTES.home = function(){
         ].filter(function(x){ return x[1]; });
         var nowMs = CG.now();
         return steps.map(function(st){
-          var ms = Date.parse(st[1]), past = ms < nowMs;
+          var ms = Date.parse(st[1]), past = ms < nowMs;   /* ms only for the past/future dot */
           return '<a class="railgame" href="'+st[3]+'" style="opacity:'+(past?".5":"1")+'">'+
             '<span class="rg-line"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:'+(past?"var(--steel)":"var(--chrome)")+';display:inline-block"></span>'+esc(st[0])+'</span>'+
-            '<span class="rg-t">'+CG.fmtDate(ms)+'</span>'+
+            '<span class="rg-t">'+CG.fmtDate(st[1])+'</span>'+
             '<span class="rg-meta">'+esc(st[2])+'</span></a>';
         }).join("");
       })())+
