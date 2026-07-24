@@ -720,7 +720,8 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
      reach S%, TK, GV, GWG, TOI/GP — the whole point of Stat Central. */
   .tbl th:nth-child(n+7):not(:last-child),.tbl td:nth-child(n+7):not(:last-child){display:none}
   .tbl.keepcols th,.tbl.keepcols td{display:table-cell}
-  .tbl.keepcols{min-width:640px}
+  /* No min-width: .tblwrap already scrolls when the table's natural width exceeds the
+     viewport, so forcing a width only made empty tables overflow for no reason. */
   /* scroll affordance: the wrap is scrollable but scrollbars are hidden on iOS */
   .tblwrap{position:relative}
   .tblwrap:after{content:"";position:absolute;top:0;right:0;bottom:0;width:26px;pointer-events:none;

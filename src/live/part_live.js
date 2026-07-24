@@ -416,11 +416,16 @@ CG.buildLiveLeague = async function(){
        "previous" are both orderings of all-zero records, so any delta between them is an
        artifact — that is what printed "#4 power ranking v3" on club pages before a single
        puck had dropped. No results => no movement. */
-    var prHasResults = regResults.length > 0;
     lg.powerRankings = prNow.map(function(code,i){
-      var was = prHasResults ? (prPrev.indexOf(code)+1) : (i+1);
-      return { rank:i+1, prev:was, team:code, move: prHasResults ? was-(i+1) : 0 };
+      var was = prPrev.indexOf(code)+1;
+      return { rank:i+1, prev:was, team:code, move:was-(i+1) };
     });
+  } else {
+    /* No results yet, so the engine's roster-strength order stands as the pre-season seed —
+       but the engine also derives `move` by diffing two orderings of all-zero records, which
+       printed things like "#4 power ranking v3" on club pages before a single puck dropped.
+       Movement is meaningless until a game is final: flatten it. */
+    (lg.powerRankings||[]).forEach(function(p){ p.prev = p.rank; p.move = 0; });
   }
   /* commissioner's manual ranking override (site_config) — applies only while it
      covers the current club list exactly; otherwise the computed order stands */
