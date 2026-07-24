@@ -343,7 +343,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .caro-btn{width:40px;height:40px;border-radius:var(--r-s);border:1.5px solid #39434B;display:grid;place-items:center;color:var(--on-ink)}
 .caro-btn:hover{border-color:var(--chrome);color:var(--chrome)}
 .caro-dots{display:flex;gap:6px;margin-right:10px}
-.caro-dots button{width:22px;height:4px;border-radius:2px;background:#39434B;transition:background .2s;min-height:0;padding:0}
+.caro-dots button{position:relative;width:22px;height:4px;border-radius:2px;background:#39434B;transition:background .2s;min-height:0;padding:0}
+/* the visible indicator stays a 4px bar, but the tap target is expanded to a real ~28px
+   touch area so it is usable on a phone (the bar alone was untappable). */
+.caro-dots button::before{content:"";position:absolute;inset:-13px -5px}
 .caro-dots button.on{background:var(--chrome)}
 .caro-dots button:focus-visible{outline-offset:4px}
 .hero-rail{border-left:1px solid #2A343B;padding:26px 0 26px 26px;display:flex;flex-direction:column;gap:12px}
@@ -745,6 +748,10 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
    on the site triggered it. 15.5 -> 16 is imperceptible; the zoom was not. */
 @media(max-width:560px){
   input,select,textarea{font-size:16px}
+  /* touch-target floor: btn-sm is 36px, so small CTAs — including the registration deadline
+     bar, the single most-important conversion button for phone visitors from Discord — sat
+     under the 44px minimum. Pad them up on touch widths without disturbing desktop. */
+  .btn-sm{min-height:44px;padding-top:10px;padding-bottom:10px}
 }
 
 /* mobile menu */

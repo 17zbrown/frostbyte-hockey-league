@@ -1117,7 +1117,7 @@ CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b
 CG.ROUTES.register = function(){
   var s = CG.SEASON || {}, open = !!s.registration_open;
   var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
-    "Register for the season", "One form puts you in the player pool. The commissioner assigns roster spots from there.");
+    "Register for the season", "One form puts you in the player pool. Sign up by the deadline to enter the draft; after it — or if you join mid-season — you're placed on a club with an open spot automatically (Rule 2.2).");
   if (!CG.auth.profile){
     /* site_config is anon-readable, so guests get the real join link at the exact moment they're
        told they need it — the site cannot add them to the server on their behalf */
@@ -1147,7 +1147,7 @@ CG.ROUTES.register = function(){
   var onRoster = !!(myCt && p && ((CG.lg && CG.lg._rosteredIds) || {})[p.id]);
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> '+(myCt&&onRoster
       ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
-      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. The commissioner assigns roster spots — you’ll be notified.')+' Update your details below any time before the deadline.</div>' : "";
+      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. Register by the deadline and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.')+' Update your details below any time before the deadline.</div>' : "";
   if (myCt && !reg){
     statusCard = '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re under contract with '+esc(ctName)+' through Season '+(myCt.end_season||snumR)+' — but a contract doesn’t replace registration.</b> Until you sign up you can’t play, and your '+CG.fmtMoney(myCt.salary||0)+' salary sits on the club’s cap as dead money. If '+esc(ctName)+' takes on a new owner and you still haven’t signed up after the deadline, the deal is voided and you’re suspended through Season '+(myCt.end_season||snumR)+' (Rule 2.5). Registering — any time — puts you straight back on the roster.</div>' + statusCard;
   }
@@ -1216,7 +1216,7 @@ CG.ROUTES.legal = function(){
     ])+
     sec("Deleting your data", [
       "Message any commissioner from <a href='#/hub/messages' style='font-weight:700;border-bottom:2px solid var(--chrome)'>Messages</a> (or on Discord) to delete your account. Deletion removes your profile, registrations, availability, applications, and messages. The permanent game record — box scores and results — is retained with your gamertag, the same way any league's record book works.",
-      "Questions about any of this go to the commissioners — they're listed on every club page."
+      "Questions about any of this go to the league office — reach the commissioners in the league Discord."
     ])+
     '<p class="caption">Last updated July 16, 2026 · applies to chelgamingleague.com and the league Discord.</p>'+
   '</div>';
@@ -6674,7 +6674,7 @@ CG.bootLive = async function(){
     if (app) app.innerHTML =
       '<section class="sec"><div class="shell"><div class="empty" style="padding:80px 20px">'+
       '<div class="e-art">'+(CG.ic?CG.ic("flag",22):"")+'</div><b>Couldn’t load live data</b>'+
-      '<p>'+(CG.esc?CG.esc(CG.LIVE.error):CG.LIVE.error)+'</p></div></div></section>';
+      '<p>'+(typeof esc==="function"?esc(CG.LIVE.error):"Something went wrong loading the league.")+'</p></div></div></section>';
     return;
   }
   CG.renderChrome();

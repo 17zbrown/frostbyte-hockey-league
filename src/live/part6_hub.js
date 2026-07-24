@@ -765,7 +765,7 @@ CG.hubRoster = function(qs){
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
     '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff floor">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">GP counts toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff-eligibility floor ('+minGames+' games). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player clears their cap hit; a claimed player’s salary is reinstated at his pre-waiver number (Rule 2.5).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">GP counts toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff-eligibility floor ('+minGames+' games). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him to the free-agent pool immediately and clears his cap hit; any club may then sign him under the free-agency rules (Rule 2.2).</span></div></div>';
   return h;
 };
 CG.AFTER._roster = function(){

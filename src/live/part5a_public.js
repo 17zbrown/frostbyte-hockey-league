@@ -604,7 +604,14 @@ CG.ROUTES.schedule = function(param, qs){
     '<div class="seg" role="group" aria-label="Game state">'+["all","final","upcoming"].map(function(s){
       return '<button data-state="'+s+'" class="'+(fState===s?"on":"")+'">'+s[0].toUpperCase()+s.slice(1)+'</button>'; }).join("")+'</div>'+
     '<select id="fWeek" aria-label="Filter by week" style="max-width:140px"><option value="">All weeks</option>'+
-      Array.from({length:10},function(_,i){ return '<option value="'+(i+1)+'"'+(fWeek==String(i+1)?" selected":"")+'>Week '+(i+1)+'</option>'; }).join("")+'</select>'+
+      /* Weeks come from the actual schedule, not a hardcoded 1–10: the regular season is nine
+         game-weeks (Rule 3.1), so "Week 10" could never match, and pre-season/playoff weeks
+         belong here too. Distinct, sorted, real. */
+      (function(){
+        var wks = {}; (CG.lg.schedule||[]).forEach(function(g){ if(g.week) wks[g.week]=1; });
+        return Object.keys(wks).map(Number).sort(function(a,b){return a-b;})
+          .map(function(w){ return '<option value="'+w+'"'+(fWeek==String(w)?" selected":"")+'>Week '+w+'</option>'; }).join("");
+      })()+'</select>'+
     '<button class="btn btn-ghost btn-sm" id="csvSched">'+CG.ic("dl",14)+'Export CSV</button>'+
   '</div></div>';
   /* group by stage + week so pre-season week 1 never merges with regular week 1 */
@@ -735,8 +742,9 @@ CG.playoffBracket = function(){
     return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff format</h3>'+
       '<span class="chip">Seeded once games are played</span></div><div class="card-b">'+
       '<p class="small" style="color:var(--steel);line-height:1.65">Top three in each division qualify — six clubs, three rounds. '+
-      'Division winners take seeds 1 and 2 and skip the quarter-finals; the other four seed by points, then wins, '+
-      'then goal differential (Rule 8.1). The bracket appears here as soon as there are results to seed it.</p>'+
+      'Division winners take seeds 1 and 2 and skip the quarter-finals; the other four seed by points percentage, '+
+      'with ties broken by head-to-head, regulation wins, then goal differential (Rule 8.1, Rule 8.2). '+
+      'The bracket appears here as soon as there are results to seed it.</p>'+
       '<span class="caption" style="display:block;margin-top:10px">'+
       (poAt ? 'Playoffs begin '+CG.fmtDay(poAt)+'.' : 'Playoff dates are set with the season schedule.')+'</span></div></div>';
   }
@@ -784,7 +792,7 @@ CG.ROUTES.standings = function(param, qs){
   var views = [["division","Divisions"],["league","League"],["wildcard","Playoff picture"]];
   if (hasPre) views.push(["preseason","Pre-season"]);
   var head = CG.pageHead(eyebrow,"League standings",
-    "Two points for a win, one for an overtime loss. Top three per division qualify — the dashed line is the cut (Rule 8.1). Tiebreakers: wins, then goal differential, then goals for.",
+    "Two points for a win, one for an overtime loss. Top three per division qualify — the dashed line is the cut (Rule 8.1). Ties break by head-to-head record, then regulation wins, then goal differential (Rule 8.2).",
     '<div style="display:flex;gap:9px;align-items:flex-end;flex-wrap:wrap">'+
       '<div class="seg" role="group" aria-label="Standings view">'+views.map(function(v){
         return '<button data-view="'+v[0]+'" class="'+(view===v[0]?"on":"")+'">'+v[1]+'</button>'; }).join("")+'</div>'+
@@ -941,6 +949,9 @@ CG.ROUTES.teams = function(){
 
 /* ---------- TEAM PAGE ---------- */
 CG.ROUTES.team = function(code, qs){
+  /* Accept the legacy query form #/team?code=BOS (used in early Discord posts and docs) as
+     well as the canonical #/team/BOS, so old links resolve instead of 404-ing. */
+  code = code || (qs && qs.code) || null;
   var t = CG.TEAM[code]; if (!t) return CG.ROUTES._404();
   var lg = CG.lg;
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";
@@ -1163,6 +1174,7 @@ CG.AFTER.players = function(param, qs){
 /* ---------- PLAYER PROFILE ---------- */
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
+  pid = pid || (qs && (qs.id || qs.pid)) || null;  /* accept legacy #/player?id=… links */
   var p = lg.players.find(function(x){ return x.id===pid; });
   if (!p) return CG.ROUTES._404();
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";

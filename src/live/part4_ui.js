@@ -946,6 +946,9 @@ CG.pageTitleFor = function(name, root){
   return lead===CG.SITE_TITLE ? lead : lead+" · "+CG.SITE_TITLE;
 };
 CG.router = function(){
+  /* Close the mobile menu on any route change — the Android back button and any programmatic
+     navigation swap the page underneath while leaving the overlay open on top of it. */
+  if (CG.closeMobileNav) CG.closeMobileNav();
   var h = location.hash || "#/home";
   var parts = h.replace(/^#\//,"").split("?")[0].split("/");
   var name = parts[0]||"home", param = parts.slice(1).join("/")||null;
