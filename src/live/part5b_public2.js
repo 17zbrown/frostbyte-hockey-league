@@ -278,11 +278,14 @@ CG.countdown = function(el, targetMs, onElapsed){
 
 /* ---------- MATCHUP CENTER ---------- */
 CG.gameCode = function(id){
-  /* prefer a real EA lobby code assigned to the game (EA club codes are 6-digit numbers) */
+  /* the real code is the one the commissioner sets on the game (EA lobby codes are 6-digit) */
   var g = CG.lg && CG.lg.schedule && CG.lg.schedule.find(function(x){ return x.id===id; });
   if (g && g.code) return String(g.code);
-  /* otherwise a stable 6-digit code hashed from the game id — same number for both
-     clubs on every render, never drifts */
+  /* Live: there is no code until the commissioner sets one. Return null so every surface shows
+     "pending" — a fabricated hash code disagreed with the commissioner's master list and the
+     Discord reminders, sending players to the wrong lobby. The hash only stands in for the
+     prototype's offline demo. */
+  if (CG.LIVE_MODE) return null;
   var h = 2166136261, s = String(id);
   for (var i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = (h*16777619) >>> 0; }
   return String(100000 + (h % 900000));
@@ -406,7 +409,7 @@ CG.ROUTES.matchup = function(id){
       codeBox = '<div class="codebox locked"><span class="lock">'+CG.ic("clock",14)+'Code releases at T-30</span><div class="cb-code">'+CG.fmtTime(g.at-30*60000)+'</div>'+
         '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Automatic release 30 minutes before puck drop. Never share codes publicly (Rule 4.2).</p></div>';
     } else {
-      codeBox = '<div class="codebox"><span class="lock" style="color:var(--chrome)">'+CG.ic("code",14)+'Private game code · live</span><div class="cb-code">'+CG.gameCode(g.id)+'</div>'+
+      codeBox = '<div class="codebox"><span class="lock" style="color:var(--chrome)">'+CG.ic("code",14)+'Private game code · live</span><div class="cb-code">'+(CG.gameCode(g.id)||'<span style="opacity:.6;letter-spacing:0;font-size:.7em">code pending</span>')+'</div>'+
         '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Released '+CG.fmtTime(g.at-30*60000)+' · visible to rostered players and staff only.</p></div>';
     }
     body += '<div class="grid g23" style="align-items:start"><div class="stack">';

@@ -6311,7 +6311,7 @@ CG.hubScheduleLive = function(){
           '<span class="chip" style="font-size:9.5px">'+(homeSide?"HOME":"AWAY")+'</span>'+
           '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">'+
             (codeReleased
-              ? '<span class="chip chip-chrome mono" style="letter-spacing:.12em">'+CG.gameCode(g.id)+'</span>'
+              ? '<span class="chip chip-chrome mono" style="letter-spacing:.12em">'+(CG.gameCode(g.id)||'code pending')+'</span>'
               : '<span class="chip">'+CG.ic("lock",11)+' Code at '+CG.fmtTime(g.at-30*60000)+'</span>')+
             '<a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Match card</a></span></div>'+
         CG.serverVetoControls(g, me, lockAt)+

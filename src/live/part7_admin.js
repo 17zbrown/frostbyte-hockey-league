@@ -162,7 +162,7 @@ CG.admCodes = function(){
       var released = CG.now()>=g.at-30*60000;
       return '<tr><td class="tleft"><b style="font-family:var(--f-disp);font-size:13px">'+CG.TEAM[g.away].code+' @ '+CG.TEAM[g.home].code+'</b><small style="display:block;color:var(--steel);font-family:var(--f-mono);font-size:10px">'+CG.fmtFull(g.at)+'</small></td>'+
       '<td>'+g.week+'</td><td class="tleft"><span class="chip '+(released?"chip-win":"")+'">'+(released?"Live":"T-30 · "+CG.fmtTime(g.at-30*60000))+'</span></td>'+
-      '<td class="tleft mono" style="letter-spacing:.14em">'+CG.gameCode(g.id)+'</td>'+
+      '<td class="tleft mono" style="letter-spacing:.14em">'+(CG.gameCode(g.id)||'<span style="opacity:.5;letter-spacing:0">pending</span>')+'</td>'+
       '<td><button class="btn btn-ghost btn-sm" data-regen="'+g.id+'">Regenerate</button></td></tr>';
     }).join("")+'</tbody></table></div></div>'+
     '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Release policy</h3></div><div class="card-b">'+
