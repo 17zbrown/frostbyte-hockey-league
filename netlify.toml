@@ -27,6 +27,13 @@
   to = "/.netlify/functions/discord-join"
   status = 200
 
+# Discord interactions endpoint for the #lfg pickup bot (slash command + button/select callbacks).
+# This URL goes in the Discord Developer Portal under "Interactions Endpoint URL".
+[[redirects]]
+  from = "/api/discord-interactions"
+  to = "/.netlify/functions/discord-interactions"
+  status = 200
+
 # `publish = "."` serves the repo root, which means the working tree is reachable on the public
 # domain: /src/live/part_live.js (421 KB of raw source), /server.js, /package.json, both READMEs and
 # the internal design standards all returned 200. Nothing is secret and nothing at runtime fetches
