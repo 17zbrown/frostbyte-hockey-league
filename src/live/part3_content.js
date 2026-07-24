@@ -267,3 +267,27 @@ CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Str
     summary: "Terminology corrected across the rulebook: the rules referred to a club “captain,” a role the league does not use. A club is run by its management — Owner, General Manager, and Assistant GM (Rule 2.6) — so protests and paperwork (1.3), trades (2.3), reschedules (3.3), game-code release (4.2), lobby-failure evidence (4.3), availability (5.1), discipline (7.1, 7.4), and award voting (9.2) now cite club management, and the definitions (10.1) replace “captain” with “club management.”"
   });
 })();
+
+/* ---- rulebook v2.2 — rookie bidding mechanics + free-agency honesty system (Rule 2.2) ----
+   The bid clock resets on every bid (was: only the first bid started it), bids start at $750K
+   and rise in $250K steps, and open free agency is clarified as custom-salary offers players
+   choose on an honesty system. Matches the rookie_bidding_system build. Idempotent. ---- */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.2") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  var s = sec(2,"2.2"); if (!s || !s.paragraphs) return;
+  for (var i=0;i<s.paragraphs.length;i++){
+    if (s.paragraphs[i].indexOf("twelve (12) hour countdown") > -1){
+      s.paragraphs[i] = "Free agency runs on two tracks that open together. An undrafted first-year player who met the five-game pre-season minimum of Rule 2.8 enters rookie bidding, a live auction: any club with an open roster spot and the cap room to carry him may bid. Bids start at $750,000 and rise in $250,000 increments. Each bid opens a twelve (12) hour window for another club to outbid — every new bid resets the clock to twelve hours — and when the clock reaches zero with no higher bid, the club holding the high bid wins the player’s rights and the salary it bid becomes his contract. A club may not outbid its own standing high bid.";
+    }
+    if (s.paragraphs[i].indexOf("open re-signing") > -1){
+      s.paragraphs[i] = "Every other available player — a returning player whose contract has expired, or any registered free agent who is not in rookie bidding — enters open free agency. Clubs send that player contract offers at a salary of their choosing, within the cap and contract limits of Rule 2.5, and the player chooses which to accept; a signing takes effect when the player and the club’s management confirm the terms and the league office posts it to the transaction log. Players are expected in good faith to take the strongest offer on the table. The league does not forbid a player from signing a lower offer — to play with friends, for instance — but it trusts members not to abuse that latitude to defeat a fair market.";
+    }
+  }
+  rb.changelog.unshift({
+    version: "2.2", dateIso: "2026-07-24",
+    summary: "Rookie free agency runs as a live auction (Rule 2.2): bids on an undrafted five-game rookie start at $750K and rise in $250K increments, and every bid resets a 12-hour clock — the high bid when the clock expires wins, and the bid amount becomes the contract (previously only the first bid started the clock). Open free agency is clarified: for every other available player, clubs send custom-salary offers and the player chooses, expected in good faith to take the strongest offer — signing a lower one (to play with friends) isn’t forbidden but isn’t to be abused."
+  });
+})();
