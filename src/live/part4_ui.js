@@ -7,6 +7,18 @@ var $  = function(s,r){ return (r||document).querySelector(s); };
 var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
 function esc(s){ return (s==null?"":String(s)).replace(/[<>&"']/g,function(c){
   return {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"}[c]; }); }
+/* Avatar URLs are UNTRUSTED: profiles.avatar_url is world-readable and self-writable by any
+   member, so a crafted value reaches every viewer of a DM thread, roster row, or the masthead.
+   Escaping alone is not enough — javascript:/data: would still execute — so allowlist the two
+   CDNs we actually serve avatars from and escape what survives. Returns null when unsafe, and
+   every caller falls back to initials. */
+function safeAvatar(u){
+  if (!u) return null;
+  var s = String(u);
+  if (!/^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net|[a-z0-9-]+\.supabase\.co)\/[^\s"'<>]*$/i.test(s)) return null;
+  return esc(s);
+}
+CG.safeAvatar = safeAvatar;
 
 /* ---------- persistent demo state ---------- */
 CG.STORE_KEY = "cgproto:v1";
@@ -146,7 +158,8 @@ CG.PERSONAS = {
    build and cost every visitor ~50 KB. PERSONAS keeps its labels, just not the artwork. */
 CG.avatarHtml = function(key){
   var p = CG.PERSONAS[key||CG.role()];
-  if (p && p.avatar) return '<img src="'+p.avatar+'" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block">';
+  var src = p && safeAvatar(p.avatar);
+  if (src) return '<img src="'+src+'" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block">';
   return esc(((p&&p.tag)||"G").slice(0,2).toUpperCase());
 };
 

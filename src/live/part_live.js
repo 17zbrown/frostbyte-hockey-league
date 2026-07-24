@@ -47,6 +47,14 @@ CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
   return { data: out, error: null };
 };
 
+/* Columns of `profiles` the public league load may read. Deliberately excludes the identity
+   columns (discord_id, discord_username, platform_gamertag) and the moderation columns
+   (is_admin, ban_reason, banned_at, banned_by) — anon's grant is scoped to exactly this list,
+   so a signed-out scraper cannot harvest members' Discord identities from /rest/v1/profiles.
+   Keep this in sync with the GRANT in the lock_down_profiles_columns migration. */
+CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,twitch,live,"+
+  "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone";
+
 CG.buildLiveLeague = async function(){
   var sb = CG.sb;
   if (!sb) throw new Error("Supabase client unavailable");
@@ -54,7 +62,12 @@ CG.buildLiveLeague = async function(){
     sb.from("teams").select("*"),
     sb.from("divisions").select("*").order("sort_order"),
     sb.from("seasons").select("*").order("number", { ascending:false }),
-    CG.sbAll("profiles","*","id"),
+    /* Explicit column list, not "*": this load runs for signed-out visitors too, and anon's
+       grant on profiles is now column-scoped so identity columns (discord_id, discord_username,
+       platform_gamertag) and moderation columns (is_admin, ban_reason, banned_at, banned_by)
+       can't be scraped from the public API. Anything needing those reads them from the
+       signed-in user's own profile row (CG.auth.profile) or a staff-only query. */
+    CG.sbAll("profiles",CG.PROFILE_PUBLIC_COLS,"id"),
     CG.sbAll("roster_spots","*","id"),
     CG.sbAll("contracts","*","id"),
     CG.sbAll("games","*","scheduled_at"),
@@ -180,7 +193,7 @@ CG.buildLiveLeague = async function(){
         twitch: p.twitch || null, twitchLive: !!p.live,
         overall: p.overall || 70,
         eaId: p.ea_id || "", avatar: p.avatar_url || null,
-        banned: !!p.banned, discordId: p.discord_id,
+        banned: !!p.banned,
         salary: (c && c.salary!=null) ? c.salary : (rs.salary||0),
         term: c ? Math.max(1, (c.end_season||1) - (c.start_season||1) + 1) : 1,
         mgmt: mgmt, mgmtSalary: (mgmt==="owner"||mgmt==="gm"),
@@ -1024,7 +1037,8 @@ CG.me = function(){
 };
 CG.avatarHtml = function(){
   var p = CG.auth.profile;
-  if (p && p.avatar_url) return '<img src="'+p.avatar_url+'" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block">';
+  var src = p && CG.safeAvatar(p.avatar_url);
+  if (src) return '<img src="'+src+'" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block">';
   var tag = (p && (p.gamertag||p.display_name)) || "G";
   return esc(String(tag).slice(0,2).toUpperCase());
 };
@@ -2492,7 +2506,8 @@ CG.dmUid = function(){ return CG.auth.user ? CG.auth.user.id : null; };
 CG.dmOtherId = function(m){ var me=CG.dmUid(); return m.sender_id===me ? m.recipient_id : m.sender_id; };
 CG.dmName = function(id){ var p=CG._dm.profiles[id]; return p ? (p.gamertag||p.display_name||"Member") : "Member"; };
 CG.dmAva = function(id){ var p=CG._dm.profiles[id];
-  if (p&&p.avatar_url) return '<img src="'+p.avatar_url+'" alt="" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">';
+  var src = p && CG.safeAvatar(p.avatar_url);
+  if (src) return '<img src="'+src+'" alt="" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">';
   return '<span class="avatar" style="width:38px;height:38px;flex-shrink:0">'+esc(String(CG.dmName(id)).slice(0,2).toUpperCase())+'</span>';
 };
 CG.dmUnreadTotal = function(){ var me=CG.dmUid(); return CG._dm.msgs.filter(function(m){ return m.recipient_id===me && !m.read_at; }).length; };
@@ -3033,7 +3048,7 @@ CG.admUsersLive = function(){
       var sus=(lg.suspensions||[]).find(function(s){ return s.playerId===pr.id && s.status==="active"; });
       var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
       return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
-        '<td class="tleft"><span class="playercell">'+(pr.avatar_url?'<img src="'+esc(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+(CG.safeAvatar(pr.avatar_url)?'<img src="'+CG.safeAvatar(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
         '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
         '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
         '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
