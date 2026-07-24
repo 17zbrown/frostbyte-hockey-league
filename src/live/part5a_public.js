@@ -1179,7 +1179,7 @@ CG.ROUTES.player = function(pid, qs){
   var preS = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
   var anyGp = (s.gp||0) + ((preS && preS.gp)||0);
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
-    '<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
+    '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
       /* decorative here — the club name is the very next thing a screen reader reads, in the eyebrow */
       (t.logo
         ? '<img class="crest hero-crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="">'
