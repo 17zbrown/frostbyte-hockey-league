@@ -304,6 +304,7 @@ export default async (req) => {
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
   const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
+  const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
   const roleId = {};
   for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
   const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
@@ -519,6 +520,25 @@ export default async (req) => {
       if (created && created.id) { roleId[name.toLowerCase()] = created.id; roleNameById[created.id] = name; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
     } catch (e) { sum.errors.push({ role: name, error: String(e.message || e) }); }
   }
+  // Reconcile properties on the EXISTING static roles — ENSURE_ROLES only sets them at creation,
+  // so roles seeded before the intent changed drifted (Owner and AGM ended up mentionable:false,
+  // and the senior Owner role sat un-hoisted below the hoisted GM). Enforce the declared config.
+  //   [name, mentionable, hoist]
+  const ROLE_PROPS = [
+    ["Owner", true, true], ["General Manager", true, true], ["Assistant General Manager", true, false],
+    ["Staff", true, true], ["Commissioner", true, true], ["Not Signed Up", true, false],
+  ];
+  for (const [name, mentionable, hoist] of ROLE_PROPS) {
+    const rid = roleId[name.toLowerCase()];
+    const cur = rid && roleObjById[rid];
+    if (!cur) continue;
+    if (cur.mentionable !== mentionable || cur.hoist !== hoist) {
+      try {
+        await dApi("PATCH", `/guilds/${GUILD}/roles/${rid}`, { mentionable, hoist });
+        sum.roleUpdated = (sum.roleUpdated || 0) + 1;
+      } catch (e) { sum.errors.push({ roleProps: name, error: String(e.message || e) }); }
+    }
+  }
   if (roleId["not signed up"]) await sbUpsertCfg("discord_not_signed_up_role_id", roleId["not signed up"]);
   // Publish a name->id map of the league roles so the DATABASE can render @role pills too
   // (public._role_tag reads this). Without it the DB can only bold a role name.
@@ -537,14 +557,16 @@ export default async (req) => {
   // department roles are managed too, so they're added/removed as officials change their picks
   for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) managedIds.add(rid); }
 
-  // who still needs to register for the open season → drives the "Not Signed Up" role
+  // Current-season registration drives the three participation roles. `registered` is populated
+  // year-round (not only while the window is open) so Player and Free Agent stay coherent all
+  // season; `regOpen` is the narrower "sign-ups still open" flag that drives Not Signed Up.
   let regOpen = false; const registered = new Set();
   try {
     const s = (await sbGet("seasons?select=id,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0];
     if (s) {
       const deadline = s.signup_deadline_at || s.registration_deadline;
       regOpen = !!s.registration_open && (!deadline || Date.now() < Date.parse(deadline));
-      if (regOpen) for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
+      for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
     }
   } catch (e) { sum.errors.push({ regStatus: String(e.message || e) }); }
 
@@ -594,11 +616,19 @@ export default async (req) => {
       const handle = mem.user && mem.user.username;
       if (handle && handle !== m.discord_username) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { discord_username: handle }); }
 
-      // (2) role sync — desired managed roles for this member
+      // (2) role sync — desired managed roles for this member.
+      // The three participation roles are mutually coherent, gated on current-season registration
+      // and roster status (previously Player was unconditional and Free Agent applied to anyone
+      // teamless, so an unregistered member wore Player + Free Agent + Not Signed Up at once):
+      //   Player      = registered for the season OR holding a roster spot
+      //   Free Agent  = registered but not yet on a roster (available to sign)
+      //   Not Signed Up (below) = linked but not registered while the window is open
       const desired = new Set();
-      if (roleId["player"]) desired.add(roleId["player"]);
-      if (m.team_id && teamRoleId[m.team_id]) desired.add(teamRoleId[m.team_id]);
-      else if (roleId["free agent"]) desired.add(roleId["free agent"]);
+      const isRegistered = registered.has(m.profile_id);
+      const onRoster = !!(m.team_id && teamRoleId[m.team_id]);
+      if ((isRegistered || onRoster) && roleId["player"]) desired.add(roleId["player"]);
+      if (onRoster) desired.add(teamRoleId[m.team_id]);
+      else if (isRegistered && roleId["free agent"]) desired.add(roleId["free agent"]);
       const teamRole = mgmtRoleByProfile[m.profile_id];
       if (teamRole === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
       if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
@@ -614,10 +644,12 @@ export default async (req) => {
           if (rid) desired.add(rid);
         }
       }
-      // "Not Signed Up" — a plain member who hasn't registered for the open season (the daily
-      // #season-signups reminder pings this role). Cleared automatically once they register or the
-      // window closes, since it's a managed role reconciled to `desired` every run.
-      if (regOpen && m.role === "member" && !registered.has(m.profile_id) && roleId["not signed up"]) desired.add(roleId["not signed up"]);
+      // "Not Signed Up" — any linked member who hasn't registered for the open season (the daily
+      // #season-signups reminder pings this role). Applies regardless of profile role, because
+      // staff and commissioners are allowed to play too (role-conflict rules) and should get the
+      // nudge. Cleared automatically once they register or the window closes, since it's a managed
+      // role reconciled to `desired` every run.
+      if (regOpen && !registered.has(m.profile_id) && roleId["not signed up"]) desired.add(roleId["not signed up"]);
       // position role (Center / Left Wing / … / Goalie) from their current-season position
       const posName = POS_LABEL[posOf[m.profile_id]];
       if (posName && roleId[posName.toLowerCase()]) desired.add(roleId[posName.toLowerCase()]);
