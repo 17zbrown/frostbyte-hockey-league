@@ -6452,10 +6452,17 @@ CG.hubFreeAgents = function(){
     : '<span class="chip chip-win">Window closed — free agents stay signable</span>';
   var rosterN=(lg.byTeam[t.code]||[]).length, rosterMax=s.roster_max||15;
   var rosteredIds=lg._rosteredIds||{}, faHeld=CG.contractHeldIds();
+  /* Two tracks (Rule 2.2): veterans/returning players sign through open free agency here;
+     undrafted rookies who hit the five-game pre-season minimum are won on the bidding board. */
   var pool=(lg._registrationsRaw||[]).filter(function(r){
     return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
-      (lg.isVeteran(r.profile_id) || ((lg.preGp[r.profile_id]||{}).gp||0) >= 5);
+      lg.isVeteran(r.profile_id);
   }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  var bidPool=(lg._registrationsRaw||[]).filter(function(r){
+    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
+      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) >= 5;
+  }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  var aucById = {}; (lg._rookieAuctions||[]).forEach(function(a){ aucById[a.profile_id]=a; });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
     '<p class="lede" style="margin-top:8px">Every signable player without a club. Approach opens a direct message to talk terms; signing adds them to your roster at the salary you negotiated — first come, first served, under the cap.</p></div>';
@@ -6483,6 +6490,27 @@ CG.hubFreeAgents = function(){
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Rookies who missed the 5-game pre-season minimum never appear here — the league places them on random clubs ten minutes after the draft’s final pick. Signing is enforced server-side: the window, eligibility, and your roster space are all checked again on the click.</span></div>'
     :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Unsigned, draft-eligible players land here after the draft. Check back once free agency opens.</p></div></div>')+'</div>';
+
+  /* ---- Rookie bidding board (Rule 2.2): $750K start, $250K increments, 12h resets per bid ---- */
+  h+='<div class="card" style="margin-top:20px"><div class="card-h"><h3>Rookie bidding</h3><span class="chip chip-chrome">Auction</span></div>'+
+    (bidPool.length?'<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Rookie bidding board</caption><thead><tr>'+
+      '<th class="tleft">Rookie</th><th>POS</th><th>Scout OVR</th><th>High bid</th><th class="tleft">Closes in</th><th class="tright">Action</th></tr></thead><tbody>'+
+      bidPool.map(function(r){
+        var prof=r.profiles||{}, a=aucById[r.profile_id];
+        var mine = a && a.high_team_id===t.id;
+        var closes = a ? '<span data-countdown="'+a.closes_at+'">'+CG.fmtCountdown(Math.max(0,Date.parse(a.closes_at)-nowMs))+'</span>' : '<span class="caption">no bids yet</span>';
+        var high = a ? '<b>'+CG.fmtMoney(a.high_bid)+'</b>'+(mine?' <span class="chip chip-win chip-xs">you</span>':'') : '<span class="caption">— (opens $0.75M)</span>';
+        var full = rosterN>=rosterMax;
+        return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
+          '<td class="tnum">'+esc(r.position||"—")+'</td>'+
+          '<td class="tnum">'+(r.scout_ovr==null?'<span class="caption">—</span>':r.scout_ovr)+'</td>'+
+          '<td class="tnum">'+high+'</td>'+
+          '<td class="tleft">'+closes+'</td>'+
+          '<td class="tright"><button class="btn btn-chrome btn-sm" data-rookie-bid="'+r.profile_id+'" data-name="'+esc(prof.gamertag||"this rookie")+'" data-high="'+(a?a.high_bid:0)+'"'+
+            ((canSign&&!full&&!mine)?"":" disabled")+(mine?' title="You hold the high bid"':full?' title="Your roster is full"':!canSign?' title="Bidding opens with free agency"':'')+'>'+(mine?"High bid":"Bid")+'</button></td></tr>';
+      }).join("")+'</tbody></table></div>'+
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Bids start at $750K and rise in $250K steps. Every bid resets a 12-hour clock; when it hits zero the high bid wins and becomes the rookie’s contract (Rule 2.2). Cap and roster space are checked on every bid and again at the award.</span></div>'
+    :'<div class="card-b"><div class="empty" style="padding:44px 20px"><div class="e-art">'+CG.ic("db",22)+'</div><b>No rookies up for bid</b><p>Undrafted first-year players who play five pre-season games appear here when free agency opens.</p></div></div>')+'</div>';
   return h;
 };
 CG.AFTER._hubFreeAgents = function(){
@@ -6517,6 +6545,42 @@ CG.AFTER._hubFreeAgents = function(){
         if (r.error){ CG.toast("Couldn’t sign: "+r.error.message,"err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast(String(r.data||name)+" · "+CG.fmtMoney(sal)+" — welcome aboard","ok");
+        CG.reloadLeague();
+      });
+    });
+  }); });
+
+  /* Load the open rookie auctions once, then re-render so the bidding board shows live bids. */
+  if (CG.sb && CG.SEASON && CG.SEASON.id && !CG.lg._rookieAuctionsLoaded){
+    CG.lg._rookieAuctionsLoaded = true;
+    CG.sb.from("rookie_auctions").select("profile_id,high_bid,high_team_id,closes_at,status")
+      .eq("season_id", CG.SEASON.id).eq("status","open")
+      .then(function(r){ CG.lg._rookieAuctions=(r&&r.data)||[]; if(location.hash.indexOf("#/hub/freeagents")===0 && CG.router) CG.router(); },
+            function(){ CG.lg._rookieAuctions=[]; });
+  }
+  /* live countdowns on each auction */
+  document.querySelectorAll("[data-countdown]").forEach(function(el){
+    if (CG.countdown) CG.countdown(el, Date.parse(el.getAttribute("data-countdown")), function(e){ e.textContent="closing…"; });
+  });
+  /* place a bid */
+  document.querySelectorAll("[data-rookie-bid]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid=this.getAttribute("data-rookie-bid"), name=this.getAttribute("data-name"), high=parseInt(this.getAttribute("data-high"),10)||0;
+    var minBid = high>0 ? high+250000 : 750000;
+    CG.modal("Bid on "+esc(name),
+      '<label class="fld"><span>Your bid ($M)</span><input id="rbAmt" type="number" min="'+(minBid/1e6)+'" step="0.25" value="'+(minBid/1e6)+'"></label>'+
+      '<p class="caption">Minimum '+(high>0?'to outbid: <b>'+CG.fmtMoney(minBid)+'</b> (current high '+CG.fmtMoney(high)+')':'opening bid: <b>$0.75M</b>')+'. Bids rise in $0.25M steps and reset the 12-hour clock. The cap and your roster space are checked on submit.</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="rbGo">Place bid</button>');
+    document.getElementById("rbGo").addEventListener("click", function(){
+      var v=parseFloat(document.getElementById("rbAmt").value), amt=Math.round(v*1e6);
+      if(!(amt>=minBid)){ CG.toast("Bid must be at least "+CG.fmtMoney(minBid),"err"); return; }
+      if((amt-750000)%250000!==0){ CG.toast("Bids must be in $0.25M increments from $0.75M","err"); return; }
+      var btn=this; btn.disabled=true;
+      CG.sb.rpc("place_rookie_bid",{ p_profile:pid, p_amount:amt }).then(function(r){
+        btn.disabled=false;
+        if (r.error){ CG.toast("Couldn’t bid: "+r.error.message,"err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast(String(r.data||"Bid placed"),"ok");
+        CG.lg._rookieAuctionsLoaded=false;   /* force a reload of the board */
         CG.reloadLeague();
       });
     });
