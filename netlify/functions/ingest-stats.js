@@ -77,9 +77,14 @@ function normalizeMatch(raw) {
       };
     });
     return { ea_club_id: String(cid), name: c.details ? c.details.name : null, score: +(c.score || 0),
-             ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), players };
+             ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), result: +(c.result || 0), players };
   };
-  return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), clubs: [club(clubIds[0]), club(clubIds[1])] };
+  const clubs = [club(clubIds[0]), club(clubIds[1])];
+  // EA's per-club `result` code: 1 = regulation win, 2 = regulation loss, 5 = OT win, 6 = OT loss.
+  // CGHL plays continuous sudden-death OT and no shootout (Rule 4.1), so any non-regulation
+  // finish is overtime. If either club reports 5 or 6, the game went to OT.
+  const wentOt = clubs.some((c) => c.result === 5 || c.result === 6);
+  return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), clubs, went_ot: wentOt };
 }
 
 // ---- Resolve an EA roster entry to one of our profiles (best effort) ----
@@ -192,6 +197,7 @@ async function ingestOne(norm, raw, summary) {
   const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
   await sbSend("PATCH", `games?id=eq.${game.id}`,
     { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id,
+      went_ot: !!norm.went_ot,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
 
