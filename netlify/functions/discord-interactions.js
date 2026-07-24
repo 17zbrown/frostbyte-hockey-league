@@ -245,6 +245,11 @@ export default async (req) => {
   // GET — health check + Ed25519 self-test (confirms the crypto path works in the deployed runtime)
   if (req.method === "GET") {
     if (!(url && url.searchParams.get("diag") === DIAG)) return new Response("ok", { status: 200 });
+    // ?sim=cmd exercises the real /lfg command path (RPC + card render) without a Discord signature
+    if (url.searchParams.get("sim") === "cmd") {
+      try { return await handleCommand({ data: { name: "lfg" }, guild_id: "SIMGUILD", channel_id: "SIMCHANNEL" }); }
+      catch (e) { return new Response(JSON.stringify({ simError: String(e && (e.stack || e.message || e)) }), { status: 200, headers: { "content-type": "application/json" } }); }
+    }
     let selftest = false, realKeyLoads = false, err = null;
     try {
       const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
