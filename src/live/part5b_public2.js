@@ -396,7 +396,11 @@ CG.ROUTES.matchup = function(id){
   } else {
     /* PREVIEW: server, code, lineups */
     var released = now >= g.at - 30*60000;
-    var lineupsOut = now >= g.at - 60*60000;
+    /* Reveal lineups at the SAME moment they lock (T-30), not 60 minutes out. Revealing at T-60
+       while the builder stayed editable until T-30 let a manager read the opponent's confirmed
+       sheet and then change his own for 30 minutes. Now both sheets appear only once neither can
+       be changed. */
+    var lineupsOut = now >= g.at - 30*60000;
     /* A club's management with no roster spot still runs a club in this game and needs the code —
        CG.me() only exists for rostered players, so match on the managed club too (the schedule
        desk already shows them the code, so the matchup page must agree). */
@@ -421,7 +425,7 @@ CG.ROUTES.matchup = function(id){
     body += '<div class="grid g23" style="align-items:start"><div class="stack">';
     /* lineups */
     body += '<div class="card"><div class="card-h"><h3>Confirmed lineups</h3>'+
-      '<span class="chip">'+(lineupsOut?"Released "+CG.fmtTime(g.at-60*60000):"Release at "+CG.fmtTime(g.at-60*60000))+'</span></div>';
+      '<span class="chip">'+(lineupsOut?"Released "+CG.fmtTime(g.at-30*60000):"Release at "+CG.fmtTime(g.at-30*60000))+'</span></div>';
     if (lineupsOut){
       body += '<div class="grid g2" style="gap:0" id="muLineups">'+[g.away,g.home].map(function(code){
         var slots = CG.plannedLineup(g, code);
@@ -437,7 +441,7 @@ CG.ROUTES.matchup = function(id){
           }).join("") : '<p class="caption" style="padding:12px 0">Lineup not submitted yet.</p>')+'</div>';
       }).join("")+'</div>';
     } else {
-      body += '<div class="empty"><div class="e-art">'+CG.ic("lock",20)+'</div><b>Lineups are sealed</b><p>Both lineups release simultaneously 60 minutes before puck drop — neither club sees the other’s sheet early.</p></div>';
+      body += '<div class="empty"><div class="e-art">'+CG.ic("lock",20)+'</div><b>Lineups are sealed</b><p>Both lineups release together when they lock, 30 minutes before puck drop (Rule 5.3) — neither club sees the other’s sheet while it can still be changed.</p></div>';
     }
     body += '</div>';
     /* team leaders comparison */
