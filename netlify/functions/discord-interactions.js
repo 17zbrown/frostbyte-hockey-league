@@ -36,13 +36,15 @@ const respond = (obj) => new Response(JSON.stringify(obj), { status: 200, header
 const ephemeral = (content) => respond({ type: REPLY, data: { content, flags: EPHEMERAL } });
 
 /* ---------- Ed25519 signature verification (dependency-free) ---------- */
-function verifySignature(rawBody, sig, ts) {
+function loadEdKey(pubHex) {
+  // wrap the raw 32-byte ed25519 public key in a DER SPKI header so Node can load it
+  const der = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(pubHex, "hex")]);
+  return crypto.createPublicKey({ key: der, format: "der", type: "spki" });
+}
+function verifySignature(rawBody, sig, ts, pubHex) {
   try {
     if (!sig || !ts) return false;
-    // wrap the raw 32-byte ed25519 public key in a DER SPKI header so Node can load it
-    const der = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(PUBLIC_KEY, "hex")]);
-    const key = crypto.createPublicKey({ key: der, format: "der", type: "spki" });
-    return crypto.verify(null, Buffer.from(ts + rawBody), key, Buffer.from(sig, "hex"));
+    return crypto.verify(null, Buffer.from(ts + rawBody), loadEdKey(pubHex || PUBLIC_KEY), Buffer.from(sig, "hex"));
   } catch (e) { return false; }
 }
 
@@ -229,11 +231,42 @@ async function handleCommand(interaction) {
   return respond({ type: REPLY, data: signupView(row) });
 }
 
+const DIAG = "lfgdiag9x";
+async function logDebug(row) {
+  try { await fetch(`${SB_URL}/rest/v1/_lfg_debug`, { method: "POST", headers: sbHead(), body: JSON.stringify(row) }); } catch (e) {}
+}
+
 export default async (req) => {
+  const url = (() => { try { return new URL(req.url); } catch { return null; } })();
+
+  // GET self-test — confirms the Ed25519 code path works in the deployed runtime (no user needed)
+  if (req.method === "GET" && url && url.searchParams.get("diag") === DIAG) {
+    let selftest = false, realKeyLoads = false, err = null;
+    try {
+      const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+      const rawPub = publicKey.export({ format: "der", type: "spki" }).slice(-32).toString("hex");
+      const ts = "1700000000", body = JSON.stringify({ type: 1 });
+      const sig = crypto.sign(null, Buffer.from(ts + body), privateKey).toString("hex");
+      selftest = verifySignature(body, sig, ts, rawPub);
+      loadEdKey(PUBLIC_KEY); realKeyLoads = true;
+    } catch (e) { err = String(e.message || e); }
+    return new Response(JSON.stringify({ selftest, realKeyLoads, pubKeyLen: PUBLIC_KEY.length, node: process.version, err }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+
   const sig = req.headers.get("x-signature-ed25519");
   const ts = req.headers.get("x-signature-timestamp");
   const raw = await req.text();
-  if (!verifySignature(raw, sig, ts)) return new Response("invalid request signature", { status: 401 });
+  const verified = verifySignature(raw, sig, ts);
+
+  // POST echo — inspect exactly what the function received (body preservation, headers), no valid sig needed
+  if (url && url.searchParams.get("echo") === DIAG) {
+    return new Response(JSON.stringify({ rawLen: raw.length, rawHead: raw.slice(0, 160), sigPresent: !!sig, tsPresent: !!ts, verified, ct: req.headers.get("content-type") }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+
+  // log every real request so a failed Discord PING can be diagnosed after the fact
+  await logDebug({ has_sig: !!sig, has_ts: !!ts, raw_len: raw.length, raw_head: (raw || "").slice(0, 200), verified, ct: req.headers.get("content-type"), note: "prod" });
+
+  if (!verified) return new Response("invalid request signature", { status: 401 });
 
   let interaction;
   try { interaction = JSON.parse(raw); } catch (e) { return new Response("bad json", { status: 400 }); }
