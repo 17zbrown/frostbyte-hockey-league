@@ -236,3 +236,34 @@ CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Str
     summary: "New Rule 4.5 — Positional builds and X-Factor restrictions. To keep games decided by skill rather than loadout, the league bans a defined set of X-Factor traits (Truculence, Big Tipper, Hipster, Pressure+, Spark Plug, Unstoppable, Big Rig, Wheels) and every Elite-tier trait, bars all special-character player classes and special or mascot characters, and locks each position to a legal set of builds: forwards may not use the Enforcer build (or any defenseman build), and defensemen may not use the Enforcer Defenseman build (or any forward build) — Power Forward and Defensive Defenseman are permitted. Icing a banned build or ability makes the lineup ineligible and forfeits the game (Rule 5.2). The full list is maintained by the league office with the settings sheet (Rule 4.1)."
   });
 })();
+
+/* ---- rulebook v2.1 — replace the non-existent "captain" role with club management ----
+   The product has no captain: a club is run by its Owner / GM / AGM (Rule 2.6). The rules were
+   written in captain vocabulary, so protests, trades, reschedules, code release, availability,
+   discipline, and awards all cited a role no member can hold. Rewrites the affected paragraphs
+   (Chapters 1,2,3,4,5,7,9,10) to "club management". No rule IDs change. Idempotent. ---- */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.1") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  function setP(cnum, sid, idx, text){ var s=sec(cnum,sid); if (s && s.paragraphs && s.paragraphs[idx]!=null) s.paragraphs[idx]=text; }
+
+  setP(1,"1.2",0, "All members — players, club management, and league staff — are expected to compete hard and act like professionals. Harassment, hate speech, threats, doxxing, and targeted abuse are prohibited in all league spaces, including in-game chat, Discord, streams of league games, and direct messages arising out of league business. The standard applies whether or not the conduct occurs during a scheduled game.");
+  setP(1,"1.3",1, "A club’s management — its Owner, General Manager, or Assistant General Manager (Rule 2.6) — is the formal point of contact between the club and the league office. Protests, reschedule requests, and roster paperwork must come from the club’s management to be considered filed.");
+  setP(2,"2.3",0, "Clubs may trade rostered players by mutual agreement of both clubs’ management. Both clubs must file matching trade confirmations with the league office, and the trade takes effect only when the league office posts it to the official transaction log. Players acquired by trade are eligible for their new club beginning with that club’s next scheduled game after posting.");
+  setP(3,"3.3",0, "A game may be rescheduled only by written agreement of both clubs’ management, filed with and approved by the league office before the originally scheduled puck drop. The league office will not approve reschedules that push a game past the end of the week in which it was originally scheduled unless exceptional circumstances exist.");
+  setP(4,"4.2",0, "League games are played in private lobbies secured by a game code issued by the league office. Codes are released to the two competing clubs — their management and the players on that night’s lineup — no earlier than thirty (30) minutes before the scheduled puck drop.");
+  setP(4,"4.3",1, "If the lobby itself fails — a full crash or an EA server outage affecting both clubs — both clubs must capture evidence of the score and game clock at failure. The league office will order the game resumed from the recorded score and time where feasible, and replayed in full where it is not.");
+  setP(5,"5.1",0, "Every rostered player must submit weekly availability for the upcoming game week through the league’s availability system no later than Sunday at 8:00 PM Eastern Time. Availability submitted after the deadline is accepted at club management’s discretion for lineup purposes but is recorded as late by the league office.");
+  setP(5,"5.1",1, "Club management is responsible for confirming that the club’s availability picture supports an eligible lineup for each scheduled game. A club that discovers an availability shortfall after the Sunday deadline must pursue a reschedule under Rule 3.3 without delay; waiting until game night is not a defense to a forfeit.");
+  setP(7,"7.1",0, "The league office holds exclusive authority to investigate suspected violations of this rulebook and to impose discipline on players, club management, and clubs. The league office may act on a filed complaint, an official’s report, or its own observation, and may review any league game in full, including recorded footage and Discord communications in league spaces.");
+  setP(7,"7.4",2, "Club management shares responsibility under this rule. A manager who directs, encourages, or conspicuously tolerates dangerous contact by their players is subject to discipline as if they had committed the act.");
+  setP(9,"9.2",0, "Individual awards are decided by a vote the league office runs among league staff and club management, informed by the official statistical record under Chapter 6. No voter may cast a first-place vote for a member of their own club. The league office publishes voting results with the award announcements.");
+  setP(10,"10.1",0, "As used in this rulebook: “league office” means the CGHL commissioner and staff acting in their official capacity; “club” means a member team of the CGHL together with its management and rostered players; “club management” means a club’s Owner, General Manager, and Assistant General Manager (Rule 2.6); “puck drop” means the scheduled start time of a game as published on the official schedule; “dress” means to appear in a league lobby as a participant in a game; “game week” means the scheduling week as delineated on the official schedule; and “settings sheet” means the league-published game configuration document incorporated by Rule 4.1.");
+
+  rb.changelog.unshift({
+    version: "2.1", dateIso: "2026-07-23",
+    summary: "Terminology corrected across the rulebook: the rules referred to a club “captain,” a role the league does not use. A club is run by its management — Owner, General Manager, and Assistant GM (Rule 2.6) — so protests and paperwork (1.3), trades (2.3), reschedules (3.3), game-code release (4.2), lobby-failure evidence (4.3), availability (5.1), discipline (7.1, 7.4), and award voting (9.2) now cite club management, and the definitions (10.1) replace “captain” with “club management.”"
+  });
+})();
