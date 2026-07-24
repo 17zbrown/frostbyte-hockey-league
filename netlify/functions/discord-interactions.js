@@ -44,29 +44,35 @@ function loadEdKey(pubHex) {
 function verifySignature(rawBody, sig, ts, pubHex) {
   try {
     if (!sig || !ts) return false;
-    return crypto.verify(null, Buffer.from(ts + rawBody), loadEdKey(pubHex || PUBLIC_KEY), Buffer.from(sig, "hex"));
+    // rawBody may be a Buffer (from req.arrayBuffer, byte-exact) or a string; concat the timestamp
+    // as bytes either way so the signed message matches Discord exactly.
+    const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody);
+    const msg = Buffer.concat([Buffer.from(String(ts)), body]);
+    return crypto.verify(null, msg, loadEdKey(pubHex || PUBLIC_KEY), Buffer.from(sig, "hex"));
   } catch (e) { return false; }
 }
 
 /* ---------- Supabase REST (service role) ---------- */
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
+// hard 2.5s cap on every DB call so a slow round-trip surfaces as an error, never a Discord timeout
+const withTimeout = (opts) => ({ ...opts, signal: AbortSignal.timeout(2500) });
 async function sbRpc(fn, args) {
-  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, { method: "POST", headers: sbHead(), body: JSON.stringify(args) });
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, withTimeout({ method: "POST", headers: sbHead(), body: JSON.stringify(args) }));
   if (!r.ok) throw new Error(`rpc ${fn}: ${r.status} ${await r.text()}`);
   return r.json();
 }
 async function sbGetLobby(id) {
-  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&select=*`, { headers: sbHead() });
+  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&select=*`, withTimeout({ headers: sbHead() }));
   const rows = await r.json();
   return Array.isArray(rows) ? rows[0] : null;
 }
 // optimistic compare-and-swap on updated_at so two simultaneous clicks can't clobber each other
 async function sbSaveLobby(id, prevUpdatedAt, state, status) {
-  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&updated_at=eq.${encodeURIComponent(prevUpdatedAt)}`, {
+  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&updated_at=eq.${encodeURIComponent(prevUpdatedAt)}`, withTimeout({
     method: "PATCH",
     headers: { ...sbHead(), Prefer: "return=representation" },
     body: JSON.stringify({ state, status, updated_at: new Date().toISOString() }),
-  });
+  }));
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) && rows.length ? rows[0] : null;   // null => CAS lost, caller retries
 }
@@ -232,15 +238,13 @@ async function handleCommand(interaction) {
 }
 
 const DIAG = "lfgdiag9x";
-async function logDebug(row) {
-  try { await fetch(`${SB_URL}/rest/v1/_lfg_debug`, { method: "POST", headers: sbHead(), body: JSON.stringify(row) }); } catch (e) {}
-}
 
 export default async (req) => {
   const url = (() => { try { return new URL(req.url); } catch { return null; } })();
 
-  // GET self-test — confirms the Ed25519 code path works in the deployed runtime (no user needed)
-  if (req.method === "GET" && url && url.searchParams.get("diag") === DIAG) {
+  // GET — health check + Ed25519 self-test (confirms the crypto path works in the deployed runtime)
+  if (req.method === "GET") {
+    if (!(url && url.searchParams.get("diag") === DIAG)) return new Response("ok", { status: 200 });
     let selftest = false, realKeyLoads = false, err = null;
     try {
       const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
@@ -255,29 +259,25 @@ export default async (req) => {
 
   const sig = req.headers.get("x-signature-ed25519");
   const ts = req.headers.get("x-signature-timestamp");
-  const raw = await req.text();
-  const verified = verifySignature(raw, sig, ts);
-
-  // POST echo — inspect exactly what the function received (body preservation, headers), no valid sig needed
-  if (url && url.searchParams.get("echo") === DIAG) {
-    return new Response(JSON.stringify({ rawLen: raw.length, rawHead: raw.slice(0, 160), sigPresent: !!sig, tsPresent: !!ts, verified, ct: req.headers.get("content-type") }), { status: 200, headers: { "content-type": "application/json" } });
-  }
-
-  // log every real request so a failed Discord PING can be diagnosed after the fact
-  await logDebug({ has_sig: !!sig, has_ts: !!ts, raw_len: raw.length, raw_head: (raw || "").slice(0, 200), verified, ct: req.headers.get("content-type"), note: "prod" });
-
-  if (!verified) return new Response("invalid request signature", { status: 401 });
+  // Read the body byte-exact — arrayBuffer never re-encodes, so the signed bytes match Discord's
+  // exactly even when a nickname/username contains non-ASCII. (req.text() UTF-8-round-trips.)
+  const bodyBuf = Buffer.from(await req.arrayBuffer());
+  if (!verifySignature(bodyBuf, sig, ts)) return new Response("invalid request signature", { status: 401 });
 
   let interaction;
-  try { interaction = JSON.parse(raw); } catch (e) { return new Response("bad json", { status: 400 }); }
+  try { interaction = JSON.parse(bodyBuf.toString("utf8")); } catch (e) { return new Response("bad json", { status: 400 }); }
+
+  // PING is answered instantly with zero backend work — required for endpoint verification + keep-alive
+  if (interaction.type === 1) return respond(PONG);
 
   try {
-    if (interaction.type === 1) return respond(PONG);
     if (interaction.type === 2) return await handleCommand(interaction);
     if (interaction.type === 3) return await handleComponent(interaction);
     return respond(PONG);
   } catch (e) {
-    return ephemeral("Something went wrong handling that — try `/lfg` again.");
+    console.error("lfg-interaction error", e && (e.stack || e.message || e));
+    // surface the failure to the user instead of letting Discord report a silent "did not respond"
+    return ephemeral("The pickup bot hit an error: " + String(e && (e.message || e)).slice(0, 180));
   }
 };
 
