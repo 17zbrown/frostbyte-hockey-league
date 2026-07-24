@@ -324,19 +324,37 @@ export default async (req) => {
     if (Object.keys(dmap).length) await sbUpsertCfg("discord_dept_role_ids", JSON.stringify(dmap));
   } catch (e) { sum.errors.push({ deptRoleIds: String(e.message || e) }); }
 
-  // Keep #free-agency and #trade-block private to team management — self-heals if the @everyone
-  // view permission ever gets re-added. VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608.
+  // #trade-block and #free-agency self-heal to their intended audience if @everyone view ever
+  // gets re-added. They are NOT the same audience: #trade-block is team management only, but
+  // #free-agency exists for free agents AND clubs to talk deals, so the Free Agent role must be
+  // able to see it — locking it to management hid the channel from the very people it is for.
+  // VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608.
   const MGMT_ALLOW = "68608";
   const mgmtRoleIds = ["owner", "general manager", "assistant general manager", "commissioner"].map((n) => roleId[n]).filter(Boolean);
-  for (const cname of ["free-agency", "trade-block"]) {
+  const faRoleId = roleId["free agent"];
+  const CHANNEL_AUDIENCE = {
+    "trade-block": mgmtRoleIds,
+    "free-agency": [...mgmtRoleIds, faRoleId].filter(Boolean),
+  };
+  for (const cname of Object.keys(CHANNEL_AUDIENCE)) {
+    const allowIds = CHANNEL_AUDIENCE[cname];
     const chan = guildChannels.find((c) => c.name === cname && c.type === 0);
-    if (!chan) continue;
-    const everyone = (chan.permission_overwrites || []).find((o) => o.id === GUILD);
+    if (!chan || !allowIds.length) continue;
+    const ow = chan.permission_overwrites || [];
+    const everyone = ow.find((o) => o.id === GUILD);
     const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
-    if (hidden) continue; // already locked down
+    // Fast-path skip only when it's hidden from @everyone AND every intended role can already
+    // view it — otherwise a missing role allow (e.g. Free Agent) would never be healed.
+    const allAllowed = allowIds.every((rid) => {
+      const o = ow.find((x) => x.id === rid);
+      return o && (BigInt(o.allow || "0") & 1024n) === 1024n;
+    });
+    if (hidden && allAllowed) continue;
     try {
+      // Grant the audience FIRST, then deny @everyone — never deny-then-stop, or a mid-sweep
+      // failure would leave the channel hidden from everyone including its own audience.
+      for (const rid of allowIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
       await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
-      for (const rid of mgmtRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
       sum.mgmtLocked = (sum.mgmtLocked || 0) + 1;
     } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
   }
