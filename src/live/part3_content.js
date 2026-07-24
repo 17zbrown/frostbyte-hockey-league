@@ -206,3 +206,33 @@ CG.CONTENT = {"articles":[{"slug":"week-7-preview-blades-at-vipers","title":"Str
     summary: "Rule 2.7 corrected: a commissioner may serve as league staff — the two offices work together. The separation that still holds is between the league office (commissioners and staff) and a club's front office (Owner, GM, AGM): no one holds a seat in both at the same time, in either direction. The staff application reflects this — anyone currently owning or managing a club must step down from that seat before joining the staff, and vice versa."
   });
 })();
+
+/* ---- rulebook v2.0 — positional builds & X-Factor restrictions (Rule 4.5) ----
+   New competitive-integrity section under Chapter 4. Bans a defined set of
+   X-Factor traits plus every Elite-tier trait, bars all special-character
+   player classes and special/mascot characters, and locks each position to a
+   legal set of builds. Additive — creates §4.5, no existing rule IDs change.
+   Idempotent. Ships alongside the official Loadout Restrictions graphic. ---- */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.0") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  var c4 = ch(4);
+  if (c4 && c4.sections && !c4.sections.some(function(s){ return s.id==="4.5"; })){
+    c4.sections.push({
+      id: "4.5",
+      title: "Positional builds and X-Factor restrictions",
+      paragraphs: [
+        "CGHL is decided by skill, not by loadout. Every player dresses on a legal build for his position and keeps his X-Factors within the restrictions of this rule, which the league maintains so that games turn on how a player plays rather than on a chosen ability. This rule binds every game — pre-season, regular season, and playoffs. Dressing a player on a banned build, or with a banned X-Factor, makes the lineup ineligible under Rule 5.2: the game is forfeit, without prejudice to further discipline under Chapter 7.",
+        "The following X-Factor abilities are banned outright, in every slot and at every tier they appear: Truculence, Big Tipper, Hipster, Pressure+, Spark Plug, Unstoppable, Big Rig, and Wheels. In addition, every Elite-tier X-Factor is banned regardless of its name — if an ability sits in the Elite tier, it may not be equipped. The league office keeps the definitive banned-ability list with the settings sheet and may add to it as the game is patched or the meta shifts.",
+        "The league is played with standard created players only. Special-character player classes — the pre-built gimmick classes such as Moonlight, Hammer, Bones, Wally, Deepfreeze, Surge, and Vector — are banned, as is every special or mascot character. These names are illustrative, not exhaustive: no special class and no special character may be dressed in any CGHL game, at any position.",
+        "Builds are locked to their position group. A forward may not use the Power Forward (PWF) or Enforcer (ENF) build, nor any defenseman build — Defensive Defenseman (DD), Offensive Defenseman (OD), Enforcer Defenseman (ENFD), Two-Way Defenseman (TWD), or Puck-Moving Defenseman (PMD). A defenseman may not use the Defensive Defenseman (DD) or Enforcer Defenseman (ENFD, also tagged EFD in some menus) build, nor any forward build — Grinder (GRN), Playmaker (PLY), Sniper (SNP), Power Forward (PWF), Two-Way Forward (TWF), Enforcer (ENF), or Dangler (DNG). What remains is the legal set: a forward builds as a Sniper, Playmaker, Grinder, Two-Way Forward, or Dangler; a defenseman builds as an Offensive, Two-Way, or Puck-Moving Defenseman. No build outside this legal set may be dressed at that position.",
+        "Responsibility for fielding legal builds rests with the player and his club’s management. Managers should confirm every dressed player’s build and abilities before lineups lock under Rule 5.3; a club that ices a banned build or ability forfeits the game under Rule 5.2 and may face discipline under Chapter 7. The league office publishes these restrictions in summary as the official Loadout Restrictions graphic and announces any change to the banned list with that week’s schedule; where that graphic and this rule differ, this rule and the league office’s banned-ability list (Rule 4.1) control."
+      ]
+    });
+  }
+  rb.changelog.unshift({
+    version: "2.0", dateIso: "2026-07-23",
+    summary: "New Rule 4.5 — Positional builds and X-Factor restrictions. To keep games decided by skill rather than loadout, the league bans a defined set of X-Factor traits (Truculence, Big Tipper, Hipster, Pressure+, Spark Plug, Unstoppable, Big Rig, Wheels) and every Elite-tier trait, bars all special-character player classes and special or mascot characters, and locks each position to a legal set of builds: forwards may not use Power Forward or Enforcer or any defenseman build, and defensemen may not use Defensive or Enforcer Defenseman or any forward build. Icing a banned build or ability makes the lineup ineligible and forfeits the game (Rule 5.2). The full list ships as the official Loadout Restrictions graphic and is maintained by the league office."
+  });
+})();
