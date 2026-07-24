@@ -129,6 +129,62 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
   }
 }
 
+// Community + game-night channels: a public #lfg and #draft-hub, per-club voice rooms (private to
+// the club + office, mirroring the club text rooms), and a couple of public Game Voice lobbies for
+// scrims. Creation only — never deletes an existing channel. Idempotent by name+parent.
+async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
+  const cat = (name) => guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === name);
+  const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
+  const generalCat = cat("general"), gamesCat = cat("games"), teamRoomsCat = cat("team rooms");
+
+  async function ensurePublicText(name, parentId, topic) {
+    if (!parentId || guildChannels.find((c) => c.name === name && c.parent_id === parentId)) return;
+    try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name, type: 0, parent_id: parentId, topic });
+      guildChannels.push(ch); sum.communityChansCreated = (sum.communityChansCreated || 0) + 1;
+    } catch (e) { sum.errors.push({ communityChan: name, error: String(e.message || e) }); }
+  }
+  await ensurePublicText("lfg", generalCat && generalCat.id, "Looking for group — line up pickup 6s and scrims. Call your position and go.");
+  await ensurePublicText("draft-hub", gamesCat && gamesCat.id, "Watch the CGHL entry draft live and talk picks — the draft itself runs on the site.");
+
+  // per-club voice rooms, private to the club role + office. VIEW(1024)+CONNECT(1048576)+SPEAK(2097152).
+  const VOICE_ALLOW = "3146752";
+  if (teamRoomsCat) {
+    for (const t of teams) {
+      if (!t.discord_role_id) continue;
+      const vname = ((t.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")) + "-voice";
+      if (guildChannels.find((c) => c.type === 2 && c.name === vname && c.parent_id === teamRoomsCat.id)) continue;
+      const overwrites = [{ id: GUILD, type: 0, deny: "1024", allow: "0" },
+        { id: t.discord_role_id, type: 0, allow: VOICE_ALLOW, deny: "0" },
+        ...office.map((id) => ({ id, type: 0, allow: VOICE_ALLOW, deny: "0" }))];
+      try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: vname, type: 2, parent_id: teamRoomsCat.id, permission_overwrites: overwrites });
+        guildChannels.push(ch); sum.clubVoiceCreated = (sum.clubVoiceCreated || 0) + 1;
+      } catch (e) { sum.errors.push({ clubVoice: vname, error: String(e.message || e) }); }
+    }
+  }
+  // public Game Voice lobbies for scrims / mixed groups on game night
+  if (gamesCat) {
+    for (const vn of ["Game Voice 1", "Game Voice 2"]) {
+      if (guildChannels.find((c) => c.type === 2 && c.name === vn && c.parent_id === gamesCat.id)) continue;
+      try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: vn, type: 2, parent_id: gamesCat.id });
+        guildChannels.push(ch); sum.gameVoiceCreated = (sum.gameVoiceCreated || 0) + 1;
+      } catch (e) { sum.errors.push({ gameVoice: vn, error: String(e.message || e) }); }
+    }
+  }
+
+  // One-time cleanup: remove the stray duplicate #league-advertisement (a topic-less Staff dup of
+  // #advertisement). Guarded by a config flag so this runs exactly once and the recurring sweep
+  // never deletes a future channel someone deliberately names that.
+  try {
+    const done = await sbGet("app_config?key=eq.cleanup_league_advertisement_done&select=value");
+    if (!(Array.isArray(done) && done.length)) {
+      const dup = guildChannels.find((c) => c.type === 0 && c.name === "league-advertisement");
+      if (dup) { await dApi("DELETE", `/channels/${dup.id}`); sum.dupAdChanDeleted = 1;
+        const i = guildChannels.indexOf(dup); if (i >= 0) guildChannels.splice(i, 1); }
+      await sbUpsertCfg("cleanup_league_advertisement_done", "1");
+    }
+  } catch (e) { sum.errors.push({ dupAdCleanup: String(e.message || e) }); }
+}
+
 // Staff departments — one Discord role + one private room per office lane, all under the Staff
 // category. Each room is visible to its department AND the commissioners (oversight), not to all
 // staff. `key` mirrors the site's CG.STAFF_DEPARTMENTS and profiles.departments, so picking a
@@ -550,6 +606,7 @@ export default async (req) => {
   } catch (e) { sum.errors.push({ roleIdMap: String(e.message || e) }); }
   // the Team Management category + its rooms (private to the front office)
   try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
+  try { await ensureCommunityChannels(guildChannels, teams, roleId, sum); } catch (e) { sum.errors.push({ communityChannels: String(e.message || e) }); }
 
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
