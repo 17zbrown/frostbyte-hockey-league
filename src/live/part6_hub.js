@@ -175,8 +175,7 @@ CG.gmTasksCard = function(team){
   var lg = CG.lg, rows = "";
   var tonightG = (lg.tonight||[]).find(function(g){ return g.home===team||g.away===team; });
   if (tonightG){
-    var night = CG.gameNight ? CG.gameNight(tonightG) : null;
-    var submitted = !!((lg._lineups||{})[team+":"+night]);
+    var submitted = !!((lg._lineups||{})[team+":"+tonightG.id]);
     rows += '<div class="titem"><span class="t-dot '+(submitted?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+(submitted?"submitted":"not submitted")+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lineup">Builder</a></div>';
   }
   if (CG.WEEK8 && CG.WEEK8.open && CG.avFor){
@@ -489,10 +488,13 @@ CG.hubLineup = function(qs){
   var opp = game.home===me.team ? game.away : game.home;
   var key = game.id+":"+me.team;
   var saved = (CG.store.get("lineups")||{})[key];
-  var night = CG.gameNight(game);
-  var dbLu = (CG.lg._lineups||{})[me.team+":"+night];
+  var dbLu = (CG.lg._lineups||{})[me.team+":"+game.id];
   var lockAt = game.at - 30*60000;
-  var locked = CG.now() >= lockAt;
+  var rawLocked = CG.now() >= lockAt;
+  /* Emergency call-up: once a game locks, management can still swap a player after the deadline.
+     A per-game flag flips the builder back into an editable, clearly-flagged emergency mode. */
+  var emergency = !!(CG._luEmergency && CG._luEmergency[game.id]);
+  var locked = rawLocked && !emergency;
   var status = saved ? saved.status : (dbLu ? "submitted" : "draft");
   var slots = saved ? saved.slots
     : (dbLu ? { LW:dbLu.lw||null, C:dbLu.center||null, RW:dbLu.rw||null, LD:dbLu.ld||null, RD:dbLu.rd||null, G:dbLu.goalie||null } : {});
@@ -514,15 +516,18 @@ CG.hubLineup = function(qs){
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Lineup builder'+nightSwitch+'</h1>'+
     '<p class="lede" style="margin-top:8px">Click a bench player, then a slot — or drag them on. Six starters, one per position. Locks at '+CG.fmtTime(lockAt)+' (Rule 5.3); the opponent sees it 60 minutes before puck drop.</p></div>';
-  var bar = '<div class="note '+(status==="submitted"?"grn":"chr")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
-    '<b style="font-family:var(--f-disp)">Status: '+(locked?"Locked":status)+'</b>'+
-    (saved&&saved.at?'<span class="caption">last saved '+CG.fmtFull(saved.at)+'</span>':"")+
+  var editControls = '<button class="btn btn-ghost btn-sm" id="luAuto">Auto-fill best available</button>'+
+    '<button class="btn btn-ghost btn-sm" id="luClear">Clear</button>'+
+    '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(emergency?"Submit emergency call-up":(status==="submitted"?"Resubmit":"Submit lineup"))+'</button>';
+  var bar = '<div class="note '+(emergency?"red":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
+    '<b style="font-family:var(--f-disp)">Status: '+(emergency?"Emergency call-up":(rawLocked?"Locked":status))+'</b>'+
+    (rawLocked&&!emergency?'<span class="caption">locked '+CG.fmtTime(lockAt)+' (Rule 5.3)</span>':(saved&&saved.at?'<span class="caption">last saved '+CG.fmtFull(saved.at)+'</span>':""))+
     '<span style="margin-left:auto;display:flex;gap:9px">'+
-    (!locked?'<button class="btn btn-ghost btn-sm" id="luAuto">Auto-fill best available</button>'+
-      '<button class="btn btn-ghost btn-sm" id="luClear">Clear</button>'+
-      '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(status==="submitted"?"Resubmit":"Submit lineup")+'</button>'
-      :'<span class="lock">'+CG.ic("lock",14)+'Lineup locked — commissioner override only</span>')+
-    '</span></div>';
+    (!rawLocked ? editControls
+      : emergency ? editControls+'<button class="btn btn-ghost btn-sm" id="luEmCancel">Cancel</button>'
+      : '<span class="lock">'+CG.ic("lock",14)+'Locked</span><button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the deadline for an emergency call-up">Emergency call-up</button>')+
+    '</span></div>'+
+    (emergency?'<div class="note red" style="margin-bottom:18px;font-size:13px;line-height:1.5">This game locked at '+CG.fmtTime(lockAt)+'. Emergency call-ups are for a genuine no-show — the swap is recorded, and the opponent already sees the locked lineup. Change only the player you must.</div>':"");
   var rink = '<div class="rink"><div class="rk-rows">'+
     '<div class="rk-line">'+["LW","C","RW"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
     '<div class="rk-line d2">'+["LD","RD"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
@@ -564,14 +569,16 @@ CG.AFTER._lineup = function(){
   if (!game) return;
   var key = game.id+":"+me.team;
   var store = CG.store.get("lineups")||{};
-  var _night = CG.gameNight(game), _dbLu = (CG.lg._lineups||{})[me.team+":"+_night];
+  var _dbLu = (CG.lg._lineups||{})[me.team+":"+game.id];
   var state = store[key] || (_dbLu
     ? { slots:{ LW:_dbLu.lw||undefined, C:_dbLu.center||undefined, RW:_dbLu.rw||undefined, LD:_dbLu.ld||undefined, RD:_dbLu.rd||undefined, G:_dbLu.goalie||undefined }, status:"submitted", rev:[] }
     : { slots:{}, status:"draft", rev:[] });
   var sel = null;
   /* the availability night (n1/n2) covering this game — null when it's outside the window */
   var avNightKey = CG.nightAvKey(game);
-  function isLocked(){ return CG.now() >= game.at - 30*60000; }
+  /* In emergency-call-up mode the deadline is deliberately overridden for management. */
+  function inEmergency(){ return !!(CG._luEmergency && CG._luEmergency[game.id]); }
+  function isLocked(){ return CG.now() >= game.at - 30*60000 && !inEmergency(); }
   function msg(t, bad){ var el=$("#luMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
   function save(what, status){
     state.at = CG.now();
@@ -581,7 +588,7 @@ CG.AFTER._lineup = function(){
     CG.router();
   }
   function validate(p, pos){
-    if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — only a commissioner override can change it now.";
+    if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — use an emergency call-up to swap a player now.";
     /* Rule 2.1 — position groups are binding, but a training-camp player fills any slot */
     if (p.squad!=="tc" && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players fill any position (Rule 2.1).";
@@ -649,31 +656,49 @@ CG.AFTER._lineup = function(){
   });
   var sub = $("#luSubmit");
   if (sub) sub.addEventListener("click", function(){
-    if (isLocked()){ CG.toast("Lineup is locked (Rule 5.3) — commissioner override only","err"); return; }
+    var pastLock = CG.now() >= game.at - 30*60000;
+    if (pastLock && !inEmergency()){ CG.toast("Lineup is locked (Rule 5.3) — use an emergency call-up","err"); return; }
     var missing = ["LW","C","RW","LD","RD","G"].filter(function(pos){ return !state.slots[pos]; });
     if (missing.length){ CG.toast("Fill every slot first — missing "+missing.join(", "), "err"); return; }
-    CG.confirm("Submit this lineup?","Your six starters go to the league office and release to the opponent 60 minutes before puck drop. You can resubmit until the lock.","Submit lineup", function(){
+    var emg = pastLock;   /* submitting after the lock is, by definition, an emergency call-up */
+    CG.confirm(emg?"Confirm emergency call-up?":"Submit this lineup?",
+      emg?"This game already locked. The swap is recorded against the club and the opponent already sees the locked lineup — only submit for a genuine no-show."
+         :"Your six starters go to the league office and release to the opponent 60 minutes before puck drop. You can resubmit until the lock.",
+      emg?"Submit emergency call-up":"Submit lineup", function(){
       save("Lineup submitted to the league office","submitted");
-      /* persist to the real lineups table (per game night) */
+      /* Persist through the server-enforced lock. set_game_lineup() rejects post-lock edits unless
+         p_emergency is set, which only club management can do (Rule 5.3) — the lock is enforced in
+         the database, so no client can bypass it. */
       if (CG.LIVE_MODE && CG.sb){
-        var tid = (CG.lg._codeToId||{})[me.team], sid = CG.SEASON && CG.SEASON.id;
-        if (tid && sid){
-          var night = CG.gameNight(game);
-          var lr = { season_id:sid, team_id:tid, night:night,
-            lw:state.slots.LW||null, center:state.slots.C||null, rw:state.slots.RW||null,
-            ld:state.slots.LD||null, rd:state.slots.RD||null, goalie:state.slots.G||null,
-            updated_by:(CG.auth&&CG.auth.user?CG.auth.user.id:null), updated_at:new Date().toISOString() };
-          CG.sb.from("lineups").upsert(lr,{onConflict:"season_id,team_id,night"}).then(function(r){
-            if(r.error){ CG.toast("Saved on this device; DB sync failed: "+r.error.message,"err"); return; }
-            CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[me.team+":"+night] = lr;
+        var tid = (CG.lg._codeToId||{})[me.team];
+        if (tid){
+          CG.sb.rpc("set_game_lineup", { p_game:game.id, p_team:tid,
+            p_center:state.slots.C||null, p_lw:state.slots.LW||null, p_rw:state.slots.RW||null,
+            p_ld:state.slots.LD||null, p_rd:state.slots.RD||null, p_goalie:state.slots.G||null,
+            p_emergency:emg }).then(function(r){
+            if(r.error || !r.data){ CG.toast(r.error?("Couldn’t submit: "+r.error.message):"Submit was blocked by the server — refresh and retry","err"); return; }
+            var row = Array.isArray(r.data) ? r.data[0] : r.data;
+            CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[me.team+":"+game.id] = row;
+            if (CG._luEmergency) delete CG._luEmergency[game.id];
           });
         }
       }
-      CG.pushNotif("check","Lineup submitted","vs "+CG.TEAM[game.home===me.team?game.away:game.home].name+" — locks "+CG.fmtTime(game.at-30*60000)+".","#/hub/lineup");
-      CG.audit("Lineup submitted",""+key);
-      CG.toast("Lineup submitted","ok");
+      CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===me.team?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
+      CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
+      CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
       CG.renderChrome();
     });
+  });
+  var emBtn = $("#luEmergency");
+  if (emBtn) emBtn.addEventListener("click", function(){
+    CG.confirm("Start an emergency call-up?","This game locked at "+CG.fmtTime(game.at-30*60000)+". Use this only for a genuine no-show — swap the player, then resubmit. The change is recorded against the club.","Enable call-up", function(){
+      CG._luEmergency = CG._luEmergency||{}; CG._luEmergency[game.id]=true; CG.router();
+    });
+  });
+  var emCancel = $("#luEmCancel");
+  if (emCancel) emCancel.addEventListener("click", function(){
+    if (CG._luEmergency) delete CG._luEmergency[game.id];
+    CG.router();
   });
   document.querySelectorAll(".srv-sel").forEach(function(el){
     el.addEventListener("change", function(){ CG.saveVeto(el.getAttribute("data-veto-game"), el); });

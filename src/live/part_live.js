@@ -709,8 +709,8 @@ CG.loadManagerData = async function(){
         });
       }
       if (CG.SEASON && CG.SEASON.id){
-        jobs.push(CG.sb.from("lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
-          .then(function(lu){ (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.night]=row; }); }, function(){}));
+        jobs.push(CG.sb.from("game_lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+          .then(function(lu){ (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.game_id]=row; }); }, function(){}));
       }
     }
     await Promise.all(jobs);
@@ -911,33 +911,31 @@ CG.openBell = function(){
  * lineups table (anon-readable), never the depth-chart guess. Rows are
  * fetched per matchup and cached; no row = "Lineup not submitted yet".
  * ------------------------------------------------------------------ */
-CG._pubLineups = {};   /* "<teamCode>:<night>" -> lineups row (or null once fetched) */
+CG._pubLineups = {};   /* "<teamCode>:<gameId>" -> game_lineups row (or null once fetched) */
 var _plannedLineupProto = CG.plannedLineup;
 CG.plannedLineup = function(g, code){
   /* keep the prototype path for the signed-in manager's own saved draft */
   var saved = (CG.store.get("lineups")||{})[g.id+":"+code];
   if (saved && saved.status!=="draft") return saved.slots;
-  var night = CG.gameNight ? CG.gameNight(g) : "wed";
-  var row = CG._pubLineups[code+":"+night];
-  if (row === undefined && CG.lg && CG.lg._lineups) row = CG.lg._lineups[code+":"+night];
+  var row = CG._pubLineups[code+":"+g.id];
+  if (row === undefined && CG.lg && CG.lg._lineups) row = CG.lg._lineups[code+":"+g.id];
   if (row) return { LW:row.lw||null, C:row.center||null, RW:row.rw||null, LD:row.ld||null, RD:row.rd||null, G:row.goalie||null };
   return { LW:null, C:null, RW:null, LD:null, RD:null, G:null };   /* the live site never guesses */
 };
 /* fetch both clubs' submitted lineups for a matchup, then re-render once they land */
 CG.loadMatchupLineups = function(g){
-  if (!CG.sb || !CG.SEASON || !CG.SEASON.id || !g) return;
-  var night = CG.gameNight(g);
-  var kA = g.home+":"+night, kB = g.away+":"+night;
+  if (!CG.sb || !g) return;
+  var kA = g.home+":"+g.id, kB = g.away+":"+g.id;
   if (CG._pubLineups[kA] !== undefined && CG._pubLineups[kB] !== undefined) return;   /* cached */
   var ids = [ (CG.lg._codeToId||{})[g.home], (CG.lg._codeToId||{})[g.away] ].filter(Boolean);
   if (ids.length<2) return;
-  CG.sb.from("lineups").select("team_id,night,center,lw,rw,ld,rd,goalie")
-    .eq("season_id", CG.SEASON.id).eq("night", night).in("team_id", ids)
+  CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie")
+    .eq("game_id", g.id).in("team_id", ids)
     .then(function(r){
       CG._pubLineups[kA] = null; CG._pubLineups[kB] = null;
       ((r&&r.data)||[]).forEach(function(row){
         var code = (CG.lg._idToCode||{})[row.team_id];
-        if (code) CG._pubLineups[code+":"+night] = row;
+        if (code) CG._pubLineups[code+":"+g.id] = row;
       });
       /* re-render only if the user is still looking at this matchup */
       if (location.hash.indexOf("#/matchup/"+g.id)===0 && CG.router) CG.router();
