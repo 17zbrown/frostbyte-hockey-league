@@ -346,7 +346,7 @@ CG.ROUTES.home = function(){
      regular-season "Opening games" (and playoffs read as playoffs on either path) */
   var stageWk = function(g){ return (g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week; };
   var railLabel = pre
-    ? (railGames.length ? "Next up · "+stageWk(railGames[0]) : "Opening games")
+    ? (railGames.length ? "Next up · "+stageWk(railGames[0]) : "Road to puck drop")
     : "Tonight"+(railGames.length ? " · "+stageWk(railGames[0]) : "");
   html += '<section id="hero"><div class="shell hero-grid">'+
     '<div class="caro" id="heroCaro" aria-label="Featured stories"></div>'+
@@ -360,7 +360,25 @@ CG.ROUTES.home = function(){
           '<span class="rg-t">'+(pre?CG.fmtDay(g.at):CG.fmtTime(g.at))+'</span>'+
           '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+(g.feature?' · <b style="color:var(--chrome)">MARQUEE</b>':"")+
             (streamers.length?' · streaming: '+streamers.map(function(p){ return esc(p.tag); }).join(", "):"")+'</span></a>';
-      }).join("") : '<p class="caption" style="color:var(--on-ink-dim);padding:8px 0">The opening schedule is being finalized.</p>')+
+      }).join("") : (function(){
+        /* Pre-season, no slate yet — fill the rail with the real road to puck drop instead of an
+           empty "being finalized" line, so the hero's right column carries its weight. */
+        var sD = CG.SEASON || {};
+        var steps = [
+          ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff", "#/register"],
+          ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
+          ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/schedule"],
+          ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
+        ].filter(function(x){ return x[1]; });
+        var nowMs = CG.now();
+        return steps.map(function(st){
+          var ms = Date.parse(st[1]), past = ms < nowMs;
+          return '<a class="railgame" href="'+st[3]+'" style="opacity:'+(past?".5":"1")+'">'+
+            '<span class="rg-line"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:'+(past?"var(--steel)":"var(--chrome)")+';display:inline-block"></span>'+esc(st[0])+'</span>'+
+            '<span class="rg-t">'+CG.fmtDate(ms)+'</span>'+
+            '<span class="rg-meta">'+esc(st[2])+'</span></a>';
+        }).join("");
+      })())+
       '<p class="caption" style="color:var(--on-ink-dim)">'+(pre?"Lineups and private game codes go live on game day (Rule 4.2).":"Lineups release 60 min before puck drop · codes at T-30 (Rule 4.2).")+'</p>'+
     '</aside></div></section>';
   /* quick fact strip */

@@ -617,7 +617,16 @@ CG.renderChrome = function(){
       items.push('<a class="tk-item" href="#/matchup/'+g.id+'"><span class="tk-lab">'+CG.fmtDay(g.at).toUpperCase()+'</span>'+
         '<b>'+g.away+' @ '+g.home+'</b><span class="tk-lab">'+CG.fmtTime(g.at)+'</span></a>');
     });
-    if (!items.length) items.push('<span class="tk-item"><span class="tk-lab">CHEL GAMING HOCKEY LEAGUE</span><b>Season 1 — the inaugural season</b></span>');
+    if (!items.length){
+      /* No games or leaders yet — carry the season's real milestones so the ticker reads like a
+         broadcast strip, not one sentence repeated (the track duplicates its items to scroll). */
+      var sN = CG.SEASON || {};
+      items.push('<span class="tk-item"><span class="tk-lab">SEASON 1</span><b>The inaugural season</b></span>');
+      items.push('<span class="tk-item"><span class="tk-lab">LEAGUE</span><b>8 founding clubs · 2 divisions</b></span>');
+      if (sN.registration_deadline) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtDate(Date.parse(sN.registration_deadline))+'</b></a>');
+      if (sN.draft_at) items.push('<span class="tk-item"><span class="tk-lab">DRAFT</span><b>'+CG.fmtDate(Date.parse(sN.draft_at))+'</b></span>');
+      if (sN.starts_at) items.push('<a class="tk-item" href="#/schedule"><span class="tk-lab">PUCK DROP</span><b>'+CG.fmtDate(Date.parse(sN.starts_at))+'</b></a>');
+    }
   }
   var tk = items.join("");
   $("#ticker").innerHTML = '<div class="tk-track"><div style="display:flex;height:100%">'+tk+'</div><div style="display:flex;height:100%" aria-hidden="true">'+tk+'</div></div>';
