@@ -681,7 +681,7 @@ CG.renderChrome = function(){
       '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/brand">Brand</a><a class="fl" href="#/hub/complaints">Complaints</a>'+
         /* the only registration entry points were both on the homepage; the footer is on every page */
         (CG.SEASON && CG.SEASON.registration_open ? '<a class="fl" href="#/register">Register to play</a>' : "")+
-        (CG.LIVE_MODE?'<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>':'<a class="fl" href="#/blueprint">Platform Blueprint</a>')+'</div>'+
+        '<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>'+'</div>'+
       '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+(CG.LIVE_MODE?'':'<a class="fl" href="#/signin">Switch demo role</a>')+'</div>'+
     '</div>'+
     '<div class="ft-base"><span>© '+CG.seasonYear()+' Chel Gaming Hockey League · '+esc(CG.seasonTag())+'</span><span><a href="#/legal" style="color:inherit">Terms &amp; Privacy</a> · All times Eastern</span></div>'+
@@ -930,7 +930,6 @@ CG.ROUTE_TITLES = {
   search:     "Search",
   legal:      "Terms & Privacy",
   brand:      "Brand & identity",
-  blueprint:  "Platform Blueprint",
   _404:       "Page not found"
 };
 /* A rendered <h1> names the actual subject (this club, this player, this headline), so it beats the

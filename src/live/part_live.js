@@ -412,9 +412,14 @@ CG.buildLiveLeague = async function(){
     };
     var prMaxWk = regResults.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
     var prNow = prOrder(null), prPrev = prOrder(prMaxWk);
+    /* Movement is only meaningful once results exist. With no finals played, "now" and
+       "previous" are both orderings of all-zero records, so any delta between them is an
+       artifact — that is what printed "#4 power ranking v3" on club pages before a single
+       puck had dropped. No results => no movement. */
+    var prHasResults = regResults.length > 0;
     lg.powerRankings = prNow.map(function(code,i){
-      var was = prPrev.indexOf(code)+1;
-      return { rank:i+1, prev:was, team:code, move:was-(i+1) };
+      var was = prHasResults ? (prPrev.indexOf(code)+1) : (i+1);
+      return { rank:i+1, prev:was, team:code, move: prHasResults ? was-(i+1) : 0 };
     });
   }
   /* commissioner's manual ranking override (site_config) — applies only while it
@@ -754,6 +759,14 @@ CG.notifRoute = function(view, param){
     case "staffdesk":    return "#/hub/staffdesk";
     case "stafftasks":   return "#/hub/staffdesk";
     case "complaints":   return "#/hub/complaints";
+    /* Case notifications: DB triggers send link_view 'actions' to the member who filed
+       (resolved / denied / staff replied) and 'admin' to staff when a new case lands. Neither
+       had a case here, so every one of those fell through to the hub dashboard and the final
+       step of the casework loop — telling someone their complaint was resolved — went nowhere. */
+    case "actions":      return "#/hub/complaints";
+    case "admin":        return "#/hub/staffdesk";
+    /* contract offers notify with link_view 'offers' */
+    case "offers":       return "#/hub";
     /* application chat: staff land on the office detail page; applicants on their own application */
     case "application":  return param ? "#/hub/application?"+param : "#/hub/staffdesk";
     case "ownerapp":     return "#/owner";

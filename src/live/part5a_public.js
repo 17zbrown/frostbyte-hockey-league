@@ -637,7 +637,22 @@ CG.ROUTES.schedule = function(param, qs){
     return '<div style="margin-bottom:30px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'+
       '<span class="eyebrow chr">'+lab+'</span>'+(k===nowKey?'<span class="chip chip-live"><span class="live-dot"></span>Next up</span>':"")+'</div>'+
       '<div class="stack" style="gap:9px">'+grp.games.map(CG.gameCard).join("")+'</div></div>';
-  }).join("") : '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games match those filters</b><p>Clear a filter or two — the full slate lives here.</p></div>';
+  }).join("") : (
+    /* Two different empty states. Before the draft there is no slate at all, so blaming the
+       visitor's filters ("clear a filter or two") reads as a broken page — which is what every
+       visitor saw between now and puck drop. Only show the filter copy when games actually
+       exist and the current filter set excludes them. */
+    (CG.lg.schedule && CG.lg.schedule.length)
+      ? '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games match those filters</b><p>Clear a filter or two — the full slate lives here.</p></div>'
+      : (function(){
+          var s = CG.SEASON || {};
+          var draftTxt = s.draft_at ? " — "+CG.fmtFull(Date.parse(s.draft_at)) : "";
+          var dropTxt  = s.starts_at ? CG.fmtDate(Date.parse(s.starts_at)) : "the season opener";
+          return '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>The Season 1 slate posts after the draft</b>'+
+            '<p>Clubs are built on draft night'+esc(draftTxt)+', and the schedule goes up once the rosters that will play it exist. Puck drops '+esc(dropTxt)+'.</p>'+
+            '<a class="btn btn-chrome" href="#/register" style="margin-top:16px">Register to play</a></div>';
+        })()
+  );
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
 };
 CG.AFTER.schedule = function(param, qs){
@@ -944,8 +959,8 @@ CG.ROUTES.team = function(code, qs){
                gm: roster.find(function(p){return p.mgmt==="gm";}),
                agm: roster.find(function(p){return p.mgmt==="agm";}) };
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
-    '<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+CG.crest(code,84)+
-      '<div style="min-width:0;flex:1"><span class="eyebrow chr">'+t.div+' Division · '+esc(t.city)+' · '+esc(t.arena)+'</span>'+
+    '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+CG.crest(code,84)+
+      '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+t.div+' Division · '+esc(t.city)+' · '+esc(t.arena)+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(t.name)+'</h1>'+
         '<div style="display:flex;gap:18px;margin-top:12px;font-family:var(--f-mono);font-size:12.5px;color:var(--on-ink-dim);flex-wrap:wrap">'+
           '<span><b style="color:#fff" class="num">'+s.w+"-"+s.l+"-"+s.otl+'</b> record</span>'+
@@ -953,7 +968,7 @@ CG.ROUTES.team = function(code, qs){
           '<span><b style="color:#fff" class="num">'+(s.diff>0?"+":"")+s.diff+'</b> diff</span>'+
           (archived||!pr?'':'<span>#'+pr.rank+' power ranking '+ (pr.move? (pr.move>0?"▲":"▼")+Math.abs(pr.move):"") +'</span>')+
           CG.form5(s.last5)+'</div></div>'+
-      (archived?'':'<div style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+lg.teamRatings[code].ovr+'</span>'+
+      (archived?'':'<div class="hero-ovr" style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+lg.teamRatings[code].ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Team overall</span></div>')+'</div>'+
     '<div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;align-items:center">'+
       (mgmt.owner?'<span class="chip chip-ink" style="border-color:#39434B">Owner · '+esc(mgmt.owner.tag)+'</span>':"")+
@@ -962,7 +977,11 @@ CG.ROUTES.team = function(code, qs){
       (!mgmt.owner&&!mgmt.gm&&!mgmt.agm?'<span class="chip chip-ink" style="border-color:#39434B">Management not yet named</span>':"")+'</div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
-      (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>':'<span class="chip chip-win">Live — updates after every final</span>')+
+      (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>'
+        /* "Live" is a semantic status. Before a single game exists it is simply untrue, and a
+           green pill on an 0-0-0 club dilutes the token everywhere else it is used. */
+        :((CG.lg.schedule&&CG.lg.schedule.length)?'<span class="chip chip-win">Live — updates after every final</span>'
+                                                 :'<span class="chip">Season 1 — not yet under way</span>'))+
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+
@@ -1163,9 +1182,9 @@ CG.ROUTES.player = function(pid, qs){
     '<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
       /* decorative here — the club name is the very next thing a screen reader reads, in the eyebrow */
       (t.logo
-        ? '<img class="crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="">'
+        ? '<img class="crest hero-crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="">'
         : '<div style="flex-shrink:0">'+CG.crest(p.team,52)+'</div>')+
-      '<div style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
+      '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
           (p.rookie?'<span class="chip chip-chrome">Rookie</span>':"")+
@@ -1180,11 +1199,15 @@ CG.ROUTES.player = function(pid, qs){
         '</div></div>'+
       /* OVR is the staff scouting number on the profile — the live adapter sets it from
          profiles.overall for every player, played games or not. It is never derived from results. */
-      '<div style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
+      '<div class="hero-ovr" style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Overall · scouted</span></div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
-      (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>':'<span class="chip chip-win">Live — updates after every final</span>')+
+      (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>'
+        /* "Live" is a semantic status. Before a single game exists it is simply untrue, and a
+           green pill on an 0-0-0 club dilutes the token everywhere else it is used. */
+        :((CG.lg.schedule&&CG.lg.schedule.length)?'<span class="chip chip-win">Live — updates after every final</span>'
+                                                 :'<span class="chip">Season 1 — not yet under way</span>'))+
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+

@@ -261,7 +261,7 @@ CG.admUsers = function(qs){
   return '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+
     '<input type="search" id="uQ" placeholder="Search accounts…" value="'+esc(qs.q||"")+'" style="max-width:280px" aria-label="Search users">'+
     '<button class="btn btn-ghost btn-sm" data-toast="Invites send a Discord/email link that maps the account to a player profile (demo)">'+CG.ic("plus",14)+'Invite user</button>'+
-    '<button class="btn btn-ghost btn-sm" data-go="#/blueprint">Permission matrix</button></div>'+
+    '</div>'+
     '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>League accounts — all 96</caption><thead><tr>'+
     '<th class="tleft">Account</th><th class="tleft">Club</th><th class="tleft">League role</th><th class="tleft">Status</th><th></th></tr></thead><tbody>'+
     list.map(function(p){

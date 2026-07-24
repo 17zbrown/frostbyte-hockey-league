@@ -95,8 +95,19 @@ CG.AFTER.awards = function(param){
 CG.ROUTES.rankings = function(){
   var lg = CG.lg, C = CG.CONTENT;
   if (CG.isPreseason && CG.isPreseason()){
-    var pHead = CG.pageHead("Preseason projections","CGHL Power Rankings","Weekly power rankings begin once games are played. Until then, here's how the clubs line up on paper — by roster overall.");
-    var order = CG.TEAMS.slice().sort(function(a,b){ return lg.teamRatings[b.code].ovr - lg.teamRatings[a.code].ovr; });
+    var pHead = CG.pageHead("Preseason projections","CGHL Power Rankings","Weekly power rankings begin once games are played. Until then this is the pre-season seeding order — the same order the home page and the clubs grid show.");
+    /* Order by the SHARED lg.powerRankings seed rather than re-sorting by roster overall.
+       Pre-season every club's ovr is the same default, so that sort was a no-op and the list
+       silently fell back to registry order — publishing a ranking that contradicted the home
+       widget and the teams grid, which both read lg.powerRankings. One source, one order. */
+    var prRank = {}; (lg.powerRankings||[]).forEach(function(p){ prRank[p.team] = p.rank; });
+    var order = CG.TEAMS.slice().sort(function(a,b){
+      var ra = prRank[a.code], rb = prRank[b.code];
+      if (ra != null && rb != null) return ra - rb;
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return a.code.localeCompare(b.code);
+    });
     var pRows = order.map(function(t, i){
       var r = lg.byTeam[t.code]||[];
       return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+t.code+'" role="link" tabindex="0"><div class="card-b" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:center">'+

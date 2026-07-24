@@ -714,12 +714,36 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
   .gamecard .gc-when{padding-right:10px}
   .gamecard .gc-tag{display:none}
   footer.site .ft-top{grid-template-columns:1fr 1fr}
+  /* Column hiding is a LAST resort: it makes the hidden data unreachable and unsortable.
+     Keep it only for tables that carry a compact summary (standings). Stat-dense tables opt
+     out with .keepcols and scroll horizontally inside .tblwrap instead, so phones can still
+     reach S%, TK, GV, GWG, TOI/GP — the whole point of Stat Central. */
   .tbl th:nth-child(n+7):not(:last-child),.tbl td:nth-child(n+7):not(:last-child){display:none}
   .tbl.keepcols th,.tbl.keepcols td{display:table-cell}
+  .tbl.keepcols{min-width:640px}
+  /* scroll affordance: the wrap is scrollable but scrollbars are hidden on iOS */
+  .tblwrap{position:relative}
+  .tblwrap:after{content:"";position:absolute;top:0;right:0;bottom:0;width:26px;pointer-events:none;
+    background:linear-gradient(90deg,transparent,var(--paper))}
 }
 @media(max-width:430px){
   footer.site .ft-top{grid-template-columns:1fr}
   .avcell{width:26px;height:26px}
+  /* Player/team hero: the middle block had min-width:0 so a long unbreakable gamertag
+     overflowed its shrunken flex item straight under the OVR badge ("ZACKBRO|7") instead of
+     wrapping the row. Give it a real floor so flex-wrap actually wraps, shrink the crest, and
+     let the OVR badge sit inline underneath rather than fighting for the same line. */
+  .hero-row{gap:14px !important}
+  .hero-row .hero-main{min-width:min(100%,240px) !important;flex:1 1 100% !important}
+  .hero-row .hero-crest{width:64px !important;height:68px !important}
+  .hero-row .hero-ovr{text-align:left !important;flex:0 0 auto}
+  .hero-row .hero-ovr .ovrbox{min-width:48px !important;height:40px !important;font-size:20px !important}
+}
+/* iOS Safari zooms the viewport when a focused control is under 16px and never zooms back.
+   body is 15.5px and controls inherit it, so every search box, filter select, and form field
+   on the site triggered it. 15.5 -> 16 is imperceptible; the zoom was not. */
+@media(max-width:560px){
+  input,select,textarea{font-size:16px}
 }
 
 /* mobile menu */
