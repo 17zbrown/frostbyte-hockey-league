@@ -117,7 +117,7 @@ CG.hubNav = function(section){
   function render(items){
     return items.map(function(it){
       var badge = "";
-      if (it[0]==="availability" && !CG.availGet((CG.me()||{}).id)) badge = '<span class="hs-n">due</span>';
+      if (it[0]==="availability" && CG.WEEK8 && CG.WEEK8.open && !CG.availGet((CG.me()||{}).id)) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
@@ -168,11 +168,37 @@ CG.ROUTES.hub = function(param, qs){
   return CG.ROUTES._404();
 };
 
+/* Management tasks card — shared by the rostered-manager dashboard and the club-management
+   dashboard (an owner with no roster spot). Everything is live: lineup status from the lineups
+   table (not localStorage), the real incoming-trade count, and a GM-vacancy nudge. */
+CG.gmTasksCard = function(team){
+  var lg = CG.lg, rows = "";
+  var tonightG = (lg.tonight||[]).find(function(g){ return g.home===team||g.away===team; });
+  if (tonightG){
+    var night = CG.gameNight ? CG.gameNight(tonightG) : null;
+    var submitted = !!((lg._lineups||{})[team+":"+night]);
+    rows += '<div class="titem"><span class="t-dot '+(submitted?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+(submitted?"submitted":"not submitted")+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lineup">Builder</a></div>';
+  }
+  if (CG.WEEK8 && CG.WEEK8.open && CG.avFor){
+    var noReply = (lg.byTeam[team]||[]).filter(function(p){ try { return CG.avFor(p.id).nights.n1.st==="nr"; } catch(e){ return false; } }).length;
+    rows += '<div class="titem"><span class="t-dot'+(noReply?" red":" grn")+'"></span><span style="flex:1">'+noReply+' player'+(noReply===1?"":"s")+' with no '+esc(CG.WEEK8.label)+' response.</span><a class="btn btn-ghost btn-sm" href="#/hub/availability">Grid</a></div>';
+  }
+  var inc = CG.incomingCount ? CG.incomingCount() : 0;
+  rows += '<div class="titem"><span class="t-dot'+(inc?" red":" grn")+'"></span><span style="flex:1">'+(inc? inc+' incoming trade offer'+(inc===1?"":"s")+' awaiting your review.' : 'No pending trade offers.')+'</span><a class="btn btn-ghost btn-sm" href="#/hub/tradehub">Trade Hub</a></div>';
+  var to = (CG.TEAMS||[]).find(function(t){ return t.code===team; });
+  if (to && !to.gm){
+    rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1">No General Manager appointed yet — nominate one from the roster desk.</span><a class="btn btn-ghost btn-sm" href="#/hub/roster">Roster desk</a></div>';
+  }
+  return '<div class="card" style="border-color:var(--ink)"><div class="card-h"><h3>Management tasks</h3><span class="chip chip-chrome">Management</span></div><div class="tasklist">'+rows+'</div></div>';
+};
+
 /* ---------- dashboard ---------- */
 CG.hubDashboard = function(){
   var r = CG.role(), me = CG.me(), lg = CG.lg;
+  var who = (me && me.tag) || (CG.auth.profile && (CG.auth.profile.gamertag || CG.auth.profile.display_name)) || "coach";
+  var title = r==="commish" ? "Commissioner desk" : r==="staff" ? "Staff desk" : "Evening, "+esc(who)+".";
   var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+CG.fmtFull(CG.now())+'</span>'+
-    '<h1 class="h-page" style="margin-top:8px">'+(r==="staff"?"Staff desk":"Evening, "+esc((me||{tag:"coach"}).tag)+".")+'</h1></div>';
+    '<h1 class="h-page" style="margin-top:8px">'+title+'</h1></div>';
   var cards = [];
   if (me){
     var t = CG.TEAM[me.team], s = lg.pstats[me.id];
@@ -184,12 +210,20 @@ CG.hubDashboard = function(){
       '<div><b style="font-family:var(--f-disp);font-size:17px">'+esc(t.name)+'</b>'+
       '<span class="caption" style="display:block">'+lg.teams[me.team].w+"-"+lg.teams[me.team].l+"-"+lg.teams[me.team].otl+' · '+t.div+' Division'+(r==="mgmt"?" · You are the GM":"")+'</span></div>'+
       '<span class="ovrbox" style="margin-left:auto" title="My overall">'+lg.ratings[me.id].ovr+'</span></div></div>');
-    cards.push('<div class="card'+(av?"":" ")+'" '+(av?"":'style="border-color:var(--chrome-deep);background:var(--chrome-tint)"')+'>'+
-      '<div class="card-h"><h3>'+esc(CG.WEEK8.label)+' availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Sunday 8 PM ET")+'</span></div>'+
-      '<div class="card-b">'+(av
-        ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+'. You can edit until the deadline.</p>'
-        : '<p class="small" style="color:var(--steel)">Two game nights next week. Your GM builds lineups from this — 30 seconds now saves a scramble later.</p>')+
-      '<a class="btn '+(av?"btn-ghost":"btn-chrome")+' btn-sm" style="margin-top:12px" href="#/hub/availability">'+(av?"Review / edit":"Submit availability")+'</a></div></div>');
+    /* Availability only carries urgency when a game week is actually open. Pre-season (no
+       scheduled week) shows a calm "opens when the schedule posts" state instead of a red
+       "Due Sunday 8 PM ET" for a week that doesn't exist. */
+    if (CG.WEEK8 && CG.WEEK8.open){
+      cards.push('<div class="card" '+(av?"":'style="border-color:var(--chrome-deep);background:var(--chrome-tint)"')+'>'+
+        '<div class="card-h"><h3>'+esc(CG.WEEK8.label)+' availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Sunday 8 PM ET")+'</span></div>'+
+        '<div class="card-b">'+(av
+          ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+'. You can edit until the deadline.</p>'
+          : '<p class="small" style="color:var(--steel)">Your club’s management builds lineups from this — 30 seconds now saves a scramble later.</p>')+
+        '<a class="btn '+(av?"btn-ghost":"btn-chrome")+' btn-sm" style="margin-top:12px" href="#/hub/availability">'+(av?"Review / edit":"Submit availability")+'</a></div></div>');
+    } else {
+      cards.push('<div class="card"><div class="card-h"><h3>Availability</h3><span class="chip">Off week</span></div>'+
+        '<div class="card-b"><p class="small" style="color:var(--steel)">No game week is scheduled yet. Availability opens each week once the schedule is posted — you’ll get a notification.</p></div></div>');
+    }
     if (lg.tonight.length){
       cards.push(CG.tonightCard(me, tonight, inLineup));
     }
@@ -205,26 +239,32 @@ CG.hubDashboard = function(){
     }
   }
   if (me && CG.managesClub()){
-    var noReply = (lg.byTeam[me.team]||[]).filter(function(p){ return CG.avFor(p.id).nights.n1.st==="nr"; }).length;
-    var lu = (CG.store.get("lineups")||{});
-    var tonightG = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; });
-    var luState = tonightG && lu[tonightG.id+":"+me.team] ? lu[tonightG.id+":"+me.team].status : "not submitted";
-    cards.push('<div class="card" style="border-color:var(--ink)"><div class="card-h"><h3>GM tasks</h3><span class="chip chip-chrome">Management</span></div>'+
-      '<div class="tasklist">'+
-      (tonightG?'<div class="titem"><span class="t-dot '+(luState==="submitted"?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+luState+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lineup">Builder</a></div>':"")+
-      '<div class="titem"><span class="t-dot'+(noReply?" red":" grn")+'"></span><span style="flex:1">'+noReply+' player'+(noReply===1?"":"s")+' with no '+esc(CG.WEEK8.label)+' response.</span><a class="btn btn-ghost btn-sm" href="#/hub/availability">Grid</a></div>'+
-      '<div class="titem"><span class="t-dot grn"></span><span style="flex:1">No pending roster transactions.</span><a class="btn btn-ghost btn-sm" href="#/hub/tradehub">Trade Hub</a></div>'+
+    cards.push(CG.gmTasksCard(me.team));
+  }
+  if (r==="staff" || r==="commish"){
+    /* Cases assigned to THIS official, from the live action-request table — the prototype filtered
+       on a demo persona ("RefCam_Official") so the card could never populate. */
+    var uid = CG.auth.user && CG.auth.user.id;
+    var mine = (lg._actionReqs||[]).filter(function(a){ return a.assigned_to===uid && a.status!=="resolved" && a.status!=="denied"; });
+    var openAll = (lg._actionReqs||[]).filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; }).length;
+    cards.push('<div class="card"><div class="card-h"><h3>Assigned to you</h3><a class="sec-link" href="#/hub/staffdesk">Staff Desk</a></div><div class="card-b">'+
+      (mine.length
+        ? mine.slice(0,4).map(function(a){
+            var meta = (CG.ACTION_META&&CG.ACTION_META[a.type])||{label:a.type};
+            return '<div class="notif" data-go="#/hub/complaint?id='+esc((a.id||"").slice(0,8))+'" style="cursor:pointer"><span class="nf-ic" style="color:var(--red)">'+CG.ic("flag",15)+'</span>'+
+              '<span style="min-width:0"><b>'+esc((a.id||"").slice(0,8))+' — '+esc(meta.label)+'</b><p>'+esc(a.subject||a.status||"Under review")+'</p></span></div>';
+          }).join("")
+        : '<p class="small" style="color:var(--steel)">No cases assigned to you right now'+(openAll?' — '+openAll+' open in the queue.':'.')+'</p>')+
       '</div></div>');
   }
-  if (r==="staff"){
-    cards.push('<div class="card"><div class="card-h"><h3>Assigned cases</h3><a class="sec-link" href="#/hub/complaints">Queue</a></div>'+
-      CG.visibleComplaints().filter(function(c){ return c.assignedTo==="RefCam_Official" && c.status!=="Resolved"; }).map(function(c){
-        return '<div class="notif" data-go="#/hub/complaint?id='+c.caseId+'" style="cursor:pointer"><span class="nf-ic" style="color:var(--red)">'+CG.ic("flag",15)+'</span>'+
-          '<span><b>'+c.caseId+' — '+esc(c.category)+'</b><p>'+esc(c.status)+(c.confidential?" · Confidential":"")+'</p></span></div>';
-      }).join("")+'</div>');
-    cards.push('<div class="card"><div class="card-h"><h3>Stats desk</h3></div><div class="card-b">'+
-      '<p class="small" style="color:var(--steel)">All 48 finals through Week 6 are verified. Tonight’s four finals will queue here for entry after the games.</p>'+
-      '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/hub/statsentry">Open stats entry</a></div></div>');
+  if (r==="commish"){
+    var openCases = (lg._actionReqs||[]).filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; }).length;
+    var pendApps = (lg._staffApps||[]).concat(lg._ownerApps||[], lg._mgmtApps||[]).filter(function(a){ return a.status==="pending"; }).length;
+    cards.push('<div class="card" style="border-color:var(--ink)"><div class="card-h"><h3>League office</h3><a class="sec-link" href="#/admin">Control Center</a></div><div class="tasklist">'+
+      '<div class="titem"><span class="t-dot'+(openCases?" red":" grn")+'"></span><span style="flex:1">'+openCases+' open case'+(openCases===1?"":"s")+' in the queue.</span><a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a></div>'+
+      '<div class="titem"><span class="t-dot'+(pendApps?" red":" grn")+'"></span><span style="flex:1">'+pendApps+' application'+(pendApps===1?"":"s")+' awaiting the reviewer vote.</span><a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Review</a></div>'+
+      '<div class="titem"><span class="t-dot grn"></span><span style="flex:1">Full league controls — schedule, teams, automations, EA stats.</span><a class="btn btn-ghost btn-sm" href="#/admin">Open</a></div>'+
+      '</div></div>');
   }
   /* notifications preview for everyone signed in */
   var notifs = CG.baseNotifs().slice(0,3);

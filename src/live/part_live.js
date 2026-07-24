@@ -955,6 +955,24 @@ CG.AFTER.matchup = function(param, qs){
  * "Evening, coach." and one empty card. Show them where they actually
  * stand: registration status, the road ahead, and their applications.
  * ------------------------------------------------------------------ */
+/* Club-management dashboard: an Owner / GM / AGM who holds no roster spot still runs a club. */
+CG._mgmtDashboard = function(mt){
+  var lg = CG.lg, s = CG.SEASON||{}, rec = (lg.teams && lg.teams[mt.code]) || {};
+  var uid = (CG.auth.user||{}).id;
+  var role = mt.owner===uid ? "Owner" : mt.gm===uid ? "General Manager" : "Assistant GM";
+  var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+esc(mt.div)+' Division · '+esc(role)+'</span>'+
+    '<h1 class="h-page" style="margin-top:8px">'+esc(mt.name)+'</h1>'+
+    '<p class="lede" style="margin-top:10px">Your club’s front office — build lineups, manage the roster, and work the trade market from the Team HQ menu.</p></div>';
+  var cards = [];
+  cards.push('<div class="card" style="--tc:'+mt.color+'"><div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+mt.code+'">Team page</a></div>'+
+    '<div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(mt.code,44)+
+    '<div><b style="font-family:var(--f-disp);font-size:17px">'+esc(mt.name)+'</b>'+
+    '<span class="caption" style="display:block">'+(rec.w||0)+"-"+(rec.l||0)+"-"+(rec.otl||0)+' · '+esc(mt.div)+' Division</span></div></div></div>');
+  if (CG.gmTasksCard) cards.push(CG.gmTasksCard(mt.code));
+  if (CG.roadAheadCard) cards.push(CG.roadAheadCard(s, { chip:"the season ahead" }));
+  return h + '<div class="grid g2">'+cards.join("")+'</div>';
+};
+
 var _hubDashboardProto = null;
 CG._wrapHubDashboard = function(){
   if (_hubDashboardProto || !CG.hubDashboard) return;
@@ -962,6 +980,11 @@ CG._wrapHubDashboard = function(){
   CG.hubDashboard = function(){
     var me = CG.me(), r = CG.role();
     if (me || r==="staff" || r==="commish" || !CG.auth.profile) return _hubDashboardProto();
+    /* A club owner/GM/AGM who holds no roster spot (every manager, pre-season) used to fall into
+       the new-member "on the way to a roster spot" onboarding. They run a club — give them a
+       club-management dashboard instead. */
+    var mt = CG.myManagedTeam && CG.myManagedTeam();
+    if (mt) return CG._mgmtDashboard(mt);
     var p = CG.auth.profile, s = CG.SEASON||{}, reg = CG.auth.registration;
     var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+CG.fmtFull(CG.now())+'</span>'+
       '<h1 class="h-page" style="margin-top:8px">Welcome, '+esc(p.gamertag||p.display_name||"skater")+'.</h1>'+
@@ -6592,7 +6615,13 @@ CG.proposeTrade = function(){
   CG.sb.from("trades").insert(payload).then(function(r){
     if(r.error){ CG.toast("Couldn’t propose: "+r.error.message,"err"); return; }
     CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}};
-    CG.toast("Trade proposed to "+CG.TEAM[d.partner].name,"ok"); CG.refreshTrades();
+    var counteredId = CG._counteringId; CG._counteringId = null;
+    var finish = function(){ CG.toast("Trade proposed to "+CG.TEAM[d.partner].name,"ok"); CG.refreshTrades(); };
+    /* If this proposal is a counter, decline the original offer so the same deal isn't live
+       twice. Quietly (no second toast); a failure just leaves the original as-is. */
+    if (counteredId){
+      CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",counteredId).then(finish, finish);
+    } else { finish(); }
   });
 };
 CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error) CG.toast("Couldn’t accept: "+r.error.message,"err"); else { CG.toast("Trade accepted!","ok"); CG.refreshTrades(); } }); }); };
@@ -6601,15 +6630,18 @@ CG.cancelTrade = function(id){ CG.sb.from("trades").update({ status:"cancelled",
 CG.counterTrade = function(id){
   var tr=(CG.lg._myTrades||[]).find(function(x){ return x.id===id; }); if(!tr) return;
   CG._liveTrade={ partner:CG.lg._idToCode[tr.from_team_id], offP:(tr.requested_profile_ids||[]).slice(), reqP:(tr.offered_profile_ids||[]).slice(), offK:(tr.requested_pick_ids||[]).slice(), reqK:(tr.offered_pick_ids||[]).slice(), ret:{} };
+  /* Remember which incoming offer this counters, so proposing the counter auto-declines the
+     original — otherwise both clubs kept seeing two live offers for the same deal. */
+  CG._counteringId = id;
   CG.toast("Loaded their offer to counter — adjust and propose","ok"); CG.router();
 };
 CG.AFTER._tradehubLive = function(qs){
   if(qs && qs.add){ var dd=CG.liveTrade(); if(dd.offP.indexOf(qs.add)<0) dd.offP.push(qs.add); location.hash="#/hub/tradehub"; return; }
-  var ps=document.getElementById("tradePartner"); if(ps) ps.addEventListener("change", function(){ var d=CG.liveTrade(); if(d.partner!==this.value){ d.reqP=[]; d.reqK=[]; } d.partner=this.value||null; CG.router(); });
+  var ps=document.getElementById("tradePartner"); if(ps) ps.addEventListener("change", function(){ var d=CG.liveTrade(); if(d.partner!==this.value){ d.reqP=[]; d.reqK=[]; CG._counteringId=null; } d.partner=this.value||null; CG.router(); });
   var ao=document.getElementById("tradeAddOff"); if(ao) ao.addEventListener("click", function(){ CG.tradePicker("off"); });
   var ar=document.getElementById("tradeAddReq"); if(ar) ar.addEventListener("click", function(){ CG.tradePicker("recv"); });
   document.querySelectorAll("[data-trade-rm]").forEach(function(b){ b.addEventListener("click", function(){ var parts=this.getAttribute("data-trade-rm").split(":"), d=CG.liveTrade(), map={offp:"offP",offk:"offK",reqp:"reqP",reqk:"reqK"}, arr=d[map[parts[0]]]; if(arr){ var i=arr.indexOf(parts[1]); if(i>=0) arr.splice(i,1); } CG.router(); }); });
-  var clr=document.getElementById("tradeClear"); if(clr) clr.addEventListener("click", function(){ CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; CG.router(); });
+  var clr=document.getElementById("tradeClear"); if(clr) clr.addEventListener("click", function(){ CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; CG._counteringId=null; CG.router(); });
   var pr=document.getElementById("tradePropose"); if(pr) pr.addEventListener("click", CG.proposeTrade);
   document.querySelectorAll("[data-trade-accept]").forEach(function(b){ b.addEventListener("click", function(){ CG.acceptTrade(this.getAttribute("data-trade-accept")); }); });
   document.querySelectorAll("[data-trade-decline]").forEach(function(b){ b.addEventListener("click", function(){ CG.declineTrade(this.getAttribute("data-trade-decline")); }); });

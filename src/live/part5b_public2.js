@@ -397,7 +397,13 @@ CG.ROUTES.matchup = function(id){
     /* PREVIEW: server, code, lineups */
     var released = now >= g.at - 30*60000;
     var lineupsOut = now >= g.at - 60*60000;
-    var canCode = CG.can("codes.view") && (CG.role()==="staff"||CG.role()==="commish"|| (CG.me() && (CG.me().team===g.home||CG.me().team===g.away)));
+    /* A club's management with no roster spot still runs a club in this game and needs the code —
+       CG.me() only exists for rostered players, so match on the managed club too (the schedule
+       desk already shows them the code, so the matchup page must agree). */
+    var myMgmt = CG.myManagedTeam && CG.myManagedTeam();
+    var canCode = CG.can("codes.view") && (CG.role()==="staff"||CG.role()==="commish"
+      || (CG.me() && (CG.me().team===g.home||CG.me().team===g.away))
+      || (myMgmt && (myMgmt.code===g.home||myMgmt.code===g.away)));
     var codeBox;
     if (CG.role()==="guest"){
       codeBox = '<div class="codebox locked"><span class="lock">'+CG.ic("lock",14)+'Private game code</span><div class="cb-code">Sign in to view</div>'+
