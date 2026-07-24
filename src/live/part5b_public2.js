@@ -157,9 +157,18 @@ CG.ROUTES.news = function(param, qs){
   var filter = '<div class="shell" style="margin-bottom:20px"><div class="filters"><div class="seg" style="flex-wrap:wrap">'+
     '<button data-cat="" class="'+(cat===""?"on":"")+'">All</button>'+
     cats.map(function(c){ return '<button data-cat="'+esc(c)+'" class="'+(cat===c?"on":"")+'">'+esc(c)+'</button>'; }).join("")+'</div></div></div>';
-  var body = arts.length
-    ? '<div class="grid g3" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">'+arts.map(function(a,i){ return CG.newsCard(a, i===0 && !cat); }).join("")+'</div>'
-    : '<div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>Nothing in this category yet</b><p>Stories land here as the newsroom publishes them.</p></div>';
+  var body;
+  if (!arts.length){
+    body = '<div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>Nothing in this category yet</b><p>Stories land here as the newsroom publishes them.</p></div>';
+  } else if (!cat){
+    /* Lead story runs full-width as a feature band so a young newsroom (one or two stories) reads
+       as a front page rather than a lone card stranded in a three-up grid. */
+    var lead = arts[0], rest = arts.slice(1);
+    body = CG.newsCard(lead, true, true)+
+      (rest.length ? '<div class="grid g3" style="margin-top:18px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">'+rest.map(function(a){ return CG.newsCard(a); }).join("")+'</div>' : "");
+  } else {
+    body = '<div class="grid g3" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">'+arts.map(function(a){ return CG.newsCard(a); }).join("")+'</div>';
+  }
   return head + filter + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
 };
 CG.AFTER.news = function(){

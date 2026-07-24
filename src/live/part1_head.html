@@ -437,6 +437,15 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
 .newscard.lead h3{font-size:22px}
 .newscard p{color:var(--steel);font-size:13.5px;line-height:1.5}
 .newscard .nc-meta{margin-top:auto;padding-top:10px;font-family:var(--f-mono);font-size:10.5px;color:var(--steel);letter-spacing:.05em}
+/* Feature band — the lead story spans the full row: art left, headline + excerpt right. */
+.newscard.feature{flex-direction:row;align-items:stretch}
+.newscard.feature .nc-art{height:auto;flex:0 0 46%;min-height:260px}
+.newscard.feature .nc-b{justify-content:center;padding:30px 34px;gap:10px}
+.newscard.feature h3{font-size:clamp(23px,3vw,32px);letter-spacing:-.02em;line-height:1.12}
+.newscard.feature p{font-size:15px;line-height:1.55;color:var(--ink-3);max-width:54ch}
+.newscard.feature .nc-flag{position:absolute;top:14px;left:14px;font-family:var(--f-mono);font-size:9.5px;
+  letter-spacing:.12em;text-transform:uppercase;background:var(--chrome);color:#0b0e11;padding:4px 9px;border-radius:999px;font-weight:700}
+@media(max-width:640px){.newscard.feature{flex-direction:column}.newscard.feature .nc-art{flex:none;min-height:160px}.newscard.feature .nc-b{padding:20px}}
 
 /* ---------- tabs / filters ---------- */
 .tabs{display:flex;gap:2px;border-bottom:1.5px solid var(--ink);overflow-x:auto;scrollbar-width:none}

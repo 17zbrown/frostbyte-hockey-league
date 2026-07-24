@@ -563,18 +563,19 @@ CG.ROUTES.home = function(){
   }
   return html;
 };
-CG.newsCard = function(a, lead){
+CG.newsCard = function(a, lead, feature){
   var t0 = a.relatedTeams[0] && CG.TEAMS.find(function(t){ return t.name===a.relatedTeams[0]; });
+  var showExcerpt = lead || feature;
   var art = '<svg viewBox="0 0 400 150" preserveAspectRatio="xMidYMid slice" aria-hidden="true">'+
     '<rect width="400" height="150" fill="#101519"/>'+
     '<circle cx="330" cy="20" r="90" fill="'+(t0?t0.color:"#FFE500")+'" opacity=".25"/>'+
     '<circle cx="330" cy="20" r="56" fill="'+(t0?t0.color:"#FFE500")+'" opacity=".35"/>'+
     '<path d="M0 118 L400 92 L400 150 L0 150 Z" fill="'+(t0?t0.color:"#FFE500")+'" opacity=".16"/>'+
     '<text x="22" y="126" font-family="Archivo, sans-serif" font-weight="900" font-size="44" fill="#FFFFFF" opacity=".1">CGHL</text></svg>';
-  return '<article class="newscard'+(lead?" lead":"")+'" data-go="#/article/'+a.slug+'" role="link" tabindex="0">'+
-    '<div class="nc-art">'+art+'</div><div class="nc-b">'+
+  return '<article class="newscard'+(lead?" lead":"")+(feature?" feature":"")+'" data-go="#/article/'+a.slug+'" role="link" tabindex="0">'+
+    '<div class="nc-art">'+art+(feature?'<span class="nc-flag">Latest</span>':"")+'</div><div class="nc-b">'+
     '<span class="eyebrow" style="font-size:10px">'+esc(a.category)+'</span>'+
-    '<h3>'+esc(a.title)+'</h3>'+(lead?'<p>'+esc(a.excerpt)+'</p>':"")+
+    '<h3>'+esc(a.title)+'</h3>'+(showExcerpt?'<p>'+esc(a.excerpt)+'</p>':"")+
     '<span class="nc-meta">'+CG.fmtDate(a.dateIso)+' · '+esc(a.author.split("—")[0].trim())+'</span></div></article>';
 };
 CG.AFTER.home = function(){
@@ -952,13 +953,16 @@ CG.ROUTES.teams = function(){
           '<div style="min-width:0"><b style="font-family:var(--f-disp);font-weight:800;font-size:17px;display:block">'+esc(t.name)+'</b>'+
           '<span class="caption">'+esc(t.city)+' · '+esc(t.arena)+'</span></div>'+
           '<span class="ovrbox '+CG.ovrClass(lg.teamRatings[t.code].ovr)+'" style="margin-left:auto" title="Team overall">'+lg.teamRatings[t.code].ovr+'</span></div>'+
-        '<p class="small" style="color:var(--steel)">'+esc(note)+'</p>'+
+        /* Reserve two lines for the note so a 1-line club ("3 players signed…") and a 2-line one
+           ("No players signed yet…") keep their record/seed rows on the same baseline across a row. */
+        '<p class="small" style="color:var(--steel);min-height:2.8em;margin:0">'+esc(note)+'</p>'+
         '<div style="display:flex;gap:16px;align-items:center;font-family:var(--f-mono);font-size:12px;flex-wrap:wrap">'+
           '<span><b class="num">'+s.w+"-"+s.l+"-"+s.otl+'</b> record</span>'+
           '<span><b class="num">'+s.pts+'</b> pts</span>'+
           '<span>#'+pr[t.code]+(preT?' pre-season seed':' power ranking')+'</span>'+CG.form5(s.last5)+'</div>'+
         /* nobody leads a division at 0-0-0 — the badge would land on whichever club sorts first */
-        '<div style="display:flex;gap:8px"><span class="chip">'+t.div+' Division</span>'+
+        /* margin-top:auto pins the division footer to the card bottom so every card's footer aligns */
+        '<div style="display:flex;gap:8px;margin-top:auto"><span class="chip">'+t.div+' Division</span>'+
           (!preT && CG.standings(lg,t.div)[0].code===t.code?'<span class="chip chip-chrome">Division lead</span>':"")+'</div>'+
       '</div></div>';
   }).join("");
