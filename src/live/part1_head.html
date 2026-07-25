@@ -52,6 +52,7 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
   --ice:#F5F6F2; --paper:#FFFFFF; --ink:#101519; --ink-2:#1A2127; --ink-3:#242D34;
   --steel:#5C6B75; --steel-2:#8595A0; --line:#E3E6DF; --line-soft:#EDEFE9;
   --chrome:#FFE500; --chrome-deep:#E5C900; --chrome-tint:#FFFBD6;
+  --viz-accent:#A87E00;   /* chart accent that clears 3:1 on white paper; chrome is unreadable on light */
   /* the accent, deepened to hold on white — chrome yellow is ~1.07:1 on paper. Constant in both
      themes on purpose: it is the light-background logo colour and must not shift under the theme. */
   --gold:#D9A800;
@@ -75,7 +76,7 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
 html[data-theme="dark"]{
   --ice:#0F1215; --paper:#171C21; --ink:#E9EEEB; --ink-2:#D7DEDA; --ink-3:#C4CCC8;
   --steel:#9AA9AF; --steel-2:#75848B; --line:#262E34; --line-soft:#1D252B;
-  --chrome-deep:#D8BE00; --chrome-tint:#2E2A0E;
+  --chrome-deep:#D8BE00; --chrome-tint:#2E2A0E; --viz-accent:#E5C900;
   --red-tint:#3A1D1B; --green-tint:#15311F;
   --red-ink:#F08880; --green-ink:#4FC486; --amber-ink:#E8D34F;
   --sh-1:0 1px 2px rgba(0,0,0,.5),0 8px 24px -14px rgba(0,0,0,.6);
@@ -321,8 +322,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .form5 i.fd-otl,.form5 i.o{border-color:var(--amber-ink);
   background:linear-gradient(var(--amber-ink) 0 50%,transparent 50%)}
 
-/* ---------- crest ---------- */
-.crest{flex-shrink:0;display:block}
+/* ---------- crest ----------
+   Team logos read as dimensional everywhere: a subtle drop-shadow lifts the mark off the surface
+   site-wide (nav, tables, cards, box scores). The featured .crest3d wrapper deepens this into a
+   full perspective tilt for the club page + player-profile hero. */
+.crest{flex-shrink:0;display:block;filter:drop-shadow(0 1.5px 2px rgba(0,0,0,.2))}
 
 /* ---------- hero carousel ---------- */
 #hero{background:var(--bc);color:var(--on-ink);position:relative;overflow:hidden}
@@ -663,66 +667,50 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .notif .nf-t{margin-left:auto;font-family:var(--f-mono);font-size:10px;color:var(--steel-2);white-space:nowrap;flex-shrink:0}
 
 /* ---------- ratings bars ---------- */
-.rbar{display:grid;grid-template-columns:110px 1fr 34px;gap:10px;align-items:center;font-size:12.5px;padding:5px 0}
-.rbar .rb-lab{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--steel)}
-.rbar .rb-track{height:8px;border-radius:4px;background:var(--line-soft);overflow:hidden}
-.rbar .rb-fill{height:100%;border-radius:4px;background:var(--ink)}
-.rbar .rb-v{font-family:var(--f-mono);font-size:11.5px;text-align:right}
+.rbar{display:grid;grid-template-columns:120px 1fr 40px;gap:12px;align-items:center;font-size:12.5px;padding:6px 0}
+.rbar .rb-lab{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+.rbar .rb-track{height:9px;border-radius:6px;background:var(--line);overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.16)}
+.rbar .rb-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--ink),var(--steel-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+.rbar .rb-v{font-family:var(--f-mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
 
-/* ---------- data-viz (Stat Lab: radar, gauges, streak, node bars, compare, leaderboard) ----------
+/* ---------- data-viz (radar + radial gauges) ----------
    All colours come from the flipping design tokens so every chart adapts to light + dark. */
 .viz-card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:16px 18px}
-.viz-card .vch{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.viz-card .vch{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .viz-card .vch h4{font-family:var(--f-disp);font-weight:800;font-size:14px;margin:0}
 .viz-card .vch .vsub{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel)}
-.viz-desc{font-size:11.5px;color:var(--steel);line-height:1.5;margin:0 0 12px}
-.vradar{display:block;margin:0 auto;max-width:320px;width:100%;height:auto}
-.vradar text{fill:var(--steel);font-family:var(--f-mono);font-size:9px;letter-spacing:.03em}
-.vradar .vr-dot{cursor:pointer}
-.vlegend{display:flex;gap:16px;justify-content:center;margin-top:6px;font-family:var(--f-mono);font-size:10.5px;color:var(--steel)}
+.vradar{display:block;margin:0 auto;max-width:340px;width:100%;height:auto}
+.vradar text{fill:var(--steel);font-family:var(--f-mono);font-size:8.5px;font-weight:600;letter-spacing:.05em}
+.vradar .vr-grid{fill:none;stroke:var(--line)}
+.vradar .vr-spoke{stroke:var(--line)}
+.vradar .vr-surface{fill:var(--ice)}
+.vradar .vr-dot{filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))}
+.vlegend{display:flex;gap:16px;justify-content:center;margin-top:8px;font-family:var(--f-mono);font-size:10px;letter-spacing:.04em;color:var(--steel)}
 .vlegend i{width:10px;height:10px;border-radius:3px;display:inline-block;vertical-align:-1px;margin-right:6px}
-.vgauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:10px}
+.vgauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:16px 12px;justify-items:center}
 .vgauge{text-align:center}
-.vgauge svg{display:block;margin:0 auto}
-.vgauge .vgv{font-family:var(--f-disp);font-weight:800;font-size:19px;fill:var(--ink);letter-spacing:-.02em}
-.vgauge .vgl{font-family:var(--f-mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--steel);margin-top:4px}
-.vstreak{display:flex;gap:5px;flex-wrap:wrap}
-.vres{width:24px;height:28px;border-radius:5px;display:grid;place-items:center;font-family:var(--f-disp);font-weight:800;font-size:11px;color:#0B0E12}
-.vres.W{background:var(--green)} .vres.L{background:var(--red);color:#fff} .vres.O{background:var(--steel);color:#fff}
-.vwk{display:flex;align-items:flex-end;gap:8px;height:150px;padding-top:22px}
-.vwk .vwc{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
-.vwk .vwn{font-family:var(--f-disp);font-weight:800;font-size:11px;color:#0B0E12;background:var(--steel);padding:2px 6px;border-radius:6px;margin-bottom:6px}
-.vwk .vwc.pk .vwn{background:var(--chrome)}
-.vwk .vws{width:11px;border-radius:5px 5px 3px 3px;background:var(--steel);min-height:3px;opacity:.55}
-.vwk .vwc.pk .vws{background:var(--chrome);opacity:1}
-.vwk .vwl{font-family:var(--f-mono);font-size:9px;color:var(--steel);margin-top:7px}
-.vcmp{display:flex;flex-direction:column;gap:13px}
-.vcmp .vcr .vcl{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--steel);margin-bottom:5px}
-.vcmp .vcl b{color:var(--ink);font-size:12px}
-.vcmp .vct{height:8px;border-radius:5px;background:var(--line-soft);position:relative;overflow:hidden}
-.vcmp .vct .vcm{position:absolute;left:0;top:0;height:100%;border-radius:5px;background:var(--chrome-deep)}
-.vcmp .vct .vca{position:absolute;top:-3px;height:14px;width:2px;background:var(--steel);border-radius:2px}
-.vkpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
-.vkpi{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:14px 16px}
-.vkpi .vkl{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
-.vkpi .vkv{font-family:var(--f-disp);font-weight:900;font-size:26px;letter-spacing:-.02em;margin-top:2px}
-.vkpi .vkd{font-family:var(--f-mono);font-size:10.5px;margin-top:2px}
-.vkpi .vkd.up{color:var(--green-ink)} .vkpi .vkd.down{color:var(--red-ink)}
-.vkpi .vkh{font-size:11px;color:var(--steel);margin-top:6px;line-height:1.4}
-.vkpi svg{margin-top:8px;display:block;width:100%;height:28px}
-.vlb{display:flex;flex-direction:column}
-.vlbrow{display:flex;align-items:center;gap:12px;padding:10px 4px;border-top:1px solid var(--line)}
-.vlbrow:first-child{border-top:0}
-.vrk{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-family:var(--f-disp);font-weight:800;font-size:11px;flex-shrink:0;color:var(--steel);background:var(--ice)}
-.vrk.g1{color:#0B0E12;background:linear-gradient(145deg,var(--chrome),var(--gold))}
-.vrk.g2{color:#0B0E12;background:linear-gradient(145deg,#E8EDF2,#AAB4BD)}
-.vrk.g3{color:#0B0E12;background:linear-gradient(145deg,#E8A15C,#B06F2E)}
-.vlbrow .vwho{flex:1;min-width:0}
-.vlbrow .vwho b{font-family:var(--f-disp);font-weight:700;font-size:13.5px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vlbrow .vwho span{font-family:var(--f-mono);font-size:9.5px;color:var(--steel)}
-.vratebar{width:88px;height:7px;border-radius:5px;background:var(--line-soft);overflow:hidden;flex-shrink:0}
-.vratebar i{display:block;height:100%;border-radius:5px;background:var(--chrome-deep)}
-.vlbrow .vrn{font-family:var(--f-disp);font-weight:800;font-size:15px;width:32px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+.vgauge svg{display:block;margin:0 auto;overflow:visible}
+.vgauge .vgt{stroke:var(--line)}
+.vgauge .vgv{font-family:var(--f-disp);font-weight:800;font-size:18px;fill:var(--ink);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.vgauge .vgl{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);margin-top:5px}
+  /* clickable 3D team logo — the real crest itself, tilted in perspective. No plate, ring or backdrop. */
+  .crest3d{display:inline-block;perspective:820px;flex-shrink:0;text-decoration:none;line-height:0;animation:c3d-in .5s ease both}
+  @keyframes c3d-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+  .crest3d .crest{transform-style:preserve-3d;transform:rotateX(7deg) rotateY(-15deg);
+    transition:transform .55s cubic-bezier(.2,.8,.3,1),filter .55s ease;will-change:transform;
+    filter:drop-shadow(-7px 11px 11px rgba(0,0,0,.5)) drop-shadow(0 2px 2px rgba(0,0,0,.42))}
+  .crest3d:hover .crest,.crest3d:focus-visible .crest{transform:rotateX(5deg) rotateY(13deg) scale(1.05);
+    filter:drop-shadow(9px 13px 15px rgba(0,0,0,.55)) drop-shadow(0 2px 3px rgba(0,0,0,.42))}
+  .crest3d:focus-visible{outline:2px solid var(--chrome);outline-offset:5px;border-radius:8px}
+  /* stat-viz load animations (respect reduced-motion) */
+  .vgauge .varc{animation:viz-arc 1s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes viz-arc{from{stroke-dashoffset:var(--varc-len,0)}to{stroke-dashoffset:0}}
+  .rbar .rb-fill{animation:viz-grow-w .9s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes viz-grow-w{from{width:0}}
+  .viz-card{animation:viz-up .5s ease both}
+  @keyframes viz-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @media(prefers-reduced-motion:reduce){.crest3d,.vgauge .varc,.rbar .rb-fill,.viz-card{animation:none}
+    .crest3d .crest{transition:none} .viz-card{transform:none}}
 
 /* ---------- video module ---------- */
 .vidbox{position:relative;border-radius:var(--r-l);overflow:hidden;background:var(--bc);border:1.5px solid var(--bc);min-height:280px;display:grid}

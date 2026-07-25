@@ -993,7 +993,8 @@ CG.ROUTES.team = function(code, qs){
                gm: roster.find(function(p){return p.mgmt==="gm";}),
                agm: roster.find(function(p){return p.mgmt==="agm";}) };
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
-    '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+CG.crest(code,84)+
+    '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
+      '<span class="crest3d">'+CG.crest(code,52,{decorative:true})+'</span>'+
       '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+t.div+' Division · '+esc(t.city)+' · '+esc(t.arena)+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(t.name)+'</h1>'+
         '<div style="display:flex;gap:18px;margin-top:12px;font-family:var(--f-mono);font-size:12.5px;color:var(--on-ink-dim);flex-wrap:wrap">'+
@@ -1041,26 +1042,37 @@ CG.ROUTES.team = function(code, qs){
       (roster.length ? "" : CG.emptyRow(archived?5:6, "No players on this roster yet",
         "Clubs fill up at the draft and in free agency. Signings show here the moment they’re made."))+
       '</tbody></table></div></div>';
-    /* consolidated — team stats live in this same tab (no separate Team stats tab) */
-    var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
-        _svp = _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
-    body += '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
-      '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'+
-      [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
-       ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_gp).toFixed(1)],
-       ["Shots against per game",(s.sa/_gp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
-       ["Points percentage",(s.ptsPct*100).toFixed(0)+"%"]].map(function(kv){
-        return '<div class="kpi" style="cursor:default"><b class="num">'+kv[1]+'</b><span>'+kv[0]+'</span></div>';
-      }).join("")+'</div>'+
-      (archived
-        ? '<div class="note" style="margin-top:18px"><b style="font-family:var(--f-disp)">'+esc(SD.label)+' — final.</b> Archived team numbers are frozen exactly as the season ended.</div>'
-        : '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Overall rating breakdown</h3><span class="chip">Formula v1 · configurable</span></div><div class="card-b">'+
-      Object.keys(lg.teamRatings[code].parts).map(function(k){
-        var v = lg.teamRatings[code].parts[k];
-        return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+v+'%"></span></span><span class="rb-v num">'+v+'</span></div>';
-      }).join("")+
-      '<p class="caption" style="margin-top:10px">Team overall blends record, goal differential, goaltending, roster depth, and recent form. The commissioner can re-weight the formula in the Control Center — every number traces to real results.</p></div></div>')+
-      '<h3 class="h-sec" style="font-size:18px;margin:28px 0 14px">Roster</h3>'+rosterTable;
+    /* consolidated — team stats live in this same tab (no separate Team stats tab).
+       Before a single game exists (pre-season) every rate is 0.00 / .000, so we swap the
+       zero-wall + the results-derived rating breakdown for one honest "not yet under way" note —
+       the same discipline as the player Fresh-sheet card. Archived + played clubs keep the grid. */
+    var teamPlayed = archived || (s.gp||0) > 0;
+    var teamStats;
+    if (!teamPlayed){
+      teamStats = '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
+        '<div class="card"><div class="empty" style="padding:40px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div>'+
+        '<b>No games played yet</b><p>Goals per game, save percentage, the overall rating and the rest fill in automatically from EA box scores after '+esc(CG.TEAM[code].name)+'’s first final. Nothing here is entered by hand.</p></div></div>';
+    } else {
+      var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
+          _svp = _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
+      teamStats = '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
+        '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'+
+        [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
+         ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_gp).toFixed(1)],
+         ["Shots against per game",(s.sa/_gp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
+         ["Points percentage",(s.ptsPct*100).toFixed(0)+"%"]].map(function(kv){
+          return '<div class="kpi" style="cursor:default"><b class="num">'+kv[1]+'</b><span>'+kv[0]+'</span></div>';
+        }).join("")+'</div>'+
+        (archived
+          ? '<div class="note" style="margin-top:18px"><b style="font-family:var(--f-disp)">'+esc(SD.label)+' — final.</b> Archived team numbers are frozen exactly as the season ended.</div>'
+          : '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Overall rating breakdown</h3><span class="chip">Formula v1 · configurable</span></div><div class="card-b">'+
+        Object.keys(lg.teamRatings[code].parts).map(function(k){
+          var v = lg.teamRatings[code].parts[k];
+          return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+v+'%"></span></span><span class="rb-v num">'+v+'</span></div>';
+        }).join("")+
+        '<p class="caption" style="margin-top:10px">Team overall blends record, goal differential, goaltending, roster depth, and recent form. The commissioner can re-weight the formula in the Control Center — every number traces to real results.</p></div></div>');
+    }
+    body += teamStats + '<h3 class="h-sec" style="font-size:18px;margin:28px 0 14px">Roster</h3>'+rosterTable;
   }
   if (tab==="games"){
     if (archived){
@@ -1224,10 +1236,8 @@ CG.ROUTES.player = function(pid, qs){
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+
     ';background:linear-gradient(90deg,rgba(16,21,25,.95),rgba(16,21,25,.72) 46%,rgba(16,21,25,.5)),linear-gradient(180deg,rgba(16,21,25,.32),rgba(16,21,25,.58)),#101519 url(\'/assets/cinema/profile-hero-21x9.jpg\') center/cover no-repeat"><div class="shell">'+
     '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
-      /* decorative here — the club name is the very next thing a screen reader reads, in the eyebrow */
-      (t.logo
-        ? '<img class="crest hero-crest" src="'+t.logo+'" width="104" height="110" style="object-fit:contain" alt="">'
-        : '<div style="flex-shrink:0">'+CG.crest(p.team,52)+'</div>')+
+      /* the club logo itself, tilted in 3D → links to the team page (same site-wide crest mark) */
+      '<a href="#/team/'+esc(p.team)+'" class="crest3d" aria-label="'+esc(t.name)+' — team page">'+CG.crest(p.team,52,{decorative:true})+'</a>'+
       '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
@@ -1324,9 +1334,11 @@ CG.ROUTES.player = function(pid, qs){
         '</div></div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
         '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. The '+r.ovr+' overall is the staff scouting number from registration.</p></div></div>';
-    /* Stat Lab viz for players with a game sample: skater DNA radar + efficiency gauges
-       (goalies get goaltending gauges). Pre-season 0-GP players keep the Fresh-sheet card. */
-    var playerViz = (isEmpty || archived) ? "" : (isG
+    /* Stat Lab viz for players with a REGULAR-SEASON game sample: skater DNA radar + efficiency
+       gauges (goalies get goaltending gauges). Gated on s.gp (season only) — a player with just
+       pre-season games has an all-zero season line, which would collapse the radar to its floor,
+       so they keep the numeric pre-season card without the misleading shape. */
+    var playerViz = (isEmpty || archived || (s.gp||0)<1) ? "" : (isG
       ? '<div class="viz-card" style="margin-bottom:16px"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
           CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
           CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
@@ -1422,44 +1434,37 @@ CG.ROUTES.player = function(pid, qs){
    come from design tokens so every chart adapts to light + dark.
    ================================================================ */
 CG.vizGauge = function(val, max, disp, label, color){
-  color = color || "var(--chrome-deep)";
-  var r=34, circ=2*Math.PI*r, sweep=0.75, frac=Math.max(0,Math.min(1,(val/max)||0))*sweep;
-  return '<div class="vgauge"><svg viewBox="0 0 88 84" width="88" height="80" aria-hidden="true">'+
-    '<circle cx="44" cy="44" r="34" fill="none" stroke="var(--line-soft)" stroke-width="7" stroke-linecap="round" stroke-dasharray="'+(circ*sweep).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(135 44 44)"/>'+
-    '<circle cx="44" cy="44" r="34" fill="none" stroke="'+color+'" stroke-width="7" stroke-linecap="round" stroke-dasharray="'+(circ*frac).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(135 44 44)"/>'+
-    '<text x="44" y="49" text-anchor="middle" class="vgv">'+esc(String(disp==null?val:disp))+'</text></svg>'+
-    '<div class="vgl">'+esc(label)+'</div></div>';
-};
-CG.vizStreak = function(results){
-  return '<div class="vstreak">'+(results||[]).map(function(r){ var c=r==="O"?"O":(r==="L"?"L":"W"); return '<span class="vres '+c+'">'+(r==="O"?"OT":c)+'</span>'; }).join("")+'</div>';
+  color = color || "var(--viz-accent)";
+  var r=34, circ=2*Math.PI*r, sweep=0.75, frac=Math.max(0,Math.min(1,(val/max)||0))*sweep, len=(circ*frac).toFixed(1);
+  var dispTxt = String(disp==null?val:disp);
+  /* value arc drawn only when there's a positive fraction — a 0-value round-cap otherwise leaves a
+     stray dot at the track's start. The value is voiced to screen readers via the sr-only span
+     (the SVG itself is aria-hidden). */
+  var arc = frac>0 ? '<circle class="varc" style="--varc-len:'+len+'" cx="44" cy="42" r="34" fill="none" stroke="'+color+'" stroke-width="6.5" stroke-linecap="round" stroke-dasharray="'+len+' '+circ.toFixed(1)+'" transform="rotate(135 44 42)"/>' : '';
+  return '<div class="vgauge"><svg viewBox="0 0 88 80" width="88" height="80" aria-hidden="true">'+
+    '<circle class="vgt" cx="44" cy="42" r="34" fill="none" stroke-width="6.5" stroke-linecap="round" stroke-dasharray="'+(circ*sweep).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(135 44 42)"/>'+
+    arc +
+    '<text x="44" y="42" text-anchor="middle" dominant-baseline="central" class="vgv">'+esc(dispTxt)+'</text></svg>'+
+    '<div class="vgl">'+esc(label)+'</div><span class="sr-only">'+esc(label)+': '+esc(dispTxt)+'</span></div>';
 };
 CG.vizRadar = function(axes, me, cmp, meLabel, cmpLabel){
   var cx=150, cy=120, R=86, n=axes.length, TAU=Math.PI*2, g="";
   function poly(vals, mx){ return vals.map(function(v,i){ var a=-Math.PI/2+i*TAU/n, rr=R*Math.max(0,Math.min(1,v/mx)); return [cx+Math.cos(a)*rr, cy+Math.sin(a)*rr]; }); }
-  [0.25,0.5,0.75,1].forEach(function(f){ g+='<polygon points="'+poly(axes.map(function(){return f;}),1).map(function(p){return p.map(function(z){return z.toFixed(1);}).join(",");}).join(" ")+'" fill="none" stroke="var(--line)" />'; });
+  function ptsOf(P){ return P.map(function(p){return p.map(function(z){return z.toFixed(1);}).join(",");}).join(" "); }
+  /* faint filled backdrop so the web reads as a surface, then the concentric grid + spokes */
+  g+='<polygon class="vr-surface" points="'+ptsOf(poly(axes.map(function(){return 1;}),1))+'"/>';
+  [0.25,0.5,0.75,1].forEach(function(f){ g+='<polygon class="vr-grid" points="'+ptsOf(poly(axes.map(function(){return f;}),1))+'"/>'; });
   axes.forEach(function(name,i){ var a=-Math.PI/2+i*TAU/n, ex=cx+Math.cos(a)*R, ey=cy+Math.sin(a)*R;
-    g+='<line x1="'+cx+'" y1="'+cy+'" x2="'+ex.toFixed(1)+'" y2="'+ey.toFixed(1)+'" stroke="var(--line)"/>';
+    g+='<line class="vr-spoke" x1="'+cx+'" y1="'+cy+'" x2="'+ex.toFixed(1)+'" y2="'+ey.toFixed(1)+'"/>';
     var lx=cx+Math.cos(a)*(R+15), ly=cy+Math.sin(a)*(R+15), anc=Math.abs(Math.cos(a))<0.3?"middle":(Math.cos(a)>0?"start":"end");
     g+='<text x="'+lx.toFixed(1)+'" y="'+(ly+3).toFixed(1)+'" text-anchor="'+anc+'">'+esc(name.toUpperCase())+'</text>'; });
-  function shape(vals,fill,stroke,dots){ var P=poly(vals,100), pts=P.map(function(p){return p.map(function(z){return z.toFixed(1);}).join(",");}).join(" ");
-    var o='<polygon points="'+pts+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="2" stroke-linejoin="round"/>';
-    if(dots) P.forEach(function(p){ o+='<circle class="vr-dot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3" fill="'+stroke+'"/>'; }); return o; }
-  if (cmp) g+=shape(cmp,"color-mix(in srgb,var(--steel) 20%,transparent)","var(--steel)",false);
-  g+=shape(me,"color-mix(in srgb,var(--chrome) 22%,transparent)","var(--chrome-deep)",true);
-  var legend = '<div class="vlegend"><span><i style="background:var(--chrome-deep)"></i>'+esc(meLabel||"This player")+'</span>'+(cmp?'<span><i style="background:var(--steel)"></i>'+esc(cmpLabel||"League avg")+'</span>':'')+'</div>';
+  function shape(vals,fill,stroke,dots){ var P=poly(vals,100);
+    var o='<polygon points="'+ptsOf(P)+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="2.25" stroke-linejoin="round"/>';
+    if(dots) P.forEach(function(p){ o+='<circle class="vr-dot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3.2" fill="'+stroke+'"/>'; }); return o; }
+  if (cmp) g+=shape(cmp,"color-mix(in srgb,var(--steel) 18%,transparent)","var(--steel)",false);
+  g+=shape(me,"color-mix(in srgb,var(--viz-accent) 20%,transparent)","var(--viz-accent)",true);
+  var legend = '<div class="vlegend"><span><i style="background:var(--viz-accent)"></i>'+esc(meLabel||"This player")+'</span>'+(cmp?'<span><i style="background:var(--steel)"></i>'+esc(cmpLabel||"League avg")+'</span>':'')+'</div>';
   return '<svg class="vradar" viewBox="0 0 300 244" role="img" aria-label="Attribute radar">'+g+'</svg>'+legend;
-};
-CG.vizNodeBars = function(data, labels){
-  var mx=Math.max.apply(null,data.concat([1])), pk=data.indexOf(Math.max.apply(null,data));
-  return '<div class="vwk">'+data.map(function(v,i){
-    return '<div class="vwc'+(i===pk&&v>0?" pk":"")+'"><span class="vwn">'+v+'</span><div class="vws" style="height:'+(mx?Math.max(3,v/mx*100):0)+'%"></div><span class="vwl">'+esc((labels&&labels[i])||("W"+(i+1)))+'</span></div>';
-  }).join("")+'</div>';
-};
-CG.vizCompare = function(rows){
-  return '<div class="vcmp">'+rows.map(function(c){
-    return '<div class="vcr"><div class="vcl"><span>'+esc(c.label)+'</span><b class="num">'+c.me+'</b></div>'+
-      '<div class="vct"><div class="vcm" style="width:'+Math.max(0,Math.min(100,c.me/c.max*100))+'%"></div><div class="vca" style="left:'+Math.max(0,Math.min(100,c.avg/c.max*100))+'%"></div></div></div>';
-  }).join("")+'</div>';
 };
 /* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
 CG.skaterDNA = function(s){
@@ -1484,11 +1489,11 @@ CG.renderPickupStats = function(rows){
     return note + '<div class="card"><div class="empty" style="padding:48px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No pickup games yet</b>'+
       '<p>Pickup (#lfg) games between two EASHL clubs appear here once their box score is imported.</p></div></div>';
   }
-  var gp=rows.length, g=0,a=0,sh=0,hit=0,pim=0,pm=0, gGames=0, sv=0,sa=0,ga=0, so=0, w=0,l=0,otl=0;
+  var gp=rows.length, g=0,a=0,sh=0,hit=0,pim=0,pm=0,tk=0, gGames=0, sv=0,sa=0,ga=0, so=0, w=0,l=0,otl=0;
   function sideScores(x){ var gm=x.pickup_games||{}, side=(x.team_side||"").toUpperCase();
     return { my: side==="A"?gm.score_a:(side==="B"?gm.score_b:null), opp: side==="A"?gm.score_b:(side==="B"?gm.score_a:null), ot:gm.went_ot }; }
   rows.forEach(function(x){
-    g+=x.goals||0; a+=x.assists||0; sh+=x.shots||0; hit+=x.hits||0; pim+=x.pim||0; pm+=x.plus_minus||0;
+    g+=x.goals||0; a+=x.assists||0; sh+=x.shots||0; hit+=x.hits||0; pim+=x.pim||0; pm+=x.plus_minus||0; tk+=x.takeaways||0;
     if (x.is_goalie){ gGames++; sv+=x.saves||0; sa+=x.shots_against||0; ga+=x.goals_against||0; if(x.shutout) so++; }
     var ss=sideScores(x);
     if (ss.my!=null && ss.opp!=null){ if (ss.my>ss.opp) w++; else if (ss.ot) otl++; else l++; }
@@ -1496,7 +1501,8 @@ CG.renderPickupStats = function(rows){
   var mostlyG = gGames > gp/2;
   var vizCards = "";
   if (!mostlyG){
-    var dna = CG.skaterDNA({gp:gp, g:g, a:a, shots:sh, hits:hit, pim:pim, pm:pm, blk:0, tk:0, gwg:0});
+    /* pickup box scores carry takeaways (no blocked shots), so Defense is takeaway-driven here. */
+    var dna = CG.skaterDNA({gp:gp, g:g, a:a, shots:sh, hits:hit, pim:pim, pm:pm, blk:0, tk:tk, gwg:0});
     vizCards = '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
       '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, dna, null, "This player")+'</div>'+
       '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
