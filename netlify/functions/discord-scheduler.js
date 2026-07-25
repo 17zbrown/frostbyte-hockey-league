@@ -111,6 +111,106 @@ function etParts(d = new Date()) {
 const fmtTime = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso)) + " ET";
 const fmtDay = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
 
+/* ---------- pickup (#pickup-games) lobby upkeep ----------
+   KEEP the summary + draft view builders below IN SYNC with discord-interactions.js (same embed shape
+   and custom_ids). Runs every tick: (1) for an open lobby, bump the public roster summary to the
+   bottom of #pickup-games (skip if it's already the last message) or expire it after 30 min with no
+   new signups; (2) for a full lobby whose captains nobody claimed within ~8 min, auto-assign the first
+   two signups as captains and start the draft. */
+const LFG_BRAND = 0xFFE500;
+const LFG_POS = [
+  { key: "C", label: "Center" }, { key: "LW", label: "Left Wing" }, { key: "RW", label: "Right Wing" },
+  { key: "LD", label: "Left Defense" }, { key: "RD", label: "Right Defense" }, { key: "G", label: "Goaltender" },
+];
+const LFG_POS_LABEL = LFG_POS.reduce((m, p) => (m[p.key] = p.label, m), {});
+const LFG_PER_POS = 2, LFG_FULL = LFG_POS.length * LFG_PER_POS;
+const lfgCount = (s, pos) => (s.signups || []).filter((x) => x.pos === pos).length;
+const lfgTeamNames = (s, side) => (s.teams[side] || []).map((id) => `<@${id}>`).join(", ") || "—";
+function lfgSummaryEmbed(s) {
+  const fields = LFG_POS.map((p) => {
+    const who = (s.signups || []).filter((x) => x.pos === p.key).map((x) => `<@${x.id}>`).join(", ");
+    return { name: `${p.label} (${lfgCount(s, p.key)}/${LFG_PER_POS})`, value: who || "_open_", inline: true };
+  });
+  return { title: "🏒 Pickup Lobby — who's in",
+    description: `**${(s.signups || []).length}/${LFG_FULL}** signed up. Run **/join** to grab an open spot — first ${LFG_FULL} (2 per position) locks the lobby and moves to its own channel.`,
+    color: LFG_BRAND, fields };
+}
+function lfgDraftView(lobby) {
+  const s = lobby.state;
+  const cur = s.turn === "A" ? s.captains[0] : s.captains[1];
+  const pool = (s.signups || []).filter((x) => x.id !== s.captains[0] && x.id !== s.captains[1] && !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
+  const options = pool.slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: LFG_POS_LABEL[x.pos], value: x.id }));
+  return { embeds: [{ title: "🧢 Captains' draft",
+    description: `<@${cur}> is on the clock — pick a player.\n\n**Team A** (<@${s.captains[0]}>): ${lfgTeamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${lfgTeamNames(s, "B")}`,
+    color: LFG_BRAND, footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` } }],
+    components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }] };
+}
+async function lfgDApi(method, path, body) {
+  const r = await fetch(`https://discord.com/api/v10${path}`, {
+    method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+async function lfgPatchLobby(id, body) {
+  await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(), body: JSON.stringify(body) }).catch(() => {});
+}
+async function lfgUpkeep(errors) {
+  const out = { refreshed: 0, expired: 0, autoCaptained: 0 };
+  if (!BOT) return out;
+  const now = Date.now();
+  // (1) open lobbies — keep the summary at the bottom, or expire after 30 min of no new signups
+  let open = [];
+  try { open = await sbGet("lfg_lobbies?status=eq.open&message_id=not.is.null&select=id,channel_id,message_id,state,updated_at"); }
+  catch (e) { errors.push(`lfg open load: ${String(e.message || e)}`); }
+  for (const lo of (open || [])) {
+    const st = lo.state || {};
+    const lastAt = st.lastSignupAt ? Date.parse(st.lastSignupAt) : Date.parse(lo.updated_at);
+    if (now - lastAt > 30 * 60 * 1000) {
+      try { await lfgDApi("PATCH", `/channels/${lo.channel_id}/messages/${lo.message_id}`, { embeds: [{ title: "⌛ Pickup lobby expired", description: "No new signups for a while — run `/join` to start a fresh one.", color: LFG_BRAND }] }); } catch (e) {}
+      await lfgPatchLobby(lo.id, { status: "expired" });
+      out.expired++; continue;
+    }
+    let last;
+    try { const arr = await lfgDApi("GET", `/channels/${lo.channel_id}/messages?limit=1`); last = arr && arr[0]; } catch (e) { continue; }
+    if (!last || last.id === lo.message_id) continue;   // already the most recent — nothing to do
+    let posted;
+    try { posted = await lfgDApi("POST", `/channels/${lo.channel_id}/messages`, { embeds: [lfgSummaryEmbed(st)], allowed_mentions: { parse: [] } }); }
+    catch (e) { errors.push(`lfg repost: ${String(e.message || e)}`); continue; }
+    if (!posted || !posted.id) continue;
+    await lfgPatchLobby(lo.id, { message_id: posted.id });
+    try { await lfgDApi("DELETE", `/channels/${lo.channel_id}/messages/${lo.message_id}`); } catch (e) {}
+    out.refreshed++;
+  }
+  // (2) full lobbies with no captains claimed for ~8 min — auto-assign the first two signups + draft
+  let awaiting = [];
+  try { awaiting = await sbGet("lfg_lobbies?status=eq.captains&thread_id=not.is.null&select=id,thread_id,state,updated_at"); }
+  catch (e) { errors.push(`lfg captains load: ${String(e.message || e)}`); }
+  for (const lo of (awaiting || [])) {
+    const st = lo.state || {};
+    const filledAt = st.filledAt ? Date.parse(st.filledAt) : Date.parse(lo.updated_at);
+    if (now - filledAt < 8 * 60 * 1000) continue;
+    const ids = (st.signups || []).map((x) => x.id);
+    const have = st.captains || [];
+    const capA = have[0] || ids[0];
+    const capB = have[1] || ids.find((id) => id !== capA);
+    if (!capA || !capB) continue;
+    st.captains = [capA, capB];
+    st.teams = { A: [capA], B: [capB] };
+    st.order = ["A", "B", "B", "A", "A", "B", "B", "A", "A", "B"];
+    st.pickIndex = 0; st.turn = "A";
+    await lfgPatchLobby(lo.id, { state: st, status: "drafting", updated_at: new Date().toISOString() });
+    try {
+      const dv = lfgDraftView({ id: lo.id, state: st });
+      await lfgDApi("POST", `/channels/${lo.thread_id}/messages`, { content: `🧢 No one claimed **/captain**, so the first two signups are your captains: <@${capA}> (Team A) & <@${capB}> (Team B). Draft time!`, embeds: dv.embeds, components: dv.components });
+    } catch (e) { errors.push(`lfg autocap post: ${String(e.message || e)}`); }
+    out.autoCaptained++;
+  }
+  return out;
+}
+
 export default async (req) => {
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
   // ?run=casework|signups bypasses the time gate for a manual check; &dry=1 computes without posting.
@@ -121,6 +221,9 @@ export default async (req) => {
   // take the game reminders down with it. Both feed the ok/errCount record the Automations chip reads.
   const now = new Date(), et = etParts(now), sum = { errors: [] };
   try {
+    // pickup-lobby upkeep runs every tick, independent of the league season (there may be none yet)
+    sum.lfg = await lfgUpkeep(sum.errors);
+
     const seasons = await sbGet("seasons?select=id,number&order=number.desc&limit=1");
     const season = seasons[0];
     if (!season) return json({ skipped: "no season" });

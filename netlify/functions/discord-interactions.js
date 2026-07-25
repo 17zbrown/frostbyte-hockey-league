@@ -1,12 +1,13 @@
 // Discord interactions endpoint for the all-in-Discord #pickup-games pickup system.
-// Flow: /join -> players join a position (2 per position, 12 total) -> snake draft between the two
-// captains -> server veto -> a private lobby code is handed off. On fill, a dedicated per-lobby
-// CHANNEL is spun up (under the "Pickup Lobbies" category) where the draft + game live; it links the
-// club-search stats page and carries a Delete button so staff can remove it once the box score is in.
-// Every step edits its own message in place (UPDATE_MESSAGE). State lives in lfg_lobbies; the room
-// channel id is stashed in the thread_id column. (/lfg is still accepted as a legacy alias.)
+// Flow: each player runs /join and picks a position from a private (ephemeral) picker that shows the
+// open spots. A public roster SUMMARY in #pickup-games updates as people join and gets bumped to the
+// bottom (discord-scheduler keeps it there and expires an idle lobby). On the 12th signup a dedicated
+// CHANNEL is spun up (under "Pickup Lobbies") with a full how-to briefing; two players run /captain to
+// volunteer (first two become the captains — discord-scheduler auto-assigns the first two signups if
+// nobody claims it), then the captains' snake draft -> server pick -> a private lobby code.
+// State lives in lfg_lobbies: the summary message id in message_id, the room channel id in thread_id.
 //
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. Node 18+ (global fetch). Netlify Functions v2 (ESM).
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN. Node 18+ (global fetch). ESM.
 // The interaction PUBLIC KEY is not a secret (Discord uses it so anyone can verify its signatures),
 // so it is inlined; update it only if the Discord application's key is regenerated.
 
@@ -15,7 +16,7 @@ import crypto from "node:crypto";
 const PUBLIC_KEY = "4a2af92fd2cdfa5fdad8d2f1e3fd2eb9e8e17f76dc2c82a154491ebabac3d369";
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const BOT = process.env.DISCORD_BOT_TOKEN;   // for spinning up the per-lobby channel on fill (+ its delete)
+const BOT = process.env.DISCORD_BOT_TOKEN;   // for the public summary + spinning up the per-lobby channel
 const CLUB_SEARCH = "chelgamingleague.com/#/hub/statsmgr";   // staff stats-manager (add game by club search)
 
 const POS = [
@@ -72,6 +73,18 @@ async function sbGetLobby(id) {
   const rows = await r.json();
   return Array.isArray(rows) ? rows[0] : null;
 }
+// the open lobby (signup phase) for a channel, or null — read-only, used by /join to show live counts
+async function sbGetOpenLobby(channelId) {
+  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?channel_id=eq.${encodeURIComponent(channelId)}&status=eq.open&select=*&order=updated_at.desc&limit=1`, withTimeout({ headers: sbHead() }));
+  const rows = await r.json().catch(() => []);
+  return Array.isArray(rows) ? rows[0] : null;
+}
+// the lobby whose per-lobby room channel is `channelId` and is still awaiting captains, or null
+async function sbGetRoomLobby(channelId, status) {
+  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?thread_id=eq.${encodeURIComponent(channelId)}&status=eq.${status}&select=*&limit=1`, withTimeout({ headers: sbHead() }));
+  const rows = await r.json().catch(() => []);
+  return Array.isArray(rows) ? rows[0] : null;
+}
 // optimistic compare-and-swap on updated_at so two simultaneous clicks can't clobber each other
 async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&updated_at=eq.${encodeURIComponent(prevUpdatedAt)}`, withTimeout({
@@ -82,10 +95,15 @@ async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) && rows.length ? rows[0] : null;   // null => CAS lost, caller retries
 }
-// best-effort: stash the draft thread id on the lobby (draft still works via lobby id if this misses)
+// best-effort: stash the room channel id on the lobby (draft still works via lobby id if this misses)
 async function sbStashThread(id, threadId) {
   await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(),
     body: JSON.stringify({ thread_id: threadId }), signal: AbortSignal.timeout(1200) }).catch(() => {});
+}
+// best-effort: remember the public summary's message id so discord-scheduler can bump/expire it.
+async function sbStashMessage(id, messageId) {
+  await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(),
+    body: JSON.stringify({ message_id: messageId }), signal: AbortSignal.timeout(1200) }).catch(() => {});
 }
 // Sign-up gate: does this Discord user have a Chel Gaming website account (a profile linked to their id)?
 async function sbHasAccount(discordId) {
@@ -116,50 +134,70 @@ async function sbIsStatsStaff(discordId) {
   } catch (e) { return false; }
 }
 
-/* ---------- Discord REST (bot token) — only used to spin off the per-lobby draft thread ---------- */
+/* ---------- Discord REST (bot token) — the public summary + per-lobby channel ---------- */
 async function dApi(method, path, body, ms) {
   const r = await fetch(`https://discord.com/api/v10${path}`, {
     method, headers: { Authorization: `Bot ${BOT}`, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(ms || 1600),
+    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(ms || 1600),
   });
-  if (!r.ok) throw new Error(`${path} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
-  return r.json();
+  if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
+  const t = await r.text();               // tolerate 204 (DELETE) with an empty body
+  return t ? JSON.parse(t) : null;
 }
-// On fill: spin up a dedicated channel for this lobby (under the Pickup Lobbies category if configured),
-// drop the draft in it, ping the 12 players. Returns the channel id (also stashed on lobby.thread_id so
-// draftView shows the club-search link + Delete button). Throws if the channel can't be made — the
-// caller then falls back to drafting in #pickup-games with no room extras.
+// Keep the public roster summary current + at the bottom of #pickup-games: edit it in place if it's
+// still the last message, otherwise repost it at the bottom (deleting the buried one). Returns the
+// live message id.
+async function ensureSummary(channelId, state, curMsgId) {
+  const view = summaryView(state);
+  let last = null;
+  try { const arr = await dApi("GET", `/channels/${channelId}/messages?limit=1`, undefined, 1400); last = arr && arr[0]; } catch (e) {}
+  if (curMsgId && last && last.id === curMsgId) {
+    try { await dApi("PATCH", `/channels/${channelId}/messages/${curMsgId}`, { embeds: view.embeds }, 1400); return curMsgId; } catch (e) {}
+  }
+  let posted;
+  try { posted = await dApi("POST", `/channels/${channelId}/messages`, { embeds: view.embeds, allowed_mentions: { parse: [] } }, 1600); }
+  catch (e) { return curMsgId; }
+  if (curMsgId) { dApi("DELETE", `/channels/${channelId}/messages/${curMsgId}`, undefined, 1400).catch(() => {}); }  // remove the buried one (fire-and-forget)
+  return posted && posted.id ? posted.id : curMsgId;
+}
+// On fill: create the dedicated lobby channel (under the Pickup Lobbies category if configured) and
+// post the how-to briefing + Delete button, pinging the 12. Returns the channel id. Throws if the
+// channel can't be made (caller still confirms the signup).
 async function launchLobbyRoom(lobby, guildId, categoryId) {
   const shortId = String(lobby.id).slice(0, 4).toLowerCase();
   const body = { name: `pickup-${shortId}`, type: 0,
-    topic: "Pickup lobby — draft, play, then report the box score by club search and delete this channel." };
+    topic: "Pickup lobby — run /captain to set captains, draft, play, report by club search, then delete." };
   if (categoryId) body.parent_id = categoryId;
   const ch = await dApi("POST", `/guilds/${guildId}/channels`, body);
-  lobby.thread_id = ch.id;   // makes draftView render the club-search line + Delete button
   const ids = (lobby.state.signups || []).map((p) => p.id);
   const pings = ids.map((id) => `<@${id}>`).join(" ");
-  const dv = draftView(lobby);
   await dApi("POST", `/channels/${ch.id}/messages`, {
-    content: `${pings}\n**Your lobby is full — draft time!** 🏒 Captains, make your picks below.`,
-    embeds: dv.embeds, components: dv.components, allowed_mentions: { users: ids.slice(0, 100) },
+    content: `${pings}\n**Lobby's full — let's set it up! 🏒**`,
+    embeds: [instructionsEmbed()],
+    components: [{ type: 1, components: [{ type: 2, style: 4, label: "🗑 Delete lobby", custom_id: `lfg:closelobby:${lobby.id}` }] }],
+    allowed_mentions: { users: ids.slice(0, 100) },
   });
   return ch.id;
 }
-const filledView = (roomId) => ({
-  embeds: [{ title: "🔒 Lobby full — 12/12",
-    description: `Your lobby has its own channel: <#${roomId}>\n\nAnyone can run \`/join\` to start the next lobby.`,
-    color: BRAND }],
-  components: [],
-});
-// Extra bits shown in the dedicated lobby channel (never in the #pickup-games fallback): a club-search
-// link so staff can enter the box score, and a Delete button to clean the channel up afterward.
-function roomExtras(lobby) {
-  if (!lobby.thread_id) return { line: "", rows: [] };
+function instructionsEmbed() {
   return {
-    line: `\n\n📊 **After the game:** enter the box score by **club search** at ${CLUB_SEARCH}, then press **Delete lobby** to clean up.`,
-    rows: [{ type: 1, components: [{ type: 2, style: 4, label: "🗑 Delete lobby", custom_id: `lfg:closelobby:${lobby.id}` }] }],
+    title: "🏒 Pickup lobby — how to run it",
+    description:
+      "**1 · Captains** — two of you run **/captain** to volunteer. The first two become **Team A** & **Team B**. " +
+      "(Nobody claims it within ~8 min? The first two who signed up are set automatically.)\n\n" +
+      "**2 · Mini draft** — the captains take turns picking players from a dropdown (snake order) until both teams are full.\n\n" +
+      "**3 · Server & code** — Team A's captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
+      "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
+      `**5 · Stats** — after the game, statistics staff enter the box score by **club search** at ${CLUB_SEARCH}.\n\n` +
+      "**6 · Done** — staff press **🗑 Delete lobby** below to clear this channel (it also auto-clears later).",
+    color: BRAND,
   };
 }
+const fullSummaryEmbed = (roomId) => ({
+  title: "🔒 Lobby full — 12/12",
+  description: `Head to <#${roomId}> to set captains and draft.\n\nRun **/join** anytime to start the next lobby.`,
+  color: BRAND,
+});
 
 /* ---------- state helpers ---------- */
 const nameOf = (interaction) => {
@@ -167,6 +205,7 @@ const nameOf = (interaction) => {
   const u = m.user || interaction.user || {};
   return m.nick || u.global_name || u.username || "Player";
 };
+const userIdOf = (interaction) => (interaction.member && interaction.member.user && interaction.member.user.id) || (interaction.user && interaction.user.id);
 const posCount = (s, pos) => (s.signups || []).filter((x) => x.pos === pos).length;
 const teamNames = (s, side) => (s.teams[side] || []).map((id) => `<@${id}>`).join(", ") || "—";
 const draftOrder = () => ["A", "B", "B", "A", "A", "B", "B", "A", "A", "B"]; // snake for 2 teams x 10 picks
@@ -175,28 +214,38 @@ const remainingPool = (s) => (s.signups || []).filter((x) => x.id !== s.captains
   !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
 
 /* ---------- view builders ---------- */
-// Signup buttons are keyed by CHANNEL id (not lobby id) so /lfg can render instantly without a DB
-// round-trip; the lobby is created lazily (get-or-create) on the first button click.
-function signupView(channelId, state) {
-  const s = state;
+// The private per-player picker (ephemeral): six position buttons showing what's open, plus Leave if
+// they're already in. Buttons are keyed by CHANNEL id so the lobby is created lazily on first click.
+function pickerView(channelId, s, userId) {
+  const mine = (s.signups || []).find((x) => x.id === userId);
+  return {
+    embeds: [{
+      title: "🏒 Pick your position",
+      description: (mine ? `You're in at **${POS_LABEL[mine.pos]}**. Press **Leave** to drop, then /join again to switch.` : "Tap your position to jump in.") +
+        `\n\n**${(s.signups || []).length}/${FULL}** signed up — the number on each button is how many spots are left.`,
+      color: BRAND,
+    }],
+    components: [
+      { type: 1, components: POS.slice(0, 5).map((p) => ({ type: 2, style: 1, label: `${p.label} (${PER_POS - posCount(s, p.key)} left)`, custom_id: `lfg:join:${channelId}:${p.key}`, disabled: posCount(s, p.key) >= PER_POS })) },
+      { type: 1, components: [
+        { type: 2, style: 1, label: `Goaltender (${PER_POS - posCount(s, "G")} left)`, custom_id: `lfg:join:${channelId}:G`, disabled: posCount(s, "G") >= PER_POS },
+        { type: 2, style: 2, label: "Leave", custom_id: `lfg:leave:${channelId}`, disabled: !mine },
+      ] },
+    ],
+  };
+}
+// The public roster summary (no buttons) that lives in #pickup-games and gets bumped to the bottom.
+function summaryView(s) {
   const fields = POS.map((p) => {
     const who = (s.signups || []).filter((x) => x.pos === p.key).map((x) => `<@${x.id}>`).join(", ");
     return { name: `${p.label} (${posCount(s, p.key)}/${PER_POS})`, value: who || "_open_", inline: true };
   });
-  const rows = [
-    { type: 1, components: POS.slice(0, 5).map((p) => ({ type: 2, style: 1, label: `${p.key} (${posCount(s, p.key)}/${PER_POS})`, custom_id: `lfg:join:${channelId}:${p.key}`, disabled: posCount(s, p.key) >= PER_POS })) },
-    { type: 1, components: [
-      { type: 2, style: 1, label: `G (${posCount(s, "G")}/${PER_POS})`, custom_id: `lfg:join:${channelId}:G`, disabled: posCount(s, "G") >= PER_POS },
-      { type: 2, style: 2, label: "Leave", custom_id: `lfg:leave:${channelId}` },
-    ] },
-  ];
   return {
     embeds: [{
-      title: "🏒 Pickup Lobby — signups open",
-      description: `Click your position to join. First **${FULL}** players (**${PER_POS} per position**) locks the lobby and starts the captains' draft.\n\n**${(s.signups || []).length}/${FULL}** in.`,
+      title: "🏒 Pickup Lobby — who's in",
+      description: `**${(s.signups || []).length}/${FULL}** signed up. Run **/join** to grab an open spot — first ${FULL} (2 per position) locks the lobby and moves to its own channel.`,
       color: BRAND, fields,
     }],
-    components: rows,
   };
 }
 function draftView(lobby) {
@@ -204,67 +253,84 @@ function draftView(lobby) {
   const pool = remainingPool(s);
   const capName = `<@${currentCaptain(s)}>`;
   const options = pool.slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
-  const rx = roomExtras(lobby);
   return {
     embeds: [{
       title: "🧢 Captains' draft",
-      description: `${capName} is on the clock — pick a player.\n\n**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}` + rx.line,
+      description: `${capName} is on the clock — pick a player.\n\n**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
       color: BRAND,
       footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` },
     }],
-    components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }].concat(rx.rows),
+    components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }],
   };
 }
 function serverView(lobby) {
   const s = lobby.state;
-  const rx = roomExtras(lobby);
   return {
     embeds: [{
       title: "🌐 Pick the server",
-      description: `Teams are set. <@${s.captains[0]}>, choose the server.\n\n**Team A**: ${teamNames(s, "A")}\n**Team B**: ${teamNames(s, "B")}` + rx.line,
+      description: `Teams are set. <@${s.captains[0]}>, choose the server.\n\n**Team A**: ${teamNames(s, "A")}\n**Team B**: ${teamNames(s, "B")}`,
       color: BRAND,
     }],
-    components: [{ type: 1, components: SERVERS.map((sv, i) => ({ type: 2, style: 1, label: sv, custom_id: `lfg:server:${lobby.id}:${i}` })) }].concat(rx.rows),
+    components: [{ type: 1, components: SERVERS.map((sv, i) => ({ type: 2, style: 1, label: sv, custom_id: `lfg:server:${lobby.id}:${i}` })) }],
   };
 }
 function doneView(lobby) {
   const s = lobby.state;
-  const rx = roomExtras(lobby);
   return {
     embeds: [{
       title: "✅ Lobby ready — good luck out there",
-      description: `**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, import your stats at **chelgamingleague.com/#/pickup-import** — pickup stats show on your profile (separate from league play).` + rx.line,
+      description: `**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, staff enter the box score by **club search** at ${CLUB_SEARCH} (players can also self-import at chelgamingleague.com/#/pickup-import).`,
       color: BRAND,
       footer: { text: "Set a private match with this code on the chosen server." },
     }],
-    components: rx.rows,
+    components: [],
   };
 }
 
-/* ---------- mutations (return {view,status,state} to render, or {error} ephemeral) ---------- */
+/* ---------- mutations (return { status, state, ... } to render, or { error } ephemeral) ---------- */
 function applyJoin(lobby, userId, name, pos) {
   const s = lobby.state;
   if (!POS_LABEL[pos]) return { error: "Unknown position." };
-  if ((s.signups || []).some((x) => x.id === userId)) return { error: "You're already in this lobby — use **Leave** to switch positions." };
-  if (posCount(s, pos) >= PER_POS) return { error: `${POS_LABEL[pos]} is full.` };
+  if ((s.signups || []).some((x) => x.id === userId)) return { error: "You're already in this lobby — press **Leave** first to switch positions." };
+  if (posCount(s, pos) >= PER_POS) return { error: `${POS_LABEL[pos]} is full — pick another spot.` };
   s.signups = (s.signups || []).concat([{ id: userId, name, pos }]);
   if (s.signups.length >= FULL) {
-    // lock and open the draft: first two signups captain the two teams
-    s.captains = [s.signups[0].id, s.signups[1].id];
-    s.teams = { A: [s.captains[0]], B: [s.captains[1]] };
-    s.order = draftOrder();
-    s.pickIndex = 0;
-    s.turn = s.order[0];
-    lobby.status = "drafting";
-    return { view: draftView(lobby), status: "drafting", state: s };
+    lobby.status = "captains";
+    s.filledAt = new Date().toISOString();
+    s.captains = [];
+    return { status: "captains", state: s, filled: true };
   }
-  return { view: signupView(lobby.channel_id, s), status: "open", state: s };
+  return { status: "open", state: s };
 }
 function applyLeave(lobby, userId) {
   const s = lobby.state;
   if (!(s.signups || []).some((x) => x.id === userId)) return { error: "You're not in this lobby." };
   s.signups = s.signups.filter((x) => x.id !== userId);
-  return { view: signupView(lobby.channel_id, s), status: "open", state: s };
+  return { status: "open", state: s };
+}
+// Set up the snake draft once both captains are known (from /captain or the scheduler's fallback).
+function startDraft(s, capA, capB) {
+  s.captains = [capA, capB];
+  s.teams = { A: [capA], B: [capB] };
+  s.order = draftOrder();
+  s.pickIndex = 0;
+  s.turn = s.order[0];
+  return s;
+}
+// /captain: volunteer. First volunteer -> Team A, second -> Team B (which starts the draft).
+function applyCaptain(lobby, userId) {
+  const s = lobby.state;
+  if (!(s.signups || []).some((x) => x.id === userId)) return { error: "Only players signed up in this lobby can be captains." };
+  s.captains = s.captains || [];
+  if (s.captains.includes(userId)) return { error: "You're already a captain." };
+  if (s.captains.length >= 2) return { error: "Both captains are already set." };
+  s.captains.push(userId);
+  if (s.captains.length === 2) {
+    startDraft(s, s.captains[0], s.captains[1]);
+    lobby.status = "drafting";
+    return { status: "drafting", state: s, started: true };
+  }
+  return { status: "captains", state: s, started: false };
 }
 function applyPick(lobby, userId, pickId) {
   const s = lobby.state;
@@ -289,23 +355,22 @@ function applyServer(lobby, userId, idx) {
 }
 
 /* ---------- component dispatch with CAS retry ---------- */
-const SIGNUP_ACTIONS = { join: 1, leave: 1, cancel: 1 };
+const SIGNUP_ACTIONS = { join: 1, leave: 1 };
+const CLOSED_STATES = { cancelled: 1, done: 1, expired: 1, closed: 1 };
 async function handleComponent(interaction) {
   const parts = (interaction.data.custom_id || "").split(":");   // lfg:<action>:<channelId|lobbyId>:<arg?>
   const action = parts[1], key = parts[2], arg = parts[3];
-  const userId = (interaction.member && interaction.member.user && interaction.member.user.id) || (interaction.user && interaction.user.id);
+  const userId = userIdOf(interaction);
   const name = nameOf(interaction);
   const guildId = interaction.guild_id || "";
 
-  // Only players with a Chel Gaming website account may sign up. Checked before any lobby is touched,
-  // so a non-account click never even creates a lobby.
+  // Only players with a Chel Gaming website account may sign up. Checked before any lobby is touched.
   if (action === "join" && !(await sbHasAccount(userId))) {
-    return ephemeral("You need a Chel Gaming account to join pickup games — sign in at **chelgamingleague.com** first (it takes 10 seconds with Discord), then come back and pick your position.");
+    return ephemeral("You need a Chel Gaming account to join pickup games — sign in at **chelgamingleague.com** first (10 seconds with Discord), then run /join again.");
   }
 
-  // Delete-lobby button (in the dedicated lobby channel): staff-only. Marks the lobby closed and edits
-  // the message; discord-sync deletes the channel on its next sweep (avoids the "respond to an
-  // interaction whose channel you just deleted" race). key == lobby id here.
+  // Delete-lobby button (in the lobby channel): staff-only. Marks it closed; discord-sync removes the
+  // channel on its next sweep (avoids responding to an interaction whose channel you just deleted).
   if (action === "closelobby") {
     if (!(await sbIsStatsStaff(userId))) {
       return ephemeral("Only statistics staff or a commissioner can delete a lobby — it's tied to entering the box score. If you think this one should be removed, open a ticket on **chelgamingleague.com** and staff will handle it.");
@@ -327,18 +392,16 @@ async function handleComponent(interaction) {
     } else {
       lobby = await sbGetLobby(key);
     }
-    if (!lobby || lobby.status === "cancelled" || lobby.status === "done") {
+    if (!lobby || CLOSED_STATES[lobby.status]) {
       return ephemeral("This lobby has closed. Run `/join` to start a fresh one.");
     }
     let out;
     if (action === "join") {
-      if (lobby.status !== "open") return ephemeral("Signups are closed — the draft has already started.");
+      if (lobby.status !== "open") return ephemeral("Signups are closed — the lobby is already full.");
       out = applyJoin(lobby, userId, name, arg);
     } else if (action === "leave") {
-      if (lobby.status !== "open") return ephemeral("Signups are closed — the draft has already started.");
+      if (lobby.status !== "open") return ephemeral("Signups are closed — the lobby is already full.");
       out = applyLeave(lobby, userId);
-    } else if (action === "cancel") {
-      out = { view: { embeds: [{ title: "Lobby cancelled", description: `Cancelled by <@${userId}>. Run \`/join\` to start again.`, color: BRAND }], components: [] }, status: "cancelled", state: lobby.state };
     } else if (action === "pick") {
       out = applyPick(lobby, userId, (interaction.data.values || [])[0]);
     } else if (action === "server") {
@@ -346,36 +409,72 @@ async function handleComponent(interaction) {
     } else return ephemeral("Unknown action.");
 
     if (out.error) return ephemeral(out.error);
+    if (action === "join" || action === "leave") out.state.lastSignupAt = new Date().toISOString();
 
     const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, out.status);
     if (!saved) continue;   // CAS lost — another click landed first; re-read and retry
 
-    // If this join just filled the lobby, spin up its own channel and free the signup channel. Only the
-    // click that won the CAS save reaches here, so the channel is created exactly once.
-    if (action === "join" && out.status === "drafting" && BOT && guildId) {
-      try {
-        const categoryId = await sbGetConfig("pickup_lobby_category_id");   // Pickup Lobbies category (ensured by discord-sync)
-        const roomId = await launchLobbyRoom({ id: lobby.id, state: out.state }, guildId, categoryId);
-        sbStashThread(lobby.id, roomId);   // best-effort persist of the room channel id (thread_id column)
-        return respond({ type: UPDATE, data: filledView(roomId) });
-      } catch (e) {
-        // couldn't create the channel — gracefully run the draft here in #pickup-games instead
-        return respond({ type: UPDATE, data: out.view });
+    // Signup actions: keep the public summary fresh + at the bottom; on the 12th, spin up the room.
+    if (action === "join" || action === "leave") {
+      if (out.filled && BOT && guildId) {
+        try {
+          const categoryId = await sbGetConfig("pickup_lobby_category_id");
+          const roomId = await launchLobbyRoom({ id: lobby.id, state: out.state }, guildId, categoryId);
+          sbStashThread(lobby.id, roomId);
+          if (lobby.message_id) { try { await dApi("PATCH", `/channels/${lobby.channel_id}/messages/${lobby.message_id}`, { embeds: [fullSummaryEmbed(roomId)] }, 1400); } catch (e) {} }
+          return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby full!", description: `You're in — head to <#${roomId}> to set captains and draft.`, color: BRAND }], components: [] } });
+        } catch (e) {
+          return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby full — 12/12", description: "You're in! Captains, set up the draft in the lobby channel.", color: BRAND }], components: [] } });
+        }
       }
+      let newMsgId = lobby.message_id;
+      if (BOT) { try { newMsgId = await ensureSummary(lobby.channel_id, out.state, lobby.message_id); } catch (e) {} }
+      if (newMsgId && newMsgId !== lobby.message_id) sbStashMessage(lobby.id, newMsgId);
+      const confirm = action === "join"
+        ? { title: "✅ You're in", description: `Signed up at **${POS_LABEL[arg]}**. Watch <#${lobby.channel_id}> for the roster — run /join again to switch or leave.`, color: BRAND }
+        : { title: "👋 You left the lobby", description: "Run /join again anytime to jump back in.", color: BRAND };
+      return respond({ type: UPDATE, data: { embeds: [confirm], components: [] } });
     }
+
+    // Draft / server actions edit the draft message in the lobby channel.
     return respond({ type: UPDATE, data: out.view });
   }
   return ephemeral("The lobby was busy — try that again.");
 }
 
-/* ---------- slash command ---------- */
-const EMPTY_STATE = { signups: [], captains: [], teams: { A: [], B: [] }, turn: null, server: null, code: null };
+/* ---------- slash commands ---------- */
 async function handleCommand(interaction) {
   const cmd = interaction.data.name || "";
-  if (cmd !== "join" && cmd !== "lfg") return ephemeral("Unknown command.");   // /lfg kept as a legacy alias
-  // Respond INSTANTLY with a fresh signup card — no DB round-trip, so it never risks Discord's 3s
-  // timeout on a cold start. The lobby is created on the first click via get-or-create.
-  return respond({ type: REPLY, data: signupView(interaction.channel_id, EMPTY_STATE) });
+  if (cmd === "join" || cmd === "lfg") return handleJoin(interaction);   // /lfg kept as a legacy alias
+  if (cmd === "captain") return handleCaptain(interaction);
+  return ephemeral("Unknown command.");
+}
+// /join -> a private position picker showing what's open. Reads the lobby (no create) so counts are live.
+async function handleJoin(interaction) {
+  const channelId = interaction.channel_id;
+  const userId = userIdOf(interaction);
+  let state = { signups: [] };
+  try { const lobby = await sbGetOpenLobby(channelId); if (lobby && lobby.state) state = lobby.state; } catch (e) {}
+  return respond({ type: REPLY, data: { ...pickerView(channelId, state, userId), flags: EPHEMERAL } });
+}
+// /captain (in a full lobby's channel) -> volunteer as a captain; the second volunteer starts the draft.
+async function handleCaptain(interaction) {
+  const channelId = interaction.channel_id;
+  const userId = userIdOf(interaction);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lobby = await sbGetRoomLobby(channelId, "captains");
+    if (!lobby) return ephemeral("There's no lobby waiting on captains here — run **/captain** inside a full lobby's channel.");
+    const out = applyCaptain(lobby, userId);
+    if (out.error) return ephemeral(out.error);
+    const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, out.status);
+    if (!saved) continue;   // CAS lost — retry
+    if (out.started) {
+      const dv = draftView({ id: lobby.id, state: out.state });
+      return respond({ type: REPLY, data: { content: `🧢 Captains set: <@${out.state.captains[0]}> (Team A) & <@${out.state.captains[1]}> (Team B). Draft time!`, embeds: dv.embeds, components: dv.components } });
+    }
+    return respond({ type: REPLY, data: { content: `🧢 <@${userId}> is **Team A captain**. One more — someone else run **/captain** to take **Team B** and start the draft.` } });
+  }
+  return ephemeral("The lobby was busy — try /captain again.");
 }
 
 const DIAG = "lfgdiag9x";
@@ -422,6 +521,6 @@ export const handler = async (event) => {
   }
 };
 
-// Exposed for local unit tests only; Netlify invokes the default export.
-export const _internals = { verifySignature, applyJoin, applyLeave, applyPick, applyServer,
-  signupView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };
+// Exposed for local unit tests only; Netlify invokes the named handler export.
+export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
+  startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };

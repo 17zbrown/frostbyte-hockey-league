@@ -316,7 +316,10 @@ export default async (req) => {
     // replaces the old /lfg. (The handler still accepts an "lfg" name as a harmless safety net.)
     if (BOT && GUILD && regMode === "commands") {
       const app = await dApi("GET", `/applications/@me`);
-      const cmds = [{ name: "join", type: 1, description: "Join or start a pickup game lobby" }];
+      const cmds = [
+        { name: "join", type: 1, description: "Join or start a pickup game lobby" },
+        { name: "captain", type: 1, description: "Volunteer as a captain — run in a full pickup lobby's channel" },
+      ];
       const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
       return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
         { status: 200, headers: { "content-type": "application/json" } });
