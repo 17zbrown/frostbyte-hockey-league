@@ -105,6 +105,14 @@ async function resolveProfile(entry, cache) {
 }
 
 export const handler = async (event) => {
+  // temp diag: is the residential proxy set, and does an EA call through it work?
+  if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag === "puproxy9") {
+    const out = { proxySet: !!PROXY, node: process.version, platform: PLATFORM };
+    try { const d = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=test`);
+      out.eaTest = "ok"; out.shape = Array.isArray(d) ? ("array len " + d.length) : ("object keys " + Object.keys(d || {}).length); }
+    catch (e) { out.eaTest = String(e.message || e); }
+    return reply(out);
+  }
   if (event.httpMethod !== "POST") return reply({ error: "POST only" }, 405);
   if (!SB_URL || !SB_KEY) return reply({ error: "server not configured" }, 500);
   const h = event.headers || {};
