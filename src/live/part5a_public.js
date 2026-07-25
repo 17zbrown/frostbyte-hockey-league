@@ -1364,7 +1364,9 @@ CG.ROUTES.player = function(pid, qs){
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Team history</h3></div><div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("users",15)+'</span><span><b>'+esc(t.name)+'</b><p>Signed '+esc(p.joined)+' · Season 1 original roster</p></span></div></div>';
   }
   body += '</div>';
-  return head + tabs + body;
+  /* Pickup stats (from #lfg games) render here, filled async in AFTER.player. Kept visually and
+     structurally separate from league play — never folded into the league totals above. */
+  return head + tabs + body + '<div id="pickupSection"></div>';
 };
 /* Twitch broadcast card on the profile: watch link for everyone; the profile's own
    player also gets Go Live / End Stream + channel controls. Omitted entirely when
@@ -1423,6 +1425,40 @@ CG.AFTER.player = function(pid, qs){
   });
   var twC = $("#twChange");
   if (twC) twC.addEventListener("click", CG.setTwitchHandle);
+
+  /* Pickup stats — fetched on demand and rendered into #pickupSection. Reads the isolated
+     pickup_stats table only; nothing here touches league totals, eligibility, or overall. */
+  var box = document.getElementById("pickupSection");
+  if (box && CG.sb){
+    CG.sb.from("pickup_stats")
+      .select("goals,assists,shots,hits,pim,plus_minus,is_goalie,saves,shots_against,goals_against,team_side,pickup_games(club_a,club_b,score_a,score_b,played_at,went_ot)")
+      .eq("profile_id", pid)
+      .then(function(r){
+        var rows = (r && r.data) || [];
+        if (!rows.length) return;   /* no pickup games → show nothing */
+        var g=0,a=0,sh=0,hit=0,pim=0,sv=0,sa=0,ga=0, gGames=0, gp=rows.length;
+        rows.forEach(function(x){ g+=x.goals||0; a+=x.assists||0; sh+=x.shots||0; hit+=x.hits||0; pim+=x.pim||0;
+          if (x.is_goalie){ gGames++; sv+=x.saves||0; sa+=x.shots_against||0; ga+=x.goals_against||0; } });
+        var mostlyG = gGames > gp/2;
+        var kpi = function(n,l){ return '<div class="kpi" style="cursor:default"><b class="num">'+n+'</b><span>'+l+'</span></div>'; };
+        var stats = mostlyG
+          ? kpi(gp,"Pickup GP")+kpi(sa?(1-ga/sa).toFixed(3).replace(/^0/,""):"—","Save %")+kpi(sv,"Saves")+kpi(ga,"GA")
+          : kpi(gp,"Pickup GP")+kpi(g,"Goals")+kpi(a,"Assists")+kpi(g+a,"Points")+kpi(hit,"Hits");
+        var log = rows.slice().sort(function(x,y){
+            return ((y.pickup_games&&y.pickup_games.played_at)||"").localeCompare((x.pickup_games&&x.pickup_games.played_at)||""); })
+          .map(function(x){
+            var gm = x.pickup_games||{}, when = gm.played_at ? CG.fmtDate(gm.played_at) : "";
+            var line = x.is_goalie ? ((x.saves||0)+" SV, "+(x.goals_against||0)+" GA") : ((x.goals||0)+"G "+(x.assists||0)+"A");
+            return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("chart",14)+'</span><span><b>'+esc(gm.club_a||"?")+" "+(gm.score_a||0)+"–"+(gm.score_b||0)+" "+esc(gm.club_b||"?")+(gm.went_ot?" (OT)":"")+'</b><p>'+line+" · Team "+esc(x.team_side||"?")+'</p></span><span class="nf-t">'+esc(when)+'</span></div>';
+          }).join("");
+        box.innerHTML = '<section class="sec-tight" style="padding-top:0"><div class="shell" style="max-width:960px">'+
+          '<div class="card" style="border-color:var(--line)"><div class="card-h"><h3>Pickup games</h3><span class="chip">Not league play</span></div>'+
+          '<div class="card-b"><p class="caption" style="margin:0 0 12px">From #lfg pickup games — shown for fun. These never count toward league totals, the 5-game minimum, draft/bid eligibility, or overall.</p>'+
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:10px">'+stats+'</div></div>'+
+          '<div class="card-b" style="border-top:1px solid var(--line)">'+log+'</div>'+
+          '</div></div></section>';
+      }, function(){});
+  }
 };
 
 /* ---------- STATS CENTRAL ---------- */

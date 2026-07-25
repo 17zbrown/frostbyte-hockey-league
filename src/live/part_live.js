@@ -1133,6 +1133,89 @@ CG.ROUTES.signin = function(){
 CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); }); };
 
 /* ================================================================
+   PICKUP STATS IMPORTER — search an EASHL club, pick a club_private
+   match, pull its box score into pickup_games/pickup_stats (isolated
+   from league play; display-only on profiles). Backend: /api/pickup-import.
+   ================================================================ */
+CG.ROUTES["pickup-import"] = function(){
+  var head = CG.pageHead("Pickup stats", "Import a pickup game",
+    "Played a pickup between two EASHL clubs? Search your club, pick the game from EA’s recent match list, and its box score attaches to each player’s profile as pickup stats — kept separate from league play (it never affects the 5-game minimum, eligibility, or overall).");
+  if (!CG.auth || !CG.auth.profile){
+    return head + '<div class="shell" style="max-width:620px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:56px 20px">'+
+      '<div class="e-art">'+CG.ic("user",22)+'</div><b>Sign in to import a game</b>'+
+      '<p>Importing is tied to your account.</p><a class="btn btn-chrome" style="margin-top:16px" href="#/signin">Sign in</a></div></div></div>';
+  }
+  return head + '<div class="shell" style="max-width:760px;padding-bottom:48px">'+
+    '<div class="card"><div class="card-b">'+
+      '<label class="fld" style="margin:0"><span>EASHL club name</span>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="puClub" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
+        '<button class="btn btn-chrome" id="puSearch">Search EA</button></div></label>'+
+      '<div id="puResults" style="margin-top:18px"></div>'+
+    '</div></div>'+
+    '<p class="caption" style="margin-top:14px">EA only keeps each club’s last few private matches, so import soon after playing. If a game has aged out or EA’s feed is down, a box-score screenshot import is the backup.</p>'+
+  '</div>';
+};
+CG.AFTER["pickup-import"] = function(){
+  var res = document.getElementById("puResults"); if (!res) return;
+  function api(payload){
+    return CG.sb.auth.getSession().then(function(s){
+      var tok = s && s.data && s.data.session && s.data.session.access_token;
+      if (!tok) throw new Error("Sign in again — no session token");
+      return fetch("/api/pickup-import", { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
+        body: JSON.stringify(payload) }).then(function(r){ return r.json(); });
+    });
+  }
+  var errBox = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
+  function doSearch(){
+    var name = (document.getElementById("puClub").value||"").trim();
+    if (name.length < 2){ CG.toast("Enter a club name","err"); return; }
+    res.innerHTML = '<p class="caption">Searching EA…</p>';
+    api({ action:"search", clubName:name }).then(function(o){
+      if (o.error){ res.innerHTML = errBox(o.error); return; }
+      var clubs = o.clubs||[];
+      if (!clubs.length){ res.innerHTML = '<div class="note">No clubs found for “'+esc(name)+'”. Check the exact spelling.</div>'; return; }
+      res.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick your club:</div>'+clubs.map(function(c){
+        return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+(c.memberCount?' · '+c.memberCount+' members':'')+'</button>';
+      }).join("");
+      res.querySelectorAll("[data-club]").forEach(function(b){ b.addEventListener("click", function(){ loadMatches(this.getAttribute("data-club"), this.getAttribute("data-cn")); }); });
+    }).catch(function(e){ res.innerHTML = errBox(e.message); });
+  }
+  function loadMatches(cid, cn){
+    res.innerHTML = '<p class="caption">Loading '+esc(cn)+'’s recent games…</p>';
+    api({ action:"matches", clubId:cid }).then(function(o){
+      if (o.error){ res.innerHTML = errBox(o.error); return; }
+      var ms = o.matches||[];
+      if (!ms.length){ res.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'. EA’s private feed can be empty on NHL 26 — a screenshot import is the backup.</div>'; return; }
+      res.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import:</div>'+ms.map(function(m){
+        var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
+        return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+          '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+m.a.score+' – '+m.b.score+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+
+          '<div class="caption">'+esc(when)+'</div></div>'+
+          '<button class="btn btn-chrome btn-sm" data-import="'+esc(m.matchId)+'" data-cid="'+esc(cid)+'">Import</button>'+
+        '</div></div>';
+      }).join("");
+      res.querySelectorAll("[data-import]").forEach(function(b){ b.addEventListener("click", function(){ doImport(this); }); });
+    }).catch(function(e){ res.innerHTML = errBox(e.message); });
+  }
+  function doImport(btn){
+    var mid = btn.getAttribute("data-import"), cid = btn.getAttribute("data-cid");
+    btn.disabled = true; btn.textContent = "Importing…";
+    api({ action:"import", clubId:cid, matchId:mid }).then(function(o){
+      btn.disabled = false; btn.textContent = "Import";
+      if (o.error){ CG.toast(o.error,"err"); return; }
+      var players = o.players||[], matched = players.filter(function(p){ return p.matched; }).length;
+      res.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Imported.</b> '+matched+' of '+players.length+' players matched to CGHL profiles'+(o.unmatched?' — '+o.unmatched+' unmatched (their EA name didn’t match a gamertag)':'')+'. Pickup stats now show on the matched profiles.</div>'+
+        '<div class="tasklist" style="margin-top:12px">'+players.map(function(p){
+          return '<div class="titem"><span class="t-dot '+(p.matched?"grn":"red")+'"></span><span style="flex:1">'+esc(p.name||"?")+' · Team '+esc(p.side)+' · '+p.goals+'G '+p.assists+'A'+(p.matched?'':' · <span class="caption">no profile</span>')+'</span></div>';
+        }).join("")+'</div>';
+      CG.toast("Pickup game imported","ok");
+    }).catch(function(e){ btn.disabled = false; btn.textContent = "Import"; CG.toast("Import failed: "+e.message,"err"); });
+  }
+  var sb = document.getElementById("puSearch"); if (sb) sb.addEventListener("click", doSearch);
+  var inp = document.getElementById("puClub"); if (inp) inp.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); doSearch(); } });
+};
+
+/* ================================================================
    PARITY: SEASON REGISTRATION (season_registrations)
    ================================================================ */
 CG.ROUTES.register = function(){

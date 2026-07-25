@@ -185,7 +185,7 @@ function doneView(lobby) {
   return {
     embeds: [{
       title: "✅ Lobby ready — good luck out there",
-      description: `**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\``,
+      description: `**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, import your stats at **chelgamingleague.com/#/pickup-import** — pickup stats show on your profile (separate from league play).`,
       color: BRAND,
       footer: { text: "Set a private match with this code on the chosen server." },
     }],
