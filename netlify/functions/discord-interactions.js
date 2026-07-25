@@ -92,18 +92,20 @@ const remainingPool = (s) => (s.signups || []).filter((x) => x.id !== s.captains
   !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
 
 /* ---------- view builders ---------- */
-function signupView(lobby) {
-  const s = lobby.state;
+// Signup buttons are keyed by CHANNEL id (not lobby id) so /lfg can render instantly without a DB
+// round-trip; the lobby is created lazily (get-or-create) on the first button click.
+function signupView(channelId, state) {
+  const s = state;
   const fields = POS.map((p) => {
     const who = (s.signups || []).filter((x) => x.pos === p.key).map((x) => `<@${x.id}>`).join(", ");
     return { name: `${p.label} (${posCount(s, p.key)}/${PER_POS})`, value: who || "_open_", inline: true };
   });
   const rows = [
-    { type: 1, components: POS.slice(0, 5).map((p) => ({ type: 2, style: 1, label: `${p.key} (${posCount(s, p.key)}/${PER_POS})`, custom_id: `lfg:join:${lobby.id}:${p.key}`, disabled: posCount(s, p.key) >= PER_POS })) },
+    { type: 1, components: POS.slice(0, 5).map((p) => ({ type: 2, style: 1, label: `${p.key} (${posCount(s, p.key)}/${PER_POS})`, custom_id: `lfg:join:${channelId}:${p.key}`, disabled: posCount(s, p.key) >= PER_POS })) },
     { type: 1, components: [
-      { type: 2, style: 1, label: `G (${posCount(s, "G")}/${PER_POS})`, custom_id: `lfg:join:${lobby.id}:G`, disabled: posCount(s, "G") >= PER_POS },
-      { type: 2, style: 2, label: "Leave", custom_id: `lfg:leave:${lobby.id}` },
-      { type: 2, style: 4, label: "Cancel lobby", custom_id: `lfg:cancel:${lobby.id}` },
+      { type: 2, style: 1, label: `G (${posCount(s, "G")}/${PER_POS})`, custom_id: `lfg:join:${channelId}:G`, disabled: posCount(s, "G") >= PER_POS },
+      { type: 2, style: 2, label: "Leave", custom_id: `lfg:leave:${channelId}` },
+      { type: 2, style: 4, label: "Cancel lobby", custom_id: `lfg:cancel:${channelId}` },
     ] },
   ];
   return {
@@ -171,13 +173,13 @@ function applyJoin(lobby, userId, name, pos) {
     lobby.status = "drafting";
     return { view: draftView(lobby), status: "drafting", state: s };
   }
-  return { view: signupView(lobby), status: "open", state: s };
+  return { view: signupView(lobby.channel_id, s), status: "open", state: s };
 }
 function applyLeave(lobby, userId) {
   const s = lobby.state;
   if (!(s.signups || []).some((x) => x.id === userId)) return { error: "You're not in this lobby." };
   s.signups = s.signups.filter((x) => x.id !== userId);
-  return { view: signupView(lobby), status: "open", state: s };
+  return { view: signupView(lobby.channel_id, s), status: "open", state: s };
 }
 function applyPick(lobby, userId, pickId) {
   const s = lobby.state;
@@ -202,24 +204,40 @@ function applyServer(lobby, userId, idx) {
 }
 
 /* ---------- component dispatch with CAS retry ---------- */
+const SIGNUP_ACTIONS = { join: 1, leave: 1, cancel: 1 };
 async function handleComponent(interaction) {
-  const parts = (interaction.data.custom_id || "").split(":");   // lfg:<action>:<lobbyId>:<arg?>
-  const action = parts[1], lobbyId = parts[2], arg = parts[3];
+  const parts = (interaction.data.custom_id || "").split(":");   // lfg:<action>:<channelId|lobbyId>:<arg?>
+  const action = parts[1], key = parts[2], arg = parts[3];
   const userId = (interaction.member && interaction.member.user && interaction.member.user.id) || (interaction.user && interaction.user.id);
   const name = nameOf(interaction);
+  const guildId = interaction.guild_id || "";
 
   for (let attempt = 0; attempt < 4; attempt++) {
-    const lobby = await sbGetLobby(lobbyId);
+    // signup buttons carry the CHANNEL id and get-or-create the lobby; draft/server buttons carry the lobby id
+    let lobby;
+    if (SIGNUP_ACTIONS[action]) {
+      lobby = await sbRpc("lfg_open_lobby", { p_guild: guildId, p_channel: key });
+      lobby = Array.isArray(lobby) ? lobby[0] : lobby;
+    } else {
+      lobby = await sbGetLobby(key);
+    }
     if (!lobby || lobby.status === "cancelled" || lobby.status === "done") {
       return ephemeral("This lobby has closed. Run `/lfg` to start a fresh one.");
     }
     let out;
-    if (action === "join")        out = applyJoin(lobby, userId, name, arg);
-    else if (action === "leave")  out = applyLeave(lobby, userId);
-    else if (action === "cancel") out = { view: { embeds: [{ title: "Lobby cancelled", description: `Cancelled by <@${userId}>. Run \`/lfg\` to start again.`, color: BRAND }], components: [] }, status: "cancelled", state: lobby.state };
-    else if (action === "pick")   out = applyPick(lobby, userId, (interaction.data.values || [])[0]);
-    else if (action === "server") out = applyServer(lobby, userId, parseInt(arg, 10));
-    else return ephemeral("Unknown action.");
+    if (action === "join") {
+      if (lobby.status !== "open") return ephemeral("Signups are closed — the draft has already started.");
+      out = applyJoin(lobby, userId, name, arg);
+    } else if (action === "leave") {
+      if (lobby.status !== "open") return ephemeral("Signups are closed — the draft has already started.");
+      out = applyLeave(lobby, userId);
+    } else if (action === "cancel") {
+      out = { view: { embeds: [{ title: "Lobby cancelled", description: `Cancelled by <@${userId}>. Run \`/lfg\` to start again.`, color: BRAND }], components: [] }, status: "cancelled", state: lobby.state };
+    } else if (action === "pick") {
+      out = applyPick(lobby, userId, (interaction.data.values || [])[0]);
+    } else if (action === "server") {
+      out = applyServer(lobby, userId, parseInt(arg, 10));
+    } else return ephemeral("Unknown action.");
 
     if (out.error) return ephemeral(out.error);
 
@@ -231,17 +249,15 @@ async function handleComponent(interaction) {
 }
 
 /* ---------- slash command ---------- */
+const EMPTY_STATE = { signups: [], captains: [], teams: { A: [], B: [] }, turn: null, server: null, code: null };
 async function handleCommand(interaction) {
   if ((interaction.data.name || "") !== "lfg") return ephemeral("Unknown command.");
-  const lobby = await sbRpc("lfg_open_lobby", { p_guild: interaction.guild_id || "", p_channel: interaction.channel_id });
-  const row = Array.isArray(lobby) ? lobby[0] : lobby;
-  return respond({ type: REPLY, data: signupView(row) });
+  // Respond INSTANTLY with a fresh signup card — no DB round-trip, so it never risks Discord's 3s
+  // timeout on a cold start. The lobby is created on the first click via get-or-create.
+  return respond({ type: REPLY, data: signupView(interaction.channel_id, EMPTY_STATE) });
 }
 
 const DIAG = "lfgdiag9x";
-async function logDebug(row) {
-  try { await fetch(`${SB_URL}/rest/v1/_lfg_debug`, withTimeout({ method: "POST", headers: sbHead(), body: JSON.stringify(row) })); } catch (e) {}
-}
 
 export const handler = async (event) => {
   const q = event.queryStringParameters || {};
@@ -266,10 +282,7 @@ export const handler = async (event) => {
   const ts = h["x-signature-timestamp"] || h["X-Signature-Timestamp"];
   // event.body is the raw request body (base64 only for binary content-types); decode if flagged.
   const raw = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : (event.body || "");
-  const verified = verifySignature(raw, sig, ts);
-  let itype = null; try { itype = JSON.parse(raw).type; } catch (e) {}
-  await logDebug({ method: event.httpMethod, ua: (h["user-agent"] || h["User-Agent"] || "").slice(0, 60), has_sig: !!sig, has_ts: !!ts, raw_len: (raw || "").length, verified, itype, note: "v1" });
-  if (!verified) return { statusCode: 401, body: "invalid request signature" };
+  if (!verifySignature(raw, sig, ts)) return { statusCode: 401, body: "invalid request signature" };
 
   let interaction;
   try { interaction = JSON.parse(raw); } catch (e) { return { statusCode: 400, body: "bad json" }; }
