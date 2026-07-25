@@ -1024,7 +1024,7 @@ CG.ROUTES.team = function(code, qs){
     }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding:22px 0 40px">';
   if (tab==="roster"){
-    body += '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Roster — '+esc(SD.label)+'</caption><thead><tr>'+
+    var rosterTable = '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Roster — '+esc(SD.label)+'</caption><thead><tr>'+
       '<th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th>Pts / Record</th>'+(archived?"":'<th>OVR</th>')+'</tr></thead><tbody>'+
       roster.map(function(p){
         var ps = SD.pstats[p.id], line;
@@ -1044,7 +1044,7 @@ CG.ROUTES.team = function(code, qs){
     /* consolidated — team stats live in this same tab (no separate Team stats tab) */
     var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
         _svp = _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
-    body += '<h3 class="h-sec" style="font-size:18px;margin:28px 0 14px">Team stats</h3>'+
+    body += '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
       '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'+
       [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
        ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_gp).toFixed(1)],
@@ -1059,7 +1059,8 @@ CG.ROUTES.team = function(code, qs){
         var v = lg.teamRatings[code].parts[k];
         return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+v+'%"></span></span><span class="rb-v num">'+v+'</span></div>';
       }).join("")+
-      '<p class="caption" style="margin-top:10px">Team overall blends record, goal differential, goaltending, roster depth, and recent form. The commissioner can re-weight the formula in the Control Center — every number traces to real results.</p></div></div>');
+      '<p class="caption" style="margin-top:10px">Team overall blends record, goal differential, goaltending, roster depth, and recent form. The commissioner can re-weight the formula in the Control Center — every number traces to real results.</p></div></div>')+
+      '<h3 class="h-sec" style="font-size:18px;margin:28px 0 14px">Roster</h3>'+rosterTable;
   }
   if (tab==="games"){
     if (archived){
