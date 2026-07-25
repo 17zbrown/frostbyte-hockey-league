@@ -238,6 +238,9 @@ async function handleCommand(interaction) {
 }
 
 const DIAG = "lfgdiag9x";
+async function logDebug(row) {
+  try { await fetch(`${SB_URL}/rest/v1/_lfg_debug`, withTimeout({ method: "POST", headers: sbHead(), body: JSON.stringify(row) })); } catch (e) {}
+}
 
 export default async (req) => {
   const url = (() => { try { return new URL(req.url); } catch { return null; } })();
@@ -262,7 +265,10 @@ export default async (req) => {
   // Read the body byte-exact — arrayBuffer never re-encodes, so the signed bytes match Discord's
   // exactly even when a nickname/username contains non-ASCII. (req.text() UTF-8-round-trips.)
   const bodyBuf = Buffer.from(await req.arrayBuffer());
-  if (!verifySignature(bodyBuf, sig, ts)) return new Response("invalid request signature", { status: 401 });
+  const verified = verifySignature(bodyBuf, sig, ts);
+  let itype = null; try { itype = JSON.parse(bodyBuf.toString("utf8")).type; } catch (e) {}
+  await logDebug({ method: req.method, ua: (req.headers.get("user-agent") || "").slice(0, 60), has_sig: !!sig, has_ts: !!ts, raw_len: bodyBuf.length, verified, itype, note: "post" });
+  if (!verified) return new Response("invalid request signature", { status: 401 });
 
   let interaction;
   try { interaction = JSON.parse(bodyBuf.toString("utf8")); } catch (e) { return new Response("bad json", { status: 400 }); }
