@@ -924,7 +924,7 @@
       }).filter(Boolean);
   }
   var SAMPLE_GAMES = [
-    {opp:"TOR",g:1,a:0},{opp:"CHI",g:0,a:1},{opp:"PIT",g:2,a:1},{opp:"WPG",g:0,a:0},
+    {opp:"TOR",g:1,a:0},{opp:"CHI",g:0,a:1},{opp:"CAR",g:2,a:1},{opp:"WPG",g:0,a:0},
     {opp:"ANA",g:1,a:2},{opp:"COL",g:0,a:1},{opp:"DAL",g:1,a:0},{opp:"BOS",g:2,a:2},
     {opp:"TOR",g:0,a:1},{opp:"CHI",g:1,a:1}
   ].map(function(g){ g.p = g.g + g.a; return g; });
@@ -991,7 +991,7 @@
       });
   }
   var SAMPLE_TEAM = [
-    {opp:"TOR",us:3,them:2,ot:false},{opp:"CHI",us:1,them:4,ot:false},{opp:"PIT",us:2,them:1,ot:true},
+    {opp:"TOR",us:3,them:2,ot:false},{opp:"CHI",us:1,them:4,ot:false},{opp:"CAR",us:2,them:1,ot:true},
     {opp:"WPG",us:5,them:2,ot:false},{opp:"ANA",us:2,them:3,ot:true},{opp:"COL",us:4,them:1,ot:false},
     {opp:"BOS",us:1,them:2,ot:false},{opp:"DAL",us:3,them:1,ot:false},{opp:"TOR",us:2,them:0,ot:false},
     {opp:"CHI",us:4,them:3,ot:true}
