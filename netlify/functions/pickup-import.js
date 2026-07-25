@@ -46,17 +46,27 @@ async function authUser(token) {
 // honours dispatcher, routing the call through the residential proxy.
 async function eaFetch(url) {
   const { ProxyAgent, fetch: uFetch } = await import("undici");
-  const opts = { headers: {
+  const headers = {
     "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
     "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
     "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
     "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
-  }, signal: AbortSignal.timeout(9000) };
-  if (PROXY) opts.dispatcher = new ProxyAgent(PROXY);
-  const r = await uFetch(url, opts);
-  if (!r.ok) throw new Error(`EA ${r.status}${r.status === 403 ? " (IP blocked — residential proxy required)" : ""}`);
-  return r.json();
+  };
+  // EA's NHL 26 API blocks intermittently by IP; a NEW ProxyAgent each attempt = a fresh IPRoyal
+  // rotating IP, so a flaky 403 just retries on a different IP. Kept under Netlify's 10s fn timeout.
+  let last = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const opts = { headers, signal: AbortSignal.timeout(2800) };
+      if (PROXY) opts.dispatcher = new ProxyAgent(PROXY);
+      const r = await uFetch(url, opts);
+      if (r.ok) return r.json();
+      last = `EA ${r.status}`;
+      if (r.status !== 403) throw new Error(last);   // non-403 errors won't be fixed by another IP
+    } catch (e) { last = String(e.message || e); }
+  }
+  throw new Error(`EA unreachable (${last}${last.includes("403") ? " — EA is throttling; try again in a moment" : ""})`);
 }
 const eaSearchClubs = (name) =>
   eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);
