@@ -120,7 +120,9 @@ async function resolveProfile(entry, cache) {
   let prev = await sbGet(`pickup_stats?ea_player_id=eq.${eid}&profile_id=not.is.null&select=profile_id&limit=1`);
   if (!prev[0]) prev = await sbGet(`game_stats?ea_player_id=eq.${eid}&profile_id=not.is.null&select=profile_id&limit=1`);
   if (prev[0]) pid = prev[0].profile_id;
-  if (!pid && gt) { const pr = await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(gt)}&select=id&limit=1`); if (pr[0]) pid = pr[0].id; }
+  // Match the EA gamertag from the box score to the EA ID the player entered on their profile
+  // (profiles.ea_id) — NOT their site gamertag/display name.
+  if (!pid && gt) { const pr = await sbGet(`profiles?ea_id=ilike.${encodeURIComponent(gt)}&select=id&limit=1`); if (pr[0]) pid = pr[0].id; }
   cache.set(entry.ea_player_id, pid); return pid;
 }
 
