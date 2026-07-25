@@ -4035,14 +4035,22 @@ CG.teamForm = function(t){
     return p ? (p.gamertag||p.display_name||"") : "";
   }
   /* Front office lives on the club, so it's edited here (edit-only — a club must exist first). */
+  var anySeat = !!(t.owner||t.gm||t.agm);
+  function vacBtn(role){
+    return '<div style="text-align:right;margin-top:5px;min-height:20px">'+
+      '<button type="button" class="btn btn-ghost btn-sm rm-btn" data-vacate-seat="'+role+'"'+(t[role]?'':' style="display:none"')+'>Vacate seat</button></div>';
+  }
   var mgmtBlock = isEdit ? (
     '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">'+
-      '<h3 class="h-sec" style="font-size:15px;margin:0 0 2px">Front office</h3>'+
-      '<p class="caption" style="margin:0 0 12px">Owner, GM and AGM run this club’s Team HQ — roster, trades, lineups and draft picks. Type a member’s name and pick them; clear a field to vacate the seat. One person holds one seat per club.</p>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 2px">'+
+        '<h3 class="h-sec" style="font-size:15px;margin:0">Front office</h3>'+
+        '<button type="button" class="btn btn-ghost btn-sm rm-btn" id="tfClearAll"'+(anySeat?'':' style="display:none"')+'>Remove all seats</button>'+
+      '</div>'+
+      '<p class="caption" style="margin:0 0 12px">Owner, GM and AGM run this club’s Team HQ — roster, trades, lineups and draft picks. Type a member’s name and pick them to assign a seat. <b>Vacate seat</b> (or <b>Remove all seats</b>) clears management immediately — a player’s roster spot and contract are untouched. One person holds one seat per club.</p>'+
       '<div class="grid g3" style="gap:12px">'+
-        CG.memberPickerField("tfOwner","Owner")+
-        CG.memberPickerField("tfGm","General Manager")+
-        CG.memberPickerField("tfAgm","Assistant GM")+
+        '<div>'+CG.memberPickerField("tfOwner","Owner")+vacBtn("owner")+'</div>'+
+        '<div>'+CG.memberPickerField("tfGm","General Manager")+vacBtn("gm")+'</div>'+
+        '<div>'+CG.memberPickerField("tfAgm","Assistant GM")+vacBtn("agm")+'</div>'+
       '</div>'+
     '</div>'
   ) : '';
@@ -4101,6 +4109,36 @@ CG.teamForm = function(t){
     ["tfOwner","tfGm","tfAgm"].forEach(function(id){ CG.wireMemberPicker(id, ["members"]); });
     var pf=function(id,pid){ var el=document.getElementById(id); if(el&&pid){ el.value=holderName(pid); el.dataset.acId=pid; } };
     pf("tfOwner",t.owner); pf("tfGm",t.gm); pf("tfAgm",t.agm);
+    /* --- explicit seat removal: Vacate a seat or Remove all, applied immediately (two-click confirm) --- */
+    var seatId={owner:"tfOwner",gm:"tfGm",agm:"tfAgm"}, seatName={owner:"Owner",gm:"General Manager",agm:"Assistant GM"};
+    var refreshClearAll=function(){ var ca=document.getElementById("tfClearAll"); if(ca) ca.style.display=(t.owner||t.gm||t.agm)?"":"none"; };
+    var doVacate=function(role, done){
+      CG.sb.rpc("set_team_manager",{ p_team_code:t.code, p_role:role, p_profile:null }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t vacate: "+r.error.message,"err"); if(done)done(false); return; }
+        t[role]=null;
+        var el=document.getElementById(seatId[role]); if(el){ el.value=""; delete el.dataset.acId; el.classList.remove("ac-ok"); }
+        var vb=document.querySelector('[data-vacate-seat="'+role+'"]'); if(vb) vb.style.display="none";
+        refreshClearAll(); if(done)done(true);
+      });
+    };
+    var arm=function(btn, confirmLabel, run){
+      if(!btn) return; var orig=btn.textContent, armed=false, tmr=null;
+      var reset=function(){ armed=false; if(tmr)clearTimeout(tmr); btn.textContent=orig; btn.style.color=""; btn.style.borderColor=""; };
+      btn.addEventListener("click", function(){
+        if(armed){ reset(); run(); return; }
+        armed=true; btn.textContent=confirmLabel; btn.style.color="var(--red-ink)"; btn.style.borderColor="var(--red-ink)";
+        tmr=setTimeout(reset, 4000);
+      });
+    };
+    document.querySelectorAll("[data-vacate-seat]").forEach(function(b){
+      var role=b.getAttribute("data-vacate-seat");
+      arm(b, "Confirm — vacate?", function(){ doVacate(role, function(ok){ if(ok) CG.toast(seatName[role]+" seat vacated","ok"); }); });
+    });
+    arm(document.getElementById("tfClearAll"), "Confirm — remove all?", function(){
+      var roles=["owner","gm","agm"].filter(function(r){ return t[r]; });
+      if(!roles.length) return;
+      (function next(i){ if(i>=roles.length){ CG.toast("All front-office seats removed","ok"); return; } doVacate(roles[i], function(){ next(i+1); }); })(0);
+    });
   }
   document.getElementById("tfSave").addEventListener("click", function(){
     var name=(document.getElementById("tfName").value||"").trim(),
