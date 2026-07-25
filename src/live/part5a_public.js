@@ -1198,7 +1198,11 @@ CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
   pid = pid || (qs && (qs.id || qs.pid)) || null;  /* accept legacy #/player?id=… links */
   var p = lg.players.find(function(x){ return x.id===pid; });
-  if (!p) return CG.ROUTES._404();
+  /* Not a rostered league player, but may be a website account holder with pickup stats — render a
+     minimal profile whose header + pickup section are filled async in AFTER.player. */
+  if (!p) return CG.pageHead("Player", "Player profile", "") +
+    '<div class="shell" style="max-width:960px;padding-bottom:2px"><div id="acctHdr" class="note">Loading account…</div></div>' +
+    '<div id="pickupSection"></div>';
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";
   var SD = CG.seasonData(seasonKey);
   var archived = seasonKey!=="cur";
@@ -1408,6 +1412,16 @@ CG.scoutLine = function(p){
     s.pim+" PIM. This summary is computed from verified game data only.";
 };
 CG.AFTER.player = function(pid, qs){
+  /* Account-only profile (not a rostered league player): fill the minimal header with the gamertag.
+     The rest of this handler's selectors are all guarded and no-op on the minimal page; the pickup
+     fetch below targets #pickupSection and runs for any account. */
+  if (!CG.lg.players.find(function(x){ return x.id===pid; }) && CG.sb){
+    CG.sb.from("profiles").select("gamertag").eq("id", pid).maybeSingle().then(function(r){
+      var hdr = document.getElementById("acctHdr"); if (!hdr) return;
+      if (r && r.data) hdr.innerHTML = '<b style="font-family:var(--f-disp);font-size:16px">'+esc(r.data.gamertag||"Player")+'</b><p class="caption" style="margin:4px 0 0">This account isn’t on a league roster — only pickup game stats show here.</p>';
+      else { hdr.innerHTML = '<b>Profile not found.</b>'; var ps=document.getElementById("pickupSection"); if (ps) ps.innerHTML=""; }
+    }, function(){});
+  }
   var season = (qs&&qs.season)||"";
   $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){
     location.hash="#/player/"+pid+"?tab="+this.getAttribute("data-tab")+(season&&season!=="cur"?"&season="+season:"");
