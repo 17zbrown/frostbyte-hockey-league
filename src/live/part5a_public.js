@@ -153,15 +153,15 @@ CG.slideDefs = function(){
     slides.push({ key:"kickoff", label:CG.seasonTag(), html:
       '<span class="s-cat"><span class="chip chip-chrome">'+esc(CG.seasonTag())+(sNum===1?' · Inaugural':'')+'</span></span>'+
       '<h2>The puck drops '+startTxt+'.</h2>'+
-      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+CG.TEAMS.length+' clubs, '+((CG.DIVISIONS&&CG.DIVISIONS.length)||2)+' divisions — '+(sNum===1?'Chel Gaming’s first competitive season':esc(CG.seasonTag())+' of Chel Gaming hockey')+'. '+
+      '<p class="s-dek">'+(days!=null?days+' day'+(days===1?"":"s")+' out. ':"")+(sNum===1?'Chel Gaming’s first competitive season':esc(CG.seasonTag())+' of Chel Gaming hockey')+'. '+
       (regOpen?'Registration is open — claim your spot before the draft.':'Rosters take shape through the pre-season and the draft.')+'</p>'+
       '<div class="s-cta">'+(regOpen?'<a class="btn btn-chrome" href="#/register">Register to play</a><a class="btn btn-ghost" href="#/schedule">Opening schedule</a>'
         :'<a class="btn btn-chrome" href="#/schedule">Opening schedule</a><a class="btn btn-ghost" href="#/teams">The clubs</a>')+'</div>'+
       '<span class="s-date">Season opens '+startTxt+'</span>' });
     slides.push({ key:"clubs", label:"The clubs", html:
-      '<span class="s-cat"><span class="chip chip-chrome">'+CG.TEAMS.length+' founding clubs</span></span>'+
-      '<h2>Meet the founding eight.</h2>'+
-      '<p class="s-dek">Two divisions, real rosters, real management under a $'+Math.round((CG.CAP||60000000)/1000000)+'M cap. Explore each club and its cap sheet.</p>'+
+      '<span class="s-cat"><span class="chip chip-chrome">The clubs</span></span>'+
+      '<h2>Meet the founding clubs.</h2>'+
+      '<p class="s-dek">Real rosters, real management under a $'+Math.round((CG.CAP||60000000)/1000000)+'M cap. Explore each club and its cap sheet.</p>'+
       '<div class="s-cta"><a class="btn btn-chrome" href="#/teams">Browse clubs</a>'+
       '<a class="btn btn-ghost" href="#/players">Player directory</a></div>'+
       '<span class="s-date">'+esc(CG.seasonTag())+' · '+CG.seasonYear()+'</span>' });
@@ -391,7 +391,7 @@ CG.ROUTES.home = function(){
     html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
       '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Off-season")+'</b><span>inaugural season</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>day'+(days===1?"":"s")+' to puck drop'+(start?" · "+CG.fmtDay(start):"")+'</span></div>'+
-      '<div style="cursor:pointer" data-go="#/teams"><b class="num">'+CG.TEAMS.length+'</b><span>clubs · '+(CG.DIVISIONS?CG.DIVISIONS.length:2)+' divisions</span></div>'+
+      '<div style="cursor:pointer" data-go="#/teams"><b class="num">'+CG.TEAMS.length+'</b><span>clubs</span></div>'+
       (signed >= signedFloor
         ? '<div style="cursor:pointer" data-go="#/players"><b class="num">'+signed+'</b><span>players signed</span></div>'
         : regOpen

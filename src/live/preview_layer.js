@@ -688,7 +688,7 @@
     var kpis = [];
     kpis.push(['<b data-count="'+regs.length+'">0</b>', "players signed"]);
     if (days != null) kpis.push(['<b data-count="'+days+'">0</b>', "days to puck drop"]);
-    kpis.push(['<b data-count="'+CG.TEAMS.length+'">0</b>', "clubs · "+esc((CG.DIVISIONS||[1,2]).length)+" divisions"]);
+    kpis.push(['<b data-count="'+CG.TEAMS.length+'">0</b>', "clubs"]);
     if (CG.CAP) kpis.push(['<b data-count="'+(CG.CAP/1e6)+'" data-pre="$" data-post="M">$0M</b>', "salary cap"]);
     var chart = signupChart(regs) || progressBlock();
     var maxP = Math.max(mix.F, mix.D, mix.G, 1);

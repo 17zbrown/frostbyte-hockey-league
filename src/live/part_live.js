@@ -1781,7 +1781,7 @@ CG.ROUTES.brand = function(){
       '<p class="lede">A display face for confidence, a body face for reading, a mono face for anything that’s a number. Numbers always use tabular figures so columns line up.</p></div></div>'+
     '<div class="grid g3">'+
       specimen("font-family:var(--f-disp);font-weight:900;font-size:44px;letter-spacing:-.03em;line-height:.98", "Puck drop.", "<b>Archivo</b> · display / headings · 400–900 · tight tracking, balanced wrap")+
-      specimen("font-family:var(--f-body);font-size:15.5px;line-height:1.6;color:var(--ink-3)", "Eight clubs across two divisions play a full season — live standings, imported box scores, trades, and a playoff bracket.", "<b>IBM Plex Sans</b> · body · 400 / 500 / 600 · line-height ~1.6")+
+      specimen("font-family:var(--f-body);font-size:15.5px;line-height:1.6;color:var(--ink-3)", "Clubs play a full season — live standings, imported box scores, trades, and a playoff bracket.", "<b>IBM Plex Sans</b> · body · 400 / 500 / 600 · line-height ~1.6")+
       specimen("font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums;line-height:1.7;color:var(--ink)", "2‑1‑0 · W2<br>.932 SV%<br>21:34 TOI · #97", "<b>IBM Plex Mono</b> · data & labels · tabular figures for every stat")+
     '</div>'+
 
