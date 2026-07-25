@@ -129,7 +129,7 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
   }
 }
 
-// Community + game-night channels: a public #lfg and #draft-hub, per-club voice rooms (private to
+// Community + game-night channels: a public #pickup-games and #draft-hub, per-club voice rooms (private to
 // the club + office, mirroring the club text rooms), and a couple of public Game Voice lobbies for
 // scrims. Creation only — never deletes an existing channel. Idempotent by name+parent.
 async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
@@ -137,13 +137,24 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
   const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
   const generalCat = cat("general"), gamesCat = cat("games"), teamRoomsCat = cat("team rooms");
 
-  async function ensurePublicText(name, parentId, topic) {
-    if (!parentId || guildChannels.find((c) => c.name === name && c.parent_id === parentId)) return;
+  // Creates the channel if missing. If oldNames is given and a channel by one of those names still
+  // exists, it's RENAMED in place (keeping its position, history, and id) instead of a duplicate being
+  // made — this is how #lfg was migrated to #pickup-games without the sweep recreating the old name.
+  async function ensurePublicText(name, parentId, topic, oldNames) {
+    if (!parentId || guildChannels.find((c) => c.type === 0 && c.name === name)) return;
+    const prev = (oldNames && oldNames.length)
+      ? guildChannels.find((c) => c.type === 0 && oldNames.includes(c.name)) : null;
+    if (prev) {
+      try { await dApi("PATCH", `/channels/${prev.id}`, { name, topic }); prev.name = name;
+        sum.communityChansRenamed = (sum.communityChansRenamed || 0) + 1; return;
+      } catch (e) { sum.errors.push({ communityChanRename: name, error: String(e.message || e) }); }
+    }
     try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name, type: 0, parent_id: parentId, topic });
       guildChannels.push(ch); sum.communityChansCreated = (sum.communityChansCreated || 0) + 1;
     } catch (e) { sum.errors.push({ communityChan: name, error: String(e.message || e) }); }
   }
-  await ensurePublicText("lfg", generalCat && generalCat.id, "Looking for group — line up pickup 6s and scrims. Call your position and go.");
+  // #pickup-games (formerly #lfg) — the /lfg pickup lobbies live here.
+  await ensurePublicText("pickup-games", generalCat && generalCat.id, "Pickup games — run /lfg to line up 6s and scrims. Call your position and go.", ["lfg"]);
   await ensurePublicText("draft-hub", gamesCat && gamesCat.id, "Watch the CGHL entry draft live and talk picks — the draft itself runs on the site.");
 
   // per-club voice rooms, private to the club role + office. VIEW(1024)+CONNECT(1048576)+SPEAK(2097152).

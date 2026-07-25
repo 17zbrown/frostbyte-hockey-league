@@ -1484,10 +1484,10 @@ CG.SKATER_DNA_AXES = ["Shooting","Playmaking","Defense","Physical","Discipline",
    built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
    game score + the player's team side. Never feeds league totals, eligibility, or overall. */
 CG.renderPickupStats = function(rows){
-  var note = '<div class="note" style="margin-bottom:16px">These are <b>pickup games</b> from #lfg — the same stats as league play, kept separate. They never count toward league totals, the five-game minimum, draft or bid eligibility, or the overall rating.</div>';
+  var note = '<div class="note" style="margin-bottom:16px">These are <b>pickup games</b> from the #pickup-games lobbies — the same stats as league play, kept separate. They never count toward league totals, the five-game minimum, draft or bid eligibility, or the overall rating.</div>';
   if (!rows || !rows.length){
     return note + '<div class="card"><div class="empty" style="padding:48px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No pickup games yet</b>'+
-      '<p>Pickup (#lfg) games between two EASHL clubs appear here once their box score is imported.</p></div></div>';
+      '<p>#pickup-games matches between two EASHL clubs appear here once their box score is imported.</p></div></div>';
   }
   var gp=rows.length, g=0,a=0,sh=0,hit=0,pim=0,pm=0,tk=0, gGames=0, sv=0,sa=0,ga=0, so=0, w=0,l=0,otl=0;
   function sideScores(x){ var gm=x.pickup_games||{}, side=(x.team_side||"").toUpperCase();
@@ -1623,7 +1623,7 @@ CG.AFTER.player = function(pid, qs){
 };
 
 /* ================================================================
-   PICKUP BOX SCORE — the full box score for one #lfg pickup game.
+   PICKUP BOX SCORE — the full box score for one #pickup-games pickup game.
    Structurally isolated from league play: it links out to player
    profiles for convenience, but is never folded into league totals,
    standings, eligibility or overall. pickup_games / pickup_stats are
@@ -1712,7 +1712,7 @@ CG.AFTER.pickup = function(id){
       boxCard(g.club_b||"Club B", g.score_b, sideB)+
       '</div><div class="stack">'+
       '<div class="card"><div class="card-h"><h3>Pickup game</h3><span class="chip">Not league play</span></div><div class="card-b">'+
-        '<p class="small" style="color:var(--steel);line-height:1.65">Imported from the EA NHL match record through the #lfg pickup importer. Pickup lines show on player profiles for fun — they never count toward league standings, the five-game minimum, draft or bid eligibility, or overall ratings.</p>'+
+        '<p class="small" style="color:var(--steel);line-height:1.65">Imported from the EA NHL match record through the pickup importer. Pickup lines show on player profiles for fun — they never count toward league standings, the five-game minimum, draft or bid eligibility, or overall ratings.</p>'+
         (when?'<p class="caption" style="margin-top:10px">Played '+esc(when)+(g.went_ot?" · settled in overtime":"")+'.</p>':"")+
       '</div></div>'+
       '</div></div>';

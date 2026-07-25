@@ -1,4 +1,4 @@
-// Discord interactions endpoint for the all-in-Discord #lfg pickup system.
+// Discord interactions endpoint for the all-in-Discord #pickup-games pickup system.
 // Flow: /lfg -> players join a position (2 per position, 12 total) -> snake draft between the two
 // captains -> server veto -> a private lobby code is handed off. Every step edits its own message
 // in place (UPDATE_MESSAGE), so no message-id bookkeeping is needed. State lives in lfg_lobbies.
@@ -102,7 +102,7 @@ async function dApi(method, path, body, ms) {
   return r.json();
 }
 // On fill: create a private thread off the signup channel, drop the draft in it, ping the 12 players.
-// Returns the thread id. Throws if the thread can't be made (caller falls back to drafting in #lfg).
+// Returns the thread id. Throws if the thread can't be made (caller falls back to drafting in #pickup-games).
 async function launchDraftRoom(lobbyId, parentChannelId, state) {
   const shortId = String(lobbyId).slice(0, 4).toUpperCase();
   // Public thread (type 11): every pinged player can open it with no invite step, and it auto-archives.
