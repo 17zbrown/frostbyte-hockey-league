@@ -105,7 +105,6 @@ function signupView(channelId, state) {
     { type: 1, components: [
       { type: 2, style: 1, label: `G (${posCount(s, "G")}/${PER_POS})`, custom_id: `lfg:join:${channelId}:G`, disabled: posCount(s, "G") >= PER_POS },
       { type: 2, style: 2, label: "Leave", custom_id: `lfg:leave:${channelId}` },
-      { type: 2, style: 4, label: "Cancel lobby", custom_id: `lfg:cancel:${channelId}` },
     ] },
   ];
   return {
