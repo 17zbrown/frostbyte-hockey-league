@@ -34,6 +34,12 @@
   to = "/.netlify/functions/discord-interactions"
   status = 200
 
+# Pickup-game stats importer (search EASHL club -> pick a club_private match -> attach to profiles).
+[[redirects]]
+  from = "/api/pickup-import"
+  to = "/.netlify/functions/pickup-import"
+  status = 200
+
 # `publish = "."` serves the repo root, which means the working tree is reachable on the public
 # domain: /src/live/part_live.js (421 KB of raw source), /server.js, /package.json, both READMEs and
 # the internal design standards all returned 200. Nothing is secret and nothing at runtime fetches
