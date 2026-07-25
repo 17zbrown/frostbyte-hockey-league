@@ -108,6 +108,7 @@ CG.hubNav = function(section){
   var club = [];
   var clubTools = r!=="commish" || CG.managesClub();
   if (clubTools){
+    if (CG.can("roster.manage")) club.push(["management","Management","shield"]);
     if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
     if (CG.can("lineup.build")) club.push(["lineup","Lineup builder","grid"]);
@@ -187,7 +188,7 @@ CG.gmTasksCard = function(team){
   rows += '<div class="titem"><span class="t-dot'+(inc?" red":" grn")+'"></span><span style="flex:1">'+(inc? inc+' incoming trade offer'+(inc===1?"":"s")+' awaiting your review.' : 'No pending trade offers.')+'</span><a class="btn btn-ghost btn-sm" href="#/hub/tradehub">Trade Hub</a></div>';
   var to = (CG.TEAMS||[]).find(function(t){ return t.code===team; });
   if (to && !to.gm){
-    rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1">No General Manager appointed yet — nominate one from the roster desk.</span><a class="btn btn-ghost btn-sm" href="#/hub/roster">Roster desk</a></div>';
+    rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1">No General Manager appointed yet — nominate one from the Management tab.</span><a class="btn btn-ghost btn-sm" href="#/hub/management">Management</a></div>';
   }
   return '<div class="card" style="border-color:var(--ink)"><div class="card-h"><h3>Management tasks</h3><span class="chip chip-chrome">Management</span></div><div class="tasklist">'+rows+'</div></div>';
 };
@@ -205,11 +206,16 @@ CG.hubDashboard = function(){
     var av = CG.availGet(me.id);
     var tonight = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; });
     var inLineup = tonight && Object.values(CG.plannedLineup(tonight, me.team)).indexOf(me.id)>=0;
-    cards.push('<div class="card" style="--tc:'+t.color+'"><div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+me.team+'">Team page</a></div>'+
-      '<div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(me.team,44)+
-      '<div><b style="font-family:var(--f-disp);font-size:17px">'+esc(t.name)+'</b>'+
-      '<span class="caption" style="display:block">'+lg.teams[me.team].w+"-"+lg.teams[me.team].l+"-"+lg.teams[me.team].otl+' · '+t.div+' Division'+(r==="mgmt"?" · You are the GM":"")+'</span></div>'+
-      '<span class="ovrbox" style="margin-left:auto" title="My overall">'+lg.ratings[me.id].ovr+'</span></div></div>');
+    /* a manager who is also rostered gets the full club-overview console; a plain player gets the compact card */
+    if (CG.managesClub && CG.managesClub() && CG.teamOverviewCard && CG.myManagedTeam && CG.myManagedTeam()){
+      cards.push(CG.teamOverviewCard(CG.myManagedTeam()));
+    } else {
+      cards.push('<div class="card" style="--tc:'+t.color+'"><div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+me.team+'">Team page</a></div>'+
+        '<div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(me.team,44)+
+        '<div><b style="font-family:var(--f-disp);font-size:17px">'+esc(t.name)+'</b>'+
+        '<span class="caption" style="display:block">'+lg.teams[me.team].w+"-"+lg.teams[me.team].l+"-"+lg.teams[me.team].otl+' · '+t.div+' Division'+(r==="mgmt"?" · You are the GM":"")+'</span></div>'+
+        '<span class="ovrbox" style="margin-left:auto" title="My overall">'+lg.ratings[me.id].ovr+'</span></div></div>');
+    }
     /* Availability only carries urgency when a game week is actually open. Pre-season (no
        scheduled week) shows a calm "opens when the schedule posts" state instead of a red
        "Due Sunday 8 PM ET" for a week that doesn't exist. */

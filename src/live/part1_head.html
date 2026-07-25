@@ -877,6 +877,15 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
 .club-led .rb-track{height:9px;border-radius:6px;background:var(--line);overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.16)}
 .club-led .rb-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--ink),var(--steel-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
 @media(prefers-reduced-motion:reduce){.club-led summary .chev{transition:none}}
+/* Team HQ team-overview: the ledger stat strip */
+/* eyebrow label — base rule so .rb-lab reads as a tiny mono caption outside .rbar too (seats, "Next") */
+.rb-lab{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+.ovstat{display:flex;flex-wrap:wrap;border:1.5px solid var(--line);border-radius:var(--r-m);background:var(--paper);overflow:hidden}
+.ovstat .cell{flex:1 1 0;min-width:96px;padding:12px 14px;border-right:1px solid var(--line-soft)}
+.ovstat .cell:last-child{border-right:0}
+.ovstat .cell b{display:block;font-family:var(--f-disp);font-weight:900;font-size:20px;letter-spacing:-.01em;line-height:1.15}
+.ovstat .cell b small{font-size:11px;font-weight:700;color:var(--steel)}
+.ovstat .cell span{display:block;margin-top:3px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
 </style>
 </head>
 <body>

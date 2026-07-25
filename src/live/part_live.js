@@ -962,10 +962,7 @@ CG._mgmtDashboard = function(mt){
     '<h1 class="h-page" style="margin-top:8px">'+esc(mt.name)+'</h1>'+
     '<p class="lede" style="margin-top:10px">Your club’s front office — build lineups, manage the roster, and work the trade market from the Team HQ menu.</p></div>';
   var cards = [];
-  cards.push('<div class="card" style="--tc:'+mt.color+'"><div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+mt.code+'">Team page</a></div>'+
-    '<div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(mt.code,44)+
-    '<div><b style="font-family:var(--f-disp);font-size:17px">'+esc(mt.name)+'</b>'+
-    '<span class="caption" style="display:block">'+(rec.w||0)+"-"+(rec.l||0)+"-"+(rec.otl||0)+' · '+esc(mt.div)+' Division</span></div></div></div>');
+  cards.push(CG.teamOverviewCard(mt));
   if (CG.gmTasksCard) cards.push(CG.gmTasksCard(mt.code));
   if (CG.roadAheadCard) cards.push(CG.roadAheadCard(s, { chip:"the season ahead" }));
   return h + '<div class="grid g2">'+cards.join("")+'</div>';
@@ -5010,43 +5007,119 @@ CG.clubMgmt = function(){
   var uid = CG.auth.user && CG.auth.user.id;
   return { club:club, t:t, teamId:t.id, isOwner: !!(uid && t.owner===uid) };
 };
-CG.clubManagementCard = function(){
-  var m = CG.clubMgmt(); if(!m) return "";
-  var lg = CG.lg||{}, names = lg._profName||{};
-  var apps = (lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId; });
-  var pending = apps.filter(function(a){ return a.status==="pending"; });
-  function seat(role, label, required){
-    var holderId = role==="gm" ? m.t.gm : m.t.agm;
-    var holder = holderId ? (names[holderId]||"Assigned") : null;
-    var pend = pending.find(function(a){ return a.role===role; });
-    var right = pend ? '<span class="chip chip-warn chip-xs">'+esc(((pend.nominee&&pend.nominee.gamertag)||"A nominee"))+' — pending</span>'
-      : m.isOwner ? '<button class="btn '+(required && !holder ? "btn-chrome" : "btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>' : "";
-    var status = holder ? esc(holder)
-      : required ? '<span style="color:var(--amber-ink)">Vacant — required</span>' : "Vacant — optional";
-    return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:10px 0">'+
-      '<span class="chip chip-chrome chip-xs">'+esc(role.toUpperCase())+'</span>'+
-      '<span style="flex:1;min-width:140px"><b style="font-family:var(--f-disp)">'+esc(label)+'</b>'+
-        '<span class="caption" style="display:block">'+status+'</span></span>'+right+'</div>';
+/* ---- Team HQ · team overview (dashboard console) ---- */
+CG.teamOverviewCard = function(mt){
+  if (!mt || !mt.code) return "";
+  var lg=CG.lg||{}, code=mt.code, names=lg._profName||{};
+  var rec=(lg.teams&&lg.teams[code])||{w:0,l:0,otl:0};
+  var pr=(lg.powerRankings||[]).find(function(p){ return p.team===code; })||{rank:0};
+  var prN=(lg.powerRankings||[]).length;
+  var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).length, rosterMax=CG.ROSTER_MAX||15;
+  var pay=(CG.teamPayroll?CG.teamPayroll(lg,code):0), cap=CG.CAP||60000000;
+  var payPct=cap?Math.min(100,Math.round(pay/cap*100)):0, over=pay>cap;
+  var played=(rec.w+rec.l+rec.otl)>0||lg.prManual;
+  var next=(lg.schedule||[]).filter(function(g){ return (g.home===code||g.away===code) && g.status!=="final"; })
+            .sort(function(a,b){ return a.at-b.at; })[0];
+  var opp=next?(next.home===code?next.away:next.home):null;
+  var seats=[["Owner",mt.owner],["GM",mt.gm],["AGM",mt.agm]].map(function(s){
+    var nm=s[1]?(names[s[1]]||"Assigned"):null;
+    return '<span style="display:flex;flex-direction:column;gap:2px">'+
+      '<span class="rb-lab">'+s[0]+'</span>'+
+      '<b style="font-family:var(--f-disp);font-size:13px'+(nm?'':';color:var(--steel-2)')+'">'+(nm?esc(nm):"Vacant")+'</b></span>';
+  }).join("");
+  return '<div class="card" style="--tc:'+esc(mt.color||"#8899A6")+';grid-column:1/-1">'+
+    '<div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+code+'">Club page →</a></div>'+
+    '<div class="card-b" style="display:flex;gap:14px;align-items:center;padding-bottom:14px">'+CG.crest(code,40)+
+      '<div style="flex:1;min-width:0"><b style="font-family:var(--f-disp);font-size:16px;display:block">'+esc(mt.name)+'</b>'+
+      '<span class="caption">'+esc(mt.div||"")+' Division'+(played?"":" · Pre-season")+'</span></div>'+
+      '<span class="ovrbox" title="Power rank">#'+(pr.rank||"—")+'</span></div>'+
+    '<div class="card-b" style="padding-top:0;padding-bottom:16px"><div class="ovstat">'+
+      '<div class="cell"><b>'+(rec.w||0)+"–"+(rec.l||0)+"–"+(rec.otl||0)+'</b><span>Record</span></div>'+
+      '<div class="cell"><b>#'+(pr.rank||"—")+'<small> / '+prN+'</small></b><span>'+(played?"Power rank":"Pre-season seed")+'</span></div>'+
+      '<div class="cell"><b>'+rosterN+'<small> / '+rosterMax+'</small></b><span>Roster</span></div>'+
+      '<div class="cell"><b'+(over?' style="color:var(--red-ink)"':'')+'>'+CG.fmtMoney(pay)+'</b><span>of '+CG.fmtMoney(cap)+' cap</span></div>'+
+    '</div>'+
+    '<div style="margin-top:12px">'+
+      '<div class="rbar"><span class="rb-lab">Roster</span><div class="rb-track"><div class="rb-fill" style="width:'+Math.round(rosterN/rosterMax*100)+'%"></div></div><span class="rb-v">'+rosterN+'/'+rosterMax+'</span></div>'+
+      '<div class="rbar"><span class="rb-lab">Cap</span><div class="rb-track"><div class="rb-fill" style="width:'+payPct+'%'+(over?";background:linear-gradient(90deg,var(--red),var(--red-ink))":"")+'"></div></div><span class="rb-v"'+(over?' style="color:var(--red-ink)"':'')+'>'+payPct+'%</span></div>'+
+    '</div></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap;align-items:center">'+
+      '<div style="display:flex;gap:18px;flex-wrap:wrap;flex:1">'+seats+'</div>'+
+      '<a class="sec-link" href="#/hub/management">Front office →</a></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">'+
+      '<span class="rb-lab">Next</span>'+
+      (next&&opp&&CG.TEAM[opp]?'<span class="teamcell">'+CG.crest(opp,22)+'<span class="nm">'+(next.home===code?"vs ":"@ ")+esc(CG.TEAM[opp].name)+'</span></span>'+
+            '<span class="caption" style="margin-left:auto">'+CG.fmtDay(next.at)+' · '+CG.fmtTime(next.at)+'</span>'
+           :'<span class="caption">'+(played?"No upcoming games scheduled.":"No games scheduled — the pre-season slate posts soon.")+'</span>')+
+    '</div></div>';
+};
+
+/* ---- Team HQ · Management tab (front office + owner GM/AGM nominations) ---- */
+CG.mgmtSeatsTable = function(m){
+  var lg=CG.lg||{}, names=lg._profName||{}, uid=(CG.auth.user||{}).id;
+  var pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
+  function row(role,label,required){
+    var owner=role==="owner";
+    var hid=owner?m.t.owner:role==="gm"?m.t.gm:m.t.agm, holder=hid?(names[hid]||"Assigned"):null;
+    var isMe=hid&&hid===uid;
+    var pend=pending.find(function(a){ return a.role===role; });
+    var status=pend?'<span class="chip chip-warn chip-xs">Pending reviewer vote</span>'
+      :owner?'<span class="chip chip-xs">Club owner</span>'
+      :holder?'<span class="chip chip-win chip-xs">Confirmed</span>'
+      :required?'<span class="chip chip-xs" style="color:var(--amber-ink);border-color:var(--amber-ink)">Vacant — required</span>'
+      :'<span class="chip chip-xs">Vacant — optional</span>';
+    var action=owner?'<span class="caption">—</span>'
+      :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
+      :m.isOwner?'<button class="btn '+(required&&!holder?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>'
+      :'<span class="caption">—</span>';
+    return '<tr>'+
+      '<td class="tleft"><span class="chip chip-chrome chip-xs">'+esc(label.toUpperCase())+'</span></td>'+
+      '<td class="tleft"><b style="font-family:var(--f-disp)">'+(holder?esc(holder):'<span style="color:var(--steel-2)">Vacant</span>')+'</b>'+(isMe?' <span class="caption">· you</span>':'')+'</td>'+
+      '<td class="tleft">'+status+'</td>'+
+      '<td class="tleft" style="text-align:right">'+action+'</td></tr>';
   }
-  /* a club must have an active GM before its first regular-season game */
-  var needsGm = !m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
-  var h = '<div class="card" style="margin-bottom:18px;margin-top:20px"><div class="card-h"><h3>Club management</h3>'+
-    (m.isOwner?'<span class="chip chip-xs">You own this club</span>':"")+'</div><div class="card-b" style="padding-top:4px">'+
-    (needsGm && m.isOwner ? '<div class="note" style="margin:6px 0 2px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">You need a General Manager</b>'+
-      'Every club must have an active GM before its first regular-season game. Nominate one below — the reviewers approve it.</div>' : "")+
-    seat("gm","General Manager", true)+seat("agm","Assistant GM", false)+
-    '<p class="caption" style="border-top:1px solid var(--line);padding-top:10px;margin-top:8px">'+
-    (m.isOwner ? "Nominate any player signed up for the season who isn’t already under contract — they don’t have to be on your roster. The league office’s application reviewers vote to approve; 50%+1 appoints them automatically. A GM is required; an AGM is optional."
-               : "Only the club owner can nominate a GM or AGM. Appointments are approved by the league office’s reviewer vote. A GM is required; an AGM is optional.")+'</p></div></div>';
-  /* the owner talks to the office about a pending nomination right here */
+  return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px">'+
+    '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">Read-only</span>')+'</div>'+
+    '<div class="tblwrap"><table class="tbl compact"><thead><tr>'+
+      '<th class="tleft">Seat</th><th class="tleft">Holder</th><th class="tleft">Status</th><th class="tleft" style="text-align:right">Action</th>'+
+    '</tr></thead><tbody>'+
+      row("owner","Owner",true)+row("gm","General Manager",true)+row("agm","Assistant GM",false)+
+    '</tbody></table></div></div>';
+};
+CG.hubManagement = function(){
+  var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
+  var lg=CG.lg||{}, pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
+  var needsGm=!m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
+  var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
+    '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the owner nominates management for the league office to approve.</p></div>';
+  if (needsGm && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">A General Manager is required</b>Every club must appoint a GM before its first regular-season game. Nominate one below — the league office’s reviewers approve it.</div>';
+  h+=CG.mgmtSeatsTable(m);
   if (m.isOwner) pending.forEach(function(a){
-    var roleLabel = a.role==="gm"?"General Manager":"Assistant GM";
-    h += '<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(roleLabel)+'</h3>'+
+    var rl=a.role==="gm"?"General Manager":"Assistant GM";
+    h+='<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(rl)+'</h3>'+
       '<span class="chip chip-warn chip-xs">Pending the reviewer vote</span></div><div class="card-b">'+
       '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw="'+a.id+'">Withdraw this nomination</button></div></div>';
-    h += CG.appChatSection("management", a.id, {office:false});
+    h+=CG.appChatSection("management", a.id, {office:false});
   });
+  h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
+    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract or on league staff — they don’t have to be on your roster. "
+               : "Only the club owner can nominate a GM or AGM. ")+
+    "The league office’s reviewers vote; on approval the nominee is set automatically, and if denied nothing changes. A GM is required before your first regular-season game; an AGM is optional.</div>";
   return h;
+};
+CG.AFTER._management = function(){
+  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
+  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-mgmt-withdraw");
+    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
+      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
+        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
+        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+  if (CG.wireAppChat) CG.wireAppChat();
 };
 CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
@@ -5076,8 +5149,9 @@ CG.submitMgmtApp = function(role, nomineeId, pitch){
   });
 };
 /* inject the management card into the roster page + wire its controls */
-CG._origHubRoster = CG.hubRoster;
-CG.hubRoster = function(qs){ return CG._origHubRoster(qs) + CG.clubManagementCard(); };
+/* Front-office management now lives on its own Team HQ → Management tab (CG.hubManagement),
+   not bolted onto the roster page. (The old roster-append override here was already clobbered
+   by the dead-cap hubRoster wrapper further down, so the card rendered nowhere.) */
 CG._origAfterRoster = CG.AFTER._roster;
 CG.AFTER._roster = function(){
   if (CG._origAfterRoster) CG._origAfterRoster();
@@ -6859,6 +6933,10 @@ CG.ROUTES.hub = function(param, qs){
     return CG.isStatsStaff() ? CG.hubShell("statsmgr", CG.hubStatsManager(qs))
       : CG.unauthorized("The stats manager is limited to statistics staff.");
   }
+  if (param==="management"){
+    return (CG.managesClub && CG.managesClub()) ? CG.hubShell("management", CG.hubManagement())
+      : CG.unauthorized("The front office is your club’s Owner/GM/AGM tool.");
+  }
   return CG._origHubRoute(param, qs);
 };
 CG._origHubAfter = CG.AFTER.hub;
@@ -6869,6 +6947,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="application"){ CG.AFTER._applicationDetail(); return; }
   if (param==="archive"){ CG.AFTER._ticketArchive(); return; }
   if (param==="statsmgr"){ CG.AFTER._statsMgr(qs); return; }
+  if (param==="management"){ CG.AFTER._management(); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   var sl=document.getElementById("sSaveLive");
