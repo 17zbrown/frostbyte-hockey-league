@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 const PUBLIC_KEY = "4a2af92fd2cdfa5fdad8d2f1e3fd2eb9e8e17f76dc2c82a154491ebabac3d369";
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const BOT = process.env.DISCORD_BOT_TOKEN;   // for creating the per-lobby draft thread on fill
 
 const POS = [
   { key: "C",  label: "Center" },
@@ -77,6 +78,43 @@ async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) && rows.length ? rows[0] : null;   // null => CAS lost, caller retries
 }
+// best-effort: stash the draft thread id on the lobby (draft still works via lobby id if this misses)
+async function sbStashThread(id, threadId) {
+  await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(),
+    body: JSON.stringify({ thread_id: threadId }), signal: AbortSignal.timeout(1200) }).catch(() => {});
+}
+
+/* ---------- Discord REST (bot token) — only used to spin off the per-lobby draft thread ---------- */
+async function dApi(method, path, body, ms) {
+  const r = await fetch(`https://discord.com/api/v10${path}`, {
+    method, headers: { Authorization: `Bot ${BOT}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(ms || 1600),
+  });
+  if (!r.ok) throw new Error(`${path} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
+  return r.json();
+}
+// On fill: create a private thread off the signup channel, drop the draft in it, ping the 12 players.
+// Returns the thread id. Throws if the thread can't be made (caller falls back to drafting in #lfg).
+async function launchDraftRoom(lobbyId, parentChannelId, state) {
+  const shortId = String(lobbyId).slice(0, 4).toUpperCase();
+  // Public thread (type 11): every pinged player can open it with no invite step, and it auto-archives.
+  const thread = await dApi("POST", `/channels/${parentChannelId}/threads`,
+    { name: `🏒 Pickup ${shortId} — draft`, type: 11, auto_archive_duration: 1440 });
+  const ids = (state.signups || []).map((p) => p.id);
+  const pings = ids.map((id) => `<@${id}>`).join(" ");
+  const dv = draftView({ id: lobbyId, state });
+  await dApi("POST", `/channels/${thread.id}/messages`, {
+    content: `${pings}\n**Your lobby is full — draft time!** 🏒 Captains, make your picks below.`,
+    embeds: dv.embeds, components: dv.components, allowed_mentions: { users: ids.slice(0, 100) },
+  });
+  return thread.id;
+}
+const filledView = (threadId) => ({
+  embeds: [{ title: "🔒 Lobby full — 12/12",
+    description: `Head to your private draft room: <#${threadId}>\n\nAnyone can run \`/lfg\` to start the next lobby.`,
+    color: BRAND }],
+  components: [],
+});
 
 /* ---------- state helpers ---------- */
 const nameOf = (interaction) => {
@@ -241,8 +279,21 @@ async function handleComponent(interaction) {
     if (out.error) return ephemeral(out.error);
 
     const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, out.status);
-    if (saved) return respond({ type: UPDATE, data: out.view });
-    // CAS lost — another click landed first; re-read and retry
+    if (!saved) continue;   // CAS lost — another click landed first; re-read and retry
+
+    // If this join just filled the lobby, spin off a private draft room and free up the signup channel.
+    // Only the click that won the CAS save reaches here, so the thread is created exactly once.
+    if (action === "join" && out.status === "drafting" && BOT) {
+      try {
+        const threadId = await launchDraftRoom(lobby.id, lobby.channel_id, out.state);
+        sbStashThread(lobby.id, threadId);   // best-effort, not awaited — keeps the response fast
+        return respond({ type: UPDATE, data: filledView(threadId) });
+      } catch (e) {
+        // couldn't create the thread — gracefully run the draft here in the signup channel instead
+        return respond({ type: UPDATE, data: out.view });
+      }
+    }
+    return respond({ type: UPDATE, data: out.view });
   }
   return ephemeral("The lobby was busy — try that again.");
 }
