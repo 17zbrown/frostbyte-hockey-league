@@ -111,9 +111,12 @@ async function resolveProfile(entry, cache) {
 export const handler = async (event) => {
   // temp diag: is the residential proxy set, and does an EA call through it work?
   if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag === "puproxy9") {
-    const out = { proxySet: !!PROXY, node: process.version, platform: PLATFORM };
-    try { const d = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=test`);
-      out.eaTest = "ok"; out.shape = Array.isArray(d) ? ("array len " + d.length) : ("object keys " + Object.keys(d || {}).length); }
+    const out = { proxySet: !!PROXY, node: process.version };
+    const { ProxyAgent, fetch: uFetch } = await import("undici");
+    try { const d = await uFetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(6000) }); out.directIp = (await d.json()).ip; } catch (e) { out.directIp = "err: " + String(e.message || e); }
+    if (PROXY) { try { const d = await uFetch("https://api.ipify.org?format=json", { dispatcher: new ProxyAgent(PROXY), signal: AbortSignal.timeout(9000) }); out.proxyIp = (await d.json()).ip; } catch (e) { out.proxyIp = "err: " + String(e.message || e); } }
+    out.proxyApplied = out.proxyIp && out.proxyIp !== out.directIp && !String(out.proxyIp).startsWith("err");
+    try { const d = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=test`); out.eaTest = "ok"; out.shape = Array.isArray(d) ? ("array " + d.length) : ("obj " + Object.keys(d || {}).length); }
     catch (e) { out.eaTest = String(e.message || e); }
     return reply(out);
   }
