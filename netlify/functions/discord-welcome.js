@@ -127,7 +127,10 @@ export default async () => {
     const memberIds = members.map((m) => m.user.id);
 
     const already = new Set((await sbGet("welcomed_members?select=discord_id")).map((r) => r.discord_id));
-    const fresh = members.filter((m) => !already.has(m.user.id));
+    // With Community membership screening on, a member sits as `pending` until they accept the rules.
+    // Skip them so we greet them only once they're actually through the gate (a later sweep catches
+    // them when `pending` clears); they're not marked welcomed, so nothing is lost.
+    const fresh = members.filter((m) => !already.has(m.user.id) && !m.pending);
     sum.new = fresh.length;
 
     // First-ever run: seed everyone silently so we don't welcome long-time members.

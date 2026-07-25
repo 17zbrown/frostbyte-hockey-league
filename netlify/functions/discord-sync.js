@@ -303,7 +303,8 @@ export default async (req) => {
   const diag = (() => { try { return new URL(req.url).searchParams; } catch { return new URLSearchParams(); } })();
   const diagMode = diag.get("diag");
   const regMode = diag.get("register");   // ?register=commands (re)registers the guild slash commands
-  if (diagMode || regMode) {
+  const setupMode = diag.get("setup");    // ?setup=community configures the welcome screen + onboarding
+  if (diagMode || regMode || setupMode) {
     const keyRow = await sbGet("app_config?key=eq.diag_key&select=value").catch(() => []);
     const want = keyRow[0] && keyRow[0].value;
     const got = diag.get("key") || req.headers.get("x-diag-key") || "";
@@ -323,6 +324,58 @@ export default async (req) => {
       const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
       return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
         { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    // Configure Community onboarding + welcome screen (idempotent). Prompt options reveal CHANNELS
+    // only — never roles — so nothing here fights the managed role sync. Enabling onboarding turns on
+    // the low-friction rules-accept gate; the welcome bot already skips members still in that gate.
+    if (BOT && GUILD && setupMode === "community") {
+      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+      const idByName = {};
+      for (const c of chans) { if (c.type === 0) { const n = (c.name || "").toLowerCase(); if (!idByName[n]) idByName[n] = c.id; } }
+      const pick = (names) => names.map((n) => idByName[n]).filter(Boolean);
+      const out = {};
+
+      // Welcome screen — the panel a prospective member sees on the invite.
+      const ws = [
+        { name: "welcome", desc: "Start here — what Chel Gaming is", emoji: "👋" },
+        { name: "season-signups", desc: "Register to play this season", emoji: "📝" },
+        { name: "pickup-games", desc: "Jump into pickup 6s — run /join", emoji: "🏒" },
+        { name: "rules", desc: "The league rulebook", emoji: "📖" },
+      ].filter((w) => idByName[w.name]).slice(0, 5);
+      try {
+        await dApi("PATCH", `/guilds/${GUILD}/welcome-screen`, {
+          enabled: true,
+          description: "Competitive 6v6 EA NHL — a full season with automated stats, and clubs you can own and run.",
+          welcome_channels: ws.map((w) => ({ channel_id: idByName[w.name], description: w.desc, emoji_name: w.emoji })),
+        });
+        out.welcomeScreen = "set";
+      } catch (e) { out.welcomeScreenError = String(e.message || e); }
+
+      // Onboarding — a solid set of default channels + one optional, channel-only routing question.
+      const defaults = pick(["welcome", "rules", "announcements", "season-signups", "schedule", "standings", "news", "general-chat", "trash-talk", "highlight-reel", "league-suggestions", "pickup-games"]);
+      const opt = (id, title, desc, names) => ({ id, title, description: desc, channel_ids: pick(names), role_ids: [] });
+      const onboarding = {
+        default_channel_ids: defaults,
+        enabled: true,
+        mode: 0,
+        prompts: [{
+          id: "1", type: 0, title: "What brings you to Chel Gaming?",
+          single_select: true, required: false, in_onboarding: true,
+          options: [
+            opt("11", "I want to play this season", "Sign up and get into pickup games.", ["season-signups", "pickup-games"]),
+            opt("12", "I want to own or manage a club", "Run a franchise — draft, cap, and trades.", ["season-signups", "announcements", "website"]),
+            opt("13", "Just following along", "Scores, standings, and league news.", ["standings", "game-scores", "news"]),
+          ],
+        }],
+      };
+      try {
+        await dApi("PUT", `/guilds/${GUILD}/onboarding`, onboarding);
+        out.onboarding = "enabled";
+        out.defaultChannels = defaults.length;
+      } catch (e) { out.onboardingError = String(e.message || e); }
+
+      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (BOT && GUILD && diagMode === "guild") {
       const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
