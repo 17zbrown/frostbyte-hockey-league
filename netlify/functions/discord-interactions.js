@@ -252,10 +252,14 @@ async function handleComponent(interaction) {
 const EMPTY_STATE = { signups: [], captains: [], teams: { A: [], B: [] }, turn: null, server: null, code: null };
 async function handleCommand(interaction) {
   if ((interaction.data.name || "") !== "lfg") return ephemeral("Unknown command.");
+  // TEMP bisection probe: simplest possible valid response. If this shows, the function +
+  // signature verification + response all work, and the issue was the card structure.
+  if (LFG_PROBE) return ephemeral("🏒 LFG endpoint reached — the bot is responding. (channel " + (interaction.channel_id || "?") + ")");
   // Respond INSTANTLY with a fresh signup card — no DB round-trip, so it never risks Discord's 3s
   // timeout on a cold start. The lobby is created on the first click via get-or-create.
   return respond({ type: REPLY, data: signupView(interaction.channel_id, EMPTY_STATE) });
 }
+const LFG_PROBE = true;
 
 const DIAG = "lfgdiag9x";
 
