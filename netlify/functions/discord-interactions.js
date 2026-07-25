@@ -308,7 +308,7 @@ async function handleComponent(interaction) {
   // interaction whose channel you just deleted" race). key == lobby id here.
   if (action === "closelobby") {
     if (!(await sbIsStatsStaff(userId))) {
-      return ephemeral("Only statistics staff or a commissioner can delete a lobby — do it once the box score is entered on the club-search page.");
+      return ephemeral("Only statistics staff or a commissioner can delete a lobby — it's tied to entering the box score. If you think this one should be removed, open a ticket on **chelgamingleague.com** and staff will handle it.");
     }
     const lobby = await sbGetLobby(key);
     if (!lobby || lobby.status === "closed") return ephemeral("This lobby is already closed.");
