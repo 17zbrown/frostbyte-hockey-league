@@ -3401,9 +3401,9 @@ CG.admUsersLive = function(){
   /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
      (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
   var conflicts = profs.filter(function(pr){ return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id]; });
-  h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation is on.</b> '+
-    'Commissioners and staff can’t own or manage a club — it keeps votes on club management and staff impartial. They can still play as rostered members. New assignments that break the rule are blocked automatically.'+
-    (conflicts.length?' <span style="display:block;margin-top:8px">Grandfathered for Season 1 (keep both hats until the Season 2 rollover): '+
+  h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation.</b> '+
+    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). A commissioner can override this when there’s a reason to. Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
+    (conflicts.length?' <span style="display:block;margin-top:8px">Holding both hats right now (grandfathered for Season 1): '+
       conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
@@ -3424,14 +3424,12 @@ CG.admUsersLive = function(){
         '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
         '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
-          '<button class="btn btn-ghost btn-sm" data-manage="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Club role</button>'+
-          (mg?'<button class="btn btn-ghost btn-sm" data-unmanage="'+pr.id+'" data-club="'+esc(mg.club)+'" data-mrole="'+esc(mg.role)+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Remove club role</button>':"")+
           (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
               :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
           (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
         '</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. “Club role” assigns a member as a club’s Owner, GM, or AGM; “Remove club role” clears the seat. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. To make a member a club’s Owner, GM or AGM — or clear a seat — open that club under Teams and use its Front office pickers. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
   return h;
 };
 CG.setUserRole = function(profileId, role, selEl){
@@ -3452,37 +3450,8 @@ CG.setUserRole = function(profileId, role, selEl){
     });
   });
 };
-CG.assignClubRole = function(profileId, name){
-  var teamOpts='<option value="">Choose club…</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
-  CG.modal("Assign "+esc(name)+" to club management",
-    '<label class="fld"><span>Club</span><select id="mgTeam">'+teamOpts+'</select></label>'+
-    '<label class="fld"><span>Role</span><select id="mgRole"><option value="owner">Owner</option><option value="gm">General Manager</option><option value="agm">Assistant GM</option></select></label>'+
-    '<p class="caption">Sets the club’s Owner / GM / AGM. Management runs their club’s Team HQ (roster, trades, lineups) and drafts their own picks.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Assign</button>');
-  document.getElementById("mgGo").addEventListener("click", function(){
-    var code=document.getElementById("mgTeam").value, role=document.getElementById("mgRole").value;
-    if(!code){ CG.toast("Pick a club first","err"); return; }
-    CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:role, p_profile:profileId }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" is now "+role.toUpperCase()+" of "+code+" — refresh to see the badge","ok");
-    });
-  });
-};
-CG.removeClubRole = function(profileId, club, role, name){
-  var roleName = role==="owner"?"Owner":role==="gm"?"General Manager":"Assistant GM";
-  CG.modal("Remove "+esc(name)+" from "+esc(club)+" management?",
-    '<p>'+esc(name)+' is currently <b>'+roleName+'</b> of <b>'+esc(club)+'</b>. Removing the role ends their Team HQ access for the club; their roster spot and contract are untouched.</p>'+
-    '<p class="caption" style="margin-top:8px">Discord club-management roles update on the next sync. Reassign anytime with “Club role”.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="unmgGo">Remove role</button>');
-  document.getElementById("unmgGo").addEventListener("click", function(){
-    CG.sb.rpc("set_team_manager",{ p_team_code:club, p_role:role, p_profile:null }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay) CG.closeOverlay();
-      CG.toast(name+" removed as "+roleName+" of "+club,"ok");
-      CG.reloadLeague();
-    });
-  });
-};
+/* Club-role assignment now lives on each club's edit page (CG.teamForm → Front office) via
+   type-ahead member pickers; the old per-user modals were removed with those buttons. */
 CG.suspendUser = function(profileId, name){
   CG.modal("Suspend "+esc(name),
     '<label class="fld"><span>Reason (shown on the profile’s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.2 — abusive conduct in lobby"></textarea></label>'+
@@ -3580,8 +3549,6 @@ CG.AFTER._admUsers = function(){
     applyFilter();
   });
   document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value, this); }); });
-  document.querySelectorAll("[data-manage]").forEach(function(b){ b.addEventListener("click", function(){ CG.assignClubRole(this.getAttribute("data-manage"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-unmanage]").forEach(function(b){ b.addEventListener("click", function(){ CG.removeClubRole(this.getAttribute("data-unmanage"), this.getAttribute("data-club"), this.getAttribute("data-mrole"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-lift]").forEach(function(b){ b.addEventListener("click", function(){ CG.liftUserSuspension(this.getAttribute("data-lift"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
@@ -3977,6 +3944,24 @@ CG.teamForm = function(t){
   var isNew = !t;
   t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
   var divOpts = (CG.DIVISIONS&&CG.DIVISIONS.length?CG.DIVISIONS:["East","West"]).map(function(d){ return '<option'+(t.div===d?" selected":"")+'>'+esc(d)+'</option>'; }).join("");
+  var isEdit = !isNew;
+  function holderName(pid){
+    if(!pid) return "";
+    var p=(CG.lg&&CG.lg._profilesRaw||[]).find(function(x){ return x.id===pid; });
+    return p ? (p.gamertag||p.display_name||"") : "";
+  }
+  /* Front office lives on the club, so it's edited here (edit-only — a club must exist first). */
+  var mgmtBlock = isEdit ? (
+    '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">'+
+      '<h3 class="h-sec" style="font-size:15px;margin:0 0 2px">Front office</h3>'+
+      '<p class="caption" style="margin:0 0 12px">Owner, GM and AGM run this club’s Team HQ — roster, trades, lineups and draft picks. Type a member’s name and pick them; clear a field to vacate the seat. One person holds one seat per club.</p>'+
+      '<div class="grid g3" style="gap:12px">'+
+        CG.memberPickerField("tfOwner","Owner")+
+        CG.memberPickerField("tfGm","General Manager")+
+        CG.memberPickerField("tfAgm","Assistant GM")+
+      '</div>'+
+    '</div>'
+  ) : '';
   CG.modal(isNew?"Add a club":"Edit — "+esc(t.name),
     '<div class="grid g2" style="gap:12px">'+
     '<label class="fld"><span>Club name</span><input id="tfName" value="'+esc(t.name)+'" placeholder="e.g. Boston Bruins"></label>'+
@@ -3993,7 +3978,7 @@ CG.teamForm = function(t){
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'+
       '<span class="caption">Uploads apply when you save the club.</span>'+
       '<button type="button" class="btn btn-ghost btn-sm" id="tfLogoClear"'+(t.logo?'':' style="display:none"')+'>Use generated crest</button>'+
-    '</div>',
+    '</div>'+mgmtBlock,
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="tfSave">'+(isNew?"Add club":"Save changes")+'</button>');
   /* --- drag & drop logo wiring --- */
   var zone = document.getElementById("tfLogoDrop"), fileIn = document.getElementById("tfLogoFile"),
@@ -4027,6 +4012,12 @@ CG.teamForm = function(t){
   zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
   zone.addEventListener("drop", function(e){ e.preventDefault(); zone.classList.remove("drag"); if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
   clearBtn.addEventListener("click", function(){ setPreview(""); CG.toast("Back to the generated crest — save to apply","ok"); });
+  /* --- front-office pickers: wire the type-ahead, pre-fill current holders --- */
+  if (isEdit){
+    ["tfOwner","tfGm","tfAgm"].forEach(function(id){ CG.wireMemberPicker(id, ["members"]); });
+    var pf=function(id,pid){ var el=document.getElementById(id); if(el&&pid){ el.value=holderName(pid); el.dataset.acId=pid; } };
+    pf("tfOwner",t.owner); pf("tfGm",t.gm); pf("tfAgm",t.agm);
+  }
   document.getElementById("tfSave").addEventListener("click", function(){
     var name=(document.getElementById("tfName").value||"").trim(),
         code=(document.getElementById("tfCode").value||"").trim().toUpperCase();
@@ -4034,6 +4025,20 @@ CG.teamForm = function(t){
     if(!/^[A-Z]{2,4}$/.test(code)){ CG.toast("Code should be 2–4 letters","err"); return; }
     var clash=(CG.TEAMS||[]).find(function(x){ return x.code===code && (!t.id || x.id!==t.id); });
     if(clash){ CG.toast(code+" is already "+clash.name+"’s code","err"); return; }
+    /* front-office changes (edit only): diff each seat against what the club currently holds */
+    var mgmtChanges=[];
+    if(isEdit){
+      var want={ owner:CG.readMemberPicker("tfOwner").id||null,
+                 gm:CG.readMemberPicker("tfGm").id||null,
+                 agm:CG.readMemberPicker("tfAgm").id||null };
+      var picked=[want.owner,want.gm,want.agm].filter(Boolean);
+      if(picked.some(function(v,i){ return picked.indexOf(v)!==i; })){
+        CG.toast("One member can only hold one seat on a club — pick different people for Owner, GM and AGM","err"); return;
+      }
+      if(want.owner!==(t.owner||null)) mgmtChanges.push({role:"owner",profile:want.owner});
+      if(want.gm!==(t.gm||null))       mgmtChanges.push({role:"gm",profile:want.gm});
+      if(want.agm!==(t.agm||null))     mgmtChanges.push({role:"agm",profile:want.agm});
+    }
     var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
       division:document.getElementById("tfDiv").value,
       color:document.getElementById("tfColor").value,
@@ -4043,11 +4048,26 @@ CG.teamForm = function(t){
       ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null }))
       : CG.sb.from("teams").update(rec).eq("id", t.id);
     q.then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(isNew?name+" added to the league":"Club saved","ok");
-      CG.reloadLeague();
+      if(r.error){ btn.disabled=false; CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      /* apply front-office moves one at a time — each RPC clears the member’s prior seat first */
+      var chain=Promise.resolve();
+      mgmtChanges.forEach(function(ch){
+        chain=chain.then(function(){
+          return CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:ch.role, p_profile:ch.profile }).then(function(rr){
+            if(rr.error) throw new Error(rr.error.message);
+          });
+        });
+      });
+      chain.then(function(){
+        btn.disabled=false;
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast(isNew?name+" added to the league":"Club saved","ok");
+        CG.reloadLeague();
+      }).catch(function(e){
+        btn.disabled=false;
+        CG.toast("Club saved, but a front-office change failed: "+((e&&e.message)||"try again"),"err");
+        CG.reloadLeague();
+      });
     });
   });
 };
