@@ -153,9 +153,34 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
       guildChannels.push(ch); sum.communityChansCreated = (sum.communityChansCreated || 0) + 1;
     } catch (e) { sum.errors.push({ communityChan: name, error: String(e.message || e) }); }
   }
-  // #pickup-games (formerly #lfg) — the /lfg pickup lobbies live here.
-  await ensurePublicText("pickup-games", generalCat && generalCat.id, "Pickup games — run /lfg to line up 6s and scrims. Call your position and go.", ["lfg"]);
+  // #pickup-games (formerly #lfg) — the /join pickup lobbies live here.
+  await ensurePublicText("pickup-games", generalCat && generalCat.id, "Pickup games — run /join to line up 6s and scrims. Call your position and go.", ["lfg"]);
   await ensurePublicText("draft-hub", gamesCat && gamesCat.id, "Watch the CGHL entry draft live and talk picks — the draft itself runs on the site.");
+
+  // "Pickup Lobbies" category — each filled /join lobby gets its own channel here (created by the
+  // interactions endpoint on fill, removed by the sweep below). Stash its id so that endpoint finds it.
+  try {
+    let plCat = cat("pickup lobbies");
+    if (!plCat) {
+      plCat = await dApi("POST", `/guilds/${GUILD}/channels`, { name: "Pickup Lobbies", type: 4 });
+      if (plCat && plCat.id) { guildChannels.push(plCat); sum.pickupCatCreated = 1; }
+    }
+    if (plCat && plCat.id) await sbUpsertCfg("pickup_lobby_category_id", plCat.id);
+  } catch (e) { sum.errors.push({ pickupCat: String(e.message || e) }); }
+
+  // Sweep spent pickup-lobby channels: any lobby marked closed (staff hit Delete), or untouched for
+  // 12h, has its channel (thread_id) removed and the marker cleared. Idempotent; a 404 is fine.
+  try {
+    const rooms = await sbGet("lfg_lobbies?thread_id=not.is.null&select=id,thread_id,status,updated_at&order=updated_at.asc&limit=100");
+    const now = Date.now();
+    for (const lo of (rooms || [])) {
+      const stale = lo.status === "closed" || (now - Date.parse(lo.updated_at) > 12 * 3600 * 1000);
+      if (!stale) continue;
+      try { await dApi("DELETE", `/channels/${lo.thread_id}`); } catch (e) { /* already gone */ }
+      await sbPatch(`lfg_lobbies?id=eq.${lo.id}`, { thread_id: null });
+      sum.pickupRoomsSwept = (sum.pickupRoomsSwept || 0) + 1;
+    }
+  } catch (e) { sum.errors.push({ pickupSweep: String(e.message || e) }); }
 
   // per-club voice rooms, private to the club role + office. VIEW(1024)+CONNECT(1048576)+SPEAK(2097152).
   const VOICE_ALLOW = "3146752";
@@ -268,7 +293,8 @@ export default async (req) => {
   // Never returns ids, tokens, or message content.
   const diag = (() => { try { return new URL(req.url).searchParams; } catch { return new URLSearchParams(); } })();
   const diagMode = diag.get("diag");
-  if (diagMode) {
+  const regMode = diag.get("register");   // ?register=commands (re)registers the guild slash commands
+  if (diagMode || regMode) {
     const keyRow = await sbGet("app_config?key=eq.diag_key&select=value").catch(() => []);
     const want = keyRow[0] && keyRow[0].value;
     const got = diag.get("key") || req.headers.get("x-diag-key") || "";
@@ -277,6 +303,15 @@ export default async (req) => {
     if (!want || got !== want) return new Response("Not found", { status: 404 });
   }
   try {
+    // Register the guild slash commands (idempotent bulk-overwrite). Only /join is advertised — this
+    // replaces the old /lfg. (The handler still accepts an "lfg" name as a harmless safety net.)
+    if (BOT && GUILD && regMode === "commands") {
+      const app = await dApi("GET", `/applications/@me`);
+      const cmds = [{ name: "join", type: 1, description: "Join or start a pickup game lobby" }];
+      const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
+      return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
+        { status: 200, headers: { "content-type": "application/json" } });
+    }
     if (BOT && GUILD && diagMode === "guild") {
       const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
       const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
