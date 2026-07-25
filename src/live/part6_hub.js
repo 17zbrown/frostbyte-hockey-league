@@ -104,6 +104,7 @@ CG.hubNav = function(section){
   mine.push(["settings","Settings","gear"]);
   var staffTools = [];
   if ((r==="staff" || r==="commish") && CG.hubStaffDesk) staffTools.push(["staffdesk","Staff desk","flag"]);
+  if (CG.isStatsStaff && CG.isStatsStaff()) staffTools.push(["statsmgr","Stats manager","chart"]);
   var club = [];
   var clubTools = r!=="commish" || CG.managesClub();
   if (clubTools){

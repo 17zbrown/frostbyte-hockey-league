@@ -1216,6 +1216,249 @@ CG.AFTER["pickup-import"] = function(){
 };
 
 /* ================================================================
+   STATS MANAGER — statistics staff + commissioners manage EA games:
+   add a game by EASHL club-name search, hand-edit an imported box
+   score (numbers + reassign a mis-matched player), or delete a game.
+   Operates on the isolated pickup_games / pickup_stats tables (the
+   club-search EA-import system). Every write goes through the
+   is_stats_staff()-gated SECURITY DEFINER RPCs; the page is gated to
+   the same set. Data is loaded async into #smBody.
+   ================================================================ */
+CG.isStatsStaff = function(){
+  var p = CG.auth && CG.auth.profile;
+  return !!(p && (p.role==="commissioner" || (p.role==="staff" && (p.departments||[]).indexOf("statistics")>=0)));
+};
+CG._smNum = [["goals","G"],["assists","A"],["shots","S"],["hits","HIT"],["pim","PIM"],["plus_minus","+/-"],["saves","SV"],["shots_against","SA"],["goals_against","GA"]];
+CG._smLoadProfiles = function(){
+  if (CG._smProfiles) return Promise.resolve(CG._smProfiles);
+  return CG.sb.from("profiles").select("id,gamertag,display_name,ea_id").order("gamertag").then(function(r){
+    CG._smProfiles = (r && r.data) || []; return CG._smProfiles;
+  });
+};
+CG._smProfOpts = function(sel){
+  var o = '<option value="">— unassigned —</option>';
+  (CG._smProfiles||[]).forEach(function(p){
+    var label = (p.gamertag||p.display_name||"(no name)")+(p.ea_id?" · EA:"+p.ea_id:"");
+    o += '<option value="'+p.id+'"'+(p.id===sel?" selected":"")+'>'+esc(label)+'</option>';
+  });
+  return o;
+};
+CG.hubStatsManager = function(qs){
+  if (!CG.isStatsStaff()) return CG.unauthorized("The stats manager is limited to statistics staff.");
+  return '<div style="margin-bottom:20px"><span class="eyebrow chr">Statistics desk</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Stats manager</h1>'+
+    '<p class="lede" style="margin-top:6px">Import an EA game by club search, fix an imported box score, or delete a game. '+
+    'These are the club-search EA games shown on player profiles &mdash; walled off from league standings, eligibility and ratings.</p></div>'+
+    '<div id="smBody"><p class="caption">Loading…</p></div>';
+};
+CG.AFTER._statsMgr = function(qs){
+  qs = qs || {};
+  var body = document.getElementById("smBody");
+  if (!body || !CG.sb || !CG.isStatsStaff()) return;
+  CG._smLoadProfiles().then(function(){
+    if (qs.game) CG._smRenderDetail(body, qs.game);
+    else CG._smRenderList(body);
+  });
+};
+/* -- EA import API (same backend the pickup importer uses) -- */
+CG._smApi = function(payload){
+  return CG.sb.auth.getSession().then(function(s){
+    var tok = s && s.data && s.data.session && s.data.session.access_token;
+    if (!tok) throw new Error("Sign in again — no session token");
+    return fetch("/api/pickup-import", { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
+      body: JSON.stringify(payload) }).then(function(r){ return r.json(); });
+  });
+};
+/* -- LIST: add-by-club-search + the manage list -- */
+CG._smRenderList = function(body){
+  CG.sb.from("pickup_games").select("id,played_at,club_a,club_b,score_a,score_b,source,went_ot,pickup_stats(count)")
+    .order("played_at",{ascending:false}).limit(60).then(function(r){
+    var games = (r && r.data) || [];
+    var addCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Add an EA game</h3><span class="chip">Club search</span></div>'+
+      '<div class="card-b"><label class="fld" style="margin:0"><span>EASHL club name</span>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="smClub" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
+        '<button class="btn btn-chrome" id="smSearch">Search EA</button></div></label>'+
+        '<div id="smSearchOut" style="margin-top:14px"></div>'+
+        '<p class="caption" style="margin-top:12px">EA keeps only each club’s last few private matches, so import soon after the game. The box score attaches to matched profiles by their EA ID.</p>'+
+      '</div></div>';
+    var listCard = '<div class="card"><div class="card-h"><h3>EA games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
+    if (!games.length){
+      listCard += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No EA games yet</b><p>Import one above and it will appear here to manage.</p></div></div>';
+    } else {
+      listCard += '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Game</th><th>Date</th><th>Lines</th><th class="tright">Manage</th></tr></thead><tbody>'+
+        games.map(function(g){
+          var cnt = (g.pickup_stats && g.pickup_stats[0] && g.pickup_stats[0].count) || 0;
+          var when = g.played_at ? CG.fmtDate(g.played_at) : "—";
+          return '<tr><td class="tleft"><b>'+esc(g.club_a||"?")+" "+(g.score_a==null?"–":g.score_a)+"–"+(g.score_b==null?"–":g.score_b)+" "+esc(g.club_b||"?")+'</b>'+(g.went_ot?' <span class="chip" style="font-size:9px">OT</span>':'')+(g.source?' <span class="caption">'+esc(g.source)+'</span>':'')+'</td>'+
+            '<td class="mono" style="font-size:11px">'+esc(when)+'</td><td>'+cnt+'</td>'+
+            '<td class="tright" style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="#/hub/statsmgr?game='+g.id+'">Edit</a> '+
+            '<button class="btn btn-ghost btn-sm" data-smdel="'+g.id+'" data-lbl="'+esc((g.club_a||"?")+" vs "+(g.club_b||"?"))+'" style="color:var(--red)">Delete</button></td></tr>';
+        }).join("")+'</tbody></table></div>';
+    }
+    listCard += '</div>';
+    body.innerHTML = addCard + listCard;
+
+    /* --- wire the search flow --- */
+    var out = document.getElementById("smSearchOut");
+    var errBox = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
+    function doSearch(){
+      var name = (document.getElementById("smClub").value||"").trim();
+      if (name.length < 2){ CG.toast("Enter a club name","err"); return; }
+      out.innerHTML = '<p class="caption">Searching EA…</p>';
+      CG._smApi({ action:"search", clubName:name }).then(function(o){
+        if (o.error){ out.innerHTML = errBox(o.error); return; }
+        var clubs = o.clubs||[];
+        if (!clubs.length){ out.innerHTML = '<div class="note">No clubs found for “'+esc(name)+'”. Check the spelling.</div>'; return; }
+        out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the club:</div>'+clubs.map(function(c){
+          return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+(c.memberCount?' · '+c.memberCount+' members':'')+'</button>';
+        }).join("");
+        out.querySelectorAll("[data-club]").forEach(function(b){ b.addEventListener("click", function(){ loadMatches(this.getAttribute("data-club"), this.getAttribute("data-cn")); }); });
+      }).catch(function(e){ out.innerHTML = errBox(e.message); });
+    }
+    function loadMatches(cid, cn){
+      out.innerHTML = '<p class="caption">Loading '+esc(cn)+'’s recent games…</p>';
+      CG._smApi({ action:"matches", clubId:cid }).then(function(o){
+        if (o.error){ out.innerHTML = errBox(o.error); return; }
+        var ms = o.matches||[];
+        if (!ms.length){ out.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'.</div>'; return; }
+        out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import:</div>'+ms.map(function(m){
+          var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
+          return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+            '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+m.a.score+' – '+m.b.score+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+'<div class="caption">'+esc(when)+'</div></div>'+
+            '<button class="btn btn-chrome btn-sm" data-import="'+esc(m.matchId)+'" data-cid="'+esc(cid)+'">Import</button></div></div>';
+        }).join("");
+        out.querySelectorAll("[data-import]").forEach(function(b){ b.addEventListener("click", function(){ doImport(this); }); });
+      }).catch(function(e){ out.innerHTML = errBox(e.message); });
+    }
+    function doImport(btn){
+      var mid = btn.getAttribute("data-import"), cid = btn.getAttribute("data-cid");
+      btn.disabled = true; btn.textContent = "Importing…";
+      CG._smApi({ action:"import", clubId:cid, matchId:mid }).then(function(o){
+        btn.disabled = false; btn.textContent = "Import";
+        if (o.error){ CG.toast(o.error,"err"); return; }
+        var players = o.players||[], matched = players.filter(function(p){ return p.matched; }).length;
+        CG.toast("Imported — "+matched+"/"+players.length+" players matched","ok");
+        CG.router();
+      }).catch(function(e){ btn.disabled = false; btn.textContent = "Import"; CG.toast("Import failed: "+e.message,"err"); });
+    }
+    var sbtn = document.getElementById("smSearch"); if (sbtn) sbtn.addEventListener("click", doSearch);
+    var sinp = document.getElementById("smClub"); if (sinp) sinp.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); doSearch(); } });
+    body.querySelectorAll("[data-smdel]").forEach(function(b){ b.addEventListener("click", function(){
+      var id=this.getAttribute("data-smdel"), lbl=this.getAttribute("data-lbl");
+      CG.confirm("Delete "+lbl+"?", "The game and every stat line are removed and stop showing on player profiles. This can’t be undone.", "Delete game", function(){
+        CG.sb.rpc("stats_pickup_delete",{ p_game:id }).then(function(r){
+          if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+          CG.toast("Game deleted","ok"); CG.router();
+        });
+      });
+    }); });
+  });
+};
+/* -- DETAIL: edit one game's box score -- */
+CG._smRenderDetail = function(body, gid){
+  Promise.all([
+    CG.sb.from("pickup_games").select("*").eq("id",gid).maybeSingle(),
+    CG.sb.from("pickup_stats").select("*, profiles(gamertag)").eq("pickup_game_id",gid).order("team_side")
+  ]).then(function(rs){
+    var g = rs[0] && rs[0].data, rows = (rs[1] && rs[1].data) || [];
+    if (!g){ body.innerHTML = '<div class="note">Game not found. <a href="#/hub/statsmgr" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to the list</a></div>'; return; }
+    function num(x,k,lab){ return '<td><input data-f="'+k+'" type="number" value="'+(x[k]==null?0:x[k])+'" style="width:44px;padding:4px;text-align:center;font-variant-numeric:tabular-nums" aria-label="'+lab+'"></td>'; }
+    var rowsHtml = rows.map(function(x){
+      var gt = x.profiles && x.profiles.gamertag;
+      return '<tr data-row="'+x.id+'">'+
+        '<td class="tleft" style="min-width:150px"><select data-f="profile_id" style="width:100%;padding:5px;max-width:200px">'+CG._smProfOpts(x.profile_id)+'</select>'+
+          '<span class="caption" style="display:block;margin-top:3px">EA: '+esc(x.skater_name||"?")+(x.team_side?" · Team "+esc(x.team_side):"")+(gt?"":" · <span style=\"color:var(--red)\">unmatched</span>")+'</span></td>'+
+        '<td style="text-align:center"><input data-f="is_goalie" type="checkbox"'+(x.is_goalie?" checked":"")+' aria-label="Goalie"></td>'+
+        CG._smNum.map(function(f){ return num(x,f[0],f[1]); }).join("")+
+        '<td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-saverow>Save</button> <button class="btn btn-ghost btn-sm" data-delrow style="color:var(--red)">✕</button></td></tr>';
+    }).join("");
+    var thead = '<tr><th class="tleft">Player (linked account)</th><th>G?</th>'+CG._smNum.map(function(f){ return '<th>'+f[1]+'</th>'; }).join("")+'<th></th></tr>';
+    var meta = '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Game</h3>'+
+      '<a class="sec-link" href="#/hub/statsmgr">'+CG.ic("back",13)+'All games</a></div>'+
+      '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">'+
+        '<label class="fld" style="margin:0"><span>Club A</span><input data-m="club_a" value="'+esc(g.club_a||"")+'"></label>'+
+        '<label class="fld" style="margin:0"><span>Score A</span><input data-m="score_a" type="number" value="'+(g.score_a==null?"":g.score_a)+'"></label>'+
+        '<label class="fld" style="margin:0"><span>Score B</span><input data-m="score_b" type="number" value="'+(g.score_b==null?"":g.score_b)+'"></label>'+
+        '<label class="fld" style="margin:0"><span>Club B</span><input data-m="club_b" value="'+esc(g.club_b||"")+'"></label>'+
+        '<label class="fld" style="margin:0"><span>Date</span><input data-m="played_at" type="date" value="'+esc((g.played_at||"").slice(0,10))+'"></label>'+
+        '<label class="fld" style="margin:0;flex-direction:row;align-items:center;gap:8px"><input data-m="went_ot" type="checkbox"'+(g.went_ot?" checked":"")+'><span style="margin:0">Overtime</span></label>'+
+      '</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-ink btn-sm" id="smSaveMeta">Save game</button>'+
+        '<button class="btn btn-ghost btn-sm" id="smDelGame" style="color:var(--red)">Delete game</button></div></div></div>';
+    var boxCard = '<div class="card"><div class="card-h"><h3>Box score</h3><span class="chip">'+rows.length+' line'+(rows.length===1?"":"s")+'</span></div>'+
+      '<div class="tblwrap"><table class="tbl keepcols"><thead>'+thead+'</thead><tbody>'+
+      (rowsHtml || '<tr><td colspan="'+(CG._smNum.length+3)+'" class="tleft"><span class="caption">No stat lines. Add one below.</span></td></tr>')+
+      '</tbody></table></div>'+
+      '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'+
+        '<label class="fld" style="margin:0"><span>Add a line — EA name</span><input id="smNewName" placeholder="Player name" style="width:150px"></label>'+
+        '<label class="fld" style="margin:0"><span>Side</span><select id="smNewSide"><option value="A">A</option><option value="B">B</option></select></label>'+
+        '<label class="fld" style="margin:0;flex-direction:row;align-items:center;gap:6px"><input id="smNewG" type="checkbox"><span style="margin:0">Goalie</span></label>'+
+        '<button class="btn btn-chrome btn-sm" id="smAddRow">Add line</button></div></div>';
+    body.innerHTML = meta + boxCard;
+
+    /* collect a row's fields into a jsonb patch */
+    function collect(row){
+      var p = {};
+      row.querySelectorAll("[data-f]").forEach(function(el){
+        var k = el.getAttribute("data-f");
+        if (el.type==="checkbox") p[k] = el.checked;
+        else if (el.type==="number") p[k] = el.value===""?"0":String(parseInt(el.value,10)||0);
+        else p[k] = el.value;
+      });
+      return p;
+    }
+    body.querySelectorAll("[data-saverow]").forEach(function(b){ b.addEventListener("click", function(){
+      var row = this.closest("[data-row]"), rid = row.getAttribute("data-row");
+      this.disabled = true; this.textContent = "Saving…"; var self = this;
+      CG.sb.rpc("stats_pickup_row",{ p_row_id:rid, p_game:gid, p:collect(row) }).then(function(r){
+        self.disabled=false; self.textContent="Save";
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG.toast("Line saved","ok");
+      });
+    }); });
+    body.querySelectorAll("[data-delrow]").forEach(function(b){ b.addEventListener("click", function(){
+      var rid = this.closest("[data-row]").getAttribute("data-row");
+      CG.sb.rpc("stats_pickup_row_delete",{ p_row_id:rid }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        CG.toast("Line removed","ok"); CG.router();
+      });
+    }); });
+    var addBtn = document.getElementById("smAddRow");
+    if (addBtn) addBtn.addEventListener("click", function(){
+      var name=(document.getElementById("smNewName").value||"").trim();
+      var side=document.getElementById("smNewSide").value, goalie=document.getElementById("smNewG").checked;
+      this.disabled=true; var self=this;
+      CG.sb.rpc("stats_pickup_row",{ p_row_id:null, p_game:gid, p:{ skater_name:name||"New player", team_side:side, is_goalie:goalie } }).then(function(r){
+        self.disabled=false;
+        if(r.error){ CG.toast("Couldn’t add: "+r.error.message,"err"); return; }
+        CG.toast("Line added","ok"); CG.router();
+      });
+    });
+    var saveMeta = document.getElementById("smSaveMeta");
+    if (saveMeta) saveMeta.addEventListener("click", function(){
+      var p={}; body.querySelectorAll("[data-m]").forEach(function(el){ var k=el.getAttribute("data-m");
+        if(el.type==="checkbox") p[k]=el.checked;
+        else if(el.type==="number") p[k]= el.value===""?null:parseInt(el.value,10);
+        else p[k]=el.value; });
+      this.disabled=true; var self=this;
+      CG.sb.rpc("stats_pickup_update_game",{ p_game:gid, p:p }).then(function(r){
+        self.disabled=false;
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG.toast("Game saved","ok"); CG.router();
+      });
+    });
+    var delGame = document.getElementById("smDelGame");
+    if (delGame) delGame.addEventListener("click", function(){
+      CG.confirm("Delete this game?", "The game and every stat line are removed and stop showing on player profiles. This can’t be undone.", "Delete game", function(){
+        CG.sb.rpc("stats_pickup_delete",{ p_game:gid }).then(function(r){
+          if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+          CG.toast("Game deleted","ok"); location.hash="#/hub/statsmgr";
+        });
+      });
+    });
+  });
+};
+
+/* ================================================================
    PARITY: SEASON REGISTRATION (season_registrations)
    ================================================================ */
 CG.ROUTES.register = function(){
@@ -6462,6 +6705,10 @@ CG.ROUTES.hub = function(param, qs){
     if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
     return CG.hubShell("staffdesk", CG.hubTicketArchive());
   }
+  if (param==="statsmgr"){
+    return CG.isStatsStaff() ? CG.hubShell("statsmgr", CG.hubStatsManager(qs))
+      : CG.unauthorized("The stats manager is limited to statistics staff.");
+  }
   return CG._origHubRoute(param, qs);
 };
 CG._origHubAfter = CG.AFTER.hub;
@@ -6471,6 +6718,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
   if (param==="application"){ CG.AFTER._applicationDetail(); return; }
   if (param==="archive"){ CG.AFTER._ticketArchive(); return; }
+  if (param==="statsmgr"){ CG.AFTER._statsMgr(qs); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   var sl=document.getElementById("sSaveLive");
