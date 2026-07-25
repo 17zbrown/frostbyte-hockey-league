@@ -981,6 +981,7 @@ CG.ROUTES.team = function(code, qs){
   var archived = seasonKey!=="cur";
   var s = SD.teams[code];
   var tab = qs.tab||"roster";
+  if (tab==="stats") tab="roster";   /* "Team stats" merged into "Roster & stats" — keep old links working */
   var pr = lg.powerRankings.find(function(p){ return p.team===code; });
   var roster = lg.byTeam[code].slice().sort(function(a,b){
     var ord = {C:0,LW:1,RW:2,LD:3,RD:4,G:5};
@@ -1018,7 +1019,7 @@ CG.ROUTES.team = function(code, qs){
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+
-    [["roster","Roster"],["games","Schedule & results"],["stats","Team stats"],["moves","Transactions & discipline"],["honors","Honors"]].map(function(x){
+    [["roster","Roster & stats"],["games","Schedule & results"],["moves","Transactions & discipline"],["honors","Honors"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>';
     }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding:22px 0 40px">';
@@ -1040,6 +1041,25 @@ CG.ROUTES.team = function(code, qs){
       (roster.length ? "" : CG.emptyRow(archived?5:6, "No players on this roster yet",
         "Clubs fill up at the draft and in free agency. Signings show here the moment they’re made."))+
       '</tbody></table></div></div>';
+    /* consolidated — team stats live in this same tab (no separate Team stats tab) */
+    var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
+        _svp = _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
+    body += '<h3 class="h-sec" style="font-size:18px;margin:28px 0 14px">Team stats</h3>'+
+      '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'+
+      [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
+       ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_gp).toFixed(1)],
+       ["Shots against per game",(s.sa/_gp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
+       ["Points percentage",(s.ptsPct*100).toFixed(0)+"%"]].map(function(kv){
+        return '<div class="kpi" style="cursor:default"><b class="num">'+kv[1]+'</b><span>'+kv[0]+'</span></div>';
+      }).join("")+'</div>'+
+      (archived
+        ? '<div class="note" style="margin-top:18px"><b style="font-family:var(--f-disp)">'+esc(SD.label)+' — final.</b> Archived team numbers are frozen exactly as the season ended.</div>'
+        : '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Overall rating breakdown</h3><span class="chip">Formula v1 · configurable</span></div><div class="card-b">'+
+      Object.keys(lg.teamRatings[code].parts).map(function(k){
+        var v = lg.teamRatings[code].parts[k];
+        return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+v+'%"></span></span><span class="rb-v num">'+v+'</span></div>';
+      }).join("")+
+      '<p class="caption" style="margin-top:10px">Team overall blends record, goal differential, goaltending, roster depth, and recent form. The commissioner can re-weight the formula in the Control Center — every number traces to real results.</p></div></div>');
   }
   if (tab==="games"){
     if (archived){
@@ -1058,26 +1078,7 @@ CG.ROUTES.team = function(code, qs){
       body += '<div class="stack" style="gap:9px">'+games.map(CG.gameCard).join("")+'</div>';
     }
   }
-  if (tab==="stats"){
-    var gp = Math.max(1,s.gp);
-    var goalies = roster.filter(function(p){ return p.pos==="G"; });
-    var svp = goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
-    body += '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'+
-      [["Goals per game",(s.gf/gp).toFixed(2)],["Goals against per game",(s.ga/gp).toFixed(2)],
-       ["Team save percentage",svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/gp).toFixed(1)],
-       ["Shots against per game",(s.sa/gp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
-       ["Points percentage",(s.ptsPct*100).toFixed(0)+"%"]].map(function(kv){
-        return '<div class="kpi" style="cursor:default"><b class="num">'+kv[1]+'</b><span>'+kv[0]+'</span></div>';
-      }).join("")+'</div>'+
-      (archived
-        ? '<div class="note" style="margin-top:18px"><b style="font-family:var(--f-disp)">'+esc(SD.label)+' — final.</b> Archived team numbers are frozen exactly as the season ended. Overall ratings and power rankings are computed per season and live on the current campaign only.</div>'
-        : '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Overall rating breakdown</h3><span class="chip">Formula v1 · configurable</span></div><div class="card-b">'+
-      Object.keys(lg.teamRatings[code].parts).map(function(k){
-        var v = lg.teamRatings[code].parts[k];
-        return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+v+'%"></span></span><span class="rb-v num">'+v+'</span></div>';
-      }).join("")+
-      '<p class="caption" style="margin-top:10px">Team overall blends record, goal differential, goaltending, roster depth, and recent form. The commissioner can re-weight the formula in the Control Center — every number traces to real results.</p></div></div>');
-  }
+  /* the former "Team stats" tab is consolidated into the Roster & stats tab above */
   if (tab==="moves" && archived){
     body += '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("swap",22)+'</div><b>No transactions in '+esc(SD.label)+'</b><p>Rosters were frozen for the exhibition slate; league transactions began with Season 1.</p></div></div>';
   }
@@ -1322,7 +1323,23 @@ CG.ROUTES.player = function(pid, qs){
         '</div></div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
         '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. The '+r.ovr+' overall is the staff scouting number from registration.</p></div></div>';
+    /* Stat Lab viz for players with a game sample: skater DNA radar + efficiency gauges
+       (goalies get goaltending gauges). Pre-season 0-GP players keep the Fresh-sheet card. */
+    var playerViz = (isEmpty || archived) ? "" : (isG
+      ? '<div class="viz-card" style="margin-bottom:16px"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
+          CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
+          CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
+          CG.vizGauge(s.qs||0, Math.max(s.gp,1), ""+(s.qs||0), "Quality starts","var(--steel)")+
+        '</div></div>'
+      : '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
+          '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), null, p.tag)+'</div>'+
+          '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
+            CG.vizGauge(s.shots?(s.g/s.shots*100):0,20,(s.shots?Math.round(s.g/s.shots*100):0)+"%","Shooting %")+
+            CG.vizGauge(s.p||0, Math.max(s.gp*3,1), ((s.p||0)/Math.max(1,s.gp)).toFixed(2), "Pts / GP","var(--steel)")+
+            CG.vizGauge(s.hits||0, Math.max(s.gp*5,1), ""+(s.hits||0), "Hits","var(--gold)")+
+          '</div></div></div>');
     var leftTop = isEmpty ? emptyCard :
+      playerViz +
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
       cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
@@ -1399,6 +1416,64 @@ CG.ROUTES.player = function(pid, qs){
      pickup_stats table — the same stat presentation as league play, minus the overall rating. */
   return head + tabs + body;
 };
+/* ================================================================
+   STAT LAB data-viz helpers — theme-aware vanilla SVG/CSS. Colours
+   come from design tokens so every chart adapts to light + dark.
+   ================================================================ */
+CG.vizGauge = function(val, max, disp, label, color){
+  color = color || "var(--chrome-deep)";
+  var r=34, circ=2*Math.PI*r, sweep=0.75, frac=Math.max(0,Math.min(1,(val/max)||0))*sweep;
+  return '<div class="vgauge"><svg viewBox="0 0 88 84" width="88" height="80" aria-hidden="true">'+
+    '<circle cx="44" cy="44" r="34" fill="none" stroke="var(--line-soft)" stroke-width="7" stroke-linecap="round" stroke-dasharray="'+(circ*sweep).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(135 44 44)"/>'+
+    '<circle cx="44" cy="44" r="34" fill="none" stroke="'+color+'" stroke-width="7" stroke-linecap="round" stroke-dasharray="'+(circ*frac).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(135 44 44)"/>'+
+    '<text x="44" y="49" text-anchor="middle" class="vgv">'+esc(String(disp==null?val:disp))+'</text></svg>'+
+    '<div class="vgl">'+esc(label)+'</div></div>';
+};
+CG.vizStreak = function(results){
+  return '<div class="vstreak">'+(results||[]).map(function(r){ var c=r==="O"?"O":(r==="L"?"L":"W"); return '<span class="vres '+c+'">'+(r==="O"?"OT":c)+'</span>'; }).join("")+'</div>';
+};
+CG.vizRadar = function(axes, me, cmp, meLabel, cmpLabel){
+  var cx=150, cy=120, R=86, n=axes.length, TAU=Math.PI*2, g="";
+  function poly(vals, mx){ return vals.map(function(v,i){ var a=-Math.PI/2+i*TAU/n, rr=R*Math.max(0,Math.min(1,v/mx)); return [cx+Math.cos(a)*rr, cy+Math.sin(a)*rr]; }); }
+  [0.25,0.5,0.75,1].forEach(function(f){ g+='<polygon points="'+poly(axes.map(function(){return f;}),1).map(function(p){return p.map(function(z){return z.toFixed(1);}).join(",");}).join(" ")+'" fill="none" stroke="var(--line)" />'; });
+  axes.forEach(function(name,i){ var a=-Math.PI/2+i*TAU/n, ex=cx+Math.cos(a)*R, ey=cy+Math.sin(a)*R;
+    g+='<line x1="'+cx+'" y1="'+cy+'" x2="'+ex.toFixed(1)+'" y2="'+ey.toFixed(1)+'" stroke="var(--line)"/>';
+    var lx=cx+Math.cos(a)*(R+15), ly=cy+Math.sin(a)*(R+15), anc=Math.abs(Math.cos(a))<0.3?"middle":(Math.cos(a)>0?"start":"end");
+    g+='<text x="'+lx.toFixed(1)+'" y="'+(ly+3).toFixed(1)+'" text-anchor="'+anc+'">'+esc(name.toUpperCase())+'</text>'; });
+  function shape(vals,fill,stroke,dots){ var P=poly(vals,100), pts=P.map(function(p){return p.map(function(z){return z.toFixed(1);}).join(",");}).join(" ");
+    var o='<polygon points="'+pts+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="2" stroke-linejoin="round"/>';
+    if(dots) P.forEach(function(p){ o+='<circle class="vr-dot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3" fill="'+stroke+'"/>'; }); return o; }
+  if (cmp) g+=shape(cmp,"color-mix(in srgb,var(--steel) 20%,transparent)","var(--steel)",false);
+  g+=shape(me,"color-mix(in srgb,var(--chrome) 22%,transparent)","var(--chrome-deep)",true);
+  var legend = '<div class="vlegend"><span><i style="background:var(--chrome-deep)"></i>'+esc(meLabel||"This player")+'</span>'+(cmp?'<span><i style="background:var(--steel)"></i>'+esc(cmpLabel||"League avg")+'</span>':'')+'</div>';
+  return '<svg class="vradar" viewBox="0 0 300 244" role="img" aria-label="Attribute radar">'+g+'</svg>'+legend;
+};
+CG.vizNodeBars = function(data, labels){
+  var mx=Math.max.apply(null,data.concat([1])), pk=data.indexOf(Math.max.apply(null,data));
+  return '<div class="vwk">'+data.map(function(v,i){
+    return '<div class="vwc'+(i===pk&&v>0?" pk":"")+'"><span class="vwn">'+v+'</span><div class="vws" style="height:'+(mx?Math.max(3,v/mx*100):0)+'%"></div><span class="vwl">'+esc((labels&&labels[i])||("W"+(i+1)))+'</span></div>';
+  }).join("")+'</div>';
+};
+CG.vizCompare = function(rows){
+  return '<div class="vcmp">'+rows.map(function(c){
+    return '<div class="vcr"><div class="vcl"><span>'+esc(c.label)+'</span><b class="num">'+c.me+'</b></div>'+
+      '<div class="vct"><div class="vcm" style="width:'+Math.max(0,Math.min(100,c.me/c.max*100))+'%"></div><div class="vca" style="left:'+Math.max(0,Math.min(100,c.avg/c.max*100))+'%"></div></div></div>';
+  }).join("")+'</div>';
+};
+/* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
+CG.skaterDNA = function(s){
+  var gp=Math.max(1,s.gp||0), cl=function(x){return Math.max(4,Math.min(100,Math.round(x)));};
+  return [
+    cl(s.shots? (s.g/s.shots)*100*4.5 : 0),          /* Shooting  — finishing % */
+    cl((s.a/gp)/1.2*100),                             /* Playmaking — assists/gp */
+    cl(((s.blk||0)+(s.tk||0))/gp/4*100),              /* Defense */
+    cl((s.hits||0)/gp/5*100),                         /* Physical */
+    cl(100 - (s.pim||0)/gp/3*100),                    /* Discipline — fewer PIM */
+    cl(55 + (s.pm||0)/gp*18 + (s.gwg||0)/gp*30)       /* Clutch — +/- & GWG */
+  ];
+};
+CG.SKATER_DNA_AXES = ["Shooting","Playmaking","Defense","Physical","Discipline","Clutch"];
+
 /* Pickup Stats tab — the same stat presentation as league play (KPI grid + game-by-game table),
    built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
    game score + the player's team side. Never feeds league totals, eligibility, or overall. */
@@ -1418,6 +1493,23 @@ CG.renderPickupStats = function(rows){
     if (ss.my!=null && ss.opp!=null){ if (ss.my>ss.opp) w++; else if (ss.ot) otl++; else l++; }
   });
   var mostlyG = gGames > gp/2;
+  var vizCards = "";
+  if (!mostlyG){
+    var dna = CG.skaterDNA({gp:gp, g:g, a:a, shots:sh, hits:hit, pim:pim, pm:pm, blk:0, tk:0, gwg:0});
+    vizCards = '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
+      '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, dna, null, "This player")+'</div>'+
+      '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
+        CG.vizGauge(sh?(g/sh*100):0, 20, (sh?Math.round(g/sh*100):0)+"%", "Shooting %")+
+        CG.vizGauge(g+a, Math.max(gp*3,1), ((g+a)/gp).toFixed(2), "Pts / GP", "var(--steel)")+
+        CG.vizGauge(hit, Math.max(gp*5,1), ""+hit, "Hits", "var(--gold)")+
+      '</div></div></div>';
+  } else {
+    vizCards = '<div class="viz-card" style="margin-bottom:16px"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
+      CG.vizGauge(sa?(sv/sa*100):0, 100, sa?(sv/sa).toFixed(3).replace(/^0/,""):"—", "Save %")+
+      CG.vizGauge(gGames?(3-Math.min(3,ga/gGames)):0, 3, gGames?(ga/gGames).toFixed(2):"—", "GAA", "var(--gold)")+
+      CG.vizGauge(sv, Math.max(sa,1), ""+sv, "Saves", "var(--steel)")+
+    '</div></div>';
+  }
   var cells = mostlyG
     ? [["GP",gp],["Record",w+"-"+l+"-"+otl],["SV%",sa?(sv/sa).toFixed(3).replace(/^0/,""):"—"],["GAA",gGames?(ga/gGames).toFixed(2):"—"],["Saves",sv],["GA",ga],["Shutouts",so]]
     : [["GP",gp],["Goals",g],["Assists",a],["Points",g+a],["+/-",(pm>0?"+":"")+pm],["Shots",sh],["Shooting%",sh?Math.round(100*g/sh)+"%":"—"],["Hits",hit],["PIM",pim]];
@@ -1440,7 +1532,7 @@ CG.renderPickupStats = function(rows){
           : '<td class="'+((x.goals||0)?"":"z")+'">'+(x.goals||0)+'</td><td class="'+((x.assists||0)?"":"z")+'">'+(x.assists||0)+'</td><td class="pts">'+((x.goals||0)+(x.assists||0))+'</td><td>'+(x.shots||0)+'</td><td>'+((x.plus_minus||0)>0?"+":"")+(x.plus_minus||0)+'</td><td class="'+((x.pim||0)?"":"z")+'">'+(x.pim||0)+'</td>')+
         '</tr>';
     }).join("")+'</tbody></table></div></div>';
-  return note + kpiGrid + logTable;
+  return note + vizCards + kpiGrid + logTable;
 };
 /* Twitch broadcast card on the profile: watch link for everyone; the profile's own
    player also gets Go Live / End Stream + channel controls. Omitted entirely when
