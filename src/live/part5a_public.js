@@ -940,7 +940,7 @@ CG.ROUTES.teams = function(){
       '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:46px;height:46px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:7.5px;letter-spacing:.12em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:20px;line-height:1">'+topL.tier+'</b></div>'+
       '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
     '</div>' : "";
-  var head = CG.pageHead("The clubs","Eight franchises. One trophy.",
+  var head = CG.pageHead("The clubs","One trophy. Every club chasing it.",
     "Every club runs a real room — front office, "+(CG.ROSTER_MAX||15)+"-player roster, and a rivalry waiting to happen.", tierBadge);
   var pr = {}; lg.powerRankings.forEach(function(p){ pr[p.team]=p.rank; });
   var preT = CG.isPreseason();

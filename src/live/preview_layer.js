@@ -1255,7 +1255,7 @@
     var startMs = CG.seasonStartMs && CG.seasonStartMs();
     var startTag = startMs ? esc(CG.fmtDay(startMs).replace(/^[A-Za-z]+, /,"")) : "soon";
     var head = active ? esc(s.name||"The season")+" is under way." : "The puck drops "+startTag+".";
-    var dek = "Eight clubs, two divisions, and a fresh sheet.";
+    var dek = "Real clubs, real rosters, and a fresh sheet.";
 
     var regDl = s.registration_deadline ? Date.parse(s.registration_deadline) : null;
     var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;

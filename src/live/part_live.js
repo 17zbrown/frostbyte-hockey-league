@@ -1812,7 +1812,7 @@ CG.ROUTES.brand = function(){
     '<div class="shell"><div class="grid g2">'+
       [["“Unlock your competitive journey today!”","“Register to play — sign-ups close the Monday before the draft.”"],
        ["“An error occurred.”","“Couldn’t save — your sign-in expired. Sign out and back in, then retry.”"],
-       ["“96 players and counting 🔥”","“Eight clubs. Rosters fill through the draft.”"],
+       ["“96 players and counting 🔥”","“Rosters fill through the draft.”"],
        ["“Admin backend”","“Control Center” · “the league office”"]
       ].map(function(p){ return '<div class="card" style="background:var(--bc2);border-color:#2A343B"><div class="card-b" style="display:grid;gap:12px">'+
         '<div style="display:flex;gap:9px;align-items:flex-start"><span style="color:var(--red-ink);flex-shrink:0">'+CG.ic("x",14)+'</span><span class="small" style="color:var(--on-ink-dim)">'+esc(p[0])+'</span></div>'+
