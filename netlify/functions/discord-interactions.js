@@ -83,6 +83,14 @@ async function sbStashThread(id, threadId) {
   await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(),
     body: JSON.stringify({ thread_id: threadId }), signal: AbortSignal.timeout(1200) }).catch(() => {});
 }
+// Sign-up gate: does this Discord user have a Chel Gaming website account (a profile linked to their id)?
+async function sbHasAccount(discordId) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/profiles?discord_id=eq.${encodeURIComponent(discordId)}&select=id&limit=1`, withTimeout({ headers: sbHead() }));
+    const rows = await r.json().catch(() => []);
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (e) { return true; }   // fail-open on a transient DB error (the join's own DB call will fail anyway)
+}
 
 /* ---------- Discord REST (bot token) — only used to spin off the per-lobby draft thread ---------- */
 async function dApi(method, path, body, ms) {
@@ -248,6 +256,12 @@ async function handleComponent(interaction) {
   const userId = (interaction.member && interaction.member.user && interaction.member.user.id) || (interaction.user && interaction.user.id);
   const name = nameOf(interaction);
   const guildId = interaction.guild_id || "";
+
+  // Only players with a Chel Gaming website account may sign up. Checked before any lobby is touched,
+  // so a non-account click never even creates a lobby.
+  if (action === "join" && !(await sbHasAccount(userId))) {
+    return ephemeral("You need a Chel Gaming account to join pickup games — sign in at **chelgamingleague.com** first (it takes 10 seconds with Discord), then come back and pick your position.");
+  }
 
   for (let attempt = 0; attempt < 4; attempt++) {
     // signup buttons carry the CHANNEL id and get-or-create the lobby; draft/server buttons carry the lobby id
