@@ -3182,8 +3182,7 @@ CG.admPreseason = function(){
         var actions= declined
           ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+nm+'">Reinstate</button>'
           : on
-          ? (isMgmt?'<span class="caption">Seat set in Teams</span>'
-             :'<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+r.profile_id+'" data-club="'+esc(club||"")+'" data-name="'+nm+'">Remove from roster</button>')
+          ? '<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+r.profile_id+'" data-club="'+esc(club||"")+'" data-name="'+nm+'"'+(isMgmt?' data-mgmt="1"':'')+'>Remove from roster</button>'
           : '<span class="fa-assign"><select data-assign-team="'+r.id+'" class="fa-club"><option value="">Club…</option>'+clubOpts+'</select>'+
             '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+nm+'" disabled>Assign</button>'+
             '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+nm+'">Decline</button></span>';
@@ -3197,7 +3196,7 @@ CG.admPreseason = function(){
           '<td class="tright reg-act">'+actions+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. <b>Free agent</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the free-agent pool (their spot and cap hit clear; they stay registered). Owner/GM/AGM seats are protected here — set them under Teams.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. <b>Free agent</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the free-agent pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   /* per-club roster ledger — expand a club to see and remove its players (capacity stays visible while assigning) */
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
@@ -3215,13 +3214,13 @@ CG.admPreseason = function(){
             return '<div class="cl-row"><span class="mono" style="width:30px;color:var(--steel)">#'+(p.jersey||"—")+'</span>'+
               '<span class="mono" style="width:32px">'+esc(p.pos||"—")+'</span>'+
               '<span class="nm" style="flex:1;min-width:0">'+esc(p.tag||"—")+'</span>'+
-              (mg?'<span class="chip chip-chrome" style="font-size:9px">'+esc((mg||"").toUpperCase())+'</span>'
-                 :'<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+p.id+'" data-club="'+esc(t.code)+'" data-name="'+esc(p.tag||"a player")+'">Remove</button>')+
+              (mg?'<span class="chip chip-chrome" style="font-size:9px;margin-right:6px">'+esc((mg||"").toUpperCase())+'</span>':'')+
+              '<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+p.id+'" data-club="'+esc(t.code)+'" data-name="'+esc(p.tag||"a player")+'"'+(mg?' data-mgmt="1"':'')+'>Remove</button>'+
             '</div>';
           }).join("") : '<span class="caption">No players yet.</span>')+
         '</div></details>';
     }).join("")+'</div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every club and its current roster. Remove waives a player to the free-agent pool; Owner/GM/AGM are protected — set a club’s front office under Teams.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every club and its current roster. Remove waives a player to the free-agent pool; a manager keeps their Owner/GM/AGM seat — those are set under Teams.</span></div></div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
     h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
@@ -3311,12 +3310,13 @@ CG.AFTER._preseason = function(){
   }); });
   /* remove a rostered player from any club — from a table row OR the roster ledger */
   document.querySelectorAll("[data-reg-remove]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.removeFromRoster(this.getAttribute("data-reg-remove"), this.getAttribute("data-club"), this.getAttribute("data-name"));
+    CG.removeFromRoster(this.getAttribute("data-reg-remove"), this.getAttribute("data-club"), this.getAttribute("data-name"), this.getAttribute("data-mgmt")==="1");
   }); });
 };
-CG.removeFromRoster = function(profileId, club, name){
+CG.removeFromRoster = function(profileId, club, name, isMgmt){
   CG.confirm("Remove "+(name||"this player")+(club?" from "+club:"")+"?",
-    "This waives the player back to the free-agent pool, clears their roster spot and cap hit, and logs a transaction. They stay registered — you can re-assign them to any club.",
+    "This waives the player back to the free-agent pool, clears their roster spot and cap hit, and logs a transaction. They stay registered — you can re-assign them to any club."+
+    (isMgmt?" They also hold a front-office seat on this club — that Owner/GM/AGM seat (set under Teams) is untouched; only their player roster spot is removed." : ""),
     "Remove from roster", function(){
     CG.sb.rpc("admin_remove_from_roster",{ p_profile:profileId, p_season_id:(CG.SEASON&&CG.SEASON.id)||null }).then(function(r){
       if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
