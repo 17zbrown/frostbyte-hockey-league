@@ -4437,7 +4437,9 @@ CG.seasonPlayerIndex = function(){
   /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker */
   var office = {};
   (lg._profilesRaw||[]).forEach(function(p){ if (p.role==="staff" || p.role==="commissioner") office[p.id] = true; });
-  return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id]; });
+  /* a player already under a contract this season can't be nominated — only free agents are eligible */
+  var held = (CG.contractHeldIds && CG.contractHeldIds()) || {};
+  return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id] && !held[m.id]; });
 };
 /* attachAC indexes players off the roster; "members" widens it to the whole league for the places
    that need to name someone rather than look up a rostered player. */
@@ -5034,7 +5036,7 @@ CG.clubManagementCard = function(){
       'Every club must have an active GM before its first regular-season game. Nominate one below — the reviewers approve it.</div>' : "")+
     seat("gm","General Manager", true)+seat("agm","Assistant GM", false)+
     '<p class="caption" style="border-top:1px solid var(--line);padding-top:10px;margin-top:8px">'+
-    (m.isOwner ? "Nominate any player signed up for the season — they don’t have to be on your roster. The league office’s application reviewers vote to approve; 50%+1 appoints them automatically. A GM is required; an AGM is optional."
+    (m.isOwner ? "Nominate any player signed up for the season who isn’t already under contract — they don’t have to be on your roster. The league office’s application reviewers vote to approve; 50%+1 appoints them automatically. A GM is required; an AGM is optional."
                : "Only the club owner can nominate a GM or AGM. Appointments are approved by the league office’s reviewer vote. A GM is required; an AGM is optional.")+'</p></div></div>';
   /* the owner talks to the office about a pending nomination right here */
   if (m.isOwner) pending.forEach(function(a){
@@ -5050,7 +5052,7 @@ CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
   var label = role==="gm"?"General Manager":"Assistant GM";
   CG.modal("Nominate a "+label,
-    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
+    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season who isn’t already under contract — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
       (role==="gm" ? ' Every club needs an active GM before its first regular-season game.' : ' An AGM is optional.')+'</p>'+
     CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
     '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
