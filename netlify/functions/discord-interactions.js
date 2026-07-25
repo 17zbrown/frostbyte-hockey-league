@@ -32,7 +32,8 @@ const PONG = { type: 1 };
 const UPDATE = 7;              // edit the message the component is attached to
 const REPLY = 4;              // new message (channel or ephemeral)
 const EPHEMERAL = 64;
-const respond = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { "content-type": "application/json" } });
+// Classic Netlify handler responses: { statusCode, headers, body } (matches ingest-stats / parse-screenshots)
+const respond = (obj) => ({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(obj) });
 const ephemeral = (content) => respond({ type: REPLY, data: { content, flags: EPHEMERAL } });
 
 /* ---------- Ed25519 signature verification (dependency-free) ---------- */
@@ -242,12 +243,12 @@ async function logDebug(row) {
   try { await fetch(`${SB_URL}/rest/v1/_lfg_debug`, withTimeout({ method: "POST", headers: sbHead(), body: JSON.stringify(row) })); } catch (e) {}
 }
 
-export default async (req) => {
-  const url = (() => { try { return new URL(req.url); } catch { return null; } })();
+export const handler = async (event) => {
+  const q = event.queryStringParameters || {};
 
   // GET — health check + Ed25519 self-test (confirms the crypto path works in the deployed runtime)
-  if (req.method === "GET") {
-    if (!(url && url.searchParams.get("diag") === DIAG)) return new Response("ok", { status: 200 });
+  if (event.httpMethod === "GET") {
+    if (q.diag !== DIAG) return { statusCode: 200, body: "ok" };
     let selftest = false, realKeyLoads = false, err = null;
     try {
       const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
@@ -257,21 +258,21 @@ export default async (req) => {
       selftest = verifySignature(body, sig, ts, rawPub);
       loadEdKey(PUBLIC_KEY); realKeyLoads = true;
     } catch (e) { err = String(e.message || e); }
-    return new Response(JSON.stringify({ selftest, realKeyLoads, pubKeyLen: PUBLIC_KEY.length, node: process.version, err }), { status: 200, headers: { "content-type": "application/json" } });
+    return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify({ selftest, realKeyLoads, pubKeyLen: PUBLIC_KEY.length, node: process.version, err }) };
   }
 
-  const sig = req.headers.get("x-signature-ed25519");
-  const ts = req.headers.get("x-signature-timestamp");
-  // Read the body byte-exact — arrayBuffer never re-encodes, so the signed bytes match Discord's
-  // exactly even when a nickname/username contains non-ASCII. (req.text() UTF-8-round-trips.)
-  const bodyBuf = Buffer.from(await req.arrayBuffer());
-  const verified = verifySignature(bodyBuf, sig, ts);
-  let itype = null; try { itype = JSON.parse(bodyBuf.toString("utf8")).type; } catch (e) {}
-  await logDebug({ method: req.method, ua: (req.headers.get("user-agent") || "").slice(0, 60), has_sig: !!sig, has_ts: !!ts, raw_len: bodyBuf.length, verified, itype, note: "post" });
-  if (!verified) return new Response("invalid request signature", { status: 401 });
+  const h = event.headers || {};
+  const sig = h["x-signature-ed25519"] || h["X-Signature-Ed25519"];
+  const ts = h["x-signature-timestamp"] || h["X-Signature-Timestamp"];
+  // event.body is the raw request body (base64 only for binary content-types); decode if flagged.
+  const raw = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : (event.body || "");
+  const verified = verifySignature(raw, sig, ts);
+  let itype = null; try { itype = JSON.parse(raw).type; } catch (e) {}
+  await logDebug({ method: event.httpMethod, ua: (h["user-agent"] || h["User-Agent"] || "").slice(0, 60), has_sig: !!sig, has_ts: !!ts, raw_len: (raw || "").length, verified, itype, note: "v1" });
+  if (!verified) return { statusCode: 401, body: "invalid request signature" };
 
   let interaction;
-  try { interaction = JSON.parse(bodyBuf.toString("utf8")); } catch (e) { return new Response("bad json", { status: 400 }); }
+  try { interaction = JSON.parse(raw); } catch (e) { return { statusCode: 400, body: "bad json" }; }
 
   // PING is answered instantly with zero backend work — required for endpoint verification + keep-alive
   if (interaction.type === 1) return respond(PONG);
