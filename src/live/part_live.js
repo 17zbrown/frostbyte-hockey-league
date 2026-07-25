@@ -356,8 +356,15 @@ CG.buildLiveLeague = async function(){
   var priorSeason={};
   roster.forEach(function(rs){ if(seasonId && rs.season_id!==seasonId) priorSeason[rs.profile_id]=true; });
   lg.preGp=preGp; lg.careerGp=careerGp;
-  /* veteran = been drafted, rostered in a prior season, or 5+ career games */
+  /* veteran (DRAFT-ELIGIBILITY exemption, Rule 2.8) = drafted before, rostered a prior season, or
+     5+ career games — note career games include THIS cycle's pre-season, so a first-year who logs
+     five pre-season games counts here too (they no longer need the 5-game draft-eligibility gate). */
   lg.isVeteran = function(pid){ return !!(draftedEver[pid] || priorSeason[pid] || (careerGp[pid]||0)>=5); };
+  /* returning (FREE-AGENCY track, Rule 2.2) = actually been in the league before (drafted or
+     rostered a prior season). This is what separates open free agency (returning players) from
+     rookie bidding (undrafted FIRST-years who hit the pre-season minimum) — 5 pre-season games this
+     cycle do NOT make someone "returning". */
+  lg.isReturning = function(pid){ return !!(draftedEver[pid] || priorSeason[pid]); };
 
   /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
      from the box above via CG.aggregate; these power the advanced leaders + profiles) */
@@ -3102,6 +3109,35 @@ CG.AFTER.messages = function(param){
    LIVE ADMIN: PRE-SEASON CENTRAL (registrations + owner apps + roster fill)
    Real data; reversible writes (scout_ovr, owner-app status).
    ================================================================ */
+/* Single source of truth for a registered player's pool state, labelled per the CGHL lifecycle so
+   pre-draft signups are never mislabelled "free agents". States:
+   · Management  — holds an Owner/GM/AGM seat; auto-assigned to their club, EXEMPT from the 5-game
+                   pre-season minimum.
+   · Rostered    — signed to a club's active roster.
+   · Under contract — a returning player under an active deal, re-joining their club (Rule 2.5).
+   · Signed up   — registered, unrostered, and the draft hasn't happened yet (a prospect in the
+                   draft pool — this is what most "10 free agents" actually are). NOT a free agent.
+   · Free agent  — POST-draft returning veteran, unrostered, signable in open free agency (Rule 2.2).
+   · Undrafted FA — POST-draft first-year who hit the 5-game minimum but went undrafted → rookie
+                    bidding board (Rule 2.2, Rule 2.8).
+   · Draft-ineligible — POST-draft first-year under the 5-game minimum → randomly placed on a club
+                        after free agency concludes.
+   · Declined / Not signed up — kept out of assignment / no registration. */
+CG.poolState = function(pid){
+  var lg=CG.lg||{};
+  var seat=(CG.TEAMS||[]).some(function(t){ return t.owner===pid || t.gm===pid || t.agm===pid; });
+  if (seat) return { key:"management", label:"Management", chip:"chip-chrome" };
+  if ((lg._rosteredIds||{})[pid]) return { key:"rostered", label:"Rostered", chip:"chip-win" };
+  var reg=(lg._registrationsRaw||[]).find(function(r){ return r.profile_id===pid; });
+  if (!reg) return { key:"unregistered", label:"Not signed up", chip:"chip" };
+  if (reg.status==="declined") return { key:"declined", label:"Declined", chip:"chip-loss" };
+  if ((CG.contractHeldIds?CG.contractHeldIds():{})[pid]) return { key:"under_contract", label:"Under contract", chip:"chip-win" };
+  var draftDone=!!(lg.draftState && String(lg.draftState.status)==="complete");
+  if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
+  if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
+  if ((((lg.preGp||{})[pid])||{}).gp >= 5) return { key:"undrafted_fa", label:"Undrafted FA", chip:"chip-warn" };
+  return { key:"draft_ineligible", label:"Draft-ineligible", chip:"chip-warn" };
+};
 CG.admPreseason = function(){
   var lg=CG.lg, s=CG.SEASON||{};
   var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[], sapps=lg._staffApps||[];
@@ -3115,7 +3151,7 @@ CG.admPreseason = function(){
   var h='<div style="margin-bottom:18px"><h2 class="h-sec">Pre-season central</h2>'+
     '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>';
   var kpis=[[regs.length,"Registered players","",""],
-    [faN,"Free agents · need a club","","fa"],
+    [faN,"Unsigned · need a club","","fa"],
     [assigned+" / "+regs.length,"Rostered","","ros"],
     [pendingApps,"Owner apps pending",pendingApps>0?"alert":"",""],
     [s.registration_open?"Open":"Closed","Registration","",""]];
@@ -3154,7 +3190,7 @@ CG.admPreseason = function(){
   var clubOpts=CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
   h+='<div class="card"><div class="reg-bar">'+
     '<div class="seg" role="group" aria-label="Filter registrations">'+
-      [["all","All",regs.length],["fa","Free agents",faN],["ros","Rostered",assigned],["dec","Declined",decN]]
+      [["all","All",regs.length],["fa","Unsigned",faN],["ros","Rostered",assigned],["dec","Declined",decN]]
         .map(function(f){ return '<button data-reg-filter="'+f[0]+'" class="'+(f[0]==="all"?"on":"")+'" aria-pressed="'+(f[0]==="all")+'">'+f[1]+' <b class="num">'+f[2]+'</b></button>'; }).join("")+
     '</div>'+
     '<input type="search" id="regSearch" placeholder="Search gamertag or EA ID…" aria-label="Search registrations">'+
@@ -3168,14 +3204,19 @@ CG.admPreseason = function(){
         var club=on?(pl&&pl.team):null, nm=esc(prof.gamertag||"a player"), av=CG.safeAvatar(prof.avatar_url);
         var pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0};
         var late=dl && r.created_at && Date.parse(r.created_at)>Date.parse(dl);
+        var seatHolder=(CG.TEAMS||[]).some(function(t){ return t.owner===r.profile_id||t.gm===r.profile_id||t.agm===r.profile_id; });
         var elig= declined?'<span class="chip chip-loss">Declined</span>'
+                : seatHolder?'<span class="chip chip-chrome" style="font-size:9px">Management — exempt</span>'
                 : late?'<span class="chip chip-warn">Late — random-assigned</span>'
                 : lg.isVeteran(r.profile_id)?'<span class="chip">Veteran — exempt</span>'
                 : pre.gp>=5?'<span class="chip chip-win">Draft-eligible</span>'
                 : '<span class="chip chip-warn">'+pre.gp+' of 5 games</span>';
+        /* status uses the lifecycle classifier: rostered/mgmt keep their combined badge; every
+           unrostered registrant gets its true state (Signed up / Free agent / Undrafted FA / …) */
+        var ps=CG.poolState(r.profile_id);
         var statusChip= declined?'<span class="chip chip-loss">Declined</span>'
                 : on?((isMgmt?'<span class="chip chip-chrome" style="font-size:9px">'+esc((pl.mgmt||"").toUpperCase())+'</span> ':'')+'<span class="chip chip-win">Rostered</span>')
-                : '<span class="chip chip-warn">Free agent</span>';
+                : '<span class="chip '+ps.chip+'">'+esc(ps.label)+'</span>';
         var actions= declined
           ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+nm+'">Reinstate</button>'
           : on
@@ -3193,7 +3234,7 @@ CG.admPreseason = function(){
           '<td class="tright reg-act">'+actions+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. <b>Free agent</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the free-agent pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (returning veteran), <b>Undrafted FA</b> (met the 5-game minimum → bidding) or <b>Draft-ineligible</b> (auto-placed after free agency). <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   /* per-club roster ledger — expand a club to see and remove its players (capacity stays visible while assigning) */
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
@@ -4418,7 +4459,7 @@ CG.memberIndex = function(){
       var name = pr.gamertag || pr.display_name || "Member";
       var sub = p && CG.TEAM[p.team]
         ? CG.TEAM[p.team].name+" · "+p.pos+(p.jersey?" · #"+p.jersey:"")
-        : (rostered[pr.id] ? "Rostered" : "Free agent");
+        : (rostered[pr.id] ? "Rostered" : (CG.poolState?CG.poolState(pr.id).label:"Unsigned"));
       return { kind:"player", id:pr.id, label:name, sub:sub, team:(p&&p.team)||null };
     })
     .sort(function(a,b){ return a.label.localeCompare(b.label); });
@@ -5729,7 +5770,7 @@ CG.admOverviewLive = function(){
   var draftSt = lg.draftState ? lg.draftState.status : null;
   var h = '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">'+
     '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>days to puck drop</span></div>'+
-    '<div class="kpi'+(unsigned.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+unsigned.length+'</b><span>free agents unsigned</span></div>'+
+    '<div class="kpi'+(unsigned.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+unsigned.length+'</b><span>'+(draftSt==="complete"?"free agents unsigned":"signed up · no club")+'</span></div>'+
     '<div class="kpi'+(pendingApps.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+pendingApps.length+'</b><span>owner apps pending</span></div>'+
     '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
     '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
@@ -7010,15 +7051,16 @@ CG.hubFreeAgents = function(){
     : '<span class="chip chip-win">Window closed — free agents stay signable</span>';
   var rosterN=(lg.byTeam[t.code]||[]).length, rosterMax=s.roster_max||15;
   var rosteredIds=lg._rosteredIds||{}, faHeld=CG.contractHeldIds();
-  /* Two tracks (Rule 2.2): veterans/returning players sign through open free agency here;
-     undrafted rookies who hit the five-game pre-season minimum are won on the bidding board. */
+  /* Two tracks (Rule 2.2): RETURNING players (drafted/rostered before) sign through open free agency
+     here; undrafted FIRST-years who hit the five-game pre-season minimum are won on the bidding
+     board. isReturning (not isVeteran) is the split — 5 pre-season games alone don't make a veteran. */
   var pool=(lg._registrationsRaw||[]).filter(function(r){
     return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
-      lg.isVeteran(r.profile_id);
+      lg.isReturning(r.profile_id);
   }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   var bidPool=(lg._registrationsRaw||[]).filter(function(r){
     return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
-      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) >= 5;
+      !lg.isReturning(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) >= 5;
   }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
   var aucById = {}; (lg._rookieAuctions||[]).forEach(function(a){ aucById[a.profile_id]=a; });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
