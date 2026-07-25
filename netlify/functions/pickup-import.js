@@ -41,10 +41,14 @@ async function authUser(token) {
 }
 
 /* ---------- EA Pro Clubs (through the residential proxy) ---------- */
+// Use undici's OWN fetch, not Node's global fetch: on Node 24 the global fetch silently drops the
+// `dispatcher` option, so the ProxyAgent is ignored and EA sees the datacenter IP (403). undici.fetch
+// honours dispatcher, routing the call through the residential proxy.
 async function eaFetch(url) {
-  let dispatcher;
-  if (PROXY) { const { ProxyAgent } = await import("undici"); dispatcher = new ProxyAgent(PROXY); }
-  const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, dispatcher });
+  const { ProxyAgent, fetch: uFetch } = await import("undici");
+  const opts = { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, signal: AbortSignal.timeout(9000) };
+  if (PROXY) opts.dispatcher = new ProxyAgent(PROXY);
+  const r = await uFetch(url, opts);
   if (!r.ok) throw new Error(`EA ${r.status}${r.status === 403 ? " (IP blocked — residential proxy required)" : ""}`);
   return r.json();
 }
