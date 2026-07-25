@@ -1,9 +1,19 @@
-# Cinematic asset library — generated 2026-07-22 (Higgsfield)
+# Cinematic asset library — generated 2026-07-22 / 2026-07-25 (Higgsfield)
 
-Status: **generated and preserved, currently unwired.** The commissioner
-chose UI motion (3D logo treatments, animated stat bubbles, vector
-trophy) over photographic environments, so these files ship in the repo
-for future use but no page references them yet.
+Status: the 2026-07-22 homepage set is **generated and preserved,
+currently unwired** (the commissioner chose UI motion over photographic
+environments there). The 2026-07-25 additions below **are wired** — they
+carry the player-profile redesign (hero backdrop, empty-state, pickup box
+score).
+
+## Wired — player profile (added 2026-07-25, Higgsfield soul_location)
+| File | Where it's used | Prompt intent |
+|---|---|---|
+| profile-hero-21x9.jpg | Player-profile hero band backdrop (heavy charcoal scrim over it) | Rink-level dark arena, cool light sweep lower-left, one warm amber accent on the boards, deep negative space |
+| fresh-ice-16x9.jpg | Player-profile "no games yet" empty state ("Fresh sheet / Yet to take a shift") | Pristine untouched sheet of ice under cool light, dark top for the headline — a blank slate |
+| ice-macro-21x9.jpg *(reused)* | Pickup box-score page (`#/pickup/:id`) hero backdrop | (existing) close-up dark rink ice with skate marks |
+
+## Homepage set (2026-07-22, unwired)
 
 All stills: Higgsfield `soul_location` (text-only prompts, no reference
 media, no people, no third-party marks). Video: Bytedance `seedance1_5`

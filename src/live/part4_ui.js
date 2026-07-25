@@ -925,6 +925,7 @@ CG.ROUTE_TITLES = {
   players:    "Player Directory",
   player:     "Player",
   matchup:    "Matchup",
+  pickup:     "Pickup game",
   news:       "News",
   article:    "News",
   rulebook:   "Rulebook",

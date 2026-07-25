@@ -1216,7 +1216,11 @@ CG.ROUTES.player = function(pid, qs){
      with five pre-season appearances does have a sample to talk about. */
   var preS = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
   var anyGp = (s.gp||0) + ((preS && preS.gp)||0);
-  var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
+  /* Broadcast-grade backdrop: a rink-level environment (Higgsfield soul_location) under a heavy
+     charcoal scrim so the crest, name and overall stay fully legible; the club colour rides the
+     6px border. The base #101519 shows if the image 404s. */
+  var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+
+    ';background:linear-gradient(90deg,rgba(16,21,25,.95),rgba(16,21,25,.72) 46%,rgba(16,21,25,.5)),linear-gradient(180deg,rgba(16,21,25,.32),rgba(16,21,25,.58)),#101519 url(\'/assets/cinema/profile-hero-21x9.jpg\') center/cover no-repeat"><div class="shell">'+
     '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
       /* decorative here — the club name is the very next thing a screen reader reads, in the eyebrow */
       (t.logo
@@ -1238,7 +1242,7 @@ CG.ROUTES.player = function(pid, qs){
       /* OVR is the staff scouting number on the profile — the live adapter sets it from
          profiles.overall for every player, played games or not. It is never derived from results. */
       '<div class="hero-ovr" style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
-        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Overall · scouted</span></div></div>'+
+        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink)">Overall · scouted</span></div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
       (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>'
@@ -1300,11 +1304,31 @@ CG.ROUTES.player = function(pid, qs){
            : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
         .map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating — and toward the five games that make a first-year player draft-eligible.</p></div></div>' : '';
-    body += '<div class="grid g23"><div>'+
+    /* Empty-state cleanup: a first-year (or just-signed) player with no games at any stage gets a
+       single broadcast "fresh sheet" panel instead of a wall of twelve zeroes. The pristine-ice
+       still (Higgsfield soul_location) carries the moment; the rating breakdown is dropped as
+       redundant here. Played players keep the full KPI grid + scouting card. */
+    var isEmpty = !archived && anyGp===0;
+    /* the fresh-ice still is dark at the TOP, bright ice at the BOTTOM — so the headline sits at the
+       top over the dark region (align-items:flex-start) and the scrim eases through the middle so the
+       ice actually reads in the lower band instead of being crushed under a heavy floor scrim */
+    var emptyCard = '<div class="card" style="overflow:hidden;padding:0">'+
+      '<div style="position:relative;min-height:210px;display:flex;align-items:flex-start;'+
+        'background:linear-gradient(180deg,rgba(16,21,25,.9),rgba(16,21,25,.32) 46%,rgba(16,21,25,.08) 74%,rgba(16,21,25,.42)),'+
+        '#0e1216 url(\'/assets/cinema/fresh-ice-16x9.jpg\') center 62%/cover no-repeat">'+
+        '<div style="position:relative;padding:22px 22px 18px">'+
+          '<span class="eyebrow" style="color:var(--chrome)">Fresh sheet</span>'+
+          '<h3 style="font-family:var(--f-disp);font-weight:800;font-size:clamp(22px,3.4vw,30px);color:#fff;line-height:1.04;letter-spacing:-.01em;text-transform:none;margin:8px 0 0">Yet to take a shift</h3>'+
+        '</div></div>'+
+      '<div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
+        '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. The '+r.ovr+' overall is the staff scouting number from registration.</p></div></div>';
+    var leftTop = isEmpty ? emptyCard :
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
       cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
-        '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>'+preCard+advCard+'</div>'+
+        '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
+    if (isEmpty) sideCard = "";   /* the fresh-sheet card already explains the scouted overall */
+    body += '<div class="grid g23"><div>'+ leftTop +preCard+advCard+'</div>'+
       '<div class="stack">'+sideCard+(archived?"":
         '<div class="card"><div class="card-h"><h3>Contract</h3>'+
         (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
@@ -1445,7 +1469,7 @@ CG.AFTER.player = function(pid, qs){
   var box = document.getElementById("pickupSection");
   if (box && CG.sb){
     CG.sb.from("pickup_stats")
-      .select("goals,assists,shots,hits,pim,plus_minus,is_goalie,saves,shots_against,goals_against,team_side,pickup_games(club_a,club_b,score_a,score_b,played_at,went_ot)")
+      .select("goals,assists,shots,hits,pim,plus_minus,is_goalie,saves,shots_against,goals_against,team_side,pickup_games(id,club_a,club_b,score_a,score_b,played_at,went_ot)")
       .eq("profile_id", pid)
       .then(function(r){
         var rows = (r && r.data) || [];
@@ -1456,23 +1480,120 @@ CG.AFTER.player = function(pid, qs){
         var mostlyG = gGames > gp/2;
         var kpi = function(n,l){ return '<div class="kpi" style="cursor:default"><b class="num">'+n+'</b><span>'+l+'</span></div>'; };
         var stats = mostlyG
-          ? kpi(gp,"Pickup GP")+kpi(sa?(1-ga/sa).toFixed(3).replace(/^0/,""):"—","Save %")+kpi(sv,"Saves")+kpi(ga,"GA")
+          ? kpi(gp,"Pickup GP")+kpi(sa?(sv/sa).toFixed(3).replace(/^0/,""):"—","Save %")+kpi(sv,"Saves")+kpi(ga,"GA")
           : kpi(gp,"Pickup GP")+kpi(g,"Goals")+kpi(a,"Assists")+kpi(g+a,"Points")+kpi(hit,"Hits");
         var log = rows.slice().sort(function(x,y){
             return ((y.pickup_games&&y.pickup_games.played_at)||"").localeCompare((x.pickup_games&&x.pickup_games.played_at)||""); })
           .map(function(x){
             var gm = x.pickup_games||{}, when = gm.played_at ? CG.fmtDate(gm.played_at) : "";
             var line = x.is_goalie ? ((x.saves||0)+" SV, "+(x.goals_against||0)+" GA") : ((x.goals||0)+"G "+(x.assists||0)+"A");
-            return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("chart",14)+'</span><span><b>'+esc(gm.club_a||"?")+" "+(gm.score_a||0)+"–"+(gm.score_b||0)+" "+esc(gm.club_b||"?")+(gm.went_ot?" (OT)":"")+'</b><p>'+line+" · Team "+esc(x.team_side||"?")+'</p></span><span class="nf-t">'+esc(when)+'</span></div>';
+            return '<div class="notif"'+(gm.id?' style="cursor:pointer" data-go="#/pickup/'+gm.id+'" role="link" tabindex="0"':' style="cursor:default"')+'><span class="nf-ic">'+CG.ic("chart",14)+'</span><span style="flex:1;min-width:0"><b>'+esc(gm.club_a||"?")+" "+(gm.score_a||0)+"–"+(gm.score_b||0)+" "+esc(gm.club_b||"?")+(gm.went_ot?" (OT)":"")+'</b><p>'+line+" · Team "+esc(x.team_side||"?")+'</p></span><span class="nf-t">'+esc(when)+(gm.id?' <span aria-hidden="true" style="color:var(--steel)">›</span>':"")+'</span></div>';
           }).join("");
         box.innerHTML = '<section class="sec-tight" style="padding-top:0"><div class="shell" style="max-width:960px">'+
           '<div class="card" style="border-color:var(--line)"><div class="card-h"><h3>Pickup games</h3><span class="chip">Not league play</span></div>'+
-          '<div class="card-b"><p class="caption" style="margin:0 0 12px">From #lfg pickup games — shown for fun. These never count toward league totals, the 5-game minimum, draft/bid eligibility, or overall.</p>'+
+          '<div class="card-b"><p class="caption" style="margin:0 0 12px">From #lfg pickup games — shown for fun. These never count toward league totals, the 5-game minimum, draft/bid eligibility, or overall. Click any game for its full box score.</p>'+
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:10px">'+stats+'</div></div>'+
           '<div class="card-b" style="border-top:1px solid var(--line)">'+log+'</div>'+
           '</div></div></section>';
       }, function(){});
   }
+};
+
+/* ================================================================
+   PICKUP BOX SCORE — the full box score for one #lfg pickup game.
+   Structurally isolated from league play: it links out to player
+   profiles for convenience, but is never folded into league totals,
+   standings, eligibility or overall. pickup_games / pickup_stats are
+   not preloaded into CG.lg, so the page is a dark hero skeleton that
+   AFTER.pickup fills once the two isolated tables come back.
+   ================================================================ */
+CG.ROUTES.pickup = function(id){
+  if (!id) return CG.ROUTES._404();
+  CG._pickupId = id;
+  return '<section class="sec-dark" style="padding:clamp(26px,4vw,46px) 0;border-bottom:6px solid var(--chrome);background:linear-gradient(180deg,rgba(16,21,25,.55),rgba(16,21,25,.8)),linear-gradient(90deg,rgba(16,21,25,.9),rgba(16,21,25,.58) 60%,rgba(16,21,25,.4)),#101519 url(\'/assets/cinema/ice-macro-21x9.jpg\') center/cover no-repeat"><div class="shell">'+
+    '<a href="#/stats" id="pkBack" class="sec-link" style="color:var(--on-ink-dim)">'+CG.ic("back",14)+'Back</a>'+
+    '<h1 id="pkH1" class="sr-only">Pickup game</h1>'+
+    '<div id="pkHero" style="margin-top:16px;min-height:92px"><p class="caption" style="color:var(--on-ink-dim)">Loading the box score…</p></div>'+
+    '</div></section>'+
+    '<div class="shell" style="padding:22px 0 40px"><div id="pkBody"></div></div>';
+};
+CG.AFTER.pickup = function(id){
+  id = id || CG._pickupId;
+  var hero = document.getElementById("pkHero"), body = document.getElementById("pkBody");
+  if (!id || !CG.sb || !hero) return;
+  /* back-arrow returns to wherever they came from (a player profile's pickup section); the
+     #/stats href is only the fallback for a cold direct load with no history */
+  var bk = document.getElementById("pkBack");
+  if (bk) bk.addEventListener("click", function(e){ if (history.length>1){ e.preventDefault(); history.back(); } });
+  /* a neutral monogram stands in for the club crest (pickup clubs have no logo record) */
+  function pkBadge(name, size){ size = size||56;
+    var ch = (((name||"?").trim().charAt(0))||"?").toUpperCase();
+    return '<span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;'+
+      'width:'+size+'px;height:'+size+'px;border-radius:50%;background:linear-gradient(135deg,#1b2027,#0f1317);'+
+      'border:1px solid #39434B;color:var(--chrome);font-family:var(--f-disp);font-size:'+Math.round(size*0.4)+'px">'+esc(ch)+'</span>';
+  }
+  function nrm(s){ return (s==null?"":String(s)).trim().toUpperCase(); }
+  Promise.all([
+    CG.sb.from("pickup_games").select("*").eq("id", id).maybeSingle(),
+    CG.sb.from("pickup_stats").select("*, profiles(gamertag)").eq("pickup_game_id", id)
+  ]).then(function(rs){
+    var g = rs[0] && rs[0].data;
+    var rows = (rs[1] && rs[1].data) || [];
+    if (!g){ hero.innerHTML = '<b style="color:#fff;font-family:var(--f-disp);font-size:20px">Pickup game not found</b>'+
+      '<p class="caption" style="color:var(--on-ink-dim);margin-top:6px">It may have been removed, or the link is out of date.</p>'; if (body) body.innerHTML=""; return; }
+    var when = g.played_at ? CG.fmtDate(g.played_at) : "";
+    var h1el = document.getElementById("pkH1"); if (h1el) h1el.textContent = (g.club_a||"Club A")+" vs "+(g.club_b||"Club B")+" — pickup game";
+    hero.innerHTML = '<span class="eyebrow chr">Pickup game · not league play'+(when?' · '+esc(when):"")+'</span>'+
+      '<div class="mx-teams" style="margin-top:14px">'+
+        '<div class="mx-side">'+pkBadge(g.club_a,64)+'<div><div class="mx-nm" style="color:#fff">'+esc(g.club_a||"Club A")+'</div><div class="mx-rec">Team A</div></div></div>'+
+        '<div class="mx-mid"><div class="mx-score num">'+(g.score_a==null?"–":g.score_a)+' — '+(g.score_b==null?"–":g.score_b)+'</div><div class="mx-t">'+(g.went_ot?"Overtime final":"Final")+'</div></div>'+
+        '<div class="mx-side away">'+pkBadge(g.club_b,64)+'<div><div class="mx-nm" style="color:#fff">'+esc(g.club_b||"Club B")+'</div><div class="mx-rec">Team B</div></div></div>'+
+      '</div>';
+    /* one box-score card per side — skater table + a goalie line, matching the league matchup */
+    function boxCard(title, score, list){
+      var sk = list.filter(function(x){ return !x.is_goalie; })
+        .sort(function(a,b){ return ((b.goals||0)+(b.assists||0))-((a.goals||0)+(a.assists||0)); });
+      var gs = list.filter(function(x){ return x.is_goalie; });
+      function nameCell(x){
+        var gt = x.profiles && x.profiles.gamertag, label = gt || x.skater_name || "Player";
+        return '<span class="playercell"><span class="nm">'+esc(label)+'</span>'+(x.position?'<small>'+esc(x.position)+'</small>':"")+'</span>';
+      }
+      function rowAttr(x){ var gt = x.profiles && x.profiles.gamertag;
+        return (x.profile_id && gt) ? ' class="rowlink" data-go="#/player/'+x.profile_id+'" role="link" tabindex="0"' : ""; }
+      var skHtml = sk.map(function(x){
+        return '<tr'+rowAttr(x)+'><td class="tleft">'+nameCell(x)+'</td>'+
+          '<td class="'+((x.goals||0)?"":"z")+'">'+(x.goals||0)+'</td><td class="'+((x.assists||0)?"":"z")+'">'+(x.assists||0)+'</td>'+
+          '<td class="pts">'+((x.goals||0)+(x.assists||0))+'</td><td>'+(x.shots||0)+'</td>'+
+          '<td class="'+((x.hits||0)?"":"z")+'">'+(x.hits||0)+'</td><td class="'+((x.pim||0)?"":"z")+'">'+(x.pim||0)+'</td>'+
+          '<td>'+((x.plus_minus||0)>0?"+":"")+(x.plus_minus||0)+'</td></tr>';
+      }).join("");
+      var glHtml = gs.map(function(x){
+        var gt = x.profiles && x.profiles.gamertag, label = gt || x.skater_name || "Goalie";
+        var sa = x.shots_against||0, sv = x.saves||0;
+        return '<tr'+rowAttr(x)+'><td class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">G: '+esc(label)+'</td>'+
+          '<td colspan="7" class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">'+
+          sv+'/'+sa+' saves'+(sa?" ("+(sv/sa).toFixed(3).replace(/^0/,"")+")":"")+' · '+(x.goals_against||0)+' GA'+(x.shutout?" · SHUTOUT":"")+'</td></tr>';
+      }).join("");
+      if (!sk.length && !gs.length) skHtml = '<tr><td colspan="8" class="tleft"><span class="caption">No player lines imported for this side.</span></td></tr>';
+      return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3><span style="display:inline-flex;align-items:center;gap:9px">'+
+        pkBadge(title,22)+esc(title)+' — '+(score==null?"–":score)+'</span></h3></div>'+
+        '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Skater</th><th>G</th><th>A</th><th>P</th><th>S</th><th>HIT</th><th>PIM</th><th>+/-</th></tr></thead><tbody>'+
+        skHtml+glHtml+'</tbody></table></div></div>';
+    }
+    var sideA = rows.filter(function(x){ return nrm(x.team_side)==="A"; });
+    var sideB = rows.filter(function(x){ return nrm(x.team_side)==="B"; });
+    var other = rows.filter(function(x){ return nrm(x.team_side)!=="A" && nrm(x.team_side)!=="B"; });
+    if (other.length) sideA = sideA.concat(other);   /* never drop a line we can't bucket */
+    body.innerHTML = '<div class="grid g23" style="align-items:start"><div>'+
+      boxCard(g.club_a||"Club A", g.score_a, sideA)+
+      boxCard(g.club_b||"Club B", g.score_b, sideB)+
+      '</div><div class="stack">'+
+      '<div class="card"><div class="card-h"><h3>Pickup game</h3><span class="chip">Not league play</span></div><div class="card-b">'+
+        '<p class="small" style="color:var(--steel);line-height:1.65">Imported from the EA NHL match record through the #lfg pickup importer. Pickup lines show on player profiles for fun — they never count toward league standings, the five-game minimum, draft or bid eligibility, or overall ratings.</p>'+
+        (when?'<p class="caption" style="margin-top:10px">Played '+esc(when)+(g.went_ot?" · settled in overtime":"")+'.</p>':"")+
+      '</div></div>'+
+      '</div></div>';
+  }, function(){ hero.innerHTML = '<b style="color:#fff">Couldn’t load this game.</b><p class="caption" style="color:var(--on-ink-dim);margin-top:6px">Try again in a moment.</p>'; });
 };
 
 /* ---------- STATS CENTRAL ---------- */
