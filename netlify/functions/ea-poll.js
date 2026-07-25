@@ -71,15 +71,19 @@ export default async () => {
     const clubs = [...new Set((await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id`)).map((t) => String(t.ea_club_id)).filter(Boolean))];
     if (!clubs.length) return json({ skipped: "no teams have an ea_club_id set" });
 
+    // Use undici's OWN fetch (uFetch) below, not Node's global fetch: on Node 24 the global fetch
+    // silently drops the `dispatcher` option, so the ProxyAgent is ignored and EA sees the datacenter
+    // IP. undici.fetch honours dispatcher, routing through the residential proxy.
+    const { ProxyAgent, fetch: uFetch } = await import("undici");
     let dispatcher;
-    if (PROXY) { const { ProxyAgent } = await import("undici"); dispatcher = new ProxyAgent(PROXY); }
+    if (PROXY) { dispatcher = new ProxyAgent(PROXY); }
 
     const byId = new Map();
     const clubErrors = [];
     for (const c of clubs) {
       try {
         const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${c}`;
-        const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, dispatcher });
+        const r = await uFetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, dispatcher });
         if (!r.ok) { clubErrors.push(`club ${c}: EA ${r.status}`); console.error(`ea-poll club ${c}: EA ${r.status}${r.status === 403 ? " (IP blocked — needs residential HTTPS_PROXY)" : ""}`); continue; }
         const data = await r.json();
         if (Array.isArray(data)) for (const m of data) if (m && m.matchId) byId.set(String(m.matchId), m);
