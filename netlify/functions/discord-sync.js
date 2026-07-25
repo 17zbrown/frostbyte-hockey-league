@@ -141,7 +141,16 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
   // exists, it's RENAMED in place (keeping its position, history, and id) instead of a duplicate being
   // made — this is how #lfg was migrated to #pickup-games without the sweep recreating the old name.
   async function ensurePublicText(name, parentId, topic, oldNames) {
-    if (!parentId || guildChannels.find((c) => c.type === 0 && c.name === name)) return;
+    if (!parentId) return;
+    const existing = guildChannels.find((c) => c.type === 0 && c.name === name);
+    if (existing) {
+      // keep the topic current on an already-present channel (e.g. the /lfg -> /join wording) without recreating it
+      if (topic && existing.topic !== topic) {
+        try { await dApi("PATCH", `/channels/${existing.id}`, { topic }); existing.topic = topic; sum.communityChansRetopic = (sum.communityChansRetopic || 0) + 1; }
+        catch (e) { sum.errors.push({ communityChanTopic: name, error: String(e.message || e) }); }
+      }
+      return;
+    }
     const prev = (oldNames && oldNames.length)
       ? guildChannels.find((c) => c.type === 0 && oldNames.includes(c.name)) : null;
     if (prev) {
