@@ -3111,11 +3111,19 @@ CG.admPreseason = function(){
   var rosterMax=s.roster_max||15, rosteredIds=lg._rosteredIds||{};
   var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
   var pendingApps=apps.filter(function(a){ return a.status==="pending"; }).length;
+  var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
+  var pool=regs.filter(function(r){ return !rosteredIds[r.profile_id] && r.status!=="declined"; });
+  var faN=pool.length, decN=regs.filter(function(r){ return r.status==="declined"; }).length;
+  var dl=s.signup_deadline_at || s.registration_deadline;
   var h='<div style="margin-bottom:18px"><h2 class="h-sec">Pre-season central</h2>'+
     '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>';
-  var kpis=[[regs.length,"Registered players",""],[assigned+" / "+regs.length,"Assigned to a club",""],[pendingApps,"Owner apps pending",pendingApps>0?"alert":""],[s.registration_open?"Open":"Closed","Registration",""]];
-  h+='<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-bottom:20px">'+
-    kpis.map(function(k){ return '<div class="kpi'+(k[2]==="alert"?" alert":"")+'" style="cursor:default"><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'; }).join("")+'</div>';
+  var kpis=[[regs.length,"Registered players","",""],
+    [faN,"Free agents · need a club","","fa"],
+    [assigned+" / "+regs.length,"Rostered","","ros"],
+    [pendingApps,"Owner apps pending",pendingApps>0?"alert":"",""],
+    [s.registration_open?"Open":"Closed","Registration","",""]];
+  h+='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:20px">'+
+    kpis.map(function(k){ var f=k[3]; return '<div class="kpi'+(k[2]==="alert"?" alert":"")+'"'+(f?' data-kpi-filter="'+f+'" role="button" tabindex="0" style="cursor:pointer" title="Filter the table"':' style="cursor:default"')+'><b class="num">'+k[0]+'</b><span>'+k[1]+'</span></div>'; }).join("")+'</div>';
 
   /* season timeline — the phases the whole lifecycle runs on */
   var phases=[["Off-season begins",s.offseason_starts_at],["Owner apps close",s.owner_app_deadline],
@@ -3131,11 +3139,9 @@ CG.admPreseason = function(){
       '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open all season and late sign-ups are randomly assigned after the draft. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. Ten minutes after the draft’s final pick, rookies who missed the 5-game minimum are placed on random clubs — so rosters are settled before free agency. Free agency runs a full week; puck drop waits for it to close.</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
-  /* lifecycle actions */
-  var pool = regs.filter(function(r){ return !rosteredIds[r.profile_id] && r.status!=="declined"; });
+  /* lifecycle actions (pool + dl are defined once near the top of this function) */
   var randomN = (lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
   var rookies = pool.filter(function(r){ return !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5; });
-  var dl = s.signup_deadline_at || s.registration_deadline;
   var lateN = pool.filter(function(r){ return dl && r.created_at && Date.parse(r.created_at) > Date.parse(dl); }).length;
   h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pre-season lifecycle</h3></div><div class="card-b">'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
@@ -3147,35 +3153,75 @@ CG.admPreseason = function(){
     'Release runs automatically after the final pre-season game; rookie placement runs automatically ten minutes after the draft’s final pick. '+
     'The sign-up deadline is a draft-eligibility cutoff, not a hard close — anyone registering after it (and anyone joining mid-season) is placed on a club with an open spot automatically. These buttons are manual overrides.</p></div></div>';
 
-  var sortedRegs=regs.sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
-  h+='<div class="card"><div class="card-h"><h3>Registered players</h3><span class="chip">'+regs.length+'</span></div>'+
-    (regs.length?'<div class="tblwrap"><table class="tbl keepcols"><caption>Season registrations</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th class="tleft">EA ID</th><th>Scout OVR</th><th>Pre-season</th><th>Draft eligibility</th><th>Status</th><th class="tright">Assign to club</th></tr></thead><tbody>'+
-      sortedRegs.map(function(r){ var prof=r.profiles||{}, on=rosteredIds[r.profile_id];
-        var pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0}, vet=lg.isVeteran(r.profile_id);
-        var declined=r.status==="declined";
-        var late = dl && r.created_at && Date.parse(r.created_at) > Date.parse(dl);
-        var elig = declined ? '<span class="chip chip-loss">Declined</span>'
-                 : late ? '<span class="chip chip-warn">Late — random-assigned</span>'
-                 : vet ? '<span class="chip">Veteran — exempt</span>'
-                 : pre.gp>=5 ? '<span class="chip chip-win">Draft-eligible</span>'
-                 : '<span class="chip chip-warn">'+pre.gp+' of 5 games</span>';
-        var clubOpts = '<option value="">Choose club…</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
-        var actions = declined
-          ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+esc(prof.gamertag||"a player")+'">Reinstate</button>'
-          : on ? '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+esc(prof.gamertag||"a player")+'">Decline</button>'
-          : '<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap"><select data-assign-team="'+r.id+'" style="padding:5px;max-width:150px">'+clubOpts+'</select>'+
-            '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+esc(prof.gamertag||"a player")+'">Sign</button>'+
-            '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+esc(prof.gamertag||"a player")+'">Decline</button></span>';
-        return '<tr'+(declined?' style="opacity:.55"':"")+'><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
-          '<td class="tnum">'+esc(r.position||"—")+'</td><td class="tleft small" style="color:var(--steel)">'+esc(prof.ea_id||"—")+'</td>'+
-          '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" style="width:64px;text-align:center;padding:5px" placeholder="—"'+(declined?" disabled":"")+'></td>'+
+  var sortedRegs=regs.slice().sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  var clubOpts=CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
+  h+='<div class="card"><div class="reg-bar">'+
+    '<div class="seg" role="group" aria-label="Filter registrations">'+
+      [["all","All",regs.length],["fa","Free agents",faN],["ros","Rostered",assigned],["dec","Declined",decN]]
+        .map(function(f){ return '<button data-reg-filter="'+f[0]+'" class="'+(f[0]==="all"?"on":"")+'" aria-pressed="'+(f[0]==="all")+'">'+f[1]+' <b class="num">'+f[2]+'</b></button>'; }).join("")+
+    '</div>'+
+    '<input type="search" id="regSearch" placeholder="Search gamertag or EA ID…" aria-label="Search registrations">'+
+    '<span class="caption" id="regShowing">'+regs.length+' shown</span></div>'+
+    (regs.length?'<div class="tblwrap"><table class="tbl keepcols compact"><caption class="sr">Season registrations</caption><thead><tr>'+
+      '<th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>Scout OVR</th><th>Pre-season</th><th>Draft eligibility</th><th>Status</th><th class="tright">Action</th></tr></thead><tbody id="regBody">'+
+      sortedRegs.map(function(r){
+        var prof=r.profiles||{}, on=rosteredIds[r.profile_id], pl=playerById[r.profile_id];
+        var declined=r.status==="declined", st=declined?"dec":on?"ros":"fa";
+        var isMgmt=on && pl && pl.mgmt;
+        var club=on?(pl&&pl.team):null, nm=esc(prof.gamertag||"a player"), av=CG.safeAvatar(prof.avatar_url);
+        var pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0};
+        var late=dl && r.created_at && Date.parse(r.created_at)>Date.parse(dl);
+        var elig= declined?'<span class="chip chip-loss">Declined</span>'
+                : late?'<span class="chip chip-warn">Late — random-assigned</span>'
+                : lg.isVeteran(r.profile_id)?'<span class="chip">Veteran — exempt</span>'
+                : pre.gp>=5?'<span class="chip chip-win">Draft-eligible</span>'
+                : '<span class="chip chip-warn">'+pre.gp+' of 5 games</span>';
+        var statusChip= declined?'<span class="chip chip-loss">Declined</span>'
+                : on?((isMgmt?'<span class="chip chip-chrome" style="font-size:9px">'+esc((pl.mgmt||"").toUpperCase())+'</span> ':'')+'<span class="chip chip-win">Rostered</span>')
+                : '<span class="chip chip-warn">Free agent</span>';
+        var actions= declined
+          ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+nm+'">Reinstate</button>'
+          : on
+          ? (isMgmt?'<span class="caption">Seat set in Teams</span>'
+             :'<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+r.profile_id+'" data-club="'+esc(club||"")+'" data-name="'+nm+'">Remove from roster</button>')
+          : '<span class="fa-assign"><select data-assign-team="'+r.id+'" class="fa-club"><option value="">Club…</option>'+clubOpts+'</select>'+
+            '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+nm+'" disabled>Assign</button>'+
+            '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+nm+'">Decline</button></span>';
+        return '<tr class="reg-row-'+st+'" data-reg-status="'+st+'" data-reg-name="'+esc((prof.gamertag||"").toLowerCase()+" "+(prof.ea_id||"").toLowerCase())+'">'+
+          '<td class="tleft"><span class="playercell">'+(av?'<img src="'+av+'" alt="" class="pc-av">':'')+'<span style="min-width:0"><span class="nm">'+esc(prof.gamertag||"—")+'</span><small class="mono">'+esc(prof.ea_id||"no EA ID")+'</small></span></span></td>'+
+          '<td class="tnum">'+esc(r.position||"—")+'</td>'+
+          '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>':'<span class="caption">—</span>')+'</td>'+
+          '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" class="scout-in" placeholder="—"'+(declined?" disabled":"")+'></td>'+
           '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
-          '<td>'+elig+'</td>'+
-          '<td>'+(declined?'<span class="chip chip-loss">Declined</span>':on?'<span class="chip chip-win">Rostered</span>':'<span class="chip chip-warn">Free agent</span>')+'</td>'+
-          '<td class="tright">'+actions+'</td></tr>';
-      }).join("")+'</tbody></table></div><div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Set a scouted overall to rank the draft pool. Pre-season games played come straight from the EA box scores; the 5-game minimum only applies to players without a draft cycle or 5 career games. Late sign-ups (registered after the deadline) are flagged and get random-assigned after the draft. Decline keeps a banned or duplicate account out of assignment and the draft pool; Reinstate undoes it.</span></div>'
+          '<td>'+elig+'</td><td>'+statusChip+'</td>'+
+          '<td class="tright reg-act">'+actions+'</td></tr>';
+      }).join("")+'</tbody></table></div>'+
+      '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. <b>Free agent</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the free-agent pool (their spot and cap hit clear; they stay registered). Owner/GM/AGM seats are protected here — set them under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
+  /* per-club roster ledger — expand a club to see and remove its players (capacity stays visible while assigning) */
+  h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
+    '<div class="card-b club-led">'+
+    CG.TEAMS.map(function(t){
+      var players=(lg.byTeam[t.code]||[]).slice().sort(function(a,b){ var o={G:0,LD:1,RD:2,C:3,LW:4,RW:5}; return (o[a.pos]==null?9:o[a.pos])-(o[b.pos]==null?9:o[b.pos]); });
+      var n=players.length, pct=Math.round(100*n/rosterMax);
+      return '<details><summary>'+
+        '<span class="chev" aria-hidden="true">▸</span>'+CG.crest(t.code,22)+
+        '<span style="flex:1;min-width:0"><b style="font-family:var(--f-disp);font-size:14px">'+esc(t.name)+'</b></span>'+
+        '<span class="rb-track" style="width:120px;flex:none"><span class="rb-fill" style="width:'+Math.min(100,pct)+'%"></span></span>'+
+        '<b class="num" style="width:54px;text-align:right;font-size:13px">'+n+'/'+rosterMax+'</b></summary>'+
+        '<div class="cl-players">'+
+          (n?players.map(function(p){ var mg=p.mgmt;
+            return '<div class="cl-row"><span class="mono" style="width:30px;color:var(--steel)">#'+(p.jersey||"—")+'</span>'+
+              '<span class="mono" style="width:32px">'+esc(p.pos||"—")+'</span>'+
+              '<span class="nm" style="flex:1;min-width:0">'+esc(p.tag||"—")+'</span>'+
+              (mg?'<span class="chip chip-chrome" style="font-size:9px">'+esc((mg||"").toUpperCase())+'</span>'
+                 :'<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+p.id+'" data-club="'+esc(t.code)+'" data-name="'+esc(p.tag||"a player")+'">Remove</button>')+
+            '</div>';
+          }).join("") : '<span class="caption">No players yet.</span>')+
+        '</div></details>';
+    }).join("")+'</div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every club and its current roster. Remove waives a player to the free-agent pool; Owner/GM/AGM are protected — set a club’s front office under Teams.</span></div></div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
     h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
@@ -3201,12 +3247,6 @@ CG.admPreseason = function(){
     }).join("");
   } else { h+='<div class="card-b"><p class="caption">No staff applications yet. They appear here when members apply from the “Apply to join the staff” page. Decisions are made by the Applications-review vote on the Staff Desk.</p></div>'; }
   h+='</div>';
-  h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Roster fill</h3><span class="chip">max '+rosterMax+' per club</span></div><div class="card-b">'+
-    CG.TEAMS.map(function(t){ var n=(lg.byTeam[t.code]||[]).length, pct=Math.round(100*n/rosterMax);
-      return '<div style="display:flex;align-items:center;gap:12px;padding:7px 0">'+CG.crest(t.code,20)+'<span style="width:140px;font-size:13px">'+esc(t.name)+'</span>'+
-        '<span class="rb-track" style="flex:1"><span class="rb-fill" style="width:'+Math.min(100,pct)+'%"></span></span>'+
-        '<b class="num" style="width:56px;text-align:right;font-size:13px">'+n+'/'+rosterMax+'</b></div>';
-    }).join("")+'</div></div>';
   return h;
 };
 CG.AFTER._preseason = function(){
@@ -3240,6 +3280,50 @@ CG.AFTER._preseason = function(){
       CG.assignRegistration(regId, el.getAttribute("data-prof"), el.getAttribute("data-pos"), name, code);
     });
   }); });
+  /* --- filter + search over the registrations table --- */
+  var regFilter="all";
+  function applyRegFilter(){
+    var box=document.getElementById("regSearch"); var q=((box&&box.value)||"").trim().toLowerCase();
+    var rows=document.querySelectorAll("#regBody tr"), shown=0;
+    rows.forEach(function(tr){
+      var okS = regFilter==="all" || tr.getAttribute("data-reg-status")===regFilter;
+      var okQ = !q || (tr.getAttribute("data-reg-name")||"").indexOf(q)>=0;
+      var vis = okS && okQ; tr.style.display = vis?"":"none"; if(vis) shown++;
+    });
+    var sh=document.getElementById("regShowing"); if(sh) sh.textContent=shown+" shown";
+    var em=document.getElementById("regEmpty"); if(em) em.style.display=(rows.length&&!shown)?"":"none";
+  }
+  function setRegFilter(f){
+    regFilter=f;
+    document.querySelectorAll("[data-reg-filter]").forEach(function(b){ var on=b.getAttribute("data-reg-filter")===f; b.classList.toggle("on",on); b.setAttribute("aria-pressed",on?"true":"false"); });
+    applyRegFilter();
+  }
+  document.querySelectorAll("[data-reg-filter]").forEach(function(b){ b.addEventListener("click",function(){ setRegFilter(this.getAttribute("data-reg-filter")); }); });
+  document.querySelectorAll("[data-kpi-filter]").forEach(function(b){
+    var go=function(){ setRegFilter(b.getAttribute("data-kpi-filter")); var s=document.getElementById("regSearch"); if(s) s.scrollIntoView({block:"center",behavior:"smooth"}); };
+    b.addEventListener("click",go);
+    b.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
+  });
+  var rsIn=document.getElementById("regSearch"); if(rsIn) rsIn.addEventListener("input", applyRegFilter);
+  /* free-agent assign: arm the Assign button only once a club is picked */
+  document.querySelectorAll("[data-assign-team]").forEach(function(sel){ sel.addEventListener("change", function(){
+    var b=document.querySelector('[data-assign="'+this.getAttribute("data-assign-team")+'"]'); if(b) b.disabled=!this.value;
+  }); });
+  /* remove a rostered player from any club — from a table row OR the roster ledger */
+  document.querySelectorAll("[data-reg-remove]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.removeFromRoster(this.getAttribute("data-reg-remove"), this.getAttribute("data-club"), this.getAttribute("data-name"));
+  }); });
+};
+CG.removeFromRoster = function(profileId, club, name){
+  CG.confirm("Remove "+(name||"this player")+(club?" from "+club:"")+"?",
+    "This waives the player back to the free-agent pool, clears their roster spot and cap hit, and logs a transaction. They stay registered — you can re-assign them to any club.",
+    "Remove from roster", function(){
+    CG.sb.rpc("admin_remove_from_roster",{ p_profile:profileId, p_season_id:(CG.SEASON&&CG.SEASON.id)||null }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
+      CG.toast((r.data||name||"Player")+" removed — back in the free-agent pool","ok");
+      CG.reloadLeague();
+    });
+  });
 };
 /* ---- pre-season lifecycle actions ---- */
 CG.shuffleArr = function(a){ a=a.slice(); for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)), t=a[i]; a[i]=a[j]; a[j]=t; } return a; };
