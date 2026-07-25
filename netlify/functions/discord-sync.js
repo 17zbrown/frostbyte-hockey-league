@@ -191,21 +191,8 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
     }
   } catch (e) { sum.errors.push({ pickupSweep: String(e.message || e) }); }
 
-  // per-club voice rooms, private to the club role + office. VIEW(1024)+CONNECT(1048576)+SPEAK(2097152).
-  const VOICE_ALLOW = "3146752";
-  if (teamRoomsCat) {
-    for (const t of teams) {
-      if (!t.discord_role_id) continue;
-      const vname = ((t.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")) + "-voice";
-      if (guildChannels.find((c) => c.type === 2 && c.name === vname && c.parent_id === teamRoomsCat.id)) continue;
-      const overwrites = [{ id: GUILD, type: 0, deny: "1024", allow: "0" },
-        { id: t.discord_role_id, type: 0, allow: VOICE_ALLOW, deny: "0" },
-        ...office.map((id) => ({ id, type: 0, allow: VOICE_ALLOW, deny: "0" }))];
-      try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: vname, type: 2, parent_id: teamRoomsCat.id, permission_overwrites: overwrites });
-        guildChannels.push(ch); sum.clubVoiceCreated = (sum.clubVoiceCreated || 0) + 1;
-      } catch (e) { sum.errors.push({ clubVoice: vname, error: String(e.message || e) }); }
-    }
-  }
+  // Clubs do NOT get their own voice rooms — teams use the shared Game Voice lobbies below.
+  // (?reconcile=teams removes any per-club voice channel left over from the old behavior.)
   // public Game Voice lobbies for scrims / mixed groups on game night
   if (gamesCat) {
     for (const vn of ["Game Voice 1", "Game Voice 2"]) {
@@ -304,7 +291,8 @@ export default async (req) => {
   const diagMode = diag.get("diag");
   const regMode = diag.get("register");   // ?register=commands (re)registers the guild slash commands
   const setupMode = diag.get("setup");    // ?setup=community configures the welcome screen + onboarding
-  if (diagMode || regMode || setupMode) {
+  const reconcileMode = diag.get("reconcile"); // ?reconcile=teams prunes team voice + orphan rooms/roles, provisions new clubs
+  if (diagMode || regMode || setupMode || reconcileMode) {
     const keyRow = await sbGet("app_config?key=eq.diag_key&select=value").catch(() => []);
     const want = keyRow[0] && keyRow[0].value;
     const got = diag.get("key") || req.headers.get("x-diag-key") || "";
@@ -324,6 +312,80 @@ export default async (req) => {
       const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
       return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
         { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    // Reconcile the Team Rooms with the live club list: delete every per-club VOICE channel (clubs
+    // no longer get voice), delete text rooms + roles for clubs that no longer exist, and provision a
+    // private text room + role (no voice) for any current club missing one — e.g. a newly added club.
+    if (BOT && GUILD && reconcileMode === "teams") {
+      const out = { deletedVoice: [], deletedRooms: [], deletedRoles: [], createdRoles: [], createdRooms: [], errors: [] };
+      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+      const teams = await sbGet("teams?select=id,code,name,color,discord_role_id,discord_channel_id");
+      const teamRoomsCat = chans.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team rooms");
+      const currentSlugs = new Set(teams.map((t) => slug(t.name)));
+      const roleIdByName = {}; for (const r of roles) roleIdByName[(r.name || "").toLowerCase()] = r.id;
+      const orphanSlugs = new Set();
+
+      if (teamRoomsCat) {
+        const inCat = chans.filter((c) => c.parent_id === teamRoomsCat.id);
+        // every per-club voice channel goes — clubs don't get their own voice
+        for (const c of inCat.filter((c) => c.type === 2)) {
+          try { await dApi("DELETE", `/channels/${c.id}`); out.deletedVoice.push(c.name); }
+          catch (e) { out.errors.push({ voice: c.name, error: String(e.message || e) }); }
+        }
+        // text rooms for clubs that no longer exist
+        for (const c of inCat.filter((c) => c.type === 0)) {
+          if (currentSlugs.has(slug(c.name))) continue;
+          orphanSlugs.add(slug(c.name));
+          try { await dApi("DELETE", `/channels/${c.id}`); out.deletedRooms.push(c.name); }
+          catch (e) { out.errors.push({ room: c.name, error: String(e.message || e) }); }
+        }
+      } else { out.errors.push({ teamRooms: "category not found" }); }
+
+      // orphaned team roles: a role whose slug matches a room we just removed. Never a managed/booster role.
+      for (const r of roles) {
+        if (r.managed || (r.name || "").toLowerCase() === "@everyone") continue;
+        if (orphanSlugs.has(slug(r.name))) {
+          try { await dApi("DELETE", `/guilds/${GUILD}/roles/${r.id}`); out.deletedRoles.push(r.name); }
+          catch (e) { out.errors.push({ role: r.name, error: String(e.message || e) }); }
+        }
+      }
+
+      // provision a role + private text room (no voice) for any current club missing one
+      const office = ["owner", "general manager", "assistant general manager", "commissioner", "staff"].map((n) => roleIdByName[n]).filter(Boolean);
+      for (const t of teams) {
+        try {
+          let trole = t.discord_role_id;
+          if (!trole || !roles.find((r) => r.id === trole)) {
+            const existing = roles.find((r) => !r.managed && slug(r.name) === slug(t.name));
+            if (existing) trole = existing.id;
+            else {
+              const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
+              const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: false });
+              if (cr && cr.id) { trole = cr.id; out.createdRoles.push(t.name); }
+            }
+            if (trole) await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole });
+          }
+          let tchan = t.discord_channel_id;
+          if (teamRoomsCat && (!tchan || !chans.find((c) => c.id === tchan))) {
+            const existing = chans.find((c) => c.type === 0 && c.parent_id === teamRoomsCat.id && slug(c.name) === slug(t.name));
+            if (existing) tchan = existing.id;
+            else {
+              const allow = String(1024 | 2048 | 65536); // VIEW + SEND + READ_HISTORY
+              const overwrites = [{ id: GUILD, type: 0, deny: "1024", allow: "0" }];
+              if (trole) overwrites.push({ id: trole, type: 0, allow, deny: "0" });
+              for (const oid of office) overwrites.push({ id: oid, type: 0, allow, deny: "0" });
+              const topic = `Private room for the ${t.name} — roster, lineups, and team talk. Visible only to the club and staff.`;
+              const cc = await dApi("POST", `/guilds/${GUILD}/channels`, { name: slug(t.name), type: 0, parent_id: teamRoomsCat.id, topic, permission_overwrites: overwrites });
+              if (cc && cc.id) { tchan = cc.id; out.createdRooms.push(cc.name); }
+            }
+            if (tchan) await sbPatch(`teams?id=eq.${t.id}`, { discord_channel_id: tchan });
+          }
+        } catch (e) { out.errors.push({ provision: t.name, error: String(e.message || e) }); }
+      }
+
+      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
 
     // Configure Community onboarding + welcome screen (idempotent). Prompt options reveal CHANNELS

@@ -4,7 +4,7 @@
  * live standings when the NHL season is running, the final table of the
  * most recent season otherwise. No API key required (public NHL API).
  */
-const CODES = ["BOS", "CHI", "CAR", "TOR", "ANA", "COL", "DAL", "WPG"];
+const CODES = ["CAR", "TOR", "OTT"];
 
 const ab = (r) => (r.teamAbbrev && (r.teamAbbrev.default || r.teamAbbrev)) || "";
 
