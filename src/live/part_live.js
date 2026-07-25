@@ -1231,7 +1231,8 @@ CG.isStatsStaff = function(){
 CG._smNum = [["goals","G"],["assists","A"],["shots","S"],["hits","HIT"],["pim","PIM"],["plus_minus","+/-"],["saves","SV"],["shots_against","SA"],["goals_against","GA"]];
 CG._smLoadProfiles = function(){
   if (CG._smProfiles) return Promise.resolve(CG._smProfiles);
-  return CG.sb.from("profiles").select("id,gamertag,display_name,ea_id").order("gamertag").then(function(r){
+  return CG.sb.from("profiles").select("id,gamertag,display_name,ea_id").order("gamertag").limit(5000).then(function(r){
+    if (r && r.error){ CG.toast("Couldn’t load the player list — reassigning is disabled until you reload","err"); return []; }  /* don't cache a failure */
     CG._smProfiles = (r && r.data) || []; return CG._smProfiles;
   });
 };
@@ -1324,7 +1325,7 @@ CG._smRenderList = function(body){
         out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import:</div>'+ms.map(function(m){
           var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
           return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-            '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+m.a.score+' – '+m.b.score+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+'<div class="caption">'+esc(when)+'</div></div>'+
+            '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+(+m.a.score||0)+' – '+(+m.b.score||0)+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+'<div class="caption">'+esc(when)+'</div></div>'+
             '<button class="btn btn-chrome btn-sm" data-import="'+esc(m.matchId)+'" data-cid="'+esc(cid)+'">Import</button></div></div>';
         }).join("");
         out.querySelectorAll("[data-import]").forEach(function(b){ b.addEventListener("click", function(){ doImport(this); }); });
@@ -1362,11 +1363,14 @@ CG._smRenderDetail = function(body, gid){
   ]).then(function(rs){
     var g = rs[0] && rs[0].data, rows = (rs[1] && rs[1].data) || [];
     if (!g){ body.innerHTML = '<div class="note">Game not found. <a href="#/hub/statsmgr" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to the list</a></div>'; return; }
+    /* played_at is a timestamptz; the whole site shows it in ET (CG.fmtDate). Seed + compare the
+       date input in ET too, so the editor never disagrees with the list/profiles by a day. */
+    function etDate(iso){ if(!iso) return ""; try { return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(iso)); } catch(e){ return (iso||"").slice(0,10); } }
     function num(x,k,lab){ return '<td><input data-f="'+k+'" type="number" value="'+(x[k]==null?0:x[k])+'" style="width:44px;padding:4px;text-align:center;font-variant-numeric:tabular-nums" aria-label="'+lab+'"></td>'; }
     var rowsHtml = rows.map(function(x){
       var gt = x.profiles && x.profiles.gamertag;
       return '<tr data-row="'+x.id+'">'+
-        '<td class="tleft" style="min-width:150px"><select data-f="profile_id" style="width:100%;padding:5px;max-width:200px">'+CG._smProfOpts(x.profile_id)+'</select>'+
+        '<td class="tleft" style="min-width:150px"><select data-f="profile_id" data-orig="'+esc(x.profile_id||"")+'" style="width:100%;padding:5px;max-width:200px">'+CG._smProfOpts(x.profile_id)+'</select>'+
           '<span class="caption" style="display:block;margin-top:3px">EA: '+esc(x.skater_name||"?")+(x.team_side?" · Team "+esc(x.team_side):"")+(gt?"":" · <span style=\"color:var(--red)\">unmatched</span>")+'</span></td>'+
         '<td style="text-align:center"><input data-f="is_goalie" type="checkbox"'+(x.is_goalie?" checked":"")+' aria-label="Goalie"></td>'+
         CG._smNum.map(function(f){ return num(x,f[0],f[1]); }).join("")+
@@ -1380,7 +1384,7 @@ CG._smRenderDetail = function(body, gid){
         '<label class="fld" style="margin:0"><span>Score A</span><input data-m="score_a" type="number" value="'+(g.score_a==null?"":g.score_a)+'"></label>'+
         '<label class="fld" style="margin:0"><span>Score B</span><input data-m="score_b" type="number" value="'+(g.score_b==null?"":g.score_b)+'"></label>'+
         '<label class="fld" style="margin:0"><span>Club B</span><input data-m="club_b" value="'+esc(g.club_b||"")+'"></label>'+
-        '<label class="fld" style="margin:0"><span>Date</span><input data-m="played_at" type="date" value="'+esc((g.played_at||"").slice(0,10))+'"></label>'+
+        '<label class="fld" style="margin:0"><span>Date</span><input data-m="played_at" type="date" value="'+esc(etDate(g.played_at))+'" data-orig="'+esc(etDate(g.played_at))+'"></label>'+
         '<label class="fld" style="margin:0;flex-direction:row;align-items:center;gap:8px"><input data-m="went_ot" type="checkbox"'+(g.went_ot?" checked":"")+'><span style="margin:0">Overtime</span></label>'+
       '</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-ink btn-sm" id="smSaveMeta">Save game</button>'+
         '<button class="btn btn-ghost btn-sm" id="smDelGame" style="color:var(--red)">Delete game</button></div></div></div>';
@@ -1400,7 +1404,8 @@ CG._smRenderDetail = function(body, gid){
       var p = {};
       row.querySelectorAll("[data-f]").forEach(function(el){
         var k = el.getAttribute("data-f");
-        if (el.type==="checkbox") p[k] = el.checked;
+        if (k==="profile_id"){ if (el.value === (el.getAttribute("data-orig")||"")) return; p[k] = el.value; }  /* only touch the linked player when it actually changed — never silently unassign */
+        else if (el.type==="checkbox") p[k] = el.checked;
         else if (el.type==="number") p[k] = el.value===""?"0":String(parseInt(el.value,10)||0);
         else p[k] = el.value;
       });
@@ -1436,8 +1441,9 @@ CG._smRenderDetail = function(body, gid){
     var saveMeta = document.getElementById("smSaveMeta");
     if (saveMeta) saveMeta.addEventListener("click", function(){
       var p={}; body.querySelectorAll("[data-m]").forEach(function(el){ var k=el.getAttribute("data-m");
+        if(k==="played_at"){ var v=el.value; if(v && v!==(el.getAttribute("data-orig")||"")) p[k]=v+"T17:00:00.000Z"; return; }  /* only rewrite the date when changed; midday-ET anchor keeps the shown day stable */
         if(el.type==="checkbox") p[k]=el.checked;
-        else if(el.type==="number") p[k]= el.value===""?null:parseInt(el.value,10);
+        else if(el.type==="number"){ if(el.value==="") return; p[k]=parseInt(el.value,10); }  /* blank number = leave as-is */
         else p[k]=el.value; });
       this.disabled=true; var self=this;
       CG.sb.rpc("stats_pickup_update_game",{ p_game:gid, p:p }).then(function(r){

@@ -1202,7 +1202,7 @@ CG.ROUTES.player = function(pid, qs){
      minimal profile whose header + pickup section are filled async in AFTER.player. */
   if (!p) return CG.pageHead("Player", "Player profile", "") +
     '<div class="shell" style="max-width:960px;padding-bottom:2px"><div id="acctHdr" class="note">Loading account…</div></div>' +
-    '<div id="pickupSection"></div>';
+    '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px"><div id="pickupSection"></div></div></section>';
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";
   var SD = CG.seasonData(seasonKey);
   var archived = seasonKey!=="cur";
@@ -1237,7 +1237,7 @@ CG.ROUTES.player = function(pid, qs){
           (sus? (sus.status==="served"
             ? '<span class="chip chip-warn">Suspension served</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
-          (canSeeAvail?'<span class="chip chip-win">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
+          (canSeeAvail?'<span class="chip '+(CG.availGet(p.id)?"chip-win":"chip-warn")+'">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
       /* OVR is the staff scouting number on the profile — the live adapter sets it from
          profiles.overall for every player, played games or not. It is never derived from results. */
@@ -1253,7 +1253,7 @@ CG.ROUTES.player = function(pid, qs){
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+
-    [["overview","Overview"],["log","Game log"],["honors","Honors & history"]].map(function(x){
+    [["overview","Overview"],["pickup","Pickup Stats"],["log","Game log"],["honors","Honors & history"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding:22px 0 40px">';
   if (tab==="overview"){
@@ -1391,10 +1391,56 @@ CG.ROUTES.player = function(pid, qs){
       (sus?'<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+esc(sus.reason)+' — '+sus.games+' games, '+sus.status+'. Issued '+CG.fmtDate(sus.issued)+' by '+esc(sus.decidedBy)+'. <a href="#/rulebook?rule=7.4" style="font-weight:700;border-bottom:2px solid var(--chrome)">Rule 7.4 →</a></div>':"")+
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Team history</h3></div><div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("users",15)+'</span><span><b>'+esc(t.name)+'</b><p>Signed '+esc(p.joined)+' · Season 1 original roster</p></span></div></div>';
   }
+  if (tab==="pickup"){
+    body += '<div id="pickupTab"><p class="caption">Loading pickup stats…</p></div>';
+  }
   body += '</div>';
-  /* Pickup stats (from #lfg games) render here, filled async in AFTER.player. Kept visually and
-     structurally separate from league play — never folded into the league totals above. */
-  return head + tabs + body + '<div id="pickupSection"></div>';
+  /* Pickup stats live in their own tab (#pickupTab), filled async in AFTER.player from the isolated
+     pickup_stats table — the same stat presentation as league play, minus the overall rating. */
+  return head + tabs + body;
+};
+/* Pickup Stats tab — the same stat presentation as league play (KPI grid + game-by-game table),
+   built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
+   game score + the player's team side. Never feeds league totals, eligibility, or overall. */
+CG.renderPickupStats = function(rows){
+  var note = '<div class="note" style="margin-bottom:16px">These are <b>pickup games</b> from #lfg — the same stats as league play, kept separate. They never count toward league totals, the five-game minimum, draft or bid eligibility, or the overall rating.</div>';
+  if (!rows || !rows.length){
+    return note + '<div class="card"><div class="empty" style="padding:48px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No pickup games yet</b>'+
+      '<p>Pickup (#lfg) games between two EASHL clubs appear here once their box score is imported.</p></div></div>';
+  }
+  var gp=rows.length, g=0,a=0,sh=0,hit=0,pim=0,pm=0, gGames=0, sv=0,sa=0,ga=0, so=0, w=0,l=0,otl=0;
+  function sideScores(x){ var gm=x.pickup_games||{}, side=(x.team_side||"").toUpperCase();
+    return { my: side==="A"?gm.score_a:(side==="B"?gm.score_b:null), opp: side==="A"?gm.score_b:(side==="B"?gm.score_a:null), ot:gm.went_ot }; }
+  rows.forEach(function(x){
+    g+=x.goals||0; a+=x.assists||0; sh+=x.shots||0; hit+=x.hits||0; pim+=x.pim||0; pm+=x.plus_minus||0;
+    if (x.is_goalie){ gGames++; sv+=x.saves||0; sa+=x.shots_against||0; ga+=x.goals_against||0; if(x.shutout) so++; }
+    var ss=sideScores(x);
+    if (ss.my!=null && ss.opp!=null){ if (ss.my>ss.opp) w++; else if (ss.ot) otl++; else l++; }
+  });
+  var mostlyG = gGames > gp/2;
+  var cells = mostlyG
+    ? [["GP",gp],["Record",w+"-"+l+"-"+otl],["SV%",sa?(sv/sa).toFixed(3).replace(/^0/,""):"—"],["GAA",gGames?(ga/gGames).toFixed(2):"—"],["Saves",sv],["GA",ga],["Shutouts",so]]
+    : [["GP",gp],["Goals",g],["Assists",a],["Points",g+a],["+/-",(pm>0?"+":"")+pm],["Shots",sh],["Shooting%",sh?Math.round(100*g/sh)+"%":"—"],["Hits",hit],["PIM",pim]];
+  var kpiGrid = '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
+    cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>';
+  var sorted = rows.slice().sort(function(x,y){ return ((y.pickup_games&&y.pickup_games.played_at)||"").localeCompare((x.pickup_games&&x.pickup_games.played_at)||""); });
+  var logTable = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Game-by-game</h3><span class="chip">'+gp+' game'+(gp===1?"":"s")+'</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Pickup game log</caption><thead><tr>'+
+    (mostlyG ? '<th class="tleft">Date</th><th class="tleft">Matchup</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
+             : '<th class="tleft">Date</th><th class="tleft">Matchup</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>')+
+    '</tr></thead><tbody>'+sorted.map(function(x){
+      var gm=x.pickup_games||{}, when = gm.played_at ? CG.fmtDate(gm.played_at) : "—", ss=sideScores(x);
+      var link = gm.id ? ' class="rowlink" data-go="#/pickup/'+gm.id+'"' : '';
+      var resChip = (ss.my!=null&&ss.opp!=null) ? '<span class="chip '+(ss.my>ss.opp?"chip-win":"chip-loss")+'">'+(ss.my>ss.opp?"W":(ss.ot?"OTL":"L"))+'</span>' : '—';
+      var matchup = esc(gm.club_a||"?")+' '+(gm.score_a==null?"–":gm.score_a)+'–'+(gm.score_b==null?"–":gm.score_b)+' '+esc(gm.club_b||"?");
+      return '<tr'+link+'><td class="tleft mono" style="font-size:11px;white-space:nowrap">'+esc(when)+'</td>'+
+        '<td class="tleft">'+matchup+(gm.went_ot?' <span class="caption">OT</span>':'')+'</td>'+
+        (mostlyG
+          ? '<td>'+(x.shots_against||0)+'</td><td>'+(x.saves||0)+'</td><td>'+(x.goals_against||0)+'</td><td>'+resChip+'</td>'
+          : '<td class="'+((x.goals||0)?"":"z")+'">'+(x.goals||0)+'</td><td class="'+((x.assists||0)?"":"z")+'">'+(x.assists||0)+'</td><td class="pts">'+((x.goals||0)+(x.assists||0))+'</td><td>'+(x.shots||0)+'</td><td>'+((x.plus_minus||0)>0?"+":"")+(x.plus_minus||0)+'</td><td class="'+((x.pim||0)?"":"z")+'">'+(x.pim||0)+'</td>')+
+        '</tr>';
+    }).join("")+'</tbody></table></div></div>';
+  return note + kpiGrid + logTable;
 };
 /* Twitch broadcast card on the profile: watch link for everyone; the profile's own
    player also gets Go Live / End Stream + channel controls. Omitted entirely when
@@ -1464,38 +1510,16 @@ CG.AFTER.player = function(pid, qs){
   var twC = $("#twChange");
   if (twC) twC.addEventListener("click", CG.setTwitchHandle);
 
-  /* Pickup stats — fetched on demand and rendered into #pickupSection. Reads the isolated
-     pickup_stats table only; nothing here touches league totals, eligibility, or overall. */
-  var box = document.getElementById("pickupSection");
+  /* Pickup stats — into the Pickup Stats tab (rostered player) or the account-only section.
+     Same league-style presentation via CG.renderPickupStats; runs only when a container exists. */
+  var box = document.getElementById("pickupTab") || document.getElementById("pickupSection");
   if (box && CG.sb){
     CG.sb.from("pickup_stats")
-      .select("goals,assists,shots,hits,pim,plus_minus,is_goalie,saves,shots_against,goals_against,team_side,pickup_games(id,club_a,club_b,score_a,score_b,played_at,went_ot)")
+      .select("goals,assists,shots,hits,pim,plus_minus,is_goalie,saves,shots_against,goals_against,shutout,team_side,pickup_games(id,club_a,club_b,score_a,score_b,played_at,went_ot)")
       .eq("profile_id", pid)
       .then(function(r){
-        var rows = (r && r.data) || [];
-        if (!rows.length) return;   /* no pickup games → show nothing */
-        var g=0,a=0,sh=0,hit=0,pim=0,sv=0,sa=0,ga=0, gGames=0, gp=rows.length;
-        rows.forEach(function(x){ g+=x.goals||0; a+=x.assists||0; sh+=x.shots||0; hit+=x.hits||0; pim+=x.pim||0;
-          if (x.is_goalie){ gGames++; sv+=x.saves||0; sa+=x.shots_against||0; ga+=x.goals_against||0; } });
-        var mostlyG = gGames > gp/2;
-        var kpi = function(n,l){ return '<div class="kpi" style="cursor:default"><b class="num">'+n+'</b><span>'+l+'</span></div>'; };
-        var stats = mostlyG
-          ? kpi(gp,"Pickup GP")+kpi(sa?(sv/sa).toFixed(3).replace(/^0/,""):"—","Save %")+kpi(sv,"Saves")+kpi(ga,"GA")
-          : kpi(gp,"Pickup GP")+kpi(g,"Goals")+kpi(a,"Assists")+kpi(g+a,"Points")+kpi(hit,"Hits");
-        var log = rows.slice().sort(function(x,y){
-            return ((y.pickup_games&&y.pickup_games.played_at)||"").localeCompare((x.pickup_games&&x.pickup_games.played_at)||""); })
-          .map(function(x){
-            var gm = x.pickup_games||{}, when = gm.played_at ? CG.fmtDate(gm.played_at) : "";
-            var line = x.is_goalie ? ((x.saves||0)+" SV, "+(x.goals_against||0)+" GA") : ((x.goals||0)+"G "+(x.assists||0)+"A");
-            return '<div class="notif"'+(gm.id?' style="cursor:pointer" data-go="#/pickup/'+gm.id+'" role="link" tabindex="0"':' style="cursor:default"')+'><span class="nf-ic">'+CG.ic("chart",14)+'</span><span style="flex:1;min-width:0"><b>'+esc(gm.club_a||"?")+" "+(gm.score_a||0)+"–"+(gm.score_b||0)+" "+esc(gm.club_b||"?")+(gm.went_ot?" (OT)":"")+'</b><p>'+line+" · Team "+esc(x.team_side||"?")+'</p></span><span class="nf-t">'+esc(when)+(gm.id?' <span aria-hidden="true" style="color:var(--steel)">›</span>':"")+'</span></div>';
-          }).join("");
-        box.innerHTML = '<section class="sec-tight" style="padding-top:0"><div class="shell" style="max-width:960px">'+
-          '<div class="card" style="border-color:var(--line)"><div class="card-h"><h3>Pickup games</h3><span class="chip">Not league play</span></div>'+
-          '<div class="card-b"><p class="caption" style="margin:0 0 12px">From #lfg pickup games — shown for fun. These never count toward league totals, the 5-game minimum, draft/bid eligibility, or overall. Click any game for its full box score.</p>'+
-          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:10px">'+stats+'</div></div>'+
-          '<div class="card-b" style="border-top:1px solid var(--line)">'+log+'</div>'+
-          '</div></div></section>';
-      }, function(){});
+        box.innerHTML = CG.renderPickupStats((r && r.data) || []);
+      }, function(){ box.innerHTML = '<div class="note red">Couldn’t load pickup stats — try again in a moment.</div>'; });
   }
 };
 
