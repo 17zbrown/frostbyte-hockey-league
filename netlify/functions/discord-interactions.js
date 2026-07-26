@@ -429,7 +429,7 @@ async function handleComponent(interaction) {
       }
       let newMsgId = lobby.message_id;
       if (BOT) { try { newMsgId = await ensureSummary(lobby.channel_id, out.state, lobby.message_id); } catch (e) {} }
-      if (newMsgId && newMsgId !== lobby.message_id) sbStashMessage(lobby.id, newMsgId);
+      if (newMsgId && newMsgId !== lobby.message_id) await sbStashMessage(lobby.id, newMsgId);  // await: the fn freezes on response, so a fire-and-forget PATCH never lands
       const confirm = action === "join"
         ? { title: "✅ You're in", description: `Signed up at **${POS_LABEL[arg]}**. Watch <#${lobby.channel_id}> for the roster — run /join again to switch or leave.`, color: BRAND }
         : { title: "👋 You left the lobby", description: "Run /join again anytime to jump back in.", color: BRAND };

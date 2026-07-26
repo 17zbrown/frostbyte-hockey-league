@@ -163,7 +163,7 @@ async function lfgUpkeep(errors) {
   const now = Date.now();
   // (1) open lobbies — keep the summary at the bottom, or expire after 30 min of no new signups
   let open = [];
-  try { open = await sbGet("lfg_lobbies?status=eq.open&message_id=not.is.null&select=id,channel_id,message_id,state,updated_at"); }
+  try { open = await sbGet("lfg_lobbies?status=eq.open&select=id,channel_id,message_id,state,updated_at"); }
   catch (e) { errors.push(`lfg open load: ${String(e.message || e)}`); }
   for (const lo of (open || [])) {
     const st = lo.state || {};
@@ -171,10 +171,11 @@ async function lfgUpkeep(errors) {
     if (now - lastAt > 30 * 60 * 1000) {
       // 30 minutes since the last entry with no new signup: delete the signups and reset the command
       const cleared = { ...st, signups: [], captains: [], teams: { A: [], B: [] } };
-      try { await lfgDApi("PATCH", `/channels/${lo.channel_id}/messages/${lo.message_id}`, { embeds: [{ title: "♻️ Pickup lobby reset", description: "No new signups for 30 minutes — the lobby was cleared. Run `/join` to start a fresh one.", color: LFG_BRAND }] }); } catch (e) {}
+      if (lo.message_id) { try { await lfgDApi("PATCH", `/channels/${lo.channel_id}/messages/${lo.message_id}`, { embeds: [{ title: "♻️ Pickup lobby reset", description: "No new signups for 30 minutes — the lobby was cleared. Run `/join` to start a fresh one.", color: LFG_BRAND }] }); } catch (e) {} }
       await lfgPatchLobby(lo.id, { status: "expired", state: cleared });
       out.expired++; continue;
     }
+    if (!lo.message_id) continue;   // no summary message id yet — expiry above still runs; nothing to bump
     let last;
     try { const arr = await lfgDApi("GET", `/channels/${lo.channel_id}/messages?limit=1`); last = arr && arr[0]; } catch (e) { continue; }
     if (!last || last.id === lo.message_id) continue;   // already the most recent — nothing to do
