@@ -169,8 +169,10 @@ async function lfgUpkeep(errors) {
     const st = lo.state || {};
     const lastAt = st.lastSignupAt ? Date.parse(st.lastSignupAt) : Date.parse(lo.updated_at);
     if (now - lastAt > 30 * 60 * 1000) {
-      try { await lfgDApi("PATCH", `/channels/${lo.channel_id}/messages/${lo.message_id}`, { embeds: [{ title: "⌛ Pickup lobby expired", description: "No new signups for a while — run `/join` to start a fresh one.", color: LFG_BRAND }] }); } catch (e) {}
-      await lfgPatchLobby(lo.id, { status: "expired" });
+      // 30 minutes since the last entry with no new signup: delete the signups and reset the command
+      const cleared = { ...st, signups: [], captains: [], teams: { A: [], B: [] } };
+      try { await lfgDApi("PATCH", `/channels/${lo.channel_id}/messages/${lo.message_id}`, { embeds: [{ title: "♻️ Pickup lobby reset", description: "No new signups for 30 minutes — the lobby was cleared. Run `/join` to start a fresh one.", color: LFG_BRAND }] }); } catch (e) {}
+      await lfgPatchLobby(lo.id, { status: "expired", state: cleared });
       out.expired++; continue;
     }
     let last;
