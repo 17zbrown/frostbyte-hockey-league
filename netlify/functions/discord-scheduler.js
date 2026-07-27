@@ -7,7 +7,15 @@
 // De-dupe: each one-shot post claims a row in public.discord_post_log (unique kind+ref); only the
 // first claimant posts. Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN. Node 18+.
 
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+
 export const config = { schedule: "*/5 * * * *" };
+
+/* this file is ESM ("type":"module"), so there is no require() or __dirname at runtime */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -157,6 +165,142 @@ async function lfgDApi(method, path, body) {
 async function lfgPatchLobby(id, body) {
   await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(), body: JSON.stringify(body) }).catch(() => {});
 }
+/* ---------- #rules — mirror the published rulebook, and keep it mirrored ----------
+   The rulebook is CG.CONTENT.rulebook in the site bundle, so this reads that same file
+   (bundled via netlify.toml included_files) — one source of truth, no second copy to drift.
+   Messages are EDITED in place against stored ids, so a new version updates the channel
+   rather than appending another 16-message wall. A content hash makes it a cheap no-op
+   on every tick until the rules actually change. */
+const RULES_BRAND = 0xFFE500;
+export function readRulebook() {
+  const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
+                 path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
+  for (const r of roots) {
+    const p = path.join(r, "src", "live", "part3_content.js");
+    try {
+      if (!fs.existsSync(p)) continue;
+      const CG = {};
+      new Function("CG", fs.readFileSync(p, "utf8"))(CG);
+      if (CG.CONTENT && CG.CONTENT.rulebook) return CG.CONTENT.rulebook;
+    } catch (e) { /* try the next candidate root */ }
+  }
+  return null;
+}
+/* chapter/section -> Discord messages, respecting the 6000-char and 10-embed per-message caps */
+export function buildRulesMessages(rb) {
+  const cur = (rb.changelog || [])[0] || {};
+  const MAX_EMBED = 4000, MAX_MSG = 5200, MAX_EMBEDS = 8;
+  const toc = (rb.chapters || []).map((c) => `**${c.num}.** ${c.title}`).join("\n");
+  const head = {
+    embeds: [{
+      title: "CGHL Official Rulebook",
+      url: "https://chelgamingleague.com/#/rulebook",
+      description:
+        `**Version ${cur.version || "—"}**${cur.dateIso ? ` · updated ${cur.dateIso}` : ""}\n\n` +
+        `The full rulebook, mirrored from the league site. This channel updates itself whenever a ` +
+        `new version is published — always read the version above.\n\n**Contents**\n${toc}`,
+      color: RULES_BRAND,
+      footer: { text: "chelgamingleague.com/#/rulebook" },
+    }],
+  };
+  const parts = [];
+  (rb.chapters || []).forEach((ch) => {
+    (ch.sections || []).forEach((se) => {
+      const body = (se.paragraphs || []).join("\n\n");
+      const chunks = [];
+      let rest = body;
+      while (rest.length > MAX_EMBED) {
+        let cut = rest.lastIndexOf("\n\n", MAX_EMBED);
+        if (cut < 1000) cut = MAX_EMBED;
+        chunks.push(rest.slice(0, cut));
+        rest = rest.slice(cut).trim();
+      }
+      chunks.push(rest);
+      chunks.forEach((c, i) => parts.push({ ch: ch.num, chTitle: ch.title,
+        embed: { title: `${se.id ? se.id + " " : ""}${se.title}${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}`,
+                 description: c, color: RULES_BRAND }, len: c.length }));
+    });
+  });
+  const msgs = [head];
+  let bucket = [], len = 0, chNum = null, first = true;
+  const flush = () => {
+    if (!bucket.length) return;
+    const e = bucket.slice();
+    if (first) e[0] = { ...e[0], author: { name: `Chapter ${chNum} — ${bucket[0]._chTitle}` } };
+    msgs.push({ embeds: e.map(({ _chTitle, ...rest }) => rest) });
+    bucket = []; len = 0;
+  };
+  parts.forEach((p) => {
+    const chapterChanged = chNum !== null && p.ch !== chNum;
+    if (bucket.length && (chapterChanged || bucket.length >= MAX_EMBEDS || len + p.len > MAX_MSG)) {
+      flush(); first = chapterChanged;
+    }
+    if (!bucket.length) first = chNum === null || p.ch !== chNum;
+    bucket.push({ ...p.embed, _chTitle: p.chTitle });
+    len += p.len; chNum = p.ch;
+  });
+  flush();
+  return msgs;
+}
+async function rulesUpkeep(errors) {
+  const out = { checked: 0, posted: 0, edited: 0, removed: 0, skipped: null };
+  if (!BOT || !GUILD) { out.skipped = "no bot/guild"; return out; }
+  const rb = readRulebook();
+  if (!rb) { out.skipped = "rulebook not readable"; return out; }
+
+  const msgs = buildRulesMessages(rb);
+  const hash = crypto.createHash("sha256").update(JSON.stringify(msgs)).digest("hex").slice(0, 32);
+  out.checked = msgs.length;
+
+  let cfg = [];
+  try { cfg = await sbGet("app_config?key=in.(rules_sync_hash,rules_message_ids)&select=key,value"); } catch (e) {}
+  const get = (k) => (cfg.find((c) => c.key === k) || {}).value || "";
+  let ids = [];
+  try { ids = JSON.parse(get("rules_message_ids") || "[]"); } catch (e) { ids = []; }
+  if (get("rules_sync_hash") === hash && ids.length === msgs.length) return out;   // already in sync
+
+  // resolve #rules — prefer the one under the Information category over any stray duplicate
+  let chan = null;
+  try {
+    const chans = await lfgDApi("GET", `/guilds/${GUILD}/channels`);
+    const cats = Object.fromEntries((chans || []).filter((c) => c.type === 4).map((c) => [c.id, (c.name || "").toLowerCase()]));
+    const named = (chans || []).filter((c) => c.type === 0 && (c.name || "").toLowerCase() === "rules");
+    chan = named.find((c) => cats[c.parent_id] === "information") || named[0] || null;
+  } catch (e) { errors.push(`rules channel lookup: ${String(e.message || e)}`); return out; }
+  if (!chan) { out.skipped = "no #rules channel"; return out; }
+
+  const next = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const body = { embeds: msgs[i].embeds, allowed_mentions: { parse: [] } };
+    try {
+      if (ids[i]) {
+        await lfgDApi("PATCH", `/channels/${chan.id}/messages/${ids[i]}`, body);
+        next.push(ids[i]); out.edited++;
+      } else {
+        const posted = await lfgDApi("POST", `/channels/${chan.id}/messages`, body);
+        if (posted && posted.id) { next.push(posted.id); out.posted++; }
+      }
+    } catch (e) {
+      // a message that vanished (deleted by hand) is reposted rather than aborting the sync
+      try {
+        const posted = await lfgDApi("POST", `/channels/${chan.id}/messages`, body);
+        if (posted && posted.id) { next.push(posted.id); out.posted++; }
+      } catch (e2) { errors.push(`rules msg ${i}: ${String(e2.message || e2)}`); }
+    }
+  }
+  for (const stale of ids.slice(msgs.length)) {                 // rulebook shrank — drop the surplus
+    try { await lfgDApi("DELETE", `/channels/${chan.id}/messages/${stale}`); out.removed++; } catch (e) {}
+  }
+  try {
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST",
+      headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify([
+        { key: "rules_message_ids", value: JSON.stringify(next), updated_at: new Date().toISOString() },
+        { key: "rules_sync_hash", value: hash, updated_at: new Date().toISOString() },
+      ]) });
+  } catch (e) { errors.push(`rules state save: ${String(e.message || e)}`); }
+  return out;
+}
 async function lfgUpkeep(errors) {
   const out = { refreshed: 0, expired: 0, autoCaptained: 0 };
   if (!BOT) return out;
@@ -226,6 +370,8 @@ export default async (req) => {
   try {
     // pickup-lobby upkeep runs every tick, independent of the league season (there may be none yet)
     sum.lfg = await lfgUpkeep(sum.errors);
+    /* mirror the rulebook into #rules — a no-op on every tick until the published version changes */
+    try { sum.rules = await rulesUpkeep(sum.errors); } catch (e) { sum.errors.push(`rules: ${String(e.message || e)}`); }
 
     const seasons = await sbGet("seasons?select=id,number&order=number.desc&limit=1");
     const season = seasons[0];

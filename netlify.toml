@@ -8,6 +8,12 @@
   publish = "."
   functions = "netlify/functions"
 
+# The rulebook lives in the site bundle (CG.CONTENT.rulebook in part3_content.js). discord-scheduler
+# mirrors it into #rules, so it needs to read that same file at runtime — bundling it keeps ONE
+# source of truth instead of a second copy that could drift from the published rules.
+[functions]
+  included_files = ["src/live/part3_content.js"]
+
 # The front-end calls /api/parse-screenshots; route that to the serverless function.
 [[redirects]]
   from = "/api/parse-screenshots"
