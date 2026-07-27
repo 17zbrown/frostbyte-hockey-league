@@ -1,10 +1,11 @@
 /* NHL Stats API proxy for the preview's Namesake Watch module.
  * Same-origin so the browser needs no CORS; response cached at the edge.
- * Returns the standings rows for the eight CGHL namesake franchises —
- * live standings when the NHL season is running, the final table of the
+ * Returns the standings rows for the CGHL namesake franchises — live
+ * standings when the NHL season is running, the final table of the
  * most recent season otherwise. No API key required (public NHL API).
+ * Keep in sync with the club list in `teams` when a club is added or removed.
  */
-const CODES = ["CAR", "TOR", "OTT"];
+const CODES = ["CAR", "TOR", "OTT", "SJS", "BOS"];
 
 const ab = (r) => (r.teamAbbrev && (r.teamAbbrev.default || r.teamAbbrev)) || "";
 
