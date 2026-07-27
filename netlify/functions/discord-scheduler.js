@@ -243,6 +243,28 @@ export function buildRulesMessages(rb) {
   flush();
   return msgs;
 }
+/* Posting 16 messages back-to-back trips Discord's per-channel limit, so this honours Retry-After
+   instead of dropping the tail of the rulebook (lfgDApi has no 429 handling). */
+async function rulesApi(method, p, body, tries = 5) {
+  for (let i = 0; i < tries; i++) {
+    let r;
+    try {
+      r = await fetch(`https://discord.com/api/v10${p}`, {
+        method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) { throw new Error(`${method} ${p} -> ${String(e.message || e)}`); }
+    if (r.status === 429) {
+      const j = await r.json().catch(() => ({}));
+      await new Promise((s) => setTimeout(s, ((+j.retry_after || 1) + 0.25) * 1000));
+      continue;
+    }
+    if (!r.ok) throw new Error(`${method} ${p} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
+    return r.status === 204 ? null : r.json();
+  }
+  throw new Error(`${method} ${p} -> still rate limited after ${tries} attempts`);
+}
+const rulesPace = () => new Promise((s) => setTimeout(s, 400));   // stay under the per-channel burst cap
 async function rulesUpkeep(errors) {
   const out = { checked: 0, posted: 0, edited: 0, removed: 0, skipped: null };
   if (!BOT || !GUILD) { out.skipped = "no bot/guild"; return out; }
@@ -263,7 +285,7 @@ async function rulesUpkeep(errors) {
   // resolve #rules — prefer the one under the Information category over any stray duplicate
   let chan = null;
   try {
-    const chans = await lfgDApi("GET", `/guilds/${GUILD}/channels`);
+    const chans = await rulesApi("GET", `/guilds/${GUILD}/channels`);
     const cats = Object.fromEntries((chans || []).filter((c) => c.type === 4).map((c) => [c.id, (c.name || "").toLowerCase()]));
     const named = (chans || []).filter((c) => c.type === 0 && (c.name || "").toLowerCase() === "rules");
     chan = named.find((c) => cats[c.parent_id] === "information") || named[0] || null;
@@ -274,23 +296,24 @@ async function rulesUpkeep(errors) {
   for (let i = 0; i < msgs.length; i++) {
     const body = { embeds: msgs[i].embeds, allowed_mentions: { parse: [] } };
     try {
+      await rulesPace();
       if (ids[i]) {
-        await lfgDApi("PATCH", `/channels/${chan.id}/messages/${ids[i]}`, body);
+        await rulesApi("PATCH", `/channels/${chan.id}/messages/${ids[i]}`, body);
         next.push(ids[i]); out.edited++;
       } else {
-        const posted = await lfgDApi("POST", `/channels/${chan.id}/messages`, body);
+        const posted = await rulesApi("POST", `/channels/${chan.id}/messages`, body);
         if (posted && posted.id) { next.push(posted.id); out.posted++; }
       }
     } catch (e) {
       // a message that vanished (deleted by hand) is reposted rather than aborting the sync
       try {
-        const posted = await lfgDApi("POST", `/channels/${chan.id}/messages`, body);
+        const posted = await rulesApi("POST", `/channels/${chan.id}/messages`, body);
         if (posted && posted.id) { next.push(posted.id); out.posted++; }
       } catch (e2) { errors.push(`rules msg ${i}: ${String(e2.message || e2)}`); }
     }
   }
   for (const stale of ids.slice(msgs.length)) {                 // rulebook shrank — drop the surplus
-    try { await lfgDApi("DELETE", `/channels/${chan.id}/messages/${stale}`); out.removed++; } catch (e) {}
+    try { await rulesApi("DELETE", `/channels/${chan.id}/messages/${stale}`); out.removed++; } catch (e) {}
   }
   try {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST",
