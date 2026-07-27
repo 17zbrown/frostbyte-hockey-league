@@ -259,6 +259,15 @@ CG.leagueMark = function(s, variant){
 CG.DISCORD_GLYPH = '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.5a14.6 14.6 0 0 1 4.3 2.2 13.5 13.5 0 0 0-11-.1A14.3 14.3 0 0 1 8.9 3.5L8.6 3a19.7 19.7 0 0 0-4.9 1.4A20.9 20.9 0 0 0 .1 18.6a19.9 19.9 0 0 0 6 3l.7-1.1a12.9 12.9 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l.7 1.1a19.8 19.8 0 0 0 6-3 20.8 20.8 0 0 0-3.6-14.2ZM8.3 15.3c-1.2 0-2.1-1.1-2.1-2.4S7.1 10.5 8.3 10.5s2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Zm7.4 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4-.9 2.4-2.1 2.4Z"/></svg>';
 
 /* ---------- entity autocomplete (players + clubs, exact-match picker) ---------- */
+/* Fold a name to plain searchable text. Members pick stylized gamertags out of Discord —
+   "ₛₕₑᵢ𝒻", "𝔁𝓚𝓪𝓷𝓮𝓻8" — and a raw substring match can never find those, so the member was
+   effectively invisible to every type-ahead. NFKD maps the maths/script/subscript letters back
+   to ASCII; combining marks are then dropped so accents match their plain spelling too. */
+CG.acNorm = function(s){
+  s = String(s == null ? "" : s);
+  try { s = s.normalize("NFKD"); } catch(e){}
+  return s.replace(/[\u0300-\u036f]/g, "").toLowerCase();
+};
 CG.acIndex = function(kinds){
   var out = [];
   if (kinds.indexOf("players")>=0) CG.lg.players.forEach(function(p){
@@ -302,11 +311,16 @@ CG.attachAC = function(input, opts){
     }).join("");
   }
   function run(){
-    var q = input.value.trim().toLowerCase();
+    var q = CG.acNorm(input.value.trim());
     delete input.dataset.acId; delete input.dataset.acKind;
     input.classList.remove("ac-ok");
     if (!q){ cur = []; close(); if (opts.onClear) opts.onClear(); return; }
-    cur = items.filter(function(it){ return it.label.toLowerCase().indexOf(q)>=0; }).slice(0,8);
+    /* match on the folded form (and any aliases the index supplied), not the raw label —
+       otherwise a stylized gamertag is unreachable no matter what you type */
+    cur = items.filter(function(it){
+      if (!it._s) it._s = CG.acNorm(it.search || it.label);
+      return it._s.indexOf(q) >= 0;
+    }).slice(0,8);
     sel = cur.length ? 0 : -1;
     paint();
   }

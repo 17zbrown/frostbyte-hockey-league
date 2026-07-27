@@ -4503,7 +4503,12 @@ CG.memberIndex = function(){
       var sub = p && CG.TEAM[p.team]
         ? CG.TEAM[p.team].name+" · "+p.pos+(p.jersey?" · #"+p.jersey:"")
         : (rostered[pr.id] ? "Rostered" : (CG.poolState?CG.poolState(pr.id).label:"Unsigned"));
-      return { kind:"player", id:pr.id, label:name, sub:sub, team:(p&&p.team)||null };
+      /* searchable aliases: a member whose gamertag is stylized ("ₛₕₑᵢ𝒻") is otherwise
+         unfindable, and the office usually knows people by their Discord name — so match on
+         the display name as well as the gamertag (both folded to plain text by CG.acNorm). */
+      var alias = pr.display_name && pr.display_name !== name ? " "+pr.display_name : "";
+      return { kind:"player", id:pr.id, label:name, sub:sub+(alias?" · "+pr.display_name:""),
+               search:name+alias, team:(p&&p.team)||null };
     })
     .sort(function(a,b){ return a.label.localeCompare(b.label); });
 };
