@@ -850,13 +850,15 @@ CG.loadStaffExtras = async function(){
     var q = await Promise.all([
       CG.sb.rpc("ea_import_issues"), CG.sb.rpc("staff_activity", { p_limit:12 }),
       CG.sb.rpc("staff_directory"),
-      CG.sb.from("staff_tasks").select("*").order("status").order("created_at",{ascending:false})
+      CG.sb.from("staff_tasks").select("*").order("status").order("created_at",{ascending:false}),
+      CG.sb.rpc("staff_vote_board")
     ]);
     CG._staffExtras = {
       ea: (q[0]&&!q[0].error)?q[0].data:null,
       activity: (q[1]&&!q[1].error)?q[1].data:[],
       directory: (q[2]&&!q[2].error)?q[2].data:[],
-      tasks: (q[3]&&!q[3].error&&q[3].data)||[]
+      tasks: (q[3]&&!q[3].error&&q[3].data)||[],
+      votes: (q[4]&&!q[4].error&&q[4].data)||[]
     };
     if (/\/hub\/staffdesk/.test(location.hash) && CG.router) CG.router();
   } catch(e){ CG._staffExtras = null; }
@@ -4834,6 +4836,94 @@ CG.staffTasksCard = function(){
   }
   return h+'</div>';
 };
+/* Staff votes — any official can put a topic to the office and choose which departments get a
+   ballot (none selected = the whole office). Eligibility, valid choices and one-ballot-per-person
+   are all enforced by the RPCs; this only renders what the board returns. */
+CG.staffVotesCard = function(){
+  var ex = CG._staffExtras; if (!ex) return "";
+  var votes = ex.votes || [];
+  var lab = {}; (CG.STAFF_DEPARTMENTS||[]).forEach(function(d){ lab[d[0]] = d[1]; });
+  var isCommish = CG.role() === "commish";
+  function deptChips(list){
+    if (!list || !list.length) return '<span class="chip" style="font-size:9px">All staff</span>';
+    return list.map(function(k){ return '<span class="chip" style="font-size:9px">'+esc(lab[k]||k)+'</span>'; }).join(" ");
+  }
+  function block(v){
+    var opts = v.options||[], tally = v.tally||{}, cast = 0;
+    opts.forEach(function(o){ cast += (tally[o]||0); });
+    var pool = Math.max(cast, v.eligibleCount||0), isOpen = v.status === "open", canManage = isCommish || v.mine;
+    var h = '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+      '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
+        '<b style="font-family:var(--f-disp);font-size:15px">'+esc(v.title)+'</b>'+
+        (isOpen?"":'<span class="chip chip-warn" style="font-size:9px">Closed</span>')+
+        '<span class="caption" style="margin-left:auto">'+cast+' of '+pool+' voted</span></div>'+
+      (v.detail?'<p class="caption" style="margin-top:4px">'+esc(v.detail)+'</p>':"")+
+      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+deptChips(v.departments)+'</div>';
+    if (isOpen && v.eligible){
+      h += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'+opts.map(function(o){
+        return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
+        (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
+    } else if (isOpen){
+      h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
+    }
+    h += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">'+opts.map(function(o){
+      var n = tally[o]||0, pct = cast ? Math.round(n/cast*100) : 0;
+      return '<div style="display:flex;align-items:center;gap:9px">'+
+        '<span class="mono" style="font-size:11px;min-width:92px">'+esc(o)+'</span>'+
+        '<span style="flex:1;height:6px;border-radius:99px;background:var(--line-soft);overflow:hidden">'+
+          '<i style="display:block;height:100%;width:'+pct+'%;background:var(--chrome)"></i></span>'+
+        '<span class="mono num" style="font-size:11px;min-width:30px;text-align:right">'+n+'</span></div>'; }).join("")+'</div>';
+    var bal = v.ballots||[];
+    if (bal.length) h += '<p class="caption" style="margin-top:7px">'+bal.map(function(b){
+      return esc(b.who)+' · '+esc(b.choice); }).join(" &nbsp;·&nbsp; ")+'</p>';
+    h += '<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;align-items:center">'+
+      '<span class="caption" style="margin-right:auto">Opened by '+esc(v.createdByTag||"staff")+'</span>'+
+      (canManage&&isOpen?'<button class="btn btn-ghost btn-sm" data-vote-close="'+v.id+'">Close voting</button>':"")+
+      (canManage?'<button class="btn btn-ghost btn-sm" data-vote-del="'+v.id+'">Delete</button>':"")+
+      '</div></div>';
+    return h;
+  }
+  var live = votes.filter(function(v){ return v.status === "open"; });
+  var done = votes.filter(function(v){ return v.status !== "open"; }).slice(0, 4);
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff votes</h3>'+
+    '<button class="btn btn-chrome btn-sm" data-vote-add>Create vote</button></div>';
+  if (!live.length && !done.length){
+    h += '<div class="card-b"><p class="caption">Nothing on the ballot. Use <b>Create vote</b> to put a decision to the office — choose which departments get a vote, or leave it open to all staff.</p></div>';
+  } else {
+    h += live.map(block).join("");
+    if (done.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Closed</span></div>'+done.map(block).join("");
+  }
+  return h+'</div>';
+};
+CG.staffVoteCreateModal = function(){
+  var chips = (CG.STAFF_DEPARTMENTS||[]).map(function(d){
+    return '<button type="button" class="chip" data-vdept="'+d[0]+'" aria-pressed="false" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
+  CG.modal("Create a staff vote",
+    '<label class="fld"><span>Topic</span><input id="svTitle" maxlength="140" placeholder="e.g. Move game night to Thursdays?"></label>'+
+    '<label class="fld"><span>Details (optional)</span><textarea id="svDetail" rows="3" placeholder="Anything the office should know before voting."></textarea></label>'+
+    '<label class="fld"><span>Options — one per line (blank = Yes / No / Abstain)</span><textarea id="svOpts" rows="3" placeholder="Yes&#10;No&#10;Abstain"></textarea></label>'+
+    '<label class="fld"><span>Who can vote — none selected means all staff</span></label>'+
+    '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="svGo">Open vote</button>');
+  var sel = [];
+  document.querySelectorAll("[data-vdept]").forEach(function(b){ b.addEventListener("click", function(){
+    var k = this.getAttribute("data-vdept"), i = sel.indexOf(k);
+    if (i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
+    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
+  }); });
+  document.getElementById("svGo").addEventListener("click", function(){
+    var btn = this, title = (document.getElementById("svTitle").value||"").trim();
+    if (!title){ CG.toast("Give the vote a title","err"); return; }
+    var opts = (document.getElementById("svOpts").value||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
+    btn.disabled = true;
+    CG.sb.rpc("staff_vote_create",{ p_title:title, p_detail:(document.getElementById("svDetail").value||""),
+      p_options:(opts.length?opts:null), p_departments:sel, p_closes_at:null }).then(function(r){
+      btn.disabled = false;
+      if (r.error){ CG.toast(r.error.message||"Couldn’t open the vote","err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Vote opened","ok"); CG.refreshStaffExtras();
+    });
+  });
+};
 CG.staffDirectoryCard = function(){
   var ex = CG._staffExtras; if (!ex || !ex.directory) return "";
   var dir = ex.directory, uid = CG.auth.user && CG.auth.user.id, isCommish = CG.role()==="commish";
@@ -4935,6 +5025,26 @@ CG.wireStaffExtras = function(){
   document.querySelectorAll("[data-staff-edit]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
     if(entry) CG.staffProfileEditModal(entry); }); });
+  /* --- staff votes --- */
+  var va = document.querySelector("[data-vote-add]"); if (va) va.addEventListener("click", CG.staffVoteCreateModal);
+  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-vote-cast"), choice=this.getAttribute("data-choice"), btn=this; btn.disabled=true;
+    CG.sb.rpc("staff_vote_cast",{ p_vote:id, p_choice:choice, p_note:null }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t record your vote","err"); return; }
+      CG.toast("Vote recorded","ok"); CG.refreshStaffExtras(); }); }); });
+  document.querySelectorAll("[data-vote-close]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-vote-close");
+    CG.confirm("Close this vote?","No further ballots can be cast — the result stays on the desk.","Close voting", function(){
+      CG.sb.rpc("staff_vote_close",{ p_vote:id }).then(function(r){
+        if(r.error){ CG.toast(r.error.message||"Couldn’t close","err"); return; }
+        CG.toast("Voting closed","ok"); CG.refreshStaffExtras(); }); }); }); });
+  document.querySelectorAll("[data-vote-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-vote-del");
+    CG.confirm("Delete this vote?","The topic and every ballot are removed for the whole office.","Delete", function(){
+      CG.sb.rpc("staff_vote_delete",{ p_vote:id }).then(function(r){
+        if(r.error){ CG.toast(r.error.message||"Couldn’t delete","err"); return; }
+        CG.toast("Vote deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
 };
 /* Consolidated "Needs attention" triage card — the in-app twin of the daily #staff-general
    briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
@@ -5720,6 +5830,7 @@ CG.hubStaffDesk = function(){
 
   /* staff tools — actionable first (tasks, EA triage), then reference (directory, activity) */
   h += CG.staffTasksCard();
+  h += CG.staffVotesCard();
   h += CG.staffEaCard();
   h += CG.staffDirectoryCard();
   h += CG.staffActivityCard();
