@@ -4881,7 +4881,16 @@ CG.staffTaskAddModal = function(){
   });
 };
 CG.staffProfileEditModal = function(entry){
-  var picked = entry.departments||[];
+  /* Normalize what's stored BEFORE it drives the editor: map legacy keys through DEPT_ALIAS and
+     drop any key that has no chip. Seeding the selection from the raw array was a trap — a legacy
+     key (e.g. "player-relations", displayed as Community) lit no chip yet was carried into every
+     save, so that department could never be unassigned, and consumers keyed on the new name
+     (discord-sync's department roles) never saw it at all. Saving now always writes canonical,
+     de-duplicated keys, which also self-heals a stale row the first time it's edited. */
+  var known = {}; CG.STAFF_DEPARTMENTS.forEach(function(d){ known[d[0]] = 1; });
+  var picked = (entry.departments||[])
+    .map(function(k){ return (CG.DEPT_ALIAS && CG.DEPT_ALIAS[k]) || k; })
+    .filter(function(k, i, arr){ return known[k] && arr.indexOf(k) === i; });
   var chips = CG.STAFF_DEPARTMENTS.map(function(d){ var on=picked.indexOf(d[0])>=0;
     return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-dept="'+d[0]+'" aria-pressed="'+on+'" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
   CG.modal("Staff profile — "+esc(entry.gamertag||""),
