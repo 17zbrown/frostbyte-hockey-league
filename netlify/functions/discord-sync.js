@@ -886,6 +886,26 @@ export default async (req) => {
     }
   } catch (e) { sum.errors.push({ banList: String(e.message || e) }); }
 
+  /* One bulk member list per run instead of a GET per linked member. That was ~40 requests against
+     the same route every sweep, which exhausted the rate-limit bucket (and every retry) once the
+     cadence moved to 2 minutes. Uses the same paginated endpoint as discord-welcome, so it needs
+     no extra intent. If the listing fails we fall back to per-member fetches rather than skipping
+     the sweep entirely. */
+  const memberById = new Map();
+  let memberListOk = false;
+  try {
+    let after = "0";
+    for (let page = 0; page < 10; page++) {
+      const chunk = await dApi("GET", `/guilds/${GUILD}/members?limit=1000&after=${after}`);
+      if (!Array.isArray(chunk) || !chunk.length) break;
+      for (const mm of chunk) if (mm.user && mm.user.id) memberById.set(String(mm.user.id), mm);
+      if (chunk.length < 1000) break;
+      after = chunk[chunk.length - 1].user.id;
+    }
+    memberListOk = true;
+    sum.memberList = memberById.size;
+  } catch (e) { sum.errors.push({ memberList: String(e.message || e) }); }
+
   for (const m of links) {
     if (!m.discord_id) continue;
     try {
@@ -904,7 +924,10 @@ export default async (req) => {
         guildBans.delete(String(m.discord_id));
         sum.unbanned = (sum.unbanned || 0) + 1;
       }
-      const mem = await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
+      // read from the bulk listing; only fall back to a single fetch if that listing failed
+      const mem = memberListOk
+        ? (memberById.get(String(m.discord_id)) || { __notfound: true })
+        : await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
       if (mem.__notfound) { sum.notInServer++; await markGuild(m.profile_id, false); continue; }
       sum.checked++;
       await markGuild(m.profile_id, true);
