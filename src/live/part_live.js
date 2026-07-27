@@ -13,6 +13,46 @@ CG.sb = (window.supabase && window.supabase.createClient)
   ? window.supabase.createClient(CG.SB_URL, CG.SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } })
   : null;
 
+/* ------------------------------------------------------------------ *
+ * Instant Discord role sync.
+ * discord-sync reconciles every member's managed Discord roles, but its only trigger was a
+ * 5-minute cron — so a role change made here (promote to staff, sign a free agent, register for
+ * the season) could sit unreflected in Discord for minutes. The function is HTTP-invocable and
+ * debounces itself to 6s, so we ping it the moment a role-affecting write lands: Discord catches
+ * up in seconds and the cron stays as the safety net. Fire-and-forget — it can never block,
+ * slow, or fail the user's action.
+ * ------------------------------------------------------------------ */
+CG.pingDiscordSync = function(){
+  if (CG._pingedAt && Date.now() - CG._pingedAt < 5000) return;   /* client-side coalesce */
+  CG._pingedAt = Date.now();
+  try { fetch("/.netlify/functions/discord-sync", { method:"POST", keepalive:true, mode:"no-cors", cache:"no-store" }).catch(function(){}); } catch(e){}
+};
+/* RPCs that change who someone is (site role, club seat, roster spot, ban) — i.e. what Discord
+   roles they should be wearing. Anything added here is picked up automatically. */
+CG.ROLE_RPCS = ("set_member_role set_team_manager set_staff_profile sign_free_agent move_player "+
+  "waive_player admin_remove_from_roster ban_player unban_player accept_trade draft_make_pick "+
+  "apply_application_decision override_application_decision decide_staff_application "+
+  "decide_owner_application auto_assign_latecomers distribute_unproven_rookies start_next_season"
+).split(" ").reduce(function(m,k){ m[k]=1; return m; }, {});
+if (CG.sb && typeof CG.sb.rpc === "function"){
+  var _sbRpc = CG.sb.rpc.bind(CG.sb);
+  CG.sb.rpc = function(name, args, opts){
+    var b = _sbRpc(name, args, opts);
+    /* Decorate the builder's existing .then rather than calling it — calling .then() here would
+       execute the RPC a SECOND time (PostgREST builders run on await), double-applying the write. */
+    if (CG.ROLE_RPCS[name] && b && typeof b.then === "function"){
+      var _then = b.then.bind(b);
+      b.then = function(onOk, onErr){
+        return _then(function(res){
+          try { if (res && !res.error) CG.pingDiscordSync(); } catch(e){}
+          return onOk ? onOk(res) : res;
+        }, onErr);
+      };
+    }
+    return b;
+  };
+}
+
 /* real wall clock (the prototype used a frozen demo clock) */
 CG._loadEpoch = Date.now();
 CG.now = function(){ return Date.now(); };
@@ -1897,6 +1937,7 @@ CG.registerForSeason = async function(position, note){
   var r=await CG.sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(r.error){ CG.toast("Couldn’t register: "+r.error.message,"err"); return; }
   CG.auth.registration=payload;
+  CG.pingDiscordSync();   /* registering changes their Discord roles (Player / Free Agent) — don't wait for the cron */
   CG.toast("You’re registered for Season "+(s.number||1)+"!","ok"); CG.router();
 };
 
@@ -5846,7 +5887,7 @@ CG.hubRoster = function(qs){
 CG.AUTOMATIONS = [
   { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
   { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
-  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 5 min",  desc:"Keeps Discord roles and display names matched to the league database." },
+  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
   { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },

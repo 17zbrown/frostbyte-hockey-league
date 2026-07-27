@@ -12,7 +12,7 @@
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // No-ops safely if the bot token / guild id aren't set. Node 18+ (global fetch).
 
-export const config = { schedule: "*/5 * * * *" };
+export const config = { schedule: "*/2 * * * *" };
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -312,6 +312,31 @@ export default async (req) => {
       const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
       return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
         { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    // Grant the Staff role its moderation powers: "Timeout Members" (the modern mute — blocks
+    // sending, reacting and speaking) plus voice Mute. Additive and idempotent: it ORs the bits
+    // into whatever the role already has and never takes a permission away. One-shot (not enforced
+    // every sync) so the office can still adjust the role by hand in Discord.
+    if (BOT && GUILD && setupMode === "staffmod") {
+      const MODERATE_MEMBERS = 1n << 40n;   // "Timeout Members" — mutes text + voice for a duration
+      const MUTE_MEMBERS = 1n << 22n;       // voice mute
+      const wanted = MODERATE_MEMBERS | MUTE_MEMBERS;
+      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+      const role = roles.find((r) => (r.name || "").toLowerCase() === "staff");
+      if (!role) return new Response(JSON.stringify({ error: "staff role not found" }), { status: 200, headers: { "content-type": "application/json" } });
+      const cur = BigInt(role.permissions || "0");
+      const next = cur | wanted;
+      const out = { role: role.name, alreadyHad: { timeout: (cur & MODERATE_MEMBERS) !== 0n, voiceMute: (cur & MUTE_MEMBERS) !== 0n } };
+      if (next === cur) out.changed = false;
+      else {
+        await dApi("PATCH", `/guilds/${GUILD}/roles/${role.id}`, { permissions: next.toString() });
+        out.changed = true;
+      }
+      // A role can only time out members whose HIGHEST role sits below it, so surface the blockers.
+      const above = roles.filter((r) => r.position > role.position && r.name !== "@everyone" && !r.managed).map((r) => r.name);
+      out.cannotModerate = above;   // members whose top role is one of these are out of Staff's reach
+      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
 
     // Reconcile the Team Rooms with the live club list: delete every per-club VOICE channel (clubs
