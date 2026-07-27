@@ -104,7 +104,12 @@ CG.hubNav = function(section){
   mine.push(["settings","Settings","gear"]);
   var staffTools = [];
   if ((r==="staff" || r==="commish") && CG.hubStaffDesk) staffTools.push(["staffdesk","Staff desk","flag"]);
-  if (CG.isStatsStaff && CG.isStatsStaff()) staffTools.push(["statsmgr","Stats manager","chart"]);
+  /* One tab per department the signed-in person actually holds — the registry lives in
+     part9_staffdesks.js, which loads after this file, so it's read at render time. A
+     commissioner holds every department and sees the full set. */
+  (CG.STAFF_DESKS||[]).forEach(function(d){
+    if (CG.hasDept && CG.hasDept(d.dept)) staffTools.push([d.key, d.label, d.icon]);
+  });
   var club = [];
   var clubTools = r!=="commish" || CG.managesClub();
   if (clubTools){

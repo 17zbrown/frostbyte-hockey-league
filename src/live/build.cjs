@@ -24,6 +24,9 @@ const PARTS = [
   "part2_engine.js", "part3_content.js", "part4_ui.js",
   "part5a_public.js", "part5b_public2.js", "part6_hub.js",
   "part7_admin.js", "part_live.js",
+  /* per-department staff desks: chains CG.ROUTES.hub / CG.AFTER.hub, so it has to
+     load after part_live installs its own overrides */
+  "part9_staffdesks.js",
   ...(LAYER ? [LAYER] : []),           /* filename relative to src/live, e.g. preview_layer.js */
   "part8_blueprint_init.js",
 ];

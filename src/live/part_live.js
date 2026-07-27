@@ -2706,8 +2706,14 @@ CG.admDraftLive = function(){
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:17px">'+(cur?'<span class="teamcell">'+CG.crest(cur.ownerCode,22)+'<span>'+esc(cur.ownerCode)+' · #'+cur.overall+'</span></span>':"—")+'</b><span>on the clock</span></div>'+
     '<div class="kpi'+(pool.length-eligible.length>0?" alert":"")+'" style="cursor:default"><b class="num">'+eligible.length+'<span style="font-size:14px;color:var(--steel)">/'+pool.length+'</span></b><span>pool eligible</span></div></div>';
 
+  /* The draft department runs the evening; the commissioner owns the season. Building the board,
+     starting, concluding, and reversing a pick already made all reshape the season, so they stay
+     with the office — the clock, pause, skip, and picking for a club that went dark do not.
+     Same split the database enforces, so a hidden button is never the only thing stopping it. */
+  var canSetup = CG.may ? CG.may("draft.setup") : (CG.role()==="commish");
+
   /* SETUP — order style + generation (blocked while running) */
-  if (!running){
+  if (!running && canSetup){
     var meta = st && st.order_meta;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
       (meta?'<span class="chip chip-win">order set — '+esc((CG.DRAFT_STYLES.find(function(s){return s[0]===meta.style;})||["","custom"])[1])+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
@@ -2734,13 +2740,15 @@ CG.admDraftLive = function(){
   if (hasPicks){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Run the night</h3>'+(st?'<span class="caption mono">season '+sn+'</span>':"")+'</div>'+
       '<div class="card-b" style="display:flex;gap:9px;flex-wrap:wrap;align-items:end">'+
-      (!running? '<label class="fld" style="max-width:150px;margin:0"><span>Seconds per pick</span><input id="dSecs" type="number" min="15" max="600" value="'+((st&&st.pick_seconds)||120)+'"></label>'+
-                 '<button class="btn btn-chrome" id="dStart">'+CG.ic("play",15)+(st&&st.status==="complete"?"Restart the draft":"Start the draft")+'</button>'
+      (!running? (canSetup
+                   ? '<label class="fld" style="max-width:150px;margin:0"><span>Seconds per pick</span><input id="dSecs" type="number" min="15" max="600" value="'+((st&&st.pick_seconds)||120)+'"></label>'+
+                     '<button class="btn btn-chrome" id="dStart">'+CG.ic("play",15)+(st&&st.status==="complete"?"Restart the draft":"Start the draft")+'</button>'
+                   : '<span class="caption">The board is built and the draft hasn’t started. A commissioner drops the puck — the clock, skips, and picking for an absent club are yours the moment it’s live.</span>')
        : (st.status==="live" ? '<button class="btn btn-ink" id="dPause">Pause</button>' : '<button class="btn btn-chrome" id="dResume">'+CG.ic("play",15)+'Resume</button>')+
          '<label class="fld" style="max-width:130px;margin:0"><span>New clock (s)</span><input id="dResetSecs" type="number" min="15" max="600" placeholder="'+((st&&st.pick_seconds)||120)+'"></label>'+
          '<button class="btn btn-ghost" id="dResetClock">Reset the clock</button>'+
          '<button class="btn btn-ghost" id="dSkip">Skip this pick</button>'+
-         '<button class="btn btn-ghost" id="dConclude" style="margin-left:auto;color:var(--red)">Conclude the draft</button>')+
+         (canSetup?'<button class="btn btn-ghost" id="dConclude" style="margin-left:auto;color:var(--red)">Conclude the draft</button>':""))+
       '</div>'+
       (running&&cur?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
         '<b style="font-family:var(--f-disp)">'+esc(CG.TEAM[cur.ownerCode]?CG.TEAM[cur.ownerCode].name:cur.ownerCode)+' are on the clock</b><span class="caption">R'+cur.round+' · #'+cur.overall+' overall</span>'+
@@ -2766,7 +2774,7 @@ CG.admDraftLive = function(){
                 : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
                 : p.skipped?'<span class="chip chip-warn" style="font-size:9px">SKIPPED</span>'
                 :'<span class="caption mono" style="font-size:10px">upcoming</span>')+'</td>'+
-              '<td class="tright">'+(p.used?'<button class="btn btn-ghost btn-sm" data-adm-reverse="'+p.id+'" data-name="'+esc(p.playerName||"the pick")+'">Reverse</button>'
+              '<td class="tright">'+(p.used?(canSetup?'<button class="btn btn-ghost btn-sm" data-adm-reverse="'+p.id+'" data-name="'+esc(p.playerName||"the pick")+'">Reverse</button>':'')
                 : (isCur||p.skipped)&&running?'<button class="btn btn-ghost btn-sm" data-openpick="'+p.id+'">Pick for them</button>':'')+'</td></tr>';
           }).join("");
       }).join("")+'</tbody></table></div></div>';
@@ -4654,7 +4662,10 @@ CG.caseDisciplineModal = function(caseId, targetName, targetId){
     var t=document.getElementById("dcType").value;
     var args={ p_request:caseId, p_profile:pid, p_mode:t, p_reason:(document.getElementById("dcReason").value||"").trim()||null };
     if(t==="games") args.p_games=parseInt(document.getElementById("dcGamesN").value,10)||0;
-    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=new Date(d+"T23:59:59").toISOString(); }
+    /* ET, not the browser's zone. This built the instant from local time while the Users-and-roles
+       suspension path used CG.etISO, so the same "until Mar 3" ruling expired at different moments
+       depending on which screen issued it — and for a staffer abroad, up to a day early. */
+    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=CG.etISO(d, "23:59"); }
     if(t==="seasons") args.p_until_season=parseInt(document.getElementById("dcSeasonsN").value,10)||cur;
     var btn=this; btn.disabled=true;
     CG.sb.rpc("discipline_from_case", args).then(function(r){
@@ -6166,7 +6177,11 @@ CG.admNewsLive = function(){
         '<div style="flex:1;min-width:0;cursor:pointer" data-go="#/article/'+esc(a.slug)+'"><b>'+esc(a.title)+'</b>'+
           '<p class="caption" style="margin-top:2px">'+esc(a.category)+' · '+esc(a.author)+' · '+CG.fmtDate(a.dateIso)+(auto?' · <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">AUTO</span>':"")+'</p></div>'+
         '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-news-edit="'+esc(a.slug)+'">Edit</button>'+
-        '<button class="btn btn-ghost btn-sm" data-news-del="'+esc(a.slug)+'" data-title="'+esc(a.title)+'">Delete</button></span></div>';
+        /* Media staff write and edit the paper; only the commissioner can unpublish. The
+           database agrees — news has INSERT/UPDATE policies for the media department and no
+           DELETE policy, so a delete would silently remove zero rows rather than error. */
+        (CG.role()==="commish" ? '<button class="btn btn-ghost btn-sm" data-news-del="'+esc(a.slug)+'" data-title="'+esc(a.title)+'">Delete</button>' : "")+
+        '</span></div>';
     }).join("")+'</div>'
   : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>No stories yet</b><p>Publish the first one — or wait for opening night, when recaps start writing themselves.</p></div></div>';
   return h;
@@ -6193,7 +6208,9 @@ CG.newsForm = function(slug){
       btn.disabled=false; CG.toast("No active season — create one before publishing","err"); return;
     }
     var q = isNew
-      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"Commissioner")+" — Commissioner", published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
+      /* The byline was hardcoded to "— Commissioner", so a media-department story would have
+         published under a title its author doesn't hold. Sign it with the seat they actually sit in. */
+      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"League office")+" — "+(CG.role()==="commish"?"Commissioner":"League staff"), published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
       : CG.sb.from("news").update(rec).eq("id", slug);
     q.then(function(r){
       btn.disabled=false;
@@ -6257,9 +6274,13 @@ CG.AFTER._admRankings = function(){
     var i=+this.getAttribute("data-pr-down"); var d=draft().slice();
     var x=d[i+1]; d[i+1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
   }); });
+  /* These went straight at site_config, which is commissioner-only for good reason — the same
+     table holds the Discord invite and the playoff format. The rankings now move through two
+     RPCs pinned to the one key, so the media department can publish an order without being
+     handed the site's configuration. */
   var sv=document.getElementById("prSave");
   if (sv) sv.addEventListener("click", function(){
-    CG.sb.from("site_config").upsert({ key:"power_rankings_override", value:{ order: CG._prDraft }, updated_at:new Date().toISOString() },{ onConflict:"key" }).then(function(r){
+    CG.sb.rpc("rankings_set_order", { p_codes: CG._prDraft }).then(function(r){
       if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
       CG._prDraft=null; CG.toast("Manual ranking saved — live everywhere","ok"); CG.reloadLeague();
     });
@@ -6268,7 +6289,7 @@ CG.AFTER._admRankings = function(){
   if (dc) dc.addEventListener("click", function(){ CG._prDraft=null; CG.router(); });
   var au=document.getElementById("prAuto");
   if (au) au.addEventListener("click", function(){
-    CG.sb.from("site_config").delete().eq("key","power_rankings_override").then(function(r){
+    CG.sb.rpc("rankings_clear").then(function(r){
       if (r.error){ CG.toast("Couldn’t switch: "+r.error.message,"err"); return; }
       CG.toast("Back to the automatic formula","ok"); CG.reloadLeague();
     });
