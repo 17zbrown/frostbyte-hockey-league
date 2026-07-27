@@ -1957,9 +1957,17 @@ CG.NHL_FRANCHISES = [
   "Washington Capitals","Winnipeg Jets"
 ];
 /* franchises already fielded as active league clubs (matched by name) */
+/* Keyed by the FULL franchise name the dropdown uses ("Boston Bruins"), which is the club's
+   city + name — keying it on t.name alone ("Bruins") never matched, so the "already an active
+   club" hint never appeared and applicants kept picking clubs that were already fielded. */
 CG.activeFranchiseSet = function(){
   var set = {};
-  (CG.TEAMS||[]).forEach(function(t){ if(t.name) set[t.name] = t.code; });
+  (CG.TEAMS||[]).forEach(function(t){
+    if (!t.name) return;
+    var full = ((t.city ? t.city+" " : "") + t.name).trim();
+    set[full] = t.code;
+    set[t.name] = t.code;      /* tolerate a club stored without a city */
+  });
   return set;
 };
 CG.franchiseOptions = function(selected){

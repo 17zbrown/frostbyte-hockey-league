@@ -234,6 +234,48 @@ const STAFF_DEPARTMENTS = [
 
 // Ensure the department roles (mentionable) and a private room per department under the Staff
 // category. Idempotent: creates only what's missing, never deletes. VIEW+SEND+READ_HISTORY=68608.
+/* Give every club a Discord role + private room. This used to run only from the gated
+   ?reconcile=teams action, which was fine while clubs were created by hand — but an owner
+   application can now stand a club up on its own, and that club would sit on the site with no
+   Discord presence until someone remembered to reconcile. Runs on the normal sweep instead:
+   it's a no-op for clubs that already have both. */
+async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
+  const teamRoomsCat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team rooms");
+  const office = ["owner", "general manager", "assistant general manager", "commissioner", "staff"]
+    .map((n) => roleId[n]).filter(Boolean);
+  for (const t of teams) {
+    if (t.discord_role_id && t.discord_channel_id) continue;   // already provisioned
+    try {
+      let trole = t.discord_role_id;
+      if (!trole || !guildRoles.find((r) => r.id === trole)) {
+        const existing = guildRoles.find((r) => !r.managed && slug(r.name) === slug(t.name));
+        if (existing) trole = existing.id;
+        else {
+          const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
+          const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: false });
+          if (cr && cr.id) { trole = cr.id; guildRoles.push(cr); sum.clubRolesCreated = (sum.clubRolesCreated || 0) + 1; }
+        }
+        if (trole) { await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole }); t.discord_role_id = trole; }
+      }
+      let tchan = t.discord_channel_id;
+      if (teamRoomsCat && (!tchan || !guildChannels.find((c) => c.id === tchan))) {
+        const existing = guildChannels.find((c) => c.type === 0 && c.parent_id === teamRoomsCat.id && slug(c.name) === slug(t.name));
+        if (existing) tchan = existing.id;
+        else {
+          const allow = String(1024 | 2048 | 65536);   // VIEW + SEND + READ_HISTORY
+          const overwrites = [{ id: GUILD, type: 0, deny: "1024", allow: "0" }];
+          if (trole) overwrites.push({ id: trole, type: 0, allow, deny: "0" });
+          for (const oid of office) overwrites.push({ id: oid, type: 0, allow, deny: "0" });
+          const topic = `Private room for the ${t.name} — roster, lineups, and team talk. Visible only to the club and staff.`;
+          const cc = await dApi("POST", `/guilds/${GUILD}/channels`,
+            { name: slug(t.name), type: 0, parent_id: teamRoomsCat.id, topic, permission_overwrites: overwrites });
+          if (cc && cc.id) { tchan = cc.id; guildChannels.push(cc); sum.clubRoomsCreated = (sum.clubRoomsCreated || 0) + 1; }
+        }
+        if (tchan) { await sbPatch(`teams?id=eq.${t.id}`, { discord_channel_id: tchan }); t.discord_channel_id = tchan; }
+      }
+    } catch (e) { sum.errors.push({ clubProvision: t.name, error: String(e.message || e) }); }
+  }
+}
 async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) {
   const commish = roleId["commissioner"], staff = roleId["staff"];
   if (!commish || !staff) return; // office roles not provisioned yet — next run
@@ -805,6 +847,9 @@ export default async (req) => {
   // the Team Management category + its rooms (private to the front office)
   try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
   try { await ensureCommunityChannels(guildChannels, teams, roleId, sum); } catch (e) { sum.errors.push({ communityChannels: String(e.message || e) }); }
+  /* after the Team Rooms category is in place: give any club still missing a role or room one
+     (a club created by an approved owner application arrives with neither) */
+  try { await ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ clubRooms: String(e.message || e) }); }
 
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
