@@ -20,6 +20,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT = process.env.DISCORD_BOT_TOKEN;
+const GUILD = process.env.DISCORD_GUILD_ID;   // only the #rules mirror needs it (it resolves the channel by name)
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
