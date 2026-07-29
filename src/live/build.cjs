@@ -27,6 +27,9 @@ const PARTS = [
   /* per-department staff desks: chains CG.ROUTES.hub / CG.AFTER.hub, so it has to
      load after part_live installs its own overrides */
   "part9_staffdesks.js",
+  /* community forums — new top-level routes, so it can load any time after the
+     public page helpers (pageHead/ic) exist */
+  "part10_forums.js",
   ...(LAYER ? [LAYER] : []),           /* filename relative to src/live, e.g. preview_layer.js */
   "part8_blueprint_init.js",
 ];

@@ -872,6 +872,8 @@ CG.notifRoute = function(view, param){
     case "offers":       return "#/hub";
     case "ownerapp":     return "#/owner";
     case "staffapp":     return "#/staffapply";
+    /* a forum reply carries its thread id, so the alert opens the conversation */
+    case "forum":        return isId ? "#/thread?id="+encodeURIComponent(p) : "#/forums";
     /* the invite is an external URL; the notification click handler opens http(s) routes in a
        new tab. Fall back to the register page (which also carries a Join button) if unset. */
     case "discord":      return (CG._siteCfg && CG._siteCfg.discord_invite) || "#/register";

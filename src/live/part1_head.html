@@ -298,6 +298,31 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .tbl tr.tbl-filter th{padding:4px 6px;border-bottom:1px solid var(--line);background:var(--ice)}
 .tbl tr.tbl-filter input{width:100%;min-width:52px;padding:5px 7px;font:inherit;font-size:11.5px;border:1px solid var(--line);background:var(--paper);border-radius:0}
 .tbl tr.tbl-filter input:focus{outline:2px solid var(--chrome);outline-offset:-1px}
+/* ---- forums ---- */
+a.fx-board{display:block;text-decoration:none}
+a.fx-board:hover .fx-h{color:var(--chrome-deep)}
+/* Every surface that renders text a member typed. Titles and excerpts are as likely
+   to be a bare pasted invite link as a sentence, and .card is overflow:hidden — an
+   unbreakable token doesn't scroll here, it gets silently cut off. */
+.fx-h,.fx-txt{overflow-wrap:anywhere}
+/* These are headings for semantics — a screen reader needs to hear the thread list
+   as a list of headings — but the site's h1-h4 rule uppercases everything, and a
+   thread title is the member's own sentence. "LW looking for a club, PS5 evenings"
+   is not the same line once it's shouted. Editorial headings the league writes keep
+   the uppercase treatment; text a member typed keeps their capitalisation. */
+.fx-h{font-family:var(--f-disp);margin:0}
+.fx-h,h1.fx-txt{text-transform:none}
+.fx-body{font-size:14.5px;line-height:1.65;color:var(--ink);overflow-wrap:anywhere}
+.fx-body p{margin:0 0 10px}
+.fx-body p:last-child{margin-bottom:0}
+/* member-typed links: visibly a link, and never allowed to blow the column out */
+a.fx-link{color:var(--chrome-deep);border-bottom:1px solid var(--chrome);overflow-wrap:anywhere}
+a.fx-link:hover{background:var(--chrome-tint)}
+.fx-gone{opacity:.55}
+.fx-thread a{text-decoration:none}
+.fx-thread a:hover{color:var(--chrome-deep)}
+.rinkrule-lite{display:flex;align-items:center;gap:10px;color:var(--steel);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase}
+.rinkrule-lite::after{content:"";flex:1;height:1px;background:var(--line)}
 .tbl th:first-child,.tbl td:first-child{text-align:left;padding-left:16px}
 .tbl th.tleft,.tbl td.tleft{text-align:left}
 .tbl td{padding:11px 9px;text-align:right;border-bottom:1px solid var(--line-soft);

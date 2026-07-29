@@ -549,7 +549,7 @@ CG.unreadCount = function(){
 /* top-level links stay for the everyday pages; everything else lives in two
    grouped dropdowns so the bar keeps breathing room as sections grow */
 CG.NAV = [
-  ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"]
+  ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"],["Forums","#/forums"]
 ];
 CG.NAV_GROUPS = [
   ["Clubs & Players", [
@@ -947,6 +947,9 @@ CG.ROUTE_TITLES = {
   pickup:     "Pickup game",
   news:       "News",
   article:    "News",
+  forums:     "Forums",
+  forum:      "Forums",
+  thread:     "Forum thread",
   rulebook:   "Rulebook",
   draft:      "Draft Room",
   register:   "Register to play",
