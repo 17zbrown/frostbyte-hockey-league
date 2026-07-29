@@ -78,6 +78,16 @@ CG.forumAgo = function(iso){
   if (s < 86400*7) return Math.floor(s/86400)+"d ago";
   return CG.fmtDay(t);
 };
+/* A gamertag initial in a tinted disc. Cheap identity: it gives every row and every post a
+   fixed left column to line up against, which is most of what makes a list of text feel
+   designed rather than dumped. The hue is derived from the name so the same person is the
+   same colour everywhere, with no avatar upload to store or moderate. */
+CG.forumAvatar = function(name, size){
+  var s = String(name||"?").trim(), ch = (s.charAt(0)||"?").toUpperCase();
+  var h = 0; for (var i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i)) % 360;
+  return '<span class="fx-av" style="--h:'+h+(size?';--av:'+(size|0)+'px':"")+'" aria-hidden="true">'+
+    esc(ch)+'</span>';
+};
 CG.forumIsOffice = function(){ var r = CG.role(); return r==="staff" || r==="commish"; };
 CG.forumMe = function(){ return (CG.auth && CG.auth.user && CG.auth.user.id) || null; };
 /* the badge next to a name — the office is worth marking so answers carry weight */
@@ -123,22 +133,24 @@ CG.AFTER.forums = function(){
       /* own-property only: a board slugged "constructor" would otherwise sail past
          the || fallback and put the string "undefined" in the page */
       var icon = Object.prototype.hasOwnProperty.call(CG.FORUM_ICON, b.slug) ? CG.FORUM_ICON[b.slug] : "msg";
+      var th = b.threads|0, rp = b.posts|0;
       return '<a class="card raise fx-board" href="#/forum/'+esc(b.slug)+'" aria-label="'+esc(b.name)+'">'+
-        '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start">'+
-          '<span class="nf-ic" style="flex:none">'+CG.ic(icon,17)+'</span>'+
-          '<span style="flex:1;min-width:0">'+
-            '<h2 class="fx-h" style="font-size:17px">'+esc(b.name)+
-              (b.locked?' <span class="chip" style="font-size:9px">READ-ONLY</span>':"")+'</h2>'+
-            '<span class="caption" style="display:block;margin-top:3px">'+esc(b.description||"")+'</span>'+
+        '<div class="card-b fx-row">'+
+          '<span class="fx-bic">'+CG.ic(icon,19)+'</span>'+
+          '<span class="fx-main">'+
+            '<h2 class="fx-h fx-title" style="font-size:17px"><span>'+esc(b.name)+'</span>'+
+              (b.locked?'<span class="chip" style="font-size:9px">READ-ONLY</span>':"")+'</h2>'+
+            '<span class="fx-excerpt">'+esc(b.description||"")+'</span>'+
             (b.lastTitle
-              ? '<span class="caption fx-txt" style="display:block;margin-top:7px;color:var(--steel)">'+
-                  'Latest: <b>'+esc(b.lastTitle)+'</b> · '+esc(CG.forumAgo(b.lastAt))+'</span>'
-              : '<span class="caption" style="display:block;margin-top:7px;color:var(--steel-2)">No threads yet — start the first one.</span>')+
+              ? '<span class="fx-latest">'+CG.forumAvatar(b.lastAuthor||b.lastTitle, 20)+
+                  '<span class="fx-txt"><b>'+esc(b.lastTitle)+'</b></span>'+
+                  '<span class="fx-ago">'+esc(CG.forumAgo(b.lastAt))+'</span></span>'
+              : '<span class="fx-meta"><span>Nothing here yet — be the first to post.</span></span>')+
           '</span>'+
-          '<span style="flex:none;text-align:right">'+
-            '<b class="num" style="font-family:var(--f-disp);font-size:20px">'+(b.threads|0)+'</b>'+
-            '<span class="caption" style="display:block">thread'+((b.threads|0)===1?"":"s")+'</span>'+
-            '<span class="caption" style="display:block;color:var(--steel-2)">'+(b.posts|0)+' repl'+((b.posts|0)===1?"y":"ies")+'</span>'+
+          '<span class="fx-stat">'+
+            '<b class="num">'+th+'</b>'+
+            '<span class="caption">thread'+(th===1?"":"s")+'</span>'+
+            '<span class="fx-last">'+rp+' repl'+(rp===1?"y":"ies")+'</span>'+
           '</span>'+
         '</div></a>';
     }).join("")+'</div>'+
@@ -188,26 +200,35 @@ CG.AFTER.forum = function(slug){
     head.innerHTML = '<h1 class="h-page">'+esc(b.name)+'</h1>'+
       '<p class="lede" style="margin-top:8px">'+esc(b.description||"")+'</p>';
 
-    /* office moderation is visible; a member only ever sees their own tools */
+    /* The whole row is the link — a thread title is a small target, and everything in the
+       row is about the same thread, so anything else is a dead zone you have to aim around.
+       Safe to wrap in an <a>: moderation lives on the thread page, so there is nothing
+       interactive nested in here to swallow the click. */
     var rows = threads.filter(function(t){ return !t.deleted || office; }).map(function(t){
-      return '<div class="card fx-thread'+(t.deleted?" fx-gone":"")+'" style="margin-bottom:10px">'+
-        '<div class="card-b" style="display:flex;gap:12px;align-items:flex-start">'+
-          '<span style="flex:1;min-width:0">'+
-            '<h2 class="fx-h" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:16px">'+
+      var n = t.replies|0;
+      return '<a class="card raise fx-thread'+(t.deleted?" fx-gone":"")+'" href="#/thread?id='+esc(t.id)+'"'+
+        ' aria-label="'+esc(t.title)+' — '+n+' repl'+(n===1?"y":"ies")+'">'+
+        '<div class="card-b fx-row">'+
+          CG.forumAvatar(t.author)+
+          '<span class="fx-main">'+
+            '<h2 class="fx-h fx-title">'+
               (t.pinned?'<span class="chip chip-chrome" style="font-size:9px">PINNED</span>':"")+
               (t.locked?'<span class="chip" style="font-size:9px">'+CG.ic("lock",10)+' LOCKED</span>':"")+
               (t.deleted?'<span class="chip chip-loss" style="font-size:9px">REMOVED</span>':"")+
-              '<a href="#/thread?id='+esc(t.id)+'" style="font-weight:700">'+esc(t.title)+'</a>'+
+              '<span>'+esc(t.title)+'</span>'+
             '</h2>'+
-            '<span class="caption fx-txt" style="display:block;margin-top:5px">'+esc(t.excerpt||"")+(String(t.excerpt||"").length>=160?"…":"")+'</span>'+
-            '<span class="caption" style="display:block;margin-top:7px;color:var(--steel-2)">'+
-              esc(t.author)+' '+CG.forumRoleChip(t.authorRole)+' · started '+esc(CG.forumAgo(t.createdAt))+
-              ' · last activity '+esc(CG.forumAgo(t.lastAt))+'</span>'+
+            (t.excerpt?'<span class="fx-excerpt">'+esc(t.excerpt)+'</span>':"")+
+            '<span class="fx-meta">'+
+              '<b>'+esc(t.author)+'</b>'+CG.forumRoleChip(t.authorRole)+
+              '<span>started '+esc(CG.forumAgo(t.createdAt))+'</span>'+
+            '</span>'+
           '</span>'+
-          '<span style="flex:none;text-align:right">'+
-            '<b class="num" style="font-family:var(--f-disp);font-size:18px">'+(t.replies|0)+'</b>'+
-            '<span class="caption" style="display:block">repl'+((t.replies|0)===1?"y":"ies")+'</span></span>'+
-        '</div></div>';
+          '<span class="fx-stat">'+
+            '<b class="num">'+n+'</b>'+
+            '<span class="caption">repl'+(n===1?"y":"ies")+'</span>'+
+            '<span class="fx-last">'+(n?"active ":"posted ")+esc(CG.forumAgo(t.lastAt))+'</span>'+
+          '</span>'+
+        '</div></a>';
     }).join("");
 
     /* Read-only is a property of the board, not of who's looking at it — test the
@@ -308,8 +329,9 @@ CG.AFTER.thread = function(param, qs){
       }
 
       var opener =
-        '<div class="card" style="margin-bottom:14px"><div class="card-b">'+
-          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+        '<div class="card fx-post fx-op" style="margin-bottom:14px"><div class="card-b">'+
+          '<div class="fx-byline">'+
+            CG.forumAvatar(t.author)+
             '<b style="font-family:var(--f-disp)">'+esc(t.author)+'</b>'+CG.forumRoleChip(t.authorRole)+
             '<span class="caption">'+esc(CG.forumAgo(t.createdAt))+(t.editedAt?" · edited":"")+'</span>'+
             '<span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">'+
@@ -326,8 +348,9 @@ CG.AFTER.thread = function(param, qs){
           return '<div class="card fx-gone" style="margin-bottom:10px"><div class="card-b">'+
             '<span class="caption">This reply was removed.</span></div></div>';
         }
-        return '<div class="card'+(p.deleted?" fx-gone":"")+'" style="margin-bottom:10px"><div class="card-b">'+
-          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
+        return '<div class="card fx-post'+(p.deleted?" fx-gone":"")+'" style="margin-bottom:10px"><div class="card-b">'+
+          '<div class="fx-byline">'+
+            CG.forumAvatar(p.author)+
             '<b style="font-family:var(--f-disp)">'+esc(p.author)+'</b>'+CG.forumRoleChip(p.authorRole)+
             '<span class="caption">'+esc(CG.forumAgo(p.createdAt))+(p.editedAt?" · edited":"")+'</span>'+
             (p.deleted?'<span class="chip chip-loss" style="font-size:9px">REMOVED</span>':"")+
