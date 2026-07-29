@@ -667,8 +667,25 @@ CG.applySession = async function(session){
   /* direct messages: load + subscribe on sign-in, tear down on sign-out */
   if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
-  /* application chat: live thread updates (the load itself runs in buildLiveLeague) */
-  if (CG.auth.user){ CG.subscribeAppMessages(); }
+  /* Application chat + GM/AGM nominations. buildLiveLeague also loads these, but its load is
+     gated on CG.auth.user — which is still null while the page boots, since the session is
+     restored AFTER the league builds. On every cold page load that left the thread map empty:
+     an applicant opened their application to "No messages yet" over a conversation the office
+     could see, and it never healed until something else forced a reload. The session landing
+     is the authoritative load; the surface re-renders only if the data actually changed. */
+  if (CG.auth.user){
+    Promise.all([CG.loadAppMessages(), CG.loadMgmtApps()]).then(function(ch){
+      var onAppSurface = /#\/(hub\/application\b|owner\b|staffapply\b|hub\/staffdesk\b|hub\/management\b|hub\/roster\b)/.test(location.hash);
+      if ((ch[0] || ch[1]) && onAppSurface && CG.router){
+        /* keep a half-typed chat message across the re-render, same as the live handler */
+        var cur = document.querySelector("[data-appchat-input]");
+        var draft = cur ? cur.value : "", hadFocus = cur && document.activeElement === cur;
+        CG.router();
+        if (draft){ var ni = document.querySelector("[data-appchat-input]"); if (ni){ ni.value = draft; if (hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
+      }
+    });
+    CG.subscribeAppMessages();
+  }
   else { CG.teardownAppMessages && CG.teardownAppMessages(); }
   /* complaints & requests (league office) — RLS returns what this user may see */
   if (CG.auth.user){ CG.loadActionRequests().then(function(){ CG.rerenderIfShowingCases(); }); CG.subscribeActions(); }
@@ -750,8 +767,10 @@ CG.loadManagerData = async function(){
       jobs.push(CG.sb.from("application_ballots").select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
         .then(function(vb){ CG.lg._appBallots = (vb && !vb.error && vb.data) || []; }, function(){ CG.lg._appBallots = []; }));
     }
-    /* application chat — loaded for ANY signed-in user; RLS returns the office everything and an
-       applicant only their own application's thread (this is applicant-visible, unlike the ballot) */
+    /* application chat — RLS returns the office everything and an applicant only their own
+       thread. NOTE: on a cold page load CG.auth.user is still null here (the session restores
+       after the league builds), so this only fires on post-auth reloads — the authoritative
+       load lives in applySession. */
     if (CG.auth.user){
       jobs.push(CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
         .then(function(mm){ CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); }, function(){ CG.lg._appMsgs = {}; }));
@@ -5232,10 +5251,36 @@ CG._groupAppMsgs = function(rows){
   return map;
 };
 CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[type+":"+id] || []; };
+/* Resolves to TRUE only when the thread data actually changed since the last load, so callers
+   can re-render exactly when there is something new (and a token refresh re-running
+   applySession an hour in doesn't yank the page for no reason). A failed fetch keeps the
+   previous map — blanking it would repaint an open thread as "No messages yet" over a blip. */
 CG.loadAppMessages = function(){
   if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
   return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
-    .then(function(mm){ if(CG.lg) CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); return true; }, function(){ return false; });
+    .then(function(mm){
+      if (!mm || mm.error) return false;
+      var rows = mm.data || [];
+      var fp = rows.length + "|" + (rows.length ? rows[rows.length-1].created_at : "");
+      var changed = fp !== CG._appMsgsFp;
+      CG._appMsgsFp = fp;
+      if (CG.lg) CG.lg._appMsgs = CG._groupAppMsgs(rows);
+      return changed;
+    }, function(){ return false; });
+};
+/* GM/AGM nominations — same contract: true only when something changed. */
+CG.loadMgmtApps = function(){
+  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
+  return CG.sb.from("management_applications").select("*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)").order("created_at",{ascending:false})
+    .then(function(ma){
+      if (!ma || ma.error) return false;
+      var rows = ma.data || [];
+      var fp = rows.length + "|" + (rows.length ? (rows[0].updated_at || rows[0].created_at) : "");
+      var changed = fp !== CG._mgmtAppsFp;
+      CG._mgmtAppsFp = fp;
+      if (CG.lg) CG.lg._mgmtApps = rows;
+      return changed;
+    }, function(){ return false; });
 };
 /* live thread: subscribe to application_messages inserts. No recipient filter — Supabase Realtime
    applies the table's RLS, so the office receives every thread and an applicant only their own
