@@ -183,7 +183,7 @@ CG.buildLiveLeague = async function(){
   var leagueById={};
   CG.LEAGUES = leaguesRaw.map(function(l){
     var obj = { id:l.id, code:l.code, name:l.name, tier:l.tier, inspiration:l.inspiration||null,
-      sort:(l.sort_order==null?0:l.sort_order), teamCount:0 };
+      emblem:l.emblem_url||null, sort:(l.sort_order==null?0:l.sort_order), teamCount:0 };
     leagueById[l.id]=obj; return obj;
   });
   /* fallback so the UI always has the top tier even before the table is seeded */
@@ -800,18 +800,22 @@ CG.loadManagerData = async function(){
   } catch(e){}
 };
 /* re-read the leagues/tiers table (after creating a tier) and recompute counts */
+/* Returns true only when CG.LEAGUES actually came back from the DB. It used to swallow every
+   failure with a bare return, which let a caller that re-rendered "from the DB" repaint stale
+   memory instead — a green success toast over a panel showing the opposite. */
 CG.loadLeagues = async function(){
-  if (!CG.sb) return;
+  if (!CG.sb) return false;
   try {
     var r = await CG.sb.from("leagues").select("*").order("sort_order");
-    if (r.error || !r.data) return;
+    if (r.error || !r.data || !r.data.length) return false;
     CG.LEAGUES = r.data.map(function(l){ return { id:l.id, code:l.code, name:l.name, tier:l.tier,
-      inspiration:l.inspiration||null, sort:(l.sort_order==null?0:l.sort_order), teamCount:0 }; });
-    if (!CG.LEAGUES.length) return;
+      inspiration:l.inspiration||null, emblem:l.emblem_url||null,
+      sort:(l.sort_order==null?0:l.sort_order), teamCount:0 }; });
     CG.LEAGUE_BY_CODE={}; CG.LEAGUES.forEach(function(l){ CG.LEAGUE_BY_CODE[l.code]=l; });
     (CG.TEAMS||[]).forEach(function(t){ var l=CG.LEAGUE_BY_CODE[t.leagueCode]; if(l) l.teamCount++; });
     CG.TOP_LEAGUE = CG.LEAGUES.slice().sort(function(a,b){ return a.tier-b.tier||a.sort-b.sort; })[0];
-  } catch(e){}
+    return true;
+  } catch(e){ return false; }
 };
 
 CG.initAuth = async function(){
@@ -3916,6 +3920,41 @@ CG.AFTER._admUsers = function(){
 /* ================================================================
    LIVE ADMIN: LEAGUES & TIERS (CG umbrella — create_league RPC)
    ================================================================ */
+/* The tier's mark: the emblem when one is set, the TIER n plate when not.
+   The plate is always in the markup and the emblem is laid over it, so hiding a failed <img>
+   reveals the plate rather than a broken-image glyph. Hiding it is the onerror below — the
+   overlay is opaque, so without that the plate stays covered. Belt: CG.installEmblemFallback
+   does the same from a captured error event, which keeps working if inline handlers are ever
+   dropped from the CSP. */
+/* Error events on <img> don't bubble, but they can be captured — one listener covers every tier
+   mark on every page, present or future, without an inline handler. */
+CG.installEmblemFallback = function(){
+  if (CG._emblemFallback) return;
+  CG._emblemFallback = true;
+  document.addEventListener("error", function(e){
+    var el = e.target;
+    if (el && el.tagName === "IMG" && el.classList && el.classList.contains("tier-img")) el.style.display = "none";
+  }, true);
+};
+CG.tierPlate = function(l, size){
+  CG.installEmblemFallback();
+  return '<span class="tier-plate">'+
+      '<span class="tp-label">TIER</span>'+
+      '<b class="tp-num" style="font-size:'+(size|0)+'px">'+(l.tier|0)+'</b>'+
+    '</span>'+
+    (l.emblem ? '<img class="tier-img" src="'+esc(l.emblem)+'" alt="'+esc(l.code)+' emblem"'+
+                ' onerror="this.style.display=\'none\'">' : "");
+};
+/* The tier block doubles as the emblem slot in the Control Center: click it or drop an image on
+   it to change that tier's emblem. Saves on upload rather than behind a Save button — it's one
+   field, and a half-applied emblem is a worse state than no emblem. */
+CG.leagueEmblemZone = function(l){
+  return '<div class="lg-emblem" data-lg-zone="'+esc(l.code)+'"'+
+    ' role="button" tabindex="0" aria-label="Change the '+esc(l.code)+' emblem" title="Click or drop an image to set the '+esc(l.code)+' emblem">'+
+    CG.tierPlate(l, 24)+
+    '<span class="lg-emblem-hint">'+(l.emblem?"Replace":"Add emblem")+'</span></div>'+
+    '<input type="file" accept="image/*" hidden data-lg-file="'+esc(l.code)+'">';
+};
 CG.admLeagues = function(){
   var leagues=(CG.LEAGUES||[]).slice().sort(function(a,b){ return a.tier-b.tier || a.sort-b.sort; });
   var totalClubs=(CG.TEAMS||[]).length;
@@ -3928,12 +3967,18 @@ CG.admLeagues = function(){
   h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The Chel Gaming pyramid</h3><span class="chip">'+leagues.length+' tier'+(leagues.length===1?"":"s")+'</span></div>';
   h+=leagues.map(function(l,i){
     return '<div class="card-b" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line)":"")+'">'+
-      '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:8.5px;letter-spacing:.14em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:24px;line-height:1">'+l.tier+'</b></div>'+
+      CG.leagueEmblemZone(l)+
       '<div style="flex:1 1 160px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b class="mono" style="font-size:16px">'+esc(l.code)+'</b>'+(i===0?' <span class="chip chip-chrome" style="font-size:9px">TOP TIER</span>':'')+'</div><div style="color:var(--steel);font-size:13px;margin-top:2px">'+esc(l.name)+'</div></div>'+
       '<div style="flex:0 0 auto;text-align:right"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">MODELED ON</div><b style="font-family:var(--f-disp);font-size:16px">'+esc(l.inspiration||"—")+'</b></div>'+
       '<div style="flex:0 0 auto;text-align:right;min-width:56px"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">CLUBS</div><b class="num" style="font-family:var(--f-disp);font-size:16px">'+(l.teamCount||0)+'</b></div>'+
+      (l.emblem ? '<button class="btn btn-ghost btn-sm" data-lg-clear="'+esc(l.code)+'" style="flex:0 0 auto">Remove emblem</button>' : "")+
     '</div>';
-  }).join("")+'</div>';
+  }).join("")+
+  '<div class="card-b" style="border-top:1px solid var(--line)"><p class="caption" style="margin:0">'+
+    'Click a tier plate or drop an image on it to set that tier’s emblem — PNG, JPG, WebP, GIF or SVG, under 2 MB. '+
+    'It saves straight away. The top tier’s emblem headlines the public Clubs page; the rest show here, and on '+
+    'their own pages as those are built. Tiers without an emblem keep the plain TIER plate.'+
+  '</p></div></div>';
   var insp=["NHL","AHL","ECHL","KHL","SHL","Liiga","NCAA","CHL","OHL","WHL","QMJHL"];
   h+='<div class="card"><div class="card-h"><h3>Add a tier</h3></div><div class="card-b">'+
     '<div class="grid g2" style="gap:14px">'+
@@ -3963,9 +4008,87 @@ CG.createLeague = function(){
     CG.loadLeagues().then(function(){ if(location.hash.indexOf("/leagues")>=0 && CG.router) CG.router(); });
   });
 };
+/* Persist an emblem (or clear it with null) and refresh the panel from the DB, so what's on screen
+   is what's stored rather than what we hoped we stored. */
+CG.saveLeagueEmblem = function(code, url, zone){
+  return CG.sb.rpc("set_league_emblem", { p_code:code, p_url:url }).then(function(r){
+    if (r.error){
+      if (zone) zone.classList.remove("busy");
+      CG.toast(r.error.message || "Couldn’t save the emblem","err");
+      return false;
+    }
+    return CG.loadLeagues().then(function(fresh){
+      if (!fresh){
+        /* the write landed but the read-back didn't — don't repaint stale state and call it done */
+        if (zone) zone.classList.remove("busy");
+        CG.toast("Saved, but the panel couldn’t refresh — reload to see it","err");
+        return false;
+      }
+      CG.toast(url ? code+" emblem updated" : code+" emblem removed","ok");
+      if (location.hash.indexOf("/leagues")>=0 && CG.router) CG.router();
+      return true;
+    });
+  });
+};
 CG.AFTER._admLeagues = function(){
   var b=document.getElementById("lgCreate"); if(b) b.addEventListener("click", CG.createLeague);
   var code=document.getElementById("lgCode"); if(code) code.addEventListener("input", function(){ var s=this.selectionStart; this.value=this.value.toUpperCase(); try{ this.setSelectionRange(s,s); }catch(e){} });
+
+  /* --- tier emblems: click or drop on the tier plate --- */
+  document.querySelectorAll("[data-lg-zone]").forEach(function(zone){
+    var lgCode = zone.getAttribute("data-lg-zone");
+    var fileIn = document.querySelector('[data-lg-file="'+cssQ(lgCode)+'"]');
+    var clearBtn = document.querySelector('[data-lg-clear="'+cssQ(lgCode)+'"]');
+    function setBusy(on){
+      zone.classList.toggle("busy", !!on);
+      /* the lock has to cover the tier's Remove button too — it writes the same row through the
+         same RPC, so a clear confirmed mid-upload would race it and one of the two toasts lies */
+      if (clearBtn) clearBtn.disabled = !!on;
+    }
+    function upload(f){
+      if (!f) return;
+      /* the bucket's real allowlist, not /^image\//: an iPhone .heic passes "is an image" and is
+         then rejected by storage with a raw mime error the commissioner can do nothing with */
+      if (!CG.UPLOAD_MIME.test(f.type||"")){
+        CG.toast("Use a PNG, JPG, WebP, GIF or SVG — "+((f.type||"that file type")+" can’t be stored"),"err"); return;
+      }
+      if (f.size > 2*1024*1024){ CG.toast("Keep the emblem under 2 MB","err"); return; }
+      if (zone.classList.contains("busy")) return;            /* one upload at a time per tier */
+      setBusy(true);
+      CG.uploadLeagueEmblem(f, lgCode)
+        .then(function(url){ return CG.saveLeagueEmblem(lgCode, url, zone); })
+        .catch(function(e){
+          setBusy(false);
+          CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
+        });
+    }
+    if (fileIn){
+      zone.addEventListener("click", function(){ if(!zone.classList.contains("busy")) fileIn.click(); });
+      zone.addEventListener("keydown", function(e){
+        if (e.key==="Enter"||e.key===" "){ e.preventDefault(); if(!zone.classList.contains("busy")) fileIn.click(); }
+      });
+      fileIn.addEventListener("change", function(){
+        /* clear the input before uploading: browsers fire no change event when the same file is
+           picked twice, so after a failure re-picking that file would do nothing at all */
+        var f = fileIn.files[0]; fileIn.value = ""; if (f) upload(f);
+      });
+    }
+    zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
+    zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
+    zone.addEventListener("drop", function(e){
+      e.preventDefault(); zone.classList.remove("drag");
+      if (e.dataTransfer && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+    });
+  });
+  document.querySelectorAll("[data-lg-clear]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var lgCode = this.getAttribute("data-lg-clear");
+      CG.confirm("Remove the "+lgCode+" emblem?",
+        "The tier goes back to the plain TIER plate. The image file itself stays in storage — this only "+
+        "stops the site using it. You can upload a new one any time.",
+        "Remove", function(){ CG.saveLeagueEmblem(lgCode, null, null); });
+    });
+  });
 };
 
 /* ================================================================
@@ -4253,7 +4376,18 @@ CG.shrinkImage = async function(file, cap){
     return { blob:out, type:out.type, ext:(out.type==="image/webp"?"webp":"png") };
   } catch (e) { return fallback; }
 };
-CG.uploadTeamLogo = async function(file, code){
+/* One uploader for every piece of commissioner-uploaded artwork. Club crests and tier emblems
+   share the team-logos bucket and its policy (can_write_team_logo is is_commissioner(), whatever
+   the path), so they share the token dance and the resize too — a second copy of this would be a
+   second place for the stale-token bug to come back. `slug` names the file, `opts.prefix` puts it
+   in a folder, `opts.cap` is the longest edge kept. */
+/* exactly what storage.buckets.allowed_mime_types permits for team-logos — keep the two in step */
+CG.UPLOAD_MIME = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/i;
+/* CSS.escape isn't in every browser this site still serves; the codes are [A-Z0-9] in practice,
+   so quote-escaping is enough to keep the attribute selector well-formed either way */
+function cssQ(v){ return String(v==null?"":v).replace(/["\\]/g, "\\$&"); }
+CG.uploadArtwork = async function(file, slug, opts){
+  opts = opts || {};
   var s = await CG.sb.auth.getSession();
   var session = s && s.data && s.data.session;
   if (!session){
@@ -4270,12 +4404,20 @@ CG.uploadTeamLogo = async function(file, code){
     isComm = await CG.sb.rpc("is_commissioner");
     if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
   }
-  var shrunk = await CG.shrinkImage(file, 384);
+  var shrunk = await CG.shrinkImage(file, opts.cap || 384);
   var body = shrunk.blob, type = shrunk.type;
   var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
-  var path = (code||"logo").toLowerCase()+"-"+Date.now()+"."+ext;
+  /* the slug reaches an object name and a URL, so keep it to characters that survive both */
+  var safe = String(slug||"logo").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"") || "logo";
+  /* normalise the folder too, so a future caller passing "awards" (no slash) doesn't silently
+     write "awardsbos-123.webp" at the bucket root, and ".." can't aim the object elsewhere */
+  var pre = String(opts.prefix||"").toLowerCase().replace(/[^a-z0-9/-]+/g,"")
+    .split("/").filter(function(seg){ return seg && seg !== "." && seg !== ".."; }).join("/");
+  var path = (pre ? pre+"/" : "")+safe+"-"+Date.now()+"."+ext;
   async function put(tok){
-    return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+encodeURIComponent(path), {
+    /* encode per segment — encodeURIComponent on the whole path would turn the folder slash into
+       %2F and flatten the prefix into the filename */
+    return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+path.split("/").map(encodeURIComponent).join("/"), {
       method:"POST",
       /* every upload gets a fresh timestamped path, so the bytes at a given URL never change and
          can be cached for a year — the old 3600 made every visitor revalidate eight logos hourly */
@@ -4285,18 +4427,28 @@ CG.uploadTeamLogo = async function(file, code){
   }
   var res = await put(session.access_token);
   if (!res.ok){
-    var body = await res.json().catch(function(){ return {}; });
+    /* errBody, NOT body: `var` is function-scoped, so naming this `body` reused the very binding
+       put() closes over for the image bytes. The retry below then POSTed the parsed error object,
+       which fetch stringifies to "[object Object]" — 15 bytes sent as image/webp, which the bucket
+       happily accepts, so a stale-token retry "succeeded" and stored a file that isn't an image.
+       That is the exact race this retry exists to handle, and it hit club logos too. */
+    var errBody = await res.json().catch(function(){ return {}; });
     if (res.status===400 || res.status===403){
       /* stale token race — refresh once and retry with the new one */
       var rf3 = await CG.sb.auth.refreshSession();
       var fresh = rf3 && rf3.data && rf3.data.session;
       if (fresh){ res = await put(fresh.access_token); }
-      if (!res.ok){ body = await res.json().catch(function(){ return body; }); throw new Error(body.message||body.error||("upload rejected (HTTP "+res.status+")")); }
+      if (!res.ok){ errBody = await res.json().catch(function(){ return errBody; }); throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")")); }
     } else {
-      throw new Error(body.message||body.error||("upload rejected (HTTP "+res.status+")"));
+      throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")"));
     }
   }
   return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
+};
+CG.uploadTeamLogo = function(file, code){ return CG.uploadArtwork(file, code, { cap:384 }); };
+/* a tier emblem is painted bigger than a crest (it headlines the Leagues panel), so it keeps more pixels */
+CG.uploadLeagueEmblem = function(file, code){
+  return CG.uploadArtwork(file, "league-"+(code||"tier"), { prefix:"leagues/", cap:512 });
 };
 CG.teamForm = function(t){
   var isNew = !t;

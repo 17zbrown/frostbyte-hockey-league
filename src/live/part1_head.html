@@ -559,6 +559,27 @@ label.fld>span{display:block;font-family:var(--f-mono);font-size:11px;letter-spa
 .logo-drop.busy{opacity:.6;pointer-events:none}
 .logo-drop .lp-hint{font-size:12.5px;color:var(--steel);max-width:34ch}
 .logo-drop img{max-height:64px;max-width:120px;object-fit:contain}
+/* A tier's mark. The TIER n plate is always rendered and the emblem is laid over it, so an
+   emblem that fails to load (its storage object deleted) reveals the plate underneath instead of
+   a broken-image icon — the fallback is structural, not wired to a load event. */
+.tier-mark,.lg-emblem{position:relative;flex:0 0 auto;overflow:hidden;border-radius:var(--r-s)}
+.tier-mark{width:46px;height:46px}
+.lg-emblem{width:56px;height:56px;cursor:pointer;transition:box-shadow .15s,transform .15s}
+.tier-plate{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;background:var(--bc);color:var(--on-ink)}
+.tier-plate .tp-label{font-family:var(--f-mono);font-size:7.5px;letter-spacing:.12em;opacity:.7}
+.tier-plate .tp-num{font-family:var(--f-disp);line-height:1}
+.tier-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:4px;
+  background:var(--paper)}
+/* the Control Center plate is also the drop target — say so on hover/focus */
+.lg-emblem:hover,.lg-emblem:focus-visible{box-shadow:0 0 0 2px var(--chrome);outline:none}
+.lg-emblem.drag{box-shadow:0 0 0 2px var(--chrome-deep);transform:scale(1.04)}
+.lg-emblem.busy{opacity:.55;pointer-events:none}
+.lg-emblem-hint{position:absolute;inset:auto 0 0 0;z-index:2;font-family:var(--f-mono);font-size:7.5px;
+  letter-spacing:.08em;text-transform:uppercase;text-align:center;padding:2px 0;
+  background:rgba(0,0,0,.72);color:#fff;opacity:0;transition:opacity .15s}
+.lg-emblem:hover .lg-emblem-hint,.lg-emblem:focus-visible .lg-emblem-hint,
+.lg-emblem.busy .lg-emblem-hint{opacity:1}
 .fld.invalid input,.fld.invalid select,.fld.invalid textarea{border-color:var(--red)}
 .check{display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer;padding:6px 0}
 .check input{width:18px;height:18px;margin-top:2px;accent-color:var(--ink);flex-shrink:0}

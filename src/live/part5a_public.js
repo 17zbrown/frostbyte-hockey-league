@@ -937,7 +937,8 @@ CG.ROUTES.teams = function(){
   var lg = CG.lg;
   var topL = CG.TOP_LEAGUE;
   var tierBadge = topL ? '<div class="card" style="padding:12px 16px;display:flex;align-items:center;gap:14px">'+
-      '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;width:46px;height:46px;border-radius:var(--r-s);background:var(--bc);color:var(--on-ink)"><span style="font-family:var(--f-mono);font-size:7.5px;letter-spacing:.12em;opacity:.7">TIER</span><b style="font-family:var(--f-disp);font-size:20px;line-height:1">'+topL.tier+'</b></div>'+
+      /* the tier's own emblem when a commissioner has set one, the TIER plate otherwise */
+      '<div class="tier-mark">'+CG.tierPlate(topL, 20)+'</div>'+
       '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
     '</div>' : "";
   var head = CG.pageHead("The clubs","One trophy. Every club chasing it.",
