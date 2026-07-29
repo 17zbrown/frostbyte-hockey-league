@@ -129,6 +129,49 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
   }
 }
 
+// #announcements under an Information category: everyone reads, only the league office writes.
+// Its webhook is stored so the site can post league news without a bot token. Creation only —
+// if the channel already exists under Information we adopt it and just make sure the hook is on
+// file, so this never fights a channel the commissioners set up by hand.
+// VIEW(1024)+SEND(2048)+READ_HISTORY(65536)=68608; members get VIEW+READ_HISTORY (66560) and no SEND.
+async function ensureAnnouncements(guildChannels, roleId, sum) {
+  const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
+  if (office.length < 2) return;                       // roles not provisioned yet — try next run
+
+  let cat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "information");
+  if (!cat) {
+    try {
+      cat = await dApi("POST", `/guilds/${GUILD}/channels`, { name: "Information", type: 4 });
+      guildChannels.push(cat); sum.infoCatCreated = 1;
+    } catch (e) { sum.errors.push({ infoCat: String(e.message || e) }); return; }
+  }
+
+  let ch = guildChannels.find((c) => c.type !== 4 && (c.name || "").toLowerCase() === "announcements");
+  if (!ch) {
+    try {
+      ch = await dApi("POST", `/guilds/${GUILD}/channels`, {
+        name: "announcements", type: 0, parent_id: cat.id,
+        topic: "League announcements from the commissioners. Read-only — discussion goes in the forums or #general.",
+        permission_overwrites: [
+          { id: GUILD, type: 0, allow: "66560", deny: "2048" },        // everyone: read, don't post
+          ...office.map((id) => ({ id, type: 0, allow: "68608", deny: "0" })),
+        ],
+      });
+      guildChannels.push(ch); sum.announcementsCreated = 1;
+    } catch (e) { sum.errors.push({ announcements: String(e.message || e) }); return; }
+  }
+
+  try {
+    const hooks = await dApi("GET", `/channels/${ch.id}/webhooks`);
+    let hook = Array.isArray(hooks) ? hooks.find((h) => h.name === "CGHL Announcements" && h.token) : null;
+    if (!hook) hook = await dApi("POST", `/channels/${ch.id}/webhooks`, { name: "CGHL Announcements" });
+    if (hook && hook.id && hook.token) {
+      await sbUpsertCfg("discord_announcements_webhook", `https://discord.com/api/webhooks/${hook.id}/${hook.token}`);
+      sum.announcementsHook = 1;
+    }
+  } catch (e) { sum.errors.push({ announcementsHook: String(e.message || e) }); }
+}
+
 // Community + game-night channels: a public #pickup-games and #draft-hub, per-club voice rooms (private to
 // the club + office, mirroring the club text rooms), and a couple of public Game Voice lobbies for
 // scrims. Creation only — never deletes an existing channel. Idempotent by name+parent.
@@ -959,6 +1002,7 @@ export default async (req) => {
   } catch (e) { sum.errors.push({ roleIdMap: String(e.message || e) }); }
   // the Team Management category + its rooms (private to the front office)
   try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
+  try { await ensureAnnouncements(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ announcements: String(e.message || e) }); }
   try { await ensureCommunityChannels(guildChannels, teams, roleId, sum); } catch (e) { sum.errors.push({ communityChannels: String(e.message || e) }); }
   /* after the Team Rooms category is in place: give any club still missing a role or room one
      (a club created by an approved owner application arrives with neither) */
