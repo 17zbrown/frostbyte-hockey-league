@@ -65,6 +65,8 @@ async function dApi(method, path, body) {
     });
     if (r.status === 404) return { __notfound: true };
     if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
+    // A Discord-side 5xx is transient. Only 429 was retried, so one blip aborted the sweep.
+    if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
     if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
     const t = await r.text();
     return t ? JSON.parse(t) : null;
@@ -322,6 +324,61 @@ async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
     } catch (e) { sum.errors.push({ clubProvision: t.name, error: String(e.message || e) }); }
   }
 }
+// Discord paints a member's name with the colour of their HIGHEST colour-bearing role, and
+// POST /guilds/{id}/roles always creates a role at the BOTTOM of the list. So every club role
+// was created underneath Owner / General Manager / Assistant GM, and anyone holding a seat wore
+// the seat's colour instead of their club's. Sort the roles we manage into three tiers, lowest
+// first:
+//
+//     everything else we manage   <   club colours   <   league office
+//
+// A player therefore reads as their club, while Commissioner and Staff still read as the office.
+//
+// This only ever reuses positions ALREADY held by these roles — it permutes the band rather than
+// reaching for a higher slot. Discord refuses to move any role above the bot's own, and a
+// permutation can never ask for that, so this can't fail on hierarchy no matter where the bot sits.
+// Runs every sync, so a club role created a minute ago is in the right place on the next tick.
+async function ensureRoleOrder(guildRoles, teams, roleId, sum) {
+  const byId = new Map(guildRoles.map((r) => [r.id, r]));
+  // @everyone shares the guild id and integration-managed roles can't be moved at all
+  const movable = (id) => { const r = byId.get(id); return !!r && r.id !== GUILD && !r.managed; };
+  const uniq = (a) => [...new Set(a.filter(Boolean))];
+  const idsOf = (names) => uniq(names.map((n) => roleId[String(n).toLowerCase()]));
+
+  const office = idsOf(["commissioner", "staff"]).filter(movable);
+  const club = uniq(teams.map((t) => t.discord_role_id)).filter(movable);
+  const rest = uniq([
+    ...idsOf(["owner", "general manager", "assistant general manager", "player", "free agent",
+              "not signed up", "center", "left wing", "right wing", "left defense", "right defense", "goalie"]),
+    ...STAFF_DEPARTMENTS.map((d) => roleId[String(d.role).toLowerCase()]),
+  ]).filter((id) => movable(id) && !club.includes(id) && !office.includes(id));
+
+  const tiers = [rest, club, office];
+  const all = tiers.flat();
+  if (!club.length || all.length < 2) return;
+
+  const slots = all.map((id) => byId.get(id).position).sort((a, b) => a - b);
+  const byPos = (a, b) => byId.get(a).position - byId.get(b).position;  // keep each tier's own order
+  const ordered = tiers.flatMap((t) => t.slice().sort(byPos));
+  const moves = ordered.map((id, i) => ({ id, position: slots[i] }))
+                       .filter((m) => byId.get(m.id).position !== m.position);
+
+  if (moves.length) {
+    const res = await dApi("PATCH", `/guilds/${GUILD}/roles`, moves);
+    if (Array.isArray(res)) for (const r of res) { const cur = byId.get(r.id); if (cur) cur.position = r.position; }
+    sum.roleOrderMoved = moves.length;
+  }
+  // The ?diag= endpoints can't be reached (Netlify refuses public HTTP on a scheduled function),
+  // so leave the resulting order somewhere readable for whoever debugs the next colour complaint.
+  try {
+    await sbUpsertCfg("discord_role_order", JSON.stringify({
+      tiers: "other < club < office",
+      moved: moves.length,
+      order: ordered.map((id) => `${byId.get(id).position}:${byId.get(id).name}`),
+    }));
+  } catch (e) { /* observability only — never fail the sync over it */ }
+}
+
 async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) {
   const commish = roleId["commissioner"], staff = roleId["staff"];
   if (!commish || !staff) return; // office roles not provisioned yet — next run
@@ -1007,6 +1064,8 @@ export default async (req) => {
   /* after the Team Rooms category is in place: give any club still missing a role or room one
      (a club created by an approved owner application arrives with neither) */
   try { await ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ clubRooms: String(e.message || e) }); }
+  /* club colours above the front-office seats, so a player's name shows their club */
+  try { await ensureRoleOrder(guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ roleOrder: String(e.message || e) }); }
 
   const managedIds = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);

@@ -74,11 +74,15 @@ async function dApi(method, path, body) {
     });
     if (r.status === 404) return { __notfound: true };
     if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
+    // Discord's own 5xx is routine and transient — GET /members in particular throws one every
+    // so often — and only 429 was being retried, so a single blip aborted the whole sweep and
+    // reported itself as a fatal automation failure. Back off and try again instead.
+    if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
     if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
     const t = await r.text();
     return t ? JSON.parse(t) : null;
   }
-  throw new Error(`${method} ${path} -> rate-limited after retries`);
+  throw new Error(`${method} ${path} -> gave up after retries (rate limit or Discord 5xx)`);
 }
 
 // Page through the full guild member list (1000 at a time, ordered by user id).

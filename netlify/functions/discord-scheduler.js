@@ -154,14 +154,25 @@ function lfgDraftView(lobby) {
     color: LFG_BRAND, footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` } }],
     components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }] };
 }
+/* Had no retry at all, so a rate limit or a transient Discord 5xx mid-lobby left a filled pickup
+   game without its draft thread. Same handling as the other callers now. */
 async function lfgDApi(method, path, body) {
-  const r = await fetch(`https://discord.com/api/v10${path}`, {
-    method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
-  const t = await r.text(); return t ? JSON.parse(t) : null;
+  for (let i = 0; i < 4; i++) {
+    const r = await fetch(`https://discord.com/api/v10${path}`, {
+      method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (r.status === 404) return null;
+    if (r.status === 429) {
+      const j = await r.json().catch(() => ({}));
+      await new Promise((s) => setTimeout(s, ((+j.retry_after || 1) + 0.25) * 1000));
+      continue;
+    }
+    if (r.status >= 500) { await new Promise((s) => setTimeout(s, 600 * (i + 1))); continue; }
+    if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
+    const t = await r.text(); return t ? JSON.parse(t) : null;
+  }
+  throw new Error(`${method} ${path} -> gave up after retries (rate limit or Discord 5xx)`);
 }
 async function lfgPatchLobby(id, body) {
   await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(), body: JSON.stringify(body) }).catch(() => {});
@@ -259,6 +270,8 @@ async function rulesApi(method, p, body, tries = 5) {
       await new Promise((s) => setTimeout(s, ((+j.retry_after || 1) + 0.25) * 1000));
       continue;
     }
+    // A Discord-side 5xx is transient. Only 429 was retried, so one blip aborted the run.
+    if (r.status >= 500) { await new Promise((s) => setTimeout(s, 600 * (i + 1))); continue; }
     if (!r.ok) throw new Error(`${method} ${p} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
     return r.status === 204 ? null : r.json();
   }
