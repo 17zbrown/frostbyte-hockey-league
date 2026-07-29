@@ -183,6 +183,11 @@ CG.deskReviewBoard = function(){
       '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+esc(chip)+'</span>'+
       '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(title)+'</b>'+
         '<span class="caption">'+sub+'</span></span>'+
+      /* an owner application with no club chosen would approve into nothing — flag it in the
+         queue so a reviewer sees it before casting the vote that decides it */
+      (isOwner ? (a.awarded_club
+        ? '<span class="chip chip-chrome chip-xs">'+esc(a.awarded_club)+'</span>'
+        : '<span class="chip chip-warn chip-xs">no club chosen</span>') : "")+
       (waiting ? '<span class="chip chip-warn chip-xs">your ballot</span>' : '<span class="chip chip-win chip-xs">you voted</span>')+
       '<span class="caption">'+yes+' approve · '+(vb.length-yes)+' deny · '+vb.length+'/'+reviewers.length+'</span>'+
       '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+

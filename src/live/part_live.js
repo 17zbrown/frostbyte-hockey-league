@@ -2028,6 +2028,80 @@ CG.franchiseOptions = function(selected){
     return '<option value="'+esc(name)+'"'+(selected===name?" selected":"")+'>'+esc(name)+(taken?" · already an active club":"")+'</option>';
   }).join("");
 };
+/* ---------------------------------------------------------------- *
+ * Which of the three the review board is awarding.
+ *
+ * The league used to take the first pick that happened to be free. That made the
+ * ranking do the deciding and gave the reviewers no say, so the choice is theirs
+ * now: one of the three, recorded on the application, created on approval. Nothing
+ * is pre-selected on purpose — approving with no choice creates no club and tells
+ * the commissioners, which is honest, where quietly substituting a different club
+ * was not.
+ * ---------------------------------------------------------------- */
+CG.ownerAppClubStatus = function(name){
+  var code = CG.activeFranchiseSet()[name];
+  var team = code ? (CG.TEAMS||[]).find(function(t){ return t.code===code; }) : null;
+  if (team && team.owner) return { ok:false, chip:'<span class="chip chip-loss chip-xs">Already has an owner</span>' };
+  if (team)               return { ok:true,  chip:'<span class="chip chip-win chip-xs">Club is open</span>' };
+  if (CG.NHL_FRANCHISES.indexOf(name) >= 0)
+                          return { ok:true,  chip:'<span class="chip chip-chrome chip-xs">Would be founded</span>' };
+  return { ok:false, chip:'<span class="chip chip-warn chip-xs">Not a franchise we know</span>' };
+};
+CG.ownerAppClubPicker = function(a){
+  var picks = [a.preferred_club, a.franchise_2, a.franchise_3].filter(Boolean);
+  if (!picks.length) return "";
+  var me      = CG.auth && CG.auth.user && CG.auth.user.id;
+  /* the RPC refuses a reviewer acting on their own application, so don't offer the buttons */
+  var mine    = !!(me && a.profile_id === me) && CG.role() !== "commish";
+  var may     = (CG.isAppReviewer() || CG.role()==="commish") && !mine;
+  var awarded = a.awarded_club || "";
+  var placed  = (CG.TEAMS||[]).some(function(t){ return t.owner === a.profile_id; });
+  var closed  = a.status==="denied" || a.status==="withdrawn";
+  var live    = may && !closed && !placed;
+
+  var head = placed  ? '<span class="chip chip-win chip-xs">Club handed over</span>'
+           : closed  ? '<span class="chip chip-xs">Not awarded</span>'
+           : awarded ? '<span class="chip chip-chrome chip-xs">'+esc(awarded)+'</span>'
+                     : '<span class="chip chip-warn chip-xs">No choice yet</span>';
+
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Club to award</h3>'+head+'</div><div class="card-b">';
+
+  if (placed){
+    h += '<p class="caption" style="margin-bottom:12px">This owner already has their club. Front-office changes are made in the club’s Team HQ from here on.</p>';
+  } else if (closed){
+    /* past tense — a denied application's award will never be acted on */
+    h += '<p class="caption" style="margin-bottom:12px">This application was '+esc(a.status)+
+         ', so no club was created'+(awarded?' — the <b>'+esc(awarded)+'</b> were only ever pencilled in':"")+'.</p>';
+  } else if (!awarded && a.status==="approved"){
+    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)"><b>Approved with no club chosen.</b> '+
+         'Pick one below and it is created and handed over straight away.</p>';
+  } else if (!awarded){
+    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)"><b>Nobody has chosen yet.</b> '+
+         'If the vote passes now, no club is created — the league office picks one afterwards.</p>';
+  } else {
+    h += '<p class="caption" style="margin-bottom:12px">The <b>'+esc(awarded)+'</b> '+
+         (a.status==="approved" ? 'were awarded to this applicant.' : 'will be created and handed over the moment this is approved.')+'</p>';
+  }
+
+  h += '<div class="stack" style="gap:8px">'+picks.map(function(name, i){
+    var st = CG.ownerAppClubStatus(name), on = (awarded.toLowerCase() === name.toLowerCase());
+    return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 0'+(i?';border-top:1px solid var(--line-soft)':"")+'">'+
+      '<span class="chip chip-xs" style="flex:none">'+["1st","2nd","3rd"][i]+'</span>'+
+      '<b class="fx-txt" style="font-family:var(--f-disp);font-size:14px;flex:1;min-width:120px">'+esc(name)+'</b>'+
+      st.chip+
+      (live
+        ? (on ? '<button class="btn btn-ghost btn-sm" data-club-award="" data-app="'+esc(a.id)+'" style="flex:none">Clear</button>'
+              : '<button class="btn btn-chrome btn-sm" data-club-award="'+esc(name)+'" data-app="'+esc(a.id)+'" style="flex:none">'+
+                (st.ok ? "Award this club" : "Award anyway")+'</button>')
+        : (on ? '<span class="chip chip-win chip-xs" style="flex:none">Chosen</span>' : ""))+
+      '</div>';
+  }).join("")+'</div>';
+
+  if (live) h += '<p class="caption" style="margin-top:12px">Any Applications reviewer can set this, and change it until the application is decided.</p>';
+  else if (mine) h += '<p class="caption" style="margin-top:12px">This is your own application — another reviewer has to choose your club.</p>';
+  else if (!may) h += '<p class="caption" style="margin-top:12px">Only the Applications review board can choose the club.</p>';
+  return h + '</div></div>';
+};
 /* review-card line: the ranked franchise choices, flagging any already taken */
 CG.franchisePicksLine = function(a){
   var active = CG.activeFranchiseSet();
@@ -5749,6 +5823,8 @@ CG.hubApplicationDetail = function(id, type){
     (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">'+(isMgmt?"The owner’s case":"Their pitch")+'</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
     '</div></div>';
 
+  /* which club they're getting is decided before the vote lands — the approval acts on it */
+  if (isOwner) h += CG.ownerAppClubPicker(a);
   /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
   h += CG.appChatSection(type, a.id, {office:true});
   /* the reviewer vote IS the decision — no manual approve/deny */
@@ -5756,6 +5832,24 @@ CG.hubApplicationDetail = function(id, type){
   return h;
 };
 CG.AFTER._applicationDetail = function(){
+  /* the review board's club choice. Awarding after an approval places the owner on the
+     spot, so the toast reports what the server actually did rather than assuming. */
+  document.querySelectorAll("[data-club-award]").forEach(function(b){ b.addEventListener("click", function(){
+    var club = this.getAttribute("data-club-award") || null, id = this.getAttribute("data-app");
+    var all = document.querySelectorAll("[data-club-award]");
+    all.forEach(function(x){ x.disabled = true; });
+    CG.sb.rpc("set_owner_app_club", { p_id:id, p_club:club }).then(function(r){
+      if (r.error){
+        all.forEach(function(x){ x.disabled = false; });
+        CG.toast(r.error.message || "Couldn’t set the club","err"); return;
+      }
+      /* the RPC saves the choice even when it can't create the club — report which of the
+         two actually happened rather than painting every non-error green */
+      var d = r.data || {};
+      CG.toast(d.message || (club ? "Club chosen" : "Choice cleared"), d.ok === false ? "err" : "ok");
+      CG.reloadLeague();   /* a placement changes the club list, not just this row */
+    });
+  }); });
   /* commissioner override — decide immediately, bypassing the reviewer vote */
   document.querySelectorAll("[data-app-override]").forEach(function(b){ b.addEventListener("click", function(){
     var approve = this.getAttribute("data-app-override")==="approve";
