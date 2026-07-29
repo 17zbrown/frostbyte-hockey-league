@@ -603,6 +603,46 @@ export default async (req) => {
         staffChannels: report,
       }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
+
+    // Who can actually read each club's room. A club room is for THAT club plus the league
+    // office — an Owner/GM/AGM role allow would open every club's room to every club's front
+    // office, which is a scouting leak rather than a permission subtlety. Read-only; names only.
+    if (BOT && GUILD && diagMode === "teamrooms") {
+      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+      const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
+      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+      const teams = await sbGet("teams?select=code,name,discord_role_id,discord_channel_id");
+      const seatNames = ["owner", "general manager", "assistant general manager"];
+      const seatIds = roles.filter((r) => seatNames.includes((r.name || "").toLowerCase())).map((r) => r.id);
+      const report = teams.map((t) => {
+        const c = t.discord_channel_id && chans.find((x) => x.id === t.discord_channel_id);
+        if (!c) return { club: t.code, room: null, provisioned: false };
+        const ow = c.permission_overwrites || [];
+        const ev = ow.find((o) => o.id === GUILD);
+        const viewers = ow.filter((o) => (BigInt(o.allow || "0") & 1024n) === 1024n);
+        return {
+          club: t.code, room: "#" + c.name, provisioned: true,
+          hiddenFromEveryone: !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n,
+          clubRoleCanView: viewers.some((o) => o.id === t.discord_role_id),
+          canView: viewers.map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
+          // the whole point of this check: seat roles must NOT appear above
+          seatRolesWithAccess: viewers.filter((o) => seatIds.includes(o.id)).map((o) => byId[o.id]),
+        };
+      });
+      const leaking = report.filter((r) => (r.seatRolesWithAccess || []).length);
+      const catsWithSeats = chans.filter((c) => c.type === 4 && /^team rooms$/i.test(c.name || ""))
+        .map((c) => ({ category: c.name,
+          seatRolesWithAccess: (c.permission_overwrites || [])
+            .filter((o) => seatIds.includes(o.id) && (BigInt(o.allow || "0") & 1024n) === 1024n)
+            .map((o) => byId[o.id]) }));
+      return new Response(JSON.stringify({
+        verdict: leaking.length
+          ? `${leaking.length} club room(s) still grant a seat role — every front office can read them`
+          : "clean — each club room is visible to its own club plus the league office only",
+        teamRooms: report,
+        teamRoomsCategory: catsWithSeats,
+      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
+    }
   } catch (e) { return new Response(JSON.stringify({ diagError: String(e.message || e) }), { status: 500, headers: { "content-type": "application/json" } }); }
 
   if (!SB_URL || !SB_KEY || !BOT || !GUILD) {
