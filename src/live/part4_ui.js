@@ -48,10 +48,16 @@ CG.fmtFull = function(ts){ return CG.fmtDay(ts)+" · "+CG.fmtTime(ts); };
    UTC midnight, which renders as the PREVIOUS day in ET. Format those verbatim; only real
    timestamps get converted to league time. */
 CG.fmtDate = function(iso){
+  /* Accepts a calendar string ("2026-10-07"), an ISO timestamp, a millisecond number, or a
+     Date — and never throws. The last line used to Date.parse() its input unconditionally, so
+     a numeric timestamp became NaN and Intl threw "Invalid time value" — which is how the
+     public schedule page died for every visitor while the slate was empty. */
   var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||""));
   if (m) return new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric"})
     .format(new Date(+m[1], +m[2]-1, +m[3]));
-  return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",year:"numeric"}).format(Date.parse(iso));
+  var t = (typeof iso === "number") ? iso : (iso instanceof Date ? iso.getTime() : Date.parse(iso));
+  if (!isFinite(t)) return "";
+  return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",year:"numeric"}).format(t);
 };
 
 /* ---------- league boot (sim + user-entered results overlay) ---------- */
