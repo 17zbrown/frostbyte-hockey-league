@@ -5217,7 +5217,12 @@ CG.staffAttentionCard = function(){
       pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
       pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
       active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
-      unmatched_ea:null, finals_missing_stats:null };
+      unmatched_ea:null, finals_missing_stats:null,
+      /* votes the office has already loaded for the desk — open, and still short a ballot */
+      votes_awaiting_ballots:((CG._staffExtras&&CG._staffExtras.votes)||[]).filter(function(v){
+        var cast = Object.keys(v.tally||{}).reduce(function(s,k){ return s+(v.tally[k]||0); },0);
+        return v.status==="open" && cast < (v.eligibleCount||0);
+      }).length };
   }
   var n = function(v){ return (v==null?0:(v|0)); };
   var apps = n(a.pending_staff_apps)+n(a.pending_owner_apps);
@@ -5226,13 +5231,14 @@ CG.staffAttentionCard = function(){
       (a.oldest_case_hours!=null?" · oldest "+(a.oldest_case_hours>=24?Math.round(a.oldest_case_hours/24)+"d":a.oldest_case_hours+"h"):""),
       go:"#/hub/complaints", warn:n(a.sla_breached)>0 });
   if (apps>0) items.push({ label:apps+" application"+(apps===1?"":"s")+" to review", go:"#/hub/staffdesk", warn:false });
+  if (n(a.votes_awaiting_ballots)>0) items.push({ label:n(a.votes_awaiting_ballots)+" staff vote"+(n(a.votes_awaiting_ballots)===1?"":"s")+" awaiting your ballot", go:"#/hub/staffdesk", warn:false });
   if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
   if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
   if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
 
   if (!items.length){
     return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
-      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, or imports need attention right now.</span></div>';
+      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, votes, or imports need attention right now.</span></div>';
   }
   return '<div class="card" style="margin-bottom:20px;border-color:var(--chrome)"><div class="card-h" style="background:var(--chrome-tint)">'+
     '<h3>'+CG.ic("flag",15)+' Needs attention</h3>'+
