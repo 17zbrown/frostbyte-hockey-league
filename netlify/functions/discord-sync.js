@@ -241,8 +241,11 @@ const STAFF_DEPARTMENTS = [
    it's a no-op for clubs that already have both. */
 async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
   const teamRoomsCat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team rooms");
-  const office = ["owner", "general manager", "assistant general manager", "commissioner", "staff"]
-    .map((n) => roleId[n]).filter(Boolean);
+  // A club room is for THAT club plus the league office — and the office is Commissioner + Staff
+  // ONLY. The seat roles (Owner / General Manager / Assistant GM) are worn by every club's front
+  // office at once, so granting them here would have handed all five front offices a key to all
+  // five rooms. A club's own management reaches its room through the club role they already wear.
+  const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
   for (const t of teams) {
     if (t.discord_role_id && t.discord_channel_id) continue;   // already provisioned
     try {
@@ -468,7 +471,9 @@ export default async (req) => {
       }
 
       // provision a role + private text room (no voice) for any current club missing one
-      const office = ["owner", "general manager", "assistant general manager", "commissioner", "staff"].map((n) => roleIdByName[n]).filter(Boolean);
+      // Commissioner + Staff only — the seat roles are worn across every club, so putting them on
+      // one club's room opens it to all five front offices (same rule as ensureClubRooms).
+      const office = ["commissioner", "staff"].map((n) => roleIdByName[n]).filter(Boolean);
       for (const t of teams) {
         try {
           let trole = t.discord_role_id;
@@ -744,10 +749,18 @@ export default async (req) => {
     } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
   }
 
-  // Team channels self-heal the same way: private to the club + the league office. The club-role
-  // allow goes in the SAME pass as the @everyone deny (never deny first and stop — the club would
-  // lose sight of its own room), and the fast-path also verifies the club allow still exists.
+  // Team channels self-heal the same way: private to the club + the league office (Commissioner +
+  // Staff). The club-role allow goes in the SAME pass as the @everyone deny (never deny first and
+  // stop — the club would lose sight of its own room).
+  //
+  // The fast-path checks FOUR things, not two. Checking only "hidden + club can view" let two
+  // real faults survive indefinitely, because a room that was hidden with its club allowed was
+  // never looked at again: #hurricanes and #maple-leafs sat without Staff access, and #penguins
+  // kept the Owner/GM/AGM allows its creation pass had added — which let every club's front
+  // office read another club's room.
   const staffRoleIds = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
+  // Seat roles are worn across clubs, so they must never appear on a single club's room.
+  const seatRoleIds = ["owner", "general manager", "assistant general manager"].map((n) => roleId[n]).filter(Boolean);
   for (const t of teams) {
     if (!t.discord_channel_id || !t.discord_role_id) continue;
     const chan = guildChannels.find((c) => c.id === t.discord_channel_id);
@@ -757,10 +770,22 @@ export default async (req) => {
     const clubAllow = ow.find((o) => o.id === t.discord_role_id);
     const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
     const clubOk = clubAllow && (BigInt(clubAllow.allow || "0") & 1024n) === 1024n;
-    if (hidden && clubOk) continue;
+    const officeOk = staffRoleIds.every((rid) => {
+      const o = ow.find((x) => x.id === rid);
+      return o && (BigInt(o.allow || "0") & 1024n) === 1024n;
+    });
+    // any seat-role overwrite at all, granting or not — none belongs on a club room
+    const strays = ow.filter((o) => seatRoleIds.includes(o.id));
+    if (hidden && clubOk && officeOk && !strays.length) continue;
     try {
       await dApi("PUT", `/channels/${chan.id}/permissions/${t.discord_role_id}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
       for (const rid of staffRoleIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+      // remove the cross-club seat roles only — a member-specific overwrite or the bot's own
+      // integration role is somebody's deliberate choice and is left exactly as it is
+      for (const o of strays) {
+        await dApi("DELETE", `/channels/${chan.id}/permissions/${o.id}`);
+        sum.teamSeatRolesRemoved = (sum.teamSeatRolesRemoved || 0) + 1;
+      }
       await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
       sum.teamLocked = (sum.teamLocked || 0) + 1;
     } catch (e) { sum.errors.push({ lockChannel: t.name, error: String(e.message || e) }); }
