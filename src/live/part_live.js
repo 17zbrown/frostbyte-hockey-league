@@ -117,7 +117,18 @@ CG.buildLiveLeague = async function(){
        passing season_number as orderCol would demote it below round and invert the sort */
     CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",null,true,
       function(qb){ return qb.order("season_number").order("round"); }),
-    CG.sbAll("season_registrations","id,profile_id,season_id,status,position,scout_ovr,created_at, profiles(gamertag,ea_id)","id"),
+    /* The registration BOARD is public record, read through a SECURITY DEFINER pool. Reading the
+       table directly here meant RLS silently hid everyone else's rows from members and guests, so
+       every public surface undercounted the sign-ups — the directory called 46 of 47 registered
+       members "Not signed up". Notes and scouting marks stay staff-only; staff and commissioners
+       reload the full table (with scout_ovr) after auth exactly as before. */
+    CG.sb.rpc("registration_pool").then(function(r){
+      return { data: (r.data||[]).map(function(x){
+        return { id:x.id, profile_id:x.profile_id, season_id:x.season_id, status:x.status,
+                 position:x.position, scout_ovr:null, created_at:x.created_at,
+                 profiles:{ gamertag:x.gamertag, ea_id:x.ea_id } };
+      }), error:r.error };
+    }),
     sb.from("leagues").select("*").order("sort_order"),
     CG.sbAll("game_stats","*","id"),
     sb.from("feature_flags").select("key,enabled"),
@@ -125,9 +136,11 @@ CG.buildLiveLeague = async function(){
     CG.sbAll("suspensions","*","created_at",false),
     CG.sbAll("awards","*","week")
   ]);
-  /* first 9 are public-readable and required; draft_picks + season_registrations
-     (9,10) are manager-gated by RLS and fail for guests — optional here, reloaded
-     after auth for managers. leagues (11) + game_stats (12) are public but non-fatal. */
+  /* first 9 are public-readable and required; draft_picks (9) is manager-gated by
+     RLS and fails for guests — optional here, reloaded after auth for managers.
+     season_registrations (10) now arrives via the public registration_pool RPC so
+     every viewer sees the true board. leagues (11) + game_stats (12) are public
+     but non-fatal. */
   var bad = q.slice(0,9).find(function(r){ return r.error; });
   if (bad) throw new Error(bad.error.message || "query failed");
   CG._seasonsRaw = (q[2].data||[]);
@@ -596,6 +609,10 @@ CG.buildLiveLeague = async function(){
   lg._contractsRaw = contracts;
   /* current season only — a spot in a past season must not block this season's pool */
   lg._rosteredIds = {}; roster.forEach(function(rs){ if(!seasonId || rs.season_id===seasonId) lg._rosteredIds[rs.profile_id] = true; });
+  /* the pool rows feed poolState/appReviewers-style consumers via _registrationsRaw too —
+     before, that was only set in the post-auth manager reload, so guests and members always
+     saw an undefined board (every directory chip read "Not signed up") */
+  lg._registrationsRaw = registrations;
   CG.mapDraftData(lg, draftPicks, registrations);
 
   CG.LIVE.loaded = true;
@@ -3605,6 +3622,7 @@ CG.admUsersLive = function(){
         '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
         '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<button class="btn btn-ghost btn-sm" data-uedit="'+pr.id+'">Edit</button>'+
           (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
               :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
           (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
@@ -3699,7 +3717,58 @@ CG.unbanUser = function(profileId){
     CG.toast("Member unbanned","ok"); CG.router();
   });
 };
+/* Full profile editor — every identity field the office might need to correct.
+   Saved with .select() so an RLS-blocked write fails loud instead of toasting
+   success over nothing (the case-system lesson). */
+CG.userEditModal = function(id){
+  var pr = (CG.lg._profilesRaw||[]).find(function(p){ return p.id===id; });
+  if (!pr){ CG.toast("Profile not found — reload and try again","err"); return; }
+  var nm = pr.gamertag||pr.display_name||"member";
+  function fld(label,fid,val,attrs){ return '<label class="fld"><span>'+label+'</span><input id="'+fid+'" value="'+esc(val==null?"":val)+'" '+(attrs||"")+'></label>'; }
+  CG.modal("Edit player — "+esc(nm),
+    '<div class="grid g2" style="gap:12px">'+
+    fld("Gamertag","ueGT",pr.gamertag)+
+    fld("Display name","ueDN",pr.display_name)+
+    fld("EA gamertag (exact)","ueEA",pr.ea_id,'placeholder="as it appears in NHL"')+
+    '<label class="fld"><span>Platform</span><select id="uePlat">'+
+      ["","PlayStation 5","Xbox Series X|S","PC"].map(function(p){ return '<option value="'+esc(p)+'"'+((pr.platform||"")===p?" selected":"")+'>'+(p||"—")+'</option>'; }).join("")+
+      '</select></label>'+
+    fld("Time zone","ueTZ",pr.timezone,'placeholder="e.g. Eastern"')+
+    fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
+    fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
+    fld("Twitch channel","ueTw",pr.twitch,'placeholder="channel name only"')+
+    '</div>'+
+    '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ueGo">Save player</button>');
+  document.getElementById("ueGo").addEventListener("click", function(){
+    var jer = parseInt(document.getElementById("ueJer").value,10);
+    var ovr = parseInt(document.getElementById("ueOvr").value,10);
+    var payload = {
+      gamertag:(document.getElementById("ueGT").value||"").trim()||null,
+      display_name:(document.getElementById("ueDN").value||"").trim()||null,
+      ea_id:(document.getElementById("ueEA").value||"").trim()||null,
+      platform:document.getElementById("uePlat").value||null,
+      timezone:(document.getElementById("ueTZ").value||"").trim()||null,
+      jersey_number:isNaN(jer)?null:Math.max(1,Math.min(99,jer)),
+      overall:isNaN(ovr)?null:Math.max(40,Math.min(99,ovr)),
+      twitch:(document.getElementById("ueTw").value||"").trim()||null
+    };
+    if (!payload.gamertag){ CG.toast("A player needs a gamertag","err"); return; }
+    var btn=this; btn.disabled=true;
+    CG.sb.from("profiles").update(payload).eq("id",id).select("id").then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (!r.data || !r.data.length){ CG.toast("The database refused the edit (no row updated) — check your seat and retry","err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast("Player saved","ok");
+      CG.reloadLeague();
+    });
+  });
+};
 CG.AFTER._admUsers = function(){
+  document.querySelectorAll("[data-uedit]").forEach(function(b){
+    b.addEventListener("click", function(){ CG.userEditModal(this.getAttribute("data-uedit")); });
+  });
   var search=document.getElementById("userSearch"), bannedBtn=document.getElementById("bannedToggle");
   function applyFilter(){
     var qy=(search&&search.value||"").toLowerCase();
@@ -4417,11 +4486,24 @@ CG.actionCard = function(a, review){
   var aboutName = (a.target_profile && a.target_profile.gamertag) || a.target;
   if (aboutName) metaBits.push("About: "+esc(aboutName));
   metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
+  var isPos = a.type==="position_change";
+  var posLine = isPos ? (a.current_position||"?")+" → "+(a.requested_position||"?") : "";
   var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
       '<b style="font-family:var(--f-disp)">'+esc(meta.label)+'</b>'+CG.actionStatusChip(a.status)+
       (review?'<span class="caption">filed by <b>'+esc((a.profiles&&a.profiles.gamertag)||"member")+'</b></span>':"")+
       '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>';
+  /* the request itself gets a proper banner — it was buried as fine print in the meta row, and
+     nothing on the card could actually APPLY the switch */
+  if (isPos){
+    h += '<div class="note chr" style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+      '<b style="font-family:var(--f-disp)">Requested switch</b>'+
+      '<span class="chip chip-chrome">'+esc(a.current_position||"?")+'</span><span aria-hidden="true">→</span>'+
+      '<span class="chip chip-win">'+esc(a.requested_position||"?")+'</span>'+
+      (a.status==="resolved"?'<span class="caption">applied to their registration</span>'
+        :a.status==="denied"?'<span class="caption">denied — registration unchanged</span>'
+        :'<span class="caption">approving applies it to their registration instantly</span>')+'</div>';
+  }
   /* one-owner assignment (staff/commish) */
   if (review){
     var who = a.assigned_to ? (names[a.assigned_to]||"a colleague") : null;
@@ -4459,10 +4541,18 @@ CG.actionCard = function(a, review){
     h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
       (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
       (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
+      /* a position change is decided, not merely closed: Approve applies the switch to the
+         registration through decide_position_change; the generic Resolve/Deny (which changed
+         nothing but the status) and the discipline tools stay off this card type */
+      (isPos && !closed
+        ? '<button class="btn btn-chrome btn-sm" data-pos-decide="approve" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Approve '+esc(posLine)+'</button>'+
+          '<button class="btn btn-ghost btn-sm" data-pos-decide="deny" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Deny request</button>'
+        : "")+
+      (isPos ? "" :
       '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'" data-target-id="'+esc(a.target_profile_id||"")+'">Issue discipline</button>'+
       '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
       (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':"")+
+        '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':""))+
       /* deletion is a commissioner-only power (RLS enforces it too); staff never see a Delete they can't use */
       (isCommish?'<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button>':"")+'</div>';
   } else if (conflicted){
@@ -4487,7 +4577,7 @@ CG.hubComplaintsLive = function(opts){
     else if (flt==="open") queue = queue.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
   }
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"League office")+'</h1>'+
+    '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"Action Center")+'</h1>'+
     '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
   h += '<div class="grid g2" style="margin-bottom:22px">'+Object.keys(CG.ACTION_META).map(function(k){
     var m = CG.ACTION_META[k];
@@ -4724,6 +4814,19 @@ CG.AFTER._complaintsLive = function(){
       if(r.error){ CG.toast(r.error.message||"Couldn’t release","err"); return; } CG.toast("Released back to the queue","ok"); CG.refreshActions(); }); }); });
   document.querySelectorAll("[data-case-discipline]").forEach(function(b){ b.addEventListener("click", function(){
     CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target"), this.getAttribute("data-target-id")||null); }); });
+  document.querySelectorAll("[data-pos-decide]").forEach(function(b){ b.addEventListener("click", function(){
+    var approve=this.getAttribute("data-pos-decide")==="approve", id=this.getAttribute("data-pos-id"), line=this.getAttribute("data-pos-line")||"the change";
+    CG.confirm(approve?"Approve this position change?":"Deny this position change?",
+      approve?"Their registration flips to the requested position ("+esc(line)+") and the case closes. The Discord position role follows on the next sync."
+             :"The registration stays as it is and the case closes as denied. They're notified either way.",
+      approve?"Approve the switch":"Deny the request", function(){
+        CG.sb.rpc("decide_position_change",{ p_request:id, p_approve:approve }).then(function(r){
+          if (r.error){ CG.toast(r.error.message||"Couldn’t decide the request","err"); return; }
+          CG.toast(approve?"Approved — their registration is updated":"Request denied","ok");
+          if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+        });
+      });
+  }); });
   document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
     CG.caseHistoryModal(this.getAttribute("data-target")); }); });
   document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
@@ -6656,6 +6759,9 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
     '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
     '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||60000000)/1e6)+'"></label>'+
+    '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?3000000:s.owner_salary))/1e6)+'"></label>'+
+    '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?3000000:s.gm_salary))/1e6)+'"></label>'+
+    '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?3000000:s.agm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||15)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
@@ -6723,6 +6829,11 @@ CG.seasonForm = function(id){
       preseason_starts_at:iso("ssPre"), free_agency_opens_at:iso("ssFaOpen"),
       free_agency_closes_at:iso("ssFaClose"), playoffs_start_at:iso("ssPlayoffs"),
       salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||15,
+      /* fixed management salaries — Owner/GM/AGM roster spots and contracts are pinned to
+         these three numbers by the database (protect_manager_spot) */
+      owner_salary:Math.round(parseFloat(document.getElementById("ssOwnSal").value||"3")*1e6),
+      gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"3")*1e6),
+      agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"3")*1e6),
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
       moves_lock_override:document.getElementById("ssMoves").value };
     var btn=this; btn.disabled=true;
@@ -6730,9 +6841,14 @@ CG.seasonForm = function(id){
     q.then(function(r){
       btn.disabled=false;
       if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(isNew?name+" created":"Season settings saved","ok");
-      CG.reloadLeague();
+      /* push the configured numbers onto every sitting Owner/GM/AGM immediately — otherwise
+         the new salaries would only take effect the next time a seat changed hands */
+      CG.sb.rpc("apply_mgmt_salaries").then(function(ar){
+        if (CG.closeOverlay) CG.closeOverlay();
+        if (ar.error) CG.toast("Season saved, but re-applying management salaries failed: "+ar.error.message,"err");
+        else CG.toast((isNew?name+" created":"Season settings saved")+" — management salaries applied to "+(((ar.data||{}).seats_synced)||0)+" seat(s)","ok");
+        CG.reloadLeague();
+      });
     });
   });
 };
@@ -7582,6 +7698,94 @@ CG.bootLive = async function(){
   if (!location.hash) location.hash = "#/home";
   CG.router();
 };
+
+/* ================================================================
+   PER-COLUMN TABLE FILTERS — every .tbl on the site gets a funnel
+   toggle in its last header cell; switching it on reveals a filter
+   row with one input per column. Matching is diacritic-folded
+   substring per cell; a row hides only when it fails a column that
+   actually has a value typed. Rows whose cell count doesn't match
+   the header (round separators, colspan notes) are never hidden.
+   A MutationObserver enhances tables from EVERY render path — the
+   router, async loaders, modals — so nothing needs per-view wiring.
+   Opt out with data-nofilter on the table.
+   ================================================================ */
+CG.tableFilters = function(root){
+  var fold = function(s){ s=String(s==null?"":s); try{ s=s.normalize("NFKD"); }catch(e){} return s.replace(/[̀-ͯ]/g,"").toLowerCase(); };
+  ((root||document).querySelectorAll ? (root||document) : document).querySelectorAll("table.tbl:not([data-tf])").forEach(function(tbl){
+    if (tbl.hasAttribute("data-nofilter")) { tbl.setAttribute("data-tf","skip"); return; }
+    var thead = tbl.tHead, body = tbl.tBodies && tbl.tBodies[0];
+    if (!thead || !thead.rows.length || !body || body.rows.length < 2){ tbl.setAttribute("data-tf","skip"); return; }
+    var hrow = thead.rows[0], nCols = 0;
+    for (var i=0;i<hrow.cells.length;i++) nCols += hrow.cells[i].colSpan || 1;
+    if (hrow.cells.length < 2){ tbl.setAttribute("data-tf","skip"); return; }
+    tbl.setAttribute("data-tf","1");
+
+    var lastTh = hrow.cells[hrow.cells.length-1];
+    var btn = document.createElement("button");
+    btn.className = "tbl-fbtn"; btn.type = "button";
+    btn.setAttribute("aria-label","Filter this table by column");
+    btn.setAttribute("aria-expanded","false");
+    btn.setAttribute("data-tip","Filter by column");
+    btn.textContent = "⌕";
+    lastTh.appendChild(btn);
+
+    var frow = null;
+    function ensureRow(){
+      if (frow) return frow;
+      frow = thead.insertRow(-1);
+      frow.className = "tbl-filter";
+      for (var c=0;c<hrow.cells.length;c++){
+        var th = document.createElement("th");
+        th.colSpan = hrow.cells[c].colSpan || 1;
+        var name = (hrow.cells[c].textContent||"").replace(/[⌕↑↓]/g,"").trim() || ("column "+(c+1));
+        var inp = document.createElement("input");
+        inp.type = "search"; inp.placeholder = "filter…";
+        inp.setAttribute("aria-label","Filter by "+name);
+        inp.setAttribute("data-fcol", String(c));
+        th.appendChild(inp);
+        frow.appendChild(th);
+      }
+      frow.addEventListener("input", apply);
+      return frow;
+    }
+    function apply(){
+      var wants = [];
+      if (frow) frow.querySelectorAll("input").forEach(function(inp){
+        var v = fold(inp.value.trim());
+        if (v) wants.push({ col:+inp.getAttribute("data-fcol"), v:v });
+      });
+      for (var r=0;r<body.rows.length;r++){
+        var row = body.rows[r], show = true;
+        if (wants.length && row.cells.length === hrow.cells.length){
+          for (var w=0;w<wants.length;w++){
+            var cell = row.cells[wants[w].col];
+            if (cell && fold(cell.textContent).indexOf(wants[w].v) < 0){ show = false; break; }
+          }
+        }
+        /* respect other filter systems (e.g. the Users search) — only take a row back if
+           we hid it ourselves */
+        if (!show){ row.style.display = "none"; row.setAttribute("data-tf-hidden","1"); }
+        else if (row.getAttribute("data-tf-hidden")){ row.style.display = ""; row.removeAttribute("data-tf-hidden"); }
+      }
+    }
+    btn.addEventListener("click", function(){
+      var open = btn.getAttribute("aria-expanded")==="true";
+      btn.setAttribute("aria-expanded", String(!open));
+      btn.classList.toggle("on", !open);
+      if (!open){ ensureRow().style.display = ""; var f=frow.querySelector("input"); if (f) f.focus(); }
+      else if (frow){ frow.style.display = "none"; frow.querySelectorAll("input").forEach(function(i){ i.value=""; }); apply(); }
+    });
+  });
+};
+(function(){
+  var pending = null;
+  var kick = function(){ pending = null; try{ CG.tableFilters(document); }catch(e){} };
+  var mo = new MutationObserver(function(){ if (!pending) pending = setTimeout(kick, 120); });
+  var start = function(){ mo.observe(document.body, { childList:true, subtree:true }); kick(); };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
 
 if (document.readyState === "loading")
   document.addEventListener("DOMContentLoaded", function(){ CG.bootLive(); });

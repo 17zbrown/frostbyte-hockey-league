@@ -97,7 +97,7 @@ CG.hubNav = function(section){
      under "Team HQ" (complaints is a player tool, so it stays out of Team HQ) */
   var mine = [["", "Dashboard", "home"]];
   if (CG.can("availability.submit")) mine.push(["availability","Availability","cal"]);
-  if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", r==="staff"?"Case queue":"Complaints","flag"]);
+  if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", r==="staff"?"Case queue":"Action Center","flag"]);
   /* Messages lives in the account menu (avatar), not the hub sidebar */
   if (r==="staff" && !CG.LIVE_MODE) mine.push(["statsentry","Stats entry","chart"]);
   mine.push(["notifications","Notifications","bell"]);

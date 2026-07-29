@@ -354,6 +354,15 @@ function applyServer(lobby, userId, idx) {
   return { view: doneView(lobby), status: "done", state: s };
 }
 
+/* ---------- the one sanctioned room ---------- */
+// The signup sheet lives in exactly ONE channel. Interactions carry a partial channel object
+// with its name, so the gate needs no config and no extra API call. The per-lobby rooms are
+// named pickup-<id> and can never equal "pickup-games", so /join and /leave are dead there —
+// and everywhere else — by construction. Fails closed: no channel name, no signup.
+const PICKUP_CHANNEL = "pickup-games";
+const inPickupChannel = (interaction) =>
+  String((interaction.channel && interaction.channel.name) || "").toLowerCase() === PICKUP_CHANNEL;
+
 /* ---------- component dispatch with CAS retry ---------- */
 const SIGNUP_ACTIONS = { join: 1, leave: 1 };
 const CLOSED_STATES = { cancelled: 1, done: 1, expired: 1, closed: 1 };
@@ -364,6 +373,11 @@ async function handleComponent(interaction) {
   const name = nameOf(interaction);
   const guildId = interaction.guild_id || "";
 
+  // Signup buttons only act in #pickup-games — a picker left open in another channel (or a
+  // forwarded message) must not mint a shadow lobby keyed to that channel.
+  if (SIGNUP_ACTIONS[action] && !inPickupChannel(interaction)) {
+    return ephemeral("Pickup signups live in **#pickup-games** — head there and run **/join**.");
+  }
   // Only players with a Chel Gaming website account may sign up. Checked before any lobby is touched.
   if (action === "join" && !(await sbHasAccount(userId))) {
     return ephemeral("You need a Chel Gaming account to join pickup games — sign in at **chelgamingleague.com** first (10 seconds with Discord), then run /join again.");
@@ -445,7 +459,14 @@ async function handleComponent(interaction) {
 /* ---------- slash commands ---------- */
 async function handleCommand(interaction) {
   const cmd = interaction.data.name || "";
-  if (cmd === "join" || cmd === "lfg") return handleJoin(interaction);   // /lfg kept as a legacy alias
+  if (cmd === "join" || cmd === "lfg") {                                 // /lfg kept as a legacy alias
+    if (!inPickupChannel(interaction)) return ephemeral("Pickup signups live in **#pickup-games** — run **/join** there.");
+    return handleJoin(interaction);
+  }
+  if (cmd === "leave") {
+    if (!inPickupChannel(interaction)) return ephemeral("**/leave** only works in **#pickup-games**, where the signup sheet lives. A full lobby that's moved to its own room can't be left — flag a staff member there instead.");
+    return handleLeaveCmd(interaction);
+  }
   if (cmd === "captain") return handleCaptain(interaction);
   return ephemeral("Unknown command.");
 }
@@ -456,6 +477,31 @@ async function handleJoin(interaction) {
   let state = { signups: [] };
   try { const lobby = await sbGetOpenLobby(channelId); if (lobby && lobby.state) state = lobby.state; } catch (e) {}
   return respond({ type: REPLY, data: { ...pickerView(channelId, state, userId), flags: EPHEMERAL } });
+}
+// /leave -> drop off the open signup sheet without reopening the picker. Same CAS loop as the
+// buttons so a simultaneous click can't eat the write; only ever touches an OPEN lobby (a full
+// one has moved to its own room and is out of reach by the channel gate anyway).
+async function handleLeaveCmd(interaction) {
+  const channelId = interaction.channel_id;
+  const userId = userIdOf(interaction);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let lobby = null;
+    try { lobby = await sbGetOpenLobby(channelId); } catch (e) {}
+    if (!lobby || lobby.status !== "open") return ephemeral("There's no open signup sheet here right now — nothing to leave.");
+    const onSheet = ((lobby.state && lobby.state.signups) || []).some((x) => x.id === userId);
+    if (!onSheet) return ephemeral("You're not on the current signup sheet.");
+    const out = applyLeave(lobby, userId);
+    if (out.error) return ephemeral(out.error);
+    out.state.lastSignupAt = new Date().toISOString();
+    const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, out.status);
+    if (!saved) continue;   // CAS lost — re-read and retry
+    let newMsgId = lobby.message_id;
+    if (BOT) { try { newMsgId = await ensureSummary(lobby.channel_id, out.state, lobby.message_id); } catch (e) {} }
+    if (newMsgId && newMsgId !== lobby.message_id) await sbStashMessage(lobby.id, newMsgId);
+    return respond({ type: REPLY, data: { embeds: [{ title: "👋 You left the lobby",
+      description: "Your spot is open again. Run **/join** anytime to jump back in.", color: BRAND }], flags: EPHEMERAL } });
+  }
+  return ephemeral("The lobby was busy — try that again.");
 }
 // /captain (in a full lobby's channel) -> volunteer as a captain; the second volunteer starts the draft.
 async function handleCaptain(interaction) {

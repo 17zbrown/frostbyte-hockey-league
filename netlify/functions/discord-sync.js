@@ -348,12 +348,60 @@ export default async (req) => {
     if (BOT && GUILD && regMode === "commands") {
       const app = await dApi("GET", `/applications/@me`);
       const cmds = [
-        { name: "join", type: 1, description: "Join or start a pickup game lobby" },
+        { name: "join", type: 1, description: "Join or start a pickup game lobby — run in #pickup-games" },
+        { name: "leave", type: 1, description: "Leave the pickup signup sheet — run in #pickup-games" },
         { name: "captain", type: 1, description: "Volunteer as a captain — run in a full pickup lobby's channel" },
       ];
       const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
       return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
         { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    // Ground truth for the office: does every member's PARTICIPATION role match the database?
+    // Compares the live guild against season_registrations for the three roles the sweep manages
+    // around sign-ups (Not Signed Up / Player / Free Agent context). Read-only, names only.
+    // "The sync reported no errors" is not the same as "the roles are right" — this proves it.
+    if (BOT && GUILD && diagMode === "rolecheck") {
+      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+      const rid = {}; for (const r of roles) rid[(r.name || "").toLowerCase()] = r.id;
+      const members = [];
+      let after = "0";
+      for (let page = 0; page < 10; page++) {
+        const chunk = await dApi("GET", `/guilds/${GUILD}/members?limit=1000&after=${after}`);
+        if (!Array.isArray(chunk) || !chunk.length) break;
+        members.push(...chunk);
+        if (chunk.length < 1000) break;
+        after = chunk[chunk.length - 1].user.id;
+      }
+      const season = (await sbGet("seasons?select=id,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0] || {};
+      const deadline = season.signup_deadline_at || season.registration_deadline;
+      const regOpen = !!season.registration_open && (!deadline || Date.now() < Date.parse(deadline));
+      const registered = new Set((await sbGet(`season_registrations?season_id=eq.${season.id}&select=profile_id&limit=10000`)).map((r) => r.profile_id));
+      const linkRows = await sbGet("discord_links?select=profile_id,gamertag,discord_id");
+      const byDiscord = {}; for (const l of linkRows) if (l.discord_id) byDiscord[String(l.discord_id)] = l;
+      const nsu = rid["not signed up"], player = rid["player"];
+      const out = {
+        guildMembers: members.length, linked: 0, registeredInDb: registered.size, regOpen,
+        registeredWearingNotSignedUp: [], registeredMissingPlayer: [],
+        unregisteredMissingNotSignedUp: [], unlinkedWearingNotSignedUp: [],
+      };
+      for (const m of members) {
+        if (m.user && m.user.bot) continue;
+        const link = byDiscord[String(m.user.id)];
+        const has = new Set(m.roles || []);
+        const nm = m.nick || (m.user && (m.user.global_name || m.user.username));
+        if (!link) { if (nsu && has.has(nsu)) out.unlinkedWearingNotSignedUp.push(nm); continue; }
+        out.linked++;
+        const isReg = registered.has(link.profile_id);
+        if (isReg && nsu && has.has(nsu)) out.registeredWearingNotSignedUp.push(nm);
+        if (isReg && player && !has.has(player)) out.registeredMissingPlayer.push(nm);
+        if (!isReg && regOpen && nsu && !has.has(nsu)) out.unregisteredMissingNotSignedUp.push(nm);
+      }
+      out.verdict = (out.registeredWearingNotSignedUp.length || out.registeredMissingPlayer.length || out.unregisteredMissingNotSignedUp.length)
+        ? "MISMATCHES — the 2-minute sweep should clear these; if one persists, that member's top role likely outranks the bot"
+        : "clean — every linked member's participation roles match the database";
+      out.note = "unlinkedWearingNotSignedUp = in the Discord but never signed into the site; the role is telling them the truth";
+      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
     }
 
     // Grant the Staff role its moderation powers: "Timeout Members" (the modern mute — blocks
