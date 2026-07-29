@@ -1049,6 +1049,10 @@ document.addEventListener("click", function(e){
     CG.closeOverlay(); CG.renderChrome();
     if (route){
       if (/^https?:\/\//.test(route)) window.open(route, "_blank", "noopener");  /* e.g. the Discord invite */
+      /* Assigning an unchanged hash fires no hashchange, so clicking an alert for the page
+         you're already on used to do nothing at all — exactly what happens when a second
+         reply lands on the case you have open. Re-render explicitly in that case. */
+      else if (location.hash === route){ if (CG.router) CG.router(); }
       else location.hash = route;
     }
     return;

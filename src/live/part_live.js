@@ -815,29 +815,42 @@ CG.role = function(){ return (CG.auth && CG.auth.role) || "guest"; };
  * changes, application decisions, rule violations); this surfaces them.
  * ------------------------------------------------------------------ */
 CG._notifs = null;
+/* Clicking a notification opens the exact record it is about.
+   link_param carries that record's id — a case uuid, an "id=…&type=…" application
+   querystring, or a club code. Every branch degrades to its list page when the
+   param is missing, so the ~90 alerts written before the DB started sending ids
+   still land somewhere sensible instead of 404ing. */
 CG.notifRoute = function(view, param){
+  var p = String(param == null ? "" : param).trim();
+  var isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p);
+  var isQs = p.indexOf("id=") === 0;
+  /* the case thread — hubComplaintDetail says so plainly if the case is gone */
+  var caseUrl = isId ? "#/hub/complaint?id=" + encodeURIComponent(p) : null;
+  var appUrl  = isQs ? "#/hub/application?" + p : null;
   switch (view){
-    case "team":         return param ? "#/team/"+param : "#/teams";
+    case "team":         return p ? "#/team/"+encodeURIComponent(p) : "#/teams";
     case "draft":        return "#/hub/draft";
     case "manager":      return "#/hub";
     case "transactions": return "#/home";
     case "automations":  return "#/admin/automations";
     case "preseason":    return "#/admin/preseason";
-    case "users":        return "#/admin/users";
     case "rulebook":     return "#/rulebook";
-    case "staffdesk":    return "#/hub/staffdesk";
     case "stafftasks":   return "#/hub/staffdesk";
-    case "complaints":   return "#/hub/complaints";
-    /* Case notifications: DB triggers send link_view 'actions' to the member who filed
-       (resolved / denied / staff replied) and 'admin' to staff when a new case lands. Neither
-       had a case here, so every one of those fell through to the hub dashboard and the final
-       step of the casework loop — telling someone their complaint was resolved — went nowhere. */
-    case "actions":      return "#/hub/complaints";
-    case "admin":        return "#/hub/staffdesk";
-    /* contract offers notify with link_view 'offers' */
+    /* Case notifications. 'actions' goes to the member who filed (received / replied /
+       resolved / denied), 'complaints' to staff when one lands, 'admin' to commissioners.
+       All three now carry the case id, so the click opens that case's thread. */
+    case "actions":      return caseUrl || "#/hub/complaints";
+    case "complaints":   return caseUrl || "#/hub/complaints";
+    /* 'admin' is also used for a couple of non-case commissioner alerts, which pass a
+       page hint instead of an id (e.g. 'clubs' when an approved owner needs one). */
+    case "admin":        return caseUrl || (p ? "#/admin/"+encodeURIComponent(p) : "#/hub/staffdesk");
+    /* applications: the reviewer's detail page, where the vote is cast */
+    case "application":  return appUrl || "#/hub/staffdesk";
+    case "staffdesk":    return appUrl || "#/hub/staffdesk";
+    case "users":        return appUrl || "#/admin/users";
+    case "hub":          return p === "staffdesk" ? "#/hub/staffdesk" : "#/hub";
+    /* contract offers surface on the member's hub dashboard */
     case "offers":       return "#/hub";
-    /* application chat: staff land on the office detail page; applicants on their own application */
-    case "application":  return param ? "#/hub/application?"+param : "#/hub/staffdesk";
     case "ownerapp":     return "#/owner";
     case "staffapp":     return "#/staffapply";
     /* the invite is an external URL; the notification click handler opens http(s) routes in a
