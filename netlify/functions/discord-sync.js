@@ -816,7 +816,7 @@ export default async (req) => {
   const inGuildById = {};
   for (const p of await sbGet("profiles?select=id,in_guild")) inGuildById[p.id] = p.in_guild;
   const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
-  const teams = await sbGet("teams?select=id,name,color,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
+  const teams = await sbGet("teams?select=id,code,name,color,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
   // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
   const mgmtRoleByProfile = {};
