@@ -131,6 +131,56 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
   }
 }
 
+// Club rooms and roles are created once and then left alone, which meant a club that rebranded or
+// relocated kept its old Discord identity forever — the site said Canucks, Discord still said
+// Senators. Reconcile the name, colour and topic against the DB every run, PATCHing in place so the
+// role keeps its id, position and members and the channel keeps its history. Rename only: nothing
+// here creates or deletes.
+async function syncClubIdentity(guildChannels, guildRoles, teams, sum) {
+  const snapshot = [];
+  for (const t of teams) {
+    if (!t.name) continue;
+    const wantRole = t.name;
+    const wantChan = slug(t.name);
+    const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
+
+    if (t.discord_role_id) {
+      const role = guildRoles.find((r) => r.id === t.discord_role_id);
+      if (role && !role.managed) {
+        const patch = {};
+        if (role.name !== wantRole) patch.name = wantRole;
+        if (wantColor && role.color !== wantColor) patch.color = wantColor;
+        if (Object.keys(patch).length) {
+          try {
+            await dApi("PATCH", `/guilds/${GUILD}/roles/${role.id}`, patch);
+            Object.assign(role, patch);
+            sum.clubRolesRenamed = (sum.clubRolesRenamed || 0) + 1;
+          } catch (e) { sum.errors.push({ clubRole: t.code, error: String(e.message || e) }); }
+        }
+      }
+    }
+    if (t.discord_channel_id) {
+      const chan = guildChannels.find((c) => c.id === t.discord_channel_id);
+      if (chan) {
+        const wantTopic = `Private room for the ${t.name} — roster, lineups, and team talk. Visible only to the club and staff.`;
+        const patch = {};
+        if (chan.name !== wantChan) patch.name = wantChan;
+        if ((chan.topic || "") !== wantTopic) patch.topic = wantTopic;
+        if (Object.keys(patch).length) {
+          try {
+            await dApi("PATCH", `/channels/${chan.id}`, patch);
+            Object.assign(chan, patch);
+            sum.clubRoomsRenamed = (sum.clubRoomsRenamed || 0) + 1;
+          } catch (e) { sum.errors.push({ clubRoom: t.code, error: String(e.message || e) }); }
+        }
+      }
+    }
+    snapshot.push(`${t.code}=${wantRole}/#${wantChan}`);
+  }
+  // the ?diag= endpoints are unreachable on a scheduled function, so leave the mapping readable
+  try { await sbUpsertCfg("discord_club_identity", JSON.stringify(snapshot)); } catch (e) { /* observability only */ }
+}
+
 // #announcements under an Information category: everyone reads, only the league office writes.
 // Its webhook is stored so the site can post league news without a bot token. Creation only —
 // if the channel already exists under Information we adopt it and just make sure the hook is on
@@ -1064,6 +1114,8 @@ export default async (req) => {
   /* after the Team Rooms category is in place: give any club still missing a role or room one
      (a club created by an approved owner application arrives with neither) */
   try { await ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ clubRooms: String(e.message || e) }); }
+  /* a club that rebranded or relocated: bring its role + room name/colour back in line with the DB */
+  try { await syncClubIdentity(guildChannels, guildRoles, teams, sum); } catch (e) { sum.errors.push({ clubIdentity: String(e.message || e) }); }
   /* club colours above the front-office seats, so a player's name shows their club */
   try { await ensureRoleOrder(guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ roleOrder: String(e.message || e) }); }
 
