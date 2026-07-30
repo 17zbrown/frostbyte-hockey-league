@@ -314,3 +314,23 @@ CG.CONTENT = {"articles":[],"rulebook":{"chapters":[{"num":1,"title":"Membership
     summary: "Rule 2.7 amended: Media is the one staff department that may also hold a club's Owner, GM, or AGM seat. Media rules on nothing — no disputes, discipline, applications, officiating, transactions or draft — so a media staffer running a club has no decision to make about their own team. The exception is Media-alone: taking on a second department means giving up the club seat, a seated member joining the staff may be given Media and nothing else, and it never applies to commissioners. Enforced by the site, both directions."
   });
 })();
+
+/* ---- rulebook v2.4 — Rule 2.7: Media is exclusive, and votes on media matters only ----
+   Tightens v2.3. Media is not merely the department that MAY hold a club seat — it is an exclusive
+   department: on Media you hold Media and nothing else, and you vote only on media topics. That is
+   what makes the club-seat exception safe, because a media staffer has no other say to compromise.
+   Commissioners are exempt throughout: the office carries every department by definition. */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.4") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  var s27 = sec(2,"2.7");
+  if (s27 && s27.paragraphs && s27.paragraphs.length > 1){
+    s27.paragraphs[1] = "Media is a department apart, and an exclusive one. A staff member on Media holds Media and no other department, and votes only on media matters — on any question put to the league office that is not a media topic, including a vote put to the office as a whole, a media staffer does not hold a ballot. In exchange, Media is the one department that may also hold a club's Owner, GM, or AGM seat, because a staff member whose only remit is media coverage decides nothing about any club, their own included. A staff member who wants a second department gives up both the Media seat and, if they hold one, the club seat. None of this applies to a commissioner, whose office carries every department and every vote by definition.";
+  }
+  rb.changelog.unshift({
+    version: "2.4", dateIso: "2026-07-29",
+    summary: "Rule 2.7 tightened: Media is an exclusive staff department. Someone on Media holds Media and nothing else, and votes only on media topics — not on whole-office questions. In exchange Media stays the one department that may also hold a club's Owner, GM or AGM seat, because a media staffer decides nothing about any club. Want a second department? You give up Media and the club seat. Commissioners are exempt throughout — the office carries every department and every vote. Enforced by the site at every write path, including the staff vote."
+  });
+})();

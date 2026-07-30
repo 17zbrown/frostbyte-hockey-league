@@ -2286,10 +2286,28 @@ CG.AFTER.staffapply = function(){
   var sub=document.getElementById("sa-submit"); if(sub) sub.addEventListener("click", CG.submitStaffApp);
   document.querySelectorAll("[data-sa-dept]").forEach(function(b){ b.addEventListener("click", function(){
     var on = this.getAttribute("aria-pressed")!=="true";
-    this.setAttribute("aria-pressed", on?"true":"false");
-    this.style.borderColor = on ? "var(--chrome)" : "";
-    var chip = this.querySelector(".chip");
-    if (chip){ chip.classList.toggle("chip-chrome", on); chip.textContent = on ? "IN" : "—"; }
+    var mine = (this.getAttribute("data-sa-dept")||"").toLowerCase();
+    var set = function(el, val){
+      el.setAttribute("aria-pressed", val?"true":"false");
+      el.style.borderColor = val ? "var(--chrome)" : "";
+      var c = el.querySelector(".chip");
+      if (c){ c.classList.toggle("chip-chrome", val); c.textContent = val ? "IN" : "—"; }
+    };
+    set(this, on);
+    /* Media is an exclusive department (Rule 2.7) — on Media you hold Media and nothing else, so
+       picking it clears the rest, and picking anything else clears Media. */
+    if (on){
+      var cleared = false;
+      document.querySelectorAll("[data-sa-dept]").forEach(function(o){
+        if (o === b) return;
+        var od = (o.getAttribute("data-sa-dept")||"").toLowerCase();
+        var clash = (mine === "media") || (od === "media");
+        if (clash && o.getAttribute("aria-pressed")==="true"){ set(o, false); cleared = true; }
+      });
+      if (cleared) CG.toast(mine==="media"
+        ? "Media is held on its own — the other departments were cleared (Rule 2.7)"
+        : "Media can’t be held alongside another department — Media was cleared (Rule 2.7)", "ok");
+    }
   }); });
   CG.wireAppChat();
 };
@@ -5281,10 +5299,17 @@ CG.staffVotesCard = function(){
         '<span class="caption" style="margin-left:auto">'+cast+' of '+pool+' voted</span></div>'+
       (v.detail?'<p class="caption" style="margin-top:4px">'+esc(v.detail)+'</p>':"")+
       '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+deptChips(v.departments)+'</div>';
-    if (isOpen && v.eligible){
+    /* Media staff vote on media topics only (Rule 2.7). A vote with no departments is a
+       whole-office vote, which is exactly what Media has no say in — so it's out of bounds too.
+       The RPC refuses it either way; this stops us showing buttons that can only error. */
+    var mediaBlocked = CG.isMediaOnlyStaff() &&
+      !(v.departments||[]).some(function(d){ return String(d||"").trim().toLowerCase()==="media"; });
+    if (isOpen && v.eligible && !mediaBlocked){
       h += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'+opts.map(function(o){
         return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
         (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
+    } else if (isOpen && mediaBlocked){
+      h += '<p class="caption" style="margin-top:8px">Media staff vote on media topics only (Rule 2.7) — this one isn’t a media matter, so it’s read-only for you.</p>';
     } else if (isOpen){
       h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
     }
