@@ -5299,17 +5299,17 @@ CG.staffVotesCard = function(){
         '<span class="caption" style="margin-left:auto">'+cast+' of '+pool+' voted</span></div>'+
       (v.detail?'<p class="caption" style="margin-top:4px">'+esc(v.detail)+'</p>':"")+
       '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+deptChips(v.departments)+'</div>';
-    /* Media staff vote on media topics only (Rule 2.7). A vote with no departments is a
-       whole-office vote, which is exactly what Media has no say in — so it's out of bounds too.
-       The RPC refuses it either way; this stops us showing buttons that can only error. */
-    var mediaBlocked = CG.isMediaOnlyStaff() &&
-      !(v.departments||[]).some(function(d){ return String(d||"").trim().toLowerCase()==="media"; });
+    /* Media staff hold no ballot on any staff vote (Rule 2.7) — a rule change can bend toward the
+       club they run, and Media is the one department allowed to run one. The server says so via
+       mediaBarred; fall back to the local check if an older board payload lacks it. */
+    var mediaBlocked = (v.mediaBarred === true) ||
+      (v.mediaBarred === undefined && CG.isMediaOnlyStaff());
     if (isOpen && v.eligible && !mediaBlocked){
       h += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'+opts.map(function(o){
         return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
         (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
     } else if (isOpen && mediaBlocked){
-      h += '<p class="caption" style="margin-top:8px">Media staff vote on media topics only (Rule 2.7) — this one isn’t a media matter, so it’s read-only for you.</p>';
+      h += '<p class="caption" style="margin-top:8px">Media staff don’t hold a ballot on staff votes (Rule 2.7) — the department reports on the league rather than deciding for it. Every vote is read-only for you.</p>';
     } else if (isOpen){
       h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
     }
@@ -6342,7 +6342,10 @@ CG.hubStaffDesk = function(){
     ["rookie_of_year","Rookie of the Year", null]
   ];
   var isCommish = CG.role()==="commish";
-  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3><span class="chip">one vote each</span></div>';
+  /* Rule 2.7 — Media holds no ballot; the RLS policy refuses the write either way */
+  var mediaNoBallot = CG.isMediaOnlyStaff();
+  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3>'+
+    '<span class="chip">'+(mediaNoBallot?"read-only for Media":"one vote each")+'</span></div>';
   h += BALLOT_CATS.map(function(cat){
     var pool = (lg.players||[]).filter(function(p){
       if (cat[2]==="G") return p.pos==="G";
@@ -6355,13 +6358,22 @@ CG.hubStaffDesk = function(){
     return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
       '<b style="font-family:var(--f-disp);min-width:190px">'+cat[1]+'</b>'+
       (won ? '<span class="chip chip-win">Decided</span><span class="caption" data-ballot-tally="'+cat[0]+'"></span>'
-        : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
-          '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
-          '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
-          (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
+        : mediaNoBallot
+          /* Rule 2.7 — an MVP vote is the purest form of voting for your own club, and Media is the
+             one department that may run one. Tally stays visible; the picker doesn't. */
+          ? '<span class="caption" style="flex:1">Media staff don’t hold a ballot (Rule 2.7).</span>'+
+            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'
+          : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
+            '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
+            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
+            (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
       '</div>';
   }).join("");
-  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every staff member and commissioner gets one vote per award (change it any time before the finalize). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.</span></div></div>';
+  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
+    (mediaNoBallot
+      ? 'Media staff read the tallies but don’t vote on awards (Rule 2.7) — the department covers the league rather than deciding it.'
+      : 'Every staff member and commissioner gets one vote per award (change it any time before the finalize). Media staff are the exception — they hold no ballot (Rule 2.7). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.')+
+    '</span></div></div>';
   return h;
 };
 CG.AFTER._staffdesk = function(){

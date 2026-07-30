@@ -654,7 +654,9 @@ CG.deskNewsroom = function(){
   h += CG.admNewsLive();
   h += '<div style="margin-top:28px">'+CG.admRankingsLive()+'</div>';
   h += CG.deskCeiling("Media writes and edits. Taking a story back off the site is a commissioner action — "+
-    "correct it in place instead, which is what the Edit button is for.");
+    "correct it in place instead, which is what the Edit button is for. Media also holds <b>no ballot</b>: "+
+    "no staff vote, no rule change, no season award (Rule 2.7). In exchange it's the one department "+
+    "that may also run a club — the newsroom reports on the league rather than deciding for it.");
   return h;
 };
 

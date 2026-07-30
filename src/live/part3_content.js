@@ -334,3 +334,22 @@ CG.CONTENT = {"articles":[],"rulebook":{"chapters":[{"num":1,"title":"Membership
     summary: "Rule 2.7 tightened: Media is an exclusive staff department. Someone on Media holds Media and nothing else, and votes only on media topics — not on whole-office questions. In exchange Media stays the one department that may also hold a club's Owner, GM or AGM seat, because a media staffer decides nothing about any club. Want a second department? You give up Media and the club seat. Commissioners are exempt throughout — the office carries every department and every vote. Enforced by the site at every write path, including the staff vote."
   });
 })();
+
+/* ---- rulebook v2.5 — Rule 2.7: Media holds no ballot at all ----
+   Supersedes v2.4's "media topics only". A rule change or an award can bend toward the club a media
+   staffer runs, and Media is the one department allowed to run a club — so the department reports on
+   the league rather than deciding for it. Covers staff votes and award ballots alike. */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.5") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  var s27 = sec(2,"2.7");
+  if (s27 && s27.paragraphs && s27.paragraphs.length > 1){
+    s27.paragraphs[1] = "Media is a department apart, and an exclusive one. A staff member on Media holds Media and no other department, and holds no ballot: not on a staff vote of any kind, not on a rule change, and not on a season award. The department reports on the league rather than deciding for it. In exchange, Media is the one department that may also hold a club's Owner, GM, or Assistant GM seat — and the two halves of that bargain are what make each other safe, because a staff member who decides nothing cannot decide anything in favour of the club they run. A staff member who wants a second department, or a vote, gives up both the Media seat and, if they hold one, the club seat. None of this binds a commissioner, whose office carries every department and every vote by definition.";
+  }
+  rb.changelog.unshift({
+    version: "2.5", dateIso: "2026-07-30",
+    summary: "Rule 2.7 tightened again: Media holds NO ballot. Not on staff votes of any kind, not on rule changes, and not on season awards — previously they could still vote on anything scoped to media. A vote can bend toward the club a media staffer runs, and Media is the one department allowed to run a club, so the department now reports on the league rather than deciding for it. Media staff still read every tally. Commissioners are unaffected. Enforced on the staff vote, the award ballot, and the eligible-voter count so turnout can't be skewed by a ballot nobody can cast."
+  });
+})();
