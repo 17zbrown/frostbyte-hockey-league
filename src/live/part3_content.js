@@ -291,3 +291,26 @@ CG.CONTENT = {"articles":[],"rulebook":{"chapters":[{"num":1,"title":"Membership
     summary: "Rookie free agency runs as a live auction (Rule 2.2): bids on an undrafted five-game rookie start at $750K and rise in $250K increments, and every bid resets a 12-hour clock — the high bid when the clock expires wins, and the bid amount becomes the contract (previously only the first bid started the clock). Open free agency is clarified: for every other available player, clubs send custom-salary offers and the player chooses, expected in good faith to take the strongest offer — signing a lower one (to play with friends) isn’t forbidden but isn’t to be abused."
   });
 })();
+
+/* ---- rulebook v2.3 — Rule 2.7: Media is the one department that may also hold a club seat ----
+   The separation exists so nobody rules on a league decision they stand to gain from. Media rules
+   on nothing: it has no part in disputes, discipline, applications, officiating, transactions or
+   the draft. So a Media staffer running a club has no decision to make about their own team, and
+   the rule now says so. Strictly Media-alone, and never a commissioner. Idempotent. */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.3") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  var s27 = sec(2,"2.7");
+  if (s27 && s27.paragraphs && s27.paragraphs.length){
+    s27.paragraphs[0] = "The league office and a club's front office may not be held at once, with the single exception set out below. A commissioner or staff member may not own or manage a club — no Owner, General Manager, or Assistant General Manager role — and, the other way round, anyone holding a club's Owner, GM, or AGM seat may not sit on the staff. Within the office, a commissioner may serve as staff: commissioners and staff work disputes, discipline, and applications together. What the separation forbids is holding a league-office seat and a club's front-office seat at the same time, so decisions about teams and staff are made without a stake in the outcome.";
+    /* the exception reads immediately after the general rule, before "may still play" */
+    var ex = "Media is the exception. A staff member whose only department is Media may hold a club's Owner, GM, or AGM seat. The Media department rules on nothing — it takes no part in disputes, discipline, applications, officiating, transactions, or the draft — so a media staffer running a club is never deciding anything about their own team, which is the conflict this rule exists to prevent. The exception is strictly Media-alone: a staff member who picks up any second department alongside Media must vacate the club seat first, and a club seat holder joining the staff may be given Media and nothing else. It never extends to a commissioner, whose office carries authority over every department.";
+    if (s27.paragraphs.indexOf(ex) < 0) s27.paragraphs.splice(1, 0, ex);
+  }
+  rb.changelog.unshift({
+    version: "2.3", dateIso: "2026-07-29",
+    summary: "Rule 2.7 amended: Media is the one staff department that may also hold a club's Owner, GM, or AGM seat. Media rules on nothing — no disputes, discipline, applications, officiating, transactions or draft — so a media staffer running a club has no decision to make about their own team. The exception is Media-alone: taking on a second department means giving up the club seat, a seated member joining the staff may be given Media and nothing else, and it never applies to commissioners. Enforced by the site, both directions."
+  });
+})();

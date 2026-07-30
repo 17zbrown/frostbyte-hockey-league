@@ -2125,11 +2125,19 @@ CG.ROUTES.owner = function(){
       '<button class="btn btn-lg" id="dcSignIn" style="margin-top:18px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button></div></div></div>';
   }
   var p = CG.auth.profile, a = CG.auth.ownerApp||{};
-  var r = CG.role(), lockedFromOwning = (r==="staff" || r==="commish");
+  /* Rule 2.7 — the league office and a club's front office aren't held at once, except that staff
+     whose ONLY department is Media may run a club (Media rules on nothing). */
+  var r = CG.role(), lockedFromOwning = (r==="commish" || (r==="staff" && !CG.isMediaOnlyStaff()));
   var conflictNote = lockedFromOwning
     ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
-      '<span style="flex:1">'+(r==="commish"?"Commissioners":"Staff")+' can’t own or manage a club — it keeps roster and management decisions impartial. You’re welcome to play as a rostered member; ownership applications are disabled for your role.</span></div>'
-    : "";
+      '<span style="flex:1">'+(r==="commish"
+        ? 'Commissioners can’t own or manage a club — it keeps roster and management decisions impartial. You’re welcome to play as a rostered member; ownership applications are disabled for your role.'
+        : 'Staff can’t own or manage a club unless <b>Media</b> is the only department they hold (Rule 2.7) — it keeps roster and management decisions impartial. You’re welcome to play as a rostered member.')+
+      '</span></div>'
+    : (r==="staff"
+      ? '<div class="note grn" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
+        '<span style="flex:1">You’re on <b>Media</b> only, which is the one staff department that may also run a club (Rule 2.7). Take on a second department and you’d have to give the club seat up.</span></div>'
+      : "");
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
   statusCard = conflictNote + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
@@ -2200,6 +2208,16 @@ CG.DEPT_ALIAS = { "player-relations": "community" };
 CG.appReviewers = function(){
   return ((CG.lg && CG.lg._profilesRaw) || []).filter(function(p){ return (p.role==="staff"||p.role==="commissioner") && (p.departments||[]).indexOf("applications")>=0; });
 };
+/* Rule 2.7's one exception: staff whose ONLY department is Media may also hold a club seat, because
+   Media rules on nothing — no disputes, discipline, applications, officiating, transactions or
+   draft. Mirrors public.is_media_only_staff(); the DB is what actually enforces it. */
+CG.isMediaOnly = function(p){
+  if (!p || p.role !== "staff") return false;
+  var d = (p.departments || []).map(function(x){ return String(x||"").trim().toLowerCase(); })
+                               .filter(function(x){ return x; });
+  return d.length > 0 && d.every(function(x){ return x === "media"; });
+};
+CG.isMediaOnlyStaff = function(){ return CG.isMediaOnly(CG.auth && CG.auth.profile); };
 CG.isAppReviewer = function(){
   var p = CG.auth && CG.auth.profile;
   return !!(p && (p.role==="staff"||p.role==="commissioner") && (p.departments||[]).indexOf("applications")>=0);
@@ -2218,18 +2236,20 @@ CG.ROUTES.staffapply = function(){
      can't be held at once. Commissioners already carry full staff access and existing staff are
      already staff, so neither needs to apply; and anyone holding a club seat is blocked until they
      step down. Everyone still sees the exact form members see. */
-  var lockedFromStaff = (r==="staff" || r==="commish" || r==="mgmt");
+  /* a club seat holder is no longer locked out — they may apply, for Media alone (Rule 2.7) */
+  var lockedFromStaff = (r==="staff" || r==="commish");
+  var mgmtMediaOnly = (r==="mgmt");
   var lockMsg = r==="commish"
     ? 'As a commissioner you already have full staff access — there’s nothing to apply for. The Staff Desk is in your hub.'
     : r==="staff"
     ? 'You’re already on the league staff. This is the form exactly as members see it; there’s nothing to submit.'
     : r==="mgmt"
-    ? 'You currently own or manage a club, and club management and a staff seat can’t be held at the same time (Rule 2.7). Step down from your Owner, GM, or AGM seat first, then you can apply.'
+    ? 'You currently own or manage a club. <b>Media</b> is the only staff department that can be held alongside a club seat (Rule 2.7) — apply for Media on its own, or step down from your Owner, GM, or AGM seat to apply for anything else.'
     : '';
-  var staffNote = lockedFromStaff
-    ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
+  var staffNote = (lockedFromStaff || mgmtMediaOnly)
+    ? '<div class="note'+(mgmtMediaOnly?"":"")+'" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
       '<span style="flex:1">'+lockMsg+'</span>'+
-      (r==="mgmt" ? '<a class="btn btn-ghost btn-sm" href="#/hub">Team HQ</a>' : '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a>')+'</div>'
+      (mgmtMediaOnly ? '<a class="btn btn-ghost btn-sm" href="#/hub">Team HQ</a>' : '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a>')+'</div>'
     : "";
   var app = CG.auth.staffApp;
   var statusNote = app
@@ -2283,11 +2303,15 @@ CG.submitStaffApp = async function(){
   var r0=CG.role();
   if(r0==="commish"){ CG.toast("As a commissioner you already have staff access — no application needed","err"); return; }
   if(r0==="staff"){ CG.toast("You’re already on the league staff","err"); return; }
-  if(r0==="mgmt"){ CG.toast("Club management can’t also be staff — step down from your club seat first (Rule 2.7)","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   var pitch=v("sa-pitch");
   var depts=[].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });
   if(!depts.length){ CG.toast("Pick at least one department","err"); return; }
+  /* Rule 2.7 — a club seat holder may join the staff on Media and nothing else. The DB refuses the
+     approval either way; catching it here means they aren't left waiting on a vote that can't pass. */
+  if(r0==="mgmt" && !depts.every(function(d){ return String(d).toLowerCase()==="media"; })){
+    CG.toast("You own or manage a club, so Media is the only department you can apply for (Rule 2.7)","err"); return;
+  }
   if(!pitch){ CG.toast("Tell the league office why you — the pitch is the application","err"); return; }
   var payload={ profile_id: CG.auth.user.id, departments:depts, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
     experience:v("sa-exp")||null, pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
@@ -3710,9 +3734,17 @@ CG.admUsersLive = function(){
   var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
   /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
      (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
-  var conflicts = profs.filter(function(pr){ return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id]; });
+  /* Media-only staff are expressly allowed a club seat (Rule 2.7), so they aren't a conflict */
+  var conflicts = profs.filter(function(pr){
+    return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id] && !CG.isMediaOnly(pr);
+  });
+  var mediaSeated = profs.filter(function(pr){ return CG.isMediaOnly(pr) && mgmtBy[pr.id]; });
   h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation.</b> '+
-    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). A commissioner can override this when there’s a reason to. Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
+    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). '+
+    '<b>Media is the exception</b> (Rule 2.7): staff whose only department is Media may run a club, because Media rules on nothing. A commissioner can override the rest when there’s a reason to. '+
+    'Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
+    (mediaSeated.length?' <span style="display:block;margin-top:8px">Media staff running a club (allowed): '+
+      mediaSeated.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+
     (conflicts.length?' <span style="display:block;margin-top:8px">Holding both hats right now (grandfathered for Season 1): '+
       conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
@@ -4886,9 +4918,12 @@ CG.seasonPlayerIndex = function(){
     if ((!r.season_id || r.season_id===sid) && r.status!=="declined") ok[r.profile_id] = true;
   });
   Object.keys(lg._rosteredIds||{}).forEach(function(id){ ok[id] = true; });
-  /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker */
+  /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker, except
+     staff whose only department is Media, who are expressly allowed one */
   var office = {};
-  (lg._profilesRaw||[]).forEach(function(p){ if (p.role==="staff" || p.role==="commissioner") office[p.id] = true; });
+  (lg._profilesRaw||[]).forEach(function(p){
+    if ((p.role==="staff" || p.role==="commissioner") && !CG.isMediaOnly(p)) office[p.id] = true;
+  });
   /* a player already under a contract this season can't be nominated — only free agents are eligible */
   var held = (CG.contractHeldIds && CG.contractHeldIds()) || {};
   return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id] && !held[m.id]; });
