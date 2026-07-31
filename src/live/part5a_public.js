@@ -302,6 +302,192 @@ CG.seasonTimeline = function(){
   '</div></section>';
 };
 
+/* ================================================================
+   THE MAP — where the league actually is.
+
+   Outline: Natural Earth 110m country borders (public domain), projected with
+   an Albers equal-area conic (standard parallels 29.5/45.5, central meridian
+   -96) — the projection real North America maps use — then simplified with
+   Douglas-Peucker and cropped to the league's footprint. Baked in at build
+   time, so the page makes no external request for any of it and there is no
+   tile provider watching our visitors.
+
+   Every club sits at its arena city. Markers carry the club's own logo where
+   one is uploaded and the generated crest where it isn't, so the map fills in
+   as clubs do.
+   ================================================================ */
+CG.NA_MAP = {
+  w: 1000, h: 562,
+  d: "M201.0 116.1L179.3 85.8L163.3 73.6L167.0 49.8L157.0 39.2L159.7 26.8L152.4 12.0L165.8 -9.7L154.1 -24.6L140.5 -82.6L118.8 -78.2L112.8 -98.9L99.1 -110.7L156.6 -222.8L183.2 -199.0L236.4 -193.9L239.6 -187.5L249.3 -192.9L262.6 -175.8L274.6 -180.5L272.9 -171.5L286.2 -173.3L338.7 -148.6L347.7 -140.4L335.7 -136.5L377.2 -130.1L384.4 -121.4L393.7 -126.7L386.5 -133.0L407.7 -136.5L420.8 -125.5L443.0 -119.2L466.7 -119.9L466.0 -127.7L473.0 -129.7L485.0 -125.4L484.9 -113.4L489.9 -123.5L496.2 -123.2L499.5 -135.7L482.4 -147.9L483.0 -160.7L491.7 -168.9L509.0 -162.5L519.7 -149.9L513.2 -143.7L527.5 -142.0L528.2 -129.5L537.9 -139.8L547.6 -132.6L546.1 -123.2L554.4 -115.3L566.2 -136.5L565.2 -149.8L598.4 -145.5L595.1 -132.1L601.5 -120.0L587.3 -108.8L567.8 -108.4L557.5 -83.5L548.7 -73.6L536.9 -71.8L530.5 -56.5L520.7 -54.3L510.6 -42.5L498.2 -14.6L497.9 2.4L511.5 4.6L520.8 29.7L533.8 26.1L551.8 31.5L592.4 51.4L619.2 50.3L624.8 78.8L634.7 95.0L652.3 107.3L659.2 100.9L661.8 84.0L643.9 53.9L658.1 44.0L669.8 19.9L658.3 -1.1L645.1 -10.0L652.7 -27.2L639.3 -60.8L644.6 -65.1L668.8 -65.0L674.9 -70.2L700.2 -57.4L715.7 -60.5L726.7 -31.7L744.3 -25.4L754.6 -37.3L761.2 -63.7L805.7 -26.7L805.5 -16.4L831.9 -8.0L855.5 -8.2L864.3 2.2L878.3 4.7L886.2 20.5L856.4 65.8L793.3 88.7L759.7 155.5L797.0 105.9L811.8 99.4L823.3 103.7L817.1 117.2L833.4 142.8L849.9 145.6L866.6 136.9L870.5 115.9L875.5 126.6L884.4 129.3L837.7 187.5L828.9 189.1L824.2 176.2L838.9 157.1L810.3 169.2L800.5 162.6L794.0 141.6L777.0 140.2L770.3 175.5L762.9 185.0L725.6 194.3L708.3 220.8L686.5 225.1L681.8 228.6L686.2 237.8L645.2 264.0L639.2 258.2L647.3 232.5L638.4 204.6L609.3 183.1L568.7 164.4L559.4 169.7L533.4 169.3L504.0 161.7L498.6 150.3L495.0 156.5L472.7 156.5L367.3 149.7L201.0 116.1ZM602.7 -188.5L594.0 -192.7L596.9 -197.7L613.2 -199.5L627.7 -193.5L602.7 -188.5ZM621.1 -54.2L623.7 -58.9L629.9 -56.7L627.8 -48.8L621.1 -54.2ZM502.6 -200.9L498.9 -197.1L480.2 -200.3L493.9 -207.2L502.6 -200.9ZM480.9 -233.8L488.9 -231.1L477.1 -226.6L468.4 -234.8L480.9 -233.8ZM541.3 -197.2L511.0 -199.8L500.4 -213.5L478.3 -217.2L515.9 -218.1L533.1 -208.5L596.4 -213.5L598.6 -209.8L584.7 -202.8L541.3 -197.2ZM892.4 32.0L890.6 58.9L894.8 51.3L902.7 51.4L901.5 58.0L926.5 52.4L928.6 64.4L934.2 58.6L946.6 73.1L948.7 87.9L936.5 91.1L929.4 77.6L923.6 95.6L917.3 97.8L921.3 87.7L910.1 88.5L879.8 101.9L880.6 90.3L874.5 88.1L879.4 48.1L887.8 28.6L892.4 27.3L892.4 32.0ZM585.2 -91.1L619.1 -77.1L612.4 -71.6L593.4 -78.4L574.9 -61.5L571.2 -69.3L559.9 -66.8L566.6 -74.3L568.0 -97.6L585.2 -91.1ZM610.7 -185.0L616.7 -190.5L644.6 -185.4L646.6 -180.8L659.3 -186.6L687.3 -182.0L705.1 -170.8L693.2 -161.2L725.8 -160.1L740.4 -152.8L752.5 -156.3L745.1 -127.4L717.6 -137.7L708.2 -133.0L709.4 -125.5L736.8 -115.8L746.4 -104.7L746.8 -94.2L711.8 -98.8L740.7 -81.1L696.7 -82.5L685.0 -86.4L686.9 -90.9L659.7 -98.4L660.7 -94.6L637.6 -87.5L629.8 -90.8L633.3 -101.5L664.4 -110.2L661.9 -121.2L669.0 -135.9L661.5 -144.3L632.3 -148.3L636.5 -152.3L627.1 -158.0L613.8 -160.3L597.1 -152.4L569.4 -151.3L534.4 -157.4L541.7 -163.2L531.2 -162.5L528.2 -173.6L540.2 -188.4L558.2 -192.9L553.7 -185.6L560.1 -179.6L565.7 -188.9L583.1 -195.5L597.0 -186.6L597.0 -179.3L610.7 -185.0ZM496.5 -192.4L525.0 -190.7L498.6 -170.1L490.2 -170.4L485.8 -185.2L496.5 -192.4ZM303.5 -237.4L331.3 -242.6L350.7 -239.2L342.6 -231.2L303.5 -237.4ZM130.7 7.6L140.0 10.0L130.7 25.3L134.3 40.3L123.8 15.4L127.1 4.0L130.7 7.6ZM423.3 -240.9L453.9 -234.9L461.2 -227.5L424.7 -233.7L431.3 -235.5L423.3 -240.9ZM191.9 121.6L171.2 109.9L162.2 90.3L152.8 84.0L153.9 71.3L177.4 87.2L191.9 121.6ZM308.0 -219.6L347.2 -199.9L318.9 -195.9L307.0 -186.0L286.7 -185.9L269.9 -202.6L289.4 -216.8L284.6 -224.8L308.0 -219.6ZM404.4 -214.0L417.9 -213.7L413.9 -204.9L372.0 -205.0L361.1 -210.0L376.2 -211.6L335.8 -220.3L353.9 -228.3L395.4 -211.7L386.9 -221.9L393.6 -224.1L404.4 -214.0ZM410.3 -185.6L417.9 -180.4L423.0 -161.2L448.3 -148.1L447.2 -142.9L434.6 -142.7L436.3 -133.4L409.7 -141.0L352.5 -141.2L349.4 -147.7L332.8 -153.1L325.7 -164.4L363.1 -161.8L323.1 -172.0L320.3 -177.1L338.1 -177.7L315.1 -186.0L328.9 -195.6L349.2 -197.8L356.0 -194.3L351.5 -190.1L367.9 -190.3L376.9 -183.3L385.8 -187.5L396.4 -171.6L400.6 -175.7L396.9 -187.4L410.3 -185.6ZM453.8 -178.2L446.2 -185.5L454.9 -190.1L476.1 -188.6L471.1 -180.6L482.0 -175.9L480.6 -166.0L461.3 -163.0L438.7 -176.9L453.8 -178.2ZM468.9 -217.1L474.0 -212.9L470.8 -201.1L440.8 -207.9L440.9 -215.0L468.9 -217.1ZM485.8 -246.9L509.1 -251.5L553.1 -241.7L532.5 -231.7L506.8 -230.8L499.5 -233.8L504.8 -238.7L485.4 -240.7L481.3 -243.9L485.8 -246.9ZM514.3 -255.5L567.8 -262.8L699.4 -297.7L647.1 -262.6L611.2 -250.6L620.3 -251.6L616.1 -249.3L622.3 -246.8L595.6 -230.5L608.8 -229.1L591.7 -220.6L530.5 -216.2L529.3 -220.4L541.7 -223.3L537.9 -229.0L560.2 -228.2L539.6 -233.0L557.8 -242.3L545.1 -247.4L577.9 -252.8L540.6 -248.7L514.3 -255.5ZM648.7 -133.2L635.9 -126.0L632.8 -131.7L641.3 -142.5L648.0 -140.4L648.7 -133.2ZM484.0 -140.7L488.6 -136.1L483.8 -131.8L456.9 -140.2L469.2 -148.7L484.0 -140.7ZM813.9 87.8L831.4 84.5L845.3 89.6L813.9 87.8ZM834.0 129.0L840.3 135.1L858.2 130.4L851.8 140.9L836.0 139.3L834.0 129.0ZM201.0 116.1L367.3 149.7L472.7 156.5L495.0 156.5L498.6 150.3L504.0 161.7L533.4 169.3L559.4 169.7L568.7 164.4L609.3 183.1L638.4 204.6L647.3 232.5L639.2 258.2L645.2 264.0L686.2 237.8L681.8 228.6L686.5 225.1L708.3 220.8L725.6 194.3L762.9 185.0L770.3 175.5L777.0 140.2L794.0 141.6L800.5 162.6L813.7 173.7L784.0 201.6L781.8 225.0L787.9 232.3L792.8 231.3L790.0 225.9L794.4 228.4L794.8 233.2L753.9 255.7L774.7 250.6L751.7 259.3L752.9 276.5L746.9 290.8L737.4 283.5L747.0 299.7L740.2 321.1L740.5 309.0L728.6 291.2L732.4 308.2L723.8 307.4L733.4 310.8L748.6 347.1L743.0 360.7L717.5 381.5L686.9 426.7L690.8 449.2L716.7 496.6L716.4 523.9L704.8 525.9L695.4 516.5L674.2 486.8L675.6 475.8L657.8 455.5L638.8 462.8L619.5 452.4L575.5 460.0L579.1 476.0L558.3 477.5L547.4 469.5L524.9 468.6L504.4 473.9L469.5 500.6L469.1 532.2L463.4 532.6L441.8 523.5L416.0 473.9L394.9 466.4L385.2 478.5L373.9 472.8L342.1 429.2L318.6 426.4L317.7 433.0L279.7 427.6L234.0 396.5L201.4 392.7L188.8 364.7L164.0 348.7L143.5 245.8L153.8 207.1L173.9 166.4L178.1 122.8L193.8 130.0L195.2 146.2L201.0 116.1ZM201.4 392.7L234.0 396.5L279.7 427.6L317.7 433.0L318.6 426.4L342.1 429.2L373.9 472.8L385.2 478.5L394.9 466.4L416.0 473.9L441.8 523.5L469.1 532.2L457.3 586.6L467.4 615.4L487.5 643.8L511.1 654.3L558.8 641.3L568.5 634.4L574.7 607.1L623.9 594.7L628.1 605.3L617.7 625.2L616.2 647.1L605.5 644.5L600.5 654.3L566.1 657.5L566.5 666.2L559.3 666.6L576.4 678.8L576.3 684.1L555.4 685.2L548.5 709.0L520.7 688.3L507.3 684.5L476.8 693.1L366.3 647.5L337.1 618.9L334.2 610.9L339.5 609.9L342.9 596.1L337.8 582.1L302.5 531.5L290.9 523.3L292.3 509.5L256.8 463.0L250.4 425.3L230.3 411.1L226.5 437.5L259.3 500.9L267.3 540.5L274.4 542.1L283.7 558.0L273.1 565.2L270.6 555.0L246.0 529.9L247.7 509.5L213.4 475.1L220.3 476.1L228.6 464.2L212.9 444.7L201.4 392.7Z",
+  /* percent-of-frame, precomputed from the same Albers projection that drew the path above, and
+     drawn through the same viewBox at runtime — so a marker can't drift off its own coastline */
+  at: {ANA:[19.63,65.87], BOS:[77.9,40.07], BUF:[68.69,42.24], CAR:[70.96,62.4], CBJ:[64.52,51.98], CGY:[29.9,18.93], CHI:[58.55,47.58], COL:[37.5,53.61], DAL:[47.5,74.77], DET:[63.95,45.21], EDM:[31.19,12.22], FLA:[71.47,90.52], LAK:[19.21,65.0], MIN:[51.91,39.4], MTL:[73.82,32.58], NJD:[74.92,46.28], NSH:[60.52,63.97], NYI:[75.61,46.03], NYR:[75.12,46.16], OTT:[71.28,34.2], PHI:[74.03,49.13], PIT:[68.06,49.63], SEA:[20.0,24.7], SJS:[15.97,53.63], STL:[55.85,57.42], TBL:[67.98,86.32], TOR:[67.89,40.25], UTA:[29.35,48.72], VAN:[19.95,19.75], VGK:[23.9,60.71], WPG:[47.38,25.32], WSH:[72.13,52.83]}
+};
+
+/* Percent-positioned HTML markers over the SVG rather than <image> inside it: it reuses
+   CG.crest (logo when a club has uploaded one, generated crest when not), and every pin is
+   a real link to the club with a real accessible name. */
+CG.naMapPins = function(){
+  var seen = {}, out = [];
+  (CG.TEAMS || []).slice()
+    /* south-first so northern pins stack above southern ones where they nearly touch */
+    .sort(function(a, b){ return (((CG.NA_MAP.at[b.code]||[0,0])[1]) - ((CG.NA_MAP.at[a.code]||[0,0])[1])); })
+    .forEach(function(t){
+      var at = CG.NA_MAP.at[t.code];
+      if (!at || seen[t.code]) return;          /* a franchise we have no coordinate for is skipped, not guessed */
+      seen[t.code] = 1;
+      out.push('<a class="na-pin" data-mx="' + at[0] + '" data-my="' + at[1] + '" href="#/team/' + esc(t.code) + '"' +
+        ' aria-label="' + esc((t.city ? t.city + " " : "") + t.name) + '">' +
+        '<span class="na-dot">' + CG.crest(t.code, 30) + '</span>' +
+        '<span class="na-tag">' + esc(t.code) + '</span></a>');
+    });
+  return out.join("");
+};
+/* Frame the map on the CLUBS, not on the continent.
+
+   A fixed viewBox with preserveAspectRatio has to pick a poison: "slice" fills the box but crops
+   whatever the box's aspect can't hold — at 375px wide that cropped San Jose clean off the map —
+   and "meet" letterboxes instead. Neither knows which parts of the picture actually matter.
+
+   So compute the window: take the bounding box of the pins, grow it to the container's aspect,
+   leave a px margin for the crest disc and its label, and hand that rect to the SVG as its viewBox.
+   The pins are then placed from that same rect, so the path and the markers can never disagree —
+   and every club stays in frame at every size, because the frame is derived from the clubs. */
+CG.naMapView = function(box, padB){
+  var m = CG.NA_MAP, xs = [], ys = [];
+  (CG.TEAMS || []).forEach(function(t){
+    var at = m.at[t.code];
+    if (at){ xs.push(at[0] / 100 * m.w); ys.push(at[1] / 100 * m.h); }
+  });
+  if (!xs.length){ xs = [0, m.w]; ys = [0, m.h]; }
+  var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+  var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+
+  /* px of breathing room around the outermost pins: enough for half a crest either side, and more
+     below, where each pin carries its code and the caption sits over the bottom-left corner. */
+  var padX = 44, padT = 34;
+  padB = padB || 58;
+  var usableX = Math.max(box.width * 0.35, box.width - padX * 2);
+  var usableY = Math.max(box.height * 0.35, box.height - padT - padB);
+  var vw = (x1 - x0) * box.width / usableX;
+  var vh = (y1 - y0) * box.height / usableY;
+
+  var aspect = box.width / box.height;
+  var VW = Math.max(vw, vh * aspect), VH = VW / aspect;      /* grow the tight fit to the box's shape */
+  /* Never zoom out past the whole continent. Past that the extra frame is empty ocean, and — the
+     reason this is a guard and not a nicety — a box measured before the hero has settled computes a
+     window many times the map. Bounded here, the worst a bad measurement can do is show all of
+     North America, which by definition still has every club in it. */
+  var meetW = Math.max(m.w, m.h * aspect);
+  if (VW > meetW){ VW = meetW; VH = VW / aspect; }
+  var sx = box.width / VW, sy = box.height / VH;
+  /* park the pin bbox in the middle of what's left after the margins */
+  var vx = (x0 + x1) / 2 - (box.width / 2) / sx;                     /* left and right pads match */
+  var vy = (y0 + y1) / 2 - ((padT + box.height - padB) / 2) / sy;
+  /* prefer a window that stays on the map rather than one hanging over empty background — but never
+     at the cost of pushing a club out of frame */
+  var cx = VW <= m.w ? Math.max(0, Math.min(m.w - VW, vx)) : (m.w - VW) / 2;
+  var cy = VH <= m.h ? Math.max(0, Math.min(m.h - VH, vy)) : (m.h - VH) / 2;
+  if (x0 >= cx && x1 <= cx + VW) vx = cx;
+  if (y0 >= cy && y1 <= cy + VH) vy = cy;
+  return { x:vx, y:vy, w:VW, h:VH, sx:sx, sy:sy };
+};
+
+/* Lay the map out: window first, then separate the pins that still collide. Toronto and Pittsburgh
+   are 47 map-units apart while the crests are 40px wide, so the Great Lakes clubs land on each
+   other at any sane zoom — nudge them apart afterwards, capped so a pin never wanders off the city
+   it marks. */
+CG.naMapLayout = function(){
+  var wrap = document.querySelector(".na-pins");
+  if (!wrap) return;
+  var pins = [].slice.call(wrap.querySelectorAll(".na-pin"));
+  if (!pins.length) return;
+  var box = wrap.getBoundingClientRect();
+  if (!box.width || !box.height) return;          /* hero not laid out yet */
+
+  var m = CG.NA_MAP, plot = wrap.parentNode;
+  var svg = plot.querySelector(".na-svg");
+  var card = plot.parentNode;
+  var cap = card && card.querySelector(".na-cap");
+  /* the caption only competes for space where it overlays the plot — below the map (as on a phone)
+     its rect never meets a pin and this settles on the first pass */
+  var v, padB = 58;
+  var place = function(){
+    v = CG.naMapView(box, padB);
+    pins.forEach(function(el){
+      var mx = parseFloat(el.getAttribute("data-mx")) / 100 * m.w;
+      var my = parseFloat(el.getAttribute("data-my")) / 100 * m.h;
+      el.style.left = ((mx - v.x) * v.sx).toFixed(1) + "px";
+      el.style.top  = ((my - v.y) * v.sy).toFixed(1) + "px";
+    });
+  };
+  for (var pass = 0; pass < 4; pass++){
+    place();
+    if (!cap) break;
+    var cr = cap.getBoundingClientRect(), worst = 0;
+    pins.forEach(function(el){
+      var r = el.getBoundingClientRect();
+      if (r.right > cr.left && r.left < cr.right) worst = Math.max(worst, r.bottom - cr.top);
+    });
+    if (worst <= 0) break;
+    var next = padB + worst + 4;
+    /* clearing the caption is worth some zoom, but not a map squeezed into half its own box */
+    if (next > box.height * 0.45) break;
+    padB = next;
+  }
+  if (svg) svg.setAttribute("viewBox", v.x.toFixed(1) + " " + v.y.toFixed(1) + " " + v.w.toFixed(1) + " " + v.h.toFixed(1));
+  if (pins.length < 2) return;
+  var p = pins.map(function(el){
+    var r = el.getBoundingClientRect();
+    var cx = r.left - box.left + r.width / 2, cy = r.top - box.top + r.height / 2;
+    return { el:el, x:cx, y:cy, ox:cx, oy:cy, w:r.width, h:r.height,
+             bx:parseFloat(el.style.left), by:parseFloat(el.style.top) };
+  });
+  var CAP = 26;                                   /* px — beyond this the pin would lie about where the club is */
+  for (var it = 0; it < 60; it++){
+    var moved = false;
+    for (var i = 0; i < p.length; i++){
+      for (var j = i + 1; j < p.length; j++){
+        var a = p[i], b = p[j];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var needX = (a.w + b.w) / 2 * 0.86, needY = (a.h + b.h) / 2 * 0.72;
+        if (Math.abs(dx) >= needX || Math.abs(dy) >= needY) continue;
+        var d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        var push = (needY - Math.abs(dy)) / 2 + 0.6;
+        var ux = dx / d, uy = dy / d;
+        a.x -= ux * push; a.y -= uy * push;
+        b.x += ux * push; b.y += uy * push;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  p.forEach(function(q){
+    var dx = Math.max(-CAP, Math.min(CAP, q.x - q.ox));
+    var dy = Math.max(-CAP, Math.min(CAP, q.y - q.oy));
+    q.el.style.left = (q.bx + dx).toFixed(1) + "px";
+    q.el.style.top  = (q.by + dy).toFixed(1) + "px";
+  });
+};
+CG.naMap = function(){
+  var m = CG.NA_MAP, n = (CG.TEAMS || []).filter(function(t){ return m.at[t.code]; }).length;
+  return '<div class="na-wrap">' +
+    '<div class="na-plot">' +
+      /* viewBox is replaced by CG.naMapLayout once the plot has a measured size; this one is the
+         whole continent, so the map is never wrong even in the frame before that runs. */
+      '<svg class="na-svg" viewBox="0 0 ' + m.w + ' ' + m.h + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">' +
+        '<path d="' + m.d + '"/>' +
+      '</svg>' +
+      '<div class="na-pins">' + CG.naMapPins() + '</div>' +
+    '</div>' +
+    '<div class="na-cap">' +
+      '<span class="eyebrow" style="color:var(--on-ink-dim)">The league</span>' +
+      '<b class="na-cap-h">' + n + ' club' + (n === 1 ? "" : "s") + ' across North America</b>' +
+      '<span class="na-cap-s">Every club is a real room of real players. Tap a crest to see who runs it.</span>' +
+    '</div>' +
+  '</div>';
+};
+
 CG.ROUTES.home = function(){
   var lg = CG.lg, C = CG.CONTENT;
   var pre = CG.isPreseason();
@@ -349,7 +535,9 @@ CG.ROUTES.home = function(){
     ? (railGames.length ? "Next up · "+stageWk(railGames[0]) : "Road to puck drop")
     : "Tonight"+(railGames.length ? " · "+stageWk(railGames[0]) : "");
   html += '<section id="hero"><div class="shell hero-grid">'+
-    '<div class="caro" id="heroCaro" aria-label="Featured stories"></div>'+
+    /* the map is the hero's face now; the stories carousel moves directly below it so the
+       newsroom keeps its place on the front page rather than being dropped */
+    CG.naMap()+
     '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+railLabel+'</span>'+
       '<a class="sec-link" style="color:#fff" href="#/schedule">Full schedule</a></div>'+
       (railGames.length ? railGames.map(function(g){
@@ -381,6 +569,9 @@ CG.ROUTES.home = function(){
       })())+
       '<p class="caption" style="color:var(--on-ink-dim)">'+(pre?"Lineups and private game codes go live on game day (Rule 4.2).":"Lineups release 60 min before puck drop · codes at T-30 (Rule 4.2).")+'</p>'+
     '</aside></div></section>';
+  /* the newsroom, displaced from the hero by the map — same carousel, same id, now its own band */
+  html += '<section class="sec-tight" style="background:var(--bc);border-bottom:1px solid #2A343B">'+
+    '<div class="shell"><div class="caro caro-band" id="heroCaro" aria-label="Featured stories"></div></div></section>';
   /* quick fact strip */
   if (pre){
     var days = CG.daysToStart(), start = CG.seasonStartMs();
@@ -580,6 +771,32 @@ CG.newsCard = function(a, lead, feature){
 };
 CG.AFTER.home = function(){
   CG.carousel("#heroCaro", CG.slideDefs().map(function(s){ return s.html; }));
+  /* the map frames itself from its container, so it has to be laid out once the hero has a real
+     size — and again whenever that size changes, which moves both the window and the pixel gap
+     between cities. Run it straight off the event rather than deferring into rAF: the whole pass is
+     ~20 reads of ten pins, and a deferred one leaves the SVG window and the pins out of step —
+     worse, a rAF that never fires (hidden tab, throttled pane) strands the map at its old size. */
+  var relayout = function(){ if (document.querySelector(".na-pins")) CG.naMapLayout(); };
+  CG.naMapLayout();
+  requestAnimationFrame(relayout);                 /* again once the crests have their real size */
+  /* and again when the things that change the hero's height land — on a cold load the first
+     measurement can happen before the web font does, and the map would keep that frame */
+  if (document.readyState !== "complete") window.addEventListener("load", relayout, { once:true });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+  if (!CG._naResize){
+    CG._naResize = true;
+    window.addEventListener("resize", relayout);
+  }
+  /* the plot can also change size without the window doing so — the fonts landing, a scrollbar
+     appearing, the rail growing. Watch the box itself where the browser allows it. */
+  if (window.ResizeObserver){
+    if (CG._naRO) CG._naRO.disconnect();
+    var plotEl = document.querySelector(".na-plot");
+    if (plotEl){
+      CG._naRO = new ResizeObserver(function(){ CG.naMapLayout(); });
+      CG._naRO.observe(plotEl);
+    }
+  }
   /* free-agency countdown tick — stops itself when the strip leaves the page */
   var faEl = document.getElementById("faCountdown");
   if (faEl){

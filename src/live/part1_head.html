@@ -407,6 +407,39 @@ a.fx-link:hover{background:var(--chrome-tint)}
 #hero::after{content:"";position:absolute;inset:auto 0 0 0;height:1px;background:#2A343B}
 .hero-grid{display:grid;grid-template-columns:1.75fr 1fr;gap:0;align-items:stretch}
 .caro{position:relative;min-height:430px;outline:none}
+/* ---- the league map: hero face ---- */
+.na-wrap{position:relative;min-height:430px;overflow:hidden;background:
+  radial-gradient(120% 90% at 50% 0%,#16202b 0%,var(--bc) 70%)}
+/* the plot box is what the map is framed to; on desktop it is the whole card, on mobile the
+   caption drops below it so no pin has to dodge the text */
+.na-plot{position:absolute;inset:0}
+.na-svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.na-svg path{fill:#1c2733;stroke:#33424f;stroke-width:1.1;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+/* the pins share the plot box with the svg and are placed from the same viewBox, so they track
+   the map exactly — no reprojection, no drift */
+.na-pins{position:absolute;inset:0}
+/* the declutter nudge is folded into left/top rather than a custom property: transform can't carry
+   it, because calc(-50% + var(--n)) drops the var term and the pin silently snaps back */
+.na-pin{position:absolute;display:flex;flex-direction:column;align-items:center;gap:3px;
+  text-decoration:none;z-index:2;transition:transform .16s ease;transform:translate(-50%,-50%)}
+.na-pin:hover,.na-pin:focus-visible{z-index:3;outline:none;transform:translate(-50%,-50%) scale(1.14)}
+.na-dot{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;
+  background:rgba(10,15,20,.82);border:1.5px solid #43535f;box-shadow:0 3px 10px rgba(0,0,0,.5)}
+.na-pin:hover .na-dot,.na-pin:focus-visible .na-dot{border-color:var(--chrome);
+  box-shadow:0 0 0 3px rgba(232,185,35,.28),0 3px 10px rgba(0,0,0,.5)}
+.na-dot img,.na-dot svg{width:30px;height:30px;object-fit:contain}
+.na-tag{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;color:var(--on-ink-dim);
+  background:rgba(10,15,20,.72);padding:1px 5px;border-radius:3px}
+.na-pin:hover .na-tag,.na-pin:focus-visible .na-tag{color:#fff}
+/* the caption overlays the bottom-left, over the Pacific; if a club ever does frame into that
+   corner, naMapLayout reserves the caption's height and re-frames rather than let it hide a crest */
+.na-cap{position:absolute;left:0;bottom:0;padding:20px 22px;max-width:33ch;
+  display:flex;flex-direction:column;gap:5px;pointer-events:none;
+  background:linear-gradient(to top,rgba(10,15,20,.85),transparent)}
+.na-cap-h{font-family:var(--f-disp);font-size:19px;line-height:1.15;color:#fff}
+.na-cap-s{font-size:12.5px;line-height:1.45;color:var(--on-ink-dim)}
+/* the newsroom carousel in its own band below the hero */
+.caro-band{min-height:300px}
 .caro-track{display:grid;height:100%}
 .slide{grid-area:1/1;padding:clamp(26px,4vw,58px) clamp(4px,3vw,40px) clamp(64px,5vw,74px) 0;
   opacity:0;visibility:hidden;transform:translateX(28px);transition:opacity .5s ease,transform .5s ease,visibility .5s}
@@ -855,6 +888,17 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
   .statline>div{padding:12px 14px 12px 0;margin-right:14px;border-right:0}
   #demobar .db-lab2{display:none}
   .caro{min-height:400px}
+  /* on a phone the map has to zoom out to keep all ten clubs in frame, which pulls the cities
+     closer together — shrink the pins to match, and lift the caption out of the plot box so it
+     stops taking a third of the height the map is being framed into */
+  .na-wrap{min-height:340px;display:flex;flex-direction:column}
+  .na-plot{position:relative;inset:auto;flex:1 1 auto;min-height:250px}
+  .na-dot{width:32px;height:32px}
+  .na-dot img,.na-dot svg{width:23px;height:23px}
+  .na-tag{font-size:8px}
+  .na-cap{position:static;padding:2px 16px 16px;max-width:100%;background:none}
+  .na-cap-h{font-size:16px}
+  .na-cap-s{display:none}
   .slide h2{font-size:29px}
   .mx-teams{grid-template-columns:1fr;text-align:center}
   .mx-side,.mx-side.away{flex-direction:column;text-align:center;justify-items:center}
