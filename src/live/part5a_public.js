@@ -765,79 +765,31 @@ CG.pulseModule = function(){
   var POS = [["C","C"],["LW","LW"],["RW","RW"],["LD","LD"],["RD","RD"],["G","G"]];
   var byPos = {};
   regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
-  /* second series: of the players registered at each position, how many already hold a contract.
-     Derived from the two sets we already have — no new query, no estimate. */
-  var signedIds = {};
-  (lg._contractsRaw || []).forEach(function(c){ if (c && c.profile_id) signedIds[c.profile_id] = 1; });
-  var byPosSigned = {};
-  regs.forEach(function(r){
-    if (r.position && r.profile_id && signedIds[r.profile_id])
-      byPosSigned[r.position] = (byPosSigned[r.position]||0) + 1;
-  });
   var posRows = POS.filter(function(p){ return byPos[p[0]]; })
-                   .map(function(p){ return { k:p[1], v:byPos[p[0]], s:byPosSigned[p[0]]||0 }; });
+                   .map(function(p){ return { k:p[1], v:byPos[p[0]] }; });
   if (posRows.length >= 3){
     var fewest = posRows.reduce(function(b,r){ return r.v < b.v ? r : b; }, posRows[0]);
-    var openAt = posRows.reduce(function(a,r){ return a + (r.v - r.s); }, 0);
+    var most   = posRows.reduce(function(b,r){ return r.v > b.v ? r : b; }, posRows[0]);
     cards.push(V.card({
       title: "Registrations by position",
-      sub: "Fewest: " + fewest.k,
+      sub: fewest.k + " shortest \u00b7 " + most.k + " deepest",
       value: posRows.reduce(function(a,r){ return a + r.v; }, 0), count: true,
-      body: V.bars2(posRows, { markMin:true,
-        legend: [{ k:"Registered", c:"" }, { k:"Already on a club", c:"b" }],
-        note: fewest.k + " has the fewest registrations. " + openAt + " registered players are still unsigned." })
+      body: V.bars(posRows, { markMin:true,
+        note: "Skaters choose a side at registration. " + fewest.k + " has " + fewest.v +
+              " registered against " + most.v + " at " + most.k + "." })
     }));
   }
 
-  /* sign-ups per day, as a grid — one cell per day since the first registration */
-  if (regs.length >= 10){
-    var perDay = {};
-    regs.forEach(function(r){ var d = String(r.created_at).slice(0,10); perDay[d] = (perDay[d]||0) + 1; });
-    var days = Object.keys(perDay).sort();
-    var d0 = new Date(days[0] + "T00:00:00Z"), d1 = new Date(days[days.length-1] + "T00:00:00Z");
-    var cells = [], cur = new Date(d0);
-    while (cur <= d1 && cells.length < 120){
-      var key = cur.toISOString().slice(0,10);
-      cells.push({ k: key, v: perDay[key] || 0 });
-      cur.setUTCDate(cur.getUTCDate() + 1);
-    }
-    if (cells.length >= 7){
-      var busiest = cells.reduce(function(b,c){ return c.v > b.v ? c : b; }, cells[0]);
-      cards.push(V.card({
-        title: "Sign-ups per day",
-        sub: cells.length + " days of registration",
-        value: busiest.v, 
-        body: V.heat(cells, { cols: 7,
-          legend: [{ k:"None", c:"t" }, { k:"Busiest: " + busiest.v, c:"b" }],
-          note: "One cell per day, first registration to today. Darkest is the busiest day." })
-      }));
-    }
-  }
-
-  /* ---- roster spots filled, league-wide ---- */
+  /* Roster spots filled league-wide — how much room is left before the draft. */
   var max = (s.roster_max || 15), spots = teams.length * max;
   var filled = teams.reduce(function(a,t){ return a + (((lg.byTeam||{})[t.code]||[]).length); }, 0);
-  if (spots && filled >= 0){
+  if (spots > 0){
     cards.push(V.card({
       title: "Roster spots filled",
-      sub: filled + " of " + spots,
-      body: V.donut(filled, spots, { label: "of " + spots + " spots",
-        note: max + " players per club across " + teams.length + " clubs. The rest are filled at the draft." })
-    }));
-  }
-
-  /* ---- signed players per club ---- */
-  /* deliberately NOT tinted per club: the code is already inside the bar, so colour would be
-     carrying nothing, and ten brand colours in one chart pulls it off the league palette */
-  var clubRows = teams.map(function(t){
-    return { k:t.code, v:((lg.byTeam||{})[t.code]||[]).length };
-  }).filter(function(r){ return r.v > 0; });
-  if (clubRows.length >= 3){
-    cards.push(V.card({
-      title: "Players signed, by club",
-      sub: "Management and returning players",
-      value: clubRows.reduce(function(a,r){ return a + r.v; }, 0), count: true,
-      body: V.hbars(clubRows, { fmt: function(v){ return v + "/" + max; } })
+      sub: filled + " of " + spots + " across " + teams.length + " clubs",
+      body: V.donut(filled, spots, { label: "of " + spots,
+        note: (spots - filled) + " spots still open. Most are filled at the draft" +
+              (s.draft_at ? " on " + CG.fmtDate(s.draft_at) : "") + "." })
     }));
   }
 

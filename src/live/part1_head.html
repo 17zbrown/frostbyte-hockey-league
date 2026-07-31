@@ -579,27 +579,30 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;white-space:nowrap}
 .vz-note{margin:0;font-size:12px;line-height:1.5;color:var(--steel)}
 
-/* ---- vertical bars ---- */
-.vz-bars{display:grid;grid-template-columns:repeat(var(--n,6),1fr);gap:clamp(5px,1vw,11px);
-  align-items:end;height:clamp(118px,15vh,164px)}
-.vz-bar{display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
-.vz-bv{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+/* ---- vertical bars ----
+   Reference proportions: a tall plot, narrow columns that do NOT stretch to fill the card, and
+   corners near-square. Wide soft-cornered bars were most of what made these read as cheap. */
+.vz-bars{display:flex;align-items:flex-end;justify-content:space-between;gap:clamp(6px,1.4vw,16px);
+  height:clamp(168px,22vh,224px);padding:0 2px}
+.vz-bar{display:flex;flex-direction:column;align-items:center;gap:7px;height:100%;
+  justify-content:flex-end;flex:1 1 0;max-width:44px}
+.vz-bv{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--ink);
+  font-variant-numeric:tabular-nums;line-height:1}
 .vz-bt{width:100%;flex:1 1 auto;display:flex;align-items:flex-end;
-  background:var(--line-soft);border-radius:3px;overflow:hidden}
-.vz-bt>i{position:relative;display:block;width:100%;border-radius:3px;transform-origin:bottom;
+  background:var(--line-soft);border-radius:2px;overflow:hidden}
+.vz-bt>i{position:relative;display:block;width:100%;border-radius:2px;transform-origin:bottom;
   background:var(--em-2)}
-/* the taken portion, drawn inside the total the way the reference stacks its two series */
-.vz-bt>i>b{position:absolute;left:0;right:0;bottom:0;border-radius:3px;background:var(--em-4)}
-.vz-bar.on .vz-bt>i{background:var(--em-3)}
+.vz-bar.on .vz-bt>i{background:var(--em-4)}
 .vz-bar.on .vz-bv,.vz-bar.on .vz-bl{color:var(--em-ink);font-weight:700}
-.vz-bl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.09em;color:var(--steel);text-transform:uppercase}
+.vz-bl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;color:var(--steel);
+  text-transform:uppercase;line-height:1}
 
 /* ---- horizontal bars, label inside the bar ---- */
 .vz-hbars{display:flex;flex-direction:column;gap:6px}
 .vz-hb{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:11px}
-.vz-hbt{position:relative;height:26px;border-radius:4px;background:var(--line-soft);overflow:hidden;
+.vz-hbt{position:relative;height:26px;border-radius:2px;background:var(--line-soft);overflow:hidden;
   display:flex;align-items:center}
-.vz-hbt>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;transform-origin:left center;
+.vz-hbt>i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;transform-origin:left center;
   background:linear-gradient(90deg,var(--hb,var(--em-2)),color-mix(in srgb,var(--hb,var(--em-3)) 72%,var(--em-4)))}
 @supports not (color: color-mix(in srgb,red,blue)){
   .vz-hbt>i{background:linear-gradient(90deg,var(--hb,var(--em-2)),var(--em-4))}}
@@ -611,8 +614,8 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
 /* ---- donut ---- */
 .vz-donut{position:relative;display:grid;place-items:center;padding:2px 0}
 .vz-donut svg{width:clamp(124px,15vw,164px);height:auto;transform:rotate(-90deg)}
-.vz-dtrack{fill:none;stroke:var(--line-soft);stroke-width:13}
-.vz-dfill{fill:none;stroke:var(--em-3);stroke-width:13;stroke-linecap:butt;
+.vz-dtrack{fill:none;stroke:var(--line-soft);stroke-width:16}
+.vz-dfill{fill:none;stroke:var(--em-3);stroke-width:16;stroke-linecap:butt;
   stroke-dasharray:var(--dash);stroke-dashoffset:calc(var(--dash) - var(--fill))}
 .vz-dmid{position:absolute;text-align:center}
 .vz-dmid b{display:block;font-family:var(--f-disp);font-weight:800;font-size:clamp(24px,2.6vw,32px);
@@ -661,7 +664,7 @@ html.rv-on .vz[data-rv].rv-in .vz-dot{opacity:1;transition:opacity .3s ease calc
 .vz-lg>i.b{background:var(--em-4)}
 .vz-lg>i.t{background:var(--line-soft);border:1px solid var(--line)}
 .vz-heat{display:grid;grid-template-columns:repeat(var(--cols,7),1fr);gap:4px}
-.vz-cell{display:block;aspect-ratio:1;border-radius:2px;background:var(--line-soft)}
+.vz-cell{display:block;aspect-ratio:1;border-radius:1px;background:var(--line-soft)}
 .vz-cell.l1{background:color-mix(in srgb,var(--em-2) 30%,var(--line-soft))}
 .vz-cell.l2{background:color-mix(in srgb,var(--em-2) 62%,var(--line-soft))}
 .vz-cell.l3{background:var(--em-3)}
