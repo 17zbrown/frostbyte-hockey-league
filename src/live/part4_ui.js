@@ -1003,7 +1003,10 @@ CG.countUp = function(el){
     el.textContent = pre + Math.round(to * e).toLocaleString() + suf;
     if (p < 1) requestAnimationFrame(step);
   };
-  el.textContent = pre + "0" + suf;
+  /* The count starts from inside the first frame, never before it. Zeroing the text up front and
+     then waiting for rAF would strand the figure reading "0 Members" in any tab that is not
+     rendering — a backgrounded tab suspends rAF, and the reveal watchdog can still fire on its
+     timer. Left alone, the element keeps the true number the markup already carries. */
   requestAnimationFrame(step);
 };
 
