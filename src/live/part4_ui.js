@@ -978,6 +978,80 @@ CG.pageTitleFor = function(name, root){
   return lead===CG.SITE_TITLE ? lead : lead+" · "+CG.SITE_TITLE;
 };
 /* ================================================================
+   EMBER LIGHT — the flowing ribbon behind the hero and the charts.
+
+   Painted once into a low-resolution canvas and stretched by CSS. It is a soft gradient, so
+   upscaling costs nothing visually and actively helps: it smooths the banding that a hand-authored
+   CSS gradient of this shape would show. Once, not per frame — there is no animation loop here,
+   so it cannot jank; the drift is a CSS transform on the element instead.
+
+   The shape is the reference's: vertical ribs bent by a slow sine, a horizontal warm-to-deep ramp,
+   and film grain over the top. The palette is the league's ember ramp, not the reference's
+   magenta and violet.
+   ================================================================ */
+CG.emberPaint = function(cv, opts){
+  if (!cv || !cv.getContext) return;
+  opts = opts || {};
+  var W = opts.w || 300, H = opts.h || 190;
+  cv.width = W; cv.height = H;
+  var ctx = cv.getContext("2d");
+  if (!ctx) return;
+
+  /* read the ramp off the live stylesheet, so a theme or brand change carries through here */
+  var cs = getComputedStyle(document.documentElement);
+  var stops = ["--em-1","--em-2","--em-3","--em-4","--em-5"].map(function(v){
+    var hex = (cs.getPropertyValue(v) || "").trim() || "#FFC21F";
+    return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+  });
+  var ramp = function(t){
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    var f = t * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(f)), k = f - i;
+    var a = stops[i], b = stops[i + 1];
+    return [a[0] + (b[0]-a[0])*k, a[1] + (b[1]-a[1])*k, a[2] + (b[2]-a[2])*k];
+  };
+
+  var img = ctx.createImageData(W, H), d = img.data;
+  var ribs = opts.ribs || 26, grain = opts.grain == null ? 13 : opts.grain;
+  var seed = 1;
+  var rnd = function(){ seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (var y = 0; y < H; y++){
+    var v = y / H;
+    for (var x = 0; x < W; x++){
+      var u = x / W;
+      /* bend the ribs: the columns curve across the frame instead of running straight */
+      var warp = Math.sin(v * Math.PI * 1.55 + u * 2.1) * 0.075;
+      var t = u + warp + (opts.shift || 0);
+      var band = Math.sin((u * ribs + warp * 4.5 + v * 0.55) * Math.PI * 2);
+      var shade = 0.84 + 0.16 * band;
+      /* light pools toward the top-left, the way the reference falls off */
+      shade *= 1.06 - 0.20 * v;
+      var c = ramp(t);
+      var g = (rnd() - 0.5) * grain;
+      var o = (y * W + x) * 4;
+      d[o]   = Math.max(0, Math.min(255, c[0] * shade + g));
+      d[o+1] = Math.max(0, Math.min(255, c[1] * shade + g));
+      d[o+2] = Math.max(0, Math.min(255, c[2] * shade + g));
+      d[o+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  cv.setAttribute("data-painted", "1");
+};
+
+/* Paint every ember canvas that has not been painted yet. Cheap enough to call on every render:
+   the guard means each canvas is rasterised once. */
+CG.emberAll = function(root){
+  [].forEach.call((root || document).querySelectorAll("canvas.ember:not([data-painted])"), function(cv){
+    CG.emberPaint(cv, {
+      w: +cv.getAttribute("data-w") || 300,
+      h: +cv.getAttribute("data-h") || 190,
+      ribs: +cv.getAttribute("data-ribs") || 26,
+      shift: parseFloat(cv.getAttribute("data-shift")) || 0
+    });
+  });
+};
+
+/* ================================================================
    SCROLL REVEALS
 
    The safety property first, because it is the whole design: every element is
@@ -1088,6 +1162,7 @@ CG.router = function(){
     if (!el.hasAttribute("role")) el.setAttribute("role","link");
   });
   if (CG.AFTER[name]) CG.AFTER[name](param, qs);
+  CG.emberAll(app);                                /* paint the ribbon light before anything reveals */
   CG.armReveals(app);                              /* after AFTER: hooks may have injected markup */
   /* must land before focus moves: screen readers read the title when #app takes focus */
   document.title = CG.pageTitleFor(CG.ROUTES[name] ? name : "_404", app);

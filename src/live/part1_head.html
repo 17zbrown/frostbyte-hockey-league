@@ -80,6 +80,14 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
   /* motion: one easing and one beat for the whole page, so the choreography feels authored */
   --ease-out:cubic-bezier(.22,.9,.3,1); --ease-spring:cubic-bezier(.34,1.4,.64,1);
   --beat:70ms;
+  /* THE EMBER RAMP — the reference's flowing ribbon light, run through the league's own colours.
+     It ends in oxblood rather than magenta and violet on purpose: the brand is chrome yellow and
+     gold, and the design standards ban a pink-to-purple ramp outright. Five stops, warm to deep,
+     used for the hero light, the chart fills and the bar ladder. */
+  --em-1:#FFE86B; --em-2:#FFC21F; --em-3:#F58120; --em-4:#D8391F; --em-5:#7A1526;
+  /* the ramp above is for FILLS. Ember orange as text is 2.61:1 on a pale card, so text
+     that wants to read as ember uses this instead — and it flips per theme. */
+  --em-ink:#B23A10;
 }
 /* ---------- dark theme ("Night Game") — broadcast surfaces stay constant ---------- */
 html[data-theme="dark"]{
@@ -92,6 +100,7 @@ html[data-theme="dark"]{
   --sh-2:0 2px 4px rgba(0,0,0,.55),0 24px 48px -18px rgba(0,0,0,.72);
   --map-sea-1:#16202b; --map-sea-2:#0D1216; --map-land:#212f3e; --map-coast:#4a5d70;
   --map-bord:#334356; --map-lake:#131c25;
+  --em-ink:#FF9A5A;
   color-scheme:dark;
 }
 html[data-theme="dark"] #masthead{background:rgba(15,18,21,.92)}
@@ -416,10 +425,27 @@ a.fx-link:hover{background:var(--chrome-tint)}
 /* ---------- hero carousel ---------- */
 /* The hero follows the theme rather than staying a fixed broadcast surface: the map underneath
    it now renders as a light atlas in light mode, and a permanently dark band above a light map
-   left the wordmark near-black on near-black. The map's own sea tone carries it, so the band and
-   the map read as one picture in both themes. */
-#hero{background:var(--map-sea-1);color:var(--ink);position:relative;overflow:hidden}
+   left the wordmark near-black on near-black. */
+#hero{background:var(--map-sea-1);color:var(--ink);position:relative;overflow:hidden;isolation:isolate}
 #hero::after{content:"";position:absolute;inset:auto 0 0 0;height:1px;background:var(--line)}
+/* The ember light runs behind BOTH the wordmark and the map, which is what fuses them into one
+   picture — there is no seam to hide because the same surface carries through. It fades out
+   downward so the map's own sea tone takes over where the geography starts to matter. */
+.hero-ember{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;
+  object-fit:cover;opacity:.5;
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 26%,rgba(0,0,0,.55) 52%,transparent 88%);
+          mask-image:linear-gradient(to bottom,#000 0%,#000 26%,rgba(0,0,0,.55) 52%,transparent 88%);
+  animation:ember-drift 34s ease-in-out infinite alternate}
+html[data-theme="dark"] .hero-ember{opacity:.34;mix-blend-mode:screen}
+@keyframes ember-drift{from{transform:scale(1.06) translate3d(-1.5%,0,0)}
+                       to{transform:scale(1.12) translate3d(1.5%,-1.5%,0)}}
+/* the map sits above the light and lets it through at the top, so the two never meet at an edge */
+#hero .na-wrap{position:relative;z-index:1;background:linear-gradient(to bottom,
+  transparent 0%,color-mix(in srgb,var(--map-sea-1) 70%,transparent) 14%,var(--map-sea-1) 34%,var(--map-sea-2) 100%)}
+@supports not (color: color-mix(in srgb,red,blue)){
+  #hero .na-wrap{background:linear-gradient(to bottom,transparent 0%,var(--map-sea-1) 30%,var(--map-sea-2) 100%)}
+}
+@media(prefers-reduced-motion:reduce){.hero-ember{animation:none}}
 .hero-grid{display:grid;grid-template-columns:1.75fr 1fr;gap:0;align-items:stretch}
 .caro{position:relative;min-height:430px;outline:none}
 /* ================= MOTION SYSTEM =================
@@ -520,19 +546,102 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
   font-size:clamp(32px,3.6vw,50px);line-height:.94;letter-spacing:-.025em;font-variant-numeric:tabular-nums}
 .pulse-sub{display:block;margin-top:7px;font-size:13px;line-height:1.5;color:var(--steel);max-width:44ch}
 .pulse-svg{width:100%;height:clamp(120px,17vh,180px);margin-top:auto;display:block;overflow:visible}
-.pulse-area{fill:var(--viz-accent);opacity:.13}
-.pulse-line{stroke:var(--viz-accent);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;
-  vector-effect:non-scaling-stroke}
-.pulse-end{fill:var(--viz-accent);stroke:var(--paper);stroke-width:2}
+.pulse-area{fill:url(#cgPulseFill)}
+.pulse-line{stroke:url(#cgPulseLine);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--em-2) 55%,transparent))}
+@supports not (color: color-mix(in srgb,red,blue)){.pulse-line{filter:none}}
+.pulse-end{fill:var(--em-1);stroke:var(--paper);stroke-width:2}
+.pulse-grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke;opacity:.6}
+.pulse-flag{stroke:var(--em-3);stroke-width:1.5;stroke-dasharray:3 4;vector-effect:non-scaling-stroke;opacity:.5}
+/* one dot per day, arriving behind the line as it draws */
+.pulse-tick{fill:var(--em-2);opacity:0}
+html.rv-on [data-rv="draw"].rv-in .pulse-tick{opacity:.85;
+  transition:opacity .3s ease calc(320ms + var(--tick-i,0)*55ms)}
+@media(prefers-reduced-motion:reduce){.pulse-tick{opacity:.85;transition:none}}
+.pulse-axis{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:10px;
+  letter-spacing:.08em;color:var(--steel);padding:6px 0 10px}
+/* the ember light sits inside the card, behind the chart, at a whisper */
+.ember-card{position:relative;isolation:isolate}
+.card-ember{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;
+  pointer-events:none;opacity:.1}
+html[data-theme="dark"] .card-ember{opacity:.16;mix-blend-mode:screen}
 /* position bars: the shortest column is the point of the chart, so it is the one that reads */
 .poscols{display:flex;align-items:flex-end;gap:clamp(6px,1.4vw,14px);height:clamp(110px,15vh,160px);
   margin:auto 0 16px}
 .poscol{flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
 .pc-n{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
 .pc-bar{width:100%;flex:1 1 auto;display:flex;align-items:flex-end}
-.pc-bar>i{display:block;width:100%;border-radius:5px 5px 0 0;background:var(--viz-accent);opacity:.9}
+/* each column is mixed further along the ember ramp by its --col-t */
+.pc-bar>i{display:block;width:100%;border-radius:6px 6px 0 0;opacity:.92;
+  background:linear-gradient(180deg,var(--em-2),var(--em-3));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
+.poscol:nth-child(even) .pc-bar>i{background:linear-gradient(180deg,var(--em-1),var(--em-2))}
+/* the position the league is short of burns, and keeps pulsing until someone fills it */
+.poscol.short .pc-bar>i{background:linear-gradient(180deg,var(--em-3),var(--em-5));
+  box-shadow:0 0 18px color-mix(in srgb,var(--em-3) 60%,transparent),inset 0 1px 0 rgba(255,255,255,.3);
+  animation:short-pulse 2.6s ease-in-out infinite}
+@supports not (color: color-mix(in srgb,red,blue)){.poscol.short .pc-bar>i{box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}}
+@keyframes short-pulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.22)}}
+.poscol.short .pc-l,.poscol.short .pc-n{color:var(--em-ink);font-weight:700}
+@media(prefers-reduced-motion:reduce){.poscol.short .pc-bar>i{animation:none}}
 .pc-l{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;color:var(--steel)}
 @media(max-width:860px){.pulsegrid{grid-template-columns:1fr}}
+
+/* ---- the ladder: standings as lanes on a sheet of ice ---- */
+.ladderwrap{display:flex;flex-direction:column;gap:12px}
+.ladder-h{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ladder-h h3{font-family:var(--f-disp);font-size:clamp(15px,1.5vw,19px);color:var(--ink)}
+.ladder{display:flex;flex-direction:column;gap:5px;position:relative}
+.lane{position:relative;display:grid;grid-template-columns:26px 30px minmax(0,1fr) 34% auto;
+  align-items:center;gap:11px;padding:9px 13px;border-radius:10px;text-decoration:none;
+  background:var(--paper);border:1.5px solid var(--line);overflow:hidden;
+  transition:border-color .25s ease,transform .3s var(--ease-spring),box-shadow .3s ease}
+/* the club's colour washes in from the boards on hover */
+.lane::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,var(--team,var(--em-2)) -20%,transparent 58%);
+  transition:opacity .3s ease}
+.lane:hover,.lane:focus-visible{border-color:var(--team,var(--em-3));transform:translateX(4px);
+  box-shadow:var(--sh-1);outline:none}
+.lane:hover::after,.lane:focus-visible::after{opacity:.16}
+.lane>*{position:relative;z-index:1}
+.lane-rk{font-family:var(--f-mono);font-size:13px;font-weight:600;color:var(--steel);
+  font-variant-numeric:tabular-nums;text-align:center}
+.lane.in .lane-rk{color:var(--ink)}
+.lane-crest{line-height:0}
+.lane-crest img,.lane-crest svg{width:30px;height:30px;object-fit:contain}
+.lane-name{font-family:var(--f-disp);font-weight:700;font-size:14.5px;color:var(--ink);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane-name small{display:block;font-family:var(--f-mono);font-weight:400;font-size:10.5px;
+  color:var(--steel);letter-spacing:.05em;text-transform:uppercase}
+.lane-track{height:8px;border-radius:99px;background:var(--line-soft);overflow:hidden;position:relative}
+.lane-track>i{display:block;height:100%;border-radius:99px;transform-origin:left center;
+  background:linear-gradient(90deg,var(--em-2),var(--em-3) 55%,var(--em-4))}
+/* clubs above the cut burn brighter than the ones below it */
+.lane.in .lane-track>i{background:linear-gradient(90deg,var(--em-1),var(--em-2) 45%,var(--em-3))}
+.lane:not(.in) .lane-track>i{opacity:.55}
+.lane-val{font-family:var(--f-mono);font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+/* the cutline: a blue line across the sheet */
+.lane-cut{position:absolute;left:0;right:0;bottom:-3px;height:2px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--em-3),transparent);opacity:.85}
+.lane-note{margin:8px 0 0}
+/* lanes sweep in off the boards, then the tracks fill behind them */
+html.rv-on .ladder[data-rv] .lane{opacity:0;transform:translateX(-26px)}
+html.rv-on .ladder[data-rv].rv-in .lane{opacity:1;transform:none;
+  transition:opacity .5s var(--ease-out) calc(var(--lane-i,0)*80ms),
+             transform .62s var(--ease-spring) calc(var(--lane-i,0)*80ms)}
+html.rv-on .ladder[data-rv] .lane-track>i{transform:scaleX(0)}
+html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);
+  transition:transform .9s var(--ease-out) calc(220ms + var(--lane-i,0)*80ms)}
+@media(prefers-reduced-motion:reduce){
+  html.rv-on .ladder[data-rv] .lane,html.rv-on .ladder[data-rv].rv-in .lane{opacity:1;transform:none;transition:none}
+  html.rv-on .ladder[data-rv] .lane-track>i,html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);transition:none}
+  .lane:hover{transform:none}
+}
+@media(max-width:560px){
+  .lane{grid-template-columns:22px 26px minmax(0,1fr) auto;gap:9px;padding:8px 11px}
+  .lane-track{display:none}
+}
 
 /* ---- the road module: the former hero rail, now a row of its own ---- */
 .roadgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:12px}
@@ -578,16 +687,46 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
 .na-pins{position:absolute;inset:0}
 /* the declutter nudge is folded into left/top, not a custom property: transform cannot carry it,
    because calc(-50% + var(--n)) drops the var term and the pin silently snaps back */
-.na-pin{position:absolute;display:block;line-height:0;text-decoration:none;z-index:2;
+.na-pin{position:absolute;display:block;line-height:0;text-decoration:none;z-index:2;isolation:isolate;
   transform:translate(-50%,-50%);
   transition:transform .32s var(--ease-spring),filter .3s ease,opacity .5s ease}
 .na-pin:hover,.na-pin:focus-visible{z-index:3;outline:none;transform:translate(-50%,-50%) scale(1.22)}
 /* crest alone — no disc, no plate, no three-letter tag */
 .na-pin .crest,.na-pin img,.na-pin svg{width:var(--pin,54px);height:var(--pin,54px);object-fit:contain;
-  filter:drop-shadow(0 3px 7px rgba(0,0,0,.42))}
+  position:relative;filter:drop-shadow(0 3px 7px rgba(0,0,0,.42));
+  transition:filter .3s ease,transform .32s var(--ease-spring)}
+/* the glow is the CLUB's colour, set per pin from the team record — Boston glows gold, Carolina
+   red, San Jose teal. --gold is only the fallback for a club with no colour on file. */
 .na-pin:hover .crest,.na-pin:hover img,.na-pin:hover svg,
 .na-pin:focus-visible .crest,.na-pin:focus-visible img,.na-pin:focus-visible svg{
-  filter:drop-shadow(0 0 9px var(--gold)) drop-shadow(0 4px 10px rgba(0,0,0,.5))}
+  filter:drop-shadow(0 0 10px var(--team,var(--gold))) drop-shadow(0 0 26px var(--team,var(--gold)))
+         drop-shadow(0 4px 10px rgba(0,0,0,.5))}
+/* a soft disc of the club's colour blooms behind the crest on hover */
+.na-pin::before{content:"";position:absolute;left:50%;top:50%;width:var(--pin,54px);height:var(--pin,54px);
+  transform:translate(-50%,-50%) scale(.5);border-radius:50%;pointer-events:none;opacity:0;
+  background:radial-gradient(circle,var(--team,var(--gold)) 0%,transparent 68%);
+  transition:opacity .32s ease,transform .42s var(--ease-spring)}
+.na-pin:hover::before,.na-pin:focus-visible::before{opacity:.55;transform:translate(-50%,-50%) scale(2.3)}
+
+/* ---- the click: the map falls away, the club's mark rushes forward ---- */
+.na-wrap.pin-zooming .na-svg{filter:blur(4px) saturate(.65);opacity:.3;transform:scale(1.09);
+  transition:filter .6s ease,opacity .6s ease,transform .7s var(--ease-out)}
+.na-wrap.pin-zooming .na-cap{opacity:0;transition:opacity .3s ease}
+.na-wrap.pin-zooming .na-pin:not(.pin-zoom){opacity:0;transform:translate(-50%,-50%) scale(.6);
+  transition:opacity .4s ease,transform .5s var(--ease-out)}
+.na-pin.pin-zoom{z-index:9}
+.na-pin.pin-zoom .crest,.na-pin.pin-zoom img,.na-pin.pin-zoom svg{
+  transform:scale(7);opacity:0;
+  transition:transform .62s cubic-bezier(.55,0,.25,1),opacity .5s ease .18s;
+  filter:drop-shadow(0 0 40px var(--team,var(--gold)))}
+.na-pin.pin-zoom::before{opacity:.9;transform:translate(-50%,-50%) scale(14);
+  transition:opacity .55s ease,transform .62s cubic-bezier(.55,0,.25,1)}
+@media(prefers-reduced-motion:reduce){
+  .na-pin::before{display:none}
+  .na-wrap.pin-zooming .na-svg,.na-wrap.pin-zooming .na-pin:not(.pin-zoom),
+  .na-pin.pin-zoom .crest,.na-pin.pin-zoom img,.na-pin.pin-zoom svg{transition:none;transform:none;
+    opacity:1;filter:none}
+}
 /* the crests arrive one after another once the continent has settled */
 html.rv-on .na-wrap .na-pin{opacity:0;transform:translate(-50%,-50%) scale(.55)}
 html.rv-on .na-wrap.pins-in .na-pin{opacity:1;transform:translate(-50%,-50%) scale(1);

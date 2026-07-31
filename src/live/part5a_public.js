@@ -356,7 +356,10 @@ CG.naMapPins = function(){
       seen[t.code] = 1;
       /* the crest alone — the club is identified by its own mark, which is the point of using
          real logos; a three-letter code under every one of them was just clutter on the map */
-      out.push('<a class="na-pin" data-mx="' + at[0] + '" data-my="' + at[1] + '" style="--pin-i:' + (i++) + '"' +
+      /* the club's own colour rides along on the element, so the hover glow and the zoom flare are
+         that club's rather than one shared gold for everyone */
+      out.push('<a class="na-pin" data-mx="' + at[0] + '" data-my="' + at[1] + '"' +
+        ' style="--pin-i:' + (i++) + (t.color ? ';--team:' + esc(t.color) : "") + '"' +
         ' href="#/team/' + esc(t.code) + '"' +
         ' aria-label="' + esc((t.city ? t.city + " " : "") + t.name) + '">' +
         CG.crest(t.code, 54) + '</a>');
@@ -671,6 +674,55 @@ CG.leagueIntro = function(){
 };
 
 /* ================================================================
+   THE LADDER — standings as lanes on a sheet of ice, not a table.
+
+   Each club gets a lane: crest at the rail, a track that fills, and the cutline drawn across all
+   of them like a blue line. Lanes sweep in from the boards one after another and the tracks fill
+   behind them, so the order arrives as a sequence rather than a grid appearing at once.
+
+   What the track measures depends on what is true. Once games are played it is points, against
+   the leader. Before that there is nothing to rank, so it measures roster build — contracts
+   signed against the roster limit — which is a real number, and the lane carries the seeding
+   position as a rank rather than implying a record nobody has yet.
+   ================================================================ */
+CG.standingsLadder = function(dv, pre){
+  var lg = CG.lg;
+  var rows = (CG.TEAMS || []).filter(function(t){ return !dv || t.div === dv; });
+  if (!rows.length) return "";
+  var max = (CG.SEASON && CG.SEASON.roster_max) || 15;
+
+  var scored = rows.map(function(t){
+    var rec = (lg.teams && lg.teams[t.code]) || {};
+    var pts = pre ? null : ((rec.w || 0) * 2 + (rec.otl || 0));
+    var filled = ((lg.byTeam && lg.byTeam[t.code]) || []).length;
+    return { t:t, pts:pts, rec:rec, filled:filled,
+             val: pre ? filled / max : pts,
+             label: pre ? filled + "/" + max : pts + " pts",
+             sub:  pre ? "roster" : (rec.w||0) + "-" + (rec.l||0) + "-" + (rec.otl||0) };
+  });
+  var peak = scored.reduce(function(m, r){ return Math.max(m, r.val || 0); }, 0) || 1;
+  if (!pre) scored.sort(function(a,b){ return (b.pts||0) - (a.pts||0); });
+
+  /* three qualify per division — the cutline sits under the third lane */
+  var CUT = 3;
+  return '<div class="ladder" data-rv="up">' + scored.map(function(r, i){
+    var pct = Math.max(4, Math.round(100 * (r.val || 0) / peak));
+    return '<a class="lane' + (i < CUT ? " in" : "") + '" href="#/team/' + esc(r.t.code) + '"' +
+      ' style="--lane-i:' + i + (r.t.color ? ';--team:' + esc(r.t.color) : "") + '">' +
+      '<span class="lane-rk">' + (i + 1) + '</span>' +
+      '<span class="lane-crest">' + CG.crest(r.t.code, 30) + '</span>' +
+      '<span class="lane-name">' + esc(r.t.name) + '<small>' + esc(r.sub) + '</small></span>' +
+      '<span class="lane-track"><i style="width:' + pct + '%"></i></span>' +
+      '<span class="lane-val">' + esc(r.label) + '</span>' +
+      (i === CUT - 1 ? '<span class="lane-cut" aria-hidden="true"></span>' : "") +
+    '</a>';
+  }).join("") +
+  '<p class="caption lane-note">' + (pre
+      ? "Nothing to rank until the first game night — the track shows how full each roster is, and the number is the pre-season seed."
+      : "Top three in each division qualify. The line marks the cut.") + '</p></div>';
+};
+
+/* ================================================================
    THE PULSE — charts, from counts already loaded on this page.
 
    Two of them, and both are here because they answer something a prospective player actually
@@ -707,18 +759,46 @@ CG.pulseModule = function(){
   var peak = series.reduce(function(b,p){ return p.n > b.n ? p : b; }, series[0]);
   var last = series[series.length-1];
 
+  /* gridlines at quarters, a tick per day, and the busiest day called out on the curve itself —
+     the chart should reward looking at it rather than just gesturing at growth */
+  var grid = "";
+  for (var gi = 1; gi <= 3; gi++){
+    var gy = (PAD + (H - PAD*2) * gi/4).toFixed(1);
+    grid += '<line class="pulse-grid" x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '"/>';
+  }
+  var ticks = series.map(function(p, i){
+    return '<circle class="pulse-tick" cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(p.c).toFixed(1) + '" r="2"' +
+           ' style="--tick-i:' + i + '"/>';
+  }).join("");
+  var peakI = series.indexOf(peak);
+  var flag = peakI > 0 ? '<line class="pulse-flag" x1="' + xAt(peakI).toFixed(1) + '" y1="' + yAt(peak.c).toFixed(1) +
+      '" x2="' + xAt(peakI).toFixed(1) + '" y2="' + (H - PAD) + '"/>' : "";
+
   var chart =
-    '<figure class="pulse-card" data-rv="draw" style="margin:0">' +
+    '<figure class="pulse-card ember-card" data-rv="draw" style="margin:0">' +
+      '<canvas class="ember card-ember" data-w="220" data-h="140" data-ribs="18" data-shift="-0.12" aria-hidden="true"></canvas>' +
       '<figcaption class="pulse-h"><span class="eyebrow">' + (isReg ? "Sign-ups" : "Members") + ' · cumulative</span>' +
         '<b class="pulse-big"><span data-to="' + last.c + '">' + last.c + '</span></b>' +
         '<span class="pulse-sub">' + (isReg ? "players in for Season " + ((lg.season&&lg.season.number)||1)
                                             : "people on the site") + ' · busiest day ' + peak.n + ' on ' + esc(CG.fmtDate(peak.d)) + '</span>' +
       '</figcaption>' +
       '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" class="pulse-svg" aria-hidden="true" focusable="false">' +
+        '<defs><linearGradient id="cgPulseFill" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="var(--em-2)" stop-opacity=".55"/>' +
+          '<stop offset="55%" stop-color="var(--em-3)" stop-opacity=".22"/>' +
+          '<stop offset="100%" stop-color="var(--em-4)" stop-opacity="0"/>' +
+        '</linearGradient>' +
+        '<linearGradient id="cgPulseLine" x1="0" y1="0" x2="1" y2="0">' +
+          '<stop offset="0%" stop-color="var(--em-1)"/><stop offset="60%" stop-color="var(--em-2)"/>' +
+          '<stop offset="100%" stop-color="var(--em-3)"/>' +
+        '</linearGradient></defs>' +
+        grid + flag +
         '<path class="pulse-area" d="' + area + '"/>' +
         '<path class="rv-draw pulse-line" d="' + line + '" fill="none"/>' +
-        '<circle class="rv-dot pulse-end" cx="' + xAt(series.length-1).toFixed(1) + '" cy="' + yAt(last.c).toFixed(1) + '" r="4.5"/>' +
+        ticks +
+        '<circle class="rv-dot pulse-end" cx="' + xAt(series.length-1).toFixed(1) + '" cy="' + yAt(last.c).toFixed(1) + '" r="5"/>' +
       '</svg>' +
+      '<div class="pulse-axis"><span>' + esc(CG.fmtDate(series[0].d)) + '</span><span>' + esc(CG.fmtDate(last.d)) + '</span></div>' +
       '<span class="sr-only">' + (isReg?"Sign-ups":"Members") + ' grew to ' + last.c + ' by ' + esc(CG.fmtDate(last.d)) + '.</span>' +
     '</figure>';
 
@@ -731,15 +811,19 @@ CG.pulseModule = function(){
   if (have.length >= 3){
     var maxN = have.reduce(function(m,p){ return Math.max(m, counts[p[0]]); }, 1);
     var thin = have.reduce(function(b,p){ return counts[p[0]] < counts[b[0]] ? p : b; }, have[0]);
-    bars = '<figure class="pulse-card" data-rv="up" style="margin:0">' +
+    bars = '<figure class="pulse-card ember-card" data-rv="up" style="margin:0">' +
+      '<canvas class="ember card-ember" data-w="220" data-h="140" data-ribs="14" data-shift="0.1" aria-hidden="true"></canvas>' +
       '<figcaption class="pulse-h"><span class="eyebrow">The draft pool</span>' +
         '<b class="pulse-big">' + esc(thin[1]) + '</b>' +
         '<span class="pulse-sub">is what the league is shortest of — sign up there and you will not wait long</span>' +
       '</figcaption>' +
       '<div class="poscols">' + have.map(function(p, i){
-        var n = counts[p[0]];
-        return '<div class="poscol" style="--col-i:' + i + '">' +
-          '<span class="pc-n">' + n + '</span>' +
+        var n = counts[p[0]], short = p[0] === thin[0];
+        /* each column is tinted further along the ember ramp, and the position the league is short
+           of is the one that burns — the chart's point is legible without reading the caption */
+        return '<div class="poscol' + (short ? " short" : "") + '" style="--col-i:' + i +
+          ';--col-t:' + (have.length < 2 ? 0 : i/(have.length-1)).toFixed(3) + '">' +
+          '<span class="pc-n"><span data-to="' + n + '">' + n + '</span></span>' +
           '<span class="pc-bar"><i class="rv-col" style="height:' + Math.max(6, Math.round(100*n/maxN)) + '%"></i></span>' +
           '<span class="pc-l">' + esc(p[0]) + '</span></div>';
       }).join("") + '</div>' +
@@ -818,6 +902,9 @@ CG.ROUTES.home = function(){
      so the first thing anyone sees is the league's name and where it plays. */
   var seasonLine = (CG.SEASON && CG.SEASON.name ? CG.SEASON.name : "Season 1") + " · Hockey League";
   html += '<section id="hero">'+
+    /* `ember` is the marker the painter looks for; `hero-ember` places it. Two classes on purpose —
+       the painter must never depend on where a given canvas happens to live. */
+    '<canvas class="ember hero-ember" data-w="360" data-h="230" data-ribs="30" aria-hidden="true"></canvas>'+
     '<div class="hero-name">'+
       '<h1 data-rv="words">'+CG.splitChars("Chel Gaming")+'</h1>'+
       '<span class="hn-sub" data-rv="up" style="--rv-i:4">'+esc(seasonLine)+'</span>'+
@@ -892,10 +979,10 @@ CG.ROUTES.home = function(){
       '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">'+
         (pre?'The field, division by division':'The race, division by division')+'</h2></div>'+
         '<a class="sec-link" href="#/standings">Full standings</a></div>'+
-      '<div class="grid g2" data-rv="up">'+
+      '<div class="grid g2">'+
         (CG.DIVISIONS||["East","West"]).map(function(dv){
-          return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+
-            (pre ? CG.divisionField(dv)+CG.fieldNote() : CG.standTable(dv,{cutline:true}))+'</div>';
+          return '<div class="ladderwrap"><div class="ladder-h" data-rv="slide"><h3>'+esc(dv)+' Division</h3>'+
+            '<span class="chip">Top 3 qualify</span></div>'+CG.standingsLadder(dv, pre)+'</div>';
         }).join("")+
       '</div>'+
       '<div class="grid g2" style="margin-top:18px;align-items:start">'+
@@ -1050,6 +1137,31 @@ CG.AFTER.home = function(){
     } else {
       setTimeout(lit, 90);
     }
+  }
+  /* Click a crest and the map recedes while that club's mark rushes forward, then the route
+     changes. Plain left-clicks only — a modified click or a middle click must still open a tab the
+     way the browser intends. Navigation is fired by whichever comes first, the transition ending
+     or a timeout, so a dropped transitionend can never strand someone on the map. */
+  if (!CG._naZoom){
+    CG._naZoom = true;
+    document.addEventListener("click", function(e){
+      var a = e.target && e.target.closest && e.target.closest(".na-pin");
+      if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      var wrap = a.closest(".na-wrap"), href = a.getAttribute("href");
+      if (!wrap || !href) return;
+      e.preventDefault();
+      wrap.classList.add("pin-zooming");
+      a.classList.add("pin-zoom");
+      var fired = false;
+      var go = function(){
+        if (fired) return;
+        fired = true;
+        location.hash = href.replace(/^#/, "");
+      };
+      a.addEventListener("transitionend", go, { once:true });
+      setTimeout(go, 700);
+    });
   }
   var relayout = function(){ if (document.querySelector(".na-pins")) CG.naMapLayout(); };
   CG.naMapLayout();
