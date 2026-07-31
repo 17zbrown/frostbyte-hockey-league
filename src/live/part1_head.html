@@ -430,36 +430,15 @@ a.fx-link:hover{background:var(--chrome-tint)}
 /* The hero follows the theme rather than staying a fixed broadcast surface: the map underneath
    it now renders as a light atlas in light mode, and a permanently dark band above a light map
    left the wordmark near-black on near-black. */
-#hero{background:var(--map-sea-1);color:var(--ink);position:relative;overflow:hidden;isolation:isolate}
+#hero{background:var(--map-sea-1);color:var(--ink);position:relative;overflow:hidden}
 #hero::after{content:"";position:absolute;inset:auto 0 0 0;height:1px;background:var(--line)}
-/* The ember light runs behind BOTH the wordmark and the map, which is what fuses them into one
-   picture — there is no seam to hide because the same surface carries through. It fades out
-   downward so the map's own sea tone takes over where the geography starts to matter. */
-.hero-ember{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;
-  object-fit:cover;opacity:.42;
-  /* feathered far further down than before: the map used to begin against a still-bright band,
-     which is what made its top edge read as a hard stop */
-  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 18%,rgba(0,0,0,.62) 44%,rgba(0,0,0,.22) 70%,transparent 100%);
-          mask-image:linear-gradient(to bottom,#000 0%,#000 18%,rgba(0,0,0,.62) 44%,rgba(0,0,0,.22) 70%,transparent 100%);
-  animation:ember-drift 34s ease-in-out infinite alternate}
-html[data-theme="dark"] .hero-ember{opacity:.3;mix-blend-mode:screen}
-
-/* ---- the page backdrop: the same light, fixed behind everything, kept deliberately faint ----
-   It is a texture, not a feature: at this strength it reads as warmth in the paper rather than as
-   a graphic competing with the content. */
-#pageEmber{position:fixed;inset:0;z-index:-2;pointer-events:none;width:100%;height:100%;
-  object-fit:cover;opacity:.07}
-html[data-theme="dark"] #pageEmber{opacity:.13;mix-blend-mode:screen}
-@media(prefers-reduced-motion:reduce){#pageEmber{opacity:.05}}
-@keyframes ember-drift{from{transform:scale(1.06) translate3d(-1.5%,0,0)}
-                       to{transform:scale(1.12) translate3d(1.5%,-1.5%,0)}}
-/* the map sits above the light and lets it through at the top, so the two never meet at an edge */
+/* The map's sea tone rises out of the band above it rather than starting against it, so the
+   wordmark and the map still read as one picture with no seam between them. */
 #hero .na-wrap{position:relative;z-index:1;background:linear-gradient(to bottom,
   transparent 0%,color-mix(in srgb,var(--map-sea-1) 70%,transparent) 14%,var(--map-sea-1) 34%,var(--map-sea-2) 100%)}
 @supports not (color: color-mix(in srgb,red,blue)){
   #hero .na-wrap{background:linear-gradient(to bottom,transparent 0%,var(--map-sea-1) 30%,var(--map-sea-2) 100%)}
 }
-@media(prefers-reduced-motion:reduce){.hero-ember{animation:none}}
 .hero-grid{display:grid;grid-template-columns:1.75fr 1fr;gap:0;align-items:stretch}
 .caro{position:relative;min-height:430px;outline:none}
 /* ================= MOTION SYSTEM =================
@@ -517,28 +496,35 @@ html.rv-on [data-rv="words"].rv-in .rv-word>i{transform:translateY(0)}
 html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance, not the block */
 
 /* ---- scroll-linked motion ----
-   Where the browser supports scroll-driven animations natively, sections keep moving WITH the
-   scroll instead of snapping in once and stopping — which is the difference between a page that
-   reveals and one that feels continuous. It runs on the compositor, needs no library, and is
-   disabled by the reduced-motion block below like everything else.
+   Where the browser supports scroll-driven animations, sections keep moving WITH the scroll rather
+   than snapping in once — the difference between a page that reveals and one that feels continuous.
 
-   This is additive: [data-rv] still carries the observer-driven reveal, so a browser without
-   view() timelines gets exactly what it got before. */
+   EVERY variant gets a timeline, not just some. Giving it only to "up" and "pop" split the system
+   in two: those arrived off the scroll while "mask" and the rest still waited on the observer, so a
+   section could show its buttons and hide its heading and body copy. That is exactly what a reader
+   reported seeing. One mechanism, applied uniformly, or the page can disagree with itself. */
 @supports (animation-timeline: view()){
   @media(prefers-reduced-motion:no-preference){
-    html.rv-on [data-rv="up"],html.rv-on [data-rv="pop"]{
-      animation:rv-rise linear both;
-      animation-timeline:view();
-      animation-range:entry 8% cover 34%}
-    /* once it has arrived it must stay arrived: the observer's .rv-in state wins outright */
+    html.rv-on [data-rv]{animation:rv-arrive linear both;animation-timeline:view();
+      animation-range:entry 6% cover 30%}
+    html.rv-on [data-rv="mask"]{animation-name:rv-arrive-mask}
+    html.rv-on [data-rv="deal"]{animation-name:rv-arrive-deal}
+    html.rv-on [data-rv="slide"]{animation-name:rv-arrive-slide}
+    html.rv-on [data-rv="slide-r"]{animation-name:rv-arrive-slide-r}
+    /* once the observer has said it arrived, it stays arrived */
     html.rv-on [data-rv].rv-in{animation:none}
-    @keyframes rv-rise{
-      from{opacity:0;transform:translateY(34px) scale(.985)}
+    @keyframes rv-arrive{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}
+    @keyframes rv-arrive-mask{
+      from{opacity:0;transform:translateY(16px);clip-path:inset(0 0 103% 0)}
+      to{opacity:1;transform:none;clip-path:inset(-14% -8% -14% -8%)}}
+    @keyframes rv-arrive-deal{
+      from{opacity:0;transform:translateY(34px) rotate(-8deg) scale(.84)}
       to{opacity:1;transform:none}}
+    @keyframes rv-arrive-slide{from{opacity:0;transform:translateX(-34px)}to{opacity:1;transform:none}}
+    @keyframes rv-arrive-slide-r{from{opacity:0;transform:translateX(34px)}to{opacity:1;transform:none}}
     /* the chart cards drift a little slower than the page, which is what reads as depth */
-    .vzgrid .vz{animation:vz-float linear both;animation-timeline:view();animation-range:entry 0% exit 100%}
-    @keyframes vz-float{from{transform:translateY(16px)}to{transform:translateY(-16px)}}
-    html.rv-on .vzgrid .vz[data-rv]:not(.rv-in){animation:none}
+    .vzgrid .vz[data-rv]:not(.rv-in){animation-name:vz-float;animation-range:entry 0% exit 100%}
+    @keyframes vz-float{from{opacity:1;transform:translateY(14px)}to{opacity:1;transform:translateY(-14px)}}
   }
 }
 
@@ -578,7 +564,7 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
 /* ================= CG.viz — one chart language for the whole site =================
    Modelled on the reference set: a titled card, the figure in the corner, the plot beneath, and
    labels riding inside the bars so no chart needs a legend. Violet there, ember here. */
-.vz{position:relative;margin:0;padding:18px 18px 16px;border-radius:14px;
+.vz{position:relative;margin:0;padding:18px 18px 16px;border-radius:10px;
   background:var(--glass,var(--paper));border:1px solid var(--glass-line,var(--line));
   -webkit-backdrop-filter:blur(14px) saturate(1.5);backdrop-filter:blur(14px) saturate(1.5);
   display:flex;flex-direction:column;gap:14px;overflow:hidden}
@@ -599,19 +585,21 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
 .vz-bar{display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
 .vz-bv{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
 .vz-bt{width:100%;flex:1 1 auto;display:flex;align-items:flex-end;
-  background:var(--line-soft);border-radius:8px;overflow:hidden}
-.vz-bt>i{display:block;width:100%;border-radius:8px;transform-origin:bottom;
-  background:linear-gradient(180deg,var(--em-2),var(--em-3))}
-.vz-bar.on .vz-bt>i{background:linear-gradient(180deg,var(--em-3),var(--em-5))}
+  background:var(--line-soft);border-radius:3px;overflow:hidden}
+.vz-bt>i{position:relative;display:block;width:100%;border-radius:3px;transform-origin:bottom;
+  background:var(--em-2)}
+/* the taken portion, drawn inside the total the way the reference stacks its two series */
+.vz-bt>i>b{position:absolute;left:0;right:0;bottom:0;border-radius:3px;background:var(--em-4)}
+.vz-bar.on .vz-bt>i{background:var(--em-3)}
 .vz-bar.on .vz-bv,.vz-bar.on .vz-bl{color:var(--em-ink);font-weight:700}
 .vz-bl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.09em;color:var(--steel);text-transform:uppercase}
 
 /* ---- horizontal bars, label inside the bar ---- */
 .vz-hbars{display:flex;flex-direction:column;gap:6px}
 .vz-hb{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:11px}
-.vz-hbt{position:relative;height:28px;border-radius:7px;background:var(--line-soft);overflow:hidden;
+.vz-hbt{position:relative;height:26px;border-radius:4px;background:var(--line-soft);overflow:hidden;
   display:flex;align-items:center}
-.vz-hbt>i{position:absolute;left:0;top:0;bottom:0;border-radius:7px;transform-origin:left center;
+.vz-hbt>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;transform-origin:left center;
   background:linear-gradient(90deg,var(--hb,var(--em-2)),color-mix(in srgb,var(--hb,var(--em-3)) 72%,var(--em-4)))}
 @supports not (color: color-mix(in srgb,red,blue)){
   .vz-hbt>i{background:linear-gradient(90deg,var(--hb,var(--em-2)),var(--em-4))}}
@@ -624,7 +612,7 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
 .vz-donut{position:relative;display:grid;place-items:center;padding:2px 0}
 .vz-donut svg{width:clamp(124px,15vw,164px);height:auto;transform:rotate(-90deg)}
 .vz-dtrack{fill:none;stroke:var(--line-soft);stroke-width:13}
-.vz-dfill{fill:none;stroke:var(--em-3);stroke-width:13;stroke-linecap:round;
+.vz-dfill{fill:none;stroke:var(--em-3);stroke-width:13;stroke-linecap:butt;
   stroke-dasharray:var(--dash);stroke-dashoffset:calc(var(--dash) - var(--fill))}
 .vz-dmid{position:absolute;text-align:center}
 .vz-dmid b{display:block;font-family:var(--f-disp);font-weight:800;font-size:clamp(24px,2.6vw,32px);
@@ -664,6 +652,33 @@ html.rv-on .vz[data-rv].rv-in .vz-dot{opacity:1;transition:opacity .3s ease calc
 .vzgrid .vz-wide{grid-column:1/-1}
 @media(max-width:820px){.vzgrid{grid-template-columns:1fr}}
 
+
+/* ---- legend + heatmap ---- */
+.vz-leg{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
+.vz-lg{display:inline-flex;align-items:center;gap:7px;font-family:var(--f-mono);font-size:10.5px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--steel)}
+.vz-lg>i{width:9px;height:9px;border-radius:2px;background:var(--em-2);flex:none}
+.vz-lg>i.b{background:var(--em-4)}
+.vz-lg>i.t{background:var(--line-soft);border:1px solid var(--line)}
+.vz-heat{display:grid;grid-template-columns:repeat(var(--cols,7),1fr);gap:4px}
+.vz-cell{display:block;aspect-ratio:1;border-radius:2px;background:var(--line-soft)}
+.vz-cell.l1{background:color-mix(in srgb,var(--em-2) 30%,var(--line-soft))}
+.vz-cell.l2{background:color-mix(in srgb,var(--em-2) 62%,var(--line-soft))}
+.vz-cell.l3{background:var(--em-3)}
+.vz-cell.l4{background:var(--em-5)}
+@supports not (color: color-mix(in srgb,red,blue)){
+  .vz-cell.l1{background:var(--em-1)} .vz-cell.l2{background:var(--em-2)}}
+html.rv-on .vz[data-rv] .vz-cell{opacity:0;transform:scale(.72)}
+html.rv-on .vz[data-rv].rv-in .vz-cell{opacity:1;transform:none;
+  transition:opacity .3s ease calc(var(--i,0)*11ms),transform .4s var(--ease-spring) calc(var(--i,0)*11ms)}
+html.rv-on .vz[data-rv] .vz-bt>i>b{transform:scaleY(0);transform-origin:bottom}
+html.rv-on .vz[data-rv].rv-in .vz-bt>i>b{transform:scaleY(1);
+  transition:transform .7s var(--ease-out) calc(260ms + var(--i,0)*60ms)}
+@media(prefers-reduced-motion:reduce){
+  html.rv-on .vz[data-rv] .vz-cell,html.rv-on .vz[data-rv].rv-in .vz-cell{opacity:1;transform:none;transition:none}
+  html.rv-on .vz[data-rv] .vz-bt>i>b,html.rv-on .vz[data-rv].rv-in .vz-bt>i>b{transform:scaleY(1);transition:none}
+}
+
 /* ---- the pulse: charts that answer a question, in both themes ---- */
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
   clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
@@ -689,11 +704,7 @@ html.rv-on [data-rv="draw"].rv-in .pulse-tick{opacity:.85;
 @media(prefers-reduced-motion:reduce){.pulse-tick{opacity:.85;transition:none}}
 .pulse-axis{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:10px;
   letter-spacing:.08em;color:var(--steel);padding:6px 0 10px}
-/* the ember light sits inside the card, behind the chart, at a whisper */
-.ember-card{position:relative;isolation:isolate}
-.card-ember{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;
   pointer-events:none;opacity:.1}
-html[data-theme="dark"] .card-ember{opacity:.16;mix-blend-mode:screen}
 /* position bars: the shortest column is the point of the chart, so it is the one that reads */
 .poscols{display:flex;align-items:flex-end;gap:clamp(6px,1.4vw,14px);height:clamp(110px,15vh,160px);
   margin:auto 0 16px}

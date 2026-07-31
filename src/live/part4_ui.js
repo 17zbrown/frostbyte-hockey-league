@@ -1092,95 +1092,51 @@ CG.viz = (function(){
     '</div>';
   }
 
-  return { card:card, bars:bars, hbars:hbars, donut:donut, area:area };
-})();
-
-/* ================================================================
-   EMBER LIGHT — the flowing ribbon behind the hero and the charts.
-
-   Painted once into a low-resolution canvas and stretched by CSS. It is a soft gradient, so
-   upscaling costs nothing visually and actively helps: it smooths the banding that a hand-authored
-   CSS gradient of this shape would show. Once, not per frame — there is no animation loop here,
-   so it cannot jank; the drift is a CSS transform on the element instead.
-
-   The shape is the reference's: vertical ribs bent by a slow sine, a horizontal warm-to-deep ramp,
-   and film grain over the top. The palette is the league's ember ramp, not the reference's
-   magenta and violet.
-   ================================================================ */
-CG.emberPaint = function(cv, opts){
-  if (!cv || !cv.getContext) return;
-  opts = opts || {};
-  var W = opts.w || 300, H = opts.h || 190;
-  cv.width = W; cv.height = H;
-  var ctx = cv.getContext("2d");
-  if (!ctx) return;
-
-  /* read the ramp off the live stylesheet, so a theme or brand change carries through here */
-  var cs = getComputedStyle(document.documentElement);
-  var stops = ["--em-1","--em-2","--em-3","--em-4","--em-5"].map(function(v){
-    var hex = (cs.getPropertyValue(v) || "").trim() || "#FFC21F";
-    return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
-  });
-  var ramp = function(t){
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    var f = t * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(f)), k = f - i;
-    var a = stops[i], b = stops[i + 1];
-    return [a[0] + (b[0]-a[0])*k, a[1] + (b[1]-a[1])*k, a[2] + (b[2]-a[2])*k];
-  };
-
-  var img = ctx.createImageData(W, H), d = img.data;
-  var ribs = opts.ribs || 26, grain = opts.grain == null ? 13 : opts.grain;
-  var seed = 1;
-  var rnd = function(){ seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-  for (var y = 0; y < H; y++){
-    var v = y / H;
-    for (var x = 0; x < W; x++){
-      var u = x / W;
-      /* bend the ribs: the columns curve across the frame instead of running straight */
-      var warp = Math.sin(v * Math.PI * 1.55 + u * 2.1) * 0.075;
-      var t = u + warp + (opts.shift || 0);
-      var band = Math.sin((u * ribs + warp * 4.5 + v * 0.55) * Math.PI * 2);
-      var shade = 0.84 + 0.16 * band;
-      /* light pools toward the top-left, the way the reference falls off */
-      shade *= 1.06 - 0.20 * v;
-      var c = ramp(t);
-      var g = (rnd() - 0.5) * grain;
-      var o = (y * W + x) * 4;
-      d[o]   = Math.max(0, Math.min(255, c[0] * shade + g));
-      d[o+1] = Math.max(0, Math.min(255, c[1] * shade + g));
-      d[o+2] = Math.max(0, Math.min(255, c[2] * shade + g));
-      d[o+3] = 255;
-    }
+  /* Two series in one column, the way the reference stacks a light bar behind a solid one. The
+     back bar is the total; the front bar is the part of it that is already taken. */
+  function bars2(rows, o){
+    o = o || {};
+    rows = (rows || []).filter(function(r){ return r && isFinite(r.v); });
+    if (rows.length < 2) return "";
+    var max = rows.reduce(function(m,r){ return Math.max(m, r.v); }, 0) || 1;
+    var pick = rows.reduce(function(b,r){ return r.v < b.v ? r : b; }, rows[0]);
+    return '<div class="vz-bars vz-bars2" style="--n:' + rows.length + '">' + rows.map(function(r, i){
+      var sub = isFinite(r.s) ? r.s : 0;
+      return '<div class="vz-bar' + (o.markMin && r === pick ? " on" : "") + '" style="--i:' + i + '">' +
+        '<span class="vz-bv">' + num(r.v) + '</span>' +
+        '<span class="vz-bt"><i style="height:' + Math.max(4, Math.round(100*r.v/max)) + '%">' +
+          '<b style="height:' + Math.round(100 * (r.v ? sub/r.v : 0)) + '%"></b></i></span>' +
+        '<span class="vz-bl">' + esc(r.k) + '</span></div>';
+    }).join("") + '</div>' + (o.legend ? legend(o.legend) : "") +
+    (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
   }
-  ctx.putImageData(img, 0, 0);
-  cv.setAttribute("data-painted", "1");
-};
 
-/* Paint every ember canvas that has not been painted yet. Cheap enough to call on every render:
-   the guard means each canvas is rasterised once. */
-/* The page backdrop lives outside #app so it survives every route change and is painted once. */
-CG.emberBackdrop = function(){
-  if (document.getElementById("pageEmber")) return;
-  var cv = document.createElement("canvas");
-  cv.id = "pageEmber"; cv.className = "ember";
-  cv.setAttribute("aria-hidden", "true");
-  document.body.appendChild(cv);
-  /* painted here rather than left to emberAll: it lives outside #app, which is the only subtree
-     emberAll is ever handed */
-  CG.emberPaint(cv, { w:300, h:200, ribs:22 });
-};
+  function legend(items){
+    return '<div class="vz-leg">' + items.map(function(it){
+      return '<span class="vz-lg"><i class="' + esc(it.c || "") + '"></i>' + esc(it.k) + '</span>';
+    }).join("") + '</div>';
+  }
 
-CG.emberAll = function(root){
-  CG.emberBackdrop();
-  [].forEach.call((root || document).querySelectorAll("canvas.ember:not([data-painted])"), function(cv){
-    CG.emberPaint(cv, {
-      w: +cv.getAttribute("data-w") || 300,
-      h: +cv.getAttribute("data-h") || 190,
-      ribs: +cv.getAttribute("data-ribs") || 26,
-      shift: parseFloat(cv.getAttribute("data-shift")) || 0
-    });
-  });
-};
+  /* Heatmap: a grid of cells, intensity by value. The reference uses it for density, which is what
+     a per-day count is. */
+  function heat(cells, o){
+    o = o || {};
+    cells = (cells || []).filter(function(c){ return c && isFinite(c.v); });
+    if (cells.length < 7) return "";
+    var max = cells.reduce(function(m,c){ return Math.max(m, c.v); }, 0) || 1;
+    return '<div class="vz-heat" style="--cols:' + (o.cols || 7) + '">' + cells.map(function(c, i){
+      var t = c.v / max;
+      var lvl = c.v === 0 ? 0 : t > .74 ? 4 : t > .49 ? 3 : t > .24 ? 2 : 1;
+      return '<span class="vz-cell l' + lvl + '" style="--i:' + i + '"' +
+        ' title="' + esc(c.k + ": " + c.v) + '"></span>';
+    }).join("") + '</div>' +
+    (o.legend ? legend(o.legend) : "") +
+    (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
+  }
+
+  return { card:card, bars:bars, bars2:bars2, hbars:hbars, donut:donut, area:area,
+           legend:legend, heat:heat };
+})();
 
 /* ================================================================
    SCROLL REVEALS
@@ -1293,7 +1249,6 @@ CG.router = function(){
     if (!el.hasAttribute("role")) el.setAttribute("role","link");
   });
   if (CG.AFTER[name]) CG.AFTER[name](param, qs);
-  CG.emberAll(app);                                /* paint the ribbon light before anything reveals */
   CG.armReveals(app);                              /* after AFTER: hooks may have injected markup */
   /* must land before focus moves: screen readers read the title when #app takes focus */
   document.title = CG.pageTitleFor(CG.ROUTES[name] ? name : "_404", app);

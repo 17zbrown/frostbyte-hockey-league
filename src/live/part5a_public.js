@@ -765,17 +765,53 @@ CG.pulseModule = function(){
   var POS = [["C","C"],["LW","LW"],["RW","RW"],["LD","LD"],["RD","RD"],["G","G"]];
   var byPos = {};
   regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
+  /* second series: of the players registered at each position, how many already hold a contract.
+     Derived from the two sets we already have — no new query, no estimate. */
+  var signedIds = {};
+  (lg._contractsRaw || []).forEach(function(c){ if (c && c.profile_id) signedIds[c.profile_id] = 1; });
+  var byPosSigned = {};
+  regs.forEach(function(r){
+    if (r.position && r.profile_id && signedIds[r.profile_id])
+      byPosSigned[r.position] = (byPosSigned[r.position]||0) + 1;
+  });
   var posRows = POS.filter(function(p){ return byPos[p[0]]; })
-                   .map(function(p){ return { k:p[1], v:byPos[p[0]] }; });
+                   .map(function(p){ return { k:p[1], v:byPos[p[0]], s:byPosSigned[p[0]]||0 }; });
   if (posRows.length >= 3){
     var fewest = posRows.reduce(function(b,r){ return r.v < b.v ? r : b; }, posRows[0]);
+    var openAt = posRows.reduce(function(a,r){ return a + (r.v - r.s); }, 0);
     cards.push(V.card({
       title: "Registrations by position",
       sub: "Fewest: " + fewest.k,
       value: posRows.reduce(function(a,r){ return a + r.v; }, 0), count: true,
-      body: V.bars(posRows, { markMin:true,
-        note: fewest.k + " has the fewest registrations, so it is the shortest position in the draft pool." })
+      body: V.bars2(posRows, { markMin:true,
+        legend: [{ k:"Registered", c:"" }, { k:"Already on a club", c:"b" }],
+        note: fewest.k + " has the fewest registrations. " + openAt + " registered players are still unsigned." })
     }));
+  }
+
+  /* sign-ups per day, as a grid — one cell per day since the first registration */
+  if (regs.length >= 10){
+    var perDay = {};
+    regs.forEach(function(r){ var d = String(r.created_at).slice(0,10); perDay[d] = (perDay[d]||0) + 1; });
+    var days = Object.keys(perDay).sort();
+    var d0 = new Date(days[0] + "T00:00:00Z"), d1 = new Date(days[days.length-1] + "T00:00:00Z");
+    var cells = [], cur = new Date(d0);
+    while (cur <= d1 && cells.length < 120){
+      var key = cur.toISOString().slice(0,10);
+      cells.push({ k: key, v: perDay[key] || 0 });
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    if (cells.length >= 7){
+      var busiest = cells.reduce(function(b,c){ return c.v > b.v ? c : b; }, cells[0]);
+      cards.push(V.card({
+        title: "Sign-ups per day",
+        sub: cells.length + " days of registration",
+        value: busiest.v, 
+        body: V.heat(cells, { cols: 7,
+          legend: [{ k:"None", c:"t" }, { k:"Busiest: " + busiest.v, c:"b" }],
+          note: "One cell per day, first registration to today. Darkest is the busiest day." })
+      }));
+    }
   }
 
   /* ---- roster spots filled, league-wide ---- */
@@ -878,9 +914,6 @@ CG.ROUTES.home = function(){
      so the first thing anyone sees is the league's name and where it plays. */
   var seasonLine = (CG.SEASON && CG.SEASON.name ? CG.SEASON.name : "Season 1") + " · Hockey League";
   html += '<section id="hero">'+
-    /* `ember` is the marker the painter looks for; `hero-ember` places it. Two classes on purpose —
-       the painter must never depend on where a given canvas happens to live. */
-    '<canvas class="ember hero-ember" data-w="360" data-h="230" data-ribs="30" aria-hidden="true"></canvas>'+
     '<div class="hero-name">'+
       '<h1 data-rv="words">'+CG.splitChars("Chel Gaming")+'</h1>'+
       '<span class="hn-sub" data-rv="up" style="--rv-i:4">'+esc(seasonLine)+'</span>'+
