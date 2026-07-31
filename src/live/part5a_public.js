@@ -295,7 +295,7 @@ CG.seasonTimeline = function(){
   }).join("");
   return '<section class="sec-tight"><div class="shell">'+
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Season roadmap</span>'+
-    '<h2 class="h-sec">How the season rolls</h2></div>'+
+    '<h2 class="h-sec">Season schedule</h2></div>'+
     '<a class="sec-link" href="#/rulebook">The rulebook</a></div>'+
     /* the track fills and each stop arrives on its own beat, rather than the whole row fading in
        as one block — the timeline is a sequence, so it should read as one */
@@ -521,7 +521,7 @@ CG.naMap = function(){
     '</div>' +
     '<div class="na-cap">' +
       '<b class="na-cap-h">' + n + ' club' + (n === 1 ? "" : "s") + ' across North America</b>' +
-      '<span class="na-cap-s">Every crest is a real club. Tap one to see who runs it.</span>' +
+      '<span class="na-cap-s">Select a club to view its roster and staff.</span>' +
     '</div>' +
   '</div>';
 };
@@ -550,7 +550,7 @@ CG.homeFigures = function(){
   };
 
   var members = (lg._profilesRaw || []).length;
-  if (members) fig(members, "Members", "Signed in and in the Discord", null, "#/players");
+  if (members) fig(members, "Accounts", "People registered on the site", null, "#/players");
 
   var signed = lg.registrationsCount || (lg._registrationsRaw || []).length || 0;
   var clubs  = (CG.TEAMS || []).length;
@@ -559,7 +559,7 @@ CG.homeFigures = function(){
     spots ? signed.toLocaleString() + " of " + spots.toLocaleString() + " roster spots claimed" : "",
     spots ? Math.max(0, Math.min(1, signed / spots)) : null, "#/register");
 
-  if (clubs) fig(clubs, "Clubs", "Every one a real room of real players", null, "#/teams");
+  if (clubs) fig(clubs, "Clubs", "Each with an owner, GM and assistant GM", null, "#/teams");
 
   var days = CG.daysToStart(), start = CG.seasonStartMs();
   if (days != null && days >= 0) fig(days, "Day" + (days === 1 ? "" : "s") + " to puck drop",
@@ -567,8 +567,8 @@ CG.homeFigures = function(){
 
   if (figs.length < 2) return "";                 /* not enough real numbers to be worth a band */
   return '<section class="sec-tight"><div class="shell">' +
-    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The league right now</span>' +
-    '<h2 class="h-sec">Where things stand today</h2></div>' +
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">League</span>' +
+    '<h2 class="h-sec">Season 1 at a glance</h2></div>' +
     '<a class="sec-link" href="#/register">Sign up to play</a></div>' +
     '<div class="figs" data-rv="up">' + figs.join("") + '</div></div></section>';
 };
@@ -595,7 +595,7 @@ CG.roadModule = function(pre){
                       .sort(function(a,b){ return a.at-b.at; }).slice(0,4)
                   : (lg.tonight || []);
   var stageWk = function(g){ return (g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week; };
-  var head = pre ? (games.length ? "Next up · "+stageWk(games[0]) : "The road to puck drop")
+  var head = pre ? (games.length ? "Next up · "+stageWk(games[0]) : "Key dates")
                  : "Tonight"+(games.length ? " · "+stageWk(games[0]) : "");
   var rows;
   if (games.length){
@@ -629,7 +629,7 @@ CG.roadModule = function(pre){
   }
   return '<section class="sec"><div class="shell">'+
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">'+esc(head)+'</span>'+
-    '<h2 class="h-sec">'+(pre?"Everything between now and the first shift":"Tonight on the ice")+'</h2></div>'+
+    '<h2 class="h-sec">'+(pre?"Before the season starts":"Tonight\u2019s games")+'</h2></div>'+
     '<a class="sec-link" href="#/schedule">Full schedule</a></div>'+
     '<div class="roadgrid">'+rows+'</div></div></section>';
 };
@@ -640,8 +640,8 @@ CG.newsModule = function(){
      dim deck are correct against it in BOTH themes, rather than fixed-light text stranded on a
      page that turns pale */
   return '<section class="sec sec-dark"><div class="shell">'+
-    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The newsroom</span>'+
-    '<h2 class="h-sec" style="color:var(--on-ink)">Around the league</h2></div>'+
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">News</span>'+
+    '<h2 class="h-sec" style="color:var(--on-ink)">Latest news</h2></div>'+
     '<a class="sec-link" style="color:var(--on-ink)" href="#/news">All stories</a></div>'+
     '<div data-rv="up"><div class="caro caro-band" id="heroCaro" aria-label="Featured stories"></div></div>'+
   '</div></section>';
@@ -654,14 +654,14 @@ CG.leagueIntro = function(){
   var s = (CG.lg && CG.lg.season) || {};
   var cap = s.salary_cap ? "$" + Math.round(s.salary_cap / 1e6) + "M" : null;
   var lines = [
-    "Six-on-six EA NHL on a fixed schedule — real rosters, real standings, and a published rulebook" +
-      (cap ? " with a " + cap + " salary cap." : "."),
-    "Every club is run by people, not bots: an owner, a GM and an assistant GM who draft, trade and set the lines.",
-    "Sign up, enter the draft, get picked. Everything else happens in Discord and here."
+    "Six-on-six EA NHL. Fixed schedule, fixed rosters, published rulebook" +
+      (cap ? ", " + cap + " salary cap." : "."),
+    "Each club is run by an owner, a general manager and an assistant GM, who draft, trade and set lines.",
+    "Register, enter the draft, get picked up by a club. Games and lineups are managed here; day-to-day runs in Discord."
   ];
   return '<section class="sec sec-dark"><div class="shell">' +
-    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">What this is</span>' +
-    '<h2 class="h-sec">A league, not a pickup lobby</h2></div></div>' +
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Format</span>' +
+    '<h2 class="h-sec">How the league works</h2></div></div>' +
     '<div style="max-width:62ch;display:flex;flex-direction:column;gap:13px">' +
       lines.map(function(l, i){
         return '<p data-rv="mask" style="--rv-i:' + (i + 1) + ';font-size:16.5px;line-height:1.6;color:var(--on-ink-dim);margin:0">' + l + '</p>';
@@ -718,8 +718,8 @@ CG.standingsLadder = function(dv, pre){
     '</a>';
   }).join("") +
   '<p class="caption lane-note">' + (pre
-      ? "Nothing to rank until the first game night — the track shows how full each roster is, and the number is the pre-season seed."
-      : "Top three in each division qualify. The line marks the cut.") + '</p></div>';
+      ? "No games played. Track shows roster spots filled; number is the pre-season seed."
+      : "Top three per division qualify. The line marks the cutoff.") + '</p></div>';
 };
 
 /* ================================================================
@@ -734,107 +734,83 @@ CG.standingsLadder = function(dv, pre){
    Anything without data behind it is omitted rather than drawn empty.
    ================================================================ */
 CG.pulseModule = function(){
-  var lg = CG.lg || {};
-  var regs = (lg._registrationsRaw || []).filter(function(r){ return r && r.created_at; });
+  var lg = CG.lg || {}, V = CG.viz, s = lg.season || {};
+  var regs  = (lg._registrationsRaw || []).filter(function(r){ return r && r.created_at; });
   var profs = (lg._profilesRaw || []).filter(function(p){ return p && p.created_at; });
-  if (regs.length < 4 && profs.length < 4) return "";
+  var teams = CG.TEAMS || [];
+  var cards = [];
 
-  /* ---- cumulative sign-ups by day ---- */
-  var byDay = function(rows){
+  /* ---- registrations over time ---- */
+  var cum = function(rows){
     var m = {};
     rows.forEach(function(r){ var d = String(r.created_at).slice(0,10); m[d] = (m[d]||0) + 1; });
     var days = Object.keys(m).sort(), run = 0;
-    return days.map(function(d){ run += m[d]; return { d:d, n:m[d], c:run }; });
+    return days.map(function(d){ run += m[d]; return { d:d, n:m[d], v:run }; });
   };
-  var curve = byDay(regs), memberCurve = byDay(profs);
-  var series = curve.length >= memberCurve.length ? curve : memberCurve;
-  var isReg = series === curve;
-
-  var W = 620, H = 190, PAD = 8;
-  var maxC = series.reduce(function(m,p){ return Math.max(m, p.c); }, 1);
-  var xAt = function(i){ return PAD + (W - PAD*2) * (series.length<2?0:i/(series.length-1)); };
-  var yAt = function(v){ return H - PAD - (H - PAD*2) * (v/maxC); };
-  var line = series.map(function(p,i){ return (i?"L":"M") + xAt(i).toFixed(1) + " " + yAt(p.c).toFixed(1); }).join("");
-  var area = line + "L" + xAt(series.length-1).toFixed(1) + " " + (H-PAD) + "L" + xAt(0).toFixed(1) + " " + (H-PAD) + "Z";
-  var peak = series.reduce(function(b,p){ return p.n > b.n ? p : b; }, series[0]);
-  var last = series[series.length-1];
-
-  /* gridlines at quarters, a tick per day, and the busiest day called out on the curve itself —
-     the chart should reward looking at it rather than just gesturing at growth */
-  var grid = "";
-  for (var gi = 1; gi <= 3; gi++){
-    var gy = (PAD + (H - PAD*2) * gi/4).toFixed(1);
-    grid += '<line class="pulse-grid" x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '"/>';
-  }
-  var ticks = series.map(function(p, i){
-    return '<circle class="pulse-tick" cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(p.c).toFixed(1) + '" r="2"' +
-           ' style="--tick-i:' + i + '"/>';
-  }).join("");
-  var peakI = series.indexOf(peak);
-  var flag = peakI > 0 ? '<line class="pulse-flag" x1="' + xAt(peakI).toFixed(1) + '" y1="' + yAt(peak.c).toFixed(1) +
-      '" x2="' + xAt(peakI).toFixed(1) + '" y2="' + (H - PAD) + '"/>' : "";
-
-  var chart =
-    '<figure class="pulse-card ember-card" data-rv="draw" style="margin:0">' +
-      '<canvas class="ember card-ember" data-w="220" data-h="140" data-ribs="18" data-shift="-0.12" aria-hidden="true"></canvas>' +
-      '<figcaption class="pulse-h"><span class="eyebrow">' + (isReg ? "Sign-ups" : "Members") + ' · cumulative</span>' +
-        '<b class="pulse-big"><span data-to="' + last.c + '">' + last.c + '</span></b>' +
-        '<span class="pulse-sub">' + (isReg ? "players in for Season " + ((lg.season&&lg.season.number)||1)
-                                            : "people on the site") + ' · busiest day ' + peak.n + ' on ' + esc(CG.fmtDate(peak.d)) + '</span>' +
-      '</figcaption>' +
-      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" class="pulse-svg" aria-hidden="true" focusable="false">' +
-        '<defs><linearGradient id="cgPulseFill" x1="0" y1="0" x2="0" y2="1">' +
-          '<stop offset="0%" stop-color="var(--em-2)" stop-opacity=".55"/>' +
-          '<stop offset="55%" stop-color="var(--em-3)" stop-opacity=".22"/>' +
-          '<stop offset="100%" stop-color="var(--em-4)" stop-opacity="0"/>' +
-        '</linearGradient>' +
-        '<linearGradient id="cgPulseLine" x1="0" y1="0" x2="1" y2="0">' +
-          '<stop offset="0%" stop-color="var(--em-1)"/><stop offset="60%" stop-color="var(--em-2)"/>' +
-          '<stop offset="100%" stop-color="var(--em-3)"/>' +
-        '</linearGradient></defs>' +
-        grid + flag +
-        '<path class="pulse-area" d="' + area + '"/>' +
-        '<path class="rv-draw pulse-line" d="' + line + '" fill="none"/>' +
-        ticks +
-        '<circle class="rv-dot pulse-end" cx="' + xAt(series.length-1).toFixed(1) + '" cy="' + yAt(last.c).toFixed(1) + '" r="5"/>' +
-      '</svg>' +
-      '<div class="pulse-axis"><span>' + esc(CG.fmtDate(series[0].d)) + '</span><span>' + esc(CG.fmtDate(last.d)) + '</span></div>' +
-      '<span class="sr-only">' + (isReg?"Sign-ups":"Members") + ' grew to ' + last.c + ' by ' + esc(CG.fmtDate(last.d)) + '.</span>' +
-    '</figure>';
-
-  /* ---- what the draft pool is short of ---- */
-  var POS = [["C","Centre"],["LW","Left wing"],["RW","Right wing"],["LD","Left D"],["RD","Right D"],["G","Goalie"]];
-  var counts = {};
-  regs.forEach(function(r){ if (r.position) counts[r.position] = (counts[r.position]||0) + 1; });
-  var have = POS.filter(function(p){ return counts[p[0]]; });
-  var bars = "";
-  if (have.length >= 3){
-    var maxN = have.reduce(function(m,p){ return Math.max(m, counts[p[0]]); }, 1);
-    var thin = have.reduce(function(b,p){ return counts[p[0]] < counts[b[0]] ? p : b; }, have[0]);
-    bars = '<figure class="pulse-card ember-card" data-rv="up" style="margin:0">' +
-      '<canvas class="ember card-ember" data-w="220" data-h="140" data-ribs="14" data-shift="0.1" aria-hidden="true"></canvas>' +
-      '<figcaption class="pulse-h"><span class="eyebrow">The draft pool</span>' +
-        '<b class="pulse-big">' + esc(thin[1]) + '</b>' +
-        '<span class="pulse-sub">is what the league is shortest of — sign up there and you will not wait long</span>' +
-      '</figcaption>' +
-      '<div class="poscols">' + have.map(function(p, i){
-        var n = counts[p[0]], short = p[0] === thin[0];
-        /* each column is tinted further along the ember ramp, and the position the league is short
-           of is the one that burns — the chart's point is legible without reading the caption */
-        return '<div class="poscol' + (short ? " short" : "") + '" style="--col-i:' + i +
-          ';--col-t:' + (have.length < 2 ? 0 : i/(have.length-1)).toFixed(3) + '">' +
-          '<span class="pc-n"><span data-to="' + n + '">' + n + '</span></span>' +
-          '<span class="pc-bar"><i class="rv-col" style="height:' + Math.max(6, Math.round(100*n/maxN)) + '%"></i></span>' +
-          '<span class="pc-l">' + esc(p[0]) + '</span></div>';
-      }).join("") + '</div>' +
-    '</figure>';
+  var reg = cum(regs), mem = cum(profs);
+  var series = reg.length >= 4 ? reg : (mem.length >= 4 ? mem : null);
+  if (series){
+    var isReg = series === reg, last = series[series.length-1];
+    var busiest = series.reduce(function(b,p){ return p.n > b.n ? p : b; }, series[0]);
+    cards.push(V.card({
+      title: isReg ? "Registrations" : "Accounts",
+      sub: "Cumulative, by day",
+      value: last.v, count: true, rv: "draw", wide: true,
+      body: V.area(series, { from: CG.fmtDate(series[0].d), to: CG.fmtDate(last.d) }) +
+            '<p class="vz-note">Busiest day: ' + busiest.n + ' on ' + esc(CG.fmtDate(busiest.d)) + '.</p>'
+    }));
   }
 
+  /* ---- registrations by position ---- */
+  var POS = [["C","C"],["LW","LW"],["RW","RW"],["LD","LD"],["RD","RD"],["G","G"]];
+  var byPos = {};
+  regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
+  var posRows = POS.filter(function(p){ return byPos[p[0]]; })
+                   .map(function(p){ return { k:p[1], v:byPos[p[0]] }; });
+  if (posRows.length >= 3){
+    var fewest = posRows.reduce(function(b,r){ return r.v < b.v ? r : b; }, posRows[0]);
+    cards.push(V.card({
+      title: "Registrations by position",
+      sub: "Fewest: " + fewest.k,
+      value: posRows.reduce(function(a,r){ return a + r.v; }, 0), count: true,
+      body: V.bars(posRows, { markMin:true,
+        note: fewest.k + " has the fewest registrations, so it is the shortest position in the draft pool." })
+    }));
+  }
+
+  /* ---- roster spots filled, league-wide ---- */
+  var max = (s.roster_max || 15), spots = teams.length * max;
+  var filled = teams.reduce(function(a,t){ return a + (((lg.byTeam||{})[t.code]||[]).length); }, 0);
+  if (spots && filled >= 0){
+    cards.push(V.card({
+      title: "Roster spots filled",
+      sub: filled + " of " + spots,
+      body: V.donut(filled, spots, { label: "of " + spots + " spots",
+        note: max + " players per club across " + teams.length + " clubs. The rest are filled at the draft." })
+    }));
+  }
+
+  /* ---- signed players per club ---- */
+  /* deliberately NOT tinted per club: the code is already inside the bar, so colour would be
+     carrying nothing, and ten brand colours in one chart pulls it off the league palette */
+  var clubRows = teams.map(function(t){
+    return { k:t.code, v:((lg.byTeam||{})[t.code]||[]).length };
+  }).filter(function(r){ return r.v > 0; });
+  if (clubRows.length >= 3){
+    cards.push(V.card({
+      title: "Players signed, by club",
+      sub: "Management and returning players",
+      value: clubRows.reduce(function(a,r){ return a + r.v; }, 0), count: true,
+      body: V.hbars(clubRows, { fmt: function(v){ return v + "/" + max; } })
+    }));
+  }
+
+  if (!cards.length) return "";
   return '<section class="sec"><div class="shell">' +
-    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The pulse</span>' +
-    '<h2 class="h-sec">Who is turning up</h2></div>' +
-    '<a class="sec-link" href="#/register">Add yourself</a></div>' +
-    '<div class="pulsegrid">' + chart + bars + '</div></div></section>';
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Registration</span>' +
+    '<h2 class="h-sec">Season ' + ((s.number)||1) + ' sign-ups</h2></div>' +
+    '<a class="sec-link" href="#/register">Register</a></div>' +
+    '<div class="vzgrid">' + cards.join("") + '</div></div></section>';
 };
 
 /* The clubs, as a ticker of crests and nothing else — no card, no border, no name plate. The
@@ -851,8 +827,8 @@ CG.clubTicker = function(){
   var run = ts.map(function(t){ return one(t, false); }).join("") +
             ts.map(function(t){ return one(t, true); }).join("");
   return '<section class="sec"><div class="shell">' +
-    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The clubs</span>' +
-    '<h2 class="h-sec">' + ts.length + ' club' + (ts.length === 1 ? "" : "s") + ' looking for players</h2></div>' +
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Clubs</span>' +
+    '<h2 class="h-sec">' + ts.length + ' club' + (ts.length === 1 ? "" : "s") + '</h2></div>' +
     '<a class="sec-link" href="#/teams">All clubs</a></div></div>' +
     '<div class="tickwrap" data-rv="up" style="--tick-dur:' + Math.max(26, ts.length * 4.4).toFixed(0) + 's">' +
       '<div class="tickrow">' + run + '</div>' +
@@ -977,7 +953,7 @@ CG.ROUTES.home = function(){
   if (CG.modOn("standings")){
     html += '<section class="sec"><div class="shell">'+
       '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Standings</span><h2 class="h-sec">'+
-        (pre?'The field, division by division':'The race, division by division')+'</h2></div>'+
+        (pre?'Divisions':'Standings')+'</h2></div>'+
         '<a class="sec-link" href="#/standings">Full standings</a></div>'+
       '<div class="grid g2">'+
         (CG.DIVISIONS||["East","West"]).map(function(dv){

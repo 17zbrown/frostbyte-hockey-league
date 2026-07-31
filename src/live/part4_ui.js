@@ -978,6 +978,124 @@ CG.pageTitleFor = function(name, root){
   return lead===CG.SITE_TITLE ? lead : lead+" · "+CG.SITE_TITLE;
 };
 /* ================================================================
+   CG.viz — the chart system.
+
+   One visual language for every chart on the site, modelled on the reference set: a titled card,
+   a value in the corner, and the plot beneath it. Bars carry their own labels inside them so the
+   chart needs no legend or axis furniture; the emphasised series is solid and the rest is a
+   quiet track behind it.
+
+   The reference is violet throughout; these run on the league's ember ramp instead. Everything
+   below takes real numbers only — none of these will render a placeholder, and a series with no
+   data returns "" so the caller drops the card rather than showing an empty frame.
+   ================================================================ */
+CG.viz = (function(){
+  var esc = function(s){ return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); };
+  var num = function(n){ return Number(n).toLocaleString(); };
+
+  /* the shared shell: title, optional sub, optional corner value */
+  function card(o){
+    o = o || {};
+    if (!o.body) return "";
+    return '<figure class="vz' + (o.wide ? " vz-wide" : "") + '"' +
+        (o.rv === false ? "" : ' data-rv="' + (o.rv || "up") + '"') + '>' +
+      '<figcaption class="vz-h">' +
+        '<div class="vz-t"><b>' + esc(o.title) + '</b>' +
+          (o.sub ? '<span>' + esc(o.sub) + '</span>' : "") + '</div>' +
+        (o.value != null ? '<span class="vz-v"' + (o.count ? ' data-to="' + o.value + '"' : "") + '>' +
+            (typeof o.value === "number" ? num(o.value) : esc(o.value)) + '</span>' : "") +
+      '</figcaption>' + o.body + '</figure>';
+  }
+
+  /* Vertical bars. Each column carries its label and value; the series maximum is solid ember and
+     the rest sit on a track, so the shape reads without gridlines. */
+  function bars(rows, o){
+    o = o || {};
+    rows = (rows || []).filter(function(r){ return r && isFinite(r.v); });
+    if (rows.length < 2) return "";
+    var max = rows.reduce(function(m,r){ return Math.max(m, r.v); }, 0) || 1;
+    var pick = o.markMin
+      ? rows.reduce(function(b,r){ return r.v < b.v ? r : b; }, rows[0])
+      : rows.reduce(function(b,r){ return r.v > b.v ? r : b; }, rows[0]);
+    return '<div class="vz-bars" style="--n:' + rows.length + '">' + rows.map(function(r, i){
+      var on = r === pick;
+      return '<div class="vz-bar' + (on ? " on" : "") + '" style="--i:' + i + '">' +
+        '<span class="vz-bv">' + num(r.v) + '</span>' +
+        '<span class="vz-bt"><i style="height:' + Math.max(5, Math.round(100*r.v/max)) + '%"></i></span>' +
+        '<span class="vz-bl">' + esc(r.k) + '</span></div>';
+    }).join("") + '</div>' +
+    (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
+  }
+
+  /* Horizontal bars, sorted, label riding inside the bar the way the reference does. */
+  function hbars(rows, o){
+    o = o || {};
+    rows = (rows || []).filter(function(r){ return r && isFinite(r.v); }).slice();
+    if (!rows.length) return "";
+    if (o.sort !== false) rows.sort(function(a,b){ return b.v - a.v; });
+    var max = rows.reduce(function(m,r){ return Math.max(m, r.v); }, 0) || 1;
+    return '<div class="vz-hbars">' + rows.map(function(r, i){
+      var pct = Math.max(6, Math.round(100*r.v/max));
+      return '<div class="vz-hb" style="--i:' + i + (r.c ? ';--hb:' + esc(r.c) : "") + '">' +
+        '<span class="vz-hbt"><i style="width:' + pct + '%"></i>' +
+          '<em>' + esc(r.k) + '</em></span>' +
+        '<span class="vz-hbv">' + esc(o.fmt ? o.fmt(r.v, r) : num(r.v)) + '</span></div>';
+    }).join("") + '</div>' +
+    (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
+  }
+
+  /* Donut. One figure, stated plainly in the middle. */
+  function donut(val, total, o){
+    o = o || {};
+    if (!isFinite(val) || !isFinite(total) || total <= 0) return "";
+    var pct = Math.max(0, Math.min(1, val/total));
+    var R = 52, C = 2*Math.PI*R;
+    return '<div class="vz-donut">' +
+      '<svg viewBox="0 0 128 128" aria-hidden="true" focusable="false">' +
+        '<circle class="vz-dtrack" cx="64" cy="64" r="' + R + '"/>' +
+        '<circle class="vz-dfill" cx="64" cy="64" r="' + R + '"' +
+          ' style="--dash:' + C.toFixed(1) + ';--fill:' + (C*pct).toFixed(1) + '"/>' +
+      '</svg>' +
+      '<div class="vz-dmid"><b>' + Math.round(pct*100) + '%</b>' +
+        (o.label ? '<span>' + esc(o.label) + '</span>' : "") + '</div>' +
+    '</div>' +
+    (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
+  }
+
+  /* Area line with a dot per point, the way the reference's gradient chart reads. */
+  function area(points, o){
+    o = o || {};
+    points = (points || []).filter(function(p){ return p && isFinite(p.v); });
+    if (points.length < 3) return "";
+    var W = 620, H = 168, P = 10;
+    var max = points.reduce(function(m,p){ return Math.max(m, p.v); }, 0) || 1;
+    var min = o.zero === false ? points.reduce(function(m,p){ return Math.min(m, p.v); }, max) : 0;
+    var span = (max - min) || 1;
+    var X = function(i){ return P + (W - P*2) * (points.length<2?0:i/(points.length-1)); };
+    var Y = function(v){ return H - P - (H - P*2) * ((v-min)/span); };
+    var line = points.map(function(p,i){ return (i?"L":"M") + X(i).toFixed(1) + " " + Y(p.v).toFixed(1); }).join("");
+    var fill = line + "L" + X(points.length-1).toFixed(1) + " " + (H-P) + "L" + X(0).toFixed(1) + " " + (H-P) + "Z";
+    var dots = points.map(function(p,i){
+      return '<circle class="vz-dot" cx="' + X(i).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3" style="--i:' + i + '"/>';
+    }).join("");
+    var uid = "vzg" + (area._n = (area._n||0) + 1);
+    return '<div class="vz-area">' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true" focusable="false">' +
+        '<defs><linearGradient id="' + uid + '" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="var(--em-2)" stop-opacity=".5"/>' +
+          '<stop offset="100%" stop-color="var(--em-4)" stop-opacity="0"/></linearGradient></defs>' +
+        '<path class="vz-afill" d="' + fill + '" fill="url(#' + uid + ')"/>' +
+        '<path class="vz-aline rv-draw" d="' + line + '" fill="none"/>' + dots +
+      '</svg>' +
+      (o.from || o.to ? '<div class="vz-axis"><span>' + esc(o.from||"") + '</span><span>' + esc(o.to||"") + '</span></div>' : "") +
+    '</div>';
+  }
+
+  return { card:card, bars:bars, hbars:hbars, donut:donut, area:area };
+})();
+
+/* ================================================================
    EMBER LIGHT — the flowing ribbon behind the hero and the charts.
 
    Painted once into a low-resolution canvas and stretched by CSS. It is a soft gradient, so
@@ -1040,7 +1158,20 @@ CG.emberPaint = function(cv, opts){
 
 /* Paint every ember canvas that has not been painted yet. Cheap enough to call on every render:
    the guard means each canvas is rasterised once. */
+/* The page backdrop lives outside #app so it survives every route change and is painted once. */
+CG.emberBackdrop = function(){
+  if (document.getElementById("pageEmber")) return;
+  var cv = document.createElement("canvas");
+  cv.id = "pageEmber"; cv.className = "ember";
+  cv.setAttribute("aria-hidden", "true");
+  document.body.appendChild(cv);
+  /* painted here rather than left to emberAll: it lives outside #app, which is the only subtree
+     emberAll is ever handed */
+  CG.emberPaint(cv, { w:300, h:200, ribs:22 });
+};
+
 CG.emberAll = function(root){
+  CG.emberBackdrop();
   [].forEach.call((root || document).querySelectorAll("canvas.ember:not([data-painted])"), function(cv){
     CG.emberPaint(cv, {
       w: +cv.getAttribute("data-w") || 300,

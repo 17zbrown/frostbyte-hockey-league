@@ -75,6 +75,9 @@ document.documentElement.setAttribute("data-theme",_t);}catch(e){}</script>
      theme. Light reads like a printed atlas: land paler than the water, one mid-tone coastline
      doing the drawing. Every one of these is paired below, so nothing on the map can end up
      hard-coded dark on a light page. */
+  /* Liquid-glass surface: translucent enough that the backdrop reads through, opaque enough
+     that text on it still clears contrast. Every surface that used --paper flat now uses this. */
+  --glass:rgba(255,255,255,.72); --glass-line:rgba(16,21,25,.10);
   --map-sea-1:#EAF1F5; --map-sea-2:#DDE7EC; --map-land:#FBFCFA; --map-coast:#8FA3B0;
   --map-bord:#C2D0D8; --map-lake:#DCE8EF;
   /* motion: one easing and one beat for the whole page, so the choreography feels authored */
@@ -98,6 +101,7 @@ html[data-theme="dark"]{
   --red-ink:#F08880; --green-ink:#4FC486; --amber-ink:#E8D34F;
   --sh-1:0 1px 2px rgba(0,0,0,.5),0 8px 24px -14px rgba(0,0,0,.6);
   --sh-2:0 2px 4px rgba(0,0,0,.55),0 24px 48px -18px rgba(0,0,0,.72);
+  --glass:rgba(23,28,33,.62); --glass-line:rgba(255,255,255,.09);
   --map-sea-1:#16202b; --map-sea-2:#0D1216; --map-land:#212f3e; --map-coast:#4a5d70;
   --map-bord:#334356; --map-lake:#131c25;
   --em-ink:#FF9A5A;
@@ -432,11 +436,21 @@ a.fx-link:hover{background:var(--chrome-tint)}
    picture — there is no seam to hide because the same surface carries through. It fades out
    downward so the map's own sea tone takes over where the geography starts to matter. */
 .hero-ember{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;
-  object-fit:cover;opacity:.5;
-  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 26%,rgba(0,0,0,.55) 52%,transparent 88%);
-          mask-image:linear-gradient(to bottom,#000 0%,#000 26%,rgba(0,0,0,.55) 52%,transparent 88%);
+  object-fit:cover;opacity:.42;
+  /* feathered far further down than before: the map used to begin against a still-bright band,
+     which is what made its top edge read as a hard stop */
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 18%,rgba(0,0,0,.62) 44%,rgba(0,0,0,.22) 70%,transparent 100%);
+          mask-image:linear-gradient(to bottom,#000 0%,#000 18%,rgba(0,0,0,.62) 44%,rgba(0,0,0,.22) 70%,transparent 100%);
   animation:ember-drift 34s ease-in-out infinite alternate}
-html[data-theme="dark"] .hero-ember{opacity:.34;mix-blend-mode:screen}
+html[data-theme="dark"] .hero-ember{opacity:.3;mix-blend-mode:screen}
+
+/* ---- the page backdrop: the same light, fixed behind everything, kept deliberately faint ----
+   It is a texture, not a feature: at this strength it reads as warmth in the paper rather than as
+   a graphic competing with the content. */
+#pageEmber{position:fixed;inset:0;z-index:-2;pointer-events:none;width:100%;height:100%;
+  object-fit:cover;opacity:.07}
+html[data-theme="dark"] #pageEmber{opacity:.13;mix-blend-mode:screen}
+@media(prefers-reduced-motion:reduce){#pageEmber{opacity:.05}}
 @keyframes ember-drift{from{transform:scale(1.06) translate3d(-1.5%,0,0)}
                        to{transform:scale(1.12) translate3d(1.5%,-1.5%,0)}}
 /* the map sits above the light and lets it through at the top, so the two never meet at an edge */
@@ -502,6 +516,32 @@ html.rv-on [data-rv="words"] .rv-word>i{transform:translateY(112%);
 html.rv-on [data-rv="words"].rv-in .rv-word>i{transform:translateY(0)}
 html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance, not the block */
 
+/* ---- scroll-linked motion ----
+   Where the browser supports scroll-driven animations natively, sections keep moving WITH the
+   scroll instead of snapping in once and stopping — which is the difference between a page that
+   reveals and one that feels continuous. It runs on the compositor, needs no library, and is
+   disabled by the reduced-motion block below like everything else.
+
+   This is additive: [data-rv] still carries the observer-driven reveal, so a browser without
+   view() timelines gets exactly what it got before. */
+@supports (animation-timeline: view()){
+  @media(prefers-reduced-motion:no-preference){
+    html.rv-on [data-rv="up"],html.rv-on [data-rv="pop"]{
+      animation:rv-rise linear both;
+      animation-timeline:view();
+      animation-range:entry 8% cover 34%}
+    /* once it has arrived it must stay arrived: the observer's .rv-in state wins outright */
+    html.rv-on [data-rv].rv-in{animation:none}
+    @keyframes rv-rise{
+      from{opacity:0;transform:translateY(34px) scale(.985)}
+      to{opacity:1;transform:none}}
+    /* the chart cards drift a little slower than the page, which is what reads as depth */
+    .vzgrid .vz{animation:vz-float linear both;animation-timeline:view();animation-range:entry 0% exit 100%}
+    @keyframes vz-float{from{transform:translateY(16px)}to{transform:translateY(-16px)}}
+    html.rv-on .vzgrid .vz[data-rv]:not(.rv-in){animation:none}
+  }
+}
+
 /* ---- cursor: things you can act on lean toward the pointer ---- */
 @media(hover:hover) and (pointer:fine){
   .tilt{transition:transform .3s var(--ease-spring)}
@@ -534,6 +574,95 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
   .fig:nth-child(3){border-left:0}.fig:nth-child(n+3){border-top:1px solid var(--line)}}
 @media(max-width:460px){.figs{grid-template-columns:1fr}
   .fig{border-left:0}.fig+.fig{border-top:1px solid var(--line)}}
+
+/* ================= CG.viz — one chart language for the whole site =================
+   Modelled on the reference set: a titled card, the figure in the corner, the plot beneath, and
+   labels riding inside the bars so no chart needs a legend. Violet there, ember here. */
+.vz{position:relative;margin:0;padding:18px 18px 16px;border-radius:14px;
+  background:var(--glass,var(--paper));border:1px solid var(--glass-line,var(--line));
+  -webkit-backdrop-filter:blur(14px) saturate(1.5);backdrop-filter:blur(14px) saturate(1.5);
+  display:flex;flex-direction:column;gap:14px;overflow:hidden}
+/* no backdrop-filter support: fall back to the solid surface rather than a washed-out panel */
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  .vz{background:var(--paper);border-color:var(--line)}}
+.vz-h{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.vz-t b{display:block;font-family:var(--f-disp);font-weight:700;font-size:15.5px;color:var(--ink);
+  letter-spacing:.01em}
+.vz-t span{display:block;margin-top:3px;font-size:12.5px;line-height:1.45;color:var(--em-ink)}
+.vz-v{font-family:var(--f-disp);font-weight:800;font-size:clamp(20px,2vw,26px);color:var(--ink);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;white-space:nowrap}
+.vz-note{margin:0;font-size:12px;line-height:1.5;color:var(--steel)}
+
+/* ---- vertical bars ---- */
+.vz-bars{display:grid;grid-template-columns:repeat(var(--n,6),1fr);gap:clamp(5px,1vw,11px);
+  align-items:end;height:clamp(118px,15vh,164px)}
+.vz-bar{display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+.vz-bv{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.vz-bt{width:100%;flex:1 1 auto;display:flex;align-items:flex-end;
+  background:var(--line-soft);border-radius:8px;overflow:hidden}
+.vz-bt>i{display:block;width:100%;border-radius:8px;transform-origin:bottom;
+  background:linear-gradient(180deg,var(--em-2),var(--em-3))}
+.vz-bar.on .vz-bt>i{background:linear-gradient(180deg,var(--em-3),var(--em-5))}
+.vz-bar.on .vz-bv,.vz-bar.on .vz-bl{color:var(--em-ink);font-weight:700}
+.vz-bl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.09em;color:var(--steel);text-transform:uppercase}
+
+/* ---- horizontal bars, label inside the bar ---- */
+.vz-hbars{display:flex;flex-direction:column;gap:6px}
+.vz-hb{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:11px}
+.vz-hbt{position:relative;height:28px;border-radius:7px;background:var(--line-soft);overflow:hidden;
+  display:flex;align-items:center}
+.vz-hbt>i{position:absolute;left:0;top:0;bottom:0;border-radius:7px;transform-origin:left center;
+  background:linear-gradient(90deg,var(--hb,var(--em-2)),color-mix(in srgb,var(--hb,var(--em-3)) 72%,var(--em-4)))}
+@supports not (color: color-mix(in srgb,red,blue)){
+  .vz-hbt>i{background:linear-gradient(90deg,var(--hb,var(--em-2)),var(--em-4))}}
+.vz-hbt>em{position:relative;z-index:1;padding:0 11px;font-family:var(--f-mono);font-size:10.5px;
+  font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink);font-style:normal;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vz-hbv{font-family:var(--f-mono);font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ---- donut ---- */
+.vz-donut{position:relative;display:grid;place-items:center;padding:2px 0}
+.vz-donut svg{width:clamp(124px,15vw,164px);height:auto;transform:rotate(-90deg)}
+.vz-dtrack{fill:none;stroke:var(--line-soft);stroke-width:13}
+.vz-dfill{fill:none;stroke:var(--em-3);stroke-width:13;stroke-linecap:round;
+  stroke-dasharray:var(--dash);stroke-dashoffset:calc(var(--dash) - var(--fill))}
+.vz-dmid{position:absolute;text-align:center}
+.vz-dmid b{display:block;font-family:var(--f-disp);font-weight:800;font-size:clamp(24px,2.6vw,32px);
+  color:var(--em-ink);line-height:1;font-variant-numeric:tabular-nums}
+.vz-dmid span{display:block;margin-top:5px;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--steel)}
+
+/* ---- area ---- */
+.vz-area svg{width:100%;height:clamp(120px,16vh,168px);display:block;overflow:visible}
+.vz-aline{stroke:var(--em-2);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;
+  vector-effect:non-scaling-stroke}
+.vz-dot{fill:var(--em-2);opacity:0}
+.vz-axis{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:10px;
+  letter-spacing:.08em;color:var(--steel);padding-top:8px}
+
+/* ---- how each primitive arrives ---- */
+html.rv-on .vz[data-rv] .vz-bt>i{transform:scaleY(0)}
+html.rv-on .vz[data-rv].rv-in .vz-bt>i{transform:scaleY(1);
+  transition:transform .8s var(--ease-spring) calc(var(--i,0)*60ms)}
+html.rv-on .vz[data-rv] .vz-hbt>i{transform:scaleX(0)}
+html.rv-on .vz[data-rv].rv-in .vz-hbt>i{transform:scaleX(1);
+  transition:transform .85s var(--ease-out) calc(var(--i,0)*60ms)}
+html.rv-on .vz[data-rv] .vz-dfill{stroke-dashoffset:var(--dash)}
+html.rv-on .vz[data-rv].rv-in .vz-dfill{stroke-dashoffset:calc(var(--dash) - var(--fill));
+  transition:stroke-dashoffset 1.2s var(--ease-out) .1s}
+html.rv-on .vz[data-rv].rv-in .vz-dot{opacity:1;transition:opacity .3s ease calc(340ms + var(--i,0)*46ms)}
+@media(prefers-reduced-motion:reduce){
+  html.rv-on .vz[data-rv] .vz-bt>i,html.rv-on .vz[data-rv].rv-in .vz-bt>i{transform:scaleY(1);transition:none}
+  html.rv-on .vz[data-rv] .vz-hbt>i,html.rv-on .vz[data-rv].rv-in .vz-hbt>i{transform:scaleX(1);transition:none}
+  html.rv-on .vz[data-rv] .vz-dfill,html.rv-on .vz[data-rv].rv-in .vz-dfill{
+    stroke-dashoffset:calc(var(--dash) - var(--fill));transition:none}
+  .vz-dot{opacity:1}
+}
+
+/* the chart grid: a wide card spans two columns so the time series gets the room it needs */
+.vzgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+.vzgrid .vz-wide{grid-column:1/-1}
+@media(max-width:820px){.vzgrid{grid-template-columns:1fr}}
 
 /* ---- the pulse: charts that answer a question, in both themes ---- */
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
@@ -594,7 +723,8 @@ html[data-theme="dark"] .card-ember{opacity:.16;mix-blend-mode:screen}
 .ladder{display:flex;flex-direction:column;gap:5px;position:relative}
 .lane{position:relative;display:grid;grid-template-columns:26px 30px minmax(0,1fr) 34% auto;
   align-items:center;gap:11px;padding:9px 13px;border-radius:10px;text-decoration:none;
-  background:var(--paper);border:1.5px solid var(--line);overflow:hidden;
+  background:var(--glass,var(--paper));border:1px solid var(--glass-line,var(--line));overflow:hidden;
+  -webkit-backdrop-filter:blur(12px) saturate(1.4);backdrop-filter:blur(12px) saturate(1.4);
   transition:border-color .25s ease,transform .3s var(--ease-spring),box-shadow .3s ease}
 /* the club's colour washes in from the boards on hover */
 .lane::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;
@@ -676,7 +806,11 @@ html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);
   background:radial-gradient(125% 95% at 50% 0%,var(--map-sea-1) 0%,var(--map-sea-2) 72%)}
 .na-plot{position:absolute;inset:0}
 .na-svg{position:absolute;inset:0;width:100%;height:100%;display:block;
-  opacity:0;transform:scale(1.045);transition:opacity 1.5s ease .35s,transform 2.2s var(--ease-out) .35s}
+  opacity:0;transform:scale(1.045);transition:opacity 1.5s ease .35s,transform 2.2s var(--ease-out) .35s;
+  /* the geography itself fades in from the top, so the map has no edge to stop at — the crests
+     are excluded from this mask, so a northern club never dims with it */
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0%,rgba(0,0,0,.45) 7%,#000 17%);
+          mask-image:linear-gradient(to bottom,transparent 0%,rgba(0,0,0,.45) 7%,#000 17%)}
 .na-wrap.map-in .na-svg{opacity:1;transform:none}
 /* every stroke is a whole pixel: below 1 the rasteriser can only alpha-blend it, and on a
    DPR-1 screen the line washes out to nothing */
@@ -709,18 +843,21 @@ html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);
 .na-pin:hover::before,.na-pin:focus-visible::before{opacity:.55;transform:translate(-50%,-50%) scale(2.3)}
 
 /* ---- the click: the map falls away, the club's mark rushes forward ---- */
-.na-wrap.pin-zooming .na-svg{filter:blur(4px) saturate(.65);opacity:.3;transform:scale(1.09);
-  transition:filter .6s ease,opacity .6s ease,transform .7s var(--ease-out)}
+.na-wrap.pin-zooming .na-svg{filter:blur(5px) saturate(.6);opacity:.24;transform:scale(1.13);
+  transition:filter .8s ease,opacity .8s ease,transform .86s cubic-bezier(.42,0,.72,.24)}
 .na-wrap.pin-zooming .na-cap{opacity:0;transition:opacity .3s ease}
 .na-wrap.pin-zooming .na-pin:not(.pin-zoom){opacity:0;transform:translate(-50%,-50%) scale(.6);
   transition:opacity .4s ease,transform .5s var(--ease-out)}
 .na-pin.pin-zoom{z-index:9}
+/* An ease-IN curve, not ease-out: moving toward something accelerates away from you. The crest
+   holds for a beat, then leaves — and it fades late, so the mark stays legible while it grows
+   instead of dissolving the moment it moves. */
 .na-pin.pin-zoom .crest,.na-pin.pin-zoom img,.na-pin.pin-zoom svg{
-  transform:scale(7);opacity:0;
-  transition:transform .62s cubic-bezier(.55,0,.25,1),opacity .5s ease .18s;
-  filter:drop-shadow(0 0 40px var(--team,var(--gold)))}
-.na-pin.pin-zoom::before{opacity:.9;transform:translate(-50%,-50%) scale(14);
-  transition:opacity .55s ease,transform .62s cubic-bezier(.55,0,.25,1)}
+  transform:scale(9);opacity:0;
+  transition:transform .86s cubic-bezier(.42,0,.72,.24),opacity .34s ease .52s;
+  filter:drop-shadow(0 0 46px var(--team,var(--gold)))}
+.na-pin.pin-zoom::before{opacity:.85;transform:translate(-50%,-50%) scale(18);
+  transition:opacity .7s ease .1s,transform .86s cubic-bezier(.42,0,.72,.24)}
 @media(prefers-reduced-motion:reduce){
   .na-pin::before{display:none}
   .na-wrap.pin-zooming .na-svg,.na-wrap.pin-zooming .na-pin:not(.pin-zoom),
@@ -784,7 +921,8 @@ html.rv-on .na-wrap.pins-in .na-pin{opacity:1;transform:translate(-50%,-50%) sca
    rather than overriding downstream: the old rules sat later in the file at equal specificity, so
    an override in the new module's block silently lost and the text stayed a fixed dim grey that
    fails contrast on a light page. */
-.railgame{border:1.5px solid var(--line);border-radius:var(--r-m);background:var(--paper);
+.railgame{border:1px solid var(--glass-line,var(--line));border-radius:var(--r-m);background:var(--glass,var(--paper));
+  -webkit-backdrop-filter:blur(12px) saturate(1.4);backdrop-filter:blur(12px) saturate(1.4);
   cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .25s ease}
 .railgame:hover{border-color:var(--viz-accent)}
 .railgame .rg-line{display:flex;align-items:center;gap:8px;font-family:var(--f-disp);font-weight:700;
