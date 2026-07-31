@@ -198,62 +198,6 @@ export function readRulebook() {
   }
   return null;
 }
-/* chapter/section -> Discord messages, respecting the 6000-char and 10-embed per-message caps */
-export function buildRulesMessages(rb) {
-  const cur = (rb.changelog || [])[0] || {};
-  const MAX_EMBED = 4000, MAX_MSG = 5200, MAX_EMBEDS = 8;
-  const toc = (rb.chapters || []).map((c) => `**${c.num}.** ${c.title}`).join("\n");
-  const head = {
-    embeds: [{
-      title: "CGHL Official Rulebook",
-      url: "https://chelgamingleague.com/#/rulebook",
-      description:
-        `**Version ${cur.version || "—"}**${cur.dateIso ? ` · updated ${cur.dateIso}` : ""}\n\n` +
-        `The full rulebook, mirrored from the league site. This channel updates itself whenever a ` +
-        `new version is published — always read the version above.\n\n**Contents**\n${toc}`,
-      color: RULES_BRAND,
-      footer: { text: "chelgamingleague.com/#/rulebook" },
-    }],
-  };
-  const parts = [];
-  (rb.chapters || []).forEach((ch) => {
-    (ch.sections || []).forEach((se) => {
-      const body = (se.paragraphs || []).join("\n\n");
-      const chunks = [];
-      let rest = body;
-      while (rest.length > MAX_EMBED) {
-        let cut = rest.lastIndexOf("\n\n", MAX_EMBED);
-        if (cut < 1000) cut = MAX_EMBED;
-        chunks.push(rest.slice(0, cut));
-        rest = rest.slice(cut).trim();
-      }
-      chunks.push(rest);
-      chunks.forEach((c, i) => parts.push({ ch: ch.num, chTitle: ch.title,
-        embed: { title: `${se.id ? se.id + " " : ""}${se.title}${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}`,
-                 description: c, color: RULES_BRAND }, len: c.length }));
-    });
-  });
-  const msgs = [head];
-  let bucket = [], len = 0, chNum = null, first = true;
-  const flush = () => {
-    if (!bucket.length) return;
-    const e = bucket.slice();
-    if (first) e[0] = { ...e[0], author: { name: `Chapter ${chNum} — ${bucket[0]._chTitle}` } };
-    msgs.push({ embeds: e.map(({ _chTitle, ...rest }) => rest) });
-    bucket = []; len = 0;
-  };
-  parts.forEach((p) => {
-    const chapterChanged = chNum !== null && p.ch !== chNum;
-    if (bucket.length && (chapterChanged || bucket.length >= MAX_EMBEDS || len + p.len > MAX_MSG)) {
-      flush(); first = chapterChanged;
-    }
-    if (!bucket.length) first = chNum === null || p.ch !== chNum;
-    bucket.push({ ...p.embed, _chTitle: p.chTitle });
-    len += p.len; chNum = p.ch;
-  });
-  flush();
-  return msgs;
-}
 /* Posting 16 messages back-to-back trips Discord's per-channel limit, so this honours Retry-After
    instead of dropping the tail of the rulebook (lfgDApi has no 429 handling). */
 async function rulesApi(method, p, body, tries = 5) {
@@ -278,22 +222,46 @@ async function rulesApi(method, p, body, tries = 5) {
   throw new Error(`${method} ${p} -> still rate limited after ${tries} attempts`);
 }
 const rulesPace = () => new Promise((s) => setTimeout(s, 400));   // stay under the per-channel burst cap
+/* One card in #rules pointing at the rulebook page, instead of the whole book mirrored chapter by
+   chapter. The mirror was a dozen-plus messages that had to be rewritten on every amendment — it
+   tripped the per-channel rate limit, and it meant two copies of the rules that could disagree the
+   moment one edit failed. The site is the rulebook; Discord links to it.
+   The card carries the version and effective date so it is obvious at a glance whether it is
+   current, and the chapter list so nobody has to click just to see what is covered. */
+export function buildRulesLink(rb) {
+  const cur = (rb.changelog || [])[0] || {};
+  const toc = (rb.chapters || []).map((c) => `**${c.num}.** ${c.title}`).join("\n");
+  const when = cur.dateIso
+    ? new Date(cur.dateIso + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })
+    : null;
+  return {
+    embeds: [{
+      title: "📖 CGHL Official Rulebook",
+      url: "https://chelgamingleague.com/#/rulebook",
+      description:
+        "The rulebook lives on the site, where it is always current, searchable, and linkable — " +
+        "cite any rule by its number and the link goes straight to it.\n\n" +
+        "**→ [Read the rulebook](https://chelgamingleague.com/#/rulebook)**\n\n" + toc,
+      color: RULES_BRAND,
+      footer: { text: cur.version ? `Version ${cur.version}${when ? ` · effective ${when}` : ""}` : "Chel Gaming Hockey League" },
+    }],
+  };
+}
 async function rulesUpkeep(errors) {
-  const out = { checked: 0, posted: 0, edited: 0, removed: 0, skipped: null };
+  const out = { checked: 1, posted: 0, edited: 0, removed: 0, skipped: null };
   if (!BOT || !GUILD) { out.skipped = "no bot/guild"; return out; }
   const rb = readRulebook();
   if (!rb) { out.skipped = "rulebook not readable"; return out; }
 
-  const msgs = buildRulesMessages(rb);
-  const hash = crypto.createHash("sha256").update(JSON.stringify(msgs)).digest("hex").slice(0, 32);
-  out.checked = msgs.length;
+  const card = buildRulesLink(rb);
+  const hash = crypto.createHash("sha256").update(JSON.stringify(card)).digest("hex").slice(0, 32);
 
   let cfg = [];
   try { cfg = await sbGet("app_config?key=in.(rules_sync_hash,rules_message_ids)&select=key,value"); } catch (e) {}
   const get = (k) => (cfg.find((c) => c.key === k) || {}).value || "";
   let ids = [];
   try { ids = JSON.parse(get("rules_message_ids") || "[]"); } catch (e) { ids = []; }
-  if (get("rules_sync_hash") === hash && ids.length === msgs.length) return out;   // already in sync
+  if (get("rules_sync_hash") === hash && ids.length === 1) return out;   // already in sync
 
   // resolve #rules — prefer the one under the Information category over any stray duplicate
   let chan = null;
@@ -305,34 +273,36 @@ async function rulesUpkeep(errors) {
   } catch (e) { errors.push(`rules channel lookup: ${String(e.message || e)}`); return out; }
   if (!chan) { out.skipped = "no #rules channel"; return out; }
 
-  const next = [];
-  for (let i = 0; i < msgs.length; i++) {
-    const body = { embeds: msgs[i].embeds, allowed_mentions: { parse: [] } };
+  const body = { embeds: card.embeds, allowed_mentions: { parse: [] } };
+  let keep = ids[0] || null;
+
+  // Reuse the first mirrored message so the card sits where the rules already were, at the top of
+  // the channel. If it is gone (deleted by hand), post a fresh one.
+  if (keep) {
+    try { await rulesPace(); await rulesApi("PATCH", `/channels/${chan.id}/messages/${keep}`, body); out.edited++; }
+    catch (e) { keep = null; }
+  }
+  if (!keep) {
     try {
       await rulesPace();
-      if (ids[i]) {
-        await rulesApi("PATCH", `/channels/${chan.id}/messages/${ids[i]}`, body);
-        next.push(ids[i]); out.edited++;
-      } else {
-        const posted = await rulesApi("POST", `/channels/${chan.id}/messages`, body);
-        if (posted && posted.id) { next.push(posted.id); out.posted++; }
-      }
-    } catch (e) {
-      // a message that vanished (deleted by hand) is reposted rather than aborting the sync
-      try {
-        const posted = await rulesApi("POST", `/channels/${chan.id}/messages`, body);
-        if (posted && posted.id) { next.push(posted.id); out.posted++; }
-      } catch (e2) { errors.push(`rules msg ${i}: ${String(e2.message || e2)}`); }
-    }
+      const posted = await rulesApi("POST", `/channels/${chan.id}/messages`, body);
+      if (posted && posted.id) { keep = posted.id; out.posted++; }
+    } catch (e) { errors.push(`rules card: ${String(e.message || e)}`); return out; }
   }
-  for (const stale of ids.slice(msgs.length)) {                 // rulebook shrank — drop the surplus
-    try { await rulesApi("DELETE", `/channels/${chan.id}/messages/${stale}`); out.removed++; } catch (e) {}
+
+  // every other message this sync ever posted — the chapter-by-chapter mirror — comes down.
+  // Only ids we recorded ourselves are touched, so nothing anyone else posted is at risk.
+  for (const stale of ids) {
+    if (stale === keep) continue;
+    try { await rulesPace(); await rulesApi("DELETE", `/channels/${chan.id}/messages/${stale}`); out.removed++; }
+    catch (e) { /* already gone by hand — nothing to do */ }
   }
+
   try {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST",
       headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify([
-        { key: "rules_message_ids", value: JSON.stringify(next), updated_at: new Date().toISOString() },
+        { key: "rules_message_ids", value: JSON.stringify(keep ? [keep] : []), updated_at: new Date().toISOString() },
         { key: "rules_sync_hash", value: hash, updated_at: new Date().toISOString() },
       ]) });
   } catch (e) { errors.push(`rules state save: ${String(e.message || e)}`); }
