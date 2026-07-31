@@ -1017,6 +1017,7 @@ CG.armReveals = function(root){
   var reduced = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   var show = function(el){
     el.classList.add("rv-in");
+    [].forEach.call(el.querySelectorAll(".rv-draw"), function(p){ p.style.strokeDashoffset = "0"; });
     [].forEach.call(el.querySelectorAll("[data-to]"), function(n){
       if (reduced) n.textContent = (n.getAttribute("data-pre")||"") +
         Number(n.getAttribute("data-to")).toLocaleString() + (n.getAttribute("data-suf")||"");
@@ -1024,13 +1025,20 @@ CG.armReveals = function(root){
     });
   };
   /* A stroke can only draw itself if it knows its own length, and only the browser knows that.
-     Measure once, before anything is revealed, so the dash never flashes at the wrong offset. */
-  [].forEach.call(scope.querySelectorAll(".rv-draw"), function(path){
-    try {
-      var len = path.getTotalLength();
-      if (len) path.style.setProperty("--len", Math.ceil(len));
-    } catch (e){ /* not laid out yet: the CSS fallback length still draws it */ }
-  });
+     Both dash values are set here rather than through a custom property the CSS reads back: that
+     indirection resolved to its fallback and left the curve permanently invisible. If this throws
+     or never runs, the path keeps its default solid stroke — drawn, not blank. */
+  var arm = function(root){
+    [].forEach.call(root.querySelectorAll(".rv-draw"), function(path){
+      try {
+        var len = Math.ceil(path.getTotalLength());
+        if (!len) return;
+        path.style.strokeDasharray = len;
+        path.style.strokeDashoffset = len;
+      } catch (e){ /* not laid out yet — leave it drawn */ }
+    });
+  };
+  if (!reduced && window.IntersectionObserver) arm(scope);
   /* no observer, or the visitor asked for less motion: everything on, at once */
   if (reduced || !window.IntersectionObserver){ els.forEach(show); return; }
 

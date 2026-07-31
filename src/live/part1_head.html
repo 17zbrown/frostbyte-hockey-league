@@ -448,10 +448,13 @@ html.rv-on [data-rv="mask"]{transform:translateY(16px);clip-path:inset(0 0 103% 
              transform .8s var(--ease-out) calc(var(--rv-i,0)*var(--beat)),
              clip-path .9s var(--ease-out) calc(var(--rv-i,0)*var(--beat))}
 html.rv-on [data-rv="mask"].rv-in{clip-path:inset(-14% -8% -14% -8%)}
-/* an SVG line that draws itself: JS sets --len from getTotalLength() */
-html.rv-on [data-rv="draw"] .rv-draw{stroke-dasharray:var(--len,1000);stroke-dashoffset:var(--len,1000);
+/* An SVG line that draws itself. The dash values are written by JS, which is the only thing that
+   can call getTotalLength() — CSS only owns the transition. Deliberately NOT hidden here: if the
+   script never runs the line is simply drawn, whereas a CSS-side hide would leave the chart blank
+   forever. (It was: routing the length through var(--len) resolved to the fallback and the curve
+   rendered with dash 653 / offset 1000 — invisible.) */
+html.rv-on [data-rv="draw"] .rv-draw{
   transition:stroke-dashoffset 1.5s var(--ease-out) calc(140ms + var(--rv-i,0)*var(--beat))}
-html.rv-on [data-rv="draw"].rv-in .rv-draw{stroke-dashoffset:0}
 html.rv-on [data-rv="draw"] .rv-dot{opacity:0;transition:opacity .4s ease calc(900ms + var(--rv-i,0)*var(--beat))}
 html.rv-on [data-rv="draw"].rv-in .rv-dot{opacity:1}
 /* columns grow out of the axis */
@@ -484,7 +487,7 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
   html.rv-on [data-rv],html.rv-on [data-rv].rv-in{opacity:1;transform:none;clip-path:none;transition:none}
   html.rv-on [data-rv] .rv-meter i,html.rv-on [data-rv].rv-in .rv-meter i{transition:none;transform:scaleX(var(--v,0))}
   html.rv-on [data-rv] .rv-col,html.rv-on [data-rv].rv-in .rv-col{transition:none;transform:scaleY(1)}
-  html.rv-on [data-rv="draw"] .rv-draw,html.rv-on [data-rv="draw"].rv-in .rv-draw{transition:none;stroke-dashoffset:0}
+  html.rv-on [data-rv="draw"] .rv-draw{transition:none}
   html.rv-on [data-rv="draw"] .rv-dot{opacity:1;transition:none}
   html.rv-on [data-rv="words"] .rv-word>i{transform:none;transition:none}
   .tilt,.mag,.tilt:hover,.mag:hover{transform:none;transition:none}
