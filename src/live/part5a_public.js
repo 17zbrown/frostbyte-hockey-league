@@ -288,16 +288,18 @@ CG.seasonTimeline = function(){
     else if (i === nowIdx + 1 && nowIdx >= 0) chip = '<span class="szn-chip">Up next</span>';
     var weekLine = (st.name==="Regular season" && curW)
       ? '<span class="szn-week">Week '+curW+' <span>/ '+totW+'</span></span>' : "";
-    return '<div class="szn-stop '+state+'"><span class="szn-node" aria-hidden="true"></span>'+
+    return '<div class="szn-stop '+state+'" data-rv="pop" style="--rv-i:'+i+'"><span class="szn-node" aria-hidden="true"></span>'+
       '<span class="szn-date">'+CG.fmtDay(st.at)+'</span>'+
       '<b class="szn-name">'+esc(st.name)+'</b>'+weekLine+
       '<p class="szn-desc">'+esc(st.desc)+'</p>'+chip+'</div>';
   }).join("");
   return '<section class="sec-tight"><div class="shell">'+
-    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Season roadmap</span>'+
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Season roadmap</span>'+
     '<h2 class="h-sec">How the season rolls</h2></div>'+
     '<a class="sec-link" href="#/rulebook">The rulebook</a></div>'+
-    '<div class="szn-tl" style="grid-template-columns:repeat('+N+',1fr);--fillv:'+fillPct.toFixed(1)+'%">'+
+    /* the track fills and each stop arrives on its own beat, rather than the whole row fading in
+       as one block — the timeline is a sequence, so it should read as one */
+    '<div class="szn-tl" data-rv="up" style="grid-template-columns:repeat('+N+',1fr);--fillv:'+fillPct.toFixed(1)+'%">'+
     '<span class="szn-fill" aria-hidden="true" style="width:'+fillPct.toFixed(1)+'%"></span>'+body+'</div>'+
   '</div></section>';
 };
@@ -344,7 +346,7 @@ CG.NA_MAP = {
    CG.crest (logo when a club has uploaded one, generated crest when not), and every pin is
    a real link to the club with a real accessible name. */
 CG.naMapPins = function(){
-  var seen = {}, out = [];
+  var seen = {}, out = [], i = 0;
   (CG.TEAMS || []).slice()
     /* south-first so northern pins stack above southern ones where they nearly touch */
     .sort(function(a, b){ return (((CG.NA_MAP.at[b.code]||[0,0])[1]) - ((CG.NA_MAP.at[a.code]||[0,0])[1])); })
@@ -352,10 +354,12 @@ CG.naMapPins = function(){
       var at = CG.NA_MAP.at[t.code];
       if (!at || seen[t.code]) return;          /* a franchise we have no coordinate for is skipped, not guessed */
       seen[t.code] = 1;
-      out.push('<a class="na-pin" data-mx="' + at[0] + '" data-my="' + at[1] + '" href="#/team/' + esc(t.code) + '"' +
+      /* the crest alone — the club is identified by its own mark, which is the point of using
+         real logos; a three-letter code under every one of them was just clutter on the map */
+      out.push('<a class="na-pin" data-mx="' + at[0] + '" data-my="' + at[1] + '" style="--pin-i:' + (i++) + '"' +
+        ' href="#/team/' + esc(t.code) + '"' +
         ' aria-label="' + esc((t.city ? t.city + " " : "") + t.name) + '">' +
-        '<span class="na-dot">' + CG.crest(t.code, 30) + '</span>' +
-        '<span class="na-tag">' + esc(t.code) + '</span></a>');
+        CG.crest(t.code, 54) + '</a>');
     });
   return out.join("");
 };
@@ -513,9 +517,8 @@ CG.naMap = function(){
       '<div class="na-pins">' + CG.naMapPins() + '</div>' +
     '</div>' +
     '<div class="na-cap">' +
-      '<span class="eyebrow" style="color:var(--on-ink-dim)">The league</span>' +
       '<b class="na-cap-h">' + n + ' club' + (n === 1 ? "" : "s") + ' across North America</b>' +
-      '<span class="na-cap-s">Every club is a real room of real players. Tap a crest to see who runs it.</span>' +
+      '<span class="na-cap-s">Every crest is a real club. Tap one to see who runs it.</span>' +
     '</div>' +
   '</div>';
 };
@@ -567,6 +570,80 @@ CG.homeFigures = function(){
     '<div class="figs" data-rv="up">' + figs.join("") + '</div></div></section>';
 };
 
+/* Split a line into per-letter spans, each inside a per-word mask, so the wordmark can rise
+   letter by letter out of its own baseline. Kept to whole words as the mask unit: masking each
+   letter separately clips the overhangs on a display face this tight. */
+CG.splitChars = function(text){
+  var i = 0;
+  return String(text).split(/(\s+)/).map(function(tok){
+    if (!tok) return "";
+    if (/^\s+$/.test(tok)) return " ";
+    return '<span class="rv-word">' + tok.split("").map(function(ch){
+      return '<i style="--w-i:' + (i++) + '">' + esc(ch) + '</i>';
+    }).join("") + '</span>';
+  }).join("");
+};
+
+/* The road to puck drop — was the hero's right rail, now a module of its own so the hero can be
+   nothing but the map. In season it carries tonight's slate instead. */
+CG.roadModule = function(pre){
+  var lg = CG.lg;
+  var games = pre ? lg.schedule.filter(function(g){ return g.at > CG.now(); })
+                      .sort(function(a,b){ return a.at-b.at; }).slice(0,4)
+                  : (lg.tonight || []);
+  var stageWk = function(g){ return (g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week; };
+  var head = pre ? (games.length ? "Next up · "+stageWk(games[0]) : "The road to puck drop")
+                 : "Tonight"+(games.length ? " · "+stageWk(games[0]) : "");
+  var rows;
+  if (games.length){
+    rows = games.map(function(g, i){
+      var streamers = CG.liveStreamers(g);
+      return '<a class="railgame mag" data-rv="slide" style="--rv-i:'+i+'" href="#/matchup/'+g.id+'">'+
+        '<span class="rg-line">'+CG.crest(g.away,22)+esc(CG.TEAM[g.away].code)+' @ '+CG.crest(g.home,22)+esc(CG.TEAM[g.home].code)+
+          (streamers.length?' <span class="chip chip-live" style="font-size:9px;padding:1px 8px;margin-left:auto"><span class="live-dot"></span>LIVE</span>':"")+'</span>'+
+        '<span class="rg-t">'+(pre?CG.fmtDay(g.at):CG.fmtTime(g.at))+'</span>'+
+        '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+
+          (g.feature?' · <b style="color:var(--viz-accent)">MARQUEE</b>':"")+
+          (streamers.length?' · streaming: '+streamers.map(function(p){ return esc(p.tag); }).join(", "):"")+'</span></a>';
+    }).join("");
+  } else {
+    /* Pre-season, no slate yet — the real dates, so the module carries its weight instead of
+       apologising for an empty schedule. */
+    var sD = CG.SEASON || {}, nowMs = CG.now();
+    rows = [
+      ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff", "#/register"],
+      ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
+      ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/schedule"],
+      ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
+    ].filter(function(x){ return x[1]; }).map(function(st, i){
+      var past = Date.parse(st[1]) < nowMs;
+      return '<a class="railgame mag" data-rv="slide" style="--rv-i:'+i+';opacity:'+(past?".55":"1")+'" href="'+st[3]+'">'+
+        '<span class="rg-line"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:'+
+          (past?"var(--steel)":"var(--viz-accent)")+';display:inline-block"></span>'+esc(st[0])+'</span>'+
+        '<span class="rg-t">'+CG.fmtDate(st[1])+'</span>'+
+        '<span class="rg-meta">'+esc(st[2])+'</span></a>';
+    }).join("");
+  }
+  return '<section class="sec"><div class="shell">'+
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">'+esc(head)+'</span>'+
+    '<h2 class="h-sec">'+(pre?"Everything between now and the first shift":"Tonight on the ice")+'</h2></div>'+
+    '<a class="sec-link" href="#/schedule">Full schedule</a></div>'+
+    '<div class="roadgrid">'+rows+'</div></div></section>';
+};
+
+/* The newsroom, lifted out of the hero into its own module. */
+CG.newsModule = function(){
+  /* kept on a constant-dark band: the slides are a broadcast surface whose white headline and
+     dim deck are correct against it in BOTH themes, rather than fixed-light text stranded on a
+     page that turns pale */
+  return '<section class="sec sec-dark"><div class="shell">'+
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The newsroom</span>'+
+    '<h2 class="h-sec" style="color:var(--on-ink)">Around the league</h2></div>'+
+    '<a class="sec-link" style="color:var(--on-ink)" href="#/news">All stories</a></div>'+
+    '<div data-rv="up"><div class="caro caro-band" id="heroCaro" aria-label="Featured stories"></div></div>'+
+  '</div></section>';
+};
+
 /* What this actually is, for someone who arrived from a link and has no idea. Three sentences,
    each rising on its own beat, and the two things they might want to do next. Every claim here is
    one the rest of the site can back up — the cap figure comes from the season row, not prose. */
@@ -593,20 +670,109 @@ CG.leagueIntro = function(){
     '</div></div></section>';
 };
 
-/* The clubs as a wall of crests — the one thing a prospective player scans for first: is my
-   team in here, and is it taken. Each tile is a real link to that club. */
-CG.clubWall = function(){
+/* ================================================================
+   THE PULSE — charts, from counts already loaded on this page.
+
+   Two of them, and both are here because they answer something a prospective player actually
+   asks. The curve answers "is anyone joining this": it is the real cumulative sign-up count by
+   day, spike and all. The position bars answer "will I get picked": they show what the draft
+   pool is short of, which today is defence. That is a recruiting tool, not decoration — and it
+   is why these are the charts and not a generic three-number row.
+
+   Anything without data behind it is omitted rather than drawn empty.
+   ================================================================ */
+CG.pulseModule = function(){
+  var lg = CG.lg || {};
+  var regs = (lg._registrationsRaw || []).filter(function(r){ return r && r.created_at; });
+  var profs = (lg._profilesRaw || []).filter(function(p){ return p && p.created_at; });
+  if (regs.length < 4 && profs.length < 4) return "";
+
+  /* ---- cumulative sign-ups by day ---- */
+  var byDay = function(rows){
+    var m = {};
+    rows.forEach(function(r){ var d = String(r.created_at).slice(0,10); m[d] = (m[d]||0) + 1; });
+    var days = Object.keys(m).sort(), run = 0;
+    return days.map(function(d){ run += m[d]; return { d:d, n:m[d], c:run }; });
+  };
+  var curve = byDay(regs), memberCurve = byDay(profs);
+  var series = curve.length >= memberCurve.length ? curve : memberCurve;
+  var isReg = series === curve;
+
+  var W = 620, H = 190, PAD = 8;
+  var maxC = series.reduce(function(m,p){ return Math.max(m, p.c); }, 1);
+  var xAt = function(i){ return PAD + (W - PAD*2) * (series.length<2?0:i/(series.length-1)); };
+  var yAt = function(v){ return H - PAD - (H - PAD*2) * (v/maxC); };
+  var line = series.map(function(p,i){ return (i?"L":"M") + xAt(i).toFixed(1) + " " + yAt(p.c).toFixed(1); }).join("");
+  var area = line + "L" + xAt(series.length-1).toFixed(1) + " " + (H-PAD) + "L" + xAt(0).toFixed(1) + " " + (H-PAD) + "Z";
+  var peak = series.reduce(function(b,p){ return p.n > b.n ? p : b; }, series[0]);
+  var last = series[series.length-1];
+
+  var chart =
+    '<figure class="pulse-card" data-rv="draw" style="margin:0">' +
+      '<figcaption class="pulse-h"><span class="eyebrow">' + (isReg ? "Sign-ups" : "Members") + ' · cumulative</span>' +
+        '<b class="pulse-big"><span data-to="' + last.c + '">' + last.c + '</span></b>' +
+        '<span class="pulse-sub">' + (isReg ? "players in for Season " + ((lg.season&&lg.season.number)||1)
+                                            : "people on the site") + ' · busiest day ' + peak.n + ' on ' + esc(CG.fmtDate(peak.d)) + '</span>' +
+      '</figcaption>' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" class="pulse-svg" aria-hidden="true" focusable="false">' +
+        '<path class="pulse-area" d="' + area + '"/>' +
+        '<path class="rv-draw pulse-line" d="' + line + '" fill="none"/>' +
+        '<circle class="rv-dot pulse-end" cx="' + xAt(series.length-1).toFixed(1) + '" cy="' + yAt(last.c).toFixed(1) + '" r="4.5"/>' +
+      '</svg>' +
+      '<span class="sr-only">' + (isReg?"Sign-ups":"Members") + ' grew to ' + last.c + ' by ' + esc(CG.fmtDate(last.d)) + '.</span>' +
+    '</figure>';
+
+  /* ---- what the draft pool is short of ---- */
+  var POS = [["C","Centre"],["LW","Left wing"],["RW","Right wing"],["LD","Left D"],["RD","Right D"],["G","Goalie"]];
+  var counts = {};
+  regs.forEach(function(r){ if (r.position) counts[r.position] = (counts[r.position]||0) + 1; });
+  var have = POS.filter(function(p){ return counts[p[0]]; });
+  var bars = "";
+  if (have.length >= 3){
+    var maxN = have.reduce(function(m,p){ return Math.max(m, counts[p[0]]); }, 1);
+    var thin = have.reduce(function(b,p){ return counts[p[0]] < counts[b[0]] ? p : b; }, have[0]);
+    bars = '<figure class="pulse-card" data-rv="up" style="margin:0">' +
+      '<figcaption class="pulse-h"><span class="eyebrow">The draft pool</span>' +
+        '<b class="pulse-big">' + esc(thin[1]) + '</b>' +
+        '<span class="pulse-sub">is what the league is shortest of — sign up there and you will not wait long</span>' +
+      '</figcaption>' +
+      '<div class="poscols">' + have.map(function(p, i){
+        var n = counts[p[0]];
+        return '<div class="poscol" style="--col-i:' + i + '">' +
+          '<span class="pc-n">' + n + '</span>' +
+          '<span class="pc-bar"><i class="rv-col" style="height:' + Math.max(6, Math.round(100*n/maxN)) + '%"></i></span>' +
+          '<span class="pc-l">' + esc(p[0]) + '</span></div>';
+      }).join("") + '</div>' +
+    '</figure>';
+  }
+
+  return '<section class="sec"><div class="shell">' +
+    '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The pulse</span>' +
+    '<h2 class="h-sec">Who is turning up</h2></div>' +
+    '<a class="sec-link" href="#/register">Add yourself</a></div>' +
+    '<div class="pulsegrid">' + chart + bars + '</div></div></section>';
+};
+
+/* The clubs, as a ticker of crests and nothing else — no card, no border, no name plate. The
+   track is the club list twice over so the -50% loop is seamless; hover pauses it, and reduced
+   motion drops it to a plain wrapped row. */
+CG.clubTicker = function(){
   var ts = (CG.TEAMS || []).slice();
   if (!ts.length) return "";
+  var one = function(t, dup){
+    return '<a class="ticklink" href="#/team/' + esc(t.code) + '"' +
+      (dup ? ' aria-hidden="true" tabindex="-1"' : ' aria-label="' + esc((t.city ? t.city + " " : "") + t.name) + '"') +
+      '>' + CG.crest(t.code, 78) + '</a>';
+  };
+  var run = ts.map(function(t){ return one(t, false); }).join("") +
+            ts.map(function(t){ return one(t, true); }).join("");
   return '<section class="sec"><div class="shell">' +
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">The clubs</span>' +
     '<h2 class="h-sec">' + ts.length + ' club' + (ts.length === 1 ? "" : "s") + ' looking for players</h2></div>' +
-    '<a class="sec-link" href="#/teams">All clubs</a></div>' +
-    '<div class="clubwall">' + ts.map(function(t, i){
-      return '<a class="clubtile" data-rv="deal" style="--rv-i:' + (i % 10) + '" href="#/team/' + esc(t.code) + '"' +
-        ' aria-label="' + esc((t.city ? t.city + " " : "") + t.name) + '">' +
-        CG.crest(t.code, 44) + '<span class="ct-n">' + esc(t.name) + '</span></a>';
-    }).join("") + '</div></div></section>';
+    '<a class="sec-link" href="#/teams">All clubs</a></div></div>' +
+    '<div class="tickwrap" data-rv="up" style="--tick-dur:' + Math.max(26, ts.length * 4.4).toFixed(0) + 's">' +
+      '<div class="tickrow">' + run + '</div>' +
+    '</div></section>';
 };
 
 CG.ROUTES.home = function(){
@@ -647,52 +813,18 @@ CG.ROUTES.home = function(){
       '<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a></span>'+
     '</div></section>';
   }
-  /* HERO */
-  var railGames = pre ? lg.schedule.filter(function(g){ return g.at>CG.now(); }).sort(function(a,b){return a.at-b.at;}).slice(0,4) : lg.tonight;
-  /* one stage label for both branches so the pre-season rail can never be captioned as
-     regular-season "Opening games" (and playoffs read as playoffs on either path) */
-  var stageWk = function(g){ return (g.stage==="preseason"?"Pre-season week ":g.stage==="playoff"?"Playoff week ":"Week ")+g.week; };
-  var railLabel = pre
-    ? (railGames.length ? "Next up · "+stageWk(railGames[0]) : "Road to puck drop")
-    : "Tonight"+(railGames.length ? " · "+stageWk(railGames[0]) : "");
-  html += '<section id="hero"><div class="shell hero-grid">'+
-    /* the map is the hero's face now; the stories carousel moves directly below it so the
-       newsroom keeps its place on the front page rather than being dropped */
+  /* HERO — the wordmark, then the continent resolving underneath it. Nothing else lives here:
+     the schedule rail and the newsroom carousel are their own modules further down the scroll,
+     so the first thing anyone sees is the league's name and where it plays. */
+  var seasonLine = (CG.SEASON && CG.SEASON.name ? CG.SEASON.name : "Season 1") + " · Hockey League";
+  html += '<section id="hero">'+
+    '<div class="hero-name">'+
+      '<h1 data-rv="words">'+CG.splitChars("Chel Gaming")+'</h1>'+
+      '<span class="hn-sub" data-rv="up" style="--rv-i:4">'+esc(seasonLine)+'</span>'+
+    '</div>'+
     CG.naMap()+
-    '<aside class="hero-rail"><div class="rail-h"><span class="eyebrow" style="color:var(--on-ink-dim)">'+railLabel+'</span>'+
-      '<a class="sec-link" style="color:#fff" href="#/schedule">Full schedule</a></div>'+
-      (railGames.length ? railGames.map(function(g){
-        var streamers = CG.liveStreamers(g);
-        return '<a class="railgame" href="#/matchup/'+g.id+'">'+
-          '<span class="rg-line">'+CG.crest(g.away,22)+esc(CG.TEAM[g.away].code)+' @ '+CG.crest(g.home,22)+esc(CG.TEAM[g.home].code)+
-            (streamers.length?' <span class="chip chip-live" style="font-size:9px;padding:1px 8px;margin-left:auto"><span class="live-dot"></span>LIVE</span>':"")+'</span>'+
-          '<span class="rg-t">'+(pre?CG.fmtDay(g.at):CG.fmtTime(g.at))+'</span>'+
-          '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+(g.feature?' · <b style="color:var(--chrome)">MARQUEE</b>':"")+
-            (streamers.length?' · streaming: '+streamers.map(function(p){ return esc(p.tag); }).join(", "):"")+'</span></a>';
-      }).join("") : (function(){
-        /* Pre-season, no slate yet — fill the rail with the real road to puck drop instead of an
-           empty "being finalized" line, so the hero's right column carries its weight. */
-        var sD = CG.SEASON || {};
-        var steps = [
-          ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff", "#/register"],
-          ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
-          ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/schedule"],
-          ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
-        ].filter(function(x){ return x[1]; });
-        var nowMs = CG.now();
-        return steps.map(function(st){
-          var ms = Date.parse(st[1]), past = ms < nowMs;   /* ms only for the past/future dot */
-          return '<a class="railgame" href="'+st[3]+'" style="opacity:'+(past?".5":"1")+'">'+
-            '<span class="rg-line"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:'+(past?"var(--steel)":"var(--chrome)")+';display:inline-block"></span>'+esc(st[0])+'</span>'+
-            '<span class="rg-t">'+CG.fmtDate(st[1])+'</span>'+
-            '<span class="rg-meta">'+esc(st[2])+'</span></a>';
-        }).join("");
-      })())+
-      '<p class="caption" style="color:var(--on-ink-dim)">'+(pre?"Lineups and private game codes go live on game day (Rule 4.2).":"Lineups release 60 min before puck drop · codes at T-30 (Rule 4.2).")+'</p>'+
-    '</aside></div></section>';
-  /* the newsroom, displaced from the hero by the map — same carousel, same id, now its own band */
-  html += '<section class="sec-tight" style="background:var(--bc);border-bottom:1px solid #2A343B">'+
-    '<div class="shell"><div class="caro caro-band" id="heroCaro" aria-label="Featured stories"></div></div></section>';
+  '</section>';
+
   /* quick fact strip. In the pre-season the figures band says all of this and more, with real
      counts of members and sign-ups, so the thin strip would only repeat it. */
   var figures = pre ? CG.homeFigures() : "";
@@ -726,14 +858,14 @@ CG.ROUTES.home = function(){
       '<div style="cursor:pointer" data-go="#/standings"><b class="num">3×2</b><span>Playoff spots per division</span></div>'+
     '</div></div></section>';
   }
-  /* SEASON ROADMAP — the whole year on one line, drawn from the real season dates */
-  html += CG.seasonTimeline();
-  /* what the league is, then who is in it — the two questions a first-time visitor has, in the
-     order they have them, right after the numbers have told them it is real */
+  /* The scroll, in the order a first-time visitor asks the questions:
+     what is it -> who is turning up -> when does it start -> who is in it -> what is happening. */
   html += CG.leagueIntro();
-  /* the crest wall: before the season starts this is the clearest answer to "is there a spot
-     for me", and it stays useful afterwards as the way into every club */
-  html += CG.clubWall();
+  html += CG.pulseModule();
+  html += CG.seasonTimeline();
+  html += CG.roadModule(pre);
+  html += CG.clubTicker();
+  html += CG.newsModule();
   /* TONIGHT dark band */
   if (CG.modOn("tonight") && !pre){
     html += '<section class="sec sec-dark"><div class="shell">'+
@@ -818,7 +950,7 @@ CG.ROUTES.home = function(){
     var arts = C.articles.slice().sort(function(a,b){ return b.dateIso.localeCompare(a.dateIso); });
     var leadA = arts[0], rest = arts.slice(1,4);
     html += '<section class="sec"><div class="shell">'+
-      '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Off the wire</span><h2 class="h-sec">Around the league</h2></div>'+
+      '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Off the wire</span><h2 class="h-sec">Every story, in full</h2></div>'+
       '<a class="sec-link" href="#/news">The newsroom</a></div>'+
       '<div class="grid" style="grid-template-columns:1.6fr 1fr 1fr">'+
         CG.newsCard(leadA, true) + rest.slice(0,2).map(function(a){ return CG.newsCard(a); }).join("")+
@@ -907,6 +1039,18 @@ CG.AFTER.home = function(){
      between cities. Run it straight off the event rather than deferring into rAF: the whole pass is
      ~20 reads of ten pins, and a deferred one leaves the SVG window and the pins out of step —
      worse, a rAF that never fires (hidden tab, throttled pane) strands the map at its old size. */
+  /* The opening: the name is already rising when the continent starts to resolve under it, and
+     the crests only land once the map has settled. Driven by classes rather than a timeline so
+     that a browser which skips the transitions still ends in the finished state. */
+  var wrap = document.querySelector(".na-wrap");
+  if (wrap){
+    var lit = function(){ wrap.classList.add("map-in"); setTimeout(function(){ wrap.classList.add("pins-in"); }, 620); };
+    if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches){
+      wrap.classList.add("map-in", "pins-in");
+    } else {
+      setTimeout(lit, 90);
+    }
+  }
   var relayout = function(){ if (document.querySelector(".na-pins")) CG.naMapLayout(); };
   CG.naMapLayout();
   requestAnimationFrame(relayout);                 /* again once the crests have their real size */

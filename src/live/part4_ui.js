@@ -1023,6 +1023,14 @@ CG.armReveals = function(root){
       else CG.countUp(n);
     });
   };
+  /* A stroke can only draw itself if it knows its own length, and only the browser knows that.
+     Measure once, before anything is revealed, so the dash never flashes at the wrong offset. */
+  [].forEach.call(scope.querySelectorAll(".rv-draw"), function(path){
+    try {
+      var len = path.getTotalLength();
+      if (len) path.style.setProperty("--len", Math.ceil(len));
+    } catch (e){ /* not laid out yet: the CSS fallback length still draws it */ }
+  });
   /* no observer, or the visitor asked for less motion: everything on, at once */
   if (reduced || !window.IntersectionObserver){ els.forEach(show); return; }
 
