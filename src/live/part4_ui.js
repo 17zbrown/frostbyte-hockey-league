@@ -977,6 +977,77 @@ CG.pageTitleFor = function(name, root){
   if (!lead) lead = CG.ROUTE_TITLES[name] || CG.ROUTE_TITLES._404;
   return lead===CG.SITE_TITLE ? lead : lead+" · "+CG.SITE_TITLE;
 };
+/* ================================================================
+   SCROLL REVEALS
+
+   The safety property first, because it is the whole design: every element is
+   VISIBLE by default. The hidden starting state lives only under html.rv-on,
+   a class JS adds after it already holds a working IntersectionObserver. So a
+   blocked script, an old browser, a hidden tab whose rendering steps never run
+   — any of them leaves a complete, readable page instead of a blank one. A
+   reveal that hides content and waits for a callback is one suspended observer
+   away from an empty homepage; this one cannot be.
+
+   Numbers work the same way: the final figure is already in the markup, and
+   countUp only animates toward the value it reads out of the DOM.
+   ================================================================ */
+CG.countUp = function(el){
+  var to = parseFloat(String(el.getAttribute("data-to") || el.textContent).replace(/[^0-9.\-]/g, ""));
+  if (!isFinite(to)) return;
+  var pre = el.getAttribute("data-pre") || "", suf = el.getAttribute("data-suf") || "";
+  var dur = 900 + Math.min(600, Math.abs(to) * 6), t0 = 0;
+  var step = function(ts){
+    if (!t0) t0 = ts;
+    var p = Math.min(1, (ts - t0) / dur);
+    var e = 1 - Math.pow(1 - p, 3);                 /* ease out: fast start, settles gently */
+    el.textContent = pre + Math.round(to * e).toLocaleString() + suf;
+    if (p < 1) requestAnimationFrame(step);
+  };
+  el.textContent = pre + "0" + suf;
+  requestAnimationFrame(step);
+};
+
+CG.armReveals = function(root){
+  var scope = root || document;
+  var els = [].slice.call(scope.querySelectorAll("[data-rv]:not(.rv-in)"));
+  if (!els.length) return;
+  var reduced = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var show = function(el){
+    el.classList.add("rv-in");
+    [].forEach.call(el.querySelectorAll("[data-to]"), function(n){
+      if (reduced) n.textContent = (n.getAttribute("data-pre")||"") +
+        Number(n.getAttribute("data-to")).toLocaleString() + (n.getAttribute("data-suf")||"");
+      else CG.countUp(n);
+    });
+  };
+  /* no observer, or the visitor asked for less motion: everything on, at once */
+  if (reduced || !window.IntersectionObserver){ els.forEach(show); return; }
+
+  document.documentElement.classList.add("rv-on");
+  CG._rvSeen = false;
+  if (!CG._rvObs){
+    CG._rvObs = new IntersectionObserver(function(ents){
+      ents.forEach(function(e){
+        if (!e.isIntersecting) return;
+        CG._rvSeen = true;
+        CG._rvObs.unobserve(e.target);
+        show(e.target);
+      });
+    }, { rootMargin: "0px 0px -10% 0px", threshold: 0.12 });
+  }
+  els.forEach(function(el, i){
+    el.style.setProperty("--rv-i", i % 10);         /* stagger resets per group, not per page */
+    CG._rvObs.observe(el);
+  });
+  /* Watchdog: trips ONLY if the observer never reported anything at all, which means the
+     mechanism is broken rather than the content merely being below the fold. */
+  clearTimeout(CG._rvWatch);
+  CG._rvWatch = setTimeout(function(){
+    if (CG._rvSeen) return;
+    [].slice.call(document.querySelectorAll("[data-rv]:not(.rv-in)")).forEach(show);
+  }, 3000);
+};
+
 CG.router = function(){
   /* Close the mobile menu on any route change — the Android back button and any programmatic
      navigation swap the page underneath while leaving the overlay open on top of it. */
@@ -998,6 +1069,7 @@ CG.router = function(){
     if (!el.hasAttribute("role")) el.setAttribute("role","link");
   });
   if (CG.AFTER[name]) CG.AFTER[name](param, qs);
+  CG.armReveals(app);                              /* after AFTER: hooks may have injected markup */
   /* must land before focus moves: screen readers read the title when #app takes focus */
   document.title = CG.pageTitleFor(CG.ROUTES[name] ? name : "_404", app);
   app.focus({preventScroll:true});
