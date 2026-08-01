@@ -9,6 +9,11 @@
 //  (3) Server resolution: once a game's 30-min pick-lock passes, compute its
 //      server from the teams' private veto/preference picks (auto-fills the match card).
 //
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // No-ops safely if the bot token / guild id aren't set. Node 18+ (global fetch).
 
@@ -179,6 +184,92 @@ async function syncClubIdentity(guildChannels, guildRoles, teams, sum) {
   }
   // the ?diag= endpoints are unreachable on a scheduled function, so leave the mapping readable
   try { await sbUpsertCfg("discord_club_identity", JSON.stringify(snapshot)); } catch (e) { /* observability only */ }
+}
+
+// Role icons — the club crest on the club role, the CGHL shield on Staff.
+//
+// Needs Boost Level 2; without it Discord rejects the PATCH, so the guild's feature list is checked
+// first and the run records WHY it skipped rather than failing silently. If the boosts lapse the
+// icons stay on the roles Discord-side and this simply stops reconciling them.
+//
+// The images are pre-rendered 128x128 PNGs bundled with the function. The site stores logos as
+// WebP, which Discord will not accept for a role icon, and decoding WebP at runtime would put a
+// native image dependency inside the function that manages every role, channel and nickname.
+//
+// Idempotent by source URL: a small applied-map is compared each run and the PNGs are only read
+// and PATCHed when a club's logo actually changes. A club that uploads a new logo makes the
+// bundled render stale — that is reported, not applied, so a role never shows a mark the site no
+// longer uses.
+function readRoleIcon(code) {
+  const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
+                 path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
+  for (const r of roots) {
+    for (const rel of [["netlify", "functions", "role-icons"], ["role-icons"]]) {
+      try {
+        const dir = path.join(r, ...rel);
+        const img = path.join(dir, `${code}.png`);
+        if (!fs.existsSync(img)) continue;
+        const man = path.join(dir, "manifest.json");
+        const src = fs.existsSync(man)
+          ? (JSON.parse(fs.readFileSync(man, "utf8")).rendered || {})[code] : null;
+        return { data: "data:image/png;base64," + fs.readFileSync(img).toString("base64"), src };
+      } catch (e) { /* try the next candidate root */ }
+    }
+  }
+  return null;
+}
+
+async function syncRoleIcons(guildRoles, teams, roleId, sum) {
+  const guild = await dApi("GET", `/guilds/${GUILD}`);
+  const features = (guild && guild.features) || [];
+  if (!features.includes("ROLE_ICONS")) {
+    await sbUpsertCfg("discord_role_icons", JSON.stringify({
+      at: new Date().toISOString(), skipped: "guild lacks ROLE_ICONS (needs Boost Level 2)" }));
+    return;
+  }
+
+  const want = {};                                  // roleId -> { code, src }
+  for (const t of teams) {
+    if (t.discord_role_id && t.logo_url) want[t.discord_role_id] = { code: t.code, src: t.logo_url };
+  }
+  const staffId = roleId["staff"];
+  if (staffId) {
+    try {
+      const lg = await sbGet("leagues?select=emblem_url&order=tier.asc.nullslast&limit=1");
+      const emblem = lg && lg[0] && lg[0].emblem_url;
+      if (emblem) want[staffId] = { code: "STAFF", src: emblem };
+    } catch (e) { sum.errors.push({ roleIconStaff: String(e.message || e) }); }
+  }
+
+  let applied = {};
+  try {
+    const rows = await sbGet("app_config?key=eq.discord_role_icons_applied&select=value");
+    if (rows && rows[0] && rows[0].value) applied = JSON.parse(rows[0].value);
+  } catch (e) { /* first run, or unreadable — treat as nothing applied */ }
+
+  const todo = Object.keys(want).filter((rid) => applied[rid] !== want[rid].src);
+  if (!todo.length) return;                         // nothing changed: read no files, call nothing
+
+  const snap = [];
+  for (const rid of todo) {
+    const w = want[rid];
+    const role = guildRoles.find((r) => r.id === rid);
+    if (!role || role.managed) { snap.push(`${w.code}=no-role`); continue; }
+    const img = readRoleIcon(w.code);
+    if (!img) { snap.push(`${w.code}=no-image`); continue; }
+    if (img.src && img.src !== w.src) { snap.push(`${w.code}=stale-render`); continue; }
+    try {
+      await dApi("PATCH", `/guilds/${GUILD}/roles/${rid}`, { icon: img.data });
+      applied[rid] = w.src;
+      sum.roleIcons = (sum.roleIcons || 0) + 1;
+      snap.push(`${w.code}=ok`);
+    } catch (e) {
+      snap.push(`${w.code}=error`);
+      sum.errors.push({ roleIcon: w.code, error: String(e.message || e) });
+    }
+  }
+  try { await sbUpsertCfg("discord_role_icons_applied", JSON.stringify(applied)); } catch (e) { /* retried next run */ }
+  try { await sbUpsertCfg("discord_role_icons", JSON.stringify({ at: new Date().toISOString(), result: snap })); } catch (e) { /* observability only */ }
 }
 
 // #announcements under an Information category: everyone reads, only the league office writes.
@@ -1116,6 +1207,7 @@ export default async (req) => {
   try { await ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ clubRooms: String(e.message || e) }); }
   /* a club that rebranded or relocated: bring its role + room name/colour back in line with the DB */
   try { await syncClubIdentity(guildChannels, guildRoles, teams, sum); } catch (e) { sum.errors.push({ clubIdentity: String(e.message || e) }); }
+  try { await syncRoleIcons(guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ roleIcons: String(e.message || e) }); }
   /* club colours above the front-office seats, so a player's name shows their club */
   try { await ensureRoleOrder(guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ roleOrder: String(e.message || e) }); }
 
