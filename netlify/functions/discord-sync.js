@@ -204,7 +204,9 @@ function readRoleIcon(code) {
   const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
                  path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
   for (const r of roots) {
-    for (const rel of [["netlify", "functions", "role-icons"], ["role-icons"]]) {
+    /* assets/, not netlify/functions/: Netlify treats every subdirectory of the functions dir as a
+       function candidate, so bundled assets have to sit outside it. */
+    for (const rel of [["assets", "role-icons"], ["role-icons"]]) {
       try {
         const dir = path.join(r, ...rel);
         const img = path.join(dir, `${code}.png`);
@@ -907,7 +909,7 @@ export default async (req) => {
   const inGuildById = {};
   for (const p of await sbGet("profiles?select=id,in_guild")) inGuildById[p.id] = p.in_guild;
   const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
-  const teams = await sbGet("teams?select=id,code,name,color,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
+  const teams = await sbGet("teams?select=id,code,name,color,logo_url,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
   // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
   const mgmtRoleByProfile = {};
