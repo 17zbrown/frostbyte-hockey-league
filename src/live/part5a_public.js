@@ -396,7 +396,10 @@ CG.naMapView = function(box, padB){
      pin carries its code and the caption sits over the bottom-left corner. Capped as a fraction of
      the box as well as in px — these get DIVIDED BY below, so a fixed 44px pad on a narrow plot
      eats most of the width and demands a window several times the size of the map. */
-  var padX = Math.min(44, box.width * 0.12), padT = Math.min(34, box.height * 0.12);
+  /* padT clears the whole crest, not just the anchor: a pin is positioned by its centre, so half
+     the crest plus its glow sits ABOVE that point, and Vancouver and Toronto are the northernmost
+     pins in the frame. 34px was under half a 54px crest, which is why they grazed the top edge. */
+  var padX = Math.min(56, box.width * 0.13), padT = Math.min(72, box.height * 0.17);
   /* the ceiling here matches the one naMapLayout stops growing padB at, so the caption-clearance
      passes are never silently capped out from under them */
   padB = Math.min(padB || 58, box.height * 0.45);
@@ -736,30 +739,8 @@ CG.standingsLadder = function(dv, pre){
 CG.pulseModule = function(){
   var lg = CG.lg || {}, V = CG.viz, s = lg.season || {};
   var regs  = (lg._registrationsRaw || []).filter(function(r){ return r && r.created_at; });
-  var profs = (lg._profilesRaw || []).filter(function(p){ return p && p.created_at; });
   var teams = CG.TEAMS || [];
   var cards = [];
-
-  /* ---- registrations over time ---- */
-  var cum = function(rows){
-    var m = {};
-    rows.forEach(function(r){ var d = String(r.created_at).slice(0,10); m[d] = (m[d]||0) + 1; });
-    var days = Object.keys(m).sort(), run = 0;
-    return days.map(function(d){ run += m[d]; return { d:d, n:m[d], v:run }; });
-  };
-  var reg = cum(regs), mem = cum(profs);
-  var series = reg.length >= 4 ? reg : (mem.length >= 4 ? mem : null);
-  if (series){
-    var isReg = series === reg, last = series[series.length-1];
-    var busiest = series.reduce(function(b,p){ return p.n > b.n ? p : b; }, series[0]);
-    cards.push(V.card({
-      title: isReg ? "Registrations" : "Accounts",
-      sub: "Cumulative, by day",
-      value: last.v, count: true, rv: "draw", wide: true,
-      body: V.area(series, { from: CG.fmtDate(series[0].d), to: CG.fmtDate(last.d) }) +
-            '<p class="vz-note">Busiest day: ' + busiest.n + ' on ' + esc(CG.fmtDate(busiest.d)) + '.</p>'
-    }));
-  }
 
   /* ---- registrations by position ---- */
   var POS = [["C","C"],["LW","LW"],["RW","RW"],["LD","LD"],["RD","RD"],["G","G"]];
@@ -875,6 +856,9 @@ CG.ROUTES.home = function(){
 
   /* quick fact strip. In the pre-season the figures band says all of this and more, with real
      counts of members and sign-ups, so the thin strip would only repeat it. */
+  /* The clubs run directly under the map they are plotted on — the crest you just saw on the
+     continent is the crest you scroll into. Everything else comes after. */
+  html += CG.clubTicker();
   var figures = pre ? CG.homeFigures() : "";
   if (pre && figures){
     html += figures;
@@ -912,7 +896,6 @@ CG.ROUTES.home = function(){
   html += CG.pulseModule();
   html += CG.seasonTimeline();
   html += CG.roadModule(pre);
-  html += CG.clubTicker();
   html += CG.newsModule();
   /* TONIGHT dark band */
   if (CG.modOn("tonight") && !pre){
@@ -1121,7 +1104,7 @@ CG.AFTER.home = function(){
         location.hash = href.replace(/^#/, "");
       };
       a.addEventListener("transitionend", go, { once:true });
-      setTimeout(go, 700);
+      setTimeout(go, 300);   /* matches the 340ms zoom; whichever fires first wins */
     });
   }
   var relayout = function(){ if (document.querySelector(".na-pins")) CG.naMapLayout(); };
