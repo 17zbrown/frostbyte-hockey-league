@@ -139,7 +139,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
   margin-right:9px;vertical-align:0}
 .sec-dark .eyebrow{color:var(--on-ink-dim)}
 .sec-dark .eyebrow.chr{color:var(--on-ink)}
-.h-page{font-size:clamp(28px,3.6vw,42px);font-weight:800;letter-spacing:0}
+.h-page{font-size:clamp(28px,3.6vw,46px);font-weight:900;letter-spacing:-.02em;line-height:.94}
 .h-sec{font-size:clamp(28px,3.6vw,46px);font-weight:900;letter-spacing:-.02em;line-height:.94}
 .h-card{font-size:16.5px;font-weight:700;letter-spacing:.02em}
 .lede{font-size:clamp(15.5px,1.6vw,17.5px);color:var(--steel);max-width:62ch}
@@ -285,7 +285,12 @@ main{min-height:60vh}
 .sec-link{font-family:var(--f-disp);font-weight:700;font-size:13.5px;display:inline-flex;gap:7px;align-items:center;
   border-bottom:2.5px solid var(--chrome);padding-bottom:2px;transition:gap .15s;white-space:nowrap}
 .sec-link:hover{gap:11px}
-.card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);overflow:hidden}
+/* the same surface the home page uses, so a card is a card wherever you are */
+.card{background:var(--glass,var(--paper));border:1px solid var(--glass-line,var(--line));
+  border-radius:var(--r-m);overflow:hidden;
+  -webkit-backdrop-filter:blur(14px) saturate(1.5);backdrop-filter:blur(14px) saturate(1.5)}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  .card{background:var(--paper);border-color:var(--line)}}
 .card.raise{transition:transform .18s,box-shadow .18s,border-color .18s}
 .card.raise:hover{transform:translateY(-3px);box-shadow:var(--sh-2);border-color:var(--ink)}
 .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
@@ -1024,12 +1029,17 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
 .newsrow .newscard{flex:1}
 @media(max-width:900px){.newsrow{grid-template-columns:1fr;gap:12px}}
 
-.newscard{display:flex;flex-direction:column;background:var(--paper);border:1.5px solid var(--line);
+/* A card brings its own background, so it must bring its own text colour — inheriting from a
+   dark section band put near-white type on a white card (1.11:1) the moment the news carousel
+   was replaced with these. */
+.newscard{display:flex;flex-direction:column;background:var(--paper);color:var(--ink);
+  border:1.5px solid var(--line);
   border-radius:var(--r-m);overflow:hidden;cursor:pointer;transition:transform .18s,box-shadow .18s,border-color .18s}
 .newscard:hover{transform:translateY(-3px);box-shadow:var(--sh-2);border-color:var(--ink)}
 .newscard .nc-art{height:140px;position:relative;overflow:hidden;background:var(--bc)}
 .newscard .nc-b{padding:16px 18px 18px;display:flex;flex-direction:column;flex:1;gap:8px}
-.newscard h3{font-size:17px;font-weight:800;letter-spacing:-.015em;line-height:1.2}
+.newscard .eyebrow{color:var(--steel)}
+.newscard h3{font-size:17px;font-weight:800;letter-spacing:-.015em;line-height:1.2;color:var(--ink)}
 .newscard.lead h3{font-size:22px}
 .newscard p{color:var(--steel);font-size:13.5px;line-height:1.5}
 .newscard .nc-meta{margin-top:auto;padding-top:10px;font-family:var(--f-mono);font-size:10.5px;color:var(--steel);letter-spacing:.05em}

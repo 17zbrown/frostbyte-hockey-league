@@ -4,7 +4,9 @@
 
 /* ---------- shared page builders ---------- */
 CG.pageHead = function(eyebrow, title, lede, right){
-  return '<section class="sec-tight"><div class="shell"><div class="sec-head"><div class="lead">'+
+  /* Every page in the site builds its title here, so the reveal lives here too — one edit gives
+     the whole site the entrance the home page has, rather than 30 pages each authoring their own. */
+  return '<section class="sec-tight"><div class="shell"><div class="sec-head" data-rv="mask"><div class="lead">'+
     '<span class="eyebrow chr">'+esc(eyebrow)+'</span><h1 class="h-page" style="margin-top:10px">'+title+'</h1>'+
     (lede?'<p class="lede" style="margin-top:10px">'+lede+'</p>':"")+
     '</div>'+(right||"")+'</div></div></section>';

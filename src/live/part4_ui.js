@@ -1205,6 +1205,17 @@ CG.armReveals = function(root){
 
   document.documentElement.classList.add("rv-on");
   CG._rvSeen = false;
+
+  /* Anything already ON SCREEN at arm time is shown right now, synchronously, without waiting for
+     the observer to say so. Every page title goes through CG.pageHead and is therefore above the
+     fold on arrival — making it wait on a callback means a pathological tab shows a page with no
+     heading for the full 3s watchdog. Measured here instead: no callback, no delay, no dependency.
+     The observer still owns everything below the fold, which is the part that genuinely needs it. */
+  var vh = window.innerHeight || document.documentElement.clientHeight;
+  els.forEach(function(el){
+    var r = el.getBoundingClientRect();
+    if (r.bottom > 0 && r.top < vh) show(el);
+  });
   if (!CG._rvObs){
     CG._rvObs = new IntersectionObserver(function(ents){
       ents.forEach(function(e){
