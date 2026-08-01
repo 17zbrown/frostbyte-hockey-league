@@ -1019,7 +1019,7 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
 .gamecard .gc-score{font-family:var(--f-disp);font-weight:900;font-size:19px;letter-spacing:.02em}
 .gamecard .gc-tag{justify-self:end}
 /* three stories abreast, in the height the single-slide carousel used for one */
-.newsrow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:stretch}
+.newsrow{display:grid;grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:16px;align-items:stretch}
 .newsrow>div{display:flex}
 .newsrow .newscard{flex:1}
 @media(max-width:900px){.newsrow{grid-template-columns:1fr;gap:12px}}

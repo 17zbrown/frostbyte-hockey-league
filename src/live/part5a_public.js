@@ -649,8 +649,11 @@ CG.newsModule = function(){
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">News</span>'+
     '<h2 class="h-sec" style="color:var(--on-ink)">Latest news</h2></div>'+
     '<a class="sec-link" style="color:var(--on-ink)" href="#/news">All stories</a></div>'+
-    '<div class="newsrow">'+ arts.map(function(a,i){
-      return '<div data-rv="up" style="--rv-i:'+i+'">'+CG.newsCard(a)+'</div>';
+    /* The column count follows the number of stories. A fixed three-up grid with one article
+       published leaves two empty columns, and a lone card in a third of the width reads as a
+       mistake — so a single story takes the wide feature treatment instead. */
+    '<div class="newsrow" style="--n:'+arts.length+'">'+ arts.map(function(a,i){
+      return '<div data-rv="up" style="--rv-i:'+i+'">'+CG.newsCard(a, false, arts.length===1)+'</div>';
     }).join("") +'</div>'+
   '</div></section>';
 };
