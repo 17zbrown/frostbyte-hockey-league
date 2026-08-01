@@ -221,6 +221,20 @@ function readRoleIcon(code) {
   return null;
 }
 
+/* The guild icon straight off Discord's CDN, already PNG. size=128 keeps it well inside the 256KB
+   role-icon limit without any resampling on our side. */
+async function fetchGuildIconPng(hash) {
+  if (!hash) return null;
+  try {
+    const r = await rfetch(`https://cdn.discordapp.com/icons/${GUILD}/${hash}.png?size=128`,
+      { headers: { "User-Agent": UA } });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf.length || buf.length > 240 * 1024) return null;
+    return { data: "data:image/png;base64," + buf.toString("base64") };
+  } catch (e) { return null; }
+}
+
 async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   const guild = await dApi("GET", `/guilds/${GUILD}`);
   const features = (guild && guild.features) || [];
@@ -234,14 +248,17 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   for (const t of teams) {
     if (t.discord_role_id && t.logo_url) want[t.discord_role_id] = { code: t.code, src: t.logo_url };
   }
+  /* Staff wears the referee jersey — fixed artwork in the repo rather than anything from the DB,
+     so its "source" is a version marker. Bump it in the manifest to force a re-apply. */
   const staffId = roleId["staff"];
-  if (staffId) {
-    try {
-      const lg = await sbGet("leagues?select=emblem_url&order=tier.asc.nullslast&limit=1");
-      const emblem = lg && lg[0] && lg[0].emblem_url;
-      if (emblem) want[staffId] = { code: "STAFF", src: emblem };
-    } catch (e) { sum.errors.push({ roleIconStaff: String(e.message || e) }); }
-  }
+  if (staffId) want[staffId] = { code: "STAFF", src: "local:referee-jersey-v1" };
+
+  /* Commissioner wears the server's own icon. Taken live from the guild rather than shipped:
+     Discord's CDN already serves it as PNG, so there is nothing to pre-render and nothing to keep
+     in sync — change the server icon and this follows on the next tick. */
+  const commishId = roleId["commissioner"];
+  const guildIcon = guild && guild.icon;
+  if (commishId && guildIcon) want[commishId] = { code: "GUILD", src: `guild-icon:${guildIcon}` };
 
   let applied = {};
   try {
@@ -272,7 +289,13 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
     const w = want[rid];
     const role = guildRoles.find((r) => r.id === rid);
     if (!role || role.managed) { snap.push(`${w.code}=no-role`); continue; }
-    const img = readRoleIcon(w.code);
+    let img;
+    if (w.code === "GUILD") {
+      img = await fetchGuildIconPng(guildIcon);
+      if (img) img.src = w.src;                    // the hash IS the identity; never stale
+    } else {
+      img = readRoleIcon(w.code);
+    }
     if (!img) { snap.push(`${w.code}=no-image`); continue; }
     if (img.src && img.src !== w.src) { snap.push(`${w.code}=stale-render`); continue; }
     try {
@@ -283,6 +306,23 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
     } catch (e) {
       snap.push(`${w.code}=error`);
       sum.errors.push({ roleIcon: w.code, error: String(e.message || e) });
+    }
+  }
+  /* The bot's own avatar, matched to the server icon. PATCH /users/@me is rate-limited far harder
+     than role edits (a couple of changes an hour), so this is gated on the icon hash and runs at
+     most once per change — never on a normal tick. A failure here is recorded and dropped: the
+     avatar is cosmetic and must not cost the sync its role work. */
+  if (guildIcon && applied.__botAvatar !== guildIcon) {
+    const av = await fetchGuildIconPng(guildIcon);
+    if (av) {
+      try {
+        await dApi("PATCH", "/users/@me", { avatar: av.data });
+        applied.__botAvatar = guildIcon;
+        snap.push("BOT=ok");
+      } catch (e) {
+        snap.push("BOT=error");
+        sum.errors.push({ botAvatar: String(e.message || e) });
+      }
     }
   }
   try { await sbUpsertCfg("discord_role_icons_applied", JSON.stringify(applied)); } catch (e) { /* retried next run */ }

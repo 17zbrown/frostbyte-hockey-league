@@ -142,6 +142,22 @@ CG.gameCard = function(g){
    the live site. The prototype build has 48 simulated results, so this is false there. */
 CG.isPreseason = function(){ return !!(CG.lg && CG.lg.results && CG.lg.results.length===0); };
 /* transaction descriptions carry <b> emphasis written by the DB — escape everything else */
+/* The transaction log is a record of TEAM AND LEAGUE MOVES — front-office changes, signings,
+   free-agency deals, waivers, releases, trades, draft picks. Registrations and Discord joins are
+   member activity, not moves, and were never meant to appear here; whitelisting rather than
+   blacklisting means a new activity type added elsewhere cannot leak into it by default. */
+CG.TX_MOVE_TYPES = ["management","sign","signing","fa","free_agency","trade","waive","release","draft","claim"];
+CG.teamMoves = function(list){
+  return (list || []).filter(function(tx){
+    return tx && tx.text && CG.TX_MOVE_TYPES.indexOf(String(tx.type || "")) >= 0;
+  });
+};
+CG.txIcon = function(t){
+  return t === "trade" ? "swap" : t === "draft" ? "grid"
+       : t === "management" ? "users"
+       : (t === "waive" || t === "release") ? "back"
+       : "check";
+};
 CG.txText = function(s){ return esc(String(s||"")).replace(/&lt;b&gt;/g,"<b>").replace(/&lt;\/b&gt;/g,"</b>"); };
 CG.seasonStartMs = function(){ var s=CG.SEASON||(CG.lg&&CG.lg.season); return s&&s.starts_at?Date.parse(s.starts_at):null; };
 CG.daysToStart = function(){ var m=CG.seasonStartMs(); return m?Math.max(0,Math.ceil((m-CG.now())/86400000)):null; };
@@ -956,8 +972,8 @@ CG.ROUTES.home = function(){
               '<span class="val">'+(pre?"":CG.moveArrow(pr.move))+'</span></div>';
           }).join("")+'</div>'+
         '<div class="card"><div class="card-h"><h3>Transactions</h3><span class="chip">'+esc(CG.seasonTag())+' log</span></div>'+
-          ((lg.liveTransactions||[]).length ? lg.liveTransactions.slice(0,7).map(function(tx){
-            return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(tx.type==="trade"?"swap":tx.type==="draft"?"grid":tx.type==="sign"?"check":tx.type==="waive"?"back":"flag",15)+'</span>'+
+          (CG.teamMoves(lg.liveTransactions).length ? CG.teamMoves(lg.liveTransactions).slice(0,7).map(function(tx){
+            return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(CG.txIcon(tx.type),15)+'</span>'+
               '<span style="min-width:0"><p style="font-weight:600">'+CG.txText(tx.text)+'</p></span><span class="nf-t">'+(tx.dateIso?CG.fmtDate(tx.dateIso):"")+'</span></div>';
           }).join("") : '<div class="card-b"><p class="caption">No transactions yet — trades, signings, waivers, and placements land here the moment they happen.</p></div>')+'</div>'+
       '</div></div></section>';
@@ -1738,13 +1754,13 @@ CG.ROUTES.team = function(code, qs){
   }
   else if (tab==="moves"){
     /* the real transaction log has no team column — match this club's name or code in the text */
-    var tx = (lg.liveTransactions||[]).filter(function(x){
+    var tx = CG.teamMoves(lg.liveTransactions).filter(function(x){
       var s = (x.text||"");
       return s.indexOf(t.name)>=0 || new RegExp("\\b"+code+"\\b").test(s);
     }).slice(0,12);
     var sus = lg.suspensions.filter(function(x){ return x.team===code; });
     body += '<div class="grid g2"><div class="card"><div class="card-h"><h3>Transactions</h3></div>'+
-      (tx.length?tx.map(function(x){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(x.type==="trade"?"swap":x.type==="draft"?"grid":x.type==="sign"?"check":"flag",15)+'</span><span style="min-width:0"><p style="font-weight:600">'+CG.txText(x.text)+'</p></span><span class="nf-t">'+(x.dateIso?CG.fmtDate(x.dateIso):"")+'</span></div>'; }).join(""):
+      (tx.length?tx.map(function(x){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(CG.txIcon(x.type),15)+'</span><span style="min-width:0"><p style="font-weight:600">'+CG.txText(x.text)+'</p></span><span class="nf-t">'+(x.dateIso?CG.fmtDate(x.dateIso):"")+'</span></div>'; }).join(""):
         '<div class="empty"><b>No transactions</b><p>Trades, signings, waivers, and placements involving this club appear here when they happen.</p></div>')+'</div>'+
       '<div class="card"><div class="card-h"><h3>Discipline</h3></div>'+
       (sus.length?sus.map(function(x){ var p = CG.playerById(lg,x.playerId);
