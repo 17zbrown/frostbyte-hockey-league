@@ -253,6 +253,21 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   if (!todo.length) return;                         // nothing changed: read no files, call nothing
 
   const snap = [];
+  /* One-shot diagnostic: if the bundled PNGs cannot be found, record WHERE the function actually
+     looked and what is there, rather than reporting "no-image" forever with no way to tell whether
+     the glob, the path or the deploy is at fault. */
+  if (!readRoleIcon("STAFF")) {
+    const probe = [];
+    const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
+                   path.join(HERE, ".."), path.join(HERE, "..", "..")].filter(Boolean);
+    for (const r of roots) {
+      let listing = "unreadable";
+      try { listing = fs.readdirSync(r).slice(0, 14).join(","); } catch (e) { listing = String(e.code || e); }
+      probe.push({ root: r, entries: listing,
+                   hasAssets: (() => { try { return fs.existsSync(path.join(r, "assets")); } catch (e) { return "?"; } })() });
+    }
+    try { await sbUpsertCfg("discord_role_icons_probe", JSON.stringify(probe).slice(0, 3000)); } catch (e) { /* observability */ }
+  }
   for (const rid of todo) {
     const w = want[rid];
     const role = guildRoles.find((r) => r.id === rid);
