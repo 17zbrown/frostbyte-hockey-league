@@ -1248,6 +1248,21 @@ CG.router = function(){
     if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex","0");
     if (!el.hasAttribute("role")) el.setAttribute("role","link");
   });
+  /* A crest morph asked for this render: let the page arrive as if we flew into it. The class is
+     removed as soon as the animation ends so it never sticks to a later, ordinary render. */
+  if (CG._morphIn){
+    CG._morphIn = false;
+    app.classList.add("morph-in");
+    /* animationend BUBBLES. Without the target check, the first [data-rv] reveal inside the new
+       page ends its own animation, bubbles to #app, and strips .morph-in a few ms into a 240ms
+       arrival — dropping the page in at 35% opacity. */
+    app.addEventListener("animationend", function h(ev){
+      if (ev.target !== app) return;
+      app.classList.remove("morph-in");
+      app.removeEventListener("animationend", h);
+    });
+    setTimeout(function(){ app.classList.remove("morph-in"); }, 600);
+  }
   if (CG.AFTER[name]) CG.AFTER[name](param, qs);
   CG.armReveals(app);                              /* after AFTER: hooks may have injected markup */
   /* must land before focus moves: screen readers read the title when #app takes focus */

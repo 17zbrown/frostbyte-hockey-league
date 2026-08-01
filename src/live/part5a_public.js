@@ -639,17 +639,21 @@ CG.roadModule = function(pre){
 
 /* The newsroom, lifted out of the hero into its own module. */
 CG.newsModule = function(){
-  /* kept on a constant-dark band: the slides are a broadcast surface whose white headline and
-     dim deck are correct against it in BOTH themes, rather than fixed-light text stranded on a
-     page that turns pale */
+  var arts = ((CG.CONTENT && CG.CONTENT.articles) || []).slice()
+    .sort(function(a,b){ return String(b.dateIso).localeCompare(String(a.dateIso)); })
+    .slice(0,3);
+  if (!arts.length) return "";
+  /* A carousel showed one story at a time in a 430px band — two thirds of the height carried
+     nothing a reader could act on. Three cards fit the same band and say three times as much. */
   return '<section class="sec sec-dark"><div class="shell">'+
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">News</span>'+
     '<h2 class="h-sec" style="color:var(--on-ink)">Latest news</h2></div>'+
     '<a class="sec-link" style="color:var(--on-ink)" href="#/news">All stories</a></div>'+
-    '<div data-rv="up"><div class="caro caro-band" id="heroCaro" aria-label="Featured stories"></div></div>'+
+    '<div class="newsrow">'+ arts.map(function(a,i){
+      return '<div data-rv="up" style="--rv-i:'+i+'">'+CG.newsCard(a)+'</div>';
+    }).join("") +'</div>'+
   '</div></section>';
 };
-
 /* What this actually is, for someone who arrived from a link and has no idea. Three sentences,
    each rising on its own beat, and the two things they might want to do next. Every claim here is
    one the rest of the site can back up — the cap figure comes from the season row, not prose. */
@@ -893,7 +897,6 @@ CG.ROUTES.home = function(){
   /* The scroll, in the order a first-time visitor asks the questions:
      what is it -> who is turning up -> when does it start -> who is in it -> what is happening. */
   html += CG.leagueIntro();
-  html += CG.pulseModule();
   html += CG.seasonTimeline();
   html += CG.roadModule(pre);
   html += CG.newsModule();
@@ -1064,7 +1067,6 @@ CG.newsCard = function(a, lead, feature){
     '<span class="nc-meta">'+CG.fmtDate(a.dateIso)+' · '+esc(a.author.split("—")[0].trim())+'</span></div></article>';
 };
 CG.AFTER.home = function(){
-  CG.carousel("#heroCaro", CG.slideDefs().map(function(s){ return s.html; }));
   /* the map frames itself from its container, so it has to be laid out once the hero has a real
      size — and again whenever that size changes, which moves both the window and the pixel gap
      between cities. Run it straight off the event rather than deferring into rAF: the whole pass is
@@ -1086,25 +1088,110 @@ CG.AFTER.home = function(){
      changes. Plain left-clicks only — a modified click or a middle click must still open a tab the
      way the browser intends. Navigation is fired by whichever comes first, the transition ending
      or a timeout, so a dropped transitionend can never strand someone on the map. */
+  /* ================= THE CREST MORPH =================
+     Click a crest and it lifts off the map, lands dead centre of the screen, then rushes forward
+     while the page falls into it — and the club page arrives already large, settling back. The
+     effect is that the club page was inside the crest all along.
+
+     Built on a FIXED CLONE rather than by animating the pin in place: the pin lives inside a
+     clipped, transformed hero, so it can neither escape its container nor be positioned against
+     the viewport. The clone is measured off the real crest, so it starts exactly where the crest
+     is and there is no jump at hand-off.
+
+     Timing is deliberate — 150ms to centre, 200ms to rush, 240ms for the page to settle. Around
+     350ms of it is covered by the outgoing page, so it reads as one move rather than a wait. */
   if (!CG._naZoom){
     CG._naZoom = true;
+    CG._morphN = 0;
     document.addEventListener("click", function(e){
       var a = e.target && e.target.closest && e.target.closest(".na-pin");
       if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var href = a.getAttribute("href");
+      if (!href) return;
       if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-      var wrap = a.closest(".na-wrap"), href = a.getAttribute("href");
-      if (!wrap || !href) return;
-      e.preventDefault();
-      wrap.classList.add("pin-zooming");
-      a.classList.add("pin-zoom");
-      var fired = false;
+
+      var target = href.replace(/^#/, ""), fromHash = location.hash.replace(/^#/, "");
+      var done = false, stage = null, cleaned = false;
+      var mine = ++CG._morphN;
+
       var go = function(){
-        if (fired) return;
-        fired = true;
-        location.hash = href.replace(/^#/, "");
+        if (done) return;
+        done = true;
+        /* Do not override a navigation the user made while this was in flight — if the hash has
+           moved since the click, they pressed Back or followed something else, and winning that
+           race would drag them somewhere they left. */
+        if (location.hash.replace(/^#/, "") !== fromHash) return;
+        if (fromHash !== target){ CG._morphIn = true; location.hash = target; }
       };
-      a.addEventListener("transitionend", go, { once:true });
-      setTimeout(go, 300);   /* matches the 340ms zoom; whichever fires first wins */
+      var cleanup = function(){
+        if (cleaned) return;
+        cleaned = true;
+        if (stage && stage.parentNode) stage.parentNode.removeChild(stage);
+        a.style.visibility = "";
+        /* only the most recent morph may un-dim: two quick clicks would otherwise have the first
+           one brighten the page while the second is still flying */
+        if (mine === CG._morphN) document.documentElement.classList.remove("morphing");
+      };
+
+      /* Everything below is best-effort decoration. If ANY of it throws, the click must still
+         navigate — a preventDefault'd link that then dies is a dead control, and that is exactly
+         how an SVG crest used to break this (className on an SVGElement is read-only). */
+      try {
+        var art = a.querySelector("img, svg, .crest");
+        if (!art) return;
+        var r = art.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+
+        e.preventDefault();
+
+        var clone = art.cloneNode(true);
+        clone.removeAttribute("id");
+        clone.setAttribute("class", "crest-fly");        /* setAttribute: works on SVG and HTML */
+        /* A generated crest is an inline <svg> carrying its own gradient ids. Cloned as-is there
+           would be two of each in the document, and the clone would paint from whichever the
+           router deletes on navigate. Re-key the clone's ids and the url(#..) that point at them. */
+        try {
+          var idn = 0;
+          [].forEach.call(clone.querySelectorAll("[id]"), function(node){
+            var old = node.getAttribute("id");
+            var nu = "mf" + mine + "_" + (++idn);
+            node.setAttribute("id", nu);
+            clone.innerHTML = clone.innerHTML.split("#" + old + ")").join("#" + nu + ")");
+          });
+        } catch (idErr){ /* an <img> crest has none of this; nothing to re-key */ }
+
+        clone.style.cssText =
+          "position:absolute;left:0;top:0;width:" + r.width + "px;height:" + r.height + "px;" +
+          "transform:translate(" + r.left + "px," + r.top + "px);" +
+          "--tint:" + (a.style.getPropertyValue("--team") || "var(--gold)") + ";";
+
+        stage = document.createElement("div");
+        stage.className = "crest-stage";
+        stage.setAttribute("aria-hidden", "true");
+        stage.appendChild(clone);
+        document.body.appendChild(stage);
+
+        document.documentElement.classList.add("morphing");
+        a.style.visibility = "hidden";
+
+        var cx = (innerWidth - r.width) / 2, cy = (innerHeight - r.height) / 2;
+
+        requestAnimationFrame(function(){
+          clone.setAttribute("class", "crest-fly fly-centre");
+          clone.style.transform = "translate(" + cx + "px," + cy + "px) scale(1.7)";
+          setTimeout(function(){
+            clone.setAttribute("class", "crest-fly fly-centre fly-through");
+            clone.style.transform = "translate(" + cx + "px," + cy + "px) scale(15)";
+            go();
+            setTimeout(cleanup, 220);
+          }, 150);
+        });
+        setTimeout(go, 420);        /* no frame ever came (background tab): navigate anyway */
+        setTimeout(cleanup, 1400);  /* and never leave the overlay or the dim behind */
+      } catch (err){
+        cleanup();
+        location.hash = target;     /* the click still does what it says on the tin */
+      }
     });
   }
   var relayout = function(){ if (document.querySelector(".na-pins")) CG.naMapLayout(); };
