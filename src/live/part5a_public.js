@@ -270,7 +270,7 @@ CG.seasonTimeline = function(){
     [s.free_agency_opens_at, "Free agency",
       "Clubs sign the remaining free agents at negotiated salaries"+(faC?" — the window closes "+CG.fmtDay(faC):"")+"."],
     [s.starts_at, "Regular season",
-      "Wednesday and Friday nights, three games a night, every point counting toward the playoff race."],
+      "Wednesday, Thursday and Friday nights, three games a night, every point counting toward the playoff race."],
     [s.playoffs_start_at, "Playoffs",
       "Top three per division qualify. Best-of series all the way to the championship."]
   ];

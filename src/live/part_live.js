@@ -6816,14 +6816,19 @@ CG.AFTER._admHomepage = function(){
    LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
    ================================================================ */
 /* round-robin schedule generator (ported from the classic site, verified in prod
-   there): 3 ET slots a night, Wed + Fri, every club plays once per slot —
-   3 a night, 6 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
+   there): 3 ET slots a night, Wed/Thu/Fri, every club plays once per slot —
+   3 a night, 9 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
    Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
 CG.GAMES_PER_CLUB = 54;
 CG.PRESEASON_WEEKS = 2;
 CG.OFFSEASON_DARK_DAYS = 14;   /* 2 weeks of no on-ice activity — staff seat owners + management */
 CG.FA_WINDOW_DAYS = 7;         /* free agency runs a full week; puck drop waits for it to close */
 CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
+/* Nights per playing week. Wednesday, Thursday, Friday — three slots a night means a club plays
+   three games an evening and nine a week. Lived in four places as a bare "2"; a schedule and a
+   season-date spacer that disagree about the length of a week silently produce a calendar that
+   does not match its own games. */
+CG.NIGHTS_PER_WEEK = 3;
 CG.HOLIDAYS = ["12-25","07-01","07-04"];
 
 /* One timeline card, shared by the Register page and My Hub, so a member sees the same road
@@ -6869,13 +6874,16 @@ CG.holidayWeek = function(wedYmd){ /* the Mon..Sun week around a game Wednesday 
   for (var i=0;i<7;i++){ if (CG.HOLIDAYS.indexOf(CG.dayAdd(mon,i).slice(5))>=0) return true; }
   return false;
 };
-CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, skip holiday weeks */
+CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, then Wed..Fri; skip holiday weeks */
   var wed = anchorYmd;
   while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
   var out=[], skipped=[], guard=0;
   while (out.length < weeks && guard++ < 60){
     if (CG.holidayWeek(wed)){ skipped.push(wed); wed = CG.dayAdd(wed,7); continue; }
-    out.push({ week: out.length+1, wed: wed, fri: CG.dayAdd(wed,2) });
+    /* days[] is the real list; wed/fri remain as the FIRST and LAST night of the week, which is
+       what the season-date spacer and the playoff seeder actually mean by them. */
+    var days = []; for (var d = 0; d < CG.NIGHTS_PER_WEEK; d++) days.push(CG.dayAdd(wed, d));
+    out.push({ week: out.length+1, days: days, wed: days[0], fri: days[days.length-1] });
     wed = CG.dayAdd(wed,7);
   }
   return { nights: out, skipped: skipped };
@@ -6892,16 +6900,17 @@ CG.generateSchedule = function(stage){
   if ((CG.lg.schedule||[]).some(function(g){ return g.stage===stage; })){
     CG.toast("A "+(stage==="preseason"?"pre-season":"regular-season")+" schedule already exists — clear it first","err"); return; }
   var perNight=CG.NIGHT_SLOTS.length;
-  var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*2*perNight : CG.GAMES_PER_CLUB;
-  var weeks = Math.ceil(slots/perNight/2);
+  var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*CG.NIGHTS_PER_WEEK*perNight : CG.GAMES_PER_CLUB;
+  var weeks = Math.ceil(slots/perNight/CG.NIGHTS_PER_WEEK);
   var plan = CG.gameNights(CG.etYMD(anchorIso), weeks);
   var skipNote = plan.skipped.length ? " Holiday week"+(plan.skipped.length===1?"":"s")+" skipped: "+plan.skipped.join(", ")+"." : "";
   CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
-    codes.length+" clubs · "+slots+" games each · 3 a night, 6 a week (Wed + Fri, 9:00 / 9:35 / 10:10 PM ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
+    codes.length+" clubs · "+slots+" games each · "+perNight+" a night, "+(perNight*CG.NIGHTS_PER_WEEK)+" a week (Wed/Thu/Fri, "+
+    CG.NIGHT_SLOTS.map(function(t){ var h=+t.slice(0,2); return ((h%12)||12)+":"+t.slice(3); }).join(" / ")+" PM ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
     "Generate "+(stage==="preseason"?"pre-season":"schedule"), function(){
     function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
     var dates=[];
-    plan.nights.forEach(function(n){ dates.push({week:n.week,date:n.wed}); dates.push({week:n.week,date:n.fri}); });
+    plan.nights.forEach(function(n){ n.days.forEach(function(d){ dates.push({week:n.week,date:d}); }); });
     var arr=codes.slice(); if (arr.length%2) arr.push(null);
     var m=arr.length, fixed=arr[0], others=arr.slice(1), rows=[];
     for (var r=0; r<slots; r++){
@@ -7149,7 +7158,7 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||15)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
-    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed + Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, 9 regular-season weeks, and playoffs the Wednesday after. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Weeks touching Christmas, Canada Day, or July 4 are skipped. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
+    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, 6 regular-season weeks, and playoffs the Wednesday after. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Weeks touching Christmas, Canada Day, or July 4 are skipped. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
   document.getElementById("ssSpace").addEventListener("click", function(){
     /* Two ways in. Give the off-season start (the first midnight after last season's final
@@ -7177,7 +7186,7 @@ CG.seasonForm = function(id){
     var faOpenDay  = CG.dayAdd(draftDay,1);                     /* 24h after draft night */
     var faCloseDay = CG.dayAdd(faOpenDay,CG.FA_WINDOW_DAYS);    /* a full week of free agency */
     /* Puck drop waits for free agency to close, so every club starts game 1 settled. */
-    var reg = CG.gameNights(CG.dayAdd(faCloseDay,1), Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/2));
+    var reg = CG.gameNights(CG.dayAdd(faCloseDay,1), Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/CG.NIGHTS_PER_WEEK));
     var regStart = reg.nights[0].wed, regEnd = reg.nights[reg.nights.length-1].fri;
     var po = CG.gameNights(CG.dayAdd(regEnd,1), 1);
     function put(id, iso){ document.getElementById(id).value = dt(iso); }
@@ -7422,12 +7431,12 @@ CG.generatePlayoffRound = function(round){
     matchups=[[sf[0].code, sf[1].code]];
   }
   /* schedule the series: best-of-N nights, higher seed hosts odd games, on the
-     Wed/Fri cadence from playoffs_start_at (or the day after the last game) */
+     Wed/Thu/Fri cadence from playoffs_start_at (or the day after the last game) */
   var anchor = s.playoffs_start_at ? CG.etYMD(s.playoffs_start_at) : CG.etYMD(new Date(CG.now()+2*86400000).toISOString());
   var priorPlayoff = (CG.lg.playoffGames||[]);
   if (priorPlayoff.length){ var last=priorPlayoff.reduce(function(m,g){ return Math.max(m,g.at); },0); anchor=CG.dayAdd(CG.etYMD(new Date(last).toISOString()),2); }
   var plan=CG.gameNights(anchor, Math.ceil(bestOf/2)+1);
-  var nights=[]; plan.nights.forEach(function(n){ nights.push(n.wed); nights.push(n.fri); });
+  var nights=[]; plan.nights.forEach(function(n){ n.days.forEach(function(d){ nights.push(d); }); });
   var rows=[];
   matchups.forEach(function(m){
     for (var gi=0; gi<bestOf; gi++){

@@ -424,19 +424,25 @@ CG.AFTER._availability = function(){
    resolve_game_server RPC settles the server from both clubs' picks. */
 CG.SERVERS = ["NA East","NA Northeast","NA Central"];
 CG.VETO_LOCK_MS = 30*60000;
+/* The night a game belongs to, in league time. This used to answer "fri" or else "wed", which was
+   fine while the week was two nights and silently wrong the moment a third arrived — a Thursday
+   game reported itself as Wednesday and the lineup builder would open the wrong one. */
+CG.NIGHT_LABEL = { sun:"Sunday", mon:"Monday", tue:"Tuesday", wed:"Wednesday", thu:"Thursday", fri:"Friday", sat:"Saturday" };
 CG.gameNight = function(g){
-  try { return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(new Date(g.at))==="Fri" ? "fri" : "wed"; }
-  catch(e){ return "wed"; }
+  try {
+    var d = new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(new Date(g.at));
+    return String(d).slice(0,3).toLowerCase();
+  } catch(e){ return "wed"; }
 };
 /* which availability night (n1/n2) covers this game — null when the game isn't in the window */
 CG.nightAvKey = function(game){
   var n = ((CG.WEEK8 && CG.WEEK8.nights) || []).find(function(x){ return Math.abs(x.at - game.at) < 6*3600000; });
   return n ? n.key : null;
 };
-/* the lineup builder's target game — honors #/hub/lineup?night=wed|fri, else tonight/next */
+/* the lineup builder's target game — honors #/hub/lineup?night=<wed|thu|fri|...>, else tonight/next */
 CG.lineupGameFor = function(me){
   var lg = CG.lg;
-  var m = (location.hash.split("?")[1]||"").match(/night=(wed|fri)/);
+  var m = (location.hash.split("?")[1]||"").match(/night=([a-z]{3})/);
   var want = m ? m[1] : null;
   var mine = function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final"; };
   if (want){
@@ -514,15 +520,20 @@ CG.hubLineup = function(qs){
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.team===me.team && s.status!=="served") suspended[s.playerId]=true; });
   var assigned = Object.values(slots);
-  /* Wed/Fri switcher — shown when the club has an upcoming game on each night */
-  var hasWed = lg.schedule.some(function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000 && CG.gameNight(g)==="wed"; });
-  var hasFri = lg.schedule.some(function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000 && CG.gameNight(g)==="fri"; });
+  /* Night switcher, built from the nights this club actually has upcoming rather than a fixed pair,
+     so it follows the schedule instead of having to be edited whenever the week changes shape. */
+  var upcoming = lg.schedule.filter(function(g){
+    return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000;
+  }).sort(function(a,b){ return a.at-b.at; });
+  var nightsSeen = [], seenNight = {};
+  upcoming.forEach(function(g){ var k = CG.gameNight(g); if (!seenNight[k]){ seenNight[k]=1; nightsSeen.push(k); } });
   var curNight = CG.gameNight(game);
-  var nightSwitch = (hasWed && hasFri)
-    ? '<span style="display:inline-flex;gap:6px;margin-left:12px;vertical-align:middle">'+
-      [["wed","Wednesday"],["fri","Friday"]].map(function(nn){
-        var on = curNight===nn[0];
-        return '<a class="chip '+(on?"chip-chrome":"")+'" href="#/hub/lineup?night='+nn[0]+'" aria-current="'+on+'" style="cursor:pointer">'+nn[1]+'</a>';
+  var nightSwitch = nightsSeen.length > 1
+    ? '<span style="display:inline-flex;gap:6px;margin-left:12px;vertical-align:middle;flex-wrap:wrap">'+
+      nightsSeen.map(function(k){
+        var on = curNight===k;
+        return '<a class="chip '+(on?"chip-chrome":"")+'" href="#/hub/lineup?night='+k+'" aria-current="'+on+'" style="cursor:pointer">'+
+          (CG.NIGHT_LABEL[k]||k)+'</a>';
       }).join("")+'</span>'
     : "";
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
