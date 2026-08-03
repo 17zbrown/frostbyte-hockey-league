@@ -246,5 +246,32 @@ console.log("\n— one of each position per team, and the draft always completes
   A("everyone is on a team", s.teams.A.length === 6 && s.teams.B.length === 6);
 }
 
+
+console.log("\n— server veto: Away knocks one out, Home picks from the rest");
+{
+  const lobby = mk(); lobby.status = "server";     // capA = Home, capB = Away
+  A("Home cannot veto", !!I.applyVeto(lobby, "capA", 0).error);
+  A("a random player cannot veto", !!I.applyVeto(lobby, "p3", 0).error);
+  A("Home cannot pick before the veto", !!I.applyServer(lobby, "capA", 0).error);
+  const v = I.applyVeto(lobby, "capB", 1);
+  A("Away's veto lands", !v.error && lobby.state.vetoed === 1);
+  A("a second veto is refused", !!I.applyVeto(lobby, "capB", 2).error);
+  A("Away cannot pick the server", !!I.applyServer(lobby, "capB", 0).error);
+  A("Home cannot pick the vetoed server", !!I.applyServer(lobby, "capA", 1).error);
+  const pick = I.applyServer(lobby, "capA", 2);
+  A("Home picks from the remaining two", !pick.error && pick.status === "done" && lobby.state.server === "NA Central");
+  A("a 6-digit code drops", /^[0-9]{6}$/.test(String(lobby.state.code)));
+  A("the done view names the veto", JSON.stringify(pick.view).includes("Away vetoed NA Northeast"));
+
+  const fresh = mk(); fresh.status = "server";
+  const stage1 = I.serverView(fresh);
+  A("stage one offers three veto buttons to Away", (JSON.stringify(stage1).match(/lfg:veto:/g) || []).length === 3);
+  I.applyVeto(fresh, "capB", 0);
+  const stage2 = I.serverView(fresh);
+  const s2 = JSON.stringify(stage2);
+  A("stage two offers server buttons", (s2.match(/lfg:server:/g) || []).length === 3);
+  A("...with the vetoed one disabled", /vetoed[^}]*"disabled":true/.test(s2) || /"disabled":true/.test(s2));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

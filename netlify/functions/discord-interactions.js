@@ -215,7 +215,7 @@ function instructionsEmbed() {
       "**1 · Captains** — two of you run **/captain** to volunteer. The first volunteer captains **Home**, the second **Away**. " +
       "(Nobody claims it within ~5 min? The first two who signed up are set automatically.)\n\n" +
       "**2 · Mini draft** — the other player at each captain's position starts on the opposite team automatically. Captains then take turns picking (snake order), one of each position per team — the dropdown only shows who's legal.\n\n" +
-      "**3 · Server & code** — the **Home** captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
+      "**3 · Server & code** — **Away** vetoes the server they don't want, **Home** picks between the other two, then the bot drops a **private 6-digit lobby code**.\n\n" +
       "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
       `**5 · Stats** — after the game, statistics staff enter the box score by **club search** at ${CLUB_SEARCH}.\n\n` +
       "**6 · Done** — entering the box score clears this channel on its own a couple of minutes later. Want it gone sooner? When a **majority of the lobby runs /delete**, it closes — and any quiet room clears within 12 hours regardless. Someone no-show or out of line? A captain can start a vote with **/kick** — the other captain approves, and the spot refills from #pickup-games.",
@@ -298,15 +298,30 @@ function draftView(lobby) {
     components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }],
   };
 }
+/* The server is settled by VETO: Away first knocks out the server they don't want, then Home
+   picks between the remaining two. One view, two stages, keyed on s.vetoed. */
 function serverView(lobby) {
   const s = lobby.state;
+  const teams = `**Home**: ${teamNames(s, "A")}\n**Away**: ${teamNames(s, "B")}`;
+  if (s.vetoed == null) {
+    return {
+      embeds: [{
+        title: "🚫 Server veto — Away goes first",
+        description: `Teams are set. <@${s.captains[1]}> (Away), knock out the server you **don't** want. <@${s.captains[0]}> (Home) then picks between the other two.\n\n${teams}`,
+        color: BRAND,
+      }],
+      components: [{ type: 1, components: SERVERS.map((sv, i) => ({ type: 2, style: 2, label: `🚫 ${sv}`, custom_id: `lfg:veto:${lobby.id}:${i}` })) }],
+    };
+  }
   return {
     embeds: [{
       title: "🌐 Pick the server",
-      description: `Teams are set. <@${s.captains[0]}> (Home), choose the server.\n\n**Home**: ${teamNames(s, "A")}\n**Away**: ${teamNames(s, "B")}`,
+      description: `<@${s.captains[1]}> (Away) vetoed **${SERVERS[s.vetoed]}**. <@${s.captains[0]}> (Home), pick between the other two.\n\n${teams}`,
       color: BRAND,
     }],
-    components: [{ type: 1, components: SERVERS.map((sv, i) => ({ type: 2, style: 1, label: sv, custom_id: `lfg:server:${lobby.id}:${i}` })) }],
+    components: [{ type: 1, components: SERVERS.map((sv, i) => (i === s.vetoed
+      ? { type: 2, style: 2, label: `${sv} — vetoed`, custom_id: `lfg:server:${lobby.id}:${i}`, disabled: true }
+      : { type: 2, style: 1, label: sv, custom_id: `lfg:server:${lobby.id}:${i}` })) }],
   };
 }
 function doneView(lobby) {
@@ -314,7 +329,7 @@ function doneView(lobby) {
   return {
     embeds: [{
       title: "✅ Lobby ready — good luck out there",
-      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, staff enter the box score by **club search** at ${CLUB_SEARCH} (players can also self-import at chelgamingleague.com/#/pickup-import).`,
+      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}${s.vetoed != null ? ` (Away vetoed ${SERVERS[s.vetoed]})` : ""}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, staff enter the box score by **club search** at ${CLUB_SEARCH} (players can also self-import at chelgamingleague.com/#/pickup-import).`,
       color: BRAND,
       footer: { text: "Set a private match with this code on the chosen server." },
     }],
@@ -477,9 +492,20 @@ function applyPick(lobby, userId, pickId) {
   s.turn = s.order[s.pickIndex];
   return { view: draftView(lobby), status: "drafting", state: s };
 }
+function applyVeto(lobby, userId, idx) {
+  const s = lobby.state;
+  if (userId !== s.captains[1]) return { error: "Only the Away captain vetoes a server." };
+  if (s.vetoed != null) return { error: `The veto is in — **${SERVERS[s.vetoed]}** is out. Waiting on the Home captain to pick.` };
+  if (!(idx >= 0 && idx < SERVERS.length)) return { error: "Unknown server." };
+  s.vetoed = idx;
+  return { view: serverView(lobby), status: "server", state: s };
+}
 function applyServer(lobby, userId, idx) {
   const s = lobby.state;
   if (userId !== s.captains[0]) return { error: "Only the Home captain picks the server." };
+  /* guards for stale buttons: a pick can't jump the veto, and can't land on the vetoed server */
+  if (s.vetoed == null) return { error: `The Away captain (<@${s.captains[1]}>) vetoes a server first.` };
+  if (idx === s.vetoed) return { error: `**${SERVERS[idx]}** was vetoed — pick one of the other two.` };
   s.server = SERVERS[idx] || SERVERS[0];
   s.code = String(Math.floor(100000 + Math.random() * 900000));
   lobby.status = "done";
@@ -602,6 +628,8 @@ async function handleComponent(interaction) {
       out = applyLeave(lobby, userId);
     } else if (action === "pick") {
       out = applyPick(lobby, userId, (interaction.data.values || [])[0]);
+    } else if (action === "veto") {
+      out = applyVeto(lobby, userId, parseInt(arg, 10));
     } else if (action === "server") {
       out = applyServer(lobby, userId, parseInt(arg, 10));
     } else return ephemeral("Unknown action.");
@@ -832,5 +860,5 @@ export const handler = async (event) => {
 
 // Exposed for local unit tests only; Netlify invokes the named handler export.
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
-  applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, handleJoin, pickerView,
+  applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, applyVeto, handleJoin, pickerView,
   startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };
