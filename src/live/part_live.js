@@ -513,8 +513,11 @@ CG.buildLiveLeague = async function(){
       var day = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(g.at));
       if (!byNight[day] || g.at < byNight[day]) byNight[day] = g.at;
     });
-    var nights = Object.keys(byNight).sort().map(function(k){ return byNight[k]; }).slice(0,2);
-    if (nights.length===1) nights.push(nights[0]+2*86400000);
+    /* EVERY night the week actually has — not the first two. This used to slice to 2 and, if the
+       week had only one, invent a second two days later, which is where the phantom dates came
+       from. A three-night week silently lost its Friday: players could not mark it, and Rule 5.1
+       asks them to cover all three games of at least two nights. */
+    var nights = Object.keys(byNight).sort().map(function(k){ return byNight[k]; });
     var dl = new Date(nights[0]);
     for (var di=0; di<8; di++){
       if (new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(dl)==="Sun") break;
@@ -524,7 +527,7 @@ CG.buildLiveLeague = async function(){
     CG.WEEK8 = { key:(avStage==="preseason"?"pre":avStage==="playoff"?"po":"w")+avWk,
       label:(avStage==="preseason"?"Pre-season week ":avStage==="playoff"?"Playoff week ":"Week ")+avWk,
       deadline: Date.parse(dlDay+"T20:00:00-04:00"),
-      nights: [ { key:"n1", at:nights[0] }, { key:"n2", at:nights[1] } ], open:true };
+      nights: nights.map(function(at, i){ return { key:"n"+(i+1), at:at }; }), open:true };
   } else {
     /* No unplayed games — off-season, or before a schedule exists. Without this the prototype
        seed from part6_hub survives and the site publicly advertises a dead 2026 deadline.
@@ -539,8 +542,15 @@ CG.buildLiveLeague = async function(){
   /* real data: no fabricated availability — unanswered means unanswered */
   CG.avFor = function(playerId){
     var saved = CG.availGet(playerId);
-    if (saved) return saved;
-    return { nights:{ n1:{ st:"nr" }, n2:{ st:"nr" } }, at:null };
+    /* Defaults are built from the week's REAL night keys. A saved entry from a two-night week is
+       merged over them, so a player who answered before the schedule changed shows answered for
+       the nights they answered and "no response" for the new one, rather than the row breaking. */
+    var base = { nights:{}, at:null };
+    ((CG.WEEK8 && CG.WEEK8.nights) || []).forEach(function(n){ base.nights[n.key] = { st:"nr" }; });
+    if (!saved) return base;
+    var out = { at: saved.at, nights: {} };
+    Object.keys(base.nights).forEach(function(k){ out.nights[k] = saved.nights[k] || { st:"nr" }; });
+    return out;
   };
 
   /* stats-derived ratings are all-zero pre-season — use the real overalls */

@@ -3,12 +3,11 @@
    complaints, notifications, settings
    ================================================================ */
 
-CG.WEEK8 = {
-  key:"w8", label:"Week 8",
-  deadline: Date.parse("2026-07-19T20:00:00-04:00"),
-  nights: [ { key:"n1", at: Date.parse("2026-07-22T21:00:00-04:00") },
-            { key:"n2", at: Date.parse("2026-07-25T21:00:00-04:00") } ]
-};
+/* Placeholder only — the live adapter replaces this with the real week off the schedule. It is
+   deliberately CLOSED and empty rather than a seeded two-night week: the old seed carried July 2026
+   dates, so any failure to derive the real week published phantom game nights to managers instead
+   of admitting there was nothing scheduled. Shape matches the live object; `open` is the signal. */
+CG.WEEK8 = { key:null, label:"Game week", deadline:null, nights:[], open:false };
 CG.AV_OPTS = [
   ["yes","Available"],["no","Unavailable"],["maybe","Maybe"],
   ["late","Available late"],["until","Available until…"],["emg","Emergency sub only"]
@@ -323,7 +322,7 @@ CG.hubAvailability = function(){
   var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+
       (CG.WEEK8.open ? ' · deadline '+CG.fmtFull(CG.WEEK8.deadline) : ' · not yet scheduled')+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Weekly availability</h1>'+
-    '<p class="lede" style="margin-top:8px">Two nights next week. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
+    '<p class="lede" style="margin-top:8px">'+(CG.WEEK8.nights.length||0)+' night'+(CG.WEEK8.nights.length===1?'':'s')+' this week. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
   var form = !me
     ? '<div class="note">You’re viewing as league staff — no player profile, so there’s nothing personal to submit. The team grid below is what management and staff see.</div>'
     : '<div class="card"><div class="card-h"><h3>My submission</h3>'+
@@ -353,7 +352,11 @@ CG.hubAvailability = function(){
     grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc((CG.TEAM[me&&me.team?me.team:CG.myClub()]||{}).name||"—")+'</h3>'+
       '<span class="chip">Visible to management & staff only</span></div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(CG.WEEK8.label)+' availability by player</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th>Wed 7/22</th><th>Sat 7/25</th><th class="tleft">Note</th><th>Logged</th></tr></thead><tbody>'+
+      '<th class="tleft">Player</th><th>POS</th>'+
+      CG.WEEK8.nights.map(function(n){
+        return '<th>'+esc(new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",month:"numeric",day:"numeric"}).format(new Date(n.at)))+'</th>';
+      }).join("")+
+      '<th class="tleft">Note</th><th>Logged</th></tr></thead><tbody>'+
       roster.map(function(p){
         var av = CG.avFor(p.id);
         function cell(nk){
@@ -362,12 +365,15 @@ CG.hubAvailability = function(){
           var m = map[st]||map.nr;
           return '<span class="avcell '+m[0]+'" title="'+st+'">'+m[1]+'</span>';
         }
-        var note = av.nights.n1 && av.nights.n1.note ? av.nights.n1.note : (av.nights.n2&&av.nights.n2.note?av.nights.n2.note:"");
+        var noteN = CG.WEEK8.nights.filter(function(n){ return av.nights[n.key] && av.nights[n.key].note; })[0];
+        var note = noteN ? av.nights[noteN.key].note : "";
+        var silent = CG.WEEK8.nights.every(function(n){ return !av.nights[n.key] || av.nights[n.key].st==="nr"; });
         return '<tr'+(me&&p.id===me.id?' style="background:var(--chrome-tint)"':"")+'>'+
           '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm">'+esc(p.tag)+'</span>'+(me&&p.id===me.id?'<span class="chip" style="font-size:9px;padding:1px 7px">you</span>':"")+'</span></td>'+
-          '<td class="tnum">'+p.pos+'</td><td>'+cell("n1")+'</td><td>'+cell("n2")+'</td>'+
+          '<td class="tnum">'+p.pos+'</td>'+
+          CG.WEEK8.nights.map(function(n){ return '<td>'+cell(n.key)+'</td>'; }).join("")+
           '<td class="tleft small" style="color:var(--steel);max-width:220px">'+esc(note)+'</td>'+
-          '<td class="tnum" style="font-size:11px">'+(av.nights.n1.st==="nr"&&av.nights.n2.st==="nr"?'<span class="chip chip-loss" style="font-size:9px">no response</span>':CG.fmtDay(av.at))+'</td></tr>';
+          '<td class="tnum" style="font-size:11px">'+(silent?'<span class="chip chip-loss" style="font-size:9px">no response</span>':CG.fmtDay(av.at))+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">✓ available · ✗ unavailable · ? maybe · L late · U until a time · E emergency only · — no response. Opponents never see this grid — they only see your finalized lineup.</span></div></div>';
   }
@@ -378,9 +384,10 @@ CG.AFTER._availability = function(){
   var picks = {};
   var mine = CG.availGet(me.id);
   if (mine) Object.keys(mine.nights).forEach(function(k){ picks[k]=mine.nights[k].st; });
+  var NIGHTS = ((CG.WEEK8 && CG.WEEK8.nights) || []).map(function(n){ return n.key; });
   function refreshCount(){
-    var n = Object.keys(picks).filter(function(k){ return picks[k]; }).length;
-    var el = $("#avCount"); if (el) el.textContent = n+"/2 nights answered";
+    var n = NIGHTS.filter(function(k){ return picks[k]; }).length;
+    var el = $("#avCount"); if (el) el.textContent = n+"/"+NIGHTS.length+" night"+(NIGHTS.length===1?"":"s")+" answered";
   }
   $$(".av-opt").forEach(function(grp){
     grp.addEventListener("click", function(e){
@@ -394,9 +401,12 @@ CG.AFTER._availability = function(){
   });
   var sub = $("#avSubmit");
   if (sub) sub.addEventListener("click", function(){
-    if (!picks.n1 || !picks.n2){ CG.toast("Answer both nights before submitting","err"); return; }
+    var missing = NIGHTS.filter(function(k){ return !picks[k]; });
+    if (missing.length){
+      CG.toast("Answer all "+NIGHTS.length+" night"+(NIGHTS.length===1?"":"s")+" before submitting","err"); return;
+    }
     var entry = { at: CG.now(), nights:{} };
-    ["n1","n2"].forEach(function(k){
+    NIGHTS.forEach(function(k){
       entry.nights[k] = { st:picks[k], note: ($("[data-note="+k+"]")||{}).value||"" };
     });
     CG.availSave(entry, function(ok){
@@ -408,11 +418,11 @@ CG.AFTER._availability = function(){
   });
   var cp = $("#avCopy");
   if (cp) cp.addEventListener("click", function(){
-    picks = { n1:"yes", n2:"yes" };
+    picks = {}; NIGHTS.forEach(function(k){ picks[k] = "yes"; });
     $$(".av-opt").forEach(function(grp){
       $$("button",grp).forEach(function(x){ x.className = x.getAttribute("data-av")==="yes"?"on yes":""; });
     });
-    refreshCount(); CG.toast("Copied last week — both nights available");
+    refreshCount(); CG.toast("Marked available for all "+NIGHTS.length+" night"+(NIGHTS.length===1?"":"s"));
   });
   refreshCount();
 };
