@@ -1,9 +1,9 @@
 // Discord interactions endpoint for the all-in-Discord #pickup-games pickup system.
 // Flow: each player runs /join and picks a position from a private (ephemeral) picker that shows the
 // open spots. A public roster SUMMARY in #pickup-games updates as people join and gets bumped to the
-// bottom (discord-scheduler keeps it there and expires an idle lobby). On the 12th signup a dedicated
+// bottom (lfg-timers keeps it there and runs each signup's own 30-minute clock). On the 12th signup a dedicated
 // CHANNEL is spun up (under "Pickup Lobbies") with a full how-to briefing; two players run /captain to
-// volunteer (first two become the captains — discord-scheduler auto-assigns the first two signups if
+// volunteer (first two become the captains — lfg-timers auto-assigns the first two signups if
 // nobody claims it), then the captains' snake draft -> server pick -> a private lobby code.
 // State lives in lfg_lobbies: the summary message id in message_id, the room channel id in thread_id.
 //
@@ -95,12 +95,27 @@ async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) && rows.length ? rows[0] : null;   // null => CAS lost, caller retries
 }
-// best-effort: stash the room channel id on the lobby (draft still works via lobby id if this misses)
+// Stash the room channel id on the lobby. NOT best-effort: /captain, the auto-captain sweep and the
+// room cleanup all look the lobby up by thread_id, so a lost write here has no fallback path.
+// Verified + retried rather than fire-and-forget: a PATCH that 200s with zero rows is a silent loss,
+// and this is the one write in the whole flow that has no second chance.
 async function sbStashThread(id, threadId) {
-  await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(),
-    body: JSON.stringify({ thread_id: threadId }), signal: AbortSignal.timeout(1200) }).catch(() => {});
+  let last = "no attempt";
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH",
+        headers: { ...sbHead(), Prefer: "return=representation" },
+        body: JSON.stringify({ thread_id: threadId }), signal: AbortSignal.timeout(1500) });
+      if (r.ok) {
+        const rows = await r.json().catch(() => []);
+        if (Array.isArray(rows) && rows.length) return true;
+        last = "patch matched 0 rows";
+      } else last = `${r.status} ${(await r.text()).slice(0, 80)}`;
+    } catch (e) { last = String(e.message || e); }
+  }
+  throw new Error(`thread_id stash failed: ${last}`);
 }
-// best-effort: remember the public summary's message id so discord-scheduler can bump/expire it.
+// best-effort: remember the public summary's message id so lfg-timers can bump/expire it.
 async function sbStashMessage(id, messageId) {
   await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}`, { method: "PATCH", headers: sbHead(),
     body: JSON.stringify({ message_id: messageId }), signal: AbortSignal.timeout(1200) }).catch(() => {});
@@ -184,7 +199,7 @@ function instructionsEmbed() {
     title: "🏒 Pickup lobby — how to run it",
     description:
       "**1 · Captains** — two of you run **/captain** to volunteer. The first two become **Team A** & **Team B**. " +
-      "(Nobody claims it within ~8 min? The first two who signed up are set automatically.)\n\n" +
+      "(Nobody claims it within ~5 min? The first two who signed up are set automatically.)\n\n" +
       "**2 · Mini draft** — the captains take turns picking players from a dropdown (snake order) until both teams are full.\n\n" +
       "**3 · Server & code** — Team A's captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
       "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
@@ -291,9 +306,23 @@ function doneView(lobby) {
 function applyJoin(lobby, userId, name, pos) {
   const s = lobby.state;
   if (!POS_LABEL[pos]) return { error: "Unknown position." };
-  if ((s.signups || []).some((x) => x.id === userId)) return { error: "You're already in this lobby — press **Leave** first to switch positions." };
+  const now = new Date().toISOString();
+  // Every signup carries its own clock: lfg-timers holds the spot for 30 minutes from `at`, warns
+  // once when it's nearly up, then takes the player off the board. Running /join again is the
+  // renewal that warning asks for, so an existing member is refreshed here rather than rejected —
+  // and moved, if they named a different position and it has room.
+  const mine = (s.signups || []).find((x) => x.id === userId);
+  if (mine) {
+    // Renew unconditionally, even when the position they asked for is taken — someone racing their
+    // own clock must never lose their spot just because their preferred slot filled up meanwhile.
+    const blocked = mine.pos !== pos && posCount(s, pos) >= PER_POS ? POS_LABEL[pos] : null;
+    const moved = mine.pos !== pos && !blocked;
+    if (moved) mine.pos = pos;
+    mine.at = now; delete mine.warned;
+    return { status: "open", state: s, renewed: true, moved, blocked };
+  }
   if (posCount(s, pos) >= PER_POS) return { error: `${POS_LABEL[pos]} is full — pick another spot.` };
-  s.signups = (s.signups || []).concat([{ id: userId, name, pos }]);
+  s.signups = (s.signups || []).concat([{ id: userId, name, pos, at: now }]);
   if (s.signups.length >= FULL) {
     lobby.status = "captains";
     s.filledAt = new Date().toISOString();
@@ -308,7 +337,7 @@ function applyLeave(lobby, userId) {
   s.signups = s.signups.filter((x) => x.id !== userId);
   return { status: "open", state: s };
 }
-// Set up the snake draft once both captains are known (from /captain or the scheduler's fallback).
+// Set up the snake draft once both captains are known (from /captain or lfg-timers' fallback).
 function startDraft(s, capA, capB) {
   s.captains = [capA, capB];
   s.teams = { A: [capA], B: [capB] };
@@ -434,18 +463,27 @@ async function handleComponent(interaction) {
         try {
           const categoryId = await sbGetConfig("pickup_lobby_category_id");
           const roomId = await launchLobbyRoom({ id: lobby.id, state: out.state }, guildId, categoryId);
-          sbStashThread(lobby.id, roomId);
+          await sbStashThread(lobby.id, roomId);   // await: the fn freezes on response, and /captain,
+          // the auto-captain sweep and the room cleanup ALL find the lobby by thread_id — losing this
+          // write strands a filled lobby permanently and orphans its channel.
           if (lobby.message_id) { try { await dApi("PATCH", `/channels/${lobby.channel_id}/messages/${lobby.message_id}`, { embeds: [fullSummaryEmbed(roomId)] }, 1400); } catch (e) {} }
           return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby full!", description: `You're in — head to <#${roomId}> to set captains and draft.`, color: BRAND }], components: [] } });
         } catch (e) {
+          // Loud in the Netlify log: if this was the thread_id stash, the room exists but no sweep
+          // can see it, and staff need to know rather than wonder why /captain says "no lobby here".
+          console.error("lfg: lobby", lobby.id, "filled but room setup failed:", String(e.message || e));
           return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby full — 12/12", description: "You're in! Captains, set up the draft in the lobby channel.", color: BRAND }], components: [] } });
         }
       }
       let newMsgId = lobby.message_id;
       if (BOT) { try { newMsgId = await ensureSummary(lobby.channel_id, out.state, lobby.message_id); } catch (e) {} }
       if (newMsgId && newMsgId !== lobby.message_id) await sbStashMessage(lobby.id, newMsgId);  // await: the fn freezes on response, so a fire-and-forget PATCH never lands
+      const held = `Your spot is held for **30 minutes** — you'll get a ping in <#${lobby.channel_id}> before it lapses, and running **/join** again renews it.`;
       const confirm = action === "join"
-        ? { title: "✅ You're in", description: `Signed up at **${POS_LABEL[arg]}**. Watch <#${lobby.channel_id}> for the roster — run /join again to switch or leave.`, color: BRAND }
+        ? { title: out.renewed ? "🔄 Spot renewed" : "✅ You're in",
+            description: (out.blocked ? `${out.blocked} is full, so you're still at **${POS_LABEL[(out.state.signups.find((x) => x.id === userId) || {}).pos] || POS_LABEL[arg]}**. `
+                        : out.moved ? `Moved to **${POS_LABEL[arg]}**. `
+                        : `${out.renewed ? "Renewed at" : "Signed up at"} **${POS_LABEL[arg]}**. `) + held, color: BRAND }
         : { title: "👋 You left the lobby", description: "Run /join again anytime to jump back in.", color: BRAND };
       return respond({ type: UPDATE, data: { embeds: [confirm], components: [] } });
     }

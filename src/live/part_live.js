@@ -2211,6 +2211,10 @@ CG.STAFF_DEPARTMENTS = [
   ["statistics","Statistics","Spot-check the EA imports and keep the record book"],
   ["media","Media","News, recaps, broadcasts, and socials"]
 ];
+/* How many departments one application may name. Mirrored by the staff_app_department_cap trigger in
+   the database, which is the actual gate — applications already approved with more than this keep
+   theirs, but any edit to the picks has to come down to the cap. */
+CG.STAFF_DEPT_MAX = 2;
 /* legacy department key -> new key, so anyone carrying the old label still reads right in the UI */
 CG.DEPT_ALIAS = { "player-relations": "community" };
 /* the reviewer pool: staff carrying the 'applications' department. Their votes decide every
@@ -2272,7 +2276,7 @@ CG.ROUTES.staffapply = function(){
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+chat+
     '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
       (app?'<span class="chip '+(app.status==="pending"?"chip-warn":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
-    '<div class="fld"><span>Departments *</span><p class="caption" style="margin:2px 0 8px">Pick every department you’d work — the league office assigns duties from here.</p>'+
+    '<div class="fld"><span>Departments * <span class="caption">(pick up to 2)</span></span><p class="caption" style="margin:2px 0 8px">Name the two departments you’d work — the league office assigns duties from here. Two keeps an application honest about where you’ll actually spend your time.</p>'+
       '<div class="stack" style="gap:8px">'+CG.STAFF_DEPARTMENTS.map(function(d){
         var on = pickedDepts.indexOf(d[0])>=0;
         return '<button type="button" class="gamecard" data-sa-dept="'+d[0]+'" aria-pressed="'+on+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%;'+(on?"border-color:var(--chrome)":"")+'">'+
@@ -2303,6 +2307,15 @@ CG.AFTER.staffapply = function(){
       var c = el.querySelector(".chip");
       if (c){ c.classList.toggle("chip-chrome", val); c.textContent = val ? "IN" : "—"; }
     };
+    /* Two departments max. Media is exempt from the check because picking it clears everything else
+       (Rule 2.7, below) — the board can only end up smaller, never over the cap. */
+    if (on && mine !== "media"){
+      var others = [].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]'))
+        .filter(function(o){ return o !== b && (o.getAttribute("data-sa-dept")||"").toLowerCase() !== "media"; });
+      if (others.length >= CG.STAFF_DEPT_MAX){
+        CG.toast("Two departments is the limit — unpick one first","err"); return;
+      }
+    }
     set(this, on);
     /* Media is an exclusive department (Rule 2.7) — on Media you hold Media and nothing else, so
        picking it clears the rest, and picking anything else clears Media. */
@@ -2335,6 +2348,9 @@ CG.submitStaffApp = async function(){
   var pitch=v("sa-pitch");
   var depts=[].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });
   if(!depts.length){ CG.toast("Pick at least one department","err"); return; }
+  /* the toggles already cap this; re-checked here so a stale page can't post a wider set (the DB
+     trigger staff_app_department_cap is the real gate — this just gives a readable error) */
+  if(depts.length>CG.STAFF_DEPT_MAX){ CG.toast("Pick at most "+CG.STAFF_DEPT_MAX+" departments","err"); return; }
   /* Rule 2.7 — a club seat holder may join the staff on Media and nothing else. The DB refuses the
      approval either way; catching it here means they aren't left waiting on a vote that can't pass. */
   if(r0==="mgmt" && !depts.every(function(d){ return String(d).toLowerCase()==="media"; })){
@@ -6571,7 +6587,7 @@ CG.admOverviewLive = function(){
     '<div class="kpi'+(pendingApps.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+pendingApps.length+'</b><span>owner apps pending</span></div>'+
     '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
     '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">5</b><span>automations</span></div></div>';
+    '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">'+(CG.AUTOMATIONS||[]).length+'</b><span>automations</span></div></div>';
   var actions = [];
   if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
   if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
@@ -6646,6 +6662,7 @@ CG.AUTOMATIONS = [
   { key:"discord-sync",     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
+  { key:"lfg-timers",       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
   { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
