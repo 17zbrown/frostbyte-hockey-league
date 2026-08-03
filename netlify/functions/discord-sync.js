@@ -79,8 +79,153 @@ async function dApi(method, path, body) {
   throw new Error(`${method} ${path} -> rate-limited after retries`);
 }
 
+async function sbPost(path, body, prefer) {
+  const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { method: "POST",
+    headers: { ...sbHead(), Prefer: prefer || "return=minimal" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`POST ${path} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+
 // Discord channel-name slug (lowercase, hyphens) to compare against team names
 function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
+
+/* ---- who left the server ----------------------------------------------------------------
+   Discord keeps no "who left" record and this league runs no gateway bot, so a departure is only
+   ever visible as the difference between two census sweeps. The census above already pulls the
+   whole member list; this gives it a memory to diff against and posts what changed into a
+   commissioner-only room.
+
+   The one thing that must never happen is a false mass-departure. Three guards:
+     1. memberListOk — set only AFTER every page came back, so a throw mid-pagination leaves it
+        false and this is skipped entirely.
+     2. an empty census is treated as a failed one, never as "everybody left".
+     3. a drop of more than a quarter of the server in a single 2-minute tick is recorded but NOT
+        announced, and flagged in the run result instead. Real servers do not do that; a partial
+        read does.
+*/
+const DEPART_SANITY = 0.25;
+async function trackDepartures(memberById, memberListOk, links, teams, sum) {
+  if (!memberListOk || memberById.size === 0) { sum.departSkipped = "no complete census"; return; }
+  let known = [];
+  try { known = await sbGet("guild_members?present=is.true&select=discord_id,username,display_name,profile_id,joined_guild_at,is_bot"); }
+  catch (e) { sum.errors.push({ departLoad: String(e.message || e) }); return; }
+
+  const now = new Date().toISOString();
+  const profByDiscord = new Map(links.filter((l) => l.discord_id).map((l) => [String(l.discord_id), l]));
+  const codeByTeam = Object.fromEntries((teams || []).map((t) => [t.id, t.code]));
+  /* whether a leaver had signed up for the season is the part a commissioner actually reacts to,
+     so it is worth one small extra read */
+  let registered = new Set();
+  try { registered = new Set((await sbGet("season_registrations?select=profile_id")).map((r) => r.profile_id)); }
+  catch (e) { /* the log is still worth writing without it */ }
+
+  // 1) everyone seen now is present
+  const rows = [...memberById.entries()].map(([id, m]) => {
+    const link = profByDiscord.get(id);
+    return { discord_id: id,
+      username: (m.user && (m.user.username || m.user.global_name)) || null,
+      display_name: m.nick || (m.user && m.user.global_name) || null,
+      profile_id: (link && link.profile_id) || null,
+      is_bot: !!(m.user && m.user.bot),
+      joined_guild_at: m.joined_at || null,
+      last_seen: now, present: true };
+  });
+  try {
+    for (let i = 0; i < rows.length; i += 200) {
+      await sbPost("guild_members?on_conflict=discord_id", rows.slice(i, i + 200), "resolution=merge-duplicates,return=minimal");
+    }
+  } catch (e) { sum.errors.push({ departUpsert: String(e.message || e) }); return; }
+
+  // 2) anyone we knew about who is no longer in the list has left
+  const gone = known.filter((k) => !memberById.has(String(k.discord_id)));
+  sum.departed = gone.length;
+  if (!gone.length) return;
+  const share = known.length ? gone.length / known.length : 0;
+  const suspicious = share > DEPART_SANITY && gone.length > 5;
+
+  for (const g of gone) {
+    const link = profByDiscord.get(String(g.discord_id));
+    const days = g.joined_guild_at ? Math.max(0, Math.round((Date.now() - Date.parse(g.joined_guild_at)) / 86400000)) : null;
+    try {
+      await sbPost("guild_departures", [{
+        discord_id: g.discord_id, username: g.username, display_name: g.display_name,
+        profile_id: g.profile_id || (link && link.profile_id) || null,
+        joined_guild_at: g.joined_guild_at, left_at: now, days_in_server: days,
+        was_registered: registered.has(g.profile_id || (link && link.profile_id)),
+        club: (link && codeByTeam[link.team_id]) || null,
+        had_roles: null
+      }]);
+      await sbPatch(`guild_members?discord_id=eq.${encodeURIComponent(g.discord_id)}`, { present: false, last_seen: now });
+    } catch (e) { sum.errors.push({ departWrite: g.discord_id, error: String(e.message || e) }); }
+  }
+
+  if (suspicious) {
+    sum.departSuspicious = `${gone.length}/${known.length} in one tick — recorded, not announced`;
+    sum.errors.push({ departSanity: sum.departSuspicious });
+    return;
+  }
+  await announceDepartures(gone, profByDiscord, codeByTeam, registered, sum);
+}
+
+/* The commissioner-only room the log posts into. Created private in the SAME call that denies
+   @everyone, so it is never briefly visible. Commissioners only — deliberately NOT the staff role,
+   because who left is league-office information and the ask was commissioners. */
+async function ensureDeparturesChannel(guildChannels, roleId, sum) {
+  const commish = roleId["commissioner"];
+  if (!commish) return null;
+  const NAME = "member-departures";
+  let ch = guildChannels.find((c) => c.type === 0 && c.name === NAME);
+  if (ch) return ch;
+  let cat = guildChannels.find((c) => c.type === 4 && /^staff\b/i.test(c.name || ""));
+  try {
+    ch = await dApi("POST", `/guilds/${GUILD}/channels`, {
+      name: NAME, type: 0, parent_id: cat ? cat.id : undefined,
+      topic: "Who left the server, posted automatically. Commissioners only.",
+      permission_overwrites: [
+        { id: GUILD, type: 0, deny: "1024", allow: "0" },          /* @everyone: no VIEW */
+        { id: commish, type: 0, allow: "68608", deny: "0" }        /* VIEW + SEND + READ_HISTORY */
+      ]
+    });
+    if (ch && ch.id) {
+      guildChannels.push(ch);
+      sum.departChanCreated = 1;
+      /* the category may be readable by staff, so re-deny at the channel to keep it commissioner-only */
+      await dApi("POST", `/channels/${ch.id}/messages`, { embeds: [{
+        title: "👋 Member departures",
+        description: "Anyone who leaves the server is logged here within a couple of minutes, with how long they were around and whether they had signed up or held a club seat.\n\nDiscord does not tell a bot who left unless it is running a live gateway connection, so this is worked out by comparing each member sweep to the last one. A sweep that fails is skipped rather than guessed at, so a quiet day here means a quiet day, not a broken job.",
+        color: 0xFFE500 }] });
+    }
+    return ch;
+  } catch (e) { sum.errors.push({ departChan: String(e.message || e) }); return null; }
+}
+
+async function announceDepartures(gone, profByDiscord, codeByTeam, registered, sum) {
+  const chId = sum.__departChanId;
+  if (!chId) { sum.departUnannounced = gone.length; return; }
+  /* one message per departure, so each can be replied to — a thread on "why did X leave" is a
+     normal thing for a league office to want */
+  for (const g of gone) {
+    const link = profByDiscord.get(String(g.discord_id));
+    const pid = g.profile_id || (link && link.profile_id);
+    const club = link && codeByTeam[link.team_id];
+    const days = g.joined_guild_at ? Math.max(0, Math.round((Date.now() - Date.parse(g.joined_guild_at)) / 86400000)) : null;
+    const who = g.display_name || g.username || (link && link.gamertag) || g.discord_id;
+    const fields = [];
+    if (link && link.gamertag) fields.push({ name: "Site account", value: String(link.gamertag), inline: true });
+    if (club) fields.push({ name: "Club", value: String(club), inline: true });
+    if (days != null) fields.push({ name: "In the server", value: days === 0 ? "less than a day" : days + " day" + (days === 1 ? "" : "s"), inline: true });
+    if (pid && registered.has(pid)) fields.push({ name: "Season sign-up", value: "was registered to play", inline: true });
+    try {
+      await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
+        title: "👋 " + who + " left the server",
+        description: (link ? "" : "No linked site account — they never signed in at chelgamingleague.com.\n") +
+          "`" + g.discord_id + "`",
+        color: 0xC2410C, fields: fields.length ? fields : undefined,
+        timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
+      sum.departAnnounced = (sum.departAnnounced || 0) + 1;
+    } catch (e) { sum.errors.push({ departPost: g.discord_id, error: String(e.message || e) }); }
+  }
+}
 
 async function sbUpsertCfg(key, value) {
   await rfetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
@@ -1008,6 +1153,9 @@ export default async (req) => {
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
   // (its role + commissioners) instead of the category default (all staff).
   try { await ensureStaffDepartments(guildChannels, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
+  /* the commissioner-only departures room, and its id for the announcer further down */
+  try { const dch = await ensureDeparturesChannel(guildChannels, roleId, sum); if (dch && dch.id) sum.__departChanId = dch.id; }
+  catch (e) { sum.errors.push({ departChan: String(e.message || e) }); }
   const deptRoleByChannel = {};
   for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) deptRoleByChannel[d.channel] = rid; }
   try {
@@ -1329,6 +1477,11 @@ export default async (req) => {
     sum.bots = [...memberById.values()].filter((mm) => mm.user && mm.user.bot).length;
   } catch (e) { sum.errors.push({ memberList: String(e.message || e) }); }
 
+  /* Diff this census against the last one to see who left. Runs before the per-member passes below
+     so a departure is logged on the same tick it is noticed, not the next one. */
+  try { await trackDepartures(memberById, memberListOk, links, teams, sum); }
+  catch (e) { sum.errors.push({ departures: String(e.message || e) }); }
+
   for (const m of links) {
     if (!m.discord_id) continue;
     try {
@@ -1464,6 +1617,7 @@ export default async (req) => {
         at: new Date().toISOString(), ok: sum.errors.length === 0, checked: sum.checked,
         unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
+        departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
@@ -1471,3 +1625,8 @@ export default async (req) => {
   } catch {}
   return new Response(JSON.stringify(sum), { status: 200, headers: { "content-type": "application/json" } });
 };
+
+/* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
+   failure mode is silent and public — a false mass-departure would page the commissioners with a
+   fake exodus — so it is tested directly rather than only through the whole sync. */
+export const _internals = { trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY };
