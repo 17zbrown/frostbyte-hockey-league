@@ -109,12 +109,15 @@ assert("funnel: 15 placed (registered AND rostered, not 16)", /Placed on a club<
 assert("funnel flags the 52 waiting", out.includes("52 registered players still waiting on a club"));
 assert("funnel flags the roster spot with no registration", /1 holds a roster spot without registering/.test(out));
 
-// 3 — positions vs 10 jobs, in fixed order, shortages named
+// 3 — sign-ups vs the league's roster spots (Rule 2.1 quota × clubs: 30 per position, 20 in goal)
 const posOrder = [...out.matchAll(/<em>(Center|Left Wing|Right Wing|Left Defense|Right Defense|Goaltender)<\/em>/g)].map((m)=>m[1]);
 assert("positions stay in ice order, not sorted by count", posOrder.join(",") === "Center,Left Wing,Right Wing,Left Defense,Right Defense,Goaltender", posOrder.join(","));
-assert("right defense shows 7 / 10", /Right Defense<\/em><\/span><span class="vz-hbv">7 \/ 10</.test(out));
-assert("goaltender shows 12 / 10", /Goaltender<\/em><\/span><span class="vz-hbv">12 \/ 10</.test(out));
-assert("shortages named in words", out.includes("2 short at left defense") && out.includes("3 short at right defense"));
+assert("center shows 15 / 30 (3 spots x 10 clubs)", /Center<\/em><\/span><span class="vz-hbv">15 \/ 30</.test(out));
+assert("right defense shows 7 / 30", /Right Defense<\/em><\/span><span class="vz-hbv">7 \/ 30</.test(out));
+assert("goaltender shows 12 / 20 (2 spots x 10 clubs)", /Goaltender<\/em><\/span><span class="vz-hbv">12 \/ 20</.test(out));
+assert("corner value is signups over total spots", out.includes("67 / 170"));
+assert("note reports coverage and the thinnest position", /67 of 170 active-roster spots have a registrant/.test(out) && /thinnest at right defense \(7 for 30\)/.test(out));
+assert("no stale per-club framing", !/ \/ 10</.test(out) && !out.includes("starting jobs"));
 
 // 4 — front-office seats
 assert("seats corner value 16 / 30", out.includes("16 / 30"));

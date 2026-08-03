@@ -841,9 +841,9 @@ CG.hubRoster = function(qs){
     }
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp</span></div><div class="card-b">'+
-      '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("centers",posN("C"),3)+meter("left wings",posN("LW"),3)+
-      meter("right wings",posN("RW"),3)+meter("left D",posN("LD"),3)+meter("right D",posN("RD"),3)+
-      meter("goaltenders",posN("G"),2)+meter("training camp",tcSq.length,null)+'</div>'+
+      '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("centers",posN("C"),CG.ROSTER_QUOTA.C)+meter("left wings",posN("LW"),CG.ROSTER_QUOTA.LW)+
+      meter("right wings",posN("RW"),CG.ROSTER_QUOTA.RW)+meter("left D",posN("LD"),CG.ROSTER_QUOTA.LD)+meter("right D",posN("RD"),CG.ROSTER_QUOTA.RD)+
+      meter("goaltenders",posN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,null)+'</div>'+
       '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp has no size limit. '+
       'Camp players may dress in up to 3 games a week at any position; active players play their own position, up to 6 games a week (goaltenders up to 9). '+
       'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';

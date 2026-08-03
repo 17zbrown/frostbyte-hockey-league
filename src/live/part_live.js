@@ -56,6 +56,11 @@ if (CG.sb && typeof CG.sb.rpc === "function"){
 /* real wall clock (the prototype used a frozen demo clock) */
 CG._loadEpoch = Date.now();
 CG.now = function(){ return Date.now(); };
+/* The active-roster shape, per club (Rule 2.1 v2.7) — the client mirror of check_roster_structure
+   in the database. Anything that needs "how many of this position does a club (or the league)
+   carry" reads THIS, so the two can't drift apart one hardcoded 3 at a time. Top-level on purpose:
+   it is a rulebook constant, not app state, and render code must not depend on boot order for it. */
+CG.ROSTER_QUOTA = { C:3, LW:3, RW:3, LD:3, RD:3, G:2 };
 
 /* format a time-on-ice value (seconds) as m:ss for box scores / stat lines */
 CG.fmtToi = function(sec){ sec = Math.max(0, Math.round(+sec||0)); var m=Math.floor(sec/60), s=sec%60; return m+":"+(s<10?"0":"")+s; };
@@ -6634,23 +6639,33 @@ CG.overviewCharts = function(){
       ], { sort:false, note:funnelNote }) }));
   }
 
-  /* 3 — Positional supply against the ten starting jobs each position has to fill. Deliberately
-     hbars with the count in the label rather than a two-series bar: a stacked "taken vs total"
-     clamps at full once supply meets demand, which makes "exactly enough" and "three short" draw
-     the identical picture — the one comparison this chart exists to make. */
+  /* 3 — Sign-ups at each position against the roster spots the league actually carries there:
+     the Rule 2.1 quota (3 per position, 2 goalies) times the number of clubs. Deliberately hbars
+     with "signed / spots" in the label rather than a two-series bar: a stacked "taken vs total"
+     clamps at full once supply meets demand, which makes "exactly enough" and "short" draw the
+     identical picture — the one comparison this chart exists to make. */
   /* Ice order, not sorted by count, so the eye reads forwards and the gaps sit where you expect
-     them. Names come from CG.POS_NAME (part2_engine.js) rather than a second list here. */
+     them. Names come from CG.POS_NAME, spots from CG.ROSTER_QUOTA — no second copy of either. */
   var POSN = ["C","LW","RW","LD","RD","G"];
-  var need = (CG.TEAMS||[]).length || 10;
+  var clubs = (CG.TEAMS||[]).length || 10;
+  var spotsAt = function(p){ return (CG.ROSTER_QUOTA[p]||0) * clubs; };
   var byPos = {}; regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
   if (Object.keys(byPos).length){
-    var short = POSN.filter(function(p){ return (byPos[p]||0) < need; })
-      .map(function(p){ return (need-(byPos[p]||0))+" short at "+(CG.POS_NAME[p]||p).toLowerCase(); });
-    out.push(CG.viz.card({ title:"Positions against "+need+" starting jobs", sub:"Every club ices one of each",
-      value: regs.length,
-      body: CG.viz.hbars(POSN.map(function(p){ return { k:CG.POS_NAME[p]||p, v:byPos[p]||0 }; }),
-        { sort:false, fmt:function(v){ return v+" / "+need; },
-          note: short.length ? short.join(" · ") : "Every position has enough registrants to ice a full league." }) }));
+    var totalSpots = POSN.reduce(function(s,p){ return s + spotsAt(p); }, 0);
+    var covered = POSN.reduce(function(s,p){ return s + Math.min(byPos[p]||0, spotsAt(p)); }, 0);
+    /* the thinnest position by coverage share is the one the commissioner recruits for */
+    var thin = POSN.reduce(function(b,p){
+      return ((byPos[p]||0)/spotsAt(p)) < ((byPos[b]||0)/spotsAt(b)) ? p : b; }, POSN[0]);
+    var over = POSN.filter(function(p){ return (byPos[p]||0) > spotsAt(p); })
+      .map(function(p){ return (CG.POS_NAME[p]||p).toLowerCase()+" is over ("+byPos[p]+" for "+spotsAt(p)+")"; });
+    out.push(CG.viz.card({ title:"Sign-ups against the league's roster spots",
+      sub: clubs+" clubs × "+CG.ROSTER_QUOTA.C+" per position, "+CG.ROSTER_QUOTA.G+" goalies (Rule 2.1)",
+      value: regs.length+" / "+totalSpots,
+      body: CG.viz.hbars(POSN.map(function(p){ return { k:CG.POS_NAME[p]||p, v:byPos[p]||0, pos:p }; }),
+        { sort:false, fmt:function(v,r){ return v+" / "+spotsAt(r.pos); },
+          note: covered+" of "+totalSpots+" active-roster spots have a registrant · thinnest at "+
+                (CG.POS_NAME[thin]||thin).toLowerCase()+" ("+(byPos[thin]||0)+" for "+spotsAt(thin)+")"+
+                (over.length ? " · "+over.join(" · ") : "") }) }));
   }
 
   /* 4 — Front-office seats. Owner + GM + AGM per club; a club running on one person is a club
