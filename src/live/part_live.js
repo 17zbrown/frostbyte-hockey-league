@@ -6661,7 +6661,7 @@ CG.overviewCharts = function(){
     out.push(CG.viz.card({ title:"Sign-ups against the league's roster spots",
       sub: clubs+" clubs × "+CG.ROSTER_QUOTA.C+" per position, "+CG.ROSTER_QUOTA.G+" goalies (Rule 2.1)",
       value: regs.length+" / "+totalSpots,
-      body: CG.viz.hbars(POSN.map(function(p){ return { k:CG.POS_NAME[p]||p, v:byPos[p]||0, pos:p }; }),
+      body: CG.viz.hbars(POSN.map(function(p){ return { k:CG.POS_NAME[p]||p, v:byPos[p]||0, pos:p, cap:spotsAt(p) }; }),
         { sort:false, fmt:function(v,r){ return v+" / "+spotsAt(r.pos); },
           note: covered+" of "+totalSpots+" active-roster spots have a registrant · thinnest at "+
                 (CG.POS_NAME[thin]||thin).toLowerCase()+" ("+(byPos[thin]||0)+" for "+spotsAt(thin)+")"+
@@ -6677,8 +6677,10 @@ CG.overviewCharts = function(){
     var n = (lg.players||[]).filter(function(p){ return p.team===t.code && p.mgmt; }).length;
     /* Deliberately NOT tinted with t.color. hbars paints its label in dark ink over the bar, so a
        club with a dark primary (half the league — TOR and VAN are both #00205B) rendered its own
-       code invisible. The color carried nothing the label doesn't already say. */
-    return { k:t.code, v:n };
+       code invisible. The color carried nothing the label doesn't already say.
+       cap: the bar fills against the 3 seats, not the series max — without it these bars only read
+       true while some club happens to sit at 3/3. */
+    return { k:t.code, v:n, cap:SEATS };
   });
   if (seats.length && seats.some(function(s){ return s.v; })){
     var filled = seats.reduce(function(s,r){ return s+r.v; },0), total = seats.length*SEATS;

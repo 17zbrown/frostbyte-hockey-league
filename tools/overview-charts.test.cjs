@@ -118,6 +118,16 @@ assert("goaltender shows 12 / 20 (2 spots x 10 clubs)", /Goaltender<\/em><\/span
 assert("corner value is signups over total spots", out.includes("67 / 170"));
 assert("note reports coverage and the thinnest position", /67 of 170 active-roster spots have a registrant/.test(out) && /thinnest at right defense \(7 for 30\)/.test(out));
 assert("no stale per-club framing", !/ \/ 10</.test(out) && !out.includes("starting jobs"));
+// the bar FILL is the true ratio against each row's own capacity, not the series max
+const rowWidth = (label) => {
+  const m = out.match(new RegExp('<i style="width:(\\d+)%"></i>\\s*<em>' + label + '</em>'));
+  return m ? +m[1] : null;
+};
+assert("center 15 / 30 fills half the bar", rowWidth("Center") === 50, rowWidth("Center") + "%");
+assert("goaltender 12 / 20 fills 60%", rowWidth("Goaltender") === 60, rowWidth("Goaltender") + "%");
+assert("right defense 7 / 30 fills 23%", rowWidth("Right Defense") === 23, rowWidth("Right Defense") + "%");
+assert("a full club (DAL 3 / 3) fills 100%", rowWidth("DAL") === 100, rowWidth("DAL") + "%");
+assert("a 1 / 3 club fills a third", rowWidth("VAN") === 33, rowWidth("VAN") + "%");
 
 // 4 — front-office seats
 assert("seats corner value 16 / 30", out.includes("16 / 30"));

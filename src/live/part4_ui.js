@@ -1036,7 +1036,13 @@ CG.viz = (function(){
     if (o.sort !== false) rows.sort(function(a,b){ return b.v - a.v; });
     var max = rows.reduce(function(m,r){ return Math.max(m, r.v); }, 0) || 1;
     return '<div class="vz-hbars">' + rows.map(function(r, i){
-      var pct = Math.max(6, Math.round(100*r.v/max));
+      /* A row carrying its own capacity fills against IT, never the series max: 15 of 30 is half a
+         bar, and zero is an empty track (the label sits over the track, so it stays readable).
+         Overshoot clamps at full — the value text carries the "35 / 30". Rows without cap keep the
+         old scale-to-series-max behavior. */
+      var pct = isFinite(r.cap) && r.cap > 0
+        ? Math.min(100, Math.round(100*r.v/r.cap))
+        : Math.max(6, Math.round(100*r.v/max));
       return '<div class="vz-hb" style="--i:' + i + (r.c ? ';--hb:' + esc(r.c) : "") + '">' +
         '<span class="vz-hbt"><i style="width:' + pct + '%"></i>' +
           '<em>' + esc(r.k) + '</em></span>' +
