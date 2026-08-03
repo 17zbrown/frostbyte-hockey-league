@@ -801,6 +801,17 @@ CG.searchIndex = function(){
   lg.players.forEach(function(p){
     ix.push({ cat:"Players", label:p.tag, sub:CG.TEAM[p.team].name+" · "+p.pos, route:CG.playerRoute(p), key:p.tag.toLowerCase() });
   });
+  /* every other signed-in account is searchable too — a signed-up player waiting on the draft is
+     exactly who people go looking for. Their pool state stands in for a club. */
+  (function(){
+    var rostered = {}; lg.players.forEach(function(p){ rostered[p.id]=1; });
+    ((lg._profilesRaw)||[]).forEach(function(pr){
+      if (rostered[pr.id] || pr.banned) return;
+      var tag = pr.gamertag || pr.display_name; if (!tag) return;
+      var st = CG.poolState ? CG.poolState(pr.id).label : "Signed in";
+      ix.push({ cat:"Players", label:tag, sub:st, route:"#/player/"+pr.id, key:tag.toLowerCase() });
+    });
+  })();
   CG.TEAMS.forEach(function(t){
     ix.push({ cat:"Teams", label:t.name, sub:t.div+" Division · "+t.city, route:CG.slugTeam(t.code), key:(t.name+" "+t.code).toLowerCase() });
   });

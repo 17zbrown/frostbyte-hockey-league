@@ -1803,13 +1803,30 @@ CG.AFTER.team = function(code, qs){
 CG.ROUTES.players = function(param, qs){
   var lg = CG.lg;
   var fTeam = qs.team||"", fPos = qs.pos||"", fQ = (qs.q||"").toLowerCase(), fFlag = qs.flag||"";
+  /* Everyone with a site account belongs in the directory, not just roster_spots — a signed-up
+     player waiting on the draft is exactly who a manager comes here to scout. Unrostered accounts
+     ride the same table with the league mark as their crest and their pool state as their club. */
+  var rosteredIds = {}; lg.players.forEach(function(p){ rosteredIds[p.id]=1; });
+  var regByProfile = {};
+  (lg._registrationsRaw||[]).forEach(function(r){
+    if (!r.season_id || (CG.SEASON && r.season_id===CG.SEASON.id)) regByProfile[r.profile_id]=r;
+  });
+  var unrostered = (lg._profilesRaw||[]).filter(function(pr){
+    return !rosteredIds[pr.id] && !pr.banned && (pr.gamertag||pr.display_name);
+  }).map(function(pr){
+    var reg = regByProfile[pr.id];
+    return { id:pr.id, tag:pr.gamertag||pr.display_name, pos:(reg&&reg.position)||null,
+             ovr:(pr.overall==null?null:pr.overall),
+             state:(CG.poolState?CG.poolState(pr.id).label:"Signed in") };
+  });
   var nRostered = lg.players.length;
   var head = CG.pageHead("Player directory","Every skater. Every tendy.",
-    esc(nRostered+" rostered player"+(nRostered===1?"":"s")+" across "+CG.TEAMS.length+" clubs. "+
+    esc((nRostered+unrostered.length)+" players — "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
       "Overalls are the league's scouting baseline; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
-    '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+'</select>'+
+    '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+
+      '<option value="FA"'+(fTeam==="FA"?" selected":"")+'>No club yet</option></select>'+
     '<select id="pPos" style="max-width:150px" aria-label="Filter by position"><option value="">All positions</option>'+["LW","C","RW","LD","RD","G"].map(function(p){ return '<option'+(fPos===p?" selected":"")+'>'+p+'</option>'; }).join("")+'</select>'+
     '<div class="seg"><button data-flag="" class="'+(fFlag===""?"on":"")+'">All</button><button data-flag="rookie" class="'+(fFlag==="rookie"?"on":"")+'">Rookies</button><button data-flag="susp" class="'+(fFlag==="susp"?"on":"")+'">Suspended</button></div>'+
   '</div></div>';
@@ -1821,6 +1838,14 @@ CG.ROUTES.players = function(param, qs){
     if (fFlag==="susp" && !lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return false;
     return true;
   }).sort(function(a,b){ return lg.ratings[b.id].ovr - lg.ratings[a.id].ovr; });
+  /* unrostered accounts join under "All clubs" or the dedicated "No club yet" filter; the rookie
+     and suspended toggles are roster concepts and leave them out */
+  var freeList = (fTeam==="" || fTeam==="FA") && fFlag==="" ? unrostered.filter(function(u){
+    if (fPos && u.pos!==fPos) return false;
+    if (fQ && u.tag.toLowerCase().indexOf(fQ)<0) return false;
+    return true;
+  }).sort(function(a,b){ return (b.ovr==null?-1:b.ovr) - (a.ovr==null?-1:a.ovr); }) : [];
+  if (fTeam==="FA") list = [];
   var rows = list.map(function(p){
     var s = lg.pstats[p.id];
     var stat = p.pos==="G" ? (s.gp? (s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,"")+" SV%" : "—") : s.p+" pts";
@@ -1831,10 +1856,19 @@ CG.ROUTES.players = function(param, qs){
       '<td class="tnum">'+s.gp+'</td><td class="tleft tnum" style="font-size:12px">'+stat+'</td>'+
       '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
   }).join("");
-  var body = list.length
-    ? '<div class="card"><div class="card-h"><h3>'+list.length+' players</h3><span class="chip">Sorted by overall</span></div>'+
+  rows += freeList.map(function(u){
+    /* the league mark stands in for a club crest until they have one */
+    return '<tr class="rowlink" style="--tc:var(--chrome)" data-go="#/player/'+esc(u.id)+'">'+
+      '<td class="tleft"><span class="playercell">'+CG.leagueMark(48,"light-tile")+'<span><span class="nm">'+esc(u.tag)+'</span><small>'+esc(u.state)+'</small></span></span></td>'+
+      '<td class="tnum">'+(u.pos||"—")+'</td><td class="tnum">—</td>'+
+      '<td class="tnum">0</td><td class="tleft tnum" style="font-size:12px">—</td>'+
+      '<td>'+(u.ovr!=null?'<span class="ovrbox '+CG.ovrClass(u.ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+u.ovr+'</span>':'<span class="caption">—</span>')+'</td></tr>';
+  }).join("");
+  var shown = list.length + freeList.length;
+  var body = shown
+    ? '<div class="card"><div class="card-h"><h3>'+shown+' players</h3><span class="chip">Sorted by overall</span></div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
-    : '<div class="empty"><div class="e-art">'+CG.ic("user",22)+'</div><b>No players match</b><p>Loosen the filters — every rostered player in the league lives in this directory.</p></div>';
+    : '<div class="empty"><div class="e-art">'+CG.ic("user",22)+'</div><b>No players match</b><p>Loosen the filters — everyone who has signed in to the site lives in this directory.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
 };
 CG.AFTER.players = function(param, qs){
