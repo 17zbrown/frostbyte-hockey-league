@@ -189,11 +189,17 @@ async function ensureSummary(channelId, state, curMsgId) {
 // channel can't be made (caller still confirms the signup).
 async function launchLobbyRoom(lobby, guildId, categoryId) {
   const shortId = String(lobby.id).slice(0, 4).toLowerCase();
+  const ids = (lobby.state.signups || []).map((p) => p.id);
+  /* Private to the twelve players in this lobby, granted in the SAME create call that denies
+     @everyone so the room is never even briefly public. The bot itself operates on admin.
+     /kick keeps these overwrites in step when the roster changes. */
+  const ALLOW = "68608";   // VIEW + SEND + READ_HISTORY
   const body = { name: `pickup-${shortId}`, type: 0,
-    topic: "Pickup lobby — run /captain to set captains, draft, play, report by club search, then delete." };
+    topic: "Pickup lobby — run /captain to set captains, draft, play, report by club search.",
+    permission_overwrites: [{ id: guildId, type: 0, deny: "1024", allow: "0" }]
+      .concat(ids.map((id) => ({ id, type: 1, allow: ALLOW, deny: "0" }))) };
   if (categoryId) body.parent_id = categoryId;
   const ch = await dApi("POST", `/guilds/${guildId}/channels`, body);
-  const ids = (lobby.state.signups || []).map((p) => p.id);
   const pings = ids.map((id) => `<@${id}>`).join(" ");
   await dApi("POST", `/channels/${ch.id}/messages`, {
     content: `${pings}\n**Lobby's full — let's set it up! 🏒**`,
@@ -206,10 +212,10 @@ function instructionsEmbed() {
   return {
     title: "🏒 Pickup lobby — how to run it",
     description:
-      "**1 · Captains** — two of you run **/captain** to volunteer. The first two become **Team A** & **Team B**. " +
+      "**1 · Captains** — two of you run **/captain** to volunteer. The first volunteer captains **Home**, the second **Away**. " +
       "(Nobody claims it within ~5 min? The first two who signed up are set automatically.)\n\n" +
       "**2 · Mini draft** — the other player at each captain's position starts on the opposite team automatically. Captains then take turns picking (snake order), one of each position per team — the dropdown only shows who's legal.\n\n" +
-      "**3 · Server & code** — Team A's captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
+      "**3 · Server & code** — the **Home** captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
       "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
       `**5 · Stats** — after the game, statistics staff enter the box score by **club search** at ${CLUB_SEARCH}.\n\n` +
       "**6 · Done** — entering the box score clears this channel on its own a couple of minutes later. Want it gone sooner? When a **majority of the lobby runs /delete**, it closes — and any quiet room clears within 12 hours regardless. Someone no-show or out of line? A captain can start a vote with **/kick** — the other captain approves, and the spot refills from #pickup-games.",
@@ -285,7 +291,7 @@ function draftView(lobby) {
   return {
     embeds: [{
       title: "🧢 Captains' draft",
-      description: `${capName} is on the clock — pick a player.\n\n**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
+      description: `${capName} is on the clock — pick a player.\n\n**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
       color: BRAND,
       footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` },
     }],
@@ -297,7 +303,7 @@ function serverView(lobby) {
   return {
     embeds: [{
       title: "🌐 Pick the server",
-      description: `Teams are set. <@${s.captains[0]}>, choose the server.\n\n**Team A**: ${teamNames(s, "A")}\n**Team B**: ${teamNames(s, "B")}`,
+      description: `Teams are set. <@${s.captains[0]}> (Home), choose the server.\n\n**Home**: ${teamNames(s, "A")}\n**Away**: ${teamNames(s, "B")}`,
       color: BRAND,
     }],
     components: [{ type: 1, components: SERVERS.map((sv, i) => ({ type: 2, style: 1, label: sv, custom_id: `lfg:server:${lobby.id}:${i}` })) }],
@@ -308,7 +314,7 @@ function doneView(lobby) {
   return {
     embeds: [{
       title: "✅ Lobby ready — good luck out there",
-      description: `**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, staff enter the box score by **club search** at ${CLUB_SEARCH} (players can also self-import at chelgamingleague.com/#/pickup-import).`,
+      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, staff enter the box score by **club search** at ${CLUB_SEARCH} (players can also self-import at chelgamingleague.com/#/pickup-import).`,
       color: BRAND,
       footer: { text: "Set a private match with this code on the chosen server." },
     }],
@@ -373,7 +379,8 @@ function startDraft(s, capA, capB) {
   s.turn = s.order[0];
   return s;
 }
-// /captain: volunteer. First volunteer -> Team A, second -> Team B (which starts the draft).
+// /captain: volunteer. First volunteer -> Home (team key A), second -> Away (key B) — the keys
+// stay A/B in state and custom_ids; Home/Away is the display language.
 function applyCaptain(lobby, userId) {
   const s = lobby.state;
   if (!(s.signups || []).some((x) => x.id === userId)) return { error: "Only players signed up in this lobby can be captains." };
@@ -460,7 +467,7 @@ function applyPick(lobby, userId, pickId) {
      blocked from the start and every other position caps at one */
   const posOf = {}; (s.signups || []).forEach((x) => { posOf[x.id] = x.pos; });
   const filled = (s.teams[s.turn] || []).map((id) => posOf[id]);
-  if (filled.includes(posOf[pickId])) return { error: `Team ${s.turn} already has a ${POS_LABEL[posOf[pickId]] || posOf[pickId]} — pick a different position.` };
+  if (filled.includes(posOf[pickId])) return { error: `${s.turn === "A" ? "Home" : "Away"} already has a ${POS_LABEL[posOf[pickId]] || posOf[pickId]} — pick a different position.` };
   s.teams[s.turn] = s.teams[s.turn].concat([pickId]);
   s.pickIndex += 1;
   if (s.pickIndex >= s.order.length || remainingPool(s).length === 0) {
@@ -472,7 +479,7 @@ function applyPick(lobby, userId, pickId) {
 }
 function applyServer(lobby, userId, idx) {
   const s = lobby.state;
-  if (userId !== s.captains[0]) return { error: "Only Team A's captain picks the server." };
+  if (userId !== s.captains[0]) return { error: "Only the Home captain picks the server." };
   s.server = SERVERS[idx] || SERVERS[0];
   s.code = String(Math.floor(100000 + Math.random() * 900000));
   lobby.status = "done";
@@ -545,9 +552,18 @@ async function handleComponent(interaction) {
           }
         }
       }
+      /* the room is member-private, so access must follow the roster: the kicked player loses the
+         channel, the replacement gains it. Best-effort — a miss leaves a readable-but-consistent
+         room and the errors surface in the Netlify log. */
+      if (lobby.thread_id && BOT) {
+        try { await dApi("DELETE", `/channels/${lobby.thread_id}/permissions/${out.target}`); } catch (e) {}
+        if (out.replacement) {
+          try { await dApi("PUT", `/channels/${lobby.thread_id}/permissions/${out.replacement.id}`, { type: 1, allow: "68608", deny: "0" }); } catch (e) {}
+        }
+      }
       const posName = POS_LABEL[out.pos] || out.pos || "player";
       const line = out.replacement
-        ? `\u2705 **${out.targetName}** was kicked. <@${out.replacement.id}> steps in at **${posName}**${out.side ? " on Team " + out.side : ""} — welcome!`
+        ? `\u2705 **${out.targetName}** was kicked. <@${out.replacement.id}> steps in at **${posName}**${out.side ? (out.side === "A" ? " for Home" : " for Away") : ""} — welcome!`
         : `\u2705 **${out.targetName}** was kicked. Nobody is waiting at **${posName}** on the #pickup-games sheet right now, so the lobby plays one short — anyone who signs up there can be pulled in by staff.`;
       return respond({ type: UPDATE, data: { content: line, embeds: [], components: [],
         allowed_mentions: out.replacement ? { users: [out.replacement.id] } : { parse: [] } } });
@@ -763,9 +779,9 @@ async function handleCaptain(interaction) {
     if (!saved) continue;   // CAS lost — retry
     if (out.started) {
       const dv = draftView({ id: lobby.id, state: out.state });
-      return respond({ type: REPLY, data: { content: `🧢 Captains set: <@${out.state.captains[0]}> (Team A) & <@${out.state.captains[1]}> (Team B). Draft time!`, embeds: dv.embeds, components: dv.components } });
+      return respond({ type: REPLY, data: { content: `🧢 Captains set: <@${out.state.captains[0]}> (Home) & <@${out.state.captains[1]}> (Away). Draft time!`, embeds: dv.embeds, components: dv.components } });
     }
-    return respond({ type: REPLY, data: { content: `🧢 <@${userId}> is **Team A captain**. One more — someone else run **/captain** to take **Team B** and start the draft.` } });
+    return respond({ type: REPLY, data: { content: `🧢 <@${userId}> is the **Home captain**. One more — someone else run **/captain** to take **Away** and start the draft.` } });
   }
   return ephemeral("The lobby was busy — try /captain again.");
 }

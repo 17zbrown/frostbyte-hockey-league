@@ -106,7 +106,7 @@ function draftView(lobby) {
   const filled = ((s.teams && s.teams[s.turn]) || []).map((id) => posOf[id]);
   const options = pool.filter((x) => !filled.includes(x.pos)).slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
   return { embeds: [{ title: "🧢 Captains' draft",
-    description: `<@${cur}> is on the clock — pick a player.\n\n**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
+    description: `<@${cur}> is on the clock — pick a player.\n\n**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
     color: BRAND, footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` } }],
     components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }] };
 }
@@ -284,7 +284,7 @@ async function sweepCaptains(errors, out) {
     try {
       const dv = draftView({ id: lo.id, state: st });
       await dApi("POST", `/channels/${lo.thread_id}/messages`, {
-        content: `🧢 No one claimed **/captain**, so the first two signups are your captains: <@${capA}> (Team A) & <@${capB}> (Team B). Draft time!`,
+        content: `🧢 No one claimed **/captain**, so the first two signups are your captains: <@${capA}> (Home) & <@${capB}> (Away). Draft time!`,
         embeds: dv.embeds, components: dv.components });
     } catch (e) { errors.push(`lfg autocap post: ${String(e.message || e)}`); }
     out.autoCaptained++;
