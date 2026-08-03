@@ -94,6 +94,17 @@ async function sbGetRoomLobbyAny(channelId) {
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) ? rows[0] : null;
 }
+// The active game (post-fill room, not yet closed) a player is in, or null. Someone mid-game may
+// not queue for the next one — their room has to CLOSE first (box score entered, majority /delete,
+// or the sweep). Fail-open on a transient DB error: a hiccup must not lock the whole server out of
+// signups; the worst case is one early signup that the next check would have caught.
+async function sbActiveGameOf(userId) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?status=in.(${KICKABLE_STATES})&select=id,thread_id,state&limit=20`, withTimeout({ headers: sbHead() }));
+    const rows = await r.json().catch(() => []);
+    return (Array.isArray(rows) ? rows : []).find((lo) => ((lo.state && lo.state.signups) || []).some((x) => x.id === userId)) || null;
+  } catch (e) { return null; }
+}
 // optimistic compare-and-swap on updated_at so two simultaneous clicks can't clobber each other
 async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&updated_at=eq.${encodeURIComponent(prevUpdatedAt)}`, withTimeout({
@@ -540,6 +551,12 @@ async function handleComponent(interaction) {
   if (action === "join" && !(await sbHasAccount(userId))) {
     return ephemeral("You need a Chel Gaming account to join pickup games — sign in at **chelgamingleague.com** first (10 seconds with Discord), then run /join again.");
   }
+  // One game at a time: a player whose lobby hasn't closed yet can't queue for the next one.
+  if (action === "join") {
+    const active = await sbActiveGameOf(userId);
+    if (active) return ephemeral("You're in an active pickup game" + (active.thread_id ? " (<#" + active.thread_id + ">)" : "") +
+      " — finish that one first. The lobby closes when its box score is entered (or by a majority **/delete**), and then you can sign up again.");
+  }
 
   // Kick-vote buttons. Handled ahead of the generic loop: its closed-lobby guard treats "done" as
   // closed, and a done lobby (code issued, game about to start) is exactly when a no-show surfaces.
@@ -860,5 +877,5 @@ export const handler = async (event) => {
 
 // Exposed for local unit tests only; Netlify invokes the named handler export.
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
-  applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, applyVeto, handleJoin, pickerView,
+  applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, applyVeto, handleJoin, pickerView, handleComponent,
   startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };

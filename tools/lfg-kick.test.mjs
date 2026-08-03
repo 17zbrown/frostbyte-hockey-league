@@ -273,5 +273,39 @@ console.log("\n— server veto: Away knocks one out, Home picks from the rest");
   A("...with the vetoed one disabled", /vetoed[^}]*"disabled":true/.test(s2) || /"disabled":true/.test(s2));
 }
 
+
+console.log("\n— one game at a time: a mid-game player can't queue for the next");
+{
+  let ACTIVE = [];   // lobbies in post-fill states
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url), m = opts.method || "GET";
+    const J = (b) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.includes("status=in.(captains,drafting,server,done)") && m === "GET") return J(ACTIVE);
+    if (u.includes("/rest/v1/profiles")) return J([{ id: "p" }]);          // has an account
+    if (u.includes("/rest/v1/rpc/lfg_open_lobby")) return J([{ id: "OL", status: "open", channel_id: "chan",
+      updated_at: new Date().toISOString(), state: { signups: [], captains: [], teams: { A: [], B: [] } } }]);
+    if (u.includes("/rest/v1/lfg_lobbies") && m === "PATCH") return J([{ id: "OL" }]);
+    return J([]);
+  };
+  const click = (uid) => ({ type: 3, guild_id: "g", channel_id: "chan",
+    channel: { id: "chan", name: "pickup-games" },
+    member: { user: { id: uid, username: "U" } },
+    data: { custom_id: "lfg:join:chan:C" } });
+
+  ACTIVE = [{ id: "L9", thread_id: "room9", state: { signups: [{ id: "busy", name: "B", pos: "C" }] } }];
+  const blocked = JSON.parse((await I.handleComponent(click("busy"))).body);
+  A("a player in an unclosed room is refused", /active pickup game/.test(blocked.data.content || ""), (blocked.data.content || "").slice(0, 60));
+  A("...and pointed at their room", /<#room9>/.test(blocked.data.content || ""));
+
+  const free = JSON.parse((await I.handleComponent(click("someoneElse"))).body);
+  A("everyone else signs up normally", !/active pickup game/.test((free.data && free.data.content) || ""));
+
+  ACTIVE = [];
+  const after = JSON.parse((await I.handleComponent(click("busy"))).body);
+  A("the moment the room closes, they're eligible again", !/active pickup game/.test((after.data && after.data.content) || ""));
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

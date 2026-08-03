@@ -1304,30 +1304,64 @@ CG.AFTER["pickup-import"] = function(){
       if (o.error){ res.innerHTML = errBox(o.error); return; }
       var ms = o.matches||[];
       if (!ms.length){ res.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'. EA’s private feed can be empty on NHL 26 — a screenshot import is the backup.</div>'; return; }
-      res.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import:</div>'+ms.map(function(m){
+      res.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import — or <b>select several sessions</b> of a lagged-out game and import them as one:</div>'+ms.map(function(m){
         var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
+        /* a visibly short session is the classic lagout fragment — worth a nudge */
+        var shortChip = (m.minutes && m.minutes < 45) ? ' <span class="chip chip-warn" title="Well under a full game — likely one session of a lagged-out game">~'+m.minutes+' min</span>' : '';
         return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-          '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+m.a.score+' – '+m.b.score+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+
+          '<button type="button" class="chip" data-sel="'+esc(m.matchId)+'" aria-pressed="false" style="cursor:pointer" title="Select this session to merge with another">—</button>'+
+          '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+m.a.score+' – '+m.b.score+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+shortChip+
           '<div class="caption">'+esc(when)+'</div></div>'+
           '<button class="btn btn-chrome btn-sm" data-import="'+esc(m.matchId)+'" data-cid="'+esc(cid)+'">Import</button>'+
         '</div></div>';
-      }).join("");
+      }).join("")+
+      '<div id="puMergeBar" style="display:none;position:sticky;bottom:12px;margin-top:10px"><div class="card"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+        '<span style="flex:1"><b id="puMergeCount" style="font-family:var(--f-disp)"></b><span class="caption" style="display:block">Lagged out mid-game? Selected sessions combine into ONE game — stats summed, score aggregated, overtime from the deciding session only.</span></span>'+
+        '<button class="btn btn-chrome btn-sm" id="puMergeGo" data-cid="'+esc(cid)+'">Import as one game</button></div></div></div>';
+      var picked = {};
+      function syncBar(){
+        var ids = Object.keys(picked), bar = document.getElementById("puMergeBar");
+        if (bar) bar.style.display = ids.length >= 2 ? "" : "none";
+        var c = document.getElementById("puMergeCount");
+        if (c) c.textContent = ids.length + " sessions selected";
+      }
+      res.querySelectorAll("[data-sel]").forEach(function(b){ b.addEventListener("click", function(){
+        var id = this.getAttribute("data-sel");
+        var on = this.getAttribute("aria-pressed") !== "true";
+        if (on && Object.keys(picked).length >= 4){ CG.toast("Four sessions is the limit for one merge","err"); return; }
+        this.setAttribute("aria-pressed", on ? "true" : "false");
+        this.classList.toggle("chip-chrome", on);
+        this.textContent = on ? "\u2713" : "\u2014";
+        if (on) picked[id] = 1; else delete picked[id];
+        syncBar();
+      }); });
+      var mg = document.getElementById("puMergeGo");
+      if (mg) mg.addEventListener("click", function(){
+        var ids = Object.keys(picked);
+        if (ids.length < 2){ CG.toast("Select at least two sessions to merge","err"); return; }
+        doImport(this, ids);
+      });
       res.querySelectorAll("[data-import]").forEach(function(b){ b.addEventListener("click", function(){ doImport(this); }); });
     }).catch(function(e){ res.innerHTML = errBox(e.message); });
   }
-  function doImport(btn){
-    var mid = btn.getAttribute("data-import"), cid = btn.getAttribute("data-cid");
+  function doImport(btn, mergeIds){
+    var cid = btn.getAttribute("data-cid");
+    var payload = mergeIds && mergeIds.length
+      ? { action:"import", clubId:cid, matchIds:mergeIds }
+      : { action:"import", clubId:cid, matchId:btn.getAttribute("data-import") };
+    var was = btn.textContent;
     btn.disabled = true; btn.textContent = "Importing…";
-    api({ action:"import", clubId:cid, matchId:mid }).then(function(o){
-      btn.disabled = false; btn.textContent = "Import";
+    api(payload).then(function(o){
+      btn.disabled = false; btn.textContent = was;
       if (o.error){ CG.toast(o.error,"err"); return; }
       var players = o.players||[], matched = players.filter(function(p){ return p.matched; }).length;
-      res.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Imported.</b> '+matched+' of '+players.length+' players matched to CGHL profiles'+(o.unmatched?' — '+o.unmatched+' unmatched (their EA name didn’t match a gamertag)':'')+'. Pickup stats now show on the matched profiles.</div>'+
+      var mergedNote = (o.sessions||1) > 1 ? ' <b>'+o.sessions+' sessions merged into one game</b> — stats summed, score aggregated.' : '';
+      res.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Imported.</b>'+mergedNote+' '+matched+' of '+players.length+' players matched to CGHL profiles'+(o.unmatched?' — '+o.unmatched+' unmatched (their EA name didn’t match a gamertag)':'')+'. Pickup stats now show on the matched profiles.</div>'+
         '<div class="tasklist" style="margin-top:12px">'+players.map(function(p){
           return '<div class="titem"><span class="t-dot '+(p.matched?"grn":"red")+'"></span><span style="flex:1">'+esc(p.name||"?")+' · Team '+esc(p.side)+' · '+p.goals+'G '+p.assists+'A'+(p.matched?'':' · <span class="caption">no profile</span>')+'</span></div>';
         }).join("")+'</div>';
       CG.toast("Pickup game imported","ok");
-    }).catch(function(e){ btn.disabled = false; btn.textContent = "Import"; CG.toast("Import failed: "+e.message,"err"); });
+    }).catch(function(e){ btn.disabled = false; btn.textContent = was; CG.toast("Import failed: "+e.message,"err"); });
   }
   var sb = document.getElementById("puSearch"); if (sb) sb.addEventListener("click", doSearch);
   var inp = document.getElementById("puClub"); if (inp) inp.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); doSearch(); } });

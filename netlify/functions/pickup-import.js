@@ -101,7 +101,9 @@ async function eaFetch(url) {
     try {
       const opts = { headers, signal: AbortSignal.timeout(2800) };
       if (PROXY) opts.dispatcher = new ProxyAgent(PROXY);
-      const r = await uFetch(url, opts);
+      /* undici's fetch exists ONLY to honour the dispatcher — with no proxy configured there is
+         nothing to honour, and global fetch keeps the handler drivable by tests */
+      const r = await (PROXY ? uFetch : fetch)(url, opts);
       if (r.ok) return r.json();
       last = `EA ${r.status}`;
       if (r.status !== 403) throw new Error(last);   // non-403 errors won't be fixed by another IP
@@ -151,6 +153,52 @@ function normalizeMatch(raw) {
   return { ea_match_id: String(raw.matchId), played_at: raw.timestamp ? new Date(raw.timestamp * 1000).toISOString() : null,
            clubs, went_ot: clubs.some((c) => c.result === 5 || c.result === 6) };
 }
+/* Merge several normalized sessions of ONE game (a lagout chain) into a single box score.
+   Sides are aligned by ea_club_id — EA does not promise the same club order across matches, and
+   summing Home's stats into Away's would be a quiet catastrophe. Counting stats sum per player
+   (someone who missed the resume keeps their first-session line); the score aggregates because the
+   resume plays only the remaining time; overtime counts only if the DECIDING session went to OT;
+   shutouts are re-judged on the combined goals against. */
+const MERGE_SUM = ["goals","assists","shots","hits","pim","plus_minus","takeaways","giveaways",
+  "faceoffs_won","faceoffs_lost","time_on_ice_seconds","saves","shots_against","goals_against"];
+function mergeMatches(norms) {
+  if (!Array.isArray(norms) || norms.length < 2) throw new Error("nothing to merge");
+  norms = norms.slice().sort((a, b) => String(a.played_at || "").localeCompare(String(b.played_at || "")));
+  const base = norms[0];
+  const ids = base.clubs.map((c) => c.ea_club_id);
+  const pairKey = ids.slice().sort().join("|");
+  for (const nrm of norms.slice(1)) {
+    if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pairKey)
+      throw new Error("Those sessions aren't all between the same two clubs — a lagout chain always is.");
+  }
+  const clubs = ids.map((cid) => {
+    const byPlayer = {};
+    let score = 0;
+    for (const nrm of norms) {
+      const side = nrm.clubs.find((c) => c.ea_club_id === cid);
+      score += side.score || 0;
+      for (const p of side.players) {
+        const cur = byPlayer[p.ea_player_id];
+        if (!cur) byPlayer[p.ea_player_id] = { ...p };
+        else {
+          MERGE_SUM.forEach((k) => { cur[k] = (cur[k] || 0) + (p[k] || 0); });
+          cur.is_goalie = cur.is_goalie || p.is_goalie;
+        }
+      }
+    }
+    const players = Object.values(byPlayer);
+    players.forEach((p) => { if (p.is_goalie) p.shutout = (p.goals_against || 0) === 0 && (p.shots_against || 0) > 0; });
+    const first = base.clubs.find((c) => c.ea_club_id === cid);
+    return { ea_club_id: cid, name: first.name, score, result: 0, players };
+  });
+  return {
+    ea_match_id: base.ea_match_id,
+    ea_match_ids: norms.map((nrm) => nrm.ea_match_id),
+    played_at: base.played_at,
+    went_ot: !!norms[norms.length - 1].went_ot,
+    clubs,
+  };
+}
 // Best-effort EA player -> CGHL profile (prior pickup link, then site gamertag).
 async function resolveProfile(entry, cache) {
   if (cache.has(entry.ea_player_id)) return cache.get(entry.ea_player_id);
@@ -167,7 +215,7 @@ async function resolveProfile(entry, cache) {
   cache.set(entry.ea_player_id, pid); return pid;
 }
 
-export const _internals = { matchLobbyForImport, normalizeMatch, mapPos };
+export const _internals = { matchLobbyForImport, normalizeMatch, mapPos, mergeMatches };
 
 export const handler = async (event) => {
   // temp diag: is the residential proxy set, and does an EA call through it work?
@@ -209,7 +257,11 @@ export const handler = async (event) => {
       const raw = await eaClubMatches(clubId);
       const list = (Array.isArray(raw) ? raw : []).map((m) => {
         const n = normalizeMatch(m); if (!n) return null;
+        /* the longest time-on-ice in the match is the best proxy for how much game was played —
+           the UI flags visibly short sessions as likely lagout fragments */
+        const toi = n.clubs.flatMap((c) => c.players.map((p) => p.time_on_ice_seconds || 0));
         return { matchId: n.ea_match_id, playedAt: n.played_at, wentOt: n.went_ot,
+          minutes: Math.round(Math.max(0, ...toi) / 60),
           a: { name: n.clubs[0].name, score: n.clubs[0].score }, b: { name: n.clubs[1].name, score: n.clubs[1].score } };
       }).filter(Boolean);
       return reply({ matches: list });
@@ -217,18 +269,29 @@ export const handler = async (event) => {
 
     if (action === "import") {
       const clubId = String(body.clubId || "").trim();
-      const matchId = String(body.matchId || "").trim();
-      if (!clubId || !matchId) return reply({ error: "Missing clubId/matchId." }, 400);
+      /* one id imports a game; several ids merge a lagout chain into ONE game */
+      const matchIds = (Array.isArray(body.matchIds) && body.matchIds.length
+        ? body.matchIds : (body.matchId != null ? [body.matchId] : [])).map((x) => String(x).trim()).filter(Boolean);
+      if (!clubId || !matchIds.length) return reply({ error: "Missing clubId/matchId." }, 400);
+      if (matchIds.length > 4) return reply({ error: "That's more than four sessions — a lagout chain shouldn't need that. Merge fewer." }, 400);
+      if (new Set(matchIds).size !== matchIds.length) return reply({ error: "The same session is selected twice." }, 400);
 
-      // already imported?
-      const dup = await sbGet(`pickup_games?ea_match_id=eq.${encodeURIComponent(matchId)}&select=id&limit=1`);
-      if (dup[0]) return reply({ error: "That game was already imported.", pickupGameId: dup[0].id }, 409);
+      /* already imported? Any selected session — whether it was a game of its own OR a segment of
+         an earlier merge — refuses the whole import, or a merged game could be double-counted one
+         session at a time. */
+      const idList = matchIds.map(encodeURIComponent).join(",");
+      const dup = await sbGet(`pickup_games?or=(ea_match_id.in.(${idList}),ea_match_ids.ov.{${idList}})&select=id&limit=1`);
+      if (dup[0]) return reply({ error: matchIds.length > 1
+        ? "One of those sessions is already part of an imported game." : "That game was already imported.", pickupGameId: dup[0].id }, 409);
 
       const raw = await eaClubMatches(clubId);
-      const match = (Array.isArray(raw) ? raw : []).find((m) => String(m.matchId) === matchId);
-      if (!match) return reply({ error: "That match is no longer in the club's recent history (EA only keeps the last few). Use the screenshot importer instead." }, 404);
-      const norm = normalizeMatch(match);
-      if (!norm) return reply({ error: "Couldn't read that match (need exactly 2 clubs)." }, 422);
+      const picked = matchIds.map((id) => (Array.isArray(raw) ? raw : []).find((m) => String(m.matchId) === id));
+      if (picked.some((m) => !m)) return reply({ error: "A selected match is no longer in the club's recent history (EA only keeps the last few). Use the screenshot importer instead." }, 404);
+      const norms = picked.map(normalizeMatch);
+      if (norms.some((nrm) => !nrm)) return reply({ error: "Couldn't read one of those matches (need exactly 2 clubs)." }, 422);
+      let norm;
+      try { norm = matchIds.length > 1 ? mergeMatches(norms) : { ...norms[0], ea_match_ids: [norms[0].ea_match_id] }; }
+      catch (e) { return reply({ error: String(e.message || e) }, 422); }
 
       // resolve profiles for both clubs' players
       const cache = new Map();
@@ -249,7 +312,7 @@ export const handler = async (event) => {
 
       const imgProfile = await sbGet(`profiles?id=eq.${uid}&select=id&limit=1`).catch(() => []);
       const game = await sbSend("POST", "pickup_games?select=id", {
-        ea_match_id: norm.ea_match_id, source: "ea", played_at: norm.played_at,
+        ea_match_id: norm.ea_match_id, ea_match_ids: norm.ea_match_ids, source: "ea", played_at: norm.played_at,
         club_a: norm.clubs[0].name, club_b: norm.clubs[1].name, score_a: norm.clubs[0].score, score_b: norm.clubs[1].score,
         went_ot: norm.went_ot, imported_by: (imgProfile[0] && imgProfile[0].id) || null,
       }, "return=representation");
@@ -260,7 +323,7 @@ export const handler = async (event) => {
       /* if this game came out of a Discord pickup lobby, thank the room and let the sweep clear it */
       let lobbyClosed = null;
       try { lobbyClosed = await closePlayedLobby(rows); } catch (e) { /* never fail an import over cleanup */ }
-      return reply({ ok: true, pickupGameId, players: preview, unmatched, lobbyClosed });
+      return reply({ ok: true, pickupGameId, players: preview, unmatched, lobbyClosed, sessions: matchIds.length });
     }
 
     return reply({ error: "Unknown action." }, 400);
