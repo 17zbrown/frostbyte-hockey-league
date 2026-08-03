@@ -7228,12 +7228,21 @@ CG.AFTER._admScheduleLive = function(){
          back-to-back rematches), and a stale split left in the row would imply the schedule still
          honours it when nothing reads it */
       var patch={ weeks:w, nights_per_week:n, night_slots:slots.join(","), div_games:null, nondiv_games:null };
+      /* The movement deadline is stored as a week number. Shortening the season left it at week 6
+         of a 6-week year, i.e. the final week — so the "partway through" roster freeze the rulebook
+         promises (Chapter 0.7, Rule 2.4) never actually happened. Keep it inside the season, two
+         thirds of the way in, whenever the current value would fall on or past the end. */
+      var curDl = +(CG.SEASON && CG.SEASON.trade_deadline_week) || 0;
+      if (!curDl || curDl >= w){
+        patch.trade_deadline_week = Math.max(1, Math.ceil(w * 2 / 3));
+      }
       B.disabled=true;
       CG.sb.from("seasons").update(patch).eq("id", CG.SEASON.id).select("id").then(function(r){
         B.disabled=false;
         if (r.error){ CG.toast("Could not save: "+r.error.message,"err"); return; }
         if (!r.data || !r.data.length){ CG.toast("Save was blocked — commissioner only","err"); return; }
-        CG.toast("Season shape saved","ok"); CG.reloadLeague();
+        CG.toast("Season shape saved"+(patch.trade_deadline_week?" · movement deadline moved to week "+patch.trade_deadline_week:""),"ok");
+        CG.reloadLeague();
       });
     });
   })();

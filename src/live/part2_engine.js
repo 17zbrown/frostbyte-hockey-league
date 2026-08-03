@@ -402,7 +402,7 @@ CG.DEFAULT_WEIGHTS = {
 CG.aggregate = function(lg, overrides){
   var W = (overrides && overrides.weights) || CG.DEFAULT_WEIGHTS;
   var teams = {}, pstats = {}, glog = {};
-  CG.TEAMS.forEach(function(t){ teams[t.code] = { code:t.code, gp:0,w:0,l:0,otl:0,gf:0,ga:0,
+  CG.TEAMS.forEach(function(t){ teams[t.code] = { code:t.code, gp:0,w:0,l:0,otl:0,rw:0,gf:0,ga:0,
     hw:0,hl:0,aw:0,al:0, res:[], sf:0, sa:0 }; });
   lg.players.forEach(function(p){
     pstats[p.id] = p.pos==="G"
@@ -417,7 +417,7 @@ CG.aggregate = function(lg, overrides){
       var t = teams[code]; t.gp++;
       t.gf += r.score[code]; t.ga += r.score[opp];
       var won = r.score[code] > r.score[opp];
-      if (won){ t.w++; (code===r.home?t.hw++:t.aw++); t.res.push("W"); }
+      if (won){ t.w++; if (!r.ot) t.rw++; (code===r.home?t.hw++:t.aw++); t.res.push("W"); }
       else if (r.ot){ t.otl++; t.res.push("OT"); }
       else { t.l++; (code===r.home?t.hl++:t.al++); t.res.push("L"); }
       Object.keys(r.box[code]).forEach(function(pid){
@@ -572,10 +572,48 @@ CG.aggregate = function(lg, overrides){
 
 /* ---------- convenience selectors ---------- */
 CG.playerById = function(lg,id){ return lg.players.find(function(p){ return p.id===id; }); };
+/* Rule 8.1: clubs are ordered by POINTS PERCENTAGE, not raw points, so a club with games in hand
+   compares fairly — which is the exact case the rule cites. Rule 8.2 breaks ties in a fixed order:
+   head-to-head between the tied clubs, then regulation wins, then goal differential, then goals
+   scored. Head-to-head is a mini-table among everyone tied, not a pairwise field, so it is
+   computed per tied group rather than inside the comparator. */
+CG.h2hPoints = function(lg, codes){
+  var set = {}, out = {};
+  codes.forEach(function(c){ set[c] = 1; out[c] = 0; });
+  (lg.results || []).forEach(function(r){
+    if (!set[r.home] || !set[r.away]) return;
+    var hs = r.homeScore, as = r.awayScore;
+    if (hs == null || as == null) return;
+    if (hs > as){ out[r.home] += 2; if (r.ot) out[r.away] += 1; }
+    else        { out[r.away] += 2; if (r.ot) out[r.home] += 1; }
+  });
+  return out;
+};
 CG.standings = function(lg, div){
-  return CG.TEAMS.filter(function(t){ return !div || t.div===div; })
-    .map(function(t){ return Object.assign({team:t}, lg.teams[t.code]); })
-    .sort(function(a,b){ return b.pts-a.pts || b.w-a.w || b.diff-a.diff || b.gf-a.gf; });
+  var rows = CG.TEAMS.filter(function(t){ return !div || t.div===div; })
+    .map(function(t){ return Object.assign({team:t}, lg.teams[t.code]); });
+  var pct = function(r){ return r.gp ? (r.pts / (r.gp * 2)) : 0; };
+  /* group by points percentage first, then order within each tied group by Rule 8.2 */
+  rows.sort(function(a, b){ return pct(b) - pct(a); });
+  var out = [], i = 0;
+  while (i < rows.length){
+    var j = i + 1;
+    while (j < rows.length && Math.abs(pct(rows[j]) - pct(rows[i])) < 1e-9) j++;
+    var grp = rows.slice(i, j);
+    if (grp.length > 1){
+      var h2h = CG.h2hPoints(lg, grp.map(function(r){ return r.code; }));
+      grp.sort(function(a, b){
+        return (h2h[b.code] || 0) - (h2h[a.code] || 0)
+            || (b.rw || 0) - (a.rw || 0)
+            || b.diff - a.diff
+            || b.gf - a.gf;
+        /* still level after all four: Rule 8.2 sends it to a one-game play-in the office schedules */
+      });
+    }
+    out = out.concat(grp);
+    i = j;
+  }
+  return out;
 };
 CG.skaterLeaders = function(lg, key, minGp){
   return lg.players.filter(function(p){ return p.pos!=="G" && lg.pstats[p.id].gp >= (minGp||1); })
