@@ -3695,6 +3695,30 @@ CG.generateSchedule = function(stage){
       roundPairs.push(pairs);
     }
 
+    /* HARD GUARANTEE: no club faces the same opponent twice in one night. The rotation makes this
+       true whenever there are more than perNight+1 clubs (a pair recurs only once per m-1 rounds),
+       but that is a property of today's inputs, not a promise — a two- or three-club test league
+       with three slots WOULD repeat a pair. Disconnected games are merged by "same clubs, back to
+       back, nothing in between", and a legitimate same-night rematch would be indistinguishable
+       from a resume — so a schedule that contains one must never exist. Verify the built rounds
+       and refuse to write rather than trust the math held. */
+    for (var vn = 0; vn * perNight < roundPairs.length; vn++){
+      var seenPairs = {};
+      for (var vs = 0; vs < perNight && vn * perNight + vs < roundPairs.length; vs++){
+        var rp = roundPairs[vn * perNight + vs];
+        for (var vp = 0; vp < rp.length; vp++){
+          var pk = rp[vp][0] < rp[vp][1] ? rp[vp][0] + "|" + rp[vp][1] : rp[vp][1] + "|" + rp[vp][0];
+          if (seenPairs[pk]){
+            CG.toast("With " + codes.length + " clubs and " + perNight + " games a night, " +
+              pk.replace("|", " and ") + " would meet twice on night " + (vn + 1) +
+              " — add clubs or reduce games per night. Nothing was generated.", "err");
+            return;
+          }
+          seenPairs[pk] = 1;
+        }
+      }
+    }
+
     var rows = [];
     for (var r = 0; r < roundPairs.length; r++){
       var day = dates[Math.floor(r/perNight)];

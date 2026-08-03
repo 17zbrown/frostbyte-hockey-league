@@ -1384,7 +1384,7 @@ export default async (req) => {
           if (rid) desired.add(rid);
         }
       }
-      // "Not Signed Up" — any linked member who hasn't registered for the open season (the daily
+      // "Not Signed Up" — a linked member who hasn't registered for the open season (the daily
       // #season-signups reminder pings this role). Applies regardless of profile role, because
       // staff and commissioners are allowed to play too (role-conflict rules) and should get the
       // nudge. Cleared automatically once they register or the window closes, since it's a managed
@@ -1409,6 +1409,40 @@ export default async (req) => {
       sum.errors.push({ discord_id: m.discord_id, error: String(e.message || e) });
     }
   }
+  /* Pass 2 — guild members with NO site link. The loop above walks site profiles that carry a
+     discord_id, so a member who joined the server but never signed into the website was never
+     visited: with ~150 members and ~80 linked, some seventy people sat outside the sweep, which is
+     why "Not Signed Up" held 18 members when it should have held roughly 85. They cannot be
+     reached from the profiles side because there is nothing to join on — so walk the guild list
+     and reconcile everyone the first pass did not cover. An unlinked member's managed roles are
+     exactly {Not Signed Up} while sign-ups are open (they have not signed up, by definition), and
+     none once the window closes. Their non-managed roles are left alone, same as pass 1. */
+  try {
+    if (memberListOk && roleId["not signed up"]) {
+      const linkedIds = new Set(links.filter((l) => l.discord_id).map((l) => String(l.discord_id)));
+      for (const [uid, mem] of memberById) {
+        if (linkedIds.has(uid)) continue;                       // pass 1 owned this member
+        if (mem.user && mem.user.bot) continue;                 // bots never sign up
+        const desired = new Set();
+        if (regOpen) desired.add(roleId["not signed up"]);
+        const current = new Set(mem.roles || []);
+        const next = [...current].filter((id) => !managedIds.has(id));
+        for (const id of desired) next.push(id);
+        const nextSet = new Set(next);
+        const changed = nextSet.size !== current.size || [...nextSet].some((id) => !current.has(id));
+        if (!changed) continue;
+        try {
+          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${uid}`, { roles: [...nextSet] });
+          if (!(res && res.__notfound)) sum.unlinkedTagged = (sum.unlinkedTagged || 0) + 1;
+        } catch (e) {
+          // the owner and anyone above the bot cannot be edited — count it rather than fail the run
+          sum.unlinkedSkipped = (sum.unlinkedSkipped || 0) + 1;
+        }
+      }
+      sum.unlinkedSeen = memberById.size - linkedIds.size;
+    }
+  } catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
+
   // (3) resolve the server for any game whose 30-min pick-lock has passed (auto-fills the match card)
   try {
     const rr = await fetch(`${SB_URL}/rest/v1/rpc/resolve_due_servers`, { method: "POST", headers: sbHead(), body: "{}" });
@@ -1421,6 +1455,7 @@ export default async (req) => {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "rl_discord-sync_result", value: JSON.stringify({
         at: new Date().toISOString(), ok: sum.errors.length === 0, checked: sum.checked,
+        unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
       }), updated_at: new Date().toISOString() }) });
