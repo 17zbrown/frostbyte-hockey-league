@@ -575,7 +575,7 @@ CG.homeFigures = function(){
 
   var signed = lg.registrationsCount || (lg._registrationsRaw || []).length || 0;
   var clubs  = (CG.TEAMS || []).length;
-  var spots  = clubs * (s.roster_max || 15);
+  var spots  = clubs * (s.roster_max || 17);
   if (signed) fig(signed, "Signed up for Season " + (s.number || 1),
     spots ? signed.toLocaleString() + " of " + spots.toLocaleString() + " roster spots claimed" : "",
     spots ? Math.max(0, Math.min(1, signed / spots)) : null, "#/register");
@@ -717,7 +717,7 @@ CG.standingsLadder = function(dv, pre){
   var lg = CG.lg;
   var rows = (CG.TEAMS || []).filter(function(t){ return !dv || t.div === dv; });
   if (!rows.length) return "";
-  var max = (CG.SEASON && CG.SEASON.roster_max) || 15;
+  var max = (CG.SEASON && CG.SEASON.roster_max) || 17;
 
   var scored = rows.map(function(t){
     var rec = (lg.teams && lg.teams[t.code]) || {};
@@ -787,7 +787,7 @@ CG.pulseModule = function(){
   }
 
   /* Roster spots filled league-wide — how much room is left before the draft. */
-  var max = (s.roster_max || 15), spots = teams.length * max;
+  var max = (s.roster_max || 17), spots = teams.length * max;
   var filled = teams.reduce(function(a,t){ return a + (((lg.byTeam||{})[t.code]||[]).length); }, 0);
   if (spots > 0){
     cards.push(V.card({
@@ -1486,7 +1486,7 @@ CG.ROUTES.standings = function(param, qs){
           '<td class="tnum">'+r.gp+'</td><td class="tnum">'+r.w+'</td><td class="tnum">'+r.l+'</td><td class="tnum">'+r.otl+'</td>'+
           '<td class="tnum">'+r.gf+'</td><td class="tnum">'+r.ga+'</td><td class="tnum">'+(r.diff>0?"+":"")+r.diff+'</td><td class="tnum"><b>'+r.pts+'</b></td></tr>';
       }).join("")+'</tbody></table></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Two weeks, rosters filled by random assignment. Pre-season results never touch the league standings — they exist so every player logs the five games that make them draft-eligible.</span></div></div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Two weeks, rosters filled by random assignment. Pre-season results never touch the league standings — they exist to knock off rust and to set a fair, on-ice draft order.</span></div></div>';
   } else if (view==="league"){
     body = '<div class="card"><div class="card-h"><h3>Overall league table</h3><span class="chip">'+CG.TEAMS.length+' clubs</span></div>'+CG.standTable(null,{full:true,caption:"League standings — all clubs"})+'</div>';
   } else if (view==="wildcard" && CG.isPreseason()){
@@ -1884,7 +1884,7 @@ CG.ROUTES.player = function(pid, qs){
   var me = CG.me();
   var canSeeAvail = CG.role()==="commish" || CG.role()==="staff" || (me && me.team===p.team && CG.can("availability.viewTeam")) || (me && me.id===p.id);
   /* "no games" has to mean no games at ANY stage: s.gp is regular-season only, and a player
-     with five pre-season appearances does have a sample to talk about. */
+     with a handful of pre-season appearances does have a sample to talk about. */
   var preS = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
   var anyGp = (s.gp||0) + ((preS && preS.gp)||0);
   /* Broadcast-grade backdrop: a rink-level environment (Higgsfield soul_location) under a heavy
@@ -1972,7 +1972,7 @@ CG.ROUTES.player = function(pid, qs){
       (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
            : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
         .map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating — and toward the five games that make a first-year player draft-eligible.</p></div></div>' : '';
+      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating. Every registered player is draft-eligible — there is no games-played requirement.</p></div></div>' : '';
     /* Empty-state cleanup: a first-year (or just-signed) player with no games at any stage gets a
        single broadcast "fresh sheet" panel instead of a wall of twelve zeroes. The pristine-ice
        still (Higgsfield soul_location) carries the moment; the rating breakdown is dropped as
@@ -2141,7 +2141,7 @@ CG.SKATER_DNA_AXES = ["Shooting","Playmaking","Defense","Physical","Discipline",
    built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
    game score + the player's team side. Never feeds league totals, eligibility, or overall. */
 CG.renderPickupStats = function(rows){
-  var note = '<div class="note" style="margin-bottom:16px">These are <b>pickup games</b> from the #pickup-games lobbies — the same stats as league play, kept separate. They never count toward league totals, the five-game minimum, draft or bid eligibility, or the overall rating.</div>';
+  var note = '<div class="note" style="margin-bottom:16px">These are <b>pickup games</b> from the #pickup-games lobbies — the same stats as league play, kept separate. They never count toward league totals, draft or bid eligibility, or the overall rating.</div>';
   if (!rows || !rows.length){
     return note + '<div class="card"><div class="empty" style="padding:48px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No pickup games yet</b>'+
       '<p>#pickup-games matches between two EASHL clubs appear here once their box score is imported.</p></div></div>';
@@ -2369,7 +2369,7 @@ CG.AFTER.pickup = function(id){
       boxCard(g.club_b||"Club B", g.score_b, sideB)+
       '</div><div class="stack">'+
       '<div class="card"><div class="card-h"><h3>Pickup game</h3><span class="chip">Not league play</span></div><div class="card-b">'+
-        '<p class="small" style="color:var(--steel);line-height:1.65">Imported from the EA NHL match record through the pickup importer. Pickup lines show on player profiles for fun — they never count toward league standings, the five-game minimum, draft or bid eligibility, or overall ratings.</p>'+
+        '<p class="small" style="color:var(--steel);line-height:1.65">Imported from the EA NHL match record through the pickup importer. Pickup lines show on player profiles for fun — they never count toward league standings, draft or bid eligibility, or overall ratings.</p>'+
         (when?'<p class="caption" style="margin-top:10px">Played '+esc(when)+(g.went_ot?" · settled in overtime":"")+'.</p>':"")+
       '</div></div>'+
       '</div></div>';

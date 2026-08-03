@@ -363,3 +363,96 @@ CG.CONTENT = {"articles":[],"rulebook":{"chapters":[{"num":1,"title":"Membership
   }
 
 })();
+
+/* ================================================================
+   RULEBOOK v2.7 — the roster ruleset rework (league owner, Aug 3 2026).
+   The active roster becomes a fixed 3C/3LW/3RW/3LD/3RD/2G = 17 with an
+   UNLIMITED training camp; weekly game caps arrive (camp 3, active 6,
+   goalies 9); EVERY minimum-games rule is abolished (the five-game
+   draft threshold and the 30% playoff floor); random assignment of new
+   players closes at the movement deadline; and the playoff series cap
+   is restated as skaters-only, with goaltenders exempt. Idempotent:
+   each edit is guarded on the text it replaces.
+   ================================================================ */
+(function(){
+  var rb = CG.CONTENT && CG.CONTENT.rulebook; if (!rb || !rb.chapters) return;
+  if (rb.changelog && rb.changelog[0] && rb.changelog[0].version === "2.7") return;
+  function ch(n){ for (var i=0;i<rb.chapters.length;i++) if (String(rb.chapters[i].num)===String(n)) return rb.chapters[i]; return null; }
+  function sec(c,id){ var cc=ch(c); if(!cc) return null; for (var i=0;i<cc.sections.length;i++) if (cc.sections[i].id===id) return cc.sections[i]; return null; }
+  /* replace the paragraph containing `marker` inside section `s` with `text` */
+  function swap(s, marker, text){
+    if (!s || !s.paragraphs) return;
+    for (var i=0;i<s.paragraphs.length;i++){
+      if (typeof s.paragraphs[i]==="string" && s.paragraphs[i].indexOf(marker)>=0){ s.paragraphs[i]=text; return; }
+    }
+  }
+
+  /* ---- Rule 2.1 — the active roster and training camp ---- */
+  var s21 = sec(2,"2.1");
+  swap(s21, "Each club carries fifteen (15) players",
+    "Each club ices from an active roster of seventeen (17) players in a fixed positional shape: three (3) centers, three (3) left wings, three (3) right wings, three (3) left defensemen, three (3) right defensemen, and two (2) goaltenders. The active roster must at all times hold enough eligible players to ice a full 6v6 lineup, including a goaltender. A club that falls below that minimum through departures or suspensions must notify the league office immediately and restore compliance through the free agent process.");
+  swap(s21, "Every player is assigned a primary position group",
+    "Every active-roster player is assigned a position — center, left wing, right wing, left defense, right defense, or goaltender — and the assignment is binding on lineups: an active player may be dressed only at his assigned position. The single exception is a training-camp player, who may be dressed at any position for as long as he is carried in camp.");
+  swap(s21, "Training camp holds three (3) players",
+    "Training camp has no size limit: a club may carry any number of camp players beyond its seventeen active spots. A training-camp player may dress in no more than three (3) games in a game week, at any position. Management may move players between the active roster and training camp freely, provided the club still satisfies the active-roster shape above; a single player, however, may change squads with the same club no more than three (3) times in a season, counting each move in either direction. Team HQ enforces the roster shape, the position assignments, and the swap cap, and refuses any move that would breach them. A player acquired by trade joins his new club on the active roster, and his swap count starts fresh there, since the three changes are counted with one club.");
+
+  /* ---- Rule 5.2 — weekly game caps become eligibility conditions ---- */
+  var s52 = sec(5,"5.2");
+  swap(s52, "A lineup is eligible when every dressed player",
+    "A lineup is eligible when every dressed player is on the club’s confirmed roster, is not under suspension, is dressed at a position his assignment permits under Rule 2.1, is within his weekly game cap below, and satisfies the position requirements of the settings sheet, including a rostered goaltender. Dressing an ineligible player results in forfeiture of the game in which the player dressed, without prejudice to further discipline under Chapter 7.");
+  swap(s52, "A player on the pro roster has no ceiling",
+    "Weekly game caps: an active-roster player may dress in at most six (6) games in a game week; a goaltender may dress in up to nine (9) — every game his club plays on the standard three-night schedule; a training-camp player is capped at three (3) under Rule 2.1. The lineup builder counts a player’s dressed games across the week and refuses a lineup that would put anyone over his cap. There is no minimum: the league imposes no games-played floor of any kind, weekly or seasonal.");
+
+  /* ---- Rule 2.8 — every registered player is draft-eligible ---- */
+  var s28 = sec(2,"2.8");
+  swap(s28, "A first-year player is draft-eligible only after",
+    "Every player who registers by the draft-eligibility deadline enters the draft pool — there is no games-played threshold of any kind. The pre-season exists to knock off rust and to give the league office an on-ice basis for the draft order, not to gatekeep the draft. A player who registers after the deadline is not lost: he is placed on a club automatically under Rule 2.2, up until random placement closes at the movement deadline.");
+
+  /* ---- Rule 2.2 — rookie bidding gate + placement window ---- */
+  var s22 = sec(2,"2.2");
+  swap(s22, "who met the five-game pre-season minimum",
+    "Free agency runs on two tracks that open together. An undrafted first-year player enters rookie bidding, a live auction: any club with an open roster spot and the cap room to carry him may bid. Bids start at $750,000 and rise in $250,000 increments; the winning club signs the player at its final bid for one season. A rookie drawing no bids may then be signed in open free agency like anyone else.");
+  swap(s22, "so it continues throughout the season and is not restricted by the movement deadline",
+    "A registered player who is neither drafted nor signed is held in the free agent pool, and no registered member is left without a place to play while placement is open. The league office automatically places an unrostered registered player — including anyone who registers after the draft-eligibility deadline or joins mid-season — onto a club that sits below a full active roster, at the league minimum salary. Automatic placement is a league-office action to fill a vacancy, not a club-initiated signing — but it shares the movement deadline’s cutoff: random placement of new players closes at the deadline (Rule 2.4), and a player who registers after it waits for the next season’s draft pool unless a club signs him through free agency while it remains open.");
+  var s24 = sec(2,"2.4");
+  swap(s24, "which fills a vacancy rather than reshaping a roster",
+    "The movement deadline restricts club-initiated signings, trades, and releases — and it is also the moment automatic placement closes: the league office does not randomly place newly registered players after the deadline, so late-season rosters are shaped only by what clubs did before it. A contracted player who registers is returned to his own club at any time under Rule 2.5; that is a contract right, not a placement, and no deadline touches it.");
+
+  /* ---- Chapter 0 — the walk-through catches up ---- */
+  swap(sec(0,"0.3"), "Automatic placement under Rule 2.2 routes every unrostered arrival",
+    "Why it works this way: a league that slams registration shut turns away players who find it a week late. Registration stays open, and automatic placement under Rule 2.2 routes an unrostered arrival onto a club that has room, at the league minimum — up until random placement closes at the movement deadline (Rule 2.4). Register after that and you enter the next season’s pool, unless a club signs you while free agency remains open.");
+  swap(sec(0,"0.4"), "It gives every first-year player the five games",
+    "The pre-season does two jobs at once, which is why it exists. It lets every player — new and returning — shake off rust in real games before anything counts; and its results give the league office a fair, on-ice basis for setting the draft order. Pre-season games count toward a player’s overall rating but never toward the regular-season standings or the playoff race.");
+  swap(sec(0,"0.6"), "Ten minutes after the final draft pick",
+    "Every player who registered by the deadline is draft-eligible — there is no games-played requirement — so the draft itself covers the whole on-time pool. Free agency opens about a day after the draft and runs one full week: undrafted first-years go through rookie bidding, and every other free agent signs at negotiated salaries under the cap (Rule 2.2, Rule 2.5). The regular season does not start until free agency closes, so every club begins game one with a settled roster rather than scrambling to fill holes in the first week.");
+  var s07 = sec(0,"0.7");
+  swap(s07, "runs six game-weeks",
+    "The regular season starts the Wednesday after free agency closes, on the shape published in Rule 3.1 — the number of weeks, nights and games per club is set season by season and stated there. Game weeks holding a league-observed holiday are skipped entirely, so no one is asked to play on a holiday; the commissioner chooses each season’s observed holidays in the Control Center. Partway through the season a movement deadline freezes club-initiated signings, trades, and new-player placement (Rule 2.4), so the stretch run is contested with settled rosters.");
+  swap(sec(0,"0.8"), "A player must have appeared in at least thirty percent",
+    "Two rules keep the postseason honest. Series are decided on depth: no skater may appear in more than four (4) games of any single series (Rule 8.3), so one dominant line cannot carry a club alone — while goaltenders are exempt and may play every game if needed, because a club carries only two. There is no games-played floor: every rostered player is playoff-eligible.");
+
+  /* ---- Rule 3.1 — the holiday sentence follows the setting ---- */
+  var s31 = sec(3,"3.1");
+  swap(s31, "Game-weeks that fall on Christmas, Canada Day, or United States Independence Day are skipped",
+    (function(){
+      /* keep the auto-synced season-shape sentence intact; only the holiday clause changes */
+      var p = null, i;
+      var ss = sec(3,"3.1");
+      for (i=0;i<ss.paragraphs.length;i++) if (ss.paragraphs[i].indexOf("Game-weeks that fall on")>=0) { p = ss.paragraphs[i]; break; }
+      if (!p) return "";
+      return p.replace(/Game-weeks that fall on Christmas, Canada Day, or United States Independence Day are skipped\./,
+        "Game-weeks holding a league-observed holiday are skipped in full; the commissioner sets each season’s observed holidays, and the schedule as generated already reflects them.");
+    })());
+
+  /* ---- Rule 8.3 — no floor; the series cap is skaters-only ---- */
+  var s83 = sec(8,"8.3");
+  swap(s83, "Playoff eligibility requires a player to have appeared in at least thirty percent",
+    "There is no games-played requirement for the playoffs: every player on the club’s roster is playoff-eligible. A player must be on the club’s roster at the movement deadline under Rule 2.4 and must not be under suspension for the game in question — nothing more.");
+  swap(s83, "No player may appear in more than four (4) games",
+    "No skater may appear in more than four (4) games of any single playoff series, regardless of series length — in a seven-game series a club needs its depth, and one dominant line cannot carry it alone. Goaltenders are exempt: a goaltender may play every game of a series if needed, because the active roster carries only two. Dressing a skater for a fifth game of a series is treated as dressing an ineligible player under Rule 5.2 and forfeits the game.");
+
+  rb.changelog.unshift({
+    version: "2.7", dateIso: "2026-08-03",
+    summary: "The roster rework. The active roster is now a fixed seventeen — 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen, 2 goaltenders — and training camp is unlimited (Rule 2.1). Weekly game caps arrive: camp players dress in up to 3 games a week at any position, active players up to 6, goaltenders up to 9 (Rule 5.2). Every minimum-games rule is abolished — the five-game draft threshold (Rule 2.8) and the 30% playoff floor (Rule 8.3) are gone; every registered player is draft-eligible and every rostered player is playoff-eligible. Random placement of new players now closes at the movement deadline (Rules 2.2, 2.4). The playoff series cap is restated: four games per series for skaters, with goaltenders exempt and able to play all seven if needed (Rule 8.3)."
+  });
+})();

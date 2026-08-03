@@ -1,6 +1,6 @@
 // POST /api/pickup-import  — import an EASHL club-match box score as a PICKUP game.
 // Pickup stats live in their own tables (pickup_games / pickup_stats) and are DISPLAY-ONLY:
-// no league rule (5-game minimum, eligibility, overall, standings, leaders) ever reads them.
+// no league rule (eligibility, overall, standings, leaders) ever reads them.
 //
 // Actions (JSON body { action, ... }, caller must send Authorization: Bearer <supabase user JWT>):
 //   { action: "search",  clubName }            -> [{ clubId, name, memberCount }]

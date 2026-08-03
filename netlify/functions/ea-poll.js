@@ -76,9 +76,9 @@ export default async () => {
 
     const clubs = [...new Set((await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id`)).map((t) => String(t.ea_club_id)).filter(Boolean))];
     if (!clubs.length) {
-      /* NOT ok. Without a single linked club no box score can ever import, no first-year reaches
-         the five-game draft threshold, and draft night silently degrades to random placement. This
-         is the one skip that must show red rather than pass quietly. */
+      /* NOT ok. Without a single linked club no box score can ever import — no scores, no stats,
+         no standings, and no on-ice basis for the draft order. This is the one skip that must
+         show red rather than pass quietly. */
       await recordResult("ea-poll", { ok: false, errCount: 1,
         lastError: "No club has an ea_club_id — the EA import cannot run. Link each club's EA id in Control Center → Clubs.",
         linkedClubs: 0, at: new Date().toISOString() });

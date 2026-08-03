@@ -455,7 +455,7 @@ CG.deskTransactions = function(){
   });
   var clubs = Object.keys(byClub).sort();
   var over = clubs.filter(function(c){ return byClub[c].used > cap; });
-  var rosterMax = (CG.SEASON && CG.SEASON.roster_max) || 15;
+  var rosterMax = (CG.SEASON && CG.SEASON.roster_max) || 17;
   var short = clubs.filter(function(c){ return byClub[c].n < rosterMax; });
 
   /* deskHead escapes the eyebrow and title — pass raw text, not pre-escaped entities. */

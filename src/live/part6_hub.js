@@ -744,13 +744,13 @@ CG.AFTER._lineup = function(){
 CG.mgmtTag = function(role){ return role==="owner"?"Owner":role==="gm"?"GM":role==="agm"?"AGM":""; };
 /* playoff-eligibility floor (Rule 8.3): a player must appear in at least this
    share of the club's regular-season games — fractions round up. No weekly max. */
-CG.PLAYOFF_MIN_PCT = 0.30;
+/* v2.7: the 30% playoff floor is abolished — every rostered player is playoff-eligible. */
 CG.clubSeasonGames = function(club){
   var n = (CG.lg.schedule||[]).filter(function(g){
     return (g.stage||"regular")==="regular" && (g.home===club || g.away===club); }).length;
   return n || CG.GAMES_PER_CLUB || 54;
 };
-CG.playoffMinGames = function(club){ return Math.ceil(CG.PLAYOFF_MIN_PCT * CG.clubSeasonGames(club)); };
+
 CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||pos==="RD") ? "D" : "F"; };
 /* Rule 2.1 — pro roster 2 G / 4 D / 6 F, training camp 3, and no player may
    change squads more than 3 times a season. The database enforces all three
@@ -818,52 +818,52 @@ CG.hubRoster = function(qs){
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
           '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
-    var gp = (lg.pstats[p.id]||{}).gp||0, minGp = CG.playoffMinGames(club), elig = gp >= minGp;
+    var gp = (lg.pstats[p.id]||{}).gp||0;
     return '<tr'+(waived?' style="opacity:.55"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
       '<td class="tnum">'+p.pos+'</td>'+
       '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
       '<td class="tnum" data-v="'+(p.salary||0)+'"><b>'+CG.fmtMoney(p.salary)+'</b></td>'+
       '<td class="tnum">'+p.term+' yr'+(p.term>1?"s":"")+'</td>'+
-      '<td class="tnum" data-v="'+gp+'">'+(elig
-        ? gp+' <span class="chip chip-win" style="font-size:9px" title="Meets the 30% playoff-eligibility floor">PLAYOFF OK</span>'
-        : gp+' <span class="caption">of '+minGp+'</span>')+'</td>'+
+      '<td class="tnum" data-v="'+gp+'">'+gp+'</td>'+
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
   }).join("");
   var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !CG.isWaived(p.id); });
   var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !CG.isWaived(p.id); });
   if (roster.some(function(p){ return p.spotId; })){
-    var gN=proSq.filter(function(p){return CG.posGroup(p.pos)==="G";}).length;
-    var dN=proSq.filter(function(p){return CG.posGroup(p.pos)==="D";}).length;
-    var fN=proSq.filter(function(p){return CG.posGroup(p.pos)==="F";}).length;
+    /* Rule 2.1 (v2.7): the active roster is quota'd by EXACT position — 3C/3LW/3RW/3LD/3RD/2G. */
+    var posN = function(p0){ return proSq.filter(function(p){ return p.pos===p0; }).length; };
     function meter(label,nv,cap){
-      var over = nv>cap;
-      return '<div><b class="num" style="font-size:22px;color:'+(over?"var(--red)":"inherit")+'">'+nv+' / '+cap+'</b>'+
+      var over = cap!=null && nv>cap;
+      return '<div><b class="num" style="font-size:22px;color:'+(over?"var(--red)":"inherit")+'">'+nv+(cap!=null?' / '+cap:'')+'</b>'+
         '<span class="caption" style="display:block">'+label+'</span></div>';
     }
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp</span></div><div class="card-b">'+
-      '<div style="display:flex;gap:26px;flex-wrap:wrap">'+meter("goaltenders",gN,2)+meter("defensemen",dN,4)+
-      meter("forwards",fN,6)+meter("training camp",tcSq.length,3)+'</div>'+
-      '<p class="caption" style="margin-top:12px">Rule 2.1 — the pro roster carries 2 goaltenders, 4 defensemen and 6 forwards; training camp holds 3. '+
-      'Camp players may dress in at most 3 games a week and can fill any position, while everyone else plays only their own. '+
+      '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("centers",posN("C"),3)+meter("left wings",posN("LW"),3)+
+      meter("right wings",posN("RW"),3)+meter("left D",posN("LD"),3)+meter("right D",posN("RD"),3)+
+      meter("goaltenders",posN("G"),2)+meter("training camp",tcSq.length,null)+'</div>'+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp has no size limit. '+
+      'Camp players may dress in up to 3 games a week at any position; active players play their own position, up to 6 games a week (goaltenders up to 9). '+
       'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';
   }
-  var seasonGames = CG.clubSeasonGames(club), minGames = CG.playoffMinGames(club);
-  var eligN = roster.filter(function(p){ return ((lg.pstats[p.id]||{}).gp||0) >= minGames; }).length;
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Playoff eligibility</h3>'+
-    '<span class="chip">'+eligN+' of '+roster.length+' eligible</span></div><div class="card-b">'+
+  /* v2.7: the 30% playoff floor is abolished — every rostered player is playoff-eligible. The
+     card now states the caps that DO exist rather than a floor that doesn't. */
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
+    '<span class="chip chip-win">every rostered player is playoff-eligible</span></div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
-      '<div><b class="num" style="font-size:22px">'+Math.round(CG.PLAYOFF_MIN_PCT*100)+'%</b><span class="caption" style="display:block">of the regular season</span></div>'+
-      '<div><b class="num" style="font-size:22px">'+minGames+'</b><span class="caption" style="display:block">games minimum (of '+seasonGames+')</span></div></div>'+
-    '<p class="caption" style="margin-top:12px">A player must appear in at least '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% of the club’s regular-season games to dress in the playoffs — that’s '+minGames+' this season, fractions rounded up. There’s no weekly maximum: anyone can play every game. In the playoffs, no player may appear in more than four games of a single series (Rule 8.3).</p></div></div>';
+      '<div><b class="num" style="font-size:22px">6</b><span class="caption" style="display:block">games a week — active players</span></div>'+
+      '<div><b class="num" style="font-size:22px">9</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
+      '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
+      '<div><b class="num" style="font-size:22px">4</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
+    '<p class="caption" style="margin-top:12px">There is no games-played minimum, weekly or seasonal (Rule 5.2). In the playoffs no skater may appear in more than four games of a single series; goaltenders are exempt and can play all seven if needed (Rule 8.3).</p></div></div>';
   h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
-    '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff floor">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
+    '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">GP counts toward the '+Math.round(CG.PLAYOFF_MIN_PCT*100)+'% playoff-eligibility floor ('+minGames+' games). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him to the free-agent pool immediately and clears his cap hit; any club may then sign him under the free-agency rules (Rule 2.2).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him to the free-agent pool immediately and clears his cap hit; any club may then sign him under the free-agency rules (Rule 2.2).</span></div></div>';
   return h;
 };
 CG.AFTER._roster = function(){
