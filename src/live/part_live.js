@@ -5632,9 +5632,26 @@ CG.staffAttentionCard = function(){
   if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
   if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
 
+  /* Season readiness — things that must be TRUE before a date, not tickets waiting to be worked.
+     The card counted only reactive work, so it read "All clear" for the seventeen days the EA
+     importer sat dead with no club linked: the one condition that, unfixed by pre-season, turns
+     draft night into silent random placement. A deadline getting closer is not an empty queue. */
+  var dp = a.days_to_preseason, dd = a.days_to_draft;
+  var by = function(days, what){ return days==null ? "" : " · "+(days===0?"today":days+"d to "+what); };
+  if (n(a.clubs_missing_ea_id)>0)
+    items.push({ label:n(a.clubs_missing_ea_id)+" club"+(n(a.clubs_missing_ea_id)===1?"":"s")+
+      " not linked to an EA club — no stats can import"+by(dp,"pre-season"),
+      go:"#/admin/teams", warn:true });
+  if (n(a.clubs_without_owner)>0)
+    items.push({ label:n(a.clubs_without_owner)+" club"+(n(a.clubs_without_owner)===1?"":"s")+
+      " without an owner"+by(dd,"the draft"), go:"#/admin/teams", warn:true });
+  if (n(a.registrants_missing_ea_id)>0)
+    items.push({ label:n(a.registrants_missing_ea_id)+" registered player"+(n(a.registrants_missing_ea_id)===1?"":"s")+
+      " with no EA id — their box scores cannot be attributed", go:"#/admin/players", warn:false });
+
   if (!items.length){
     return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
-      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, votes, or imports need attention right now.</span></div>';
+      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, votes, or imports need attention — and the season pipeline is ready.</span></div>';
   }
   return '<div class="card" style="margin-bottom:20px;border-color:var(--chrome)"><div class="card-h" style="background:var(--chrome-tint)">'+
     '<h3>'+CG.ic("flag",15)+' Needs attention</h3>'+

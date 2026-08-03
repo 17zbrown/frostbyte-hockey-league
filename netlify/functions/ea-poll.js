@@ -66,10 +66,24 @@ export default async () => {
   try {
     // Only poll during the league's game window: Wed 6pm ET -> Sat 2am ET (continuous, every week).
     // Enforced in America/New_York so it stays correct across daylight saving (a fixed-UTC cron can't).
-    if (!inGameWindow()) return json({ skipped: "outside game window (Wed 6pm - Sat 2am ET)" });
+    if (!inGameWindow()) {
+      /* Record the skip. Returning silently left rl_ea-poll_result showing the last SUCCESSFUL run,
+         so the Automations chip and the watchdog read green while the poller had done nothing for
+         seventeen days — "the function runs" and "the pipeline works" were indistinguishable. */
+      await recordResult("ea-poll", { ok: true, skipped: "outside game window", at: new Date().toISOString() });
+      return json({ skipped: "outside game window (Wed 6pm - Sat 2am ET)" });
+    }
 
     const clubs = [...new Set((await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id`)).map((t) => String(t.ea_club_id)).filter(Boolean))];
-    if (!clubs.length) return json({ skipped: "no teams have an ea_club_id set" });
+    if (!clubs.length) {
+      /* NOT ok. Without a single linked club no box score can ever import, no first-year reaches
+         the five-game draft threshold, and draft night silently degrades to random placement. This
+         is the one skip that must show red rather than pass quietly. */
+      await recordResult("ea-poll", { ok: false, errCount: 1,
+        lastError: "No club has an ea_club_id — the EA import cannot run. Link each club's EA id in Control Center → Clubs.",
+        linkedClubs: 0, at: new Date().toISOString() });
+      return json({ skipped: "no teams have an ea_club_id set", ok: false });
+    }
 
     // Use undici's OWN fetch (uFetch) below, not Node's global fetch: on Node 24 the global fetch
     // silently drops the `dispatcher` option, so the ProxyAgent is ignored and EA sees the datacenter
@@ -122,9 +136,15 @@ function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, 
 
 // League game window: Wed 6:00pm ET -> Sat 2:00am ET, continuous. DST-safe (evaluated in ET).
 function inGameWindow() {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hour12: false }).formatToParts(new Date());
-  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[parts.find((x) => x.type === "weekday").value];
-  const hr = (+parts.find((x) => x.type === "hour").value) % 24;
+  /* Wednesday 6pm through Saturday 2am ET. Deliberately wider than the current schedule: a poll
+     that runs when no game exists costs one cheap query, while a poll that does NOT run when a
+     game just finished loses that box score until someone notices. The schedule's night pattern is
+     a per-season setting now, so widening beats trying to track it here. */
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hour12: false })
+    .formatToParts(new Date());
+  const wdName = (p.find((x) => x.type === "weekday") || {}).value;
+  const hr = +((p.find((x) => x.type === "hour") || {}).value || 0);
+  const wd = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wdName];
   if (wd === 3) return hr >= 18;          // Wednesday from 6pm ET
   if (wd === 4 || wd === 5) return true;  // all of Thursday and Friday
   if (wd === 6) return hr < 2;            // Saturday until 2am ET
