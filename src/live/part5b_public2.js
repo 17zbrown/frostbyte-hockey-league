@@ -210,11 +210,18 @@ CG.rulebookShapeSync = function(rb){
   var line = "The CGHL regular season runs " + word(sh.weeks) + " (" + sh.weeks + ") game-weeks \u2014 " +
     word(sh.nights) + " nights a week, " + nights + ", " + word(sh.perNight) + " games a night, for " +
     sh.perClub + " games per club \u2014";
+  /* The clause is delimited by TWO em-dashes and the replacement contains both, so the pattern has
+     to consume through the second one. A lazy match to the first dash left the original middle
+     clause in place and re-inserted a fresh copy on every render — and because this mutates the
+     shared CG.CONTENT.rulebook, the sentence grew a duplicate each time the page was opened. */
+  var RE = /^The CGHL regular season runs [\s\S]*?\u2014[\s\S]*?\u2014/;
   (rb.chapters || []).forEach(function(ch){
     (ch.sections || []).forEach(function(sec){
       (sec.paragraphs || []).forEach(function(t, i){
-        if (typeof t === "string" && t.indexOf("The CGHL regular season runs") === 0)
-          sec.paragraphs[i] = t.replace(/^The CGHL regular season runs [\s\S]*?\u2014/, line);
+        if (typeof t !== "string" || t.indexOf("The CGHL regular season runs") !== 0) return;
+        if (!RE.test(t)) return;                       /* unrecognised shape — leave it alone */
+        var next = t.replace(RE, line);
+        if (next !== t) sec.paragraphs[i] = next;      /* no-op when already correct */
       });
     });
   });
