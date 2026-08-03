@@ -3646,3391 +3646,6 @@ CG.preseasonRandomAssign = function(){
   });
 };
 
-CG.preseasonRelease = function(){
-  var s=CG.SEASON; if (!s || !s.id) return;
-  var n=(CG.lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
-  CG.confirm("Release all "+n+" random pre-season assignments?",
-    "This is what happens automatically when the final pre-season game ends — use it early only if you mean to. "+
-    "Players return to the draft pool; their pre-season stats and eligibility are kept. Management and manually signed players stay put.",
-    "Release to draft pool", function(){
-    CG.sb.from("roster_spots").delete().eq("season_id",s.id).eq("origin","preseason_random").select("profile_id").then(function(r){
-      if (r.error){ CG.toast("Couldn’t release: "+r.error.message,"err"); return; }
-      var ids=(r.data||[]).map(function(x){ return x.profile_id; });
-      var after=function(){
-        CG.sb.from("transactions").insert({ season_id:s.id, type:"release",
-          description:"Pre-season complete — "+ids.length+" randomly assigned players returned to the draft pool" }).then(function(){
-          CG.toast(ids.length+" players released to the draft pool","ok"); CG.reloadLeague();
-        });
-      };
-      if (ids.length) CG.sb.from("season_registrations").update({ status:"pending" }).eq("season_id",s.id).in("profile_id",ids).then(after);
-      else { CG.toast("Nothing to release","ok"); CG.reloadLeague(); }
-    });
-  });
-};
-
-CG.distributeRookies = function(){
-  var lg=CG.lg, s=CG.SEASON; if (!s || !s.id) return;
-  var rosteredIds=lg._rosteredIds||{};
-  var rookies=(lg._registrationsRaw||[]).filter(function(r){
-    return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined" &&
-      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
-  });
-  if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
-  CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
-    "This runs on its own ten minutes after the draft’s final pick — the button forces it early or re-runs it by hand. "+
-    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot, "+
-    "so rosters are settled before free agency and nobody can park a prospect to poach them later.",
-    "Distribute rookies", function(){
-    CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
-      if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
-      CG.toast((r.data||0)+" rookie"+((r.data||0)===1?"":"s")+" placed on random clubs","ok"); CG.reloadLeague();
-    });
-  });
-};
-/* Late sign-ups (registered after the draft-eligibility cutoff) + anyone who joins mid-season are
-   randomly assigned to a club with an open spot. Runs on its own every 5 min; this forces it. */
-CG.assignLatecomers = function(){
-  CG.confirm("Assign late sign-ups now?",
-    "Everyone who registered after the sign-up deadline (or joined mid-season) and isn’t on a club yet "+
-    "goes to the emptiest club with an open roster spot. This also runs automatically every few minutes — "+
-    "the button just forces it. Puck-drop rosters are never blocked by a late arrival.",
-    "Assign late sign-ups", function(){
-    CG.sb.rpc("auto_assign_latecomers",{ p_force:true }).then(function(r){
-      if (r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
-      CG.toast((r.data||0)+" late sign-up"+((r.data||0)===1?"":"s")+" placed on clubs","ok"); CG.reloadLeague();
-    });
-  });
-};
-/* Decline / reinstate a registration (keeps banned or duplicate accounts out of assignment + the draft). */
-CG.setRegStatus = function(regId, status, name){
-  CG.sb.from("season_registrations").update({status:status}).eq("id",regId).then(function(r){
-    if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-    CG.toast((name||"Registration")+(status==="declined"?" declined":" reinstated"),"ok");
-    var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===regId;}); if(reg)reg.status=status;
-    CG.reloadLeague();
-  });
-};
-
-CG.assignRegistration = async function(regId, profileId, position, playerName, code){
-  var s=CG.SEASON, teamId=(CG.lg._codeToId||{})[code];
-  if(!s||!teamId){ CG.toast("Missing season/club","err"); return; }
-  var used={}; (CG.lg.byTeam[code]||[]).forEach(function(p){ if(p.jersey) used[p.jersey]=1; });
-  var num=0; for(var n=1;n<=99;n++){ if(!used[n]){ num=n; break; } }
-  var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 });
-  if(r1.error){ CG.toast("Couldn’t sign: "+r1.error.message,"err"); return; }
-  await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId);
-  await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" });
-  /* optimistic local update so the view reflects it immediately */
-  CG.lg._rosteredIds[profileId]=true;
-  if(CG.lg.byTeam[code]) CG.lg.byTeam[code].push({ id:profileId, tag:playerName, team:code, pos:position, jersey:num, mgmt:null, salary:0, depth:9 });
-  CG.toast(playerName+" signed to "+CG.TEAM[code].name+" · #"+num,"ok");
-  CG.router();
-};
-CG.setOwnerAppStatus = async function(id, status){
-  var r = await CG.sb.from("owner_applications").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id);
-  if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-  var app=(CG.lg._ownerApps||[]).find(function(x){ return x.id===id; }); if(app) app.status=status;
-  CG.toast("Application "+status,"ok"); CG.router();
-};
-/* ================================================================
-   LIVE ADMIN: USERS & ROLES (set_member_role / set_team_manager / ban)
-   ================================================================ */
-CG.admUsersLive = function(){
-  var lg=CG.lg;
-  var profs=(lg._profilesRaw||[]).slice().sort(function(a,b){ return (a.gamertag||a.display_name||"").localeCompare(b.gamertag||b.display_name||""); });
-  var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
-  /* management from the team registry, not roster spots — a manager without a
-     roster spot still holds the seat */
-  var mgmtBy={}; (CG.TEAMS||[]).forEach(function(t){
-    if(t.owner) mgmtBy[t.owner]={club:t.code, role:"owner"};
-    if(t.gm)    mgmtBy[t.gm]   ={club:t.code, role:"gm"};
-    if(t.agm)   mgmtBy[t.agm]  ={club:t.code, role:"agm"};
-  });
-  var banned=profs.filter(function(p){ return p.banned; }).length;
-  var staffN=profs.filter(function(p){ return p.role==="staff"; }).length;
-  function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
-  /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
-     (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
-  /* Media-only staff are expressly allowed a club seat (Rule 2.7), so they aren't a conflict */
-  var conflicts = profs.filter(function(pr){
-    return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id] && !CG.isMediaOnly(pr);
-  });
-  var mediaSeated = profs.filter(function(pr){ return CG.isMediaOnly(pr) && mgmtBy[pr.id]; });
-  h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation.</b> '+
-    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). '+
-    '<b>Media is the exception</b> (Rule 2.7): staff whose only department is Media may run a club, because Media rules on nothing. A commissioner can override the rest when there’s a reason to. '+
-    'Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
-    (mediaSeated.length?' <span style="display:block;margin-top:8px">Media staff running a club (allowed): '+
-      mediaSeated.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+
-    (conflicts.length?' <span style="display:block;margin-top:8px">Holding both hats right now (grandfathered for Season 1): '+
-      conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
-  h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+profs.filter(function(p){return p.role==="commissioner";}).length+'</b><span>commissioners</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+staffN+'</b><span>staff</span></div></div>';
-  h+='<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">'+
-    '<input type="search" id="userSearch" placeholder="Search players…" style="flex:1;min-width:200px" aria-label="Search users">'+
-    '<button class="btn btn-ghost btn-sm" id="bannedToggle" aria-pressed="false" style="white-space:nowrap">Banned only ('+banned+')</button></div>';
-  h+='<div class="card"><div class="card-h"><h3>Members</h3><span class="chip">'+profs.length+'</span></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
-    profs.map(function(pr){
-      var pl=playerById[pr.id], mg=mgmtBy[pr.id]||null, club=pl?pl.team:(mg?mg.club:null), mgmt=mg?mg.role:null;
-      var sus=(lg.suspensions||[]).find(function(s){ return s.playerId===pr.id && s.status==="active"; });
-      var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
-      return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
-        '<td class="tleft"><span class="playercell">'+(CG.safeAvatar(pr.avatar_url)?'<img src="'+CG.safeAvatar(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
-        '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
-        '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
-        '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
-        '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
-          '<button class="btn btn-ghost btn-sm" data-uedit="'+pr.id+'">Edit</button>'+
-          (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
-              :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
-          (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
-        '</span></td></tr>';
-    }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. To make a member a club’s Owner, GM or AGM — or clear a seat — open that club under Teams and use its Front office pickers. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
-  return h;
-};
-CG.setUserRole = function(profileId, role, selEl){
-  var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; });
-  var prev = pr ? pr.role : null;
-  var name = pr ? (pr.gamertag||pr.display_name||"this member") : "this member";
-  if (selEl && prev) selEl.value = prev;   /* revert the visible dropdown now; a confirmed change re-renders on reload */
-  var roleLabel = role==="commissioner"?"Commissioner":role==="staff"?"Staff":"Member";
-  CG.confirm("Make "+esc(name)+" a "+roleLabel+"?",
-    role==="commissioner" ? "Commissioners have full league control and can’t hold a club seat. The last commissioner can’t be demoted."
-    : role==="staff" ? "Staff work the case queue and reviews, and can’t own or manage a club."
-    : "Member is a normal player account.",
-    "Set role", function(){
-    CG.sb.rpc("set_member_role",{ p_target:profileId, p_role:role, p_team_code:null }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t set role: "+r.error.message,"err"); return; }
-      if(pr) pr.role=role;
-      CG.toast(esc(name)+" is now "+roleLabel,"ok"); CG.reloadLeague();
-    });
-  });
-};
-/* Club-role assignment now lives on each club's edit page (CG.teamForm → Front office) via
-   type-ahead member pickers; the old per-user modals were removed with those buttons. */
-CG.suspendUser = function(profileId, name){
-  CG.modal("Suspend "+esc(name),
-    '<label class="fld"><span>Reason (shown on the profile’s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.2 — abusive conduct in lobby"></textarea></label>'+
-    '<div class="grid g2" style="gap:12px;margin-top:4px">'+
-    '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
-    '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
-    '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
-    '<p class="caption">A suspended member can’t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
-  var modeSel=document.getElementById("susMode");
-  modeSel.addEventListener("change", function(){
-    var byDate=this.value==="date";
-    document.getElementById("susGamesWrap").style.display=byDate?"none":"";
-    document.getElementById("susDateWrap").style.display=byDate?"":"none";
-  });
-  document.getElementById("susGo").addEventListener("click", function(){
-    var reason=(document.getElementById("susReason").value||"").trim();
-    if(!reason){ CG.toast("Give the suspension a reason — it’s the league record","err"); return; }
-    var mode=modeSel.value, games=null, ends=null;
-    if (mode==="games"){
-      games=parseInt(document.getElementById("susGames").value,10);
-      if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
-    } else {
-      var v=document.getElementById("susDate").value;
-      if(!v){ CG.toast("Pick the end date","err"); return; }
-      ends=CG.etISO(v.slice(0,10), v.slice(11,16));
-    }
-    var btn=this; btn.disabled=true;
-    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay) CG.closeOverlay();
-      CG.toast(name+" suspended "+(mode==="games"?"for "+games+" game"+(games===1?"":"s"):"until "+CG.fmtFull(Date.parse(ends))),"ok");
-      CG.reloadLeague();
-    });
-  });
-};
-CG.liftUserSuspension = function(susId, name){
-  CG.confirm("Lift "+esc(name)+"’s suspension?","They can be rostered and make moves again immediately. The record stays on their profile as served.","Lift suspension", function(){
-    CG.sb.rpc("lift_suspension",{ p_id:susId }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t lift: "+r.error.message,"err"); return; }
-      CG.toast(name+"’s suspension lifted","ok"); CG.reloadLeague();
-    });
-  });
-};
-CG.banUser = function(profileId, name){
-  CG.modal("Ban "+esc(name)+"?",
-    '<label class="fld"><span>Reason (shown to the member)</span><textarea id="banReason" rows="2" placeholder="e.g. repeated conduct violations"></textarea></label>'+
-    '<p class="caption">Bans remove site access and remove the member from the Chel Gaming Discord. Reversible with Unban.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="banGo">Ban member</button>');
-  document.getElementById("banGo").addEventListener("click", function(){
-    var reason=(document.getElementById("banReason").value||"").trim();
-    CG.sb.rpc("ban_player",{ p_profile:profileId, p_reason:reason }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t ban: "+r.error.message,"err"); return; }
-      var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr){ pr.banned=true; pr.ban_reason=reason; }
-      if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" banned","ok"); CG.router();
-    });
-  });
-};
-CG.unbanUser = function(profileId){
-  CG.sb.rpc("unban_player",{ p_profile:profileId }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t unban: "+r.error.message,"err"); return; }
-    var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr) pr.banned=false;
-    CG.toast("Member unbanned","ok"); CG.router();
-  });
-};
-/* Full profile editor — every identity field the office might need to correct.
-   Saved with .select() so an RLS-blocked write fails loud instead of toasting
-   success over nothing (the case-system lesson). */
-CG.userEditModal = function(id){
-  var pr = (CG.lg._profilesRaw||[]).find(function(p){ return p.id===id; });
-  if (!pr){ CG.toast("Profile not found — reload and try again","err"); return; }
-  var nm = pr.gamertag||pr.display_name||"member";
-  function fld(label,fid,val,attrs){ return '<label class="fld"><span>'+label+'</span><input id="'+fid+'" value="'+esc(val==null?"":val)+'" '+(attrs||"")+'></label>'; }
-  CG.modal("Edit player — "+esc(nm),
-    '<div class="grid g2" style="gap:12px">'+
-    fld("Gamertag","ueGT",pr.gamertag)+
-    fld("Display name","ueDN",pr.display_name)+
-    fld("EA gamertag (exact)","ueEA",pr.ea_id,'placeholder="as it appears in NHL"')+
-    '<label class="fld"><span>Platform</span><select id="uePlat">'+
-      ["","PlayStation 5","Xbox Series X|S","PC"].map(function(p){ return '<option value="'+esc(p)+'"'+((pr.platform||"")===p?" selected":"")+'>'+(p||"—")+'</option>'; }).join("")+
-      '</select></label>'+
-    fld("Time zone","ueTZ",pr.timezone,'placeholder="e.g. Eastern"')+
-    fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
-    fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
-    fld("Twitch channel","ueTw",pr.twitch,'placeholder="channel name only"')+
-    '</div>'+
-    '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ueGo">Save player</button>');
-  document.getElementById("ueGo").addEventListener("click", function(){
-    var jer = parseInt(document.getElementById("ueJer").value,10);
-    var ovr = parseInt(document.getElementById("ueOvr").value,10);
-    var payload = {
-      gamertag:(document.getElementById("ueGT").value||"").trim()||null,
-      display_name:(document.getElementById("ueDN").value||"").trim()||null,
-      ea_id:(document.getElementById("ueEA").value||"").trim()||null,
-      platform:document.getElementById("uePlat").value||null,
-      timezone:(document.getElementById("ueTZ").value||"").trim()||null,
-      jersey_number:isNaN(jer)?null:Math.max(1,Math.min(99,jer)),
-      overall:isNaN(ovr)?null:Math.max(40,Math.min(99,ovr)),
-      twitch:(document.getElementById("ueTw").value||"").trim()||null
-    };
-    if (!payload.gamertag){ CG.toast("A player needs a gamertag","err"); return; }
-    var btn=this; btn.disabled=true;
-    CG.sb.from("profiles").update(payload).eq("id",id).select("id").then(function(r){
-      btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (!r.data || !r.data.length){ CG.toast("The database refused the edit (no row updated) — check your seat and retry","err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast("Player saved","ok");
-      CG.reloadLeague();
-    });
-  });
-};
-CG.AFTER._admUsers = function(){
-  document.querySelectorAll("[data-uedit]").forEach(function(b){
-    b.addEventListener("click", function(){ CG.userEditModal(this.getAttribute("data-uedit")); });
-  });
-  var search=document.getElementById("userSearch"), bannedBtn=document.getElementById("bannedToggle");
-  function applyFilter(){
-    var qy=(search&&search.value||"").toLowerCase();
-    var bannedOnly = bannedBtn && bannedBtn.getAttribute("aria-pressed")==="true";
-    var shown=0;
-    document.querySelectorAll("#usersBody tr").forEach(function(tr){
-      var hit = tr.getAttribute("data-user-name").indexOf(qy)>=0 &&
-                (!bannedOnly || tr.getAttribute("data-user-banned")==="1");
-      tr.style.display = hit ? "" : "none";
-      if (hit) shown++;
-    });
-    var empty=document.getElementById("usersEmpty");
-    if (!shown && !empty){
-      empty=document.createElement("div");
-      empty.id="usersEmpty"; empty.className="card-b";
-      empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>';
-      var tbl=document.querySelector("#usersBody").closest(".tblwrap");
-      tbl.parentNode.insertBefore(empty, tbl.nextSibling);
-    } else if (shown && empty){ empty.remove(); }
-    else if (empty){ empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>'; }
-  }
-  if(search) search.addEventListener("input", applyFilter);
-  if(bannedBtn) bannedBtn.addEventListener("click", function(){
-    var on = this.getAttribute("aria-pressed")==="true";
-    this.setAttribute("aria-pressed", on?"false":"true");
-    this.classList.toggle("btn-ink", !on);
-    this.classList.toggle("btn-ghost", on);
-    applyFilter();
-  });
-  document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value, this); }); });
-  document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-lift]").forEach(function(b){ b.addEventListener("click", function(){ CG.liftUserSuspension(this.getAttribute("data-lift"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: LEAGUES & TIERS (CG umbrella — create_league RPC)
-   ================================================================ */
-/* The tier's mark: the emblem when one is set, the TIER n plate when not.
-   The plate is always in the markup and the emblem is laid over it, so hiding a failed <img>
-   reveals the plate rather than a broken-image glyph. Hiding it is the onerror below — the
-   overlay is opaque, so without that the plate stays covered. Belt: CG.installEmblemFallback
-   does the same from a captured error event, which keeps working if inline handlers are ever
-   dropped from the CSP. */
-/* Error events on <img> don't bubble, but they can be captured — one listener covers every tier
-   mark on every page, present or future, without an inline handler. */
-CG.installEmblemFallback = function(){
-  if (CG._emblemFallback) return;
-  CG._emblemFallback = true;
-  document.addEventListener("error", function(e){
-    var el = e.target;
-    if (el && el.tagName === "IMG" && el.classList && el.classList.contains("tier-img")) el.style.display = "none";
-  }, true);
-};
-CG.tierPlate = function(l, size){
-  CG.installEmblemFallback();
-  return '<span class="tier-plate">'+
-      '<span class="tp-label">TIER</span>'+
-      '<b class="tp-num" style="font-size:'+(size|0)+'px">'+(l.tier|0)+'</b>'+
-    '</span>'+
-    (l.emblem ? '<img class="tier-img" src="'+esc(l.emblem)+'" alt="'+esc(l.code)+' emblem"'+
-                ' onerror="this.style.display=\'none\'">' : "");
-};
-/* The tier block doubles as the emblem slot in the Control Center: click it or drop an image on
-   it to change that tier's emblem. Saves on upload rather than behind a Save button — it's one
-   field, and a half-applied emblem is a worse state than no emblem. */
-CG.leagueEmblemZone = function(l){
-  return '<div class="lg-emblem" data-lg-zone="'+esc(l.code)+'"'+
-    ' role="button" tabindex="0" aria-label="Change the '+esc(l.code)+' emblem" title="Click or drop an image to set the '+esc(l.code)+' emblem">'+
-    CG.tierPlate(l, 24)+
-    '<span class="lg-emblem-hint">'+(l.emblem?"Replace":"Add emblem")+'</span></div>'+
-    '<input type="file" accept="image/*" hidden data-lg-file="'+esc(l.code)+'">';
-};
-CG.admLeagues = function(){
-  var leagues=(CG.LEAGUES||[]).slice().sort(function(a,b){ return a.tier-b.tier || a.sort-b.sort; });
-  var totalClubs=(CG.TEAMS||[]).length;
-  var top=(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL";
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Leagues &amp; tiers</h2><p class="lede" style="margin-top:6px">Chel Gaming is the umbrella. Each tier is its own league modeled on a real-world circuit — the <b>'+esc(top)+'</b> sits on top, built on the NHL. Add tiers beneath it (a CGAHL on the AHL, and so on) to grow the pyramid.</p></div>';
-  h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+leagues.length+'</b><span>tier'+(leagues.length===1?"":"s")+'</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+totalClubs+'</b><span>clubs</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc(top)+'</b><span>top tier</span></div></div>';
-  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The Chel Gaming pyramid</h3><span class="chip">'+leagues.length+' tier'+(leagues.length===1?"":"s")+'</span></div>';
-  h+=leagues.map(function(l,i){
-    return '<div class="card-b" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line)":"")+'">'+
-      CG.leagueEmblemZone(l)+
-      '<div style="flex:1 1 160px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b class="mono" style="font-size:16px">'+esc(l.code)+'</b>'+(i===0?' <span class="chip chip-chrome" style="font-size:9px">TOP TIER</span>':'')+'</div><div style="color:var(--steel);font-size:13px;margin-top:2px">'+esc(l.name)+'</div></div>'+
-      '<div style="flex:0 0 auto;text-align:right"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">MODELED ON</div><b style="font-family:var(--f-disp);font-size:16px">'+esc(l.inspiration||"—")+'</b></div>'+
-      '<div style="flex:0 0 auto;text-align:right;min-width:56px"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">CLUBS</div><b class="num" style="font-family:var(--f-disp);font-size:16px">'+(l.teamCount||0)+'</b></div>'+
-      (l.emblem ? '<button class="btn btn-ghost btn-sm" data-lg-clear="'+esc(l.code)+'" style="flex:0 0 auto">Remove emblem</button>' : "")+
-    '</div>';
-  }).join("")+
-  '<div class="card-b" style="border-top:1px solid var(--line)"><p class="caption" style="margin:0">'+
-    'Click a tier plate or drop an image on it to set that tier’s emblem — PNG, JPG, WebP, GIF or SVG, under 2 MB. '+
-    'It saves straight away. The top tier’s emblem headlines the public Clubs page; the rest show here, and on '+
-    'their own pages as those are built. Tiers without an emblem keep the plain TIER plate.'+
-  '</p></div></div>';
-  var insp=["NHL","AHL","ECHL","KHL","SHL","Liiga","NCAA","CHL","OHL","WHL","QMJHL"];
-  h+='<div class="card"><div class="card-h"><h3>Add a tier</h3></div><div class="card-b">'+
-    '<div class="grid g2" style="gap:14px">'+
-    '<label class="fld"><span>League code</span><input id="lgCode" placeholder="e.g. CGAHL" maxlength="8" style="text-transform:uppercase"></label>'+
-    '<label class="fld"><span>Tier number</span><input id="lgTier" type="number" min="1" max="20" value="'+(leagues.length+1)+'"></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Full name</span><input id="lgName" placeholder="e.g. Chel Gaming American Hockey League"></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Real-world inspiration</span><input id="lgInsp" list="inspList" placeholder="e.g. AHL"><datalist id="inspList">'+insp.map(function(x){ return '<option value="'+x+'">'; }).join("")+'</datalist></label>'+
-    '</div>'+
-    '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn btn-chrome" id="lgCreate">Create tier</button></div>'+
-    '<p class="caption" style="margin-top:12px">A new tier is created empty. Clubs stay in their current league — assigning clubs to a tier (and promotion / relegation between them) is coming next.</p>'+
-  '</div></div>';
-  return h;
-};
-CG.createLeague = function(){
-  var code=(document.getElementById("lgCode").value||"").trim().toUpperCase();
-  var name=(document.getElementById("lgName").value||"").trim();
-  var tier=parseInt(document.getElementById("lgTier").value,10);
-  var insp=(document.getElementById("lgInsp").value||"").trim();
-  if(!code){ CG.toast("Give the tier a code","err"); return; }
-  if(!name){ CG.toast("Give the tier a full name","err"); return; }
-  if(!(tier>=1)){ CG.toast("Tier number must be 1 or more","err"); return; }
-  if((CG.LEAGUE_BY_CODE||{})[code]){ CG.toast(code+" already exists","err"); return; }
-  var btn=document.getElementById("lgCreate"); if(btn){ btn.disabled=true; btn.textContent="Creating…"; }
-  CG.sb.rpc("create_league",{ p_code:code, p_name:name, p_tier:tier, p_inspiration:insp||null }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); if(btn){ btn.disabled=false; btn.textContent="Create tier"; } return; }
-    CG.toast(code+" created","ok");
-    CG.loadLeagues().then(function(){ if(location.hash.indexOf("/leagues")>=0 && CG.router) CG.router(); });
-  });
-};
-/* Persist an emblem (or clear it with null) and refresh the panel from the DB, so what's on screen
-   is what's stored rather than what we hoped we stored. */
-CG.saveLeagueEmblem = function(code, url, zone){
-  return CG.sb.rpc("set_league_emblem", { p_code:code, p_url:url }).then(function(r){
-    if (r.error){
-      if (zone) zone.classList.remove("busy");
-      CG.toast(r.error.message || "Couldn’t save the emblem","err");
-      return false;
-    }
-    return CG.loadLeagues().then(function(fresh){
-      if (!fresh){
-        /* the write landed but the read-back didn't — don't repaint stale state and call it done */
-        if (zone) zone.classList.remove("busy");
-        CG.toast("Saved, but the panel couldn’t refresh — reload to see it","err");
-        return false;
-      }
-      CG.toast(url ? code+" emblem updated" : code+" emblem removed","ok");
-      if (location.hash.indexOf("/leagues")>=0 && CG.router) CG.router();
-      return true;
-    });
-  });
-};
-CG.AFTER._admLeagues = function(){
-  var b=document.getElementById("lgCreate"); if(b) b.addEventListener("click", CG.createLeague);
-  var code=document.getElementById("lgCode"); if(code) code.addEventListener("input", function(){ var s=this.selectionStart; this.value=this.value.toUpperCase(); try{ this.setSelectionRange(s,s); }catch(e){} });
-
-  /* --- tier emblems: click or drop on the tier plate --- */
-  document.querySelectorAll("[data-lg-zone]").forEach(function(zone){
-    var lgCode = zone.getAttribute("data-lg-zone");
-    var fileIn = document.querySelector('[data-lg-file="'+cssQ(lgCode)+'"]');
-    var clearBtn = document.querySelector('[data-lg-clear="'+cssQ(lgCode)+'"]');
-    function setBusy(on){
-      zone.classList.toggle("busy", !!on);
-      /* the lock has to cover the tier's Remove button too — it writes the same row through the
-         same RPC, so a clear confirmed mid-upload would race it and one of the two toasts lies */
-      if (clearBtn) clearBtn.disabled = !!on;
-    }
-    function upload(f){
-      if (!f) return;
-      /* the bucket's real allowlist, not /^image\//: an iPhone .heic passes "is an image" and is
-         then rejected by storage with a raw mime error the commissioner can do nothing with */
-      if (!CG.UPLOAD_MIME.test(f.type||"")){
-        CG.toast("Use a PNG, JPG, WebP, GIF or SVG — "+((f.type||"that file type")+" can’t be stored"),"err"); return;
-      }
-      if (f.size > 2*1024*1024){ CG.toast("Keep the emblem under 2 MB","err"); return; }
-      if (zone.classList.contains("busy")) return;            /* one upload at a time per tier */
-      setBusy(true);
-      CG.uploadLeagueEmblem(f, lgCode)
-        .then(function(url){ return CG.saveLeagueEmblem(lgCode, url, zone); })
-        .catch(function(e){
-          setBusy(false);
-          CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
-        });
-    }
-    if (fileIn){
-      zone.addEventListener("click", function(){ if(!zone.classList.contains("busy")) fileIn.click(); });
-      zone.addEventListener("keydown", function(e){
-        if (e.key==="Enter"||e.key===" "){ e.preventDefault(); if(!zone.classList.contains("busy")) fileIn.click(); }
-      });
-      fileIn.addEventListener("change", function(){
-        /* clear the input before uploading: browsers fire no change event when the same file is
-           picked twice, so after a failure re-picking that file would do nothing at all */
-        var f = fileIn.files[0]; fileIn.value = ""; if (f) upload(f);
-      });
-    }
-    zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
-    zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
-    zone.addEventListener("drop", function(e){
-      e.preventDefault(); zone.classList.remove("drag");
-      if (e.dataTransfer && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
-    });
-  });
-  document.querySelectorAll("[data-lg-clear]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      var lgCode = this.getAttribute("data-lg-clear");
-      CG.confirm("Remove the "+lgCode+" emblem?",
-        "The tier goes back to the plain TIER plate. The image file itself stays in storage — this only "+
-        "stops the site using it. You can upload a new one any time.",
-        "Remove", function(){ CG.saveLeagueEmblem(lgCode, null, null); });
-    });
-  });
-};
-
-/* ================================================================
-   LIVE ADMIN: EA STATS — automatic stats pipeline (replaces manual
-   results entry). Link each club to its EA club id; the scheduled
-   poller + ingest-stats function do the rest.
-   ================================================================ */
-CG.admEAStats = function(){
-  var lg = CG.lg;
-  var teams = (CG.TEAMS||[]).slice();
-  var linked = teams.filter(function(t){ return t.eaClubId; }).length;
-  var finals = (lg.schedule||[]).filter(function(g){ return g.status==="final"; });
-  var imported = finals.filter(function(g){ return g.eaMatchId; });
-  var pending = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at < CG.now()-30*60000; });
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">EA stats — automatic</h2><p class="lede" style="margin-top:6px">Final scores and full box scores import straight from the EA NHL match record — there is no manual results entry. Link each club to its EA club below; the poller pulls finished games automatically on game nights and writes every stat.</p></div>';
-  h+='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'+
-    '<div class="kpi'+(linked<teams.length?" alert":"")+'" style="cursor:default"><b class="num">'+linked+'/'+teams.length+'</b><span>clubs linked</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+imported.length+'</b><span>auto-imported finals</span></div>'+
-    '<div class="kpi'+(pending.length?" alert":"")+'" style="cursor:default"><b class="num">'+pending.length+'</b><span>awaiting stats</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:18px">'+(linked?(linked<teams.length?"Partial":"Active"):"Setup")+'</b><span>pipeline</span></div></div>';
-  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Club → EA club link</h3><span class="chip">'+linked+'/'+teams.length+' linked</span></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>Each club needs its numeric EA club id</caption><thead><tr><th class="tleft">Club</th><th class="tleft">EA club id</th><th class="tleft">EA club name (optional)</th><th class="tright">Save</th></tr></thead><tbody>'+
-    teams.map(function(t){
-      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,22)+'<span class="nm">'+esc(t.name)+'</span></span></td>'+
-        '<td class="tleft"><input data-ea-id="'+t.id+'" value="'+esc(t.eaClubId||"")+'" placeholder="e.g. 45210" inputmode="numeric" style="max-width:130px"></td>'+
-        '<td class="tleft"><input data-ea-name="'+t.id+'" value="'+esc(t.eaClub||"")+'" placeholder="EA club name" style="max-width:200px"></td>'+
-        '<td class="tright"><button class="btn btn-ghost btn-sm" data-ea-save="'+t.id+'" data-code="'+esc(t.code)+'">Save</button></td></tr>';
-    }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the scheduled poller matches EA games to your schedule by club-pair + date and writes the final score and every box-score stat — no manual entry.</span></div></div>';
-  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
-  if (imported.length){
-    h+= imported.slice().sort(function(a,b){ return b.at-a.at; }).slice(0,8).map(function(g){
-      return '<div class="card-b" style="border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+' '+g.awayScore+'</span></span><span class="caption">@</span><span class="teamcell"><span class="mono" style="font-size:12px">'+esc(g.home)+' '+g.homeScore+'</span>'+CG.crest(g.home,20)+'</span>'+
-        '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Box score</a>'+
-        '<button class="btn btn-ghost btn-sm" data-reopen-final="'+g.id+'" data-label="'+esc(g.away)+' @ '+esc(g.home)+'">Re-open</button></span></div>';
-    }).join("");
-  } else if (pending.length){
-    h+='<div class="card-b"><span class="caption"><b>'+pending.length+'</b> scheduled game'+(pending.length>1?"s have":" has")+' passed and '+(pending.length>1?"are":"is")+' still waiting for EA stats. If a game never imports, confirm both clubs are linked above and were in the same EA match.</span></div>';
-  } else {
-    h+='<div class="card-b"><div class="empty" style="padding:30px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No finals yet</b><p>Once the season starts, finished games appear here automatically as the poller imports them.</p></div></div>';
-  }
-  h+='</div>';
-  /* every EA payload the poller has seen is archived — anything that didn't land shows here */
-  h+='<div class="card"><div class="card-h"><h3>Unmatched EA matches</h3><span class="chip" id="eaUnCount">checking…</span></div>'+
-    '<div id="eaUnmatchedBody"><div class="card-b"><span class="caption">Loading the ingest archive…</span></div></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every EA match the poller sees is archived, even when it can’t be matched to a fixture — EA’s own history only keeps a club’s few most recent games, so nothing is lost. Fix the cause (link the club, move the fixture, or Re-open a wrongly-claimed final above) and hit <b>Re-ingest</b> to replay the archived box score.</span></div></div>';
-  return h;
-};
-CG.saveEAClub = function(teamId, code){
-  var idEl=document.querySelector('[data-ea-id="'+teamId+'"]'), nameEl=document.querySelector('[data-ea-name="'+teamId+'"]');
-  if(!idEl) return;
-  var eaId=(idEl.value||"").trim(), eaName=(nameEl.value||"").trim();
-  if (eaId && !/^\d+$/.test(eaId)){ CG.toast("EA club id should be numbers only","err"); return; }
-  var btn=document.querySelector('[data-ea-save="'+teamId+'"]'); if(btn){ btn.disabled=true; btn.textContent="Saving…"; }
-  CG.sb.from("teams").update({ ea_club_id: eaId||null, ea_club_name: eaName||null }).eq("id",teamId).then(function(r){
-    if(btn){ btn.disabled=false; btn.textContent="Save"; }
-    if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-    var t=CG.TEAM[code]; if(t){ t.eaClubId=eaId||null; t.eaClub=eaName||null; }
-    CG.toast(code+" EA link saved","ok"); CG.router();
-  });
-};
-CG.AFTER._admEAStats = function(){
-  document.querySelectorAll("[data-ea-save]").forEach(function(b){ b.addEventListener("click", function(){ CG.saveEAClub(this.getAttribute("data-ea-save"), this.getAttribute("data-code")); }); });
-  /* re-open a wrongly-matched final: clears the result + box score so the real import can land */
-  document.querySelectorAll("[data-reopen-final]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-reopen-final"), label=this.getAttribute("data-label");
-    CG.confirm("Re-open "+label+"?",
-      "The final score and every box-score stat for this game are cleared and it returns to the schedule. Use this when the EA match that claimed the slot was actually a different game (a scrim between the same clubs). The archived payload stays replayable below.",
-      "Re-open the game", function(){
-      CG.sb.rpc("reopen_game_final",{ p_game:id }).then(function(r){
-        if(r.error){ CG.toast("Couldn’t re-open: "+r.error.message,"err"); return; }
-        CG.toast("Game re-opened — the result and box score were cleared","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-  /* unmatched / errored archive rows, with one-click replay */
-  var body=document.getElementById("eaUnmatchedBody"), count=document.getElementById("eaUnCount");
-  if (body && CG.sb){
-    CG.sb.from("ea_ingest_log").select("ea_match_id,et_day,ea_club_ids,status,reason,last_attempt_at")
-      .in("status",["unmatched","error"]).order("last_attempt_at",{ascending:false}).limit(20)
-      .then(function(r){
-        var rows=(r&&r.data)||[];
-        if (count) count.textContent = rows.length ? rows.length+" need attention" : "all clear";
-        if (count) count.className = "chip "+(rows.length?"chip-warn":"chip-win");
-        if (r&&r.error){ body.innerHTML='<div class="card-b"><span class="caption">Couldn’t read the archive: '+esc(r.error.message)+'</span></div>'; return; }
-        if (!rows.length){ body.innerHTML='<div class="card-b"><span class="caption">Nothing waiting — every archived EA match either imported or was intentionally skipped.</span></div>'; return; }
-        body.innerHTML = rows.map(function(x){
-          return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-            '<span class="mono" style="font-size:11px;color:var(--steel)">'+esc(x.et_day||"?")+'</span>'+
-            '<span class="chip '+(x.status==="error"?"chip-loss":"chip-warn")+'" style="font-size:9px">'+esc(x.status.toUpperCase())+'</span>'+
-            '<span class="caption" style="flex:1;min-width:200px">'+esc(x.reason||"—")+'</span>'+
-            '<button class="btn btn-ghost btn-sm" data-reingest="'+esc(x.ea_match_id)+'">Re-ingest</button></div>';
-        }).join("");
-        body.querySelectorAll("[data-reingest]").forEach(function(b){ b.addEventListener("click", function(){
-          var mid=this.getAttribute("data-reingest"), btn=this;
-          btn.disabled=true; btn.textContent="Replaying…";
-          CG.sb.auth.getSession().then(function(s){
-            var tok = s && s.data && s.data.session && s.data.session.access_token;
-            if (!tok){ CG.toast("Sign in again — no session token","err"); btn.disabled=false; btn.textContent="Re-ingest"; return; }
-            fetch("/api/ingest-stats",{ method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
-              body: JSON.stringify({ reingest: mid }) })
-              .then(function(r){ return r.json(); })
-              .then(function(out){
-                btn.disabled=false; btn.textContent="Re-ingest";
-                if ((out.ingested||[]).length){ CG.toast("Box score imported — "+out.ingested[0].score,"ok"); CG.reloadLeague(); }
-                else if ((out.unmatched||[]).length){ CG.toast("Still unmatched: "+out.unmatched[0].reason,"err"); }
-                else if ((out.skipped||[]).length){ CG.toast("Already ingested — nothing to do","ok"); }
-                else { CG.toast("Replay failed: "+esc(JSON.stringify(out.errors||out).slice(0,120)),"err"); }
-              })
-              .catch(function(e){ btn.disabled=false; btn.textContent="Re-ingest"; CG.toast("Replay failed: "+e.message,"err"); });
-          });
-        }); });
-      });
-  }
-};
-
-/* ================================================================
-   LIVE ADMIN: TEAMS — add / edit / remove clubs (real teams table)
-   ================================================================ */
-CG.reloadLeague = async function(){
-  try {
-    CG.lg = await CG.buildLiveLeague();
-    await CG.loadManagerData();
-    await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
-    CG.renderChrome(); CG.router();
-  } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
-};
-
-/* ================================================================
-   LIVE LEAGUE DATA — scores, standings and stats update themselves.
-   A game import writes several rows (the game, then every player's
-   box-score line), so the realtime events are coalesced into ONE
-   reload after a short quiet period. The reload is single-flight
-   (never two builds at once) and gentle: it keeps your scroll
-   position, and while you're typing in a field or have a dialog
-   open it refreshes the data in memory but waits to re-draw until
-   you're done, so nothing you're doing is interrupted.
-   ================================================================ */
-CG._liveT = null; CG._liveBusy = false; CG._liveAgain = false;
-function pvBusyInteracting(){
-  var a = document.activeElement, tn = a && a.tagName;
-  if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT" || (a && a.isContentEditable)) return true;
-  var ov = document.getElementById("overlay-root");
-  return !!(ov && ov.innerHTML.trim());   /* a modal / drawer / palette is open */
-}
-CG.liveReload = function(){
-  clearTimeout(CG._liveT);
-  CG._liveT = setTimeout(function run(){
-    if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
-    CG._liveBusy = true;
-    CG.buildLiveLeague().then(function(lg){
-      CG.lg = lg;
-      return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
-    }).then(function(){
-      /* don't yank the page out from under an active interaction — the data is
-         already fresh in memory, so the next navigation shows it. Otherwise
-         re-draw in place and hold the scroll position. */
-      if (!pvBusyInteracting()){
-        var y = window.pageYOffset;
-        if (CG.renderChrome) CG.renderChrome();
-        if (CG.router) CG.router();
-        window.scrollTo(0, y);
-      }
-    }).catch(function(){}).then(function(){
-      CG._liveBusy = false;
-      if (CG._liveAgain){ CG._liveAgain = false; CG.liveReload(); }
-    });
-  }, 1000);
-};
-/* one public channel — scores/standings/stats are the same for everyone, so this
-   runs for signed-out viewers too. Idempotent: subscribed once for the session. */
-CG.subscribeLeague = function(){
-  if (!CG.sb || CG._leagueChannel) return;
-  try {
-    CG._leagueChannel = CG.sb.channel("league-live")
-      .on("postgres_changes",{ event:"*", schema:"public", table:"games" },      function(){ CG.liveReload(); })
-      .on("postgres_changes",{ event:"*", schema:"public", table:"game_stats" }, function(){ CG.liveReload(); })
-      .subscribe();
-  } catch(e){}
-};
-CG.admTeamsLive = function(){
-  var teams = (CG.TEAMS||[]).slice();
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Teams</h2><p class="lede" style="margin-top:6px">Every club in the league — identity, division, and home arena. Edits go straight to the database and the whole site updates with them.</p></div>';
-  h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+teams.length+'</b><span>clubs</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+(CG.DIVISIONS?CG.DIVISIONS.length:2)+'</b><span>divisions</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc((CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL")+'</b><span>league</span></div></div>';
-  h+='<div class="card"><div class="card-h"><h3>Clubs</h3><button class="btn btn-chrome btn-sm" id="teamAdd">'+CG.ic("plus",14)+'Add a club</button></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>All clubs</caption><thead><tr><th class="tleft">Club</th><th class="tleft">Code</th><th class="tleft">Division</th><th>Roster</th><th class="tright">Actions</th></tr></thead><tbody>'+
-    teams.map(function(t){
-      var n=(CG.lg.byTeam[t.code]||[]).length;
-      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,24)+'<span><span class="nm">'+esc(t.name)+'</span><small>'+esc(t.city||"—")+'</small></span></span></td>'+
-        '<td class="tleft mono" style="font-size:12px">'+esc(t.code)+'</td>'+
-        '<td class="tleft">'+esc(t.div)+'</td>'+
-        '<td data-v="'+n+'">'+n+'</td>'+
-        '<td class="tright"><span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-team-edit="'+t.id+'">Edit</button>'+
-        '<button class="btn btn-ghost btn-sm" data-team-del="'+t.id+'" data-name="'+esc(t.name)+'">Remove</button></span></td></tr>';
-    }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Renames propagate everywhere instantly (rosters, schedule, and history follow the club, not the name). Removing a club is blocked while it still has rostered players or scheduled games.</span></div></div>';
-  /* custom divisions — the league's groupings are data, not hardcoded */
-  var divs = (CG._divisionsRaw||[]).slice().sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
-  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Divisions</h3><span class="chip">'+divs.length+'</span></div>'+
-    divs.map(function(d,i){
-      var n = teams.filter(function(t){ return t.div===d.name; }).length;
-      return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-        '<b style="font-family:var(--f-disp);font-size:15px;flex:1">'+esc(d.name)+'</b>'+
-        '<span class="caption">'+n+' club'+(n===1?"":"s")+'</span>'+
-        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-div-rename="'+d.id+'" data-name="'+esc(d.name)+'">Rename</button>'+
-        '<button class="btn btn-ghost btn-sm" data-div-del="'+d.id+'" data-name="'+esc(d.name)+'" data-count="'+n+'">Delete</button></span></div>';
-    }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center">'+
-      '<input id="divNew" placeholder="New division name…" style="flex:1" maxlength="24">'+
-      '<button class="btn btn-chrome btn-sm" id="divAdd">Add division</button></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Standings, team pages, and the standings race group by these automatically. Renames carry every club along; deleting needs the division empty first.</span></div></div>';
-  return h;
-};
-CG.addDivision = function(){
-  var name=(document.getElementById("divNew").value||"").trim();
-  if(!name){ CG.toast("Give the division a name","err"); return; }
-  if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
-  var maxSort=(CG._divisionsRaw||[]).reduce(function(m,d){ return Math.max(m,d.sort_order||0); },0);
-  CG.sb.from("divisions").insert({ name:name, sort_order:maxSort+1 }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t add: "+r.error.message,"err"); return; }
-    CG.toast(name+" division added","ok"); CG.reloadLeague();
-  });
-};
-CG.renameDivision = function(id, oldName){
-  CG.modal("Rename — "+esc(oldName),
-    '<label class="fld"><span>Division name</span><input id="divName" value="'+esc(oldName)+'" maxlength="24"></label>'+
-    '<p class="caption">Every club in '+esc(oldName)+' moves with the new name — standings and team pages update instantly.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="divGo">Rename</button>');
-  document.getElementById("divGo").addEventListener("click", function(){
-    var name=(document.getElementById("divName").value||"").trim();
-    if(!name){ CG.toast("Give the division a name","err"); return; }
-    if(name===oldName){ if(CG.closeOverlay)CG.closeOverlay(); return; }
-    if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
-    CG.sb.from("divisions").update({ name:name }).eq("id",id).then(function(r){
-      if(r.error){ CG.toast("Couldn’t rename: "+r.error.message,"err"); return; }
-      /* clubs reference the division by name — carry them along */
-      CG.sb.from("teams").update({ division:name }).eq("division",oldName).then(function(r2){
-        if(r2.error){ CG.toast("Division renamed, but clubs didn’t follow: "+r2.error.message,"err"); return; }
-        if(CG.closeOverlay)CG.closeOverlay();
-        CG.toast(oldName+" is now "+name,"ok"); CG.reloadLeague();
-      });
-    });
-  });
-};
-CG.deleteDivision = function(id, name, count){
-  if (count>0){ CG.toast("Can’t delete "+name+" — move its "+count+" club"+(count===1?"":"s")+" to another division first","err"); return; }
-  if ((CG._divisionsRaw||[]).length<=1){ CG.toast("The league needs at least one division","err"); return; }
-  CG.confirm("Delete the "+esc(name)+" division?","It’s empty, so nothing moves. This can’t be undone.","Delete division", function(){
-    CG.sb.from("divisions").delete().eq("id",id).then(function(r){
-      if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-      CG.toast(name+" deleted","ok"); CG.reloadLeague();
-    });
-  });
-};
-/* upload a club logo to the public team-logos bucket (commissioner-only RLS).
-   Token-explicit: a tab whose session lapsed (multi-tab refresh-token rotation)
-   silently falls back to the anon key in the storage client, which reads as
-   "violates row-level security". So we fetch the session ourselves, prove it
-   server-side, send it explicitly, and retry once through a refresh. */
-/* Club artwork arrives at whatever resolution the club had to hand — one upload was 2357x2357 —
-   while the largest crest the site ever paints is 104 CSS px (about 312 device px on a 3x screen).
-   Shipping the originals made the eight logos 884 KB, roughly two-thirds of the home page. Resize
-   once here, at upload, so the cost isn't paid by every visitor on every load.
-   WebP where the browser can encode it (all current ones can, and it holds transparency); the
-   original blob is returned untouched if anything about the decode fails, so a club can never be
-   blocked from uploading by this optimisation. */
-CG.shrinkImage = async function(file, cap){
-  var fallback = { blob:file, type:file.type||"image/png", ext:null };
-  try {
-    if (!/^image\//.test(file.type||"") || /svg/.test(file.type||"")) return fallback;
-    var bmp = await createImageBitmap(file);
-    var scale = Math.min(1, cap/Math.max(bmp.width, bmp.height));
-    var w = Math.max(1, Math.round(bmp.width*scale)), h = Math.max(1, Math.round(bmp.height*scale));
-    var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    var ctx = cv.getContext("2d");
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bmp, 0, 0, w, h);
-    bmp.close && bmp.close();
-    var out = await new Promise(function(res){ cv.toBlob(res, "image/webp", 0.92); });
-    if (!out) out = await new Promise(function(res){ cv.toBlob(res, "image/png"); });
-    if (!out || out.size >= file.size) return fallback;   // never upload a bigger file than we got
-    return { blob:out, type:out.type, ext:(out.type==="image/webp"?"webp":"png") };
-  } catch (e) { return fallback; }
-};
-/* One uploader for every piece of commissioner-uploaded artwork. Club crests and tier emblems
-   share the team-logos bucket and its policy (can_write_team_logo is is_commissioner(), whatever
-   the path), so they share the token dance and the resize too — a second copy of this would be a
-   second place for the stale-token bug to come back. `slug` names the file, `opts.prefix` puts it
-   in a folder, `opts.cap` is the longest edge kept. */
-/* exactly what storage.buckets.allowed_mime_types permits for team-logos — keep the two in step */
-CG.UPLOAD_MIME = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/i;
-/* CSS.escape isn't in every browser this site still serves; the codes are [A-Z0-9] in practice,
-   so quote-escaping is enough to keep the attribute selector well-formed either way */
-function cssQ(v){ return String(v==null?"":v).replace(/["\\]/g, "\\$&"); }
-CG.uploadArtwork = async function(file, slug, opts){
-  opts = opts || {};
-  var s = await CG.sb.auth.getSession();
-  var session = s && s.data && s.data.session;
-  if (!session){
-    var rf = await CG.sb.auth.refreshSession();
-    session = rf && rf.data && rf.data.session;
-  }
-  if (!session) throw new Error("your sign-in expired — sign out and back in, then retry");
-  var isComm = await CG.sb.rpc("is_commissioner");
-  if (isComm && isComm.error) throw new Error(isComm.error.message);
-  if (!isComm.data){
-    /* the token the server sees isn't a commissioner — one refresh, one recheck */
-    var rf2 = await CG.sb.auth.refreshSession();
-    session = (rf2 && rf2.data && rf2.data.session) || session;
-    isComm = await CG.sb.rpc("is_commissioner");
-    if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
-  }
-  var shrunk = await CG.shrinkImage(file, opts.cap || 384);
-  var body = shrunk.blob, type = shrunk.type;
-  var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
-  /* the slug reaches an object name and a URL, so keep it to characters that survive both */
-  var safe = String(slug||"logo").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"") || "logo";
-  /* normalise the folder too, so a future caller passing "awards" (no slash) doesn't silently
-     write "awardsbos-123.webp" at the bucket root, and ".." can't aim the object elsewhere */
-  var pre = String(opts.prefix||"").toLowerCase().replace(/[^a-z0-9/-]+/g,"")
-    .split("/").filter(function(seg){ return seg && seg !== "." && seg !== ".."; }).join("/");
-  var path = (pre ? pre+"/" : "")+safe+"-"+Date.now()+"."+ext;
-  async function put(tok){
-    /* encode per segment — encodeURIComponent on the whole path would turn the folder slash into
-       %2F and flatten the prefix into the filename */
-    return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+path.split("/").map(encodeURIComponent).join("/"), {
-      method:"POST",
-      /* every upload gets a fresh timestamped path, so the bytes at a given URL never change and
-         can be cached for a year — the old 3600 made every visitor revalidate eight logos hourly */
-      headers:{ "Authorization":"Bearer "+tok, "apikey":CG.SB_KEY, "Content-Type":type, "x-upsert":"true", "cache-control":"public, max-age=31536000, immutable" },
-      body:body
-    });
-  }
-  var res = await put(session.access_token);
-  if (!res.ok){
-    /* errBody, NOT body: `var` is function-scoped, so naming this `body` reused the very binding
-       put() closes over for the image bytes. The retry below then POSTed the parsed error object,
-       which fetch stringifies to "[object Object]" — 15 bytes sent as image/webp, which the bucket
-       happily accepts, so a stale-token retry "succeeded" and stored a file that isn't an image.
-       That is the exact race this retry exists to handle, and it hit club logos too. */
-    var errBody = await res.json().catch(function(){ return {}; });
-    if (res.status===400 || res.status===403){
-      /* stale token race — refresh once and retry with the new one */
-      var rf3 = await CG.sb.auth.refreshSession();
-      var fresh = rf3 && rf3.data && rf3.data.session;
-      if (fresh){ res = await put(fresh.access_token); }
-      if (!res.ok){ errBody = await res.json().catch(function(){ return errBody; }); throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")")); }
-    } else {
-      throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")"));
-    }
-  }
-  return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
-};
-CG.uploadTeamLogo = function(file, code){ return CG.uploadArtwork(file, code, { cap:384 }); };
-/* a tier emblem is painted bigger than a crest (it headlines the Leagues panel), so it keeps more pixels */
-CG.uploadLeagueEmblem = function(file, code){
-  return CG.uploadArtwork(file, "league-"+(code||"tier"), { prefix:"leagues/", cap:512 });
-};
-CG.teamForm = function(t){
-  var isNew = !t;
-  t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
-  var divOpts = (CG.DIVISIONS&&CG.DIVISIONS.length?CG.DIVISIONS:["East","West"]).map(function(d){ return '<option'+(t.div===d?" selected":"")+'>'+esc(d)+'</option>'; }).join("");
-  var isEdit = !isNew;
-  function holderName(pid){
-    if(!pid) return "";
-    var p=(CG.lg&&CG.lg._profilesRaw||[]).find(function(x){ return x.id===pid; });
-    return p ? (p.gamertag||p.display_name||"") : "";
-  }
-  /* Front office lives on the club, so it's edited here (edit-only — a club must exist first). */
-  var anySeat = !!(t.owner||t.gm||t.agm);
-  function vacBtn(role){
-    return '<div style="text-align:right;margin-top:5px;min-height:20px">'+
-      '<button type="button" class="btn btn-ghost btn-sm rm-btn" data-vacate-seat="'+role+'"'+(t[role]?'':' style="display:none"')+'>Vacate seat</button></div>';
-  }
-  var mgmtBlock = isEdit ? (
-    '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 2px">'+
-        '<h3 class="h-sec" style="font-size:15px;margin:0">Front office</h3>'+
-        '<button type="button" class="btn btn-ghost btn-sm rm-btn" id="tfClearAll"'+(anySeat?'':' style="display:none"')+'>Remove all seats</button>'+
-      '</div>'+
-      '<p class="caption" style="margin:0 0 12px">Owner, GM and AGM run this club’s Team HQ — roster, trades, lineups and draft picks. Type a member’s name and pick them to assign a seat. <b>Vacate seat</b> (or <b>Remove all seats</b>) clears management immediately — a player’s roster spot and contract are untouched. One person holds one seat per club.</p>'+
-      '<div class="grid g3" style="gap:12px">'+
-        '<div>'+CG.memberPickerField("tfOwner","Owner")+vacBtn("owner")+'</div>'+
-        '<div>'+CG.memberPickerField("tfGm","General Manager")+vacBtn("gm")+'</div>'+
-        '<div>'+CG.memberPickerField("tfAgm","Assistant GM")+vacBtn("agm")+'</div>'+
-      '</div>'+
-    '</div>'
-  ) : '';
-  CG.modal(isNew?"Add a club":"Edit — "+esc(t.name),
-    '<div class="grid g2" style="gap:12px">'+
-    '<label class="fld"><span>Club name</span><input id="tfName" value="'+esc(t.name)+'" placeholder="e.g. Boston Bruins"></label>'+
-    '<label class="fld"><span>City</span><input id="tfCity" value="'+esc(t.city||"")+'" placeholder="e.g. Boston"></label>'+
-    '<label class="fld"><span>Code (2–4 letters)</span><input id="tfCode" value="'+esc(t.code)+'" maxlength="4" style="text-transform:uppercase" placeholder="e.g. BOS"></label>'+
-    '<label class="fld"><span>Division</span><select id="tfDiv">'+divOpts+'</select></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
-    '</div>'+
-    '<label class="fld" style="margin-top:2px"><span>Club logo</span></label>'+
-    '<div class="logo-drop" id="tfLogoDrop" role="button" tabindex="0" aria-label="Upload a club logo" data-url="'+esc(t.logo||"")+'">'+
-      (t.logo?'<img src="'+esc(t.logo)+'" alt="Current logo">':'<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>')+
-    '</div>'+
-    '<input type="file" id="tfLogoFile" accept="image/*" hidden>'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'+
-      '<span class="caption">Uploads apply when you save the club.</span>'+
-      '<button type="button" class="btn btn-ghost btn-sm" id="tfLogoClear"'+(t.logo?'':' style="display:none"')+'>Use generated crest</button>'+
-    '</div>'+mgmtBlock,
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="tfSave">'+(isNew?"Add club":"Save changes")+'</button>');
-  /* --- drag & drop logo wiring --- */
-  var zone = document.getElementById("tfLogoDrop"), fileIn = document.getElementById("tfLogoFile"),
-      clearBtn = document.getElementById("tfLogoClear");
-  function setPreview(url){
-    zone.setAttribute("data-url", url||"");
-    zone.innerHTML = url ? '<img src="'+esc(url)+'" alt="Club logo">' :
-      '<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>';
-    clearBtn.style.display = url ? "" : "none";
-  }
-  function doUpload(f){
-    if (!f) return;
-    if (!/^image\//.test(f.type)){ CG.toast("That isn’t an image — use a PNG or JPG","err"); return; }
-    if (f.size > 2*1024*1024){ CG.toast("Keep the logo under 2 MB","err"); return; }
-    var prev = zone.getAttribute("data-url");
-    zone.classList.add("busy");
-    zone.innerHTML = '<span class="lp-hint">Uploading…</span>';
-    var code = (document.getElementById("tfCode").value||t.code||"logo").trim();
-    CG.uploadTeamLogo(f, code).then(function(url){
-      zone.classList.remove("busy"); setPreview(url);
-      CG.toast("Logo uploaded — save the club to apply it","ok");
-    }).catch(function(e){
-      zone.classList.remove("busy"); setPreview(prev);
-      CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
-    });
-  }
-  zone.addEventListener("click", function(){ fileIn.click(); });
-  zone.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fileIn.click(); } });
-  fileIn.addEventListener("change", function(){ if(fileIn.files[0]) doUpload(fileIn.files[0]); });
-  zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
-  zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
-  zone.addEventListener("drop", function(e){ e.preventDefault(); zone.classList.remove("drag"); if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
-  clearBtn.addEventListener("click", function(){ setPreview(""); CG.toast("Back to the generated crest — save to apply","ok"); });
-  /* --- front-office pickers: wire the type-ahead, pre-fill current holders --- */
-  if (isEdit){
-    ["tfOwner","tfGm","tfAgm"].forEach(function(id){ CG.wireMemberPicker(id, ["members"]); });
-    var pf=function(id,pid){ var el=document.getElementById(id); if(el&&pid){ el.value=holderName(pid); el.dataset.acId=pid; } };
-    pf("tfOwner",t.owner); pf("tfGm",t.gm); pf("tfAgm",t.agm);
-    /* --- explicit seat removal: Vacate a seat or Remove all, applied immediately (two-click confirm) --- */
-    var seatId={owner:"tfOwner",gm:"tfGm",agm:"tfAgm"}, seatName={owner:"Owner",gm:"General Manager",agm:"Assistant GM"};
-    var refreshClearAll=function(){ var ca=document.getElementById("tfClearAll"); if(ca) ca.style.display=(t.owner||t.gm||t.agm)?"":"none"; };
-    var doVacate=function(role, done){
-      CG.sb.rpc("set_team_manager",{ p_team_code:t.code, p_role:role, p_profile:null }).then(function(r){
-        if(r.error){ CG.toast("Couldn’t vacate: "+r.error.message,"err"); if(done)done(false); return; }
-        t[role]=null;
-        var el=document.getElementById(seatId[role]); if(el){ el.value=""; delete el.dataset.acId; el.classList.remove("ac-ok"); }
-        var vb=document.querySelector('[data-vacate-seat="'+role+'"]'); if(vb) vb.style.display="none";
-        refreshClearAll(); if(done)done(true);
-      });
-    };
-    var arm=function(btn, confirmLabel, run){
-      if(!btn) return; var orig=btn.textContent, armed=false, tmr=null;
-      var reset=function(){ armed=false; if(tmr)clearTimeout(tmr); btn.textContent=orig; btn.style.color=""; btn.style.borderColor=""; };
-      btn.addEventListener("click", function(){
-        if(armed){ reset(); run(); return; }
-        armed=true; btn.textContent=confirmLabel; btn.style.color="var(--red-ink)"; btn.style.borderColor="var(--red-ink)";
-        tmr=setTimeout(reset, 4000);
-      });
-    };
-    document.querySelectorAll("[data-vacate-seat]").forEach(function(b){
-      var role=b.getAttribute("data-vacate-seat");
-      arm(b, "Confirm — vacate?", function(){ doVacate(role, function(ok){ if(ok) CG.toast(seatName[role]+" seat vacated","ok"); }); });
-    });
-    arm(document.getElementById("tfClearAll"), "Confirm — remove all?", function(){
-      var roles=["owner","gm","agm"].filter(function(r){ return t[r]; });
-      if(!roles.length) return;
-      (function next(i){ if(i>=roles.length){ CG.toast("All front-office seats removed","ok"); return; } doVacate(roles[i], function(){ next(i+1); }); })(0);
-    });
-  }
-  document.getElementById("tfSave").addEventListener("click", function(){
-    var name=(document.getElementById("tfName").value||"").trim(),
-        code=(document.getElementById("tfCode").value||"").trim().toUpperCase();
-    if(!name){ CG.toast("Give the club a name","err"); return; }
-    if(!/^[A-Z]{2,4}$/.test(code)){ CG.toast("Code should be 2–4 letters","err"); return; }
-    var clash=(CG.TEAMS||[]).find(function(x){ return x.code===code && (!t.id || x.id!==t.id); });
-    if(clash){ CG.toast(code+" is already "+clash.name+"’s code","err"); return; }
-    /* front-office changes (edit only): diff each seat against what the club currently holds */
-    var mgmtChanges=[];
-    if(isEdit){
-      var want={ owner:CG.readMemberPicker("tfOwner").id||null,
-                 gm:CG.readMemberPicker("tfGm").id||null,
-                 agm:CG.readMemberPicker("tfAgm").id||null };
-      var picked=[want.owner,want.gm,want.agm].filter(Boolean);
-      if(picked.some(function(v,i){ return picked.indexOf(v)!==i; })){
-        CG.toast("One member can only hold one seat on a club — pick different people for Owner, GM and AGM","err"); return;
-      }
-      if(want.owner!==(t.owner||null)) mgmtChanges.push({role:"owner",profile:want.owner});
-      if(want.gm!==(t.gm||null))       mgmtChanges.push({role:"gm",profile:want.gm});
-      if(want.agm!==(t.agm||null))     mgmtChanges.push({role:"agm",profile:want.agm});
-    }
-    var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
-      division:document.getElementById("tfDiv").value,
-      color:document.getElementById("tfColor").value,
-      logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
-    var btn=this; btn.disabled=true;
-    var q = isNew
-      ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null }))
-      : CG.sb.from("teams").update(rec).eq("id", t.id);
-    q.then(function(r){
-      if(r.error){ btn.disabled=false; CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      /* apply front-office moves one at a time — each RPC clears the member’s prior seat first */
-      var chain=Promise.resolve();
-      mgmtChanges.forEach(function(ch){
-        chain=chain.then(function(){
-          return CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:ch.role, p_profile:ch.profile }).then(function(rr){
-            if(rr.error) throw new Error(rr.error.message);
-          });
-        });
-      });
-      chain.then(function(){
-        btn.disabled=false;
-        if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast(isNew?name+" added to the league":"Club saved","ok");
-        CG.reloadLeague();
-      }).catch(function(e){
-        btn.disabled=false;
-        CG.toast("Club saved, but a front-office change failed: "+((e&&e.message)||"try again"),"err");
-        CG.reloadLeague();
-      });
-    });
-  });
-};
-CG.removeTeam = function(teamId, name){
-  /* guarded: block removal while the club has rostered players or games */
-  Promise.all([
-    CG.sb.from("roster_spots").select("id",{count:"exact",head:true}).eq("team_id",teamId),
-    CG.sb.from("games").select("id",{count:"exact",head:true}).or("home_team_id.eq."+teamId+",away_team_id.eq."+teamId)
-  ]).then(function(rs){
-    var spots=(rs[0]&&rs[0].count)||0, games=(rs[1]&&rs[1].count)||0;
-    if (spots||games){
-      CG.toast("Can’t remove "+name+" — it has "+(spots?spots+" rostered player"+(spots===1?"":"s"):"")+(spots&&games?" and ":"")+(games?games+" scheduled game"+(games===1?"":"s"):"")+". Reassign those first.","err");
-      return;
-    }
-    CG.confirm("Remove "+esc(name)+"?","The club comes off the site everywhere. This can’t be undone.","Remove club", function(){
-      CG.sb.from("teams").delete().eq("id",teamId).then(function(r){
-        if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
-        CG.toast(name+" removed","ok");
-        CG.reloadLeague();
-      });
-    });
-  });
-};
-CG.AFTER._admTeams = function(){
-  var add=document.getElementById("teamAdd");
-  if(add) add.addEventListener("click", function(){ CG.teamForm(null); });
-  document.querySelectorAll("[data-team-edit]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-team-edit");
-    CG.teamForm((CG.TEAMS||[]).find(function(t){ return t.id===id; }));
-  }); });
-  document.querySelectorAll("[data-team-del]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.removeTeam(this.getAttribute("data-team-del"), this.getAttribute("data-name"));
-  }); });
-  var dAdd=document.getElementById("divAdd");
-  if(dAdd) dAdd.addEventListener("click", CG.addDivision);
-  var dNew=document.getElementById("divNew");
-  if(dNew) dNew.addEventListener("keydown", function(e){ if(e.key==="Enter") CG.addDivision(); });
-  document.querySelectorAll("[data-div-rename]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.renameDivision(this.getAttribute("data-div-rename"), this.getAttribute("data-name"));
-  }); });
-  document.querySelectorAll("[data-div-del]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.deleteDivision(this.getAttribute("data-div-del"), this.getAttribute("data-name"), +this.getAttribute("data-count"));
-  }); });
-};
-
-/* ================================================================
-   LIVE LEAGUE OFFICE — complaints & requests on the real
-   action_requests / action_messages tables (replaces the demo cases)
-   ================================================================ */
-CG.ACTION_META = {
-  complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
-  appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
-  trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s management for a move — private to your club." },
-  position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." }
-};
-CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
-CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
-CG.loadActionRequests = async function(){
-  if (!CG.sb || !CG.lg || !CG.auth.user) return;
-  CG._actionLoadError = null;
-  try {
-    var q = await Promise.all([
-      /* action_requests has THREE foreign keys to profiles — filer, assignee and the case subject —
-         so a bare profiles(...) embed is ambiguous and PostgREST rejects the whole query (PGRST201).
-         Name the constraint. `profiles` stays the response key, so consumers are unchanged. */
-      CG.sb.from("action_requests")
-        .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
-        .order("created_at",{ascending:false}),
-      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true})
-    ]);
-    /* This used to fall back to [] on any error, so a failed query was indistinguishable from an
-       empty queue — the Staff Desk read "the room is clean" while cases sat unanswered. Keep
-       whatever we already had and say so loudly instead of inventing an empty case list. */
-    if (q[0] && q[0].error) throw new Error("cases: "+(q[0].error.message||q[0].error.code||"query failed"));
-    if (q[1] && q[1].error) throw new Error("case messages: "+(q[1].error.message||q[1].error.code||"query failed"));
-    CG.lg._actionReqs = (q[0] && q[0].data) || [];
-    var msgs = {};
-    ((q[1] && q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
-    CG.lg._actionMsgs = msgs;
-  } catch(e){
-    CG._actionLoadError = String((e && e.message) || e);
-    console.error("loadActionRequests:", CG._actionLoadError);
-  }
-};
-/* Case data is read by six surfaces — the hub dashboard tile, hub complaints, the Staff Desk (its
-   KPIs, queue and assigned list), the admin overview and admin complaints — but only the complaints
-   routes ever asked for a redraw when the rows finally arrived. That is why the Staff Desk could
-   show "Nothing open" and "0 open cases" directly under a banner counting two: the banner comes
-   from an RPC that does re-render (loadStaffAttention), the cards from an array that didn't.
-   One predicate for every view that renders cases, so a new surface can't be forgotten again. */
-CG.viewShowsCases = function(){ return /#\/(hub|admin)/.test(location.hash); };
-CG.rerenderIfShowingCases = function(){
-  /* never redraw out from under an open modal — the user may be mid-way through filing */
-  var ov = document.getElementById("overlay-root");
-  if (ov && ov.innerHTML.trim()) return;
-  if (CG.viewShowsCases() && CG.router) CG.router();
-};
-CG.refreshActions = function(){
-  CG.loadActionRequests().then(CG.rerenderIfShowingCases);
-};
-/* dashboard tiles + counts read this — map real rows to the prototype shape */
-CG.visibleComplaints = function(){
-  return (CG.lg._actionReqs||[]).map(function(a){
-    var closed = a.status==="resolved"||a.status==="denied";
-    return { caseId:(a.id||"").slice(0,8), category:(CG.ACTION_META[a.type]||{}).label||a.type,
-      status: closed?"Resolved":"Under review", assignedTo:"", confidential:false,
-      summary:(a.subject||a.details||"").slice(0,90), filedBy:(a.profiles&&a.profiles.gamertag)||"member", against:a.target||"—" };
-  });
-};
-CG.actionStatusChip = function(st){
-  var map={ open:["chip","Open"], reviewing:["chip-warn","Reviewing"], acknowledged:["chip-chrome","Acknowledged"], resolved:["chip-win","Resolved"], denied:["chip-loss","Denied"] };
-  var m=map[st]||["chip",st||"Open"];
-  return '<span class="chip '+m[0]+'">'+esc(m[1])+'</span>';
-};
-CG.actionCard = function(a, review){
-  var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
-  var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
-  var uid = CG.auth.user && CG.auth.user.id, names = (CG.lg&&CG.lg._profName)||{};
-  /* conflict of interest: a staff member who filed this case or is named in it can't rule on it —
-     RLS enforces the same at the database (silently), so the ruling tools are hidden here to match.
-     Commissioners are unrestricted. */
-  var isCommish = CG.role()==="commish";
-  var conflicted = review && !isCommish && !!uid && (a.profile_id===uid || a.target_profile_id===uid);
-  var metaBits = [];
-  if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
-  /* prefer the subject's current gamertag over the text captured when the case was filed, so a
-     rename doesn't leave the case pointing at a name nobody recognises any more */
-  var aboutName = (a.target_profile && a.target_profile.gamertag) || a.target;
-  if (aboutName) metaBits.push("About: "+esc(aboutName));
-  metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
-  var isPos = a.type==="position_change";
-  var posLine = isPos ? (a.current_position||"?")+" → "+(a.requested_position||"?") : "";
-  var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
-      '<b style="font-family:var(--f-disp)">'+esc(meta.label)+'</b>'+CG.actionStatusChip(a.status)+
-      (review?'<span class="caption">filed by <b>'+esc((a.profiles&&a.profiles.gamertag)||"member")+'</b></span>':"")+
-      '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>';
-  /* the request itself gets a proper banner — it was buried as fine print in the meta row, and
-     nothing on the card could actually APPLY the switch */
-  if (isPos){
-    h += '<div class="note chr" style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
-      '<b style="font-family:var(--f-disp)">Requested switch</b>'+
-      '<span class="chip chip-chrome">'+esc(a.current_position||"?")+'</span><span aria-hidden="true">→</span>'+
-      '<span class="chip chip-win">'+esc(a.requested_position||"?")+'</span>'+
-      (a.status==="resolved"?'<span class="caption">applied to their registration</span>'
-        :a.status==="denied"?'<span class="caption">denied — registration unchanged</span>'
-        :'<span class="caption">approving applies it to their registration instantly</span>')+'</div>';
-  }
-  /* one-owner assignment (staff/commish) */
-  if (review){
-    var who = a.assigned_to ? (names[a.assigned_to]||"a colleague") : null;
-    h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-      (who ? '<span class="chip chip-chrome" style="font-size:9px">'+esc("Claimed by "+who)+'</span>' : '<span class="chip chip-warn" style="font-size:9px">Unclaimed</span>')+
-      (conflicted ? '' : (a.assigned_to===uid ? '<button class="btn btn-ghost btn-sm" data-case-unclaim="'+a.id+'">Release</button>'
-        : '<button class="btn btn-ghost btn-sm" data-case-claim="'+a.id+'">Claim</button>'))+'</div>';
-  }
-  h += (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
-    '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
-    (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
-  if (msgs.length){
-    h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
-      var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
-      var att = (m.attachments||[]).map(function(u){
-        /* render ONLY http(s) links — never a javascript:/data: scheme a filer could inject */
-        return /^https?:\/\//i.test(String(u))
-          ? '<a href="'+esc(u)+'" target="_blank" rel="noopener nofollow" class="caption" style="border-bottom:2px solid var(--chrome)">'+CG.ic("link",12)+' attachment</a>'
-          : '<span class="caption">'+esc(String(u))+'</span>'; }).join(" ");
-      return '<div style="display:flex;flex-direction:column;gap:3px'+(m.internal?';background:var(--chrome-tint);border-radius:8px;padding:8px 10px':'')+'">'+
-        '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+(m.internal?' · staff-only note':"")+'</b>'+
-        '<span class="small" style="color:var(--steel);white-space:pre-wrap;flex:1">'+esc(m.body||"")+'</span></div>'+
-        (att?'<div style="padding-left:2px">'+att+'</div>':"")+'</div>';
-    }).join("")+'</div>';
-  }
-  var closed = a.status==="resolved"||a.status==="denied";
-  if (!closed){
-    h += '<div style="display:flex;flex-direction:column;gap:6px">'+
-      '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
-        '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>'+
-      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input data-reply-att="'+a.id+'" placeholder="Attach a link (optional)" style="flex:1;min-width:180px">'+
-        (review && !conflicted?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
-  }
-  if (review && !conflicted){
-    h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
-      (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
-      (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
-      /* a position change is decided, not merely closed: Approve applies the switch to the
-         registration through decide_position_change; the generic Resolve/Deny (which changed
-         nothing but the status) and the discipline tools stay off this card type */
-      (isPos && !closed
-        ? '<button class="btn btn-chrome btn-sm" data-pos-decide="approve" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Approve '+esc(posLine)+'</button>'+
-          '<button class="btn btn-ghost btn-sm" data-pos-decide="deny" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Deny request</button>'
-        : "")+
-      (isPos ? "" :
-      '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'" data-target-id="'+esc(a.target_profile_id||"")+'">Issue discipline</button>'+
-      '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
-      (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':""))+
-      /* deletion is a commissioner-only power (RLS enforces it too); staff never see a Delete they can't use */
-      (isCommish?'<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button>':"")+'</div>';
-  } else if (conflicted){
-    h += '<div class="note" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">You’re involved in this case</b>'+
-      'You filed it or you’re named in it, so another official has to rule on it. You can still add a reply as a participant.</div>';
-  }
-  return h+'</div></div>';
-};
-CG.hubComplaintsLive = function(opts){
-  opts = opts||{};
-  var isCommish = CG.role()==="commish";
-  var review = isCommish || CG.role()==="staff";
-  var all = (CG.lg._actionReqs||[]);
-  var uid = CG.auth.user && CG.auth.user.id;
-  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
-  var queue = review && !opts.mineOnly ? all : mine;
-  /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
-  var flt = review ? (CG._caseFilter||"all") : null;
-  if (review){
-    if (flt==="mine") queue = queue.filter(function(a){ return a.assigned_to===uid; });
-    else if (flt==="unclaimed") queue = queue.filter(function(a){ return !a.assigned_to && a.status!=="resolved" && a.status!=="denied"; });
-    else if (flt==="open") queue = queue.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
-  }
-  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"Action Center")+'</h1>'+
-    '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
-  h += '<div class="grid g2" style="margin-bottom:22px">'+Object.keys(CG.ACTION_META).map(function(k){
-    var m = CG.ACTION_META[k];
-    return '<div class="card raise" data-file-action="'+k+'" role="button" tabindex="0" style="cursor:pointer"><div class="card-b" style="display:flex;gap:12px;align-items:flex-start">'+
-      '<span class="nf-ic">'+CG.ic(m.icon,16)+'</span><div><b style="font-family:var(--f-disp)">'+esc(m.label)+'</b>'+
-      '<p class="caption" style="margin-top:3px">'+esc(m.blurb)+'</p></div></div></div>';
-  }).join("")+'</div>';
-  h += '<div class="card-h" style="padding:0 0 12px;border:0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h3>'+(review?"Case queue ("+queue.length+")":"Your filed cases ("+queue.length+")")+'</h3>'+
-    (review?'<div class="seg" role="tablist" aria-label="Filter cases">'+
-      [["all","All"],["open","Open"],["mine","Mine"],["unclaimed","Unclaimed"]].map(function(f){
-        return '<button data-case-filter="'+f[0]+'" class="'+(flt===f[0]?"on":"")+'" role="tab" aria-selected="'+(flt===f[0])+'">'+f[1]+'</button>'; }).join("")+'</div>':"")+'</div>';
-  h += queue.length
-    ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
-    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
-  h += '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
-  return h;
-};
-/* Everyone in the league, not just everyone on a roster. A complaint can name a free agent or a
-   player between clubs, and the roster-derived list can't see them. Sorted so exact-prefix matches
-   feel right when typing, and each entry says where the person actually sits. */
-CG.memberIndex = function(){
-  var lg = CG.lg || {}, rostered = lg._rosteredIds || {};
-  var byId = {}; (lg.players||[]).forEach(function(p){ byId[p.id] = p; });
-  return (lg._profilesRaw||[])
-    .filter(function(pr){ return !pr.banned; })
-    .map(function(pr){
-      var p = byId[pr.id];
-      var name = pr.gamertag || pr.display_name || "Member";
-      var sub = p && CG.TEAM[p.team]
-        ? CG.TEAM[p.team].name+" · "+p.pos+(p.jersey?" · #"+p.jersey:"")
-        : (rostered[pr.id] ? "Rostered" : (CG.poolState?CG.poolState(pr.id).label:"Unsigned"));
-      /* searchable aliases: a member whose gamertag is stylized ("ₛₕₑᵢ𝒻") is otherwise
-         unfindable, and the office usually knows people by their Discord name — so match on
-         the display name as well as the gamertag (both folded to plain text by CG.acNorm). */
-      var alias = pr.display_name && pr.display_name !== name ? " "+pr.display_name : "";
-      return { kind:"player", id:pr.id, label:name, sub:sub+(alias?" · "+pr.display_name:""),
-               search:name+alias, team:(p&&p.team)||null };
-    })
-    .sort(function(a,b){ return a.label.localeCompare(b.label); });
-};
-/* GM/AGM candidates: ANY player signed up for the upcoming season — a club's own roster is not the
-   limit. A roster spot counts too (being rostered means they're in the season). */
-CG.seasonPlayerIndex = function(){
-  var lg = CG.lg||{}, sid = (CG.SEASON && CG.SEASON.id) || null, ok = {};
-  (lg._registrationsRaw||[]).forEach(function(r){
-    if ((!r.season_id || r.season_id===sid) && r.status!=="declined") ok[r.profile_id] = true;
-  });
-  Object.keys(lg._rosteredIds||{}).forEach(function(id){ ok[id] = true; });
-  /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker, except
-     staff whose only department is Media, who are expressly allowed one */
-  var office = {};
-  (lg._profilesRaw||[]).forEach(function(p){
-    if ((p.role==="staff" || p.role==="commissioner") && !CG.isMediaOnly(p)) office[p.id] = true;
-  });
-  /* a player already under a contract this season can't be nominated — only free agents are eligible */
-  var held = (CG.contractHeldIds && CG.contractHeldIds()) || {};
-  return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id] && !held[m.id]; });
-};
-/* attachAC indexes players off the roster; "members" widens it to the whole league for the places
-   that need to name someone rather than look up a rostered player. */
-CG._origAcIndex = CG.acIndex;
-CG.acIndex = function(kinds){
-  if ((kinds||[]).indexOf("seasonplayers") >= 0) return CG.seasonPlayerIndex();
-  if ((kinds||[]).indexOf("members") >= 0) return CG.memberIndex();
-  return CG._origAcIndex.call(CG, kinds||[]);
-};
-/* A free-text name is unmatchable later, so every "who is this about?" field is a combobox that
-   resolves to a real profile. Returns { name, id } — id is null when nothing was picked, which is
-   allowed: the field is optional and a member may need to name someone off-roster. */
-CG.memberPickerField = function(id, label, hint){
-  return '<label class="fld"><span>'+esc(label)+'</span>'+
-    '<input id="'+id+'" type="text" autocomplete="off" placeholder="Start typing a name…">'+
-    (hint ? '<small class="caption" style="display:block;margin-top:5px">'+esc(hint)+'</small>' : '')+
-    '</label>';
-};
-CG.wireMemberPicker = function(id, kinds){
-  var el = document.getElementById(id);
-  if (el && CG.attachAC) CG.attachAC(el, { kinds: kinds || ["members"] });
-  return el;
-};
-CG.readMemberPicker = function(id){
-  var el = document.getElementById(id);
-  if (!el) return { name:null, id:null };
-  var name = (el.value||"").trim();
-  if (!name) return { name:null, id:null };
-  var picked = el.dataset.acId || null;
-  /* typed the whole name without touching the menu — resolve it rather than lose the link */
-  if (!picked){
-    var hit = CG.memberIndex().find(function(m){ return m.label.toLowerCase() === name.toLowerCase(); });
-    if (hit) picked = hit.id;
-  }
-  return { name:name, id:picked };
-};
-CG.fileActionRequest = function(type){
-  if (!CG.auth.user){ CG.toast("Sign in with Discord first","err"); return; }
-  var meta = CG.ACTION_META[type]; if(!meta) return;
-  var me = CG.me();
-  var fields = "";
-  if (type==="complaint" || type==="appeal"){
-    var subs = type==="complaint" ? CG.COMPLAINT_SUBJECTS : CG.APPEAL_SUBJECTS;
-    fields += '<label class="fld"><span>'+(type==="complaint"?"What’s the complaint about?":"What are you appealing?")+'</span><select id="acSubject"><option value="">Select one…</option>'+subs.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join("")+'</select></label>';
-    if (type==="complaint"){
-      fields += CG.memberPickerField("acTarget", "Who is this about? (optional)",
-        "Type a name and pick from the list — that links the case to their record.");
-    }
-  }
-  if (type==="position_change"){
-    var posOpts = ["C","LW","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
-    fields += '<div class="grid g2" style="gap:12px">'+
-      '<label class="fld"><span>Current position</span><select id="acCur">'+posOpts+'</select></label>'+
-      '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>';
-  }
-  if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
-  fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
-    '<p class="caption">'+(meta.route==="manager"?"Private to your club’s management.":"Goes to the league office — commissioners are notified instantly.")+'</p>';
-  CG.modal("File — "+esc(meta.label), fields,
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="acGo">Submit</button>');
-  CG.wireMemberPicker("acTarget");
-  document.getElementById("acGo").addEventListener("click", function(){
-    var subEl=document.getElementById("acSubject");
-    var subject = subEl ? subEl.value : null;
-    if (subEl && !subject){ CG.toast("Pick what this is about","err"); return; }
-    var details = (document.getElementById("acDetails").value||"").trim();
-    if (!details){ CG.toast("Add details — describe what happened","err"); return; }
-    var tgt = CG.readMemberPicker("acTarget");
-    var payload = { profile_id: CG.auth.user.id, type:type, route:meta.route, details:details,
-      season_id: (CG.SEASON&&CG.SEASON.id)||null, subject: subject||null,
-      target: tgt.name, target_profile_id: tgt.id };
-    if (type==="trade_request") payload.team_id = (CG.lg._codeToId||{})[me.team]||null;
-    if (type==="position_change"){
-      payload.current_position = document.getElementById("acCur").value;
-      payload.requested_position = document.getElementById("acReq").value;
-      if (payload.current_position===payload.requested_position){ CG.toast("Pick a different requested position","err"); return; }
-    }
-    var btn=this; btn.disabled=true;
-    CG.sb.from("action_requests").insert(payload).then(function(r){
-      btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(meta.route==="manager"?"Sent to your club’s management":"Filed — the league office has it","ok");
-      CG.refreshActions();
-    });
-  });
-};
-/* issue a warning or suspension straight from a case — resolves it and links the record */
-CG.caseDisciplineModal = function(caseId, targetName, targetId){
-  var players = (CG.lg.players||[]).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
-  /* Prefer the profile the filer actually picked. Falling back to a name comparison is what the
-     old behaviour did everywhere, and it silently stops matching the moment someone changes their
-     gamertag — so it's now only the path for cases filed before the picker existed. */
-  var match = (targetId && players.find(function(p){ return p.id===targetId; }))
-    || players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
-  var opts = '<option value="">— pick the player —</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
-  var cur = (CG.SEASON&&CG.SEASON.number)||1;
-  CG.modal("Issue discipline",
-    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label>'+
-    '<label class="fld"><span>Type</span><select id="dcType">'+
-      '<option value="warning">Formal warning — on record, no games lost</option>'+
-      '<option value="games">Suspension — number of games</option>'+
-      '<option value="date">Suspension — until a date</option>'+
-      '<option value="seasons">Suspension — through a season</option></select></label>'+
-    '<div id="dcGames" class="fld" style="display:none"><label><span>Games</span><input id="dcGamesN" type="number" min="1" value="1"></label></div>'+
-    '<div id="dcDate" class="fld" style="display:none"><label><span>Ends after</span><input id="dcDateN" type="date"></label></div>'+
-    '<div id="dcSeasons" class="fld" style="display:none"><label><span>Through season number</span><input id="dcSeasonsN" type="number" min="'+cur+'" value="'+cur+'"></label></div>'+
-    '<label class="fld"><span>Reason (recorded on the player and the case)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
-    '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
-  function sync(){ var t=document.getElementById("dcType").value;
-    document.getElementById("dcGames").style.display=t==="games"?"block":"none";
-    document.getElementById("dcDate").style.display=t==="date"?"block":"none";
-    document.getElementById("dcSeasons").style.display=t==="seasons"?"block":"none"; }
-  document.getElementById("dcType").addEventListener("change", sync); sync();
-  document.getElementById("dcGo").addEventListener("click", function(){
-    var pid=document.getElementById("dcPlayer").value; if(!pid){ CG.toast("Pick the player","err"); return; }
-    var t=document.getElementById("dcType").value;
-    var args={ p_request:caseId, p_profile:pid, p_mode:t, p_reason:(document.getElementById("dcReason").value||"").trim()||null };
-    if(t==="games") args.p_games=parseInt(document.getElementById("dcGamesN").value,10)||0;
-    /* ET, not the browser's zone. This built the instant from local time while the Users-and-roles
-       suspension path used CG.etISO, so the same "until Mar 3" ruling expired at different moments
-       depending on which screen issued it — and for a staffer abroad, up to a day early. */
-    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=CG.etISO(d, "23:59"); }
-    if(t==="seasons") args.p_until_season=parseInt(document.getElementById("dcSeasonsN").value,10)||cur;
-    var btn=this; btn.disabled=true;
-    CG.sb.rpc("discipline_from_case", args).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t issue discipline","err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Discipline issued — case resolved","ok");
-      if(CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
-    });
-  });
-};
-/* rap sheet / precedent for the player a case is about */
-CG.caseHistoryModal = function(targetName){
-  var p = (CG.lg.players||[]).find(function(x){ return targetName && x.tag.toLowerCase()===String(targetName).toLowerCase(); });
-  if(!p){ CG.toast("No rostered player matches “"+(targetName||"—")+"”","err"); return; }
-  CG.modal("History — "+esc(p.tag), '<div id="rapBody" class="caption">Loading…</div>', '<button class="btn btn-ghost" data-close>Close</button>');
-  CG.sb.rpc("player_rap_sheet",{ p_profile:p.id }).then(function(r){
-    var el=document.getElementById("rapBody"); if(!el) return;
-    if(r.error){ el.textContent=r.error.message||"Couldn’t load"; return; }
-    function dl(x){ return x.mode==="games"?(x.games+"-game suspension"):x.mode==="seasons"?("suspension through Season "+x.until_season):x.mode==="date"?("suspension until "+(x.ends_at?CG.fmtDay(Date.parse(x.ends_at)):"—")):x.mode; }
-    var d=r.data||{}, s=d.suspensions||[], w=d.warnings||[], c=d.cases||[], h='';
-    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Suspensions</b>'+(s.length?'<div class="stack" style="gap:6px;margin-top:6px">'+s.map(function(x){ return '<div class="small">'+esc(dl(x))+' <span class="caption">· '+esc(x.reason||"no reason")+' · '+CG.fmtDay(Date.parse(x.at))+' · '+esc(x.status)+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
-    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Warnings</b>'+(w.length?'<div class="stack" style="gap:6px;margin-top:6px">'+w.map(function(x){ return '<div class="small">'+esc(x.reason||"formal warning")+' <span class="caption">· '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
-    h+='<div><b style="font-family:var(--f-disp)">Prior cases about them</b>'+(c.length?'<div class="stack" style="gap:6px;margin-top:6px">'+c.map(function(x){ return '<div class="small">'+esc((CG.ACTION_META[x.type]||{}).label||x.type)+(x.subject?' — '+esc(x.subject):"")+' <span class="caption">· '+esc(x.status)+' · '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None.</p>')+'</div>';
-    el.innerHTML=h;
-  });
-};
-CG.AFTER._complaintsLive = function(){
-  document.querySelectorAll("[data-file-action]").forEach(function(c){
-    var go = function(){ CG.fileActionRequest(c.getAttribute("data-file-action")); };
-    c.addEventListener("click", go);
-    c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
-  });
-  document.querySelectorAll("[data-case-filter]").forEach(function(b){ b.addEventListener("click", function(){
-    CG._caseFilter = this.getAttribute("data-case-filter"); if(CG.router) CG.router();
-  }); });
-  document.querySelectorAll("[data-reply-send]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-reply-send");
-    var inp=document.querySelector('[data-reply-for="'+id+'"]');
-    var body=(inp&&inp.value||"").trim();
-    if(!body){ CG.toast("Write the reply first","err"); return; }
-    var att=((document.querySelector('[data-reply-att="'+id+'"]')||{}).value||"").trim();
-    if (att && !/^https?:\/\//i.test(att)){ CG.toast("Attachments must be an http(s) link","err"); return; }
-    var internalEl=document.querySelector('[data-reply-internal="'+id+'"]');
-    var row={ request_id:id, author_id:CG.auth.user.id, body:body, internal:!!(internalEl&&internalEl.checked) };
-    if (att) row.attachments=[att];
-    CG.sb.from("action_messages").insert(row).then(function(r){
-      if(r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
-      CG.toast(row.internal?"Staff-only note added":"Reply added","ok"); CG.refreshActions();
-    });
-  }); });
-  document.querySelectorAll("[data-case-claim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-claim"), p_assignee:CG.auth.user.id }).then(function(r){
-      if(r.error){ CG.toast(r.error.message||"Couldn’t claim","err"); return; } CG.toast("Case claimed — it’s yours","ok"); CG.refreshActions(); }); }); });
-  document.querySelectorAll("[data-case-unclaim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-unclaim"), p_assignee:null }).then(function(r){
-      if(r.error){ CG.toast(r.error.message||"Couldn’t release","err"); return; } CG.toast("Released back to the queue","ok"); CG.refreshActions(); }); }); });
-  document.querySelectorAll("[data-case-discipline]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target"), this.getAttribute("data-target-id")||null); }); });
-  document.querySelectorAll("[data-pos-decide]").forEach(function(b){ b.addEventListener("click", function(){
-    var approve=this.getAttribute("data-pos-decide")==="approve", id=this.getAttribute("data-pos-id"), line=this.getAttribute("data-pos-line")||"the change";
-    CG.confirm(approve?"Approve this position change?":"Deny this position change?",
-      approve?"Their registration flips to the requested position ("+esc(line)+") and the case closes. The Discord position role follows on the next sync."
-             :"The registration stays as it is and the case closes as denied. They're notified either way.",
-      approve?"Approve the switch":"Deny the request", function(){
-        CG.sb.rpc("decide_position_change",{ p_request:id, p_approve:approve }).then(function(r){
-          if (r.error){ CG.toast(r.error.message||"Couldn’t decide the request","err"); return; }
-          CG.toast(approve?"Approved — their registration is updated":"Request denied","ok");
-          if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
-        });
-      });
-  }); });
-  document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.caseHistoryModal(this.getAttribute("data-target")); }); });
-  document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
-    /* .select() so a row blocked by RLS (a conflict of interest) comes back as 0 rows, not a
-       silent success — otherwise the official is told the case was ruled when nothing changed */
-    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-      if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-      if(!r.data||!r.data.length){ CG.toast("You can’t rule on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
-      CG.toast("Case "+st,"ok"); CG.refreshActions();
-    });
-  }); });
-  document.querySelectorAll("[data-act-respond]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-respond");
-    CG.modal("Official response",
-      '<label class="fld"><span>Response to the member</span><textarea id="arResp" rows="5"></textarea></label>'+
-      '<p class="caption">Shown on their case as the league’s written decision — pair it with Resolve or Deny.</p>',
-      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="arGo">Save response</button>');
-    document.getElementById("arGo").addEventListener("click", function(){
-      var txt=(document.getElementById("arResp").value||"").trim();
-      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        if(!r.data||!r.data.length){ CG.toast("You can’t respond on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Response saved","ok"); CG.refreshActions();
-      });
-    });
-  }); });
-  document.querySelectorAll("[data-act-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-del");
-    CG.confirm("Delete this case?","It’s removed permanently for everyone. This can’t be undone.","Delete case", function(){
-      CG.sb.from("action_requests").delete().eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-        if(!r.data||!r.data.length){ CG.toast("Only a commissioner can delete a case.","err"); return; }
-        CG.toast("Case deleted","ok"); CG.refreshActions();
-      });
-    });
-  }); });
-};
-/* route the hub + admin complaint views to the live system */
-CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
-/* Open one case from anywhere it's listed. The conversation itself is CG.actionCard — the same
-   component the list uses — so there is exactly one implementation of a case thread and replies,
-   attachments, staff-only notes and the ruling buttons behave identically however you reached it.
-   Its handlers are bound by AFTER._complaints, which already covers the "complaint" route. */
-CG.findCase = function(caseId){
-  var all = (CG.lg && CG.lg._actionReqs) || [], id = String(caseId||"").trim();
-  if (!id) return null;
-  return all.find(function(a){ return a.id === id; })
-      /* links written elsewhere carry only the first 8 characters of the id */
-      || all.find(function(a){ return String(a.id||"").slice(0, id.length) === id; })
-      || null;
-};
-CG.hubComplaintDetail = function(caseId){
-  var review = CG.role()==="commish" || CG.role()==="staff";
-  var a = CG.findCase(caseId);
-  var back = '<a class="sec-link" href="#/hub/complaints">'+CG.ic("back",14)+' All cases</a>';
-  if (!a){
-    /* a failed load and a genuinely missing case are different problems — say which */
-    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
-      '<div class="e-art">'+CG.ic("flag",22)+'</div>'+
-      '<b>'+(CG._actionLoadError ? "Couldn’t load this case" : "That case isn’t here")+'</b>'+
-      '<p>'+(CG._actionLoadError ? esc(CG._actionLoadError)+" — reload and try again."
-                                 : "It may have been deleted, or it isn’t one you have access to.")+'</p>'+
-      '</div></div>';
-  }
-  var meta = CG.ACTION_META[a.type] || { label:a.type };
-  return '<div style="margin-bottom:18px">'+back+
-    '<h1 class="h-sec" style="margin-top:10px">'+esc(meta.label)+'</h1>'+
-    '<p class="lede" style="margin-top:6px">'+
-      (review ? "The filer sees every reply here except staff-only notes."
-              : "Replies from the league office appear here — you’ll be notified when one lands.")+
-    '</p></div>'+
-    CG.actionCard(a, review);
-};
-
-/* ================================================================
-   STAFF DESK — one page for the officials: cases, discipline,
-   import spot-checks, and tonight's slate. Staff + commissioner.
-   ================================================================ */
-/* ================================================================
-   STAFF DESK data cards — EA import triage, shared task list, staff
-   directory, and the activity feed. Data comes from CG._staffExtras
-   (loaded by CG.loadStaffExtras for staff/commissioners).
-   ================================================================ */
-CG._auditLabel = function(a){
-  var m = { role_change:"changed a member’s role", season_rollover:"ran the season rollover",
-    case_assign:"assigned a case", discipline_from_case:"issued discipline from a case",
-    season_award_finalized:"finalized a season award", playoff_round:"generated a playoff round",
-    playoff_clear:"cleared a playoff round", season_status:"changed a season’s status",
-    team_upsert:"edited a club", division_upsert:"edited a division", ea_reingest:"re-ran an EA import" };
-  return m[a] || String(a||"acted").replace(/_/g," ");
-};
-CG.staffEaCard = function(){
-  var ea = CG._staffExtras && CG._staffExtras.ea; if (!ea) return "";
-  var un = ea.unmatched||[], ms = ea.missing_stats||[];
-  if (!un.length && !ms.length) return "";
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>EA imports needing a look</h3><span class="chip chip-warn">'+(un.length+ms.length)+'</span></div>';
-  if (un.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Unmatched imports</span>'+
-    un.slice(0,8).map(function(u){
-      return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line-soft)">'+
-        '<span class="mono caption" style="flex-shrink:0">#'+esc(String(u.match_id||"").slice(0,10))+'</span>'+
-        '<span class="small" style="flex:1;min-width:180px;color:var(--steel)">'+esc(u.reason||"couldn’t match to a scheduled game")+'</span>'+
-        '<span class="caption">'+(u.at?CG.fmtDay(Date.parse(u.at)):"")+'</span>'+
-        '<button class="btn btn-ghost btn-sm" data-ea-dismiss="'+esc(String(u.match_id||""))+'">Dismiss</button></div>'; }).join("")+
-    '<p class="caption" style="margin-top:8px">These EA matches couldn’t be tied to a league game — usually a club EA ID that isn’t linked, or a pickup game against a club outside CGHL. Link clubs in <a href="#/admin/eastats" style="font-weight:700;border-bottom:2px solid var(--chrome)">EA stats</a>, or dismiss the ones that aren’t league games.</p></div>';
-  if (ms.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Finals missing box scores</span>'+
-    ms.slice(0,8).map(function(m){ return '<div class="small" style="padding:6px 0;border-top:1px solid var(--line-soft)">'+esc(m.away||"?")+' @ '+esc(m.home||"?")+'<span class="caption"> · '+(m.at?CG.fmtDay(Date.parse(m.at)):"")+'</span></div>'; }).join("")+'</div>';
-  return h+'</div>';
-};
-CG.staffTasksCard = function(){
-  var ex = CG._staffExtras; if (!ex) return "";
-  var tasks = (ex.tasks||[]), uid = CG.auth.user && CG.auth.user.id;
-  var open = tasks.filter(function(t){ return t.status==="open"; });
-  var mine = open.filter(function(t){ return t.assignee===uid; });
-  var unassigned = open.filter(function(t){ return !t.assignee; });
-  var names = {}; ((ex.directory)||[]).forEach(function(d){ names[d.id]=d.gamertag; });
-  function row(t){
-    var who = t.assignee ? (names[t.assignee]||"assigned") : null;
-    return '<div class="card-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<div style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+esc(t.title)+'</b>'+
-      (t.detail?'<p class="caption" style="margin-top:2px">'+esc(t.detail)+'</p>':"")+
-      (who?'<span class="chip chip-chrome" style="font-size:9px;margin-top:4px">'+esc(who)+'</span>':'<span class="chip chip-warn" style="font-size:9px;margin-top:4px">Unassigned</span>')+'</div>'+
-      (t.assignee!==uid?'<button class="btn btn-ghost btn-sm" data-task-claim="'+t.id+'">Claim</button>':"")+
-      '<button class="btn btn-ghost btn-sm" data-task-done="'+t.id+'">Done</button>'+
-      '<button class="btn btn-ghost btn-sm" data-task-del="'+t.id+'" aria-label="Delete task">'+CG.ic("x",14)+'</button></div>';
-  }
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff tasks</h3>'+
-    '<button class="btn btn-chrome btn-sm" data-task-add>New task</button></div>';
-  if (!open.length){ h += '<div class="card-b"><p class="caption">No open tasks. Spin one up with <b>New task</b> — assign it to yourself or leave it in the pool for whoever’s free.</p></div>'; }
-  else {
-    if (mine.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Yours</span></div>'+mine.map(row).join(""); }
-    var others = open.filter(function(t){ return t.assignee!==uid; });
-    if (others.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">'+(unassigned.length?"Unassigned & others":"Assigned to others")+'</span></div>'+others.map(row).join(""); }
-  }
-  return h+'</div>';
-};
-/* Staff votes — any official can put a topic to the office and choose which departments get a
-   ballot (none selected = the whole office). Eligibility, valid choices and one-ballot-per-person
-   are all enforced by the RPCs; this only renders what the board returns. */
-CG.staffVotesCard = function(){
-  var ex = CG._staffExtras; if (!ex) return "";
-  var votes = ex.votes || [];
-  var lab = {}; (CG.STAFF_DEPARTMENTS||[]).forEach(function(d){ lab[d[0]] = d[1]; });
-  var isCommish = CG.role() === "commish";
-  function deptChips(list){
-    if (!list || !list.length) return '<span class="chip" style="font-size:9px">All staff</span>';
-    return list.map(function(k){ return '<span class="chip" style="font-size:9px">'+esc(lab[k]||k)+'</span>'; }).join(" ");
-  }
-  function block(v){
-    var opts = v.options||[], tally = v.tally||{}, cast = 0;
-    opts.forEach(function(o){ cast += (tally[o]||0); });
-    var pool = Math.max(cast, v.eligibleCount||0), isOpen = v.status === "open", canManage = isCommish || v.mine;
-    var h = '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
-      '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
-        '<b style="font-family:var(--f-disp);font-size:15px">'+esc(v.title)+'</b>'+
-        (isOpen?"":'<span class="chip chip-warn" style="font-size:9px">Closed</span>')+
-        '<span class="caption" style="margin-left:auto">'+cast+' of '+pool+' voted</span></div>'+
-      (v.detail?'<p class="caption" style="margin-top:4px">'+esc(v.detail)+'</p>':"")+
-      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+deptChips(v.departments)+'</div>';
-    /* Media staff hold no ballot on any staff vote (Rule 2.7) — a rule change can bend toward the
-       club they run, and Media is the one department allowed to run one. The server says so via
-       mediaBarred; fall back to the local check if an older board payload lacks it. */
-    var mediaBlocked = (v.mediaBarred === true) ||
-      (v.mediaBarred === undefined && CG.isMediaOnlyStaff());
-    if (isOpen && v.eligible && !mediaBlocked){
-      h += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'+opts.map(function(o){
-        return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
-        (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
-    } else if (isOpen && mediaBlocked){
-      h += '<p class="caption" style="margin-top:8px">Media staff don’t hold a ballot on staff votes (Rule 2.7) — the department reports on the league rather than deciding for it. Every vote is read-only for you.</p>';
-    } else if (isOpen){
-      h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
-    }
-    h += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">'+opts.map(function(o){
-      var n = tally[o]||0, pct = cast ? Math.round(n/cast*100) : 0;
-      return '<div style="display:flex;align-items:center;gap:9px">'+
-        '<span class="mono" style="font-size:11px;min-width:92px">'+esc(o)+'</span>'+
-        '<span style="flex:1;height:6px;border-radius:99px;background:var(--line-soft);overflow:hidden">'+
-          '<i style="display:block;height:100%;width:'+pct+'%;background:var(--chrome)"></i></span>'+
-        '<span class="mono num" style="font-size:11px;min-width:30px;text-align:right">'+n+'</span></div>'; }).join("")+'</div>';
-    var bal = v.ballots||[];
-    if (bal.length) h += '<p class="caption" style="margin-top:7px">'+bal.map(function(b){
-      return esc(b.who)+' · '+esc(b.choice); }).join(" &nbsp;·&nbsp; ")+'</p>';
-    h += '<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;align-items:center">'+
-      '<span class="caption" style="margin-right:auto">Opened by '+esc(v.createdByTag||"staff")+'</span>'+
-      (canManage&&isOpen?'<button class="btn btn-ghost btn-sm" data-vote-close="'+v.id+'">Close voting</button>':"")+
-      (canManage?'<button class="btn btn-ghost btn-sm" data-vote-del="'+v.id+'">Delete</button>':"")+
-      '</div></div>';
-    return h;
-  }
-  var live = votes.filter(function(v){ return v.status === "open"; });
-  var done = votes.filter(function(v){ return v.status !== "open"; }).slice(0, 4);
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff votes</h3>'+
-    '<button class="btn btn-chrome btn-sm" data-vote-add>Create vote</button></div>';
-  if (!live.length && !done.length){
-    h += '<div class="card-b"><p class="caption">Nothing on the ballot. Use <b>Create vote</b> to put a decision to the office — choose which departments get a vote, or leave it open to all staff.</p></div>';
-  } else {
-    h += live.map(block).join("");
-    if (done.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Closed</span></div>'+done.map(block).join("");
-  }
-  return h+'</div>';
-};
-CG.staffVoteCreateModal = function(){
-  var chips = (CG.STAFF_DEPARTMENTS||[]).map(function(d){
-    return '<button type="button" class="chip" data-vdept="'+d[0]+'" aria-pressed="false" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
-  CG.modal("Create a staff vote",
-    '<label class="fld"><span>Topic</span><input id="svTitle" maxlength="140" placeholder="e.g. Move game night to Thursdays?"></label>'+
-    '<label class="fld"><span>Details (optional)</span><textarea id="svDetail" rows="3" placeholder="Anything the office should know before voting."></textarea></label>'+
-    '<label class="fld"><span>Options — one per line (blank = Yes / No / Abstain)</span><textarea id="svOpts" rows="3" placeholder="Yes&#10;No&#10;Abstain"></textarea></label>'+
-    '<label class="fld"><span>Who can vote — none selected means all staff</span></label>'+
-    '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="svGo">Open vote</button>');
-  var sel = [];
-  document.querySelectorAll("[data-vdept]").forEach(function(b){ b.addEventListener("click", function(){
-    var k = this.getAttribute("data-vdept"), i = sel.indexOf(k);
-    if (i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
-    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
-  }); });
-  document.getElementById("svGo").addEventListener("click", function(){
-    var btn = this, title = (document.getElementById("svTitle").value||"").trim();
-    if (!title){ CG.toast("Give the vote a title","err"); return; }
-    var opts = (document.getElementById("svOpts").value||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
-    btn.disabled = true;
-    CG.sb.rpc("staff_vote_create",{ p_title:title, p_detail:(document.getElementById("svDetail").value||""),
-      p_options:(opts.length?opts:null), p_departments:sel, p_closes_at:null }).then(function(r){
-      btn.disabled = false;
-      if (r.error){ CG.toast(r.error.message||"Couldn’t open the vote","err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Vote opened","ok"); CG.refreshStaffExtras();
-    });
-  });
-};
-CG.staffDirectoryCard = function(){
-  var ex = CG._staffExtras; if (!ex || !ex.directory) return "";
-  var dir = ex.directory, uid = CG.auth.user && CG.auth.user.id, isCommish = CG.role()==="commish";
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League staff</h3><span class="chip">'+dir.length+'</span></div>';
-  h += dir.map(function(s){
-    var depts = (s.departments||[]).map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" ");
-    var canEdit = isCommish || s.id===uid;
-    return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span class="chip '+(s.role==="commissioner"?"chip-chrome":"")+'" style="font-size:9px">'+(s.role==="commissioner"?"COMMISH":"STAFF")+'</span>'+
-      '<b style="font-family:var(--f-disp);min-width:120px">'+esc(s.gamertag||"—")+'</b>'+
-      '<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap">'+(depts||'<span class="caption">no departments set</span>')+'</span>'+
-      (s.timezone?'<span class="caption mono">'+esc(s.timezone)+'</span>':"")+
-      (canEdit?'<button class="btn btn-ghost btn-sm" data-staff-edit="'+s.id+'">Edit</button>':"")+'</div>';
-  }).join("");
-  return h+'</div>';
-};
-CG.staffActivityCard = function(){
-  var acts = (CG._staffExtras && CG._staffExtras.activity)||[]; if (!acts.length) return "";
-  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent staff activity</h3><span class="chip">audit log</span></div>'+
-    '<div class="card-b" style="padding-top:6px">'+acts.slice(0,12).map(function(a){
-      return '<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line-soft)">'+
-        '<b class="small" style="font-family:var(--f-disp);min-width:110px">'+esc(a.actor||"League office")+'</b>'+
-        '<span class="small" style="flex:1;color:var(--steel)">'+esc(CG._auditLabel(a.action))+'</span>'+
-        '<span class="caption mono">'+(a.at?CG.fmtFull(Date.parse(a.at)):"")+'</span></div>';
-    }).join("")+'</div></div>';
-};
-CG.staffTaskAddModal = function(){
-  var dir = (CG._staffExtras&&CG._staffExtras.directory)||[];
-  var opts = '<option value="">Leave in the pool</option>'+dir.map(function(d){ return '<option value="'+d.id+'">'+esc(d.gamertag||"staff")+'</option>'; }).join("");
-  CG.modal("New staff task",
-    '<label class="fld"><span>Task</span><input id="stTitle" placeholder="e.g. Re-link CHI’s EA club ID" maxlength="140"></label>'+
-    '<label class="fld"><span>Detail (optional)</span><textarea id="stDetail" rows="3"></textarea></label>'+
-    '<label class="fld"><span>Assign to</span><select id="stWho">'+opts+'</select></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="stGo">Create task</button>');
-  document.getElementById("stGo").addEventListener("click", function(){
-    var title=(document.getElementById("stTitle").value||"").trim();
-    if(!title){ CG.toast("Give the task a title","err"); return; }
-    var btn=this; btn.disabled=true;
-    CG.sb.from("staff_tasks").insert({ title:title, detail:(document.getElementById("stDetail").value||"").trim()||null,
-      assignee:(document.getElementById("stWho").value||null), created_by:CG.auth.user.id }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Task created","ok"); CG.refreshStaffExtras();
-    });
-  });
-};
-CG.staffProfileEditModal = function(entry){
-  /* Normalize what's stored BEFORE it drives the editor: map legacy keys through DEPT_ALIAS and
-     drop any key that has no chip. Seeding the selection from the raw array was a trap — a legacy
-     key (e.g. "player-relations", displayed as Community) lit no chip yet was carried into every
-     save, so that department could never be unassigned, and consumers keyed on the new name
-     (discord-sync's department roles) never saw it at all. Saving now always writes canonical,
-     de-duplicated keys, which also self-heals a stale row the first time it's edited. */
-  var known = {}; CG.STAFF_DEPARTMENTS.forEach(function(d){ known[d[0]] = 1; });
-  var picked = (entry.departments||[])
-    .map(function(k){ return (CG.DEPT_ALIAS && CG.DEPT_ALIAS[k]) || k; })
-    .filter(function(k, i, arr){ return known[k] && arr.indexOf(k) === i; });
-  var chips = CG.STAFF_DEPARTMENTS.map(function(d){ var on=picked.indexOf(d[0])>=0;
-    return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-dept="'+d[0]+'" aria-pressed="'+on+'" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
-  CG.modal("Staff profile — "+esc(entry.gamertag||""),
-    '<label class="fld"><span>Departments</span></label><div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>'+
-    '<label class="fld"><span>Time zone</span><input id="spTz" value="'+esc(entry.timezone||"")+'" placeholder="e.g. ET, PT, GMT"></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="spGo">Save</button>');
-  var sel = picked.slice();
-  document.querySelectorAll("[data-dept]").forEach(function(b){ b.addEventListener("click", function(){
-    var k=this.getAttribute("data-dept"), i=sel.indexOf(k);
-    if(i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
-    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
-  }); });
-  document.getElementById("spGo").addEventListener("click", function(){
-    var btn=this; btn.disabled=true;
-    CG.sb.rpc("set_staff_profile",{ p_target:entry.id, p_departments:sel, p_timezone:(document.getElementById("spTz").value||"") }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Staff profile updated","ok"); CG.refreshStaffExtras();
-    });
-  });
-};
-CG.wireStaffExtras = function(){
-  var t = document.querySelector("[data-task-add]"); if (t) t.addEventListener("click", CG.staffTaskAddModal);
-  document.querySelectorAll("[data-ea-dismiss]").forEach(function(b){ b.addEventListener("click", function(){
-    var mid=this.getAttribute("data-ea-dismiss"), btn=this; btn.disabled=true;
-    CG.sb.rpc("ea_dismiss_import",{ p_match_id:mid }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t dismiss","err"); return; }
-      CG.toast("Import dismissed — not a league game","ok"); CG.refreshStaffExtras();
-    }); }); });
-  document.querySelectorAll("[data-task-claim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).then(function(r){
-      if(r.error){ CG.toast("Couldn’t claim","err"); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
-  document.querySelectorAll("[data-task-done]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.from("staff_tasks").update({ status:"done", completed_at:new Date().toISOString() }).eq("id",this.getAttribute("data-task-done")).then(function(r){
-      if(r.error){ CG.toast("Couldn’t update","err"); return; } CG.toast("Task done","ok"); CG.refreshStaffExtras(); }); }); });
-  document.querySelectorAll("[data-task-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-task-del");
-    CG.confirm("Delete this task?","It’s removed for the whole staff.","Delete", function(){
-      CG.sb.from("staff_tasks").delete().eq("id",id).then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete","err"); return; } CG.toast("Task deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
-  document.querySelectorAll("[data-staff-edit]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
-    if(entry) CG.staffProfileEditModal(entry); }); });
-  /* --- staff votes --- */
-  var va = document.querySelector("[data-vote-add]"); if (va) va.addEventListener("click", CG.staffVoteCreateModal);
-  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-vote-cast"), choice=this.getAttribute("data-choice"), btn=this; btn.disabled=true;
-    CG.sb.rpc("staff_vote_cast",{ p_vote:id, p_choice:choice, p_note:null }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t record your vote","err"); return; }
-      CG.toast("Vote recorded","ok"); CG.refreshStaffExtras(); }); }); });
-  document.querySelectorAll("[data-vote-close]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-vote-close");
-    CG.confirm("Close this vote?","No further ballots can be cast — the result stays on the desk.","Close voting", function(){
-      CG.sb.rpc("staff_vote_close",{ p_vote:id }).then(function(r){
-        if(r.error){ CG.toast(r.error.message||"Couldn’t close","err"); return; }
-        CG.toast("Voting closed","ok"); CG.refreshStaffExtras(); }); }); }); });
-  document.querySelectorAll("[data-vote-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-vote-del");
-    CG.confirm("Delete this vote?","The topic and every ballot are removed for the whole office.","Delete", function(){
-      CG.sb.rpc("staff_vote_delete",{ p_vote:id }).then(function(r){
-        if(r.error){ CG.toast(r.error.message||"Couldn’t delete","err"); return; }
-        CG.toast("Vote deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
-};
-/* Consolidated "Needs attention" triage card — the in-app twin of the daily #staff-general
-   briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
-   client-side (open cases, applications, suspensions) if the RPC hasn't returned yet. */
-CG.staffAttentionCard = function(){
-  var a = CG._staffAttention, lg = CG.lg;
-  /* client fallback for the counts the RPC would provide */
-  if (!a){
-    var oc = (lg._actionReqs||[]).filter(function(x){ return x.status!=="resolved" && x.status!=="denied"; }).length;
-    a = { open_cases:oc, oldest_case_hours:null, sla_breached:0,
-      pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
-      pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
-      active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
-      unmatched_ea:null, finals_missing_stats:null,
-      /* votes the office has already loaded for the desk — open, and still short a ballot */
-      votes_awaiting_ballots:((CG._staffExtras&&CG._staffExtras.votes)||[]).filter(function(v){
-        var cast = Object.keys(v.tally||{}).reduce(function(s,k){ return s+(v.tally[k]||0); },0);
-        return v.status==="open" && cast < (v.eligibleCount||0);
-      }).length };
-  }
-  var n = function(v){ return (v==null?0:(v|0)); };
-  var apps = n(a.pending_staff_apps)+n(a.pending_owner_apps);
-  var items = [];
-  if (n(a.open_cases)>0) items.push({ label:(n(a.open_cases))+" open case"+(n(a.open_cases)===1?"":"s")+
-      (a.oldest_case_hours!=null?" · oldest "+(a.oldest_case_hours>=24?Math.round(a.oldest_case_hours/24)+"d":a.oldest_case_hours+"h"):""),
-      go:"#/hub/complaints", warn:n(a.sla_breached)>0 });
-  if (apps>0) items.push({ label:apps+" application"+(apps===1?"":"s")+" to review", go:"#/hub/staffdesk", warn:false });
-  if (n(a.votes_awaiting_ballots)>0) items.push({ label:n(a.votes_awaiting_ballots)+" staff vote"+(n(a.votes_awaiting_ballots)===1?"":"s")+" awaiting your ballot", go:"#/hub/staffdesk", warn:false });
-  if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
-  if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
-  if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
-
-  if (!items.length){
-    return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
-      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, votes, or imports need attention right now.</span></div>';
-  }
-  return '<div class="card" style="margin-bottom:20px;border-color:var(--chrome)"><div class="card-h" style="background:var(--chrome-tint)">'+
-    '<h3>'+CG.ic("flag",15)+' Needs attention</h3>'+
-    (n(a.sla_breached)>0?'<span class="chip chip-loss">'+n(a.sla_breached)+' past 48h</span>':'<span class="chip chip-warn">'+items.length+' item'+(items.length===1?"":"s")+'</span>')+'</div>'+
-    '<div class="card-b" style="display:flex;flex-wrap:wrap;gap:8px">'+items.map(function(it){
-      return '<button class="chip '+(it.warn?"chip-loss":"chip-chrome")+'" style="cursor:pointer;padding:8px 12px" data-go="'+it.go+'">'+esc(it.label)+' →</button>';
-    }).join("")+'</div></div>';
-};
-/* One application opened into its own page — the full submission, plus a written response and the
-   decision, the same way a case opens from the queue. type is "staff" or "owner". */
-/* Application chat — a two-way thread between the applicant and the league office. UNLIKE the
-   staff ballot, this is applicant-visible: RLS lets the applicant read/write their own thread and
-   the office read/write any. Both sides are notified on each message (trg_application_message). */
-CG._groupAppMsgs = function(rows){
-  var map = {}; (rows||[]).forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
-  return map;
-};
-CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[type+":"+id] || []; };
-/* Resolves to TRUE only when the thread data actually changed since the last load, so callers
-   can re-render exactly when there is something new (and a token refresh re-running
-   applySession an hour in doesn't yank the page for no reason). A failed fetch keeps the
-   previous map — blanking it would repaint an open thread as "No messages yet" over a blip. */
-CG.loadAppMessages = function(){
-  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
-    .then(function(mm){
-      if (!mm || mm.error) return false;
-      var rows = mm.data || [];
-      var fp = rows.length + "|" + (rows.length ? rows[rows.length-1].created_at : "");
-      var changed = fp !== CG._appMsgsFp;
-      CG._appMsgsFp = fp;
-      if (CG.lg) CG.lg._appMsgs = CG._groupAppMsgs(rows);
-      return changed;
-    }, function(){ return false; });
-};
-/* GM/AGM nominations — same contract: true only when something changed. */
-CG.loadMgmtApps = function(){
-  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  return CG.sb.from("management_applications").select("*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)").order("created_at",{ascending:false})
-    .then(function(ma){
-      if (!ma || ma.error) return false;
-      var rows = ma.data || [];
-      var fp = rows.length + "|" + (rows.length ? (rows[0].updated_at || rows[0].created_at) : "");
-      var changed = fp !== CG._mgmtAppsFp;
-      CG._mgmtAppsFp = fp;
-      if (CG.lg) CG.lg._mgmtApps = rows;
-      return changed;
-    }, function(){ return false; });
-};
-/* live thread: subscribe to application_messages inserts. No recipient filter — Supabase Realtime
-   applies the table's RLS, so the office receives every thread and an applicant only their own
-   (same model as direct_messages). A new message re-renders the open thread in place. */
-CG._appMsgChannel = null;
-CG.subscribeAppMessages = function(){
-  if (!CG.sb || !CG.auth.user || CG._appMsgChannel) return;
-  var me = CG.auth.user.id;
-  try {
-    CG._appMsgChannel = CG.sb.channel("appmsg-"+me)
-      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"application_messages" }, function(payload){
-        var m = payload && payload.new;
-        if (!m || m.sender_id === me) return;   /* my own send already refreshed the thread */
-        CG.loadAppMessages().then(function(){
-          var onThread = /#\/hub\/application\b/.test(location.hash) || /#\/(owner|staffapply)\b/.test(location.hash) || /#\/hub\/roster\b/.test(location.hash);
-          if (onThread && CG.router){
-            /* keep a half-typed message across the live re-render */
-            var cur = document.querySelector("[data-appchat-input]");
-            var draft = cur ? cur.value : "", hadFocus = cur && document.activeElement===cur;
-            CG.router();
-            if (draft){ var ni = document.querySelector("[data-appchat-input]"); if(ni){ ni.value = draft; if(hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
-          } else { CG.toast("New message on an application","ok"); }
-        });
-      }).subscribe();
-  } catch(e){}
-};
-CG.teardownAppMessages = function(){
-  if (CG._appMsgChannel){ try{ CG.sb.removeChannel(CG._appMsgChannel); }catch(e){} CG._appMsgChannel = null; }
-};
-/* complaints & tickets: the case thread and the Staff Desk queue now update live.
-   A new reply / new case reloads the case data and re-renders any case surface in
-   place. The chime rides the notification stream (notify_action_message writes a
-   notification to the OTHER party), so there is no double ping and no self-ping. */
-CG.subscribeActions = function(){
-  if (!CG.sb || !CG.auth.user || CG._actionChannel) return;
-  var me = CG.auth.user.id;
-  try {
-    CG._actionChannel = CG.sb.channel("actions-"+me)
-      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"action_messages" }, function(payload){
-        var m = payload && payload.new;
-        if (!m || m.author_id === me) return;   /* my own reply already re-rendered the thread */
-        if (CG.refreshActions) CG.refreshActions();
-      })
-      .on("postgres_changes",{ event:"*", schema:"public", table:"action_requests" }, function(){
-        if (CG.refreshActions) CG.refreshActions();
-      }).subscribe();
-  } catch(e){}
-};
-CG.teardownActions = function(){
-  if (CG._actionChannel){ try{ CG.sb.removeChannel(CG._actionChannel); }catch(e){} CG._actionChannel = null; }
-};
-/* opts.office = the league-office view (staff/commish) vs the applicant's own view. Both can send;
-   labels differ so the applicant sees "League office" rather than a specific official's name. */
-CG.appChatSection = function(type, appId, opts){
-  opts = opts || {}; var office = !!opts.office;
-  var uid = CG.auth.user && CG.auth.user.id;
-  var msgs = CG.appMsgsFor(type, appId);
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(office?"Messages with the applicant":"Messages with the league office")+'</h3>'+
-    (msgs.length?'<span class="chip chip-xs">'+msgs.length+' message'+(msgs.length===1?"":"s")+'</span>':"")+'</div><div class="card-b">';
-  if (msgs.length){
-    h += '<div class="stack" style="gap:10px;margin-bottom:14px">'+msgs.map(function(m){
-      var mine = m.sender_id===uid;
-      var isStaff = m.sender && (m.sender.role==="staff" || m.sender.role==="commissioner");
-      var who = mine ? "You"
-        : isStaff ? (office ? ((m.sender&&m.sender.gamertag)||"Official")+" · league office" : "League office")
-        : ((m.sender&&m.sender.gamertag)||"Applicant");
-      return '<div style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
-        '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
-          '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
-          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtFull(Date.parse(m.created_at)):"")+'</span></div>'+
-          '<span class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
-    }).join("")+'</div>';
-  } else {
-    h += '<p class="caption" style="margin-bottom:14px">'+(office
-      ? "No messages yet. Reach out to the applicant with any questions before the ballot or a decision — they can read and reply here."
-      : "No messages yet. The league office may reach out here about your application, and you can message them any time. You’ll get a notification when they reply.")+'</p>';
-  }
-  var key = type+":"+appId;
-  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" aria-label="Write a message to '+(office?"the applicant":"the league office")+'" autocomplete="off" style="flex:1">'+
-    '<button class="btn btn-ink btn-sm" data-appchat-send="'+esc(key)+'">Send</button></div>';
-  h += '<p class="caption" style="margin-top:10px">'+(office
-    ? "The applicant can read and reply to this thread. The staff ballot below stays private to the league office."
-    : "Both sides are notified of new messages.")+'</p>';
-  return h + '</div></div>';
-};
-/* shared binder — used by the office detail page and both applicant views */
-CG.wireAppChat = function(){
-  document.querySelectorAll("[data-appchat-send]").forEach(function(b){ b.addEventListener("click", function(){
-    var key = this.getAttribute("data-appchat-send"), btn = this;
-    var inp = document.querySelector('[data-appchat-input="'+key+'"]');
-    var body = ((inp && inp.value) || "").trim();
-    if (!body){ CG.toast("Write a message first","err"); return; }
-    var i = key.indexOf(":"), type = key.slice(0,i), appId = key.slice(i+1);
-    btn.disabled = true;
-    CG.sb.from("application_messages").insert({ app_type:type, application_id:appId, sender_id:CG.auth.user.id, body:body }).select("id").then(function(r){
-      btn.disabled = false;
-      if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
-      if (!r.data || !r.data.length){ CG.toast("You can’t message on this application.","err"); return; }
-      if (inp) inp.value = "";
-      CG.toast("Message sent","ok");
-      CG.loadAppMessages().then(function(){ if(CG.router) CG.router(); });
-    });
-  }); });
-};
-/* ---- club management appointments: owners must APPLY to appoint a GM/AGM; the reviewer vote
-   approves. Rendered on the roster page (Team HQ). ---- */
-CG.clubMgmt = function(){
-  var club = CG.myClub && CG.myClub(); if(!club) return null;
-  var t = CG.TEAM[club]; if(!t) return null;
-  var uid = CG.auth.user && CG.auth.user.id;
-  return { club:club, t:t, teamId:t.id, isOwner: !!(uid && t.owner===uid) };
-};
-/* ---- Team HQ · team overview (dashboard console) ---- */
-CG.teamOverviewCard = function(mt){
-  if (!mt || !mt.code) return "";
-  var lg=CG.lg||{}, code=mt.code, names=lg._profName||{};
-  var rec=(lg.teams&&lg.teams[code])||{w:0,l:0,otl:0};
-  var pr=(lg.powerRankings||[]).find(function(p){ return p.team===code; })||{rank:0};
-  var prN=(lg.powerRankings||[]).length;
-  var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).length, rosterMax=CG.ROSTER_MAX||15;
-  var pay=(CG.teamPayroll?CG.teamPayroll(lg,code):0), cap=CG.CAP||60000000;
-  var payPct=cap?Math.min(100,Math.round(pay/cap*100)):0, over=pay>cap;
-  var played=(rec.w+rec.l+rec.otl)>0||lg.prManual;
-  var next=(lg.schedule||[]).filter(function(g){ return (g.home===code||g.away===code) && g.status!=="final"; })
-            .sort(function(a,b){ return a.at-b.at; })[0];
-  var opp=next?(next.home===code?next.away:next.home):null;
-  var seats=[["Owner",mt.owner],["GM",mt.gm],["AGM",mt.agm]].map(function(s){
-    var nm=s[1]?(names[s[1]]||"Assigned"):null;
-    return '<span style="display:flex;flex-direction:column;gap:2px">'+
-      '<span class="rb-lab">'+s[0]+'</span>'+
-      '<b style="font-family:var(--f-disp);font-size:13px'+(nm?'':';color:var(--steel-2)')+'">'+(nm?esc(nm):"Vacant")+'</b></span>';
-  }).join("");
-  return '<div class="card" style="--tc:'+esc(mt.color||"#8899A6")+';grid-column:1/-1">'+
-    '<div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+code+'">Club page →</a></div>'+
-    '<div class="card-b" style="display:flex;gap:14px;align-items:center;padding-bottom:14px">'+CG.crest(code,40)+
-      '<div style="flex:1;min-width:0"><b style="font-family:var(--f-disp);font-size:16px;display:block">'+esc(mt.name)+'</b>'+
-      '<span class="caption">'+esc(mt.div||"")+' Division'+(played?"":" · Pre-season")+'</span></div>'+
-      '<span class="ovrbox" title="Power rank">#'+(pr.rank||"—")+'</span></div>'+
-    '<div class="card-b" style="padding-top:0;padding-bottom:16px"><div class="ovstat">'+
-      '<div class="cell"><b>'+(rec.w||0)+"–"+(rec.l||0)+"–"+(rec.otl||0)+'</b><span>Record</span></div>'+
-      '<div class="cell"><b>#'+(pr.rank||"—")+'<small> / '+prN+'</small></b><span>'+(played?"Power rank":"Pre-season seed")+'</span></div>'+
-      '<div class="cell"><b>'+rosterN+'<small> / '+rosterMax+'</small></b><span>Roster</span></div>'+
-      '<div class="cell"><b'+(over?' style="color:var(--red-ink)"':'')+'>'+CG.fmtMoney(pay)+'</b><span>of '+CG.fmtMoney(cap)+' cap</span></div>'+
-    '</div>'+
-    '<div style="margin-top:12px">'+
-      '<div class="rbar"><span class="rb-lab">Roster</span><div class="rb-track"><div class="rb-fill" style="width:'+Math.round(rosterN/rosterMax*100)+'%"></div></div><span class="rb-v">'+rosterN+'/'+rosterMax+'</span></div>'+
-      '<div class="rbar"><span class="rb-lab">Cap</span><div class="rb-track"><div class="rb-fill" style="width:'+payPct+'%'+(over?";background:linear-gradient(90deg,var(--red),var(--red-ink))":"")+'"></div></div><span class="rb-v"'+(over?' style="color:var(--red-ink)"':'')+'>'+payPct+'%</span></div>'+
-    '</div></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap;align-items:center">'+
-      '<div style="display:flex;gap:18px;flex-wrap:wrap;flex:1">'+seats+'</div>'+
-      '<a class="sec-link" href="#/hub/management">Front office →</a></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">'+
-      '<span class="rb-lab">Next</span>'+
-      (next&&opp&&CG.TEAM[opp]?'<span class="teamcell">'+CG.crest(opp,22)+'<span class="nm">'+(next.home===code?"vs ":"@ ")+esc(CG.TEAM[opp].name)+'</span></span>'+
-            '<span class="caption" style="margin-left:auto">'+CG.fmtDay(next.at)+' · '+CG.fmtTime(next.at)+'</span>'
-           :'<span class="caption">'+(played?"No upcoming games scheduled.":"No games scheduled — the pre-season slate posts soon.")+'</span>')+
-    '</div></div>';
-};
-
-/* ---- Team HQ · Management tab (front office + owner GM/AGM nominations) ---- */
-CG.mgmtSeatsTable = function(m){
-  var lg=CG.lg||{}, names=lg._profName||{}, uid=(CG.auth.user||{}).id;
-  var pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
-  function row(role,label,required){
-    var owner=role==="owner";
-    var hid=owner?m.t.owner:role==="gm"?m.t.gm:m.t.agm, holder=hid?(names[hid]||"Assigned"):null;
-    var isMe=hid&&hid===uid;
-    var pend=pending.find(function(a){ return a.role===role; });
-    var status=pend?'<span class="chip chip-warn chip-xs">Pending reviewer vote</span>'
-      :owner?'<span class="chip chip-xs">Club owner</span>'
-      :holder?'<span class="chip chip-win chip-xs">Confirmed</span>'
-      :required?'<span class="chip chip-xs" style="color:var(--amber-ink);border-color:var(--amber-ink)">Vacant — required</span>'
-      :'<span class="chip chip-xs">Vacant — optional</span>';
-    var action=owner?'<span class="caption">—</span>'
-      :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
-      :m.isOwner?'<button class="btn '+(required&&!holder?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>'
-      :'<span class="caption">—</span>';
-    return '<tr>'+
-      '<td class="tleft"><span class="chip chip-chrome chip-xs">'+esc(label.toUpperCase())+'</span></td>'+
-      '<td class="tleft"><b style="font-family:var(--f-disp)">'+(holder?esc(holder):'<span style="color:var(--steel-2)">Vacant</span>')+'</b>'+(isMe?' <span class="caption">· you</span>':'')+'</td>'+
-      '<td class="tleft">'+status+'</td>'+
-      '<td class="tleft" style="text-align:right">'+action+'</td></tr>';
-  }
-  return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px">'+
-    '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">Read-only</span>')+'</div>'+
-    '<div class="tblwrap"><table class="tbl compact"><thead><tr>'+
-      '<th class="tleft">Seat</th><th class="tleft">Holder</th><th class="tleft">Status</th><th class="tleft" style="text-align:right">Action</th>'+
-    '</tr></thead><tbody>'+
-      row("owner","Owner",true)+row("gm","General Manager",true)+row("agm","Assistant GM",false)+
-    '</tbody></table></div></div>';
-};
-CG.hubManagement = function(){
-  var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
-  var lg=CG.lg||{}, pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
-  var needsGm=!m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
-  var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
-    '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the owner nominates management for the league office to approve.</p></div>';
-  if (needsGm && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">A General Manager is required</b>Every club must appoint a GM before its first regular-season game. Nominate one below — the league office’s reviewers approve it.</div>';
-  h+=CG.mgmtSeatsTable(m);
-  if (m.isOwner) pending.forEach(function(a){
-    var rl=a.role==="gm"?"General Manager":"Assistant GM";
-    h+='<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(rl)+'</h3>'+
-      '<span class="chip chip-warn chip-xs">Pending the reviewer vote</span></div><div class="card-b">'+
-      '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw="'+a.id+'">Withdraw this nomination</button></div></div>';
-    h+=CG.appChatSection("management", a.id, {office:false});
-  });
-  h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
-    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract or on league staff — they don’t have to be on your roster. "
-               : "Only the club owner can nominate a GM or AGM. ")+
-    "The league office’s reviewers vote; on approval the nominee is set automatically, and if denied nothing changes. A GM is required before your first regular-season game; an AGM is optional.</div>";
-  return h;
-};
-CG.AFTER._management = function(){
-  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
-  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-mgmt-withdraw");
-    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
-      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
-        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-  if (CG.wireAppChat) CG.wireAppChat();
-};
-CG.nominateManagerModal = function(role){
-  var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
-  var label = role==="gm"?"General Manager":"Assistant GM";
-  CG.modal("Nominate a "+label,
-    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season who isn’t already under contract — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
-      (role==="gm" ? ' Every club needs an active GM before its first regular-season game.' : ' An AGM is optional.')+'</p>'+
-    CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
-    '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
-  CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
-  var go = document.getElementById("mgGo");
-  if (go) go.addEventListener("click", function(){
-    var pick = CG.readMemberPicker("mgNominee");
-    if(!pick || !pick.id){ CG.toast("Pick a member first","err"); return; }
-    this.disabled = true;
-    CG.submitMgmtApp(role, pick.id, ((document.getElementById("mgPitch")||{}).value||"").trim()||null);
-  });
-};
-CG.submitMgmtApp = function(role, nomineeId, pitch){
-  var m = CG.clubMgmt(); if(!m || !m.isOwner){ CG.toast("Only the club owner can nominate management","err"); return; }
-  CG.sb.from("management_applications").insert({ team_id:m.teamId, role:role, submitted_by:CG.auth.user.id, nominee_id:nomineeId, pitch:pitch }).select("id").then(function(r){
-    if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-    if(!r.data||!r.data.length){ CG.toast("You can only nominate management for your own club","err"); return; }
-    if(CG.closeOverlay) CG.closeOverlay();
-    CG.toast("Nomination submitted — the reviewers will vote","ok"); CG.reloadLeague();
-  });
-};
-/* inject the management card into the roster page + wire its controls */
-/* Front-office management now lives on its own Team HQ → Management tab (CG.hubManagement),
-   not bolted onto the roster page. (The old roster-append override here was already clobbered
-   by the dead-cap hubRoster wrapper further down, so the card rendered nowhere.) */
-CG._origAfterRoster = CG.AFTER._roster;
-CG.AFTER._roster = function(){
-  if (CG._origAfterRoster) CG._origAfterRoster();
-  /* Pro roster <-> training camp (Rule 2.1). Every limit — the 2/4/6 position
-     caps, the 3-player camp, and the 3-swaps-a-season ceiling — is enforced by
-     the database trigger, so the button never has to be the last line of
-     defence: whatever the DB refuses comes back as its own rule message. */
-  document.querySelectorAll("[data-squad]").forEach(function(b){ b.addEventListener("click", function(){
-    var spot = this.getAttribute("data-squad"), to = this.getAttribute("data-squad-to"), btn = this;
-    btn.disabled = true;
-    CG.sb.rpc("set_roster_squad", { p_spot: spot, p_squad: to }).then(function(r){
-      if (r.error){ btn.disabled = false; CG.toast(r.error.message, "err"); return; }
-      var left = (r.data && r.data.moves_left);
-      CG.toast((to==="tc" ? "Moved to training camp" : "Moved to the pro roster")+
-        (left!=null ? " · "+left+" swap"+(left===1?"":"s")+" left this season" : ""), "ok");
-      CG.reloadLeague();
-    }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
-  }); });
-  /* Full roster: a straight, same-position pro<->camp swap (Rule 2.1). The picker
-     only lists legal counterparts (opposite squad, same position group, a swap
-     still left); the database validates the exchange as one atomic move. */
-  document.querySelectorAll("[data-squad-swap]").forEach(function(b){ b.addEventListener("click", function(){
-    var spot = this.getAttribute("data-squad-swap");
-    var club = CG.myClub(), roster = (CG.lg.byTeam[club]||[]);
-    var me = roster.find(function(x){ return x.spotId===spot; });
-    if (!me) return;
-    var grp = CG.posGroup(me.pos), wantSquad = me.squad==="tc" ? "pro" : "tc";
-    var opts = roster.filter(function(x){
-      return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
-        CG.posGroup(x.pos)===grp && (3-(x.squadMoves||0))>0;
-    });
-    if (!opts.length){
-      CG.toast("No eligible "+(wantSquad==="tc"?"camp":"pro")+" "+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+
-        " to swap with — everyone at this position has used their 3 changes.", "err");
-      return;
-    }
-    var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
-    CG.modal("Swap "+esc(me.tag),
-      '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
-      ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
-      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+'. Each player uses one of their three season swaps.</p>'+
-      '<div class="stack" style="gap:6px">'+opts.map(function(x){
-        return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
-          '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+(3-(x.squadMoves||0))+' swaps left</span></button>';
-      }).join("")+'</div>');
-    document.querySelectorAll("[data-swap-with]").forEach(function(sb){ sb.addEventListener("click", function(){
-      var other = this.getAttribute("data-swap-with");
-      var proSpot = pro ? pro.spotId : other, tcSpot = camp ? camp.spotId : other;
-      this.disabled = true;
-      CG.sb.rpc("swap_roster_squad", { p_pro_spot: proSpot, p_tc_spot: tcSpot }).then(function(r){
-        if (r.error){ CG.toast(r.error.message, "err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast("Squads swapped", "ok"); CG.reloadLeague();
-      }, function(e){ CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
-    }); });
-  }); });
-  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
-  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-mgmt-withdraw");
-    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
-      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
-        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-  CG.wireAppChat();
-};
-/* Staff ballot on an application — each official casts an advisory approve/deny (with an optional
-   reason). Visible ONLY to staff + commissioners: the application_ballots RLS enforces office-only
-   read, so the applicant never sees the votes, only the final decision. */
-CG.appBallotsFor = function(type, id){
-  return ((CG.lg && CG.lg._appBallots) || []).filter(function(v){ return v.app_type===type && v.application_id===id; });
-};
-CG.loadAppBallots = function(){
-  if (!CG.sb) return Promise.resolve(false);
-  return CG.sb.from("application_ballots")
-    .select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
-    .then(function(vb){ if(CG.lg) CG.lg._appBallots = (vb && !vb.error && vb.data) || []; return true; }, function(){ return false; });
-};
-/* The reviewer vote IS the decision. Once every reviewer (staff carrying the 'applications'
-   department) has voted, the DB auto-applies 50%+1. Commissioners don't vote but can override. */
-CG.appBallotSection = function(type, a, decided){
-  var uid = CG.auth.user && CG.auth.user.id;
-  var reviewers = CG.appReviewers();
-  var N = reviewers.length, need = Math.floor(N/2)+1;
-  var voteBy = {}; CG.appBallotsFor(type, a.id).forEach(function(v){ voteBy[v.voter_id] = v; });
-  var cast = reviewers.filter(function(r){ return voteBy[r.id]; }).length;
-  var yes = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="approve"; }).length;
-  var no  = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="deny"; }).length;
-  var mine = voteBy[uid], isReviewer = CG.isAppReviewer(), isCommish = CG.role()==="commish";
-
-  var head = decided
-    ? '<span class="chip '+(a.status==="approved"?"chip-win":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
-    : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
-
-  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
-    '<span class="chip chip-win chip-xs">'+yes+' approve</span><span class="chip chip-loss chip-xs">'+no+' deny</span>'+
-    (N?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';
-
-  if (N){
-    h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+reviewers.slice().sort(function(x,y){ return (x.gamertag||"").localeCompare(y.gamertag||""); }).map(function(r){
-      var v = voteBy[r.id];
-      var chip = v ? '<span class="chip '+(v.vote==="approve"?"chip-win":"chip-loss")+' chip-xs">'+(v.vote==="approve"?"Approve":"Deny")+'</span>'
-                   : '<span class="chip chip-warn chip-xs">Pending</span>';
-      return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+chip+
-        '<b style="font-family:var(--f-disp);font-size:13px">'+esc(r.gamertag||"An official")+(r.id===uid?" · you":"")+'</b>'+
-        (v&&v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
-    }).join("")+'</div>';
-  } else if (!decided){
-    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)">No application reviewers are assigned yet. A commissioner needs to add staff to the <b>Applications review</b> department — or decide this directly below.</p>';
-  }
-
-  if (!decided && isReviewer){
-    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
-      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time until the last reviewer votes":"Cast your vote")+'</span>'+
-      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
-        '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
-        (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
-  }
-  if (!decided && isCommish){
-    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px">'+
-      '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-        '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
-        '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button></div></div>';
-  }
-
-  h += '<p class="caption" style="margin-top:12px">'+(decided
-    ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
-    : N===0
-      ? "There’s no reviewer vote yet — no staff are assigned to Applications review. A commissioner can add reviewers or decide with the override above."
-      : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
-  return h + '</div></div>';
-};
-CG.hubApplicationDetail = function(id, type){
-  var review = CG.role()==="commish" || CG.role()==="staff";
-  var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
-  if (!review) return CG.unauthorized("Applications are reviewed by league staff.");
-  var isOwner = type==="owner", isMgmt = type==="management";
-  var list = isMgmt ? (CG.lg._mgmtApps||[]) : isOwner ? (CG.lg._ownerApps||[]) : (CG.lg._staffApps||[]);
-  var idS = String(id||"");
-  var a = list.find(function(x){ return x.id===id; })
-       || list.find(function(x){ return String(x.id||"").slice(0, idS.length)===idS; });
-  if (!a){
-    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
-      '<div class="e-art">'+CG.ic("flag",22)+'</div><b>That application isn’t here</b>'+
-      '<p>It may have been withdrawn or already decided. Head back to the Staff Desk.</p></div></div>';
-  }
-  var decided = a.status==="approved" || a.status==="denied" || a.status==="withdrawn";
-  function row(label, val){ return val ? '<div style="display:flex;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft)"><span class="caption" style="min-width:118px;flex-shrink:0">'+esc(label)+'</span><span class="small" style="flex:1">'+val+'</span></div>' : ''; }
-
-  var name, eyebrow, eyeClass, lede, fields = '';
-  if (isMgmt){
-    var clubCode = (CG.lg._idToCode||{})[a.team_id];
-    var clubName = (clubCode && CG.TEAM && CG.TEAM[clubCode] && CG.TEAM[clubCode].name) || clubCode || "the club";
-    var roleLabel = a.role==="gm" ? "General Manager" : "Assistant GM";
-    name = ((a.nominee&&a.nominee.gamertag)||"A member");
-    eyebrow = a.role==="gm" ? "GM" : "AGM"; eyeClass = "chip-chrome";
-    lede = "Nominated as "+roleLabel+" of "+clubName+".";
-    fields += row("Club", esc(clubName)+(clubCode?' <span class="caption">('+esc(clubCode)+')</span>':""));
-    fields += row("Role", esc(roleLabel));
-    fields += row("Nominee", esc((a.nominee&&a.nominee.gamertag)||"—"));
-    fields += row("Submitted by", esc((a.submitter&&a.submitter.gamertag)||"the owner"));
-    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
-  } else {
-    var prof = a.profiles||{}; name = prof.gamertag||"Applicant";
-    eyebrow = isOwner ? "OWNER" : "STAFF"; eyeClass = isOwner ? "chip" : "chip-chrome";
-    lede = isOwner ? "Application to own a club." : "Application to join the league staff.";
-    if (isOwner){
-      fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
-      fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
-      fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
-      fields += row("Franchise picks", CG.franchisePicksLine(a));
-      fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
-      fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
-    } else if (a.departments && a.departments.length){
-      fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
-    }
-    fields += row("Timezone", a.timezone?esc(a.timezone):"");
-    fields += row("Availability", a.availability?esc(a.availability):"");
-    fields += row("Experience", a.experience?esc(a.experience):"");
-    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
-  }
-
-  var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
-    : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
-    : a.status==="withdrawn" ? '<span class="chip">Withdrawn</span>'
-    : '<span class="chip chip-warn">Pending</span>';
-
-  var h = '<div style="margin-bottom:18px">'+back+
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">'+
-      '<span class="chip '+eyeClass+' chip-xs">'+esc(eyebrow)+'</span>'+
-      '<h1 class="h-sec">'+esc(name)+'</h1>'+statusChip+'</div>'+
-    '<p class="lede" style="margin-top:8px">'+esc(lede)+'</p></div>';
-
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-b">'+fields+
-    (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">'+(isMgmt?"The owner’s case":"Their pitch")+'</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
-    '</div></div>';
-
-  /* which club they're getting is decided before the vote lands — the approval acts on it */
-  if (isOwner) h += CG.ownerAppClubPicker(a);
-  /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
-  h += CG.appChatSection(type, a.id, {office:true});
-  /* the reviewer vote IS the decision — no manual approve/deny */
-  h += CG.appBallotSection(type, a, decided);
-  return h;
-};
-CG.AFTER._applicationDetail = function(){
-  /* the review board's club choice. Awarding after an approval places the owner on the
-     spot, so the toast reports what the server actually did rather than assuming. */
-  document.querySelectorAll("[data-club-award]").forEach(function(b){ b.addEventListener("click", function(){
-    var club = this.getAttribute("data-club-award") || null, id = this.getAttribute("data-app");
-    var all = document.querySelectorAll("[data-club-award]");
-    all.forEach(function(x){ x.disabled = true; });
-    CG.sb.rpc("set_owner_app_club", { p_id:id, p_club:club }).then(function(r){
-      if (r.error){
-        all.forEach(function(x){ x.disabled = false; });
-        CG.toast(r.error.message || "Couldn’t set the club","err"); return;
-      }
-      /* the RPC saves the choice even when it can't create the club — report which of the
-         two actually happened rather than painting every non-error green */
-      var d = r.data || {};
-      CG.toast(d.message || (club ? "Club chosen" : "Choice cleared"), d.ok === false ? "err" : "ok");
-      CG.reloadLeague();   /* a placement changes the club list, not just this row */
-    });
-  }); });
-  /* commissioner override — decide immediately, bypassing the reviewer vote */
-  document.querySelectorAll("[data-app-override]").forEach(function(b){ b.addEventListener("click", function(){
-    var approve = this.getAttribute("data-app-override")==="approve";
-    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
-    CG.confirm((approve?"Approve":"Deny")+" this now?","This overrides the reviewer vote and applies the decision immediately.",(approve?"Approve":"Deny")+" now", function(){
-      CG.sb.rpc("override_application_decision", { p_type:t, p_id:id, p_approve:approve }).then(function(r){
-        if (r.error){ CG.toast("Couldn’t override: "+r.error.message,"err"); return; }
-        CG.toast("Decision applied — "+(approve?"approved":"denied"),"ok");
-        CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
-      });
-    });
-  }); });
-  /* the reviewer vote — cast/change/retract; .select() so an RLS-blocked write (a non-reviewer)
-     is reported honestly instead of a false success. Casting the last vote auto-resolves server-side. */
-  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
-    var v=this.getAttribute("data-vote-cast"), t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
-    var note=((document.getElementById("appVoteNote")||{}).value||"").trim();
-    var btns=document.querySelectorAll("[data-vote-cast],[data-vote-retract]"); btns.forEach(function(x){ x.disabled=true; });
-    CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null), updated_at:new Date().toISOString() }, {onConflict:"app_type,application_id,voter_id"}).select("id").then(function(r){
-      if(r.error){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Couldn’t save your vote: "+r.error.message,"err"); return; }
-      if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only assigned application reviewers can vote.","err"); return; }
-      CG.toast("Vote recorded — "+(v==="approve"?"approve":"deny"),"ok");
-      /* full reload — casting the final vote may resolve the application (status + role assignment) */
-      CG.reloadLeague();
-    });
-  }); });
-  document.querySelectorAll("[data-vote-retract]").forEach(function(b){ b.addEventListener("click", function(){
-    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
-    CG.sb.from("application_ballots").delete().eq("app_type",t).eq("application_id",id).eq("voter_id",CG.auth.user.id).select("id").then(function(r){
-      if(r.error){ CG.toast("Couldn’t retract: "+r.error.message,"err"); return; }
-      CG.toast("Vote retracted","ok"); CG.reloadLeague();
-    });
-  }); });
-  CG.wireAppChat();
-};
-/* Every ticket the league office has handled, in one place — complaints, appeals, trade and
-   position requests, and staff/owner applications, open or closed. Each row opens its own detail
-   page (the case thread or the application response), so the whole history is browsable. */
-CG.allTickets = function(){
-  var lg = CG.lg || {}, out = [];
-  (lg._actionReqs||[]).forEach(function(a){
-    var meta = CG.ACTION_META[a.type] || { label:a.type, icon:"flag" };
-    var closed = a.status==="resolved" || a.status==="denied";
-    out.push({ group:a.type, typeLabel:meta.label, icon:meta.icon||"flag",
-      title: a.subject || (a.details||"Request").slice(0,64),
-      who: (a.profiles&&a.profiles.gamertag)||"member",
-      result: a.status==="resolved" ? "Resolved" : a.status==="denied" ? "Denied" : "Open",
-      isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
-      route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
-  });
-  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":"Pending"; }
-  (lg._staffApps||[]).forEach(function(a){
-    var closed = a.status!=="pending";
-    out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
-      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
-      result: appResult(a.status), isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=staff", replies:CG.appMsgsFor("staff",a.id).length });
-  });
-  (lg._ownerApps||[]).forEach(function(a){
-    var closed = a.status!=="pending";
-    out.push({ group:"owner", typeLabel:"Owner application", icon:"shield",
-      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
-      result: appResult(a.status), isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=owner", replies:CG.appMsgsFor("owner",a.id).length });
-  });
-  (lg._mgmtApps||[]).forEach(function(a){
-    var closed = a.status!=="pending";
-    var code = (lg._idToCode||{})[a.team_id];
-    var club = (code && CG.TEAM && CG.TEAM[code] && CG.TEAM[code].name) || code || "a club";
-    out.push({ group:"management", typeLabel:(a.role==="gm"?"GM application":"AGM application"), icon:"shield",
-      title:((a.nominee&&a.nominee.gamertag)||"A member")+" · "+club, who:(a.submitter&&a.submitter.gamertag)||"owner",
-      result: appResult(a.status), isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=management", replies:CG.appMsgsFor("management",a.id).length });
-  });
-  return out.sort(function(x,y){ return y.at - x.at; });
-};
-CG.hubTicketArchive = function(){
-  if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
-  var type = CG._arcType||"all", status = CG._arcStatus||"all";
-  var shown = CG.allTickets().filter(function(t){
-    if (type!=="all" && t.group!==type) return false;
-    if (status==="open" && !t.isOpen) return false;
-    if (status==="closed" && t.isOpen) return false;
-    return true;
-  });
-  function fbtn(attr, cur, val, label){ return '<button type="button" class="chip '+(cur===val?"chip-chrome":"")+'" style="cursor:pointer" '+attr+'="'+val+'" aria-pressed="'+(cur===val)+'">'+esc(label)+'</button>'; }
-  function resultChip(t){
-    var cls = (t.result==="Resolved"||t.result==="Approved") ? "chip-win" : t.result==="Denied" ? "chip-loss" : "chip-warn";
-    return '<span class="chip '+cls+' chip-xs">'+esc(t.result)+'</span>';
-  }
-  function row(t){
-    return '<div class="card-b row-go" data-go="'+esc(t.route)+'" role="link" tabindex="0" '+
-      'data-arc-text="'+esc((t.title+" "+t.who+" "+t.typeLabel).toLowerCase())+'" '+
-      'aria-label="Open '+esc(t.typeLabel)+': '+esc(t.title)+'" '+
-      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span style="color:var(--steel);flex-shrink:0">'+CG.ic(t.icon,15)+'</span>'+
-      '<span style="flex:1;min-width:170px"><b style="font-family:var(--f-disp);display:block">'+esc(t.title)+'</b>'+
-        '<span class="caption">'+esc(t.typeLabel)+' · '+esc(t.who)+(t.replies?' · '+t.replies+' repl'+(t.replies===1?"y":"ies"):"")+'</span></span>'+
-      resultChip(t)+
-      '<span class="caption">'+(t.at?CG.fmtDay(t.at):"")+'</span>'+
-      '<span class="caption" aria-hidden="true">→</span></div>';
-  }
-  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"],["management","GM / AGM"]];
-  var statusF = [["all","All"],["open","Open / pending"],["closed","Resolved / decided"]];
-
-  var h = '<div style="margin-bottom:18px"><a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>'+
-    '<h1 class="h-sec" style="margin-top:10px">Ticket archive</h1>'+
-    '<p class="lede" style="margin-top:8px">Every complaint, appeal, request, and application — open or closed — with its result. Open any one to read the full conversation and the decision.</p></div>';
-  h += '<div class="card" style="margin-bottom:16px"><div class="card-b" style="display:grid;gap:12px">'+
-    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Type</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+typeF.map(function(f){ return fbtn("data-arc-type",type,f[0],f[1]); }).join("")+'</div></div>'+
-    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Status</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+statusF.map(function(f){ return fbtn("data-arc-status",status,f[0],f[1]); }).join("")+'</div></div>'+
-    '<div style="display:flex;gap:12px;align-items:center"><span class="caption" style="min-width:54px">Search</span><input id="arcSearch" type="search" placeholder="Filter by name, subject, or type…" style="flex:1" autocomplete="off"></div>'+
-  '</div></div>';
-  h += '<div class="card"><div class="card-h"><h3>Tickets</h3><span class="chip" id="arcCount">'+shown.length+'</span></div>'+
-    (shown.length ? shown.map(row).join("") : '<div class="card-b"><p class="caption">No tickets match these filters. Try widening them above.</p></div>')+'</div>';
-  return h;
-};
-CG.AFTER._ticketArchive = function(){
-  document.querySelectorAll("[data-arc-type]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcType = this.getAttribute("data-arc-type"); if(CG.router) CG.router(); }); });
-  document.querySelectorAll("[data-arc-status]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcStatus = this.getAttribute("data-arc-status"); if(CG.router) CG.router(); }); });
-  var s = document.getElementById("arcSearch");
-  if (s) s.addEventListener("input", function(){
-    /* live filter without a re-render, so the search box keeps focus */
-    var q = this.value.trim().toLowerCase(), n = 0;
-    document.querySelectorAll("[data-arc-text]").forEach(function(r){
-      var hit = !q || r.getAttribute("data-arc-text").indexOf(q) >= 0;
-      r.style.display = hit ? "" : "none"; if (hit) n++;
-    });
-    var c = document.getElementById("arcCount"); if (c) c.textContent = n;
-  });
-};
-CG.hubStaffDesk = function(){
-  var lg = CG.lg;
-  var reqs = (lg._actionReqs||[]);
-  /* terminal statuses are 'resolved' and 'denied' — a denied case is closed, not open */
-  var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
-  /* warnings live in the same table but never count as suspensions */
-  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active" && s.mode!=="warning"; });
-  var now = Date.now();
-  var finals = (lg.allResults||[]).slice().sort(function(a,b){ return b.at-a.at; });
-  var weekFinals = finals.filter(function(r){ return now - r.at < 7*86400000; });
-  var tonight = lg.tonight||[];
-
-  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">League staff · officials’ tools</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Staff Desk</h1>'+
-    '<p class="lede" style="margin-top:8px">The case queue, active discipline, and the imports worth a second look — everything an official touches, in one place.</p></div>';
-
-  h += CG.staffAttentionCard();
-
-  h += '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-bottom:20px">'+
-    '<div class="kpi'+(open.length?" alert":"")+'" style="cursor:pointer" data-go="#/hub/complaints"><b class="num">'+open.length+'</b><span>open cases</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+sus.length+'</b><span>active suspensions</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+weekFinals.length+'</b><span>finals · last 7 days</span></div>'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+tonight.length+'</b><span>games tonight</span></div></div>';
-
-  /* applications — owner + staff, decided right here */
-  var ownerApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
-  var staffApps = (lg._staffApps||[]).filter(function(a){ return a.status==="pending"; });
-  var mgmtApps  = (lg._mgmtApps||[]).filter(function(a){ return a.status==="pending"; });
-  var pendCount = ownerApps.length+staffApps.length+mgmtApps.length;
-  var revCount = CG.appReviewers().length;
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3>'+
-    '<span class="chip '+(pendCount?"chip-warn":"chip-win")+'">'+(pendCount?pendCount+" awaiting the vote":"none pending")+'</span></div>';
-  /* each row opens the application into its own page (CG.hubApplicationDetail) — the reviewer vote
-     decides it there. Glance-level tally shows where the vote stands. */
-  function appRow(a, type){
-    var isOwner=type==="owner", isMgmt=type==="management";
-    var chipLabel = isMgmt ? (a.role==="gm"?"GM":"AGM") : isOwner?"OWNER":"STAFF";
-    var title, sub;
-    if (isMgmt){
-      var code=(lg._idToCode||{})[a.team_id], club=(code&&CG.TEAM&&CG.TEAM[code]&&CG.TEAM[code].name)||code||"a club";
-      title=(a.nominee&&a.nominee.gamertag)||"A member";
-      sub=(a.role==="gm"?"General Manager":"Assistant GM")+" · "+esc(club)+" · by "+esc((a.submitter&&a.submitter.gamertag)||"owner");
-    } else {
-      var prof=a.profiles||{}; title=prof.gamertag||"Applicant";
-      sub = isOwner ? CG.franchisePicksLine(a)
-        : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
-    }
-    var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
-    var tally = (vb.length ? '<span class="chip chip-xs" title="Reviewer vote so far">'+vy+' approve · '+vn+' deny</span>' : "")
-      + (revCount ? '<span class="caption">'+vb.length+'/'+revCount+' voted</span>' : "");
-    return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
-      'aria-label="Open '+esc(chipLabel)+' application: '+esc(title)+'" '+
-      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+esc(chipLabel)+'</span>'+
-      '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(title)+'</b>'+
-        '<span class="caption">'+sub+'</span></span>'+
-      tally+
-      '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
-      '<span class="caption" aria-hidden="true">→</span></div>';
-  }
-  if (staffApps.length) h += staffApps.map(function(a){ return appRow(a,"staff"); }).join("");
-  if (ownerApps.length) h += ownerApps.map(function(a){ return appRow(a,"owner"); }).join("");
-  if (mgmtApps.length)  h += mgmtApps.map(function(a){ return appRow(a,"management"); }).join("");
-  if (!pendCount){
-    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply to own a club (#/owner) or join the staff (#/staffapply); owners nominate a GM/AGM from their Team HQ.</p></div>';
-  } else {
-    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to read it and cast your vote. '+
-      (revCount ? 'Once all <b>'+revCount+'</b> application reviewer'+(revCount===1?"":"s")+' vote, 50%+1 decides it automatically.'
-                : '<b style="color:var(--amber-ink)">No reviewers are assigned</b> — a commissioner must add staff to the Applications review department, or decide with the commissioner override.')+'</span></div>';
-  }
-  h += '</div>';
-
-  /* case queue preview */
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Case queue</h3>'+
-    '<a class="sec-link" href="#/hub/complaints">Open the queue</a></div>';
-  h += open.length ? open.slice(0,5).map(function(a){
-      var meta = CG.ACTION_META[a.type] || { label:a.type };
-      var replies = ((lg._actionMsgs||{})[a.id]||[]).length;
-      var names = (lg&&lg._profName)||{};
-      return '<div class="card-b row-go" data-go="#/hub/complaint?id='+esc(a.id)+'" role="link" tabindex="0" '+
-        'aria-label="Open case: '+esc(a.subject||meta.label)+'" '+
-        'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<span class="chip chip-warn" style="text-transform:capitalize">'+esc(a.status||"open")+'</span>'+
-        '<span style="flex:1;min-width:160px">'+
-          '<b style="font-family:var(--f-disp);display:block">'+esc(a.subject||meta.label)+'</b>'+
-          '<span class="caption">'+esc(meta.label)+' · filed by '+esc((a.profiles&&a.profiles.gamertag)||"member")+
-          (a.assigned_to ? ' · claimed by '+esc(names[a.assigned_to]||"a colleague") : '')+'</span></span>'+
-        (replies ? '<span class="chip chip-xs">'+replies+' repl'+(replies===1?"y":"ies")+'</span>' : "")+
-        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
-        '<span class="caption" aria-hidden="true">→</span></div>';
-    }).join("")
-    : CG._actionLoadError
-      /* never report an empty queue we aren't sure about — an unanswered case looks identical to
-         a clean room, and that is exactly how two open cases went unseen */
-      ? '<div class="card-b"><p class="caption" style="color:var(--red-ink)"><b>Couldn’t load the case queue.</b> '+esc(CG._actionLoadError)+' — the count above comes straight from the database, so cases may be waiting. Reload; if it persists this is a bug worth reporting.</p></div>'
-      : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
-  h += '</div>';
-
-  /* ticket archive — the full history, open or closed */
-  var arcAll = CG.allTickets(), arcClosed = arcAll.filter(function(t){ return !t.isOpen; }).length;
-  h += '<div class="card raise" style="margin-bottom:18px;cursor:pointer" data-go="#/hub/archive" role="link" tabindex="0" aria-label="Open the ticket archive">'+
-    '<div class="card-h"><h3>Ticket archive</h3><span class="sec-link">'+CG.ic("db",14)+' Open the archive</span></div>'+
-    '<div class="card-b"><p class="caption">Every complaint, appeal, request, and application the league office has handled — open or closed — with its result and full conversation. '+
-      '<b>'+arcAll.length+'</b> ticket'+(arcAll.length===1?"":"s")+' on file'+(arcClosed?', '+arcClosed+' resolved':"")+'.</p></div></div>';
-
-  /* active discipline */
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3><span class="chip">'+sus.length+'</span></div>';
-  h += sus.length ? sus.map(function(s){
-      var p = CG.playerById(lg, s.playerId);
-      /* an enforcement-void suspension belongs to a player with no roster spot, so they aren't in
-         lg.players — fall back to the name carried on the suspension record itself */
-      var nm = p ? p.tag : (s.playerName || "A player");
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<b style="font-family:var(--f-disp)">'+esc(nm)+'</b>'+
-        '<span class="caption" style="flex:1">'+esc(s.reason||"")+'</span>'+
-        '<span class="chip chip-loss">'+(s.mode==="date"?("until "+(s.endsAt?CG.fmtDay(Date.parse(s.endsAt)):"further notice")):s.mode==="seasons"?("through Season "+(s.untilSeason||"—")):(s.games+" game"+(s.games===1?"":"s")))+'</span>'+
-        (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
-    }).join("")
-    : '<div class="card-b"><p class="caption">No one is suspended. '+(CG.role()==="commish"?'Suspensions are issued from <a href="#/admin/users" style="font-weight:700;border-bottom:2px solid var(--chrome)">Users &amp; roles</a>.':'The commissioner issues suspensions; the record shows here and on profiles.')+'</p></div>';
-  h += '</div>';
-
-  /* recent finals — spot-check the EA imports */
-  h += '<div class="card"><div class="card-h"><h3>Recent finals — spot-check the imports</h3><span class="chip">auto-imported from EA</span></div>';
-  h += finals.length ? finals.slice(0,6).map(function(r){
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:120px">'+CG.fmtDay(r.at)+'</span>'+
-        '<span class="teamcell">'+CG.crest(r.away,20)+'<b class="mono" style="font-size:12px">'+esc(r.away)+' '+r.score[r.away]+'</b></span><span class="caption">@</span>'+
-        '<span class="teamcell">'+CG.crest(r.home,20)+'<b class="mono" style="font-size:12px">'+esc(r.home)+' '+r.score[r.home]+'</b></span>'+
-        (r.ot?'<span class="chip" style="font-size:9px">OT</span>':"")+
-        '<a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/matchup/'+r.id+'">Box score</a></div>';
-    }).join("")
-    : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
-  h += '</div>';
-
-  /* staff tools — actionable first (tasks, EA triage), then reference (directory, activity) */
-  h += CG.staffTasksCard();
-  h += CG.staffVotesCard();
-  h += CG.staffEaCard();
-  h += CG.staffDirectoryCard();
-  h += CG.staffActivityCard();
-
-  /* season award ballots — staff vote all season; the commissioner finalizes after the finale */
-  var BALLOT_CATS = [
-    ["mvp","Most Valuable Player", null],
-    ["best_goalie","Best Goaltender", "G"],
-    ["best_defenseman","Best Defenseman", "D"],
-    ["rookie_of_year","Rookie of the Year", null]
-  ];
-  var isCommish = CG.role()==="commish";
-  /* Rule 2.7 — Media holds no ballot; the RLS policy refuses the write either way */
-  var mediaNoBallot = CG.isMediaOnlyStaff();
-  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3>'+
-    '<span class="chip">'+(mediaNoBallot?"read-only for Media":"one vote each")+'</span></div>';
-  h += BALLOT_CATS.map(function(cat){
-    var pool = (lg.players||[]).filter(function(p){
-      if (cat[2]==="G") return p.pos==="G";
-      if (cat[2]==="D") return ["LD","RD","D"].indexOf(p.pos)>=0;
-      return true;
-    }).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
-    var opts = '<option value="">— pick a player —</option>'+pool.map(function(p){
-      return '<option value="'+p.id+'">'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
-    var won = (lg.seasonAwards||[]).find(function(a){ return a.category===cat[0]; });
-    return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
-      '<b style="font-family:var(--f-disp);min-width:190px">'+cat[1]+'</b>'+
-      (won ? '<span class="chip chip-win">Decided</span><span class="caption" data-ballot-tally="'+cat[0]+'"></span>'
-        : mediaNoBallot
-          /* Rule 2.7 — an MVP vote is the purest form of voting for your own club, and Media is the
-             one department that may run one. Tally stays visible; the picker doesn't. */
-          ? '<span class="caption" style="flex:1">Media staff don’t hold a ballot (Rule 2.7).</span>'+
-            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'
-          : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
-            '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
-            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
-            (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
-      '</div>';
-  }).join("");
-  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
-    (mediaNoBallot
-      ? 'Media staff read the tallies but don’t vote on awards (Rule 2.7) — the department covers the league rather than deciding it.'
-      : 'Every staff member and commissioner gets one vote per award (change it any time before the finalize). Media staff are the exception — they hold no ballot (Rule 2.7). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.')+
-    '</span></div></div>';
-  return h;
-};
-CG.AFTER._staffdesk = function(){
-  /* applications open into their own page (the reviewer vote decides there) — no inline decide */
-  CG.wireStaffExtras();
-
-  /* ---- season award ballots ---- */
-  var sid = CG.SEASON && CG.SEASON.id;
-  if (sid && CG.sb && document.querySelector("[data-ballot-cat],[data-ballot-tally]")){
-    var names = {}; (CG.lg._profilesRaw||[]).forEach(function(p){ names[p.id]=p.gamertag||p.display_name||"—"; });
-    CG.sb.from("award_ballots").select("category,voter_id,profile_id").eq("season_id", sid).then(function(r){
-      var rows = (r&&r.data)||[];
-      document.querySelectorAll("[data-ballot-cat]").forEach(function(sel){
-        var mine = rows.find(function(x){ return x.category===sel.getAttribute("data-ballot-cat") && x.voter_id===CG.auth.user.id; });
-        if (mine) sel.value = mine.profile_id;
-      });
-      document.querySelectorAll("[data-ballot-tally]").forEach(function(el){
-        var cat = el.getAttribute("data-ballot-tally");
-        var votes = rows.filter(function(x){ return x.category===cat; });
-        if (!votes.length){ el.textContent = "no votes yet"; return; }
-        var counts = {}; votes.forEach(function(v){ counts[v.profile_id]=(counts[v.profile_id]||0)+1; });
-        var top = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a]; }).slice(0,3);
-        el.textContent = votes.length+" vote"+(votes.length===1?"":"s")+" · leading: "+
-          top.map(function(pid){ return (names[pid]||"?")+" ("+counts[pid]+")"; }).join(", ");
-      });
-    });
-  }
-  document.querySelectorAll("[data-ballot-save]").forEach(function(b){ b.addEventListener("click", function(){
-    var cat=this.getAttribute("data-ballot-save"), btn=this;
-    var sel=document.querySelector('[data-ballot-cat="'+cat+'"]');
-    if(!sel||!sel.value){ CG.toast("Pick a player first","err"); return; }
-    btn.disabled=true;
-    CG.sb.from("award_ballots").upsert({ season_id:CG.SEASON.id, category:cat, voter_id:CG.auth.user.id,
-      profile_id:sel.value, updated_at:new Date().toISOString() },{ onConflict:"season_id,category,voter_id" })
-      .then(function(r){
-        btn.disabled=false;
-        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        CG.toast("Vote saved — change it any time","ok"); CG.router();
-      });
-  }); });
-  document.querySelectorAll("[data-ballot-final]").forEach(function(b){ b.addEventListener("click", function(){
-    var cat=this.getAttribute("data-ballot-final"), label=this.getAttribute("data-label");
-    CG.confirm("Finalize "+label+"?",
-      "Tallies the staff ballots and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to break it. Re-running later corrects the record.",
-      "Finalize award", function(){
-      CG.sb.rpc("finalize_season_award",{ p_season:CG.SEASON.id, p_category:cat }).then(function(r){
-        if(r.error){ CG.toast(r.error.message,"err"); return; }
-        CG.toast(String(r.data||"Winner")+" wins "+label,"ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-};
-CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
-
-/* ================================================================
-   LIVE ADMIN: OVERVIEW — real league state, real action items
-   ================================================================ */
-CG.admOverviewLive = function(){
-  var lg = CG.lg;
-  var unlinked = (CG.TEAMS||[]).filter(function(t){ return !t.eaClubId; });
-  var pendingApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
-  var openCases = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; });
-  var unsigned = (lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===((CG.SEASON&&CG.SEASON.id)||null)) && !(lg._rosteredIds||{})[r.profile_id]; });
-  var nextG = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at>CG.now(); }).sort(function(a,b){ return a.at-b.at; })[0];
-  var days = CG.daysToStart ? CG.daysToStart() : null;
-  var draftSt = lg.draftState ? lg.draftState.status : null;
-  var h = '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>days to puck drop</span></div>'+
-    '<div class="kpi'+(unsigned.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+unsigned.length+'</b><span>'+(draftSt==="complete"?"free agents unsigned":"signed up · no club")+'</span></div>'+
-    '<div class="kpi'+(pendingApps.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+pendingApps.length+'</b><span>owner apps pending</span></div>'+
-    '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
-    '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">5</b><span>automations</span></div></div>';
-  var actions = [];
-  if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
-  if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
-  if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason","Pre-season"]);
-  if (openCases.length) actions.push([openCases.length+' complaint'+(openCases.length===1?"":"s / requests")+' open in the league office',"#/admin/complaints","Case queue"]);
-  if (draftSt && draftSt!=="complete") actions.push(["The draft is "+draftSt,"#/draft","Draft room"]);
-  h += '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>Needs your attention</h3>'+(actions.length?'<span class="chip chip-warn">'+actions.length+'</span>':'<span class="chip chip-win">All clear</span>')+'</div>'+
-    (actions.length ? actions.map(function(a){
-      return '<div class="titem" style="padding:12px 18px;border-top:1px solid var(--line-soft)"><span class="t-dot red"></span><span style="flex:1">'+a[0]+'</span><a class="btn btn-ghost btn-sm" href="'+a[1]+'">'+a[2]+'</a></div>';
-    }).join("") : '<div class="card-b"><span class="caption">Nothing pending — registrations, cases, and club links are all handled.</span></div>')+'</div>';
-  h += '<div class="stack"><div class="card"><div class="card-h"><h3>Next game night</h3><a class="sec-link" href="#/admin/schedule">Schedule</a></div><div class="card-b">'+
-    (nextG ? '<b style="font-family:var(--f-disp);font-size:16px">'+CG.fmtDay(nextG.at)+'</b><p class="caption" style="margin-top:6px">First puck drop '+CG.fmtTime(nextG.at)+' · codes at T-30 · servers set 30 min before the first game.</p>'
-           : '<span class="caption">No games scheduled yet.</span>')+'</div></div>'+
-    '<div class="card"><div class="card-h"><h3>How results work</h3><a class="sec-link" href="#/admin/eastats">EA stats</a></div><div class="card-b"><p class="small" style="color:var(--steel)">Scores and full box scores import automatically from the EA NHL match record after every final — standings, stats, overalls, news recaps, and Discord posts all follow with no manual entry.</p></div></div></div></div>';
-  return h;
-};
-
-/* ================================================================
-   LIVE ADMIN: AUTOMATIONS — real heartbeats + run-now buttons
-   ================================================================ */
-/* ================================================================
-   RULE 2.5 DEAD CAP — unsigned contracts count against the cap.
-   Mirrors public.team_cap_used: an active, non-management contract
-   covering this season whose player has no roster spot holds its full
-   salary against the club until the player registers. ============= */
-CG.deadCapEntries = function(lg, code){
-  if (!lg || !lg.live || !lg._contractsRaw) return [];
-  var sn = (CG.SEASON && CG.SEASON.number) || 1, rostered = lg._rosteredIds || {}, idToCode = lg._idToCode || {};
-  return lg._contractsRaw.filter(function(c){
-    return c.status==="active" && !c.is_manager && c.team_id && idToCode[c.team_id]===code &&
-           (c.start_season||1)<=sn && (c.end_season||1)>=sn && !rostered[c.profile_id];
-  });
-};
-CG.deadCapFor = function(lg, code){
-  return CG.deadCapEntries(lg, code).reduce(function(s,c){ return s+(c.salary||0); },0);
-};
-/* profile ids under an active team contract this season. A contracted player returns to
-   their own club by registering (Rule 2.5), so they must never appear as a free agent or a
-   draft prospect — this guards the client pools even if an auto-activation hasn't run yet. */
-CG.contractHeldIds = function(){
-  var out = {}, sn = (CG.SEASON && CG.SEASON.number) || 1;
-  ((CG.lg && CG.lg._contractsRaw) || []).forEach(function(c){
-    if (c.status==="active" && !c.is_manager && c.team_id && (c.start_season||1)<=sn && (c.end_season||1)>=sn) out[c.profile_id]=true;
-  });
-  return out;
-};
-CG._origTeamPayroll = CG._origTeamPayroll || CG.teamPayroll;
-CG.teamPayroll = function(lg, code){
-  return CG._origTeamPayroll(lg, code) + ((lg && lg.live) ? CG.deadCapFor(lg, code) : 0);
-};
-/* Team HQ → Roster: name the dead money so management knows exactly why the number moved */
-CG._origHubRoster = CG._origHubRoster || CG.hubRoster;
-CG.hubRoster = function(qs){
-  var h = CG._origHubRoster(qs);
-  var club = CG.myClub && CG.myClub(); if (!club) return h;
-  var dead = CG.deadCapEntries(CG.lg, club);
-  if (!dead.length) return h;
-  var names = dead.map(function(c){
-    var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===c.profile_id; });
-    return '<b>'+esc((pr && (pr.gamertag||pr.display_name)) || "A player")+'</b> ('+CG.fmtMoney(c.salary||0)+' through Season '+(c.end_season||"—")+')';
-  }).join(", ");
-  var note = '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
-    '<span><b style="font-family:var(--f-disp)">Dead cap — unsigned contracts.</b> '+names+' — under contract but not yet registered for this season. The salary counts against your cap and they can’t play until they sign up; registering puts them straight back on your roster at no extra cap cost. If the club changes owners first, the deal is voided and the player is suspended for its remaining length (Rule 2.5).</span></div>';
-  var anchor = '<span>Salary cap</span></div></div>';
-  h = h.indexOf(anchor) > -1 ? h.replace(anchor, anchor + note) : note + h;
-  return h.replace('<span>Active payroll</span>', '<span>Payroll + dead cap</span>');
-};
-
-CG.AUTOMATIONS = [
-  { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
-  { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
-  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
-  { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
-  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
-  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
-  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
-  { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
-  { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
-  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
-  { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
-  { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
-];
-CG.admAutomationsLive = function(){
-  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
-  /* staff channel configuration — turns on the staff notifications */
-  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Staff Discord channels</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
-    '<div class="card-b">'+
-    '<p class="caption" style="margin-bottom:14px;max-width:74ch">One webhook per staff channel. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Each channel below falls back to <b>general</b> until you set it, so nothing is ever lost.</p>'+
-    '<label class="fld"><span>Staff general — applications, daily briefing, weekly report</span><input id="staffWh" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Staff welcome — the bot’s welcome post for each new staff member</span><input id="staffWhWelcome" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Casework &amp; enforcement — cases filed, discipline issued, forfeit rulings</span><input id="staffWhCase" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Staff role ID to ping on urgent items (optional)</span><input id="staffRole" placeholder="e.g. 1524970…" autocomplete="off"></label>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-chrome btn-sm" id="staffChanSave">Save channels</button>'+
-    '<button class="btn btn-ghost btn-sm" id="staffChanTest">Send test to general</button></div>'+
-    '<p class="caption" style="margin-top:10px">Saved webhooks are never shown back here — re-paste to change one. A blank field leaves that channel as-is.</p></div></div>';
-  h += '<div class="card">'+CG.AUTOMATIONS.map(function(a,i){
-    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-      '<div style="flex:1;min-width:220px"><b style="font-family:var(--f-disp)">'+esc(a.name)+'</b>'+
-        '<p class="caption" style="margin-top:2px">'+esc(a.desc)+' '+esc(a.every)+'.</p></div>'+
-      '<span class="chip" id="auto-st-'+a.key+'">checking…</span>'+
-      '<span class="caption mono" id="auto-ts-'+a.key+'" style="min-width:110px;text-align:right">—</span>'+
-      '<button class="btn btn-ghost btn-sm" data-auto-run="'+a.key+'">Run now</button></div>';
-  }).join("")+
-  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Also fully automatic, inside the database: standings on every final, auto news (recaps, spotlights, Three Stars), server resolution at lock, and every notification. Those have no off switch — they’re triggers.</span></div></div>';
-  return h;
-};
-CG.AFTER._admAutomations = function(){
-  /* staff channel config */
-  var chSt = document.getElementById("staffChanSt");
-  if (chSt){
-    /* refresh only the status chip — NOT the whole AFTER binder (re-running it would
-       re-addEventListener on the same, un-re-rendered buttons and stack duplicate handlers) */
-    function refreshChip(){
-      CG.sb.rpc("staff_channel_status").then(function(r){
-        var d = (r&&!r.error&&r.data)||{};
-        var on = [d.configured&&"general", d.welcome&&"welcome", d.casework&&"casework"].filter(Boolean);
-        chSt.textContent = on.length ? on.join(" · ")+(d.has_role?" · pings on":"") : "Not set up";
-        chSt.className = "chip "+(d.configured?(on.length===3?"chip-win":"chip-chrome"):"chip-warn");
-      });
-    }
-    refreshChip();
-    var saveBtn = document.getElementById("staffChanSave");
-    if (saveBtn) saveBtn.addEventListener("click", function(){
-      var v=function(id){ return (document.getElementById(id).value||"").trim(); };
-      var btn=this; btn.disabled=true;
-      CG.sb.rpc("set_staff_channels",{ p_general:v("staffWh"), p_welcome:v("staffWhWelcome"),
-        p_casework:v("staffWhCase"), p_role_id:v("staffRole") }).then(function(r){
-        btn.disabled=false;
-        if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
-        CG.toast("Staff channels saved","ok");
-        ["staffWh","staffWhWelcome","staffWhCase","staffRole"].forEach(function(id){ document.getElementById(id).value=""; });
-        refreshChip();
-      });
-    });
-    var testBtn = document.getElementById("staffChanTest");
-    if (testBtn) testBtn.addEventListener("click", function(){
-      var btn=this; btn.disabled=true; btn.textContent="Sending…";
-      CG.sb.rpc("staff_channel_test").then(function(r){
-        btn.disabled=false; btn.textContent="Send test to general";
-        if(r.error){ CG.toast(r.error.message||"Test failed","err"); return; }
-        CG.toast(r.data==="sent"?"Test posted to #staff-general":"Set up the webhook first",r.data==="sent"?"ok":"err");
-      });
-    });
-  }
-  /* heartbeats + per-run results: each function stamps rl_<key> every run and rl_<key>_result
-     with {ok, errCount, lastError}. A run that happened but FAILED shows red, not green. */
-  CG.sb.from("app_config").select("key,value").like("key","rl_%").then(function(r){
-    var map = {}, results = {};
-    ((r&&r.data)||[]).forEach(function(row){
-      var k = row.key.replace(/^rl_/,"");
-      if (/_result$/.test(k)){
-        try { results[k.replace(/_result$/,"")] = JSON.parse(row.value); } catch(e){}
-      } else map[k] = row.value;
-    });
-    CG.AUTOMATIONS.forEach(function(a){
-      var ts = map[a.key] ? Date.parse(map[a.key]) : null;
-      var stEl = document.getElementById("auto-st-"+a.key), tsEl = document.getElementById("auto-ts-"+a.key);
-      if (!stEl) return;
-      if (!ts){ stEl.textContent="never ran"; stEl.className="chip chip-warn"; return; }
-      var mins = Math.round((Date.now()-ts)/60000);
-      tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
-      var res = results[a.key];
-      var failed = res && res.ok === false;
-      var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
-      if (failed){
-        stEl.textContent = "Failing";
-        stEl.className = "chip chip-loss";
-        stEl.title = res.lastError ? String(res.lastError).slice(0,180) : "last run reported errors";
-      } else {
-        stEl.textContent = fresh ? "Running" : "Check";
-        stEl.className = "chip "+(fresh?"chip-win":"chip-warn");
-        stEl.title = "";
-      }
-    });
-  });
-  document.querySelectorAll("[data-auto-run]").forEach(function(b){ b.addEventListener("click", function(){
-    var key = this.getAttribute("data-auto-run"), btn=this;
-    var job = CG.AUTOMATIONS.find(function(a){ return a.key===key; });
-    btn.disabled = true; btn.textContent = "Running…";
-    if (job && job.rpc){
-      /* database-side job — run it the way the scheduler does */
-      CG.sb.rpc(job.rpc).then(function(r){
-        btn.disabled=false; btn.textContent="Run now";
-        if (r.error){ CG.toast(key+" failed: "+r.error.message,"err"); return; }
-        CG.toast(job.name+": "+JSON.stringify(r.data).slice(0,140),"ok");
-        if (CG.router) CG.router();
-      });
-      return;
-    }
-    fetch("/.netlify/functions/"+key, { method:"GET" }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
-      .then(function(out){
-        btn.disabled=false; btn.textContent="Run now";
-        CG.toast(key+": "+JSON.stringify(out).slice(0,140),"ok");
-        if (CG.router) CG.router();
-      })
-      .catch(function(e){ btn.disabled=false; btn.textContent="Run now"; CG.toast(key+" failed: "+e.message,"err"); });
-  }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: NEWSROOM — publish / edit / delete on the news table
-   (INSERTs auto-post to #news via the notify_discord_news trigger)
-   ================================================================ */
-CG.NEWS_CATS = ["League News","Game Recap","Transactions","Awards","Commissioner Update","Team Feature"];
-CG.admNewsLive = function(){
-  var arts = (CG.CONTENT.articles||[]).slice();
-  var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
-    '<div><h2 class="h-sec">Newsroom</h2><p class="lede" style="margin-top:6px">Stories publish straight to the site and auto-post to Discord’s #news. Recaps and player spotlights write themselves after finals — everything is editable here.</p></div>'+
-    '<button class="btn btn-chrome" id="newArt" style="align-self:flex-start">'+CG.ic("plus",15)+'New story</button></div>';
-  h += arts.length ? '<div class="card"><div class="card-h"><h3>Published</h3><span class="chip">'+arts.length+'</span></div>'+
-    arts.map(function(a){
-      var auto = /CGHL Wire/i.test(a.author||"");
-      return '<div class="card-b" style="display:flex;align-items:center;gap:12px;border-top:1px solid var(--line-soft)">'+
-        '<span class="nf-ic">'+CG.ic("doc",14)+'</span>'+
-        '<div style="flex:1;min-width:0;cursor:pointer" data-go="#/article/'+esc(a.slug)+'"><b>'+esc(a.title)+'</b>'+
-          '<p class="caption" style="margin-top:2px">'+esc(a.category)+' · '+esc(a.author)+' · '+CG.fmtDate(a.dateIso)+(auto?' · <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">AUTO</span>':"")+'</p></div>'+
-        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-news-edit="'+esc(a.slug)+'">Edit</button>'+
-        /* Media staff write and edit the paper; only the commissioner can unpublish. The
-           database agrees — news has INSERT/UPDATE policies for the media department and no
-           DELETE policy, so a delete would silently remove zero rows rather than error. */
-        (CG.role()==="commish" ? '<button class="btn btn-ghost btn-sm" data-news-del="'+esc(a.slug)+'" data-title="'+esc(a.title)+'">Delete</button>' : "")+
-        '</span></div>';
-    }).join("")+'</div>'
-  : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>No stories yet</b><p>Publish the first one — or wait for opening night, when recaps start writing themselves.</p></div></div>';
-  return h;
-};
-CG.newsForm = function(slug){
-  var a = slug ? (CG.CONTENT.articles||[]).find(function(x){ return x.slug===slug; }) : null;
-  var isNew = !a;
-  CG.modal(isNew?"New story":"Edit — "+esc(a.title),
-    '<label class="fld"><span>Headline</span><input id="nwT" value="'+esc(a?a.title:"")+'" placeholder="Sentence case, specific, no clickbait"></label>'+
-    '<label class="fld"><span>Category</span><select id="nwC">'+CG.NEWS_CATS.map(function(c){ return '<option'+(a&&a.category===c?" selected":"")+'>'+c+'</option>'; }).join("")+'</select></label>'+
-    '<label class="fld"><span>Body</span><textarea id="nwB" rows="8" placeholder="Write like a beat reporter. Blank lines become paragraphs.">'+esc(a?a.body.join("\n\n"):"")+'</textarea></label>'+
-    '<p class="caption">'+(isNew?"Publishing posts to the site immediately and announces in #news on Discord.":"Edits update the site — Discord isn’t re-posted.")+'</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="nwGo">'+(isNew?"Publish":"Save changes")+'</button>');
-  document.getElementById("nwGo").addEventListener("click", function(){
-    var t=(document.getElementById("nwT").value||"").trim();
-    if (t.length<8){ CG.toast("Give it a real headline first","err"); return; }
-    var body=(document.getElementById("nwB").value||"").trim();
-    if (!body){ CG.toast("Write the story body","err"); return; }
-    var rec={ title:t, category:document.getElementById("nwC").value, body:body };
-    var btn=this; btn.disabled=true;
-    /* The newsroom feed only renders rows stamped with the current season, so publishing without
-       one would write an article that is invisible the moment it saves. Refuse instead. */
-    if (isNew && !(CG.SEASON && CG.SEASON.id)){
-      btn.disabled=false; CG.toast("No active season — create one before publishing","err"); return;
-    }
-    var q = isNew
-      /* The byline was hardcoded to "— Commissioner", so a media-department story would have
-         published under a title its author doesn't hold. Sign it with the seat they actually sit in. */
-      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"League office")+" — "+(CG.role()==="commish"?"Commissioner":"League staff"), published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
-      : CG.sb.from("news").update(rec).eq("id", slug);
-    q.then(function(r){
-      btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(isNew?"Published — it’s live and posted to #news":"Story updated","ok");
-      CG.reloadLeague();
-    });
-  });
-};
-CG.AFTER._admNewsLive = function(){
-  var na=document.getElementById("newArt");
-  if (na) na.addEventListener("click", function(){ CG.newsForm(null); });
-  document.querySelectorAll("[data-news-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.newsForm(this.getAttribute("data-news-edit")); }); });
-  document.querySelectorAll("[data-news-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-news-del"), title=this.getAttribute("data-title");
-    CG.confirm("Delete “"+esc(title)+"”?","It comes off the site immediately. The Discord post (if any) stays.","Delete story", function(){
-      CG.sb.from("news").delete().eq("id",id).then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-        CG.toast("Story deleted","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: POWER RANKINGS — automatic formula + manual override
-   ================================================================ */
-CG.admRankingsLive = function(){
-  var lg = CG.lg;
-  var order = CG._prDraft || (lg.powerRankings||[]).map(function(p){ return p.team; });
-  var dirty = !!CG._prDraft;
-  var manual = !!lg.prManual;
-  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Power rankings</h2><p class="lede" style="margin-top:6px">'+
-    (manual ? "Running on your <b>manual order</b>. The formula keeps computing underneath — return to automatic any time."
-            : "Running on the <b>automatic formula</b>: points percentage, goal differential per game, and last-five form. Reorder below to take manual control.")+'</p></div>';
-  h += '<div class="note '+(manual?"chr":"grn")+'" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp)">'+(manual?"Manual override active":"Automatic")+'</b>'+
-    '<span style="margin-left:auto;display:inline-flex;gap:8px">'+
-    (dirty?'<button class="btn btn-chrome btn-sm" id="prSave">Save this order</button><button class="btn btn-ghost btn-sm" id="prDiscard">Discard changes</button>':"")+
-    (manual&&!dirty?'<button class="btn btn-ghost btn-sm" id="prAuto">Return to automatic</button>':"")+'</span></div>';
-  h += '<div class="card">'+order.map(function(code,i){
-    var t = CG.TEAM[code]; if (!t) return "";
-    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-      '<b class="num" style="font-family:var(--f-disp);font-size:20px;width:28px">'+(i+1)+'</b>'+CG.crest(code,28)+
-      '<b style="font-family:var(--f-disp);flex:1">'+esc(t.name)+'</b>'+
-      '<span class="caption">'+CG.lg.teams[code].w+"-"+CG.lg.teams[code].l+"-"+CG.lg.teams[code].otl+'</span>'+
-      '<span style="display:inline-flex;gap:4px">'+
-        '<button class="btn btn-ghost btn-sm" data-pr-up="'+i+'" '+(i===0?"disabled":"")+' aria-label="Move '+esc(t.name)+' up">'+CG.ic("up",13)+'</button>'+
-        '<button class="btn btn-ghost btn-sm" data-pr-down="'+i+'" '+(i===order.length-1?"disabled":"")+' aria-label="Move '+esc(t.name)+' down">'+CG.ic("down",13)+'</button></span></div>';
-  }).join("")+
-  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">The public rankings page and the homepage widget follow whatever is live here. Manual orders persist until you return to automatic.</span></div></div>';
-  return h;
-};
-CG.AFTER._admRankings = function(){
-  function draft(){ return CG._prDraft || (CG.lg.powerRankings||[]).map(function(p){ return p.team; }); }
-  document.querySelectorAll("[data-pr-up]").forEach(function(b){ b.addEventListener("click", function(){
-    var i=+this.getAttribute("data-pr-up"); var d=draft().slice();
-    var x=d[i-1]; d[i-1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
-  }); });
-  document.querySelectorAll("[data-pr-down]").forEach(function(b){ b.addEventListener("click", function(){
-    var i=+this.getAttribute("data-pr-down"); var d=draft().slice();
-    var x=d[i+1]; d[i+1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
-  }); });
-  /* These went straight at site_config, which is commissioner-only for good reason — the same
-     table holds the Discord invite and the playoff format. The rankings now move through two
-     RPCs pinned to the one key, so the media department can publish an order without being
-     handed the site's configuration. */
-  var sv=document.getElementById("prSave");
-  if (sv) sv.addEventListener("click", function(){
-    CG.sb.rpc("rankings_set_order", { p_codes: CG._prDraft }).then(function(r){
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      CG._prDraft=null; CG.toast("Manual ranking saved — live everywhere","ok"); CG.reloadLeague();
-    });
-  });
-  var dc=document.getElementById("prDiscard");
-  if (dc) dc.addEventListener("click", function(){ CG._prDraft=null; CG.router(); });
-  var au=document.getElementById("prAuto");
-  if (au) au.addEventListener("click", function(){
-    CG.sb.rpc("rankings_clear").then(function(r){
-      if (r.error){ CG.toast("Couldn’t switch: "+r.error.message,"err"); return; }
-      CG.toast("Back to the automatic formula","ok"); CG.reloadLeague();
-    });
-  });
-};
-
-/* ================================================================
-   LIVE ADMIN: HOMEPAGE MODULES — persisted league-wide via feature_flags
-   ================================================================ */
-CG.admHomepageLive = function(){
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Homepage</h2><p class="lede" style="margin-top:6px">Toggle front-page modules for everyone — saved to the league database, applied on the next load.</p></div>'+
-    '<div class="card"><div class="card-h"><h3>Homepage modules</h3><a class="sec-link" href="#/home">View front page</a></div>'+
-    CG.HOMEMODS.map(function(m){
-      var on = CG.modOn(m.key);
-      return '<div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line-soft)">'+
-        '<span style="flex:1;font-weight:600;font-size:14px">'+m.label+'</span>'+
-        '<button class="toggle'+(on?" on":"")+'" data-mod-live="'+m.key+'" role="switch" aria-checked="'+on+'" aria-label="'+m.label+'"></button></div>';
-    }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Sections hidden here disappear for every visitor. The hero, and anything a section needs to explain the season, stays.</span></div></div>';
-};
-CG.AFTER._admHomepage = function(){
-  document.querySelectorAll("[data-mod-live]").forEach(function(t){
-    t.addEventListener("click", function(){
-      var k = t.getAttribute("data-mod-live");
-      var next = !CG.modOn(k);
-      CG.sb.from("feature_flags").upsert({ key:"home_"+k, enabled:next, label:"Homepage: "+k },{ onConflict:"key" }).then(function(r){
-        if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        CG._flags["home_"+k]=next;
-        t.classList.toggle("on", next); t.setAttribute("aria-checked", next);
-        CG.toast("Front page updated for everyone","ok");
-      });
-    });
-  });
-};
-
-/* ================================================================
-   LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
-   ================================================================ */
-/* round-robin schedule generator (ported from the classic site, verified in prod
-   there): 3 ET slots a night, Wed/Thu/Fri, every club plays once per slot —
-   3 a night, 9 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
-   Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
-CG.GAMES_PER_CLUB = 54;
-CG.PRESEASON_WEEKS = 2;
-CG.OFFSEASON_DARK_DAYS = 14;   /* 2 weeks of no on-ice activity — staff seat owners + management */
-CG.FA_WINDOW_DAYS = 7;         /* free agency runs a full week; puck drop waits for it to close */
-CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
-/* Nights per playing week. Wednesday, Thursday, Friday — three slots a night means a club plays
-   three games an evening and nine a week. Lived in four places as a bare "2"; a schedule and a
-   season-date spacer that disagree about the length of a week silently produce a calendar that
-   does not match its own games. */
-CG.NIGHTS_PER_WEEK = 3;
-/* Wednesday-anchored night names, for copy that has to say which nights a week runs on. */
-CG.NIGHT_NAMES = function(n){
-  var d=["Wednesday","Thursday","Friday","Saturday","Sunday","Monday","Tuesday"].slice(0, Math.max(1,Math.min(7,n||3)));
-  return d.length===1 ? d[0] : d.slice(0,-1).join(", ")+" and "+d[d.length-1];
-};
-
-/* ================= THE SHAPE OF A SEASON =================
-   Weeks, nights a week, puck-drop times and the divisional split now live on the season row, set
-   from the Control Center. The constants above are only the fallback for a season saved before the
-   settings existed. Everything that needs to know the shape reads it from here, so the generator,
-   the season-date spacer and the published rulebook cannot drift apart. */
-CG.seasonShape = function(season){
-  var s = season || CG.SEASON || {};
-  var slots = String(s.night_slots || CG.NIGHT_SLOTS.join(","))
-    .split(",").map(function(t){ return t.trim(); })
-    .filter(function(t){ return /^\d{1,2}:\d{2}$/.test(t); });
-  if (!slots.length) slots = CG.NIGHT_SLOTS.slice();
-  var nights = Math.max(1, Math.min(7, +s.nights_per_week || CG.NIGHTS_PER_WEEK));
-  var weeks  = Math.max(1, +s.weeks || Math.ceil(CG.GAMES_PER_CLUB / slots.length / nights));
-  var perClub = weeks * nights * slots.length;
-  var teams = CG.TEAMS || [];
-  var divs = {};
-  teams.forEach(function(t){ divs[t.div || "—"] = (divs[t.div || "—"] || 0) + 1; });
-  var divNames = Object.keys(divs);
-  var rivals = teams.length ? (divs[teams[0].div || "—"] - 1) : 0;
-  var others = Math.max(0, teams.length - 1 - rivals);
-  var even = divNames.length > 1 && divNames.every(function(d){ return divs[d] === divs[divNames[0]]; });
-  var x = s.div_games == null ? null : +s.div_games;
-  var y = s.nondiv_games == null ? null : +s.nondiv_games;
-  var weighted = x != null && y != null && x > 0 && y > 0;
-  return {
-    weeks: weeks, nights: nights, slots: slots, perNight: slots.length,
-    perClub: perClub, perWeek: nights * slots.length,
-    teams: teams.length, divisions: divNames.length, evenDivisions: even,
-    rivals: rivals, others: others,
-    div: x, nondiv: y, weighted: weighted,
-    weightedTotal: weighted ? (rivals * x + others * y) : null
-  };
-};
-
-/* Which divisional splits actually fit a given games-per-club, for the settings screen to offer.
-   A split has to use up exactly the games the calendar provides — no remainder, no shortfall. */
-CG.splitOptions = function(shape){
-  var out = [];
-  if (!shape.evenDivisions || shape.rivals < 1 || shape.others < 1) return out;
-  for (var x = 1; x <= 40; x++){
-    var rem = shape.perClub - shape.rivals * x;
-    if (rem <= 0) break;
-    if (rem % shape.others) continue;
-    var y = rem / shape.others;
-    if (y < 1 || x < y) continue;                 /* rivals should not be played LESS than strangers */
-    out.push({ div:x, nondiv:y, ratio: +(x / y).toFixed(2) });
-  }
-  return out;
-};
-
-/* Build the meetings the season calls for and deal them into rounds — one round per time slot,
-   every club playing exactly once. A single greedy pass strands on lopsided splits, so this uses
-   seeded randomised restarts and then VERIFIES the result against what was asked for; it returns a
-   schedule that has been checked, or an error, never a broken schedule. */
-CG.buildRounds = function(codes, divOf, xDiv, yNon, opts){
-  opts = opts || {};
-  var tries = opts.tries || 400, perRound = codes.length / 2;
-  /* Rounds are grouped into nights, and a club must not draw the same opponent twice in one
-     evening. The rotation never did this for free; a weighted build will, repeatedly, because it
-     is only trying to hit meeting counts. It matters beyond aesthetics: if two clubs can meet
-     twice on one night then clubs + date no longer identify a fixture, and a game resumed after a
-     disconnect cannot be told apart from a genuine second meeting. */
-  var nightSize = Math.max(1, opts.nightSize || 1);
-  var key = function(a,b){ return a < b ? a+"|"+b : b+"|"+a; };
-  if (codes.length % 2) return { error:"An odd number of clubs cannot all play every slot." };
-  var seed = opts.seed || 12345;
-  var rnd = function(){ seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-
-  var base = {};
-  for (var i=0;i<codes.length;i++) for (var j=i+1;j<codes.length;j++){
-    var a=codes[i], b=codes[j], n = divOf[a]===divOf[b] ? xDiv : yNon;
-    if (n>0) base[key(a,b)] = n;
-  }
-  var total = Object.keys(base).reduce(function(s,k){ return s + base[k]; }, 0);
-  if (!total) return { error:"That works out to no games." };
-  if (total % perRound) return { error:"Those numbers give "+total+" meetings, which will not divide into rounds of "+perRound+"." };
-  var perClub = total * 2 / codes.length;
-
-  for (var attempt=0; attempt<tries; attempt++){
-    var need = {}; for (var k in base) need[k] = base[k];
-    var rounds = [], ok = true;
-    while (ok){
-      var left = 0; for (var k2 in need) left += need[k2];
-      if (!left) break;
-      var used = {}, round = [];
-      var fill = function(){
-        if (round.length === perRound) return true;
-        /* the club with the fewest remaining options goes first — it is the one that strands */
-        var a = null, bestN = Infinity;
-        for (var ci=0; ci<codes.length; ci++){
-          var c = codes[ci]; if (used[c]) continue;
-          var n = 0;
-          for (var di=0; di<codes.length; di++){ var d=codes[di];
-            if (d!==c && !used[d] && (need[key(c,d)]||0) > 0) n++; }
-          if (n < bestN){ bestN = n; a = c; }
-        }
-        if (a === null) return false;
-        var nightStart = rounds.length - (rounds.length % nightSize);
-        var sameNight = {};
-        for (var ri = nightStart; ri < rounds.length; ri++)
-          rounds[ri].forEach(function(pr){ sameNight[key(pr[0], pr[1])] = 1; });
-        var opts2 = codes.filter(function(b){
-          return b!==a && !used[b] && (need[key(a,b)]||0) > 0 && !sameNight[key(a,b)];
-        });
-        for (var q=opts2.length-1;q>0;q--){ var w=Math.floor(rnd()*(q+1)); var tmp=opts2[q]; opts2[q]=opts2[w]; opts2[w]=tmp; }
-        opts2.sort(function(p,r){ return (need[key(a,r)]||0) - (need[key(a,p)]||0); });
-        for (var oi=0; oi<opts2.length; oi++){
-          var b2 = opts2[oi];
-          used[a]=1; used[b2]=1; round.push([a,b2]); need[key(a,b2)]--;
-          if (fill()) return true;
-          need[key(a,b2)]++; round.pop(); delete used[a]; delete used[b2];
-        }
-        return false;
-      };
-      if (fill()) rounds.push(round); else ok = false;
-    }
-    if (!ok) continue;
-    /* verify before returning: pair counts, club loads, and no club twice in a round */
-    var meet = {}, per = {}, bad = null;
-    rounds.forEach(function(rd){
-      var seen = {};
-      if (rd.length !== perRound) bad = "short round";
-      rd.forEach(function(pr){
-        var a=pr[0], b=pr[1];
-        if (seen[a] || seen[b]) bad = "a club appears twice in one slot";
-        seen[a]=1; seen[b]=1;
-        meet[key(a,b)] = (meet[key(a,b)]||0)+1; per[a]=(per[a]||0)+1; per[b]=(per[b]||0)+1;
-      });
-    });
-    for (var bk in base) if (meet[bk] !== base[bk]) bad = bad || "a matchup came out the wrong number of times";
-    codes.forEach(function(c){ if (per[c] !== perClub) bad = bad || "clubs did not all get the same number of games"; });
-    if (!bad) return { rounds: rounds, perClub: perClub, attempts: attempt+1 };
-  }
-  return { error:"That split cannot be scheduled with "+codes.length+" clubs in these divisions. Try moving a game between the two figures." };
-};
-
-CG.HOLIDAYS = ["12-25","07-01","07-04"];
-
-/* One timeline card, shared by the Register page and My Hub, so a member sees the same road
-   ahead in both places. Steps auto-hide until their date is set. */
-CG.roadAheadCard = function(s, opts){
-  s = s || CG.SEASON || {}; opts = opts || {};
-  var steps = [
-    [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
-    [s.registration_deadline, "Sign-up deadline", "Register by now to be eligible for the draft. Miss it and you can still join — you’ll be randomly placed on a club after the draft instead."],
-    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
-    [s.draft_at, "Draft night", "Clubs pick from the eligible pool. Ten minutes after the final pick, first-year players under the five-game minimum are placed on random clubs."],
-    [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
-    [s.starts_at, "Puck drop", "The regular season starts once free agency closes — 54 games, every stat imported automatically from EA."]
-  ].filter(function(st){ return st[0]; });
-  if (!steps.length) return "";
-  var nowT = CG.now(), nextIdx = steps.findIndex(function(st){ return Date.parse(st[0]) > nowT; });
-  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">'+(opts.chip||"what registering starts")+'</span></div>'+
-    steps.map(function(st,i){
-      var t = Date.parse(st[0]), past = t <= nowT, isNext = i===nextIdx;
-      return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;'+(i?"border-top:1px solid var(--line-soft)":"")+(past?"opacity:.5":"")+'">'+
-        '<span class="mono" style="flex:0 0 150px;font-size:11.5px;color:var(--steel);padding-top:2px">'+CG.fmtFull(t)+(isNext?' <span class="chip chip-chrome" style="font-size:9px;vertical-align:middle">NEXT UP</span>':past?' <span style="font-size:9px;color:var(--steel)">✓</span>':"")+'</span>'+
-        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+st[1]+'</b><p class="caption" style="margin-top:2px">'+st[2]+'</p></span></div>';
-    }).join("")+'</div>';
-};
-
-/* ---- shared ET-safe date helpers ---- */
-CG.dayAdd = function(ymd, n){
-  var p=ymd.split("-").map(Number);
-  var d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
-  d.setUTCDate(d.getUTCDate()+n);
-  return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");
-};
-CG.dayOfWeek = function(ymd){ var p=ymd.split("-").map(Number); return new Date(Date.UTC(p[0],p[1]-1,p[2],12)).getUTCDay(); };
-CG.etISO = function(ymd, hm){ /* correct across EDT/EST */
-  var guess = new Date(ymd+"T"+hm+":00-04:00");
-  var et = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(guess);
-  if (et !== hm) guess = new Date(ymd+"T"+hm+":00-05:00");
-  return guess.toISOString();
-};
-CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(iso)); };
-CG.holidayWeek = function(wedYmd){ /* the Mon..Sun week around a game Wednesday */
-  var mon = CG.dayAdd(wedYmd,-2);
-  for (var i=0;i<7;i++){ if (CG.HOLIDAYS.indexOf(CG.dayAdd(mon,i).slice(5))>=0) return true; }
-  return false;
-};
-CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, then Wed..Fri; skip holiday weeks */
-  var wed = anchorYmd;
-  while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
-  var out=[], skipped=[], guard=0;
-  while (out.length < weeks && guard++ < 60){
-    if (CG.holidayWeek(wed)){ skipped.push(wed); wed = CG.dayAdd(wed,7); continue; }
-    /* days[] is the real list; wed/fri remain as the FIRST and LAST night of the week, which is
-       what the season-date spacer and the playoff seeder actually mean by them. */
-    var days = []; for (var d = 0; d < CG.NIGHTS_PER_WEEK; d++) days.push(CG.dayAdd(wed, d));
-    out.push({ week: out.length+1, days: days, wed: days[0], fri: days[days.length-1] });
-    wed = CG.dayAdd(wed,7);
-  }
-  return { nights: out, skipped: skipped };
-};
-
 CG.generateSchedule = function(stage){
   stage = stage==="preseason" ? "preseason" : "regular";
   var s = CG.SEASON;
@@ -7041,3510 +3656,63 @@ CG.generateSchedule = function(stage){
   if (codes.length<2){ CG.toast("You need at least two clubs to build a schedule","err"); return; }
   if ((CG.lg.schedule||[]).some(function(g){ return g.stage===stage; })){
     CG.toast("A "+(stage==="preseason"?"pre-season":"regular-season")+" schedule already exists — clear it first","err"); return; }
+
   var shape = CG.seasonShape(s);
   var perNight = shape.perNight;
   var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*shape.nights*perNight : shape.perClub;
   var weeks = Math.ceil(slots/perNight/shape.nights);
-  /* A weighted split only applies to the regular season — the pre-season is a short shakedown and
-     is always played evenly. */
-  var useWeighted = stage!=="preseason" && shape.weighted;
-  if (useWeighted && shape.weightedTotal !== slots){
-    CG.toast("The divisional split adds up to "+shape.weightedTotal+" games but the calendar gives "+slots+" — fix it in Schedule settings","err");
-    return;
-  }
   var plan = CG.gameNights(CG.etYMD(anchorIso), weeks);
   var skipNote = plan.skipped.length ? " Holiday week"+(plan.skipped.length===1?"":"s")+" skipped: "+plan.skipped.join(", ")+"." : "";
+
   CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
-    codes.length+" clubs · "+slots+" games each"+(useWeighted?" ("+shape.div+" vs each division rival, "+shape.nondiv+" vs the rest)":"")+" · "+perNight+" a night, "+shape.perWeek+" a week ("+CG.NIGHT_NAMES(shape.nights)+", "+
-    shape.slots.map(function(t){ var h=+t.slice(0,2); return ((h%12)||12)+":"+t.slice(3); }).join(" / ")+" ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
+    codes.length+" clubs · "+slots+" games each · "+perNight+" a night, "+shape.perWeek+" a week ("+
+    CG.NIGHT_NAMES(shape.nights)+", "+
+    shape.slots.map(function(t){ var h=+t.slice(0,2); return ((h%12)||12)+":"+t.slice(3); }).join(" / ")+
+    " ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
     "Generate "+(stage==="preseason"?"pre-season":"schedule"), function(){
+
     function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
     var dates=[];
     plan.nights.forEach(function(n){ n.days.forEach(function(d){ dates.push({week:n.week,date:d}); }); });
 
-    /* Each round is one time slot: every club plays exactly once in it. Unweighted seasons rotate a
-       circle, which is the classic construction and always balanced. A weighted season has to be
-       built and then checked, so it goes through CG.buildRounds. */
+    /* One round per time slot: every club plays exactly once in it. The circle rotation meets each
+       pair once per full cycle — with ten clubs that is once every nine rounds, so once every three
+       nights — which means two clubs can never be drawn twice in an evening OR on back-to-back
+       nights. A divisional weighting was tried and removed: it hit the meeting counts but produced
+       both, and back-to-back meetings make a disconnect-and-resume impossible to tell apart from a
+       genuine second fixture. */
     var roundPairs = [];
-    if (useWeighted){
-      var divOf = {}; (CG.TEAMS||[]).forEach(function(t){ divOf[t.code] = t.div || "—"; });
-      var built = CG.buildRounds(codes, divOf, shape.div, shape.nondiv, { seed: 20260802, nightSize: perNight });
-      if (built.error){ CG.toast(built.error, "err"); return; }
-      roundPairs = built.rounds;
-    } else {
-      var arr=codes.slice(); if (arr.length%2) arr.push(null);
-      var m=arr.length, fixed=arr[0], others=arr.slice(1);
-      for (var r0=0; r0<slots; r0++){
-        var order=[fixed].concat(rrRotate(others,r0)), pairs=[];
-        for (var i0=0;i0<m/2;i0++){
-          var a0=order[i0], b0=order[m-1-i0]; if(!a0||!b0) continue;
-          if (r0%2===1){ var t0=a0; a0=b0; b0=t0; }
-          pairs.push([a0,b0]);
-        }
-        roundPairs.push(pairs);
+    var arr = codes.slice(); if (arr.length % 2) arr.push(null);
+    var m = arr.length, fixed = arr[0], others = arr.slice(1);
+    for (var r0 = 0; r0 < slots; r0++){
+      var order = [fixed].concat(rrRotate(others, r0)), pairs = [];
+      for (var i0 = 0; i0 < m/2; i0++){
+        var a0 = order[i0], b0 = order[m-1-i0];
+        if (!a0 || !b0) continue;
+        if (r0 % 2 === 1){ var t0 = a0; a0 = b0; b0 = t0; }
+        pairs.push([a0, b0]);
       }
+      roundPairs.push(pairs);
     }
 
-    var rows=[];
-    for (var r=0; r<roundPairs.length; r++){
-      var day=dates[Math.floor(r/perNight)]; if(!day) continue;
-      var iso=CG.etISO(day.date, shape.slots[r%perNight]);
+    var rows = [];
+    for (var r = 0; r < roundPairs.length; r++){
+      var day = dates[Math.floor(r/perNight)];
+      if (!day) continue;
+      var iso = CG.etISO(day.date, shape.slots[r % perNight]);
       roundPairs[r].forEach(function(pr){
         rows.push({ season_id:s.id, week:day.week, stage:stage,
           home_team_id:(CG.lg._codeToId||{})[pr[0]], away_team_id:(CG.lg._codeToId||{})[pr[1]],
           scheduled_at:iso, status:"scheduled" });
       });
     }
+
     var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
     (function insertNext(idx){
       if (idx>=chunks.length){
-        CG.sb.from("season_registrations").update({ status:"assigned" }).in("id", regIds).then(function(){
-          CG.sb.from("transactions").insert({ season_id:s.id, type:"sign",
-            description:"Pre-season: "+rows.length+" registered players randomly assigned across the league" }).then(function(){
-            CG.toast(rows.length+" players randomly assigned"+(skipped?" · "+skipped+" left out (rosters full)":""),"ok");
-            CG.reloadLeague();
-          });
-        });
-        return;
+        CG.toast(rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks","ok");
+        CG.reloadLeague(); return;
       }
-      CG.sb.from("roster_spots").insert(chunks[idx]).then(function(rz){
-        if (rz.error){ CG.toast("Assignment stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
-        insertNext(idx+1);
-      });
-    })(0);
-  });
-};
-
-CG.preseasonRelease = function(){
-  var s=CG.SEASON; if (!s || !s.id) return;
-  var n=(CG.lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
-  CG.confirm("Release all "+n+" random pre-season assignments?",
-    "This is what happens automatically when the final pre-season game ends — use it early only if you mean to. "+
-    "Players return to the draft pool; their pre-season stats and eligibility are kept. Management and manually signed players stay put.",
-    "Release to draft pool", function(){
-    CG.sb.from("roster_spots").delete().eq("season_id",s.id).eq("origin","preseason_random").select("profile_id").then(function(r){
-      if (r.error){ CG.toast("Couldn’t release: "+r.error.message,"err"); return; }
-      var ids=(r.data||[]).map(function(x){ return x.profile_id; });
-      var after=function(){
-        CG.sb.from("transactions").insert({ season_id:s.id, type:"release",
-          description:"Pre-season complete — "+ids.length+" randomly assigned players returned to the draft pool" }).then(function(){
-          CG.toast(ids.length+" players released to the draft pool","ok"); CG.reloadLeague();
-        });
-      };
-      if (ids.length) CG.sb.from("season_registrations").update({ status:"pending" }).eq("season_id",s.id).in("profile_id",ids).then(after);
-      else { CG.toast("Nothing to release","ok"); CG.reloadLeague(); }
-    });
-  });
-};
-
-CG.distributeRookies = function(){
-  var lg=CG.lg, s=CG.SEASON; if (!s || !s.id) return;
-  var rosteredIds=lg._rosteredIds||{};
-  var rookies=(lg._registrationsRaw||[]).filter(function(r){
-    return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined" &&
-      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
-  });
-  if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
-  CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
-    "This runs on its own ten minutes after the draft’s final pick — the button forces it early or re-runs it by hand. "+
-    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot, "+
-    "so rosters are settled before free agency and nobody can park a prospect to poach them later.",
-    "Distribute rookies", function(){
-    CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
-      if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
-      CG.toast((r.data||0)+" rookie"+((r.data||0)===1?"":"s")+" placed on random clubs","ok"); CG.reloadLeague();
-    });
-  });
-};
-/* Late sign-ups (registered after the draft-eligibility cutoff) + anyone who joins mid-season are
-   randomly assigned to a club with an open spot. Runs on its own every 5 min; this forces it. */
-CG.assignLatecomers = function(){
-  CG.confirm("Assign late sign-ups now?",
-    "Everyone who registered after the sign-up deadline (or joined mid-season) and isn’t on a club yet "+
-    "goes to the emptiest club with an open roster spot. This also runs automatically every few minutes — "+
-    "the button just forces it. Puck-drop rosters are never blocked by a late arrival.",
-    "Assign late sign-ups", function(){
-    CG.sb.rpc("auto_assign_latecomers",{ p_force:true }).then(function(r){
-      if (r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
-      CG.toast((r.data||0)+" late sign-up"+((r.data||0)===1?"":"s")+" placed on clubs","ok"); CG.reloadLeague();
-    });
-  });
-};
-/* Decline / reinstate a registration (keeps banned or duplicate accounts out of assignment + the draft). */
-CG.setRegStatus = function(regId, status, name){
-  CG.sb.from("season_registrations").update({status:status}).eq("id",regId).then(function(r){
-    if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-    CG.toast((name||"Registration")+(status==="declined"?" declined":" reinstated"),"ok");
-    var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===regId;}); if(reg)reg.status=status;
-    CG.reloadLeague();
-  });
-};
-
-CG.assignRegistration = async function(regId, profileId, position, playerName, code){
-  var s=CG.SEASON, teamId=(CG.lg._codeToId||{})[code];
-  if(!s||!teamId){ CG.toast("Missing season/club","err"); return; }
-  var used={}; (CG.lg.byTeam[code]||[]).forEach(function(p){ if(p.jersey) used[p.jersey]=1; });
-  var num=0; for(var n=1;n<=99;n++){ if(!used[n]){ num=n; break; } }
-  var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 });
-  if(r1.error){ CG.toast("Couldn’t sign: "+r1.error.message,"err"); return; }
-  await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId);
-  await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" });
-  /* optimistic local update so the view reflects it immediately */
-  CG.lg._rosteredIds[profileId]=true;
-  if(CG.lg.byTeam[code]) CG.lg.byTeam[code].push({ id:profileId, tag:playerName, team:code, pos:position, jersey:num, mgmt:null, salary:0, depth:9 });
-  CG.toast(playerName+" signed to "+CG.TEAM[code].name+" · #"+num,"ok");
-  CG.router();
-};
-CG.setOwnerAppStatus = async function(id, status){
-  var r = await CG.sb.from("owner_applications").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id);
-  if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-  var app=(CG.lg._ownerApps||[]).find(function(x){ return x.id===id; }); if(app) app.status=status;
-  CG.toast("Application "+status,"ok"); CG.router();
-};
-/* ================================================================
-   LIVE ADMIN: USERS & ROLES (set_member_role / set_team_manager / ban)
-   ================================================================ */
-CG.admUsersLive = function(){
-  var lg=CG.lg;
-  var profs=(lg._profilesRaw||[]).slice().sort(function(a,b){ return (a.gamertag||a.display_name||"").localeCompare(b.gamertag||b.display_name||""); });
-  var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
-  /* management from the team registry, not roster spots — a manager without a
-     roster spot still holds the seat */
-  var mgmtBy={}; (CG.TEAMS||[]).forEach(function(t){
-    if(t.owner) mgmtBy[t.owner]={club:t.code, role:"owner"};
-    if(t.gm)    mgmtBy[t.gm]   ={club:t.code, role:"gm"};
-    if(t.agm)   mgmtBy[t.agm]  ={club:t.code, role:"agm"};
-  });
-  var banned=profs.filter(function(p){ return p.banned; }).length;
-  var staffN=profs.filter(function(p){ return p.role==="staff"; }).length;
-  function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
-  /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
-     (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
-  /* Media-only staff are expressly allowed a club seat (Rule 2.7), so they aren't a conflict */
-  var conflicts = profs.filter(function(pr){
-    return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id] && !CG.isMediaOnly(pr);
-  });
-  var mediaSeated = profs.filter(function(pr){ return CG.isMediaOnly(pr) && mgmtBy[pr.id]; });
-  h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation.</b> '+
-    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). '+
-    '<b>Media is the exception</b> (Rule 2.7): staff whose only department is Media may run a club, because Media rules on nothing. A commissioner can override the rest when there’s a reason to. '+
-    'Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
-    (mediaSeated.length?' <span style="display:block;margin-top:8px">Media staff running a club (allowed): '+
-      mediaSeated.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+
-    (conflicts.length?' <span style="display:block;margin-top:8px">Holding both hats right now (grandfathered for Season 1): '+
-      conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
-  h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+profs.filter(function(p){return p.role==="commissioner";}).length+'</b><span>commissioners</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+staffN+'</b><span>staff</span></div></div>';
-  h+='<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">'+
-    '<input type="search" id="userSearch" placeholder="Search players…" style="flex:1;min-width:200px" aria-label="Search users">'+
-    '<button class="btn btn-ghost btn-sm" id="bannedToggle" aria-pressed="false" style="white-space:nowrap">Banned only ('+banned+')</button></div>';
-  h+='<div class="card"><div class="card-h"><h3>Members</h3><span class="chip">'+profs.length+'</span></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
-    profs.map(function(pr){
-      var pl=playerById[pr.id], mg=mgmtBy[pr.id]||null, club=pl?pl.team:(mg?mg.club:null), mgmt=mg?mg.role:null;
-      var sus=(lg.suspensions||[]).find(function(s){ return s.playerId===pr.id && s.status==="active"; });
-      var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
-      return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
-        '<td class="tleft"><span class="playercell">'+(CG.safeAvatar(pr.avatar_url)?'<img src="'+CG.safeAvatar(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
-        '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
-        '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
-        '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
-        '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
-          '<button class="btn btn-ghost btn-sm" data-uedit="'+pr.id+'">Edit</button>'+
-          (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
-              :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
-          (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
-        '</span></td></tr>';
-    }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. To make a member a club’s Owner, GM or AGM — or clear a seat — open that club under Teams and use its Front office pickers. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
-  return h;
-};
-CG.setUserRole = function(profileId, role, selEl){
-  var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; });
-  var prev = pr ? pr.role : null;
-  var name = pr ? (pr.gamertag||pr.display_name||"this member") : "this member";
-  if (selEl && prev) selEl.value = prev;   /* revert the visible dropdown now; a confirmed change re-renders on reload */
-  var roleLabel = role==="commissioner"?"Commissioner":role==="staff"?"Staff":"Member";
-  CG.confirm("Make "+esc(name)+" a "+roleLabel+"?",
-    role==="commissioner" ? "Commissioners have full league control and can’t hold a club seat. The last commissioner can’t be demoted."
-    : role==="staff" ? "Staff work the case queue and reviews, and can’t own or manage a club."
-    : "Member is a normal player account.",
-    "Set role", function(){
-    CG.sb.rpc("set_member_role",{ p_target:profileId, p_role:role, p_team_code:null }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t set role: "+r.error.message,"err"); return; }
-      if(pr) pr.role=role;
-      CG.toast(esc(name)+" is now "+roleLabel,"ok"); CG.reloadLeague();
-    });
-  });
-};
-/* Club-role assignment now lives on each club's edit page (CG.teamForm → Front office) via
-   type-ahead member pickers; the old per-user modals were removed with those buttons. */
-CG.suspendUser = function(profileId, name){
-  CG.modal("Suspend "+esc(name),
-    '<label class="fld"><span>Reason (shown on the profile’s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.2 — abusive conduct in lobby"></textarea></label>'+
-    '<div class="grid g2" style="gap:12px;margin-top:4px">'+
-    '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
-    '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
-    '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
-    '<p class="caption">A suspended member can’t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
-  var modeSel=document.getElementById("susMode");
-  modeSel.addEventListener("change", function(){
-    var byDate=this.value==="date";
-    document.getElementById("susGamesWrap").style.display=byDate?"none":"";
-    document.getElementById("susDateWrap").style.display=byDate?"":"none";
-  });
-  document.getElementById("susGo").addEventListener("click", function(){
-    var reason=(document.getElementById("susReason").value||"").trim();
-    if(!reason){ CG.toast("Give the suspension a reason — it’s the league record","err"); return; }
-    var mode=modeSel.value, games=null, ends=null;
-    if (mode==="games"){
-      games=parseInt(document.getElementById("susGames").value,10);
-      if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
-    } else {
-      var v=document.getElementById("susDate").value;
-      if(!v){ CG.toast("Pick the end date","err"); return; }
-      ends=CG.etISO(v.slice(0,10), v.slice(11,16));
-    }
-    var btn=this; btn.disabled=true;
-    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay) CG.closeOverlay();
-      CG.toast(name+" suspended "+(mode==="games"?"for "+games+" game"+(games===1?"":"s"):"until "+CG.fmtFull(Date.parse(ends))),"ok");
-      CG.reloadLeague();
-    });
-  });
-};
-CG.liftUserSuspension = function(susId, name){
-  CG.confirm("Lift "+esc(name)+"’s suspension?","They can be rostered and make moves again immediately. The record stays on their profile as served.","Lift suspension", function(){
-    CG.sb.rpc("lift_suspension",{ p_id:susId }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t lift: "+r.error.message,"err"); return; }
-      CG.toast(name+"’s suspension lifted","ok"); CG.reloadLeague();
-    });
-  });
-};
-CG.banUser = function(profileId, name){
-  CG.modal("Ban "+esc(name)+"?",
-    '<label class="fld"><span>Reason (shown to the member)</span><textarea id="banReason" rows="2" placeholder="e.g. repeated conduct violations"></textarea></label>'+
-    '<p class="caption">Bans remove site access and remove the member from the Chel Gaming Discord. Reversible with Unban.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="banGo">Ban member</button>');
-  document.getElementById("banGo").addEventListener("click", function(){
-    var reason=(document.getElementById("banReason").value||"").trim();
-    CG.sb.rpc("ban_player",{ p_profile:profileId, p_reason:reason }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t ban: "+r.error.message,"err"); return; }
-      var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr){ pr.banned=true; pr.ban_reason=reason; }
-      if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" banned","ok"); CG.router();
-    });
-  });
-};
-CG.unbanUser = function(profileId){
-  CG.sb.rpc("unban_player",{ p_profile:profileId }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t unban: "+r.error.message,"err"); return; }
-    var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr) pr.banned=false;
-    CG.toast("Member unbanned","ok"); CG.router();
-  });
-};
-/* Full profile editor — every identity field the office might need to correct.
-   Saved with .select() so an RLS-blocked write fails loud instead of toasting
-   success over nothing (the case-system lesson). */
-CG.userEditModal = function(id){
-  var pr = (CG.lg._profilesRaw||[]).find(function(p){ return p.id===id; });
-  if (!pr){ CG.toast("Profile not found — reload and try again","err"); return; }
-  var nm = pr.gamertag||pr.display_name||"member";
-  function fld(label,fid,val,attrs){ return '<label class="fld"><span>'+label+'</span><input id="'+fid+'" value="'+esc(val==null?"":val)+'" '+(attrs||"")+'></label>'; }
-  CG.modal("Edit player — "+esc(nm),
-    '<div class="grid g2" style="gap:12px">'+
-    fld("Gamertag","ueGT",pr.gamertag)+
-    fld("Display name","ueDN",pr.display_name)+
-    fld("EA gamertag (exact)","ueEA",pr.ea_id,'placeholder="as it appears in NHL"')+
-    '<label class="fld"><span>Platform</span><select id="uePlat">'+
-      ["","PlayStation 5","Xbox Series X|S","PC"].map(function(p){ return '<option value="'+esc(p)+'"'+((pr.platform||"")===p?" selected":"")+'>'+(p||"—")+'</option>'; }).join("")+
-      '</select></label>'+
-    fld("Time zone","ueTZ",pr.timezone,'placeholder="e.g. Eastern"')+
-    fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
-    fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
-    fld("Twitch channel","ueTw",pr.twitch,'placeholder="channel name only"')+
-    '</div>'+
-    '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ueGo">Save player</button>');
-  document.getElementById("ueGo").addEventListener("click", function(){
-    var jer = parseInt(document.getElementById("ueJer").value,10);
-    var ovr = parseInt(document.getElementById("ueOvr").value,10);
-    var payload = {
-      gamertag:(document.getElementById("ueGT").value||"").trim()||null,
-      display_name:(document.getElementById("ueDN").value||"").trim()||null,
-      ea_id:(document.getElementById("ueEA").value||"").trim()||null,
-      platform:document.getElementById("uePlat").value||null,
-      timezone:(document.getElementById("ueTZ").value||"").trim()||null,
-      jersey_number:isNaN(jer)?null:Math.max(1,Math.min(99,jer)),
-      overall:isNaN(ovr)?null:Math.max(40,Math.min(99,ovr)),
-      twitch:(document.getElementById("ueTw").value||"").trim()||null
-    };
-    if (!payload.gamertag){ CG.toast("A player needs a gamertag","err"); return; }
-    var btn=this; btn.disabled=true;
-    CG.sb.from("profiles").update(payload).eq("id",id).select("id").then(function(r){
-      btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (!r.data || !r.data.length){ CG.toast("The database refused the edit (no row updated) — check your seat and retry","err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast("Player saved","ok");
-      CG.reloadLeague();
-    });
-  });
-};
-CG.AFTER._admUsers = function(){
-  document.querySelectorAll("[data-uedit]").forEach(function(b){
-    b.addEventListener("click", function(){ CG.userEditModal(this.getAttribute("data-uedit")); });
-  });
-  var search=document.getElementById("userSearch"), bannedBtn=document.getElementById("bannedToggle");
-  function applyFilter(){
-    var qy=(search&&search.value||"").toLowerCase();
-    var bannedOnly = bannedBtn && bannedBtn.getAttribute("aria-pressed")==="true";
-    var shown=0;
-    document.querySelectorAll("#usersBody tr").forEach(function(tr){
-      var hit = tr.getAttribute("data-user-name").indexOf(qy)>=0 &&
-                (!bannedOnly || tr.getAttribute("data-user-banned")==="1");
-      tr.style.display = hit ? "" : "none";
-      if (hit) shown++;
-    });
-    var empty=document.getElementById("usersEmpty");
-    if (!shown && !empty){
-      empty=document.createElement("div");
-      empty.id="usersEmpty"; empty.className="card-b";
-      empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>';
-      var tbl=document.querySelector("#usersBody").closest(".tblwrap");
-      tbl.parentNode.insertBefore(empty, tbl.nextSibling);
-    } else if (shown && empty){ empty.remove(); }
-    else if (empty){ empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>'; }
-  }
-  if(search) search.addEventListener("input", applyFilter);
-  if(bannedBtn) bannedBtn.addEventListener("click", function(){
-    var on = this.getAttribute("aria-pressed")==="true";
-    this.setAttribute("aria-pressed", on?"false":"true");
-    this.classList.toggle("btn-ink", !on);
-    this.classList.toggle("btn-ghost", on);
-    applyFilter();
-  });
-  document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value, this); }); });
-  document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-lift]").forEach(function(b){ b.addEventListener("click", function(){ CG.liftUserSuspension(this.getAttribute("data-lift"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
-  document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: LEAGUES & TIERS (CG umbrella — create_league RPC)
-   ================================================================ */
-/* The tier's mark: the emblem when one is set, the TIER n plate when not.
-   The plate is always in the markup and the emblem is laid over it, so hiding a failed <img>
-   reveals the plate rather than a broken-image glyph. Hiding it is the onerror below — the
-   overlay is opaque, so without that the plate stays covered. Belt: CG.installEmblemFallback
-   does the same from a captured error event, which keeps working if inline handlers are ever
-   dropped from the CSP. */
-/* Error events on <img> don't bubble, but they can be captured — one listener covers every tier
-   mark on every page, present or future, without an inline handler. */
-CG.installEmblemFallback = function(){
-  if (CG._emblemFallback) return;
-  CG._emblemFallback = true;
-  document.addEventListener("error", function(e){
-    var el = e.target;
-    if (el && el.tagName === "IMG" && el.classList && el.classList.contains("tier-img")) el.style.display = "none";
-  }, true);
-};
-CG.tierPlate = function(l, size){
-  CG.installEmblemFallback();
-  return '<span class="tier-plate">'+
-      '<span class="tp-label">TIER</span>'+
-      '<b class="tp-num" style="font-size:'+(size|0)+'px">'+(l.tier|0)+'</b>'+
-    '</span>'+
-    (l.emblem ? '<img class="tier-img" src="'+esc(l.emblem)+'" alt="'+esc(l.code)+' emblem"'+
-                ' onerror="this.style.display=\'none\'">' : "");
-};
-/* The tier block doubles as the emblem slot in the Control Center: click it or drop an image on
-   it to change that tier's emblem. Saves on upload rather than behind a Save button — it's one
-   field, and a half-applied emblem is a worse state than no emblem. */
-CG.leagueEmblemZone = function(l){
-  return '<div class="lg-emblem" data-lg-zone="'+esc(l.code)+'"'+
-    ' role="button" tabindex="0" aria-label="Change the '+esc(l.code)+' emblem" title="Click or drop an image to set the '+esc(l.code)+' emblem">'+
-    CG.tierPlate(l, 24)+
-    '<span class="lg-emblem-hint">'+(l.emblem?"Replace":"Add emblem")+'</span></div>'+
-    '<input type="file" accept="image/*" hidden data-lg-file="'+esc(l.code)+'">';
-};
-CG.admLeagues = function(){
-  var leagues=(CG.LEAGUES||[]).slice().sort(function(a,b){ return a.tier-b.tier || a.sort-b.sort; });
-  var totalClubs=(CG.TEAMS||[]).length;
-  var top=(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL";
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Leagues &amp; tiers</h2><p class="lede" style="margin-top:6px">Chel Gaming is the umbrella. Each tier is its own league modeled on a real-world circuit — the <b>'+esc(top)+'</b> sits on top, built on the NHL. Add tiers beneath it (a CGAHL on the AHL, and so on) to grow the pyramid.</p></div>';
-  h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+leagues.length+'</b><span>tier'+(leagues.length===1?"":"s")+'</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+totalClubs+'</b><span>clubs</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc(top)+'</b><span>top tier</span></div></div>';
-  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The Chel Gaming pyramid</h3><span class="chip">'+leagues.length+' tier'+(leagues.length===1?"":"s")+'</span></div>';
-  h+=leagues.map(function(l,i){
-    return '<div class="card-b" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line)":"")+'">'+
-      CG.leagueEmblemZone(l)+
-      '<div style="flex:1 1 160px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b class="mono" style="font-size:16px">'+esc(l.code)+'</b>'+(i===0?' <span class="chip chip-chrome" style="font-size:9px">TOP TIER</span>':'')+'</div><div style="color:var(--steel);font-size:13px;margin-top:2px">'+esc(l.name)+'</div></div>'+
-      '<div style="flex:0 0 auto;text-align:right"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">MODELED ON</div><b style="font-family:var(--f-disp);font-size:16px">'+esc(l.inspiration||"—")+'</b></div>'+
-      '<div style="flex:0 0 auto;text-align:right;min-width:56px"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">CLUBS</div><b class="num" style="font-family:var(--f-disp);font-size:16px">'+(l.teamCount||0)+'</b></div>'+
-      (l.emblem ? '<button class="btn btn-ghost btn-sm" data-lg-clear="'+esc(l.code)+'" style="flex:0 0 auto">Remove emblem</button>' : "")+
-    '</div>';
-  }).join("")+
-  '<div class="card-b" style="border-top:1px solid var(--line)"><p class="caption" style="margin:0">'+
-    'Click a tier plate or drop an image on it to set that tier’s emblem — PNG, JPG, WebP, GIF or SVG, under 2 MB. '+
-    'It saves straight away. The top tier’s emblem headlines the public Clubs page; the rest show here, and on '+
-    'their own pages as those are built. Tiers without an emblem keep the plain TIER plate.'+
-  '</p></div></div>';
-  var insp=["NHL","AHL","ECHL","KHL","SHL","Liiga","NCAA","CHL","OHL","WHL","QMJHL"];
-  h+='<div class="card"><div class="card-h"><h3>Add a tier</h3></div><div class="card-b">'+
-    '<div class="grid g2" style="gap:14px">'+
-    '<label class="fld"><span>League code</span><input id="lgCode" placeholder="e.g. CGAHL" maxlength="8" style="text-transform:uppercase"></label>'+
-    '<label class="fld"><span>Tier number</span><input id="lgTier" type="number" min="1" max="20" value="'+(leagues.length+1)+'"></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Full name</span><input id="lgName" placeholder="e.g. Chel Gaming American Hockey League"></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Real-world inspiration</span><input id="lgInsp" list="inspList" placeholder="e.g. AHL"><datalist id="inspList">'+insp.map(function(x){ return '<option value="'+x+'">'; }).join("")+'</datalist></label>'+
-    '</div>'+
-    '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn btn-chrome" id="lgCreate">Create tier</button></div>'+
-    '<p class="caption" style="margin-top:12px">A new tier is created empty. Clubs stay in their current league — assigning clubs to a tier (and promotion / relegation between them) is coming next.</p>'+
-  '</div></div>';
-  return h;
-};
-CG.createLeague = function(){
-  var code=(document.getElementById("lgCode").value||"").trim().toUpperCase();
-  var name=(document.getElementById("lgName").value||"").trim();
-  var tier=parseInt(document.getElementById("lgTier").value,10);
-  var insp=(document.getElementById("lgInsp").value||"").trim();
-  if(!code){ CG.toast("Give the tier a code","err"); return; }
-  if(!name){ CG.toast("Give the tier a full name","err"); return; }
-  if(!(tier>=1)){ CG.toast("Tier number must be 1 or more","err"); return; }
-  if((CG.LEAGUE_BY_CODE||{})[code]){ CG.toast(code+" already exists","err"); return; }
-  var btn=document.getElementById("lgCreate"); if(btn){ btn.disabled=true; btn.textContent="Creating…"; }
-  CG.sb.rpc("create_league",{ p_code:code, p_name:name, p_tier:tier, p_inspiration:insp||null }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); if(btn){ btn.disabled=false; btn.textContent="Create tier"; } return; }
-    CG.toast(code+" created","ok");
-    CG.loadLeagues().then(function(){ if(location.hash.indexOf("/leagues")>=0 && CG.router) CG.router(); });
-  });
-};
-/* Persist an emblem (or clear it with null) and refresh the panel from the DB, so what's on screen
-   is what's stored rather than what we hoped we stored. */
-CG.saveLeagueEmblem = function(code, url, zone){
-  return CG.sb.rpc("set_league_emblem", { p_code:code, p_url:url }).then(function(r){
-    if (r.error){
-      if (zone) zone.classList.remove("busy");
-      CG.toast(r.error.message || "Couldn’t save the emblem","err");
-      return false;
-    }
-    return CG.loadLeagues().then(function(fresh){
-      if (!fresh){
-        /* the write landed but the read-back didn't — don't repaint stale state and call it done */
-        if (zone) zone.classList.remove("busy");
-        CG.toast("Saved, but the panel couldn’t refresh — reload to see it","err");
-        return false;
-      }
-      CG.toast(url ? code+" emblem updated" : code+" emblem removed","ok");
-      if (location.hash.indexOf("/leagues")>=0 && CG.router) CG.router();
-      return true;
-    });
-  });
-};
-CG.AFTER._admLeagues = function(){
-  var b=document.getElementById("lgCreate"); if(b) b.addEventListener("click", CG.createLeague);
-  var code=document.getElementById("lgCode"); if(code) code.addEventListener("input", function(){ var s=this.selectionStart; this.value=this.value.toUpperCase(); try{ this.setSelectionRange(s,s); }catch(e){} });
-
-  /* --- tier emblems: click or drop on the tier plate --- */
-  document.querySelectorAll("[data-lg-zone]").forEach(function(zone){
-    var lgCode = zone.getAttribute("data-lg-zone");
-    var fileIn = document.querySelector('[data-lg-file="'+cssQ(lgCode)+'"]');
-    var clearBtn = document.querySelector('[data-lg-clear="'+cssQ(lgCode)+'"]');
-    function setBusy(on){
-      zone.classList.toggle("busy", !!on);
-      /* the lock has to cover the tier's Remove button too — it writes the same row through the
-         same RPC, so a clear confirmed mid-upload would race it and one of the two toasts lies */
-      if (clearBtn) clearBtn.disabled = !!on;
-    }
-    function upload(f){
-      if (!f) return;
-      /* the bucket's real allowlist, not /^image\//: an iPhone .heic passes "is an image" and is
-         then rejected by storage with a raw mime error the commissioner can do nothing with */
-      if (!CG.UPLOAD_MIME.test(f.type||"")){
-        CG.toast("Use a PNG, JPG, WebP, GIF or SVG — "+((f.type||"that file type")+" can’t be stored"),"err"); return;
-      }
-      if (f.size > 2*1024*1024){ CG.toast("Keep the emblem under 2 MB","err"); return; }
-      if (zone.classList.contains("busy")) return;            /* one upload at a time per tier */
-      setBusy(true);
-      CG.uploadLeagueEmblem(f, lgCode)
-        .then(function(url){ return CG.saveLeagueEmblem(lgCode, url, zone); })
-        .catch(function(e){
-          setBusy(false);
-          CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
-        });
-    }
-    if (fileIn){
-      zone.addEventListener("click", function(){ if(!zone.classList.contains("busy")) fileIn.click(); });
-      zone.addEventListener("keydown", function(e){
-        if (e.key==="Enter"||e.key===" "){ e.preventDefault(); if(!zone.classList.contains("busy")) fileIn.click(); }
-      });
-      fileIn.addEventListener("change", function(){
-        /* clear the input before uploading: browsers fire no change event when the same file is
-           picked twice, so after a failure re-picking that file would do nothing at all */
-        var f = fileIn.files[0]; fileIn.value = ""; if (f) upload(f);
-      });
-    }
-    zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
-    zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
-    zone.addEventListener("drop", function(e){
-      e.preventDefault(); zone.classList.remove("drag");
-      if (e.dataTransfer && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
-    });
-  });
-  document.querySelectorAll("[data-lg-clear]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      var lgCode = this.getAttribute("data-lg-clear");
-      CG.confirm("Remove the "+lgCode+" emblem?",
-        "The tier goes back to the plain TIER plate. The image file itself stays in storage — this only "+
-        "stops the site using it. You can upload a new one any time.",
-        "Remove", function(){ CG.saveLeagueEmblem(lgCode, null, null); });
-    });
-  });
-};
-
-/* ================================================================
-   LIVE ADMIN: EA STATS — automatic stats pipeline (replaces manual
-   results entry). Link each club to its EA club id; the scheduled
-   poller + ingest-stats function do the rest.
-   ================================================================ */
-CG.admEAStats = function(){
-  var lg = CG.lg;
-  var teams = (CG.TEAMS||[]).slice();
-  var linked = teams.filter(function(t){ return t.eaClubId; }).length;
-  var finals = (lg.schedule||[]).filter(function(g){ return g.status==="final"; });
-  var imported = finals.filter(function(g){ return g.eaMatchId; });
-  var pending = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at < CG.now()-30*60000; });
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">EA stats — automatic</h2><p class="lede" style="margin-top:6px">Final scores and full box scores import straight from the EA NHL match record — there is no manual results entry. Link each club to its EA club below; the poller pulls finished games automatically on game nights and writes every stat.</p></div>';
-  h+='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'+
-    '<div class="kpi'+(linked<teams.length?" alert":"")+'" style="cursor:default"><b class="num">'+linked+'/'+teams.length+'</b><span>clubs linked</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+imported.length+'</b><span>auto-imported finals</span></div>'+
-    '<div class="kpi'+(pending.length?" alert":"")+'" style="cursor:default"><b class="num">'+pending.length+'</b><span>awaiting stats</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:18px">'+(linked?(linked<teams.length?"Partial":"Active"):"Setup")+'</b><span>pipeline</span></div></div>';
-  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Club → EA club link</h3><span class="chip">'+linked+'/'+teams.length+' linked</span></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>Each club needs its numeric EA club id</caption><thead><tr><th class="tleft">Club</th><th class="tleft">EA club id</th><th class="tleft">EA club name (optional)</th><th class="tright">Save</th></tr></thead><tbody>'+
-    teams.map(function(t){
-      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,22)+'<span class="nm">'+esc(t.name)+'</span></span></td>'+
-        '<td class="tleft"><input data-ea-id="'+t.id+'" value="'+esc(t.eaClubId||"")+'" placeholder="e.g. 45210" inputmode="numeric" style="max-width:130px"></td>'+
-        '<td class="tleft"><input data-ea-name="'+t.id+'" value="'+esc(t.eaClub||"")+'" placeholder="EA club name" style="max-width:200px"></td>'+
-        '<td class="tright"><button class="btn btn-ghost btn-sm" data-ea-save="'+t.id+'" data-code="'+esc(t.code)+'">Save</button></td></tr>';
-    }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the scheduled poller matches EA games to your schedule by club-pair + date and writes the final score and every box-score stat — no manual entry.</span></div></div>';
-  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
-  if (imported.length){
-    h+= imported.slice().sort(function(a,b){ return b.at-a.at; }).slice(0,8).map(function(g){
-      return '<div class="card-b" style="border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+' '+g.awayScore+'</span></span><span class="caption">@</span><span class="teamcell"><span class="mono" style="font-size:12px">'+esc(g.home)+' '+g.homeScore+'</span>'+CG.crest(g.home,20)+'</span>'+
-        '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Box score</a>'+
-        '<button class="btn btn-ghost btn-sm" data-reopen-final="'+g.id+'" data-label="'+esc(g.away)+' @ '+esc(g.home)+'">Re-open</button></span></div>';
-    }).join("");
-  } else if (pending.length){
-    h+='<div class="card-b"><span class="caption"><b>'+pending.length+'</b> scheduled game'+(pending.length>1?"s have":" has")+' passed and '+(pending.length>1?"are":"is")+' still waiting for EA stats. If a game never imports, confirm both clubs are linked above and were in the same EA match.</span></div>';
-  } else {
-    h+='<div class="card-b"><div class="empty" style="padding:30px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No finals yet</b><p>Once the season starts, finished games appear here automatically as the poller imports them.</p></div></div>';
-  }
-  h+='</div>';
-  /* every EA payload the poller has seen is archived — anything that didn't land shows here */
-  h+='<div class="card"><div class="card-h"><h3>Unmatched EA matches</h3><span class="chip" id="eaUnCount">checking…</span></div>'+
-    '<div id="eaUnmatchedBody"><div class="card-b"><span class="caption">Loading the ingest archive…</span></div></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every EA match the poller sees is archived, even when it can’t be matched to a fixture — EA’s own history only keeps a club’s few most recent games, so nothing is lost. Fix the cause (link the club, move the fixture, or Re-open a wrongly-claimed final above) and hit <b>Re-ingest</b> to replay the archived box score.</span></div></div>';
-  return h;
-};
-CG.saveEAClub = function(teamId, code){
-  var idEl=document.querySelector('[data-ea-id="'+teamId+'"]'), nameEl=document.querySelector('[data-ea-name="'+teamId+'"]');
-  if(!idEl) return;
-  var eaId=(idEl.value||"").trim(), eaName=(nameEl.value||"").trim();
-  if (eaId && !/^\d+$/.test(eaId)){ CG.toast("EA club id should be numbers only","err"); return; }
-  var btn=document.querySelector('[data-ea-save="'+teamId+'"]'); if(btn){ btn.disabled=true; btn.textContent="Saving…"; }
-  CG.sb.from("teams").update({ ea_club_id: eaId||null, ea_club_name: eaName||null }).eq("id",teamId).then(function(r){
-    if(btn){ btn.disabled=false; btn.textContent="Save"; }
-    if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-    var t=CG.TEAM[code]; if(t){ t.eaClubId=eaId||null; t.eaClub=eaName||null; }
-    CG.toast(code+" EA link saved","ok"); CG.router();
-  });
-};
-CG.AFTER._admEAStats = function(){
-  document.querySelectorAll("[data-ea-save]").forEach(function(b){ b.addEventListener("click", function(){ CG.saveEAClub(this.getAttribute("data-ea-save"), this.getAttribute("data-code")); }); });
-  /* re-open a wrongly-matched final: clears the result + box score so the real import can land */
-  document.querySelectorAll("[data-reopen-final]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-reopen-final"), label=this.getAttribute("data-label");
-    CG.confirm("Re-open "+label+"?",
-      "The final score and every box-score stat for this game are cleared and it returns to the schedule. Use this when the EA match that claimed the slot was actually a different game (a scrim between the same clubs). The archived payload stays replayable below.",
-      "Re-open the game", function(){
-      CG.sb.rpc("reopen_game_final",{ p_game:id }).then(function(r){
-        if(r.error){ CG.toast("Couldn’t re-open: "+r.error.message,"err"); return; }
-        CG.toast("Game re-opened — the result and box score were cleared","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-  /* unmatched / errored archive rows, with one-click replay */
-  var body=document.getElementById("eaUnmatchedBody"), count=document.getElementById("eaUnCount");
-  if (body && CG.sb){
-    CG.sb.from("ea_ingest_log").select("ea_match_id,et_day,ea_club_ids,status,reason,last_attempt_at")
-      .in("status",["unmatched","error"]).order("last_attempt_at",{ascending:false}).limit(20)
-      .then(function(r){
-        var rows=(r&&r.data)||[];
-        if (count) count.textContent = rows.length ? rows.length+" need attention" : "all clear";
-        if (count) count.className = "chip "+(rows.length?"chip-warn":"chip-win");
-        if (r&&r.error){ body.innerHTML='<div class="card-b"><span class="caption">Couldn’t read the archive: '+esc(r.error.message)+'</span></div>'; return; }
-        if (!rows.length){ body.innerHTML='<div class="card-b"><span class="caption">Nothing waiting — every archived EA match either imported or was intentionally skipped.</span></div>'; return; }
-        body.innerHTML = rows.map(function(x){
-          return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-            '<span class="mono" style="font-size:11px;color:var(--steel)">'+esc(x.et_day||"?")+'</span>'+
-            '<span class="chip '+(x.status==="error"?"chip-loss":"chip-warn")+'" style="font-size:9px">'+esc(x.status.toUpperCase())+'</span>'+
-            '<span class="caption" style="flex:1;min-width:200px">'+esc(x.reason||"—")+'</span>'+
-            '<button class="btn btn-ghost btn-sm" data-reingest="'+esc(x.ea_match_id)+'">Re-ingest</button></div>';
-        }).join("");
-        body.querySelectorAll("[data-reingest]").forEach(function(b){ b.addEventListener("click", function(){
-          var mid=this.getAttribute("data-reingest"), btn=this;
-          btn.disabled=true; btn.textContent="Replaying…";
-          CG.sb.auth.getSession().then(function(s){
-            var tok = s && s.data && s.data.session && s.data.session.access_token;
-            if (!tok){ CG.toast("Sign in again — no session token","err"); btn.disabled=false; btn.textContent="Re-ingest"; return; }
-            fetch("/api/ingest-stats",{ method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
-              body: JSON.stringify({ reingest: mid }) })
-              .then(function(r){ return r.json(); })
-              .then(function(out){
-                btn.disabled=false; btn.textContent="Re-ingest";
-                if ((out.ingested||[]).length){ CG.toast("Box score imported — "+out.ingested[0].score,"ok"); CG.reloadLeague(); }
-                else if ((out.unmatched||[]).length){ CG.toast("Still unmatched: "+out.unmatched[0].reason,"err"); }
-                else if ((out.skipped||[]).length){ CG.toast("Already ingested — nothing to do","ok"); }
-                else { CG.toast("Replay failed: "+esc(JSON.stringify(out.errors||out).slice(0,120)),"err"); }
-              })
-              .catch(function(e){ btn.disabled=false; btn.textContent="Re-ingest"; CG.toast("Replay failed: "+e.message,"err"); });
-          });
-        }); });
-      });
-  }
-};
-
-/* ================================================================
-   LIVE ADMIN: TEAMS — add / edit / remove clubs (real teams table)
-   ================================================================ */
-CG.reloadLeague = async function(){
-  try {
-    CG.lg = await CG.buildLiveLeague();
-    await CG.loadManagerData();
-    await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
-    CG.renderChrome(); CG.router();
-  } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
-};
-
-/* ================================================================
-   LIVE LEAGUE DATA — scores, standings and stats update themselves.
-   A game import writes several rows (the game, then every player's
-   box-score line), so the realtime events are coalesced into ONE
-   reload after a short quiet period. The reload is single-flight
-   (never two builds at once) and gentle: it keeps your scroll
-   position, and while you're typing in a field or have a dialog
-   open it refreshes the data in memory but waits to re-draw until
-   you're done, so nothing you're doing is interrupted.
-   ================================================================ */
-CG._liveT = null; CG._liveBusy = false; CG._liveAgain = false;
-function pvBusyInteracting(){
-  var a = document.activeElement, tn = a && a.tagName;
-  if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT" || (a && a.isContentEditable)) return true;
-  var ov = document.getElementById("overlay-root");
-  return !!(ov && ov.innerHTML.trim());   /* a modal / drawer / palette is open */
-}
-CG.liveReload = function(){
-  clearTimeout(CG._liveT);
-  CG._liveT = setTimeout(function run(){
-    if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
-    CG._liveBusy = true;
-    CG.buildLiveLeague().then(function(lg){
-      CG.lg = lg;
-      return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
-    }).then(function(){
-      /* don't yank the page out from under an active interaction — the data is
-         already fresh in memory, so the next navigation shows it. Otherwise
-         re-draw in place and hold the scroll position. */
-      if (!pvBusyInteracting()){
-        var y = window.pageYOffset;
-        if (CG.renderChrome) CG.renderChrome();
-        if (CG.router) CG.router();
-        window.scrollTo(0, y);
-      }
-    }).catch(function(){}).then(function(){
-      CG._liveBusy = false;
-      if (CG._liveAgain){ CG._liveAgain = false; CG.liveReload(); }
-    });
-  }, 1000);
-};
-/* one public channel — scores/standings/stats are the same for everyone, so this
-   runs for signed-out viewers too. Idempotent: subscribed once for the session. */
-CG.subscribeLeague = function(){
-  if (!CG.sb || CG._leagueChannel) return;
-  try {
-    CG._leagueChannel = CG.sb.channel("league-live")
-      .on("postgres_changes",{ event:"*", schema:"public", table:"games" },      function(){ CG.liveReload(); })
-      .on("postgres_changes",{ event:"*", schema:"public", table:"game_stats" }, function(){ CG.liveReload(); })
-      .subscribe();
-  } catch(e){}
-};
-CG.admTeamsLive = function(){
-  var teams = (CG.TEAMS||[]).slice();
-  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Teams</h2><p class="lede" style="margin-top:6px">Every club in the league — identity, division, and home arena. Edits go straight to the database and the whole site updates with them.</p></div>';
-  h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+teams.length+'</b><span>clubs</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+(CG.DIVISIONS?CG.DIVISIONS.length:2)+'</b><span>divisions</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc((CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL")+'</b><span>league</span></div></div>';
-  h+='<div class="card"><div class="card-h"><h3>Clubs</h3><button class="btn btn-chrome btn-sm" id="teamAdd">'+CG.ic("plus",14)+'Add a club</button></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>All clubs</caption><thead><tr><th class="tleft">Club</th><th class="tleft">Code</th><th class="tleft">Division</th><th>Roster</th><th class="tright">Actions</th></tr></thead><tbody>'+
-    teams.map(function(t){
-      var n=(CG.lg.byTeam[t.code]||[]).length;
-      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,24)+'<span><span class="nm">'+esc(t.name)+'</span><small>'+esc(t.city||"—")+'</small></span></span></td>'+
-        '<td class="tleft mono" style="font-size:12px">'+esc(t.code)+'</td>'+
-        '<td class="tleft">'+esc(t.div)+'</td>'+
-        '<td data-v="'+n+'">'+n+'</td>'+
-        '<td class="tright"><span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-team-edit="'+t.id+'">Edit</button>'+
-        '<button class="btn btn-ghost btn-sm" data-team-del="'+t.id+'" data-name="'+esc(t.name)+'">Remove</button></span></td></tr>';
-    }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Renames propagate everywhere instantly (rosters, schedule, and history follow the club, not the name). Removing a club is blocked while it still has rostered players or scheduled games.</span></div></div>';
-  /* custom divisions — the league's groupings are data, not hardcoded */
-  var divs = (CG._divisionsRaw||[]).slice().sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
-  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Divisions</h3><span class="chip">'+divs.length+'</span></div>'+
-    divs.map(function(d,i){
-      var n = teams.filter(function(t){ return t.div===d.name; }).length;
-      return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-        '<b style="font-family:var(--f-disp);font-size:15px;flex:1">'+esc(d.name)+'</b>'+
-        '<span class="caption">'+n+' club'+(n===1?"":"s")+'</span>'+
-        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-div-rename="'+d.id+'" data-name="'+esc(d.name)+'">Rename</button>'+
-        '<button class="btn btn-ghost btn-sm" data-div-del="'+d.id+'" data-name="'+esc(d.name)+'" data-count="'+n+'">Delete</button></span></div>';
-    }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center">'+
-      '<input id="divNew" placeholder="New division name…" style="flex:1" maxlength="24">'+
-      '<button class="btn btn-chrome btn-sm" id="divAdd">Add division</button></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Standings, team pages, and the standings race group by these automatically. Renames carry every club along; deleting needs the division empty first.</span></div></div>';
-  return h;
-};
-CG.addDivision = function(){
-  var name=(document.getElementById("divNew").value||"").trim();
-  if(!name){ CG.toast("Give the division a name","err"); return; }
-  if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
-  var maxSort=(CG._divisionsRaw||[]).reduce(function(m,d){ return Math.max(m,d.sort_order||0); },0);
-  CG.sb.from("divisions").insert({ name:name, sort_order:maxSort+1 }).then(function(r){
-    if(r.error){ CG.toast("Couldn’t add: "+r.error.message,"err"); return; }
-    CG.toast(name+" division added","ok"); CG.reloadLeague();
-  });
-};
-CG.renameDivision = function(id, oldName){
-  CG.modal("Rename — "+esc(oldName),
-    '<label class="fld"><span>Division name</span><input id="divName" value="'+esc(oldName)+'" maxlength="24"></label>'+
-    '<p class="caption">Every club in '+esc(oldName)+' moves with the new name — standings and team pages update instantly.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="divGo">Rename</button>');
-  document.getElementById("divGo").addEventListener("click", function(){
-    var name=(document.getElementById("divName").value||"").trim();
-    if(!name){ CG.toast("Give the division a name","err"); return; }
-    if(name===oldName){ if(CG.closeOverlay)CG.closeOverlay(); return; }
-    if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
-    CG.sb.from("divisions").update({ name:name }).eq("id",id).then(function(r){
-      if(r.error){ CG.toast("Couldn’t rename: "+r.error.message,"err"); return; }
-      /* clubs reference the division by name — carry them along */
-      CG.sb.from("teams").update({ division:name }).eq("division",oldName).then(function(r2){
-        if(r2.error){ CG.toast("Division renamed, but clubs didn’t follow: "+r2.error.message,"err"); return; }
-        if(CG.closeOverlay)CG.closeOverlay();
-        CG.toast(oldName+" is now "+name,"ok"); CG.reloadLeague();
-      });
-    });
-  });
-};
-CG.deleteDivision = function(id, name, count){
-  if (count>0){ CG.toast("Can’t delete "+name+" — move its "+count+" club"+(count===1?"":"s")+" to another division first","err"); return; }
-  if ((CG._divisionsRaw||[]).length<=1){ CG.toast("The league needs at least one division","err"); return; }
-  CG.confirm("Delete the "+esc(name)+" division?","It’s empty, so nothing moves. This can’t be undone.","Delete division", function(){
-    CG.sb.from("divisions").delete().eq("id",id).then(function(r){
-      if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-      CG.toast(name+" deleted","ok"); CG.reloadLeague();
-    });
-  });
-};
-/* upload a club logo to the public team-logos bucket (commissioner-only RLS).
-   Token-explicit: a tab whose session lapsed (multi-tab refresh-token rotation)
-   silently falls back to the anon key in the storage client, which reads as
-   "violates row-level security". So we fetch the session ourselves, prove it
-   server-side, send it explicitly, and retry once through a refresh. */
-/* Club artwork arrives at whatever resolution the club had to hand — one upload was 2357x2357 —
-   while the largest crest the site ever paints is 104 CSS px (about 312 device px on a 3x screen).
-   Shipping the originals made the eight logos 884 KB, roughly two-thirds of the home page. Resize
-   once here, at upload, so the cost isn't paid by every visitor on every load.
-   WebP where the browser can encode it (all current ones can, and it holds transparency); the
-   original blob is returned untouched if anything about the decode fails, so a club can never be
-   blocked from uploading by this optimisation. */
-CG.shrinkImage = async function(file, cap){
-  var fallback = { blob:file, type:file.type||"image/png", ext:null };
-  try {
-    if (!/^image\//.test(file.type||"") || /svg/.test(file.type||"")) return fallback;
-    var bmp = await createImageBitmap(file);
-    var scale = Math.min(1, cap/Math.max(bmp.width, bmp.height));
-    var w = Math.max(1, Math.round(bmp.width*scale)), h = Math.max(1, Math.round(bmp.height*scale));
-    var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    var ctx = cv.getContext("2d");
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bmp, 0, 0, w, h);
-    bmp.close && bmp.close();
-    var out = await new Promise(function(res){ cv.toBlob(res, "image/webp", 0.92); });
-    if (!out) out = await new Promise(function(res){ cv.toBlob(res, "image/png"); });
-    if (!out || out.size >= file.size) return fallback;   // never upload a bigger file than we got
-    return { blob:out, type:out.type, ext:(out.type==="image/webp"?"webp":"png") };
-  } catch (e) { return fallback; }
-};
-/* One uploader for every piece of commissioner-uploaded artwork. Club crests and tier emblems
-   share the team-logos bucket and its policy (can_write_team_logo is is_commissioner(), whatever
-   the path), so they share the token dance and the resize too — a second copy of this would be a
-   second place for the stale-token bug to come back. `slug` names the file, `opts.prefix` puts it
-   in a folder, `opts.cap` is the longest edge kept. */
-/* exactly what storage.buckets.allowed_mime_types permits for team-logos — keep the two in step */
-CG.UPLOAD_MIME = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/i;
-/* CSS.escape isn't in every browser this site still serves; the codes are [A-Z0-9] in practice,
-   so quote-escaping is enough to keep the attribute selector well-formed either way */
-function cssQ(v){ return String(v==null?"":v).replace(/["\\]/g, "\\$&"); }
-CG.uploadArtwork = async function(file, slug, opts){
-  opts = opts || {};
-  var s = await CG.sb.auth.getSession();
-  var session = s && s.data && s.data.session;
-  if (!session){
-    var rf = await CG.sb.auth.refreshSession();
-    session = rf && rf.data && rf.data.session;
-  }
-  if (!session) throw new Error("your sign-in expired — sign out and back in, then retry");
-  var isComm = await CG.sb.rpc("is_commissioner");
-  if (isComm && isComm.error) throw new Error(isComm.error.message);
-  if (!isComm.data){
-    /* the token the server sees isn't a commissioner — one refresh, one recheck */
-    var rf2 = await CG.sb.auth.refreshSession();
-    session = (rf2 && rf2.data && rf2.data.session) || session;
-    isComm = await CG.sb.rpc("is_commissioner");
-    if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
-  }
-  var shrunk = await CG.shrinkImage(file, opts.cap || 384);
-  var body = shrunk.blob, type = shrunk.type;
-  var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
-  /* the slug reaches an object name and a URL, so keep it to characters that survive both */
-  var safe = String(slug||"logo").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"") || "logo";
-  /* normalise the folder too, so a future caller passing "awards" (no slash) doesn't silently
-     write "awardsbos-123.webp" at the bucket root, and ".." can't aim the object elsewhere */
-  var pre = String(opts.prefix||"").toLowerCase().replace(/[^a-z0-9/-]+/g,"")
-    .split("/").filter(function(seg){ return seg && seg !== "." && seg !== ".."; }).join("/");
-  var path = (pre ? pre+"/" : "")+safe+"-"+Date.now()+"."+ext;
-  async function put(tok){
-    /* encode per segment — encodeURIComponent on the whole path would turn the folder slash into
-       %2F and flatten the prefix into the filename */
-    return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+path.split("/").map(encodeURIComponent).join("/"), {
-      method:"POST",
-      /* every upload gets a fresh timestamped path, so the bytes at a given URL never change and
-         can be cached for a year — the old 3600 made every visitor revalidate eight logos hourly */
-      headers:{ "Authorization":"Bearer "+tok, "apikey":CG.SB_KEY, "Content-Type":type, "x-upsert":"true", "cache-control":"public, max-age=31536000, immutable" },
-      body:body
-    });
-  }
-  var res = await put(session.access_token);
-  if (!res.ok){
-    /* errBody, NOT body: `var` is function-scoped, so naming this `body` reused the very binding
-       put() closes over for the image bytes. The retry below then POSTed the parsed error object,
-       which fetch stringifies to "[object Object]" — 15 bytes sent as image/webp, which the bucket
-       happily accepts, so a stale-token retry "succeeded" and stored a file that isn't an image.
-       That is the exact race this retry exists to handle, and it hit club logos too. */
-    var errBody = await res.json().catch(function(){ return {}; });
-    if (res.status===400 || res.status===403){
-      /* stale token race — refresh once and retry with the new one */
-      var rf3 = await CG.sb.auth.refreshSession();
-      var fresh = rf3 && rf3.data && rf3.data.session;
-      if (fresh){ res = await put(fresh.access_token); }
-      if (!res.ok){ errBody = await res.json().catch(function(){ return errBody; }); throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")")); }
-    } else {
-      throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")"));
-    }
-  }
-  return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
-};
-CG.uploadTeamLogo = function(file, code){ return CG.uploadArtwork(file, code, { cap:384 }); };
-/* a tier emblem is painted bigger than a crest (it headlines the Leagues panel), so it keeps more pixels */
-CG.uploadLeagueEmblem = function(file, code){
-  return CG.uploadArtwork(file, "league-"+(code||"tier"), { prefix:"leagues/", cap:512 });
-};
-CG.teamForm = function(t){
-  var isNew = !t;
-  t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
-  var divOpts = (CG.DIVISIONS&&CG.DIVISIONS.length?CG.DIVISIONS:["East","West"]).map(function(d){ return '<option'+(t.div===d?" selected":"")+'>'+esc(d)+'</option>'; }).join("");
-  var isEdit = !isNew;
-  function holderName(pid){
-    if(!pid) return "";
-    var p=(CG.lg&&CG.lg._profilesRaw||[]).find(function(x){ return x.id===pid; });
-    return p ? (p.gamertag||p.display_name||"") : "";
-  }
-  /* Front office lives on the club, so it's edited here (edit-only — a club must exist first). */
-  var anySeat = !!(t.owner||t.gm||t.agm);
-  function vacBtn(role){
-    return '<div style="text-align:right;margin-top:5px;min-height:20px">'+
-      '<button type="button" class="btn btn-ghost btn-sm rm-btn" data-vacate-seat="'+role+'"'+(t[role]?'':' style="display:none"')+'>Vacate seat</button></div>';
-  }
-  var mgmtBlock = isEdit ? (
-    '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 2px">'+
-        '<h3 class="h-sec" style="font-size:15px;margin:0">Front office</h3>'+
-        '<button type="button" class="btn btn-ghost btn-sm rm-btn" id="tfClearAll"'+(anySeat?'':' style="display:none"')+'>Remove all seats</button>'+
-      '</div>'+
-      '<p class="caption" style="margin:0 0 12px">Owner, GM and AGM run this club’s Team HQ — roster, trades, lineups and draft picks. Type a member’s name and pick them to assign a seat. <b>Vacate seat</b> (or <b>Remove all seats</b>) clears management immediately — a player’s roster spot and contract are untouched. One person holds one seat per club.</p>'+
-      '<div class="grid g3" style="gap:12px">'+
-        '<div>'+CG.memberPickerField("tfOwner","Owner")+vacBtn("owner")+'</div>'+
-        '<div>'+CG.memberPickerField("tfGm","General Manager")+vacBtn("gm")+'</div>'+
-        '<div>'+CG.memberPickerField("tfAgm","Assistant GM")+vacBtn("agm")+'</div>'+
-      '</div>'+
-    '</div>'
-  ) : '';
-  CG.modal(isNew?"Add a club":"Edit — "+esc(t.name),
-    '<div class="grid g2" style="gap:12px">'+
-    '<label class="fld"><span>Club name</span><input id="tfName" value="'+esc(t.name)+'" placeholder="e.g. Boston Bruins"></label>'+
-    '<label class="fld"><span>City</span><input id="tfCity" value="'+esc(t.city||"")+'" placeholder="e.g. Boston"></label>'+
-    '<label class="fld"><span>Code (2–4 letters)</span><input id="tfCode" value="'+esc(t.code)+'" maxlength="4" style="text-transform:uppercase" placeholder="e.g. BOS"></label>'+
-    '<label class="fld"><span>Division</span><select id="tfDiv">'+divOpts+'</select></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
-    '</div>'+
-    '<label class="fld" style="margin-top:2px"><span>Club logo</span></label>'+
-    '<div class="logo-drop" id="tfLogoDrop" role="button" tabindex="0" aria-label="Upload a club logo" data-url="'+esc(t.logo||"")+'">'+
-      (t.logo?'<img src="'+esc(t.logo)+'" alt="Current logo">':'<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>')+
-    '</div>'+
-    '<input type="file" id="tfLogoFile" accept="image/*" hidden>'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'+
-      '<span class="caption">Uploads apply when you save the club.</span>'+
-      '<button type="button" class="btn btn-ghost btn-sm" id="tfLogoClear"'+(t.logo?'':' style="display:none"')+'>Use generated crest</button>'+
-    '</div>'+mgmtBlock,
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="tfSave">'+(isNew?"Add club":"Save changes")+'</button>');
-  /* --- drag & drop logo wiring --- */
-  var zone = document.getElementById("tfLogoDrop"), fileIn = document.getElementById("tfLogoFile"),
-      clearBtn = document.getElementById("tfLogoClear");
-  function setPreview(url){
-    zone.setAttribute("data-url", url||"");
-    zone.innerHTML = url ? '<img src="'+esc(url)+'" alt="Club logo">' :
-      '<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>';
-    clearBtn.style.display = url ? "" : "none";
-  }
-  function doUpload(f){
-    if (!f) return;
-    if (!/^image\//.test(f.type)){ CG.toast("That isn’t an image — use a PNG or JPG","err"); return; }
-    if (f.size > 2*1024*1024){ CG.toast("Keep the logo under 2 MB","err"); return; }
-    var prev = zone.getAttribute("data-url");
-    zone.classList.add("busy");
-    zone.innerHTML = '<span class="lp-hint">Uploading…</span>';
-    var code = (document.getElementById("tfCode").value||t.code||"logo").trim();
-    CG.uploadTeamLogo(f, code).then(function(url){
-      zone.classList.remove("busy"); setPreview(url);
-      CG.toast("Logo uploaded — save the club to apply it","ok");
-    }).catch(function(e){
-      zone.classList.remove("busy"); setPreview(prev);
-      CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
-    });
-  }
-  zone.addEventListener("click", function(){ fileIn.click(); });
-  zone.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fileIn.click(); } });
-  fileIn.addEventListener("change", function(){ if(fileIn.files[0]) doUpload(fileIn.files[0]); });
-  zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
-  zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
-  zone.addEventListener("drop", function(e){ e.preventDefault(); zone.classList.remove("drag"); if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
-  clearBtn.addEventListener("click", function(){ setPreview(""); CG.toast("Back to the generated crest — save to apply","ok"); });
-  /* --- front-office pickers: wire the type-ahead, pre-fill current holders --- */
-  if (isEdit){
-    ["tfOwner","tfGm","tfAgm"].forEach(function(id){ CG.wireMemberPicker(id, ["members"]); });
-    var pf=function(id,pid){ var el=document.getElementById(id); if(el&&pid){ el.value=holderName(pid); el.dataset.acId=pid; } };
-    pf("tfOwner",t.owner); pf("tfGm",t.gm); pf("tfAgm",t.agm);
-    /* --- explicit seat removal: Vacate a seat or Remove all, applied immediately (two-click confirm) --- */
-    var seatId={owner:"tfOwner",gm:"tfGm",agm:"tfAgm"}, seatName={owner:"Owner",gm:"General Manager",agm:"Assistant GM"};
-    var refreshClearAll=function(){ var ca=document.getElementById("tfClearAll"); if(ca) ca.style.display=(t.owner||t.gm||t.agm)?"":"none"; };
-    var doVacate=function(role, done){
-      CG.sb.rpc("set_team_manager",{ p_team_code:t.code, p_role:role, p_profile:null }).then(function(r){
-        if(r.error){ CG.toast("Couldn’t vacate: "+r.error.message,"err"); if(done)done(false); return; }
-        t[role]=null;
-        var el=document.getElementById(seatId[role]); if(el){ el.value=""; delete el.dataset.acId; el.classList.remove("ac-ok"); }
-        var vb=document.querySelector('[data-vacate-seat="'+role+'"]'); if(vb) vb.style.display="none";
-        refreshClearAll(); if(done)done(true);
-      });
-    };
-    var arm=function(btn, confirmLabel, run){
-      if(!btn) return; var orig=btn.textContent, armed=false, tmr=null;
-      var reset=function(){ armed=false; if(tmr)clearTimeout(tmr); btn.textContent=orig; btn.style.color=""; btn.style.borderColor=""; };
-      btn.addEventListener("click", function(){
-        if(armed){ reset(); run(); return; }
-        armed=true; btn.textContent=confirmLabel; btn.style.color="var(--red-ink)"; btn.style.borderColor="var(--red-ink)";
-        tmr=setTimeout(reset, 4000);
-      });
-    };
-    document.querySelectorAll("[data-vacate-seat]").forEach(function(b){
-      var role=b.getAttribute("data-vacate-seat");
-      arm(b, "Confirm — vacate?", function(){ doVacate(role, function(ok){ if(ok) CG.toast(seatName[role]+" seat vacated","ok"); }); });
-    });
-    arm(document.getElementById("tfClearAll"), "Confirm — remove all?", function(){
-      var roles=["owner","gm","agm"].filter(function(r){ return t[r]; });
-      if(!roles.length) return;
-      (function next(i){ if(i>=roles.length){ CG.toast("All front-office seats removed","ok"); return; } doVacate(roles[i], function(){ next(i+1); }); })(0);
-    });
-  }
-  document.getElementById("tfSave").addEventListener("click", function(){
-    var name=(document.getElementById("tfName").value||"").trim(),
-        code=(document.getElementById("tfCode").value||"").trim().toUpperCase();
-    if(!name){ CG.toast("Give the club a name","err"); return; }
-    if(!/^[A-Z]{2,4}$/.test(code)){ CG.toast("Code should be 2–4 letters","err"); return; }
-    var clash=(CG.TEAMS||[]).find(function(x){ return x.code===code && (!t.id || x.id!==t.id); });
-    if(clash){ CG.toast(code+" is already "+clash.name+"’s code","err"); return; }
-    /* front-office changes (edit only): diff each seat against what the club currently holds */
-    var mgmtChanges=[];
-    if(isEdit){
-      var want={ owner:CG.readMemberPicker("tfOwner").id||null,
-                 gm:CG.readMemberPicker("tfGm").id||null,
-                 agm:CG.readMemberPicker("tfAgm").id||null };
-      var picked=[want.owner,want.gm,want.agm].filter(Boolean);
-      if(picked.some(function(v,i){ return picked.indexOf(v)!==i; })){
-        CG.toast("One member can only hold one seat on a club — pick different people for Owner, GM and AGM","err"); return;
-      }
-      if(want.owner!==(t.owner||null)) mgmtChanges.push({role:"owner",profile:want.owner});
-      if(want.gm!==(t.gm||null))       mgmtChanges.push({role:"gm",profile:want.gm});
-      if(want.agm!==(t.agm||null))     mgmtChanges.push({role:"agm",profile:want.agm});
-    }
-    var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
-      division:document.getElementById("tfDiv").value,
-      color:document.getElementById("tfColor").value,
-      logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
-    var btn=this; btn.disabled=true;
-    var q = isNew
-      ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null }))
-      : CG.sb.from("teams").update(rec).eq("id", t.id);
-    q.then(function(r){
-      if(r.error){ btn.disabled=false; CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      /* apply front-office moves one at a time — each RPC clears the member’s prior seat first */
-      var chain=Promise.resolve();
-      mgmtChanges.forEach(function(ch){
-        chain=chain.then(function(){
-          return CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:ch.role, p_profile:ch.profile }).then(function(rr){
-            if(rr.error) throw new Error(rr.error.message);
-          });
-        });
-      });
-      chain.then(function(){
-        btn.disabled=false;
-        if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast(isNew?name+" added to the league":"Club saved","ok");
-        CG.reloadLeague();
-      }).catch(function(e){
-        btn.disabled=false;
-        CG.toast("Club saved, but a front-office change failed: "+((e&&e.message)||"try again"),"err");
-        CG.reloadLeague();
-      });
-    });
-  });
-};
-CG.removeTeam = function(teamId, name){
-  /* guarded: block removal while the club has rostered players or games */
-  Promise.all([
-    CG.sb.from("roster_spots").select("id",{count:"exact",head:true}).eq("team_id",teamId),
-    CG.sb.from("games").select("id",{count:"exact",head:true}).or("home_team_id.eq."+teamId+",away_team_id.eq."+teamId)
-  ]).then(function(rs){
-    var spots=(rs[0]&&rs[0].count)||0, games=(rs[1]&&rs[1].count)||0;
-    if (spots||games){
-      CG.toast("Can’t remove "+name+" — it has "+(spots?spots+" rostered player"+(spots===1?"":"s"):"")+(spots&&games?" and ":"")+(games?games+" scheduled game"+(games===1?"":"s"):"")+". Reassign those first.","err");
-      return;
-    }
-    CG.confirm("Remove "+esc(name)+"?","The club comes off the site everywhere. This can’t be undone.","Remove club", function(){
-      CG.sb.from("teams").delete().eq("id",teamId).then(function(r){
-        if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
-        CG.toast(name+" removed","ok");
-        CG.reloadLeague();
-      });
-    });
-  });
-};
-CG.AFTER._admTeams = function(){
-  var add=document.getElementById("teamAdd");
-  if(add) add.addEventListener("click", function(){ CG.teamForm(null); });
-  document.querySelectorAll("[data-team-edit]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-team-edit");
-    CG.teamForm((CG.TEAMS||[]).find(function(t){ return t.id===id; }));
-  }); });
-  document.querySelectorAll("[data-team-del]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.removeTeam(this.getAttribute("data-team-del"), this.getAttribute("data-name"));
-  }); });
-  var dAdd=document.getElementById("divAdd");
-  if(dAdd) dAdd.addEventListener("click", CG.addDivision);
-  var dNew=document.getElementById("divNew");
-  if(dNew) dNew.addEventListener("keydown", function(e){ if(e.key==="Enter") CG.addDivision(); });
-  document.querySelectorAll("[data-div-rename]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.renameDivision(this.getAttribute("data-div-rename"), this.getAttribute("data-name"));
-  }); });
-  document.querySelectorAll("[data-div-del]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.deleteDivision(this.getAttribute("data-div-del"), this.getAttribute("data-name"), +this.getAttribute("data-count"));
-  }); });
-};
-
-/* ================================================================
-   LIVE LEAGUE OFFICE — complaints & requests on the real
-   action_requests / action_messages tables (replaces the demo cases)
-   ================================================================ */
-CG.ACTION_META = {
-  complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
-  appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
-  trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s management for a move — private to your club." },
-  position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." }
-};
-CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
-CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
-CG.loadActionRequests = async function(){
-  if (!CG.sb || !CG.lg || !CG.auth.user) return;
-  CG._actionLoadError = null;
-  try {
-    var q = await Promise.all([
-      /* action_requests has THREE foreign keys to profiles — filer, assignee and the case subject —
-         so a bare profiles(...) embed is ambiguous and PostgREST rejects the whole query (PGRST201).
-         Name the constraint. `profiles` stays the response key, so consumers are unchanged. */
-      CG.sb.from("action_requests")
-        .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
-        .order("created_at",{ascending:false}),
-      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true})
-    ]);
-    /* This used to fall back to [] on any error, so a failed query was indistinguishable from an
-       empty queue — the Staff Desk read "the room is clean" while cases sat unanswered. Keep
-       whatever we already had and say so loudly instead of inventing an empty case list. */
-    if (q[0] && q[0].error) throw new Error("cases: "+(q[0].error.message||q[0].error.code||"query failed"));
-    if (q[1] && q[1].error) throw new Error("case messages: "+(q[1].error.message||q[1].error.code||"query failed"));
-    CG.lg._actionReqs = (q[0] && q[0].data) || [];
-    var msgs = {};
-    ((q[1] && q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
-    CG.lg._actionMsgs = msgs;
-  } catch(e){
-    CG._actionLoadError = String((e && e.message) || e);
-    console.error("loadActionRequests:", CG._actionLoadError);
-  }
-};
-/* Case data is read by six surfaces — the hub dashboard tile, hub complaints, the Staff Desk (its
-   KPIs, queue and assigned list), the admin overview and admin complaints — but only the complaints
-   routes ever asked for a redraw when the rows finally arrived. That is why the Staff Desk could
-   show "Nothing open" and "0 open cases" directly under a banner counting two: the banner comes
-   from an RPC that does re-render (loadStaffAttention), the cards from an array that didn't.
-   One predicate for every view that renders cases, so a new surface can't be forgotten again. */
-CG.viewShowsCases = function(){ return /#\/(hub|admin)/.test(location.hash); };
-CG.rerenderIfShowingCases = function(){
-  /* never redraw out from under an open modal — the user may be mid-way through filing */
-  var ov = document.getElementById("overlay-root");
-  if (ov && ov.innerHTML.trim()) return;
-  if (CG.viewShowsCases() && CG.router) CG.router();
-};
-CG.refreshActions = function(){
-  CG.loadActionRequests().then(CG.rerenderIfShowingCases);
-};
-/* dashboard tiles + counts read this — map real rows to the prototype shape */
-CG.visibleComplaints = function(){
-  return (CG.lg._actionReqs||[]).map(function(a){
-    var closed = a.status==="resolved"||a.status==="denied";
-    return { caseId:(a.id||"").slice(0,8), category:(CG.ACTION_META[a.type]||{}).label||a.type,
-      status: closed?"Resolved":"Under review", assignedTo:"", confidential:false,
-      summary:(a.subject||a.details||"").slice(0,90), filedBy:(a.profiles&&a.profiles.gamertag)||"member", against:a.target||"—" };
-  });
-};
-CG.actionStatusChip = function(st){
-  var map={ open:["chip","Open"], reviewing:["chip-warn","Reviewing"], acknowledged:["chip-chrome","Acknowledged"], resolved:["chip-win","Resolved"], denied:["chip-loss","Denied"] };
-  var m=map[st]||["chip",st||"Open"];
-  return '<span class="chip '+m[0]+'">'+esc(m[1])+'</span>';
-};
-CG.actionCard = function(a, review){
-  var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
-  var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
-  var uid = CG.auth.user && CG.auth.user.id, names = (CG.lg&&CG.lg._profName)||{};
-  /* conflict of interest: a staff member who filed this case or is named in it can't rule on it —
-     RLS enforces the same at the database (silently), so the ruling tools are hidden here to match.
-     Commissioners are unrestricted. */
-  var isCommish = CG.role()==="commish";
-  var conflicted = review && !isCommish && !!uid && (a.profile_id===uid || a.target_profile_id===uid);
-  var metaBits = [];
-  if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
-  /* prefer the subject's current gamertag over the text captured when the case was filed, so a
-     rename doesn't leave the case pointing at a name nobody recognises any more */
-  var aboutName = (a.target_profile && a.target_profile.gamertag) || a.target;
-  if (aboutName) metaBits.push("About: "+esc(aboutName));
-  metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
-  var isPos = a.type==="position_change";
-  var posLine = isPos ? (a.current_position||"?")+" → "+(a.requested_position||"?") : "";
-  var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
-      '<b style="font-family:var(--f-disp)">'+esc(meta.label)+'</b>'+CG.actionStatusChip(a.status)+
-      (review?'<span class="caption">filed by <b>'+esc((a.profiles&&a.profiles.gamertag)||"member")+'</b></span>':"")+
-      '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>';
-  /* the request itself gets a proper banner — it was buried as fine print in the meta row, and
-     nothing on the card could actually APPLY the switch */
-  if (isPos){
-    h += '<div class="note chr" style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
-      '<b style="font-family:var(--f-disp)">Requested switch</b>'+
-      '<span class="chip chip-chrome">'+esc(a.current_position||"?")+'</span><span aria-hidden="true">→</span>'+
-      '<span class="chip chip-win">'+esc(a.requested_position||"?")+'</span>'+
-      (a.status==="resolved"?'<span class="caption">applied to their registration</span>'
-        :a.status==="denied"?'<span class="caption">denied — registration unchanged</span>'
-        :'<span class="caption">approving applies it to their registration instantly</span>')+'</div>';
-  }
-  /* one-owner assignment (staff/commish) */
-  if (review){
-    var who = a.assigned_to ? (names[a.assigned_to]||"a colleague") : null;
-    h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-      (who ? '<span class="chip chip-chrome" style="font-size:9px">'+esc("Claimed by "+who)+'</span>' : '<span class="chip chip-warn" style="font-size:9px">Unclaimed</span>')+
-      (conflicted ? '' : (a.assigned_to===uid ? '<button class="btn btn-ghost btn-sm" data-case-unclaim="'+a.id+'">Release</button>'
-        : '<button class="btn btn-ghost btn-sm" data-case-claim="'+a.id+'">Claim</button>'))+'</div>';
-  }
-  h += (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
-    '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
-    (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
-  if (msgs.length){
-    h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
-      var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
-      var att = (m.attachments||[]).map(function(u){
-        /* render ONLY http(s) links — never a javascript:/data: scheme a filer could inject */
-        return /^https?:\/\//i.test(String(u))
-          ? '<a href="'+esc(u)+'" target="_blank" rel="noopener nofollow" class="caption" style="border-bottom:2px solid var(--chrome)">'+CG.ic("link",12)+' attachment</a>'
-          : '<span class="caption">'+esc(String(u))+'</span>'; }).join(" ");
-      return '<div style="display:flex;flex-direction:column;gap:3px'+(m.internal?';background:var(--chrome-tint);border-radius:8px;padding:8px 10px':'')+'">'+
-        '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+(m.internal?' · staff-only note':"")+'</b>'+
-        '<span class="small" style="color:var(--steel);white-space:pre-wrap;flex:1">'+esc(m.body||"")+'</span></div>'+
-        (att?'<div style="padding-left:2px">'+att+'</div>':"")+'</div>';
-    }).join("")+'</div>';
-  }
-  var closed = a.status==="resolved"||a.status==="denied";
-  if (!closed){
-    h += '<div style="display:flex;flex-direction:column;gap:6px">'+
-      '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
-        '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>'+
-      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input data-reply-att="'+a.id+'" placeholder="Attach a link (optional)" style="flex:1;min-width:180px">'+
-        (review && !conflicted?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
-  }
-  if (review && !conflicted){
-    h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
-      (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
-      (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
-      /* a position change is decided, not merely closed: Approve applies the switch to the
-         registration through decide_position_change; the generic Resolve/Deny (which changed
-         nothing but the status) and the discipline tools stay off this card type */
-      (isPos && !closed
-        ? '<button class="btn btn-chrome btn-sm" data-pos-decide="approve" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Approve '+esc(posLine)+'</button>'+
-          '<button class="btn btn-ghost btn-sm" data-pos-decide="deny" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Deny request</button>'
-        : "")+
-      (isPos ? "" :
-      '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'" data-target-id="'+esc(a.target_profile_id||"")+'">Issue discipline</button>'+
-      '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
-      (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
-        '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':""))+
-      /* deletion is a commissioner-only power (RLS enforces it too); staff never see a Delete they can't use */
-      (isCommish?'<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button>':"")+'</div>';
-  } else if (conflicted){
-    h += '<div class="note" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">You’re involved in this case</b>'+
-      'You filed it or you’re named in it, so another official has to rule on it. You can still add a reply as a participant.</div>';
-  }
-  return h+'</div></div>';
-};
-CG.hubComplaintsLive = function(opts){
-  opts = opts||{};
-  var isCommish = CG.role()==="commish";
-  var review = isCommish || CG.role()==="staff";
-  var all = (CG.lg._actionReqs||[]);
-  var uid = CG.auth.user && CG.auth.user.id;
-  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
-  var queue = review && !opts.mineOnly ? all : mine;
-  /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
-  var flt = review ? (CG._caseFilter||"all") : null;
-  if (review){
-    if (flt==="mine") queue = queue.filter(function(a){ return a.assigned_to===uid; });
-    else if (flt==="unclaimed") queue = queue.filter(function(a){ return !a.assigned_to && a.status!=="resolved" && a.status!=="denied"; });
-    else if (flt==="open") queue = queue.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
-  }
-  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"Action Center")+'</h1>'+
-    '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
-  h += '<div class="grid g2" style="margin-bottom:22px">'+Object.keys(CG.ACTION_META).map(function(k){
-    var m = CG.ACTION_META[k];
-    return '<div class="card raise" data-file-action="'+k+'" role="button" tabindex="0" style="cursor:pointer"><div class="card-b" style="display:flex;gap:12px;align-items:flex-start">'+
-      '<span class="nf-ic">'+CG.ic(m.icon,16)+'</span><div><b style="font-family:var(--f-disp)">'+esc(m.label)+'</b>'+
-      '<p class="caption" style="margin-top:3px">'+esc(m.blurb)+'</p></div></div></div>';
-  }).join("")+'</div>';
-  h += '<div class="card-h" style="padding:0 0 12px;border:0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h3>'+(review?"Case queue ("+queue.length+")":"Your filed cases ("+queue.length+")")+'</h3>'+
-    (review?'<div class="seg" role="tablist" aria-label="Filter cases">'+
-      [["all","All"],["open","Open"],["mine","Mine"],["unclaimed","Unclaimed"]].map(function(f){
-        return '<button data-case-filter="'+f[0]+'" class="'+(flt===f[0]?"on":"")+'" role="tab" aria-selected="'+(flt===f[0])+'">'+f[1]+'</button>'; }).join("")+'</div>':"")+'</div>';
-  h += queue.length
-    ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
-    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
-  h += '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
-  return h;
-};
-/* Everyone in the league, not just everyone on a roster. A complaint can name a free agent or a
-   player between clubs, and the roster-derived list can't see them. Sorted so exact-prefix matches
-   feel right when typing, and each entry says where the person actually sits. */
-CG.memberIndex = function(){
-  var lg = CG.lg || {}, rostered = lg._rosteredIds || {};
-  var byId = {}; (lg.players||[]).forEach(function(p){ byId[p.id] = p; });
-  return (lg._profilesRaw||[])
-    .filter(function(pr){ return !pr.banned; })
-    .map(function(pr){
-      var p = byId[pr.id];
-      var name = pr.gamertag || pr.display_name || "Member";
-      var sub = p && CG.TEAM[p.team]
-        ? CG.TEAM[p.team].name+" · "+p.pos+(p.jersey?" · #"+p.jersey:"")
-        : (rostered[pr.id] ? "Rostered" : (CG.poolState?CG.poolState(pr.id).label:"Unsigned"));
-      /* searchable aliases: a member whose gamertag is stylized ("ₛₕₑᵢ𝒻") is otherwise
-         unfindable, and the office usually knows people by their Discord name — so match on
-         the display name as well as the gamertag (both folded to plain text by CG.acNorm). */
-      var alias = pr.display_name && pr.display_name !== name ? " "+pr.display_name : "";
-      return { kind:"player", id:pr.id, label:name, sub:sub+(alias?" · "+pr.display_name:""),
-               search:name+alias, team:(p&&p.team)||null };
-    })
-    .sort(function(a,b){ return a.label.localeCompare(b.label); });
-};
-/* GM/AGM candidates: ANY player signed up for the upcoming season — a club's own roster is not the
-   limit. A roster spot counts too (being rostered means they're in the season). */
-CG.seasonPlayerIndex = function(){
-  var lg = CG.lg||{}, sid = (CG.SEASON && CG.SEASON.id) || null, ok = {};
-  (lg._registrationsRaw||[]).forEach(function(r){
-    if ((!r.season_id || r.season_id===sid) && r.status!=="declined") ok[r.profile_id] = true;
-  });
-  Object.keys(lg._rosteredIds||{}).forEach(function(id){ ok[id] = true; });
-  /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker, except
-     staff whose only department is Media, who are expressly allowed one */
-  var office = {};
-  (lg._profilesRaw||[]).forEach(function(p){
-    if ((p.role==="staff" || p.role==="commissioner") && !CG.isMediaOnly(p)) office[p.id] = true;
-  });
-  /* a player already under a contract this season can't be nominated — only free agents are eligible */
-  var held = (CG.contractHeldIds && CG.contractHeldIds()) || {};
-  return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id] && !held[m.id]; });
-};
-/* attachAC indexes players off the roster; "members" widens it to the whole league for the places
-   that need to name someone rather than look up a rostered player. */
-CG._origAcIndex = CG.acIndex;
-CG.acIndex = function(kinds){
-  if ((kinds||[]).indexOf("seasonplayers") >= 0) return CG.seasonPlayerIndex();
-  if ((kinds||[]).indexOf("members") >= 0) return CG.memberIndex();
-  return CG._origAcIndex.call(CG, kinds||[]);
-};
-/* A free-text name is unmatchable later, so every "who is this about?" field is a combobox that
-   resolves to a real profile. Returns { name, id } — id is null when nothing was picked, which is
-   allowed: the field is optional and a member may need to name someone off-roster. */
-CG.memberPickerField = function(id, label, hint){
-  return '<label class="fld"><span>'+esc(label)+'</span>'+
-    '<input id="'+id+'" type="text" autocomplete="off" placeholder="Start typing a name…">'+
-    (hint ? '<small class="caption" style="display:block;margin-top:5px">'+esc(hint)+'</small>' : '')+
-    '</label>';
-};
-CG.wireMemberPicker = function(id, kinds){
-  var el = document.getElementById(id);
-  if (el && CG.attachAC) CG.attachAC(el, { kinds: kinds || ["members"] });
-  return el;
-};
-CG.readMemberPicker = function(id){
-  var el = document.getElementById(id);
-  if (!el) return { name:null, id:null };
-  var name = (el.value||"").trim();
-  if (!name) return { name:null, id:null };
-  var picked = el.dataset.acId || null;
-  /* typed the whole name without touching the menu — resolve it rather than lose the link */
-  if (!picked){
-    var hit = CG.memberIndex().find(function(m){ return m.label.toLowerCase() === name.toLowerCase(); });
-    if (hit) picked = hit.id;
-  }
-  return { name:name, id:picked };
-};
-CG.fileActionRequest = function(type){
-  if (!CG.auth.user){ CG.toast("Sign in with Discord first","err"); return; }
-  var meta = CG.ACTION_META[type]; if(!meta) return;
-  var me = CG.me();
-  var fields = "";
-  if (type==="complaint" || type==="appeal"){
-    var subs = type==="complaint" ? CG.COMPLAINT_SUBJECTS : CG.APPEAL_SUBJECTS;
-    fields += '<label class="fld"><span>'+(type==="complaint"?"What’s the complaint about?":"What are you appealing?")+'</span><select id="acSubject"><option value="">Select one…</option>'+subs.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join("")+'</select></label>';
-    if (type==="complaint"){
-      fields += CG.memberPickerField("acTarget", "Who is this about? (optional)",
-        "Type a name and pick from the list — that links the case to their record.");
-    }
-  }
-  if (type==="position_change"){
-    var posOpts = ["C","LW","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
-    fields += '<div class="grid g2" style="gap:12px">'+
-      '<label class="fld"><span>Current position</span><select id="acCur">'+posOpts+'</select></label>'+
-      '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>';
-  }
-  if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
-  fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
-    '<p class="caption">'+(meta.route==="manager"?"Private to your club’s management.":"Goes to the league office — commissioners are notified instantly.")+'</p>';
-  CG.modal("File — "+esc(meta.label), fields,
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="acGo">Submit</button>');
-  CG.wireMemberPicker("acTarget");
-  document.getElementById("acGo").addEventListener("click", function(){
-    var subEl=document.getElementById("acSubject");
-    var subject = subEl ? subEl.value : null;
-    if (subEl && !subject){ CG.toast("Pick what this is about","err"); return; }
-    var details = (document.getElementById("acDetails").value||"").trim();
-    if (!details){ CG.toast("Add details — describe what happened","err"); return; }
-    var tgt = CG.readMemberPicker("acTarget");
-    var payload = { profile_id: CG.auth.user.id, type:type, route:meta.route, details:details,
-      season_id: (CG.SEASON&&CG.SEASON.id)||null, subject: subject||null,
-      target: tgt.name, target_profile_id: tgt.id };
-    if (type==="trade_request") payload.team_id = (CG.lg._codeToId||{})[me.team]||null;
-    if (type==="position_change"){
-      payload.current_position = document.getElementById("acCur").value;
-      payload.requested_position = document.getElementById("acReq").value;
-      if (payload.current_position===payload.requested_position){ CG.toast("Pick a different requested position","err"); return; }
-    }
-    var btn=this; btn.disabled=true;
-    CG.sb.from("action_requests").insert(payload).then(function(r){
-      btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(meta.route==="manager"?"Sent to your club’s management":"Filed — the league office has it","ok");
-      CG.refreshActions();
-    });
-  });
-};
-/* issue a warning or suspension straight from a case — resolves it and links the record */
-CG.caseDisciplineModal = function(caseId, targetName, targetId){
-  var players = (CG.lg.players||[]).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
-  /* Prefer the profile the filer actually picked. Falling back to a name comparison is what the
-     old behaviour did everywhere, and it silently stops matching the moment someone changes their
-     gamertag — so it's now only the path for cases filed before the picker existed. */
-  var match = (targetId && players.find(function(p){ return p.id===targetId; }))
-    || players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
-  var opts = '<option value="">— pick the player —</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
-  var cur = (CG.SEASON&&CG.SEASON.number)||1;
-  CG.modal("Issue discipline",
-    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label>'+
-    '<label class="fld"><span>Type</span><select id="dcType">'+
-      '<option value="warning">Formal warning — on record, no games lost</option>'+
-      '<option value="games">Suspension — number of games</option>'+
-      '<option value="date">Suspension — until a date</option>'+
-      '<option value="seasons">Suspension — through a season</option></select></label>'+
-    '<div id="dcGames" class="fld" style="display:none"><label><span>Games</span><input id="dcGamesN" type="number" min="1" value="1"></label></div>'+
-    '<div id="dcDate" class="fld" style="display:none"><label><span>Ends after</span><input id="dcDateN" type="date"></label></div>'+
-    '<div id="dcSeasons" class="fld" style="display:none"><label><span>Through season number</span><input id="dcSeasonsN" type="number" min="'+cur+'" value="'+cur+'"></label></div>'+
-    '<label class="fld"><span>Reason (recorded on the player and the case)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
-    '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
-  function sync(){ var t=document.getElementById("dcType").value;
-    document.getElementById("dcGames").style.display=t==="games"?"block":"none";
-    document.getElementById("dcDate").style.display=t==="date"?"block":"none";
-    document.getElementById("dcSeasons").style.display=t==="seasons"?"block":"none"; }
-  document.getElementById("dcType").addEventListener("change", sync); sync();
-  document.getElementById("dcGo").addEventListener("click", function(){
-    var pid=document.getElementById("dcPlayer").value; if(!pid){ CG.toast("Pick the player","err"); return; }
-    var t=document.getElementById("dcType").value;
-    var args={ p_request:caseId, p_profile:pid, p_mode:t, p_reason:(document.getElementById("dcReason").value||"").trim()||null };
-    if(t==="games") args.p_games=parseInt(document.getElementById("dcGamesN").value,10)||0;
-    /* ET, not the browser's zone. This built the instant from local time while the Users-and-roles
-       suspension path used CG.etISO, so the same "until Mar 3" ruling expired at different moments
-       depending on which screen issued it — and for a staffer abroad, up to a day early. */
-    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=CG.etISO(d, "23:59"); }
-    if(t==="seasons") args.p_until_season=parseInt(document.getElementById("dcSeasonsN").value,10)||cur;
-    var btn=this; btn.disabled=true;
-    CG.sb.rpc("discipline_from_case", args).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t issue discipline","err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Discipline issued — case resolved","ok");
-      if(CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
-    });
-  });
-};
-/* rap sheet / precedent for the player a case is about */
-CG.caseHistoryModal = function(targetName){
-  var p = (CG.lg.players||[]).find(function(x){ return targetName && x.tag.toLowerCase()===String(targetName).toLowerCase(); });
-  if(!p){ CG.toast("No rostered player matches “"+(targetName||"—")+"”","err"); return; }
-  CG.modal("History — "+esc(p.tag), '<div id="rapBody" class="caption">Loading…</div>', '<button class="btn btn-ghost" data-close>Close</button>');
-  CG.sb.rpc("player_rap_sheet",{ p_profile:p.id }).then(function(r){
-    var el=document.getElementById("rapBody"); if(!el) return;
-    if(r.error){ el.textContent=r.error.message||"Couldn’t load"; return; }
-    function dl(x){ return x.mode==="games"?(x.games+"-game suspension"):x.mode==="seasons"?("suspension through Season "+x.until_season):x.mode==="date"?("suspension until "+(x.ends_at?CG.fmtDay(Date.parse(x.ends_at)):"—")):x.mode; }
-    var d=r.data||{}, s=d.suspensions||[], w=d.warnings||[], c=d.cases||[], h='';
-    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Suspensions</b>'+(s.length?'<div class="stack" style="gap:6px;margin-top:6px">'+s.map(function(x){ return '<div class="small">'+esc(dl(x))+' <span class="caption">· '+esc(x.reason||"no reason")+' · '+CG.fmtDay(Date.parse(x.at))+' · '+esc(x.status)+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
-    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Warnings</b>'+(w.length?'<div class="stack" style="gap:6px;margin-top:6px">'+w.map(function(x){ return '<div class="small">'+esc(x.reason||"formal warning")+' <span class="caption">· '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
-    h+='<div><b style="font-family:var(--f-disp)">Prior cases about them</b>'+(c.length?'<div class="stack" style="gap:6px;margin-top:6px">'+c.map(function(x){ return '<div class="small">'+esc((CG.ACTION_META[x.type]||{}).label||x.type)+(x.subject?' — '+esc(x.subject):"")+' <span class="caption">· '+esc(x.status)+' · '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None.</p>')+'</div>';
-    el.innerHTML=h;
-  });
-};
-CG.AFTER._complaintsLive = function(){
-  document.querySelectorAll("[data-file-action]").forEach(function(c){
-    var go = function(){ CG.fileActionRequest(c.getAttribute("data-file-action")); };
-    c.addEventListener("click", go);
-    c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
-  });
-  document.querySelectorAll("[data-case-filter]").forEach(function(b){ b.addEventListener("click", function(){
-    CG._caseFilter = this.getAttribute("data-case-filter"); if(CG.router) CG.router();
-  }); });
-  document.querySelectorAll("[data-reply-send]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-reply-send");
-    var inp=document.querySelector('[data-reply-for="'+id+'"]');
-    var body=(inp&&inp.value||"").trim();
-    if(!body){ CG.toast("Write the reply first","err"); return; }
-    var att=((document.querySelector('[data-reply-att="'+id+'"]')||{}).value||"").trim();
-    if (att && !/^https?:\/\//i.test(att)){ CG.toast("Attachments must be an http(s) link","err"); return; }
-    var internalEl=document.querySelector('[data-reply-internal="'+id+'"]');
-    var row={ request_id:id, author_id:CG.auth.user.id, body:body, internal:!!(internalEl&&internalEl.checked) };
-    if (att) row.attachments=[att];
-    CG.sb.from("action_messages").insert(row).then(function(r){
-      if(r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
-      CG.toast(row.internal?"Staff-only note added":"Reply added","ok"); CG.refreshActions();
-    });
-  }); });
-  document.querySelectorAll("[data-case-claim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-claim"), p_assignee:CG.auth.user.id }).then(function(r){
-      if(r.error){ CG.toast(r.error.message||"Couldn’t claim","err"); return; } CG.toast("Case claimed — it’s yours","ok"); CG.refreshActions(); }); }); });
-  document.querySelectorAll("[data-case-unclaim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-unclaim"), p_assignee:null }).then(function(r){
-      if(r.error){ CG.toast(r.error.message||"Couldn’t release","err"); return; } CG.toast("Released back to the queue","ok"); CG.refreshActions(); }); }); });
-  document.querySelectorAll("[data-case-discipline]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target"), this.getAttribute("data-target-id")||null); }); });
-  document.querySelectorAll("[data-pos-decide]").forEach(function(b){ b.addEventListener("click", function(){
-    var approve=this.getAttribute("data-pos-decide")==="approve", id=this.getAttribute("data-pos-id"), line=this.getAttribute("data-pos-line")||"the change";
-    CG.confirm(approve?"Approve this position change?":"Deny this position change?",
-      approve?"Their registration flips to the requested position ("+esc(line)+") and the case closes. The Discord position role follows on the next sync."
-             :"The registration stays as it is and the case closes as denied. They're notified either way.",
-      approve?"Approve the switch":"Deny the request", function(){
-        CG.sb.rpc("decide_position_change",{ p_request:id, p_approve:approve }).then(function(r){
-          if (r.error){ CG.toast(r.error.message||"Couldn’t decide the request","err"); return; }
-          CG.toast(approve?"Approved — their registration is updated":"Request denied","ok");
-          if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
-        });
-      });
-  }); });
-  document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.caseHistoryModal(this.getAttribute("data-target")); }); });
-  document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
-    /* .select() so a row blocked by RLS (a conflict of interest) comes back as 0 rows, not a
-       silent success — otherwise the official is told the case was ruled when nothing changed */
-    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-      if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-      if(!r.data||!r.data.length){ CG.toast("You can’t rule on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
-      CG.toast("Case "+st,"ok"); CG.refreshActions();
-    });
-  }); });
-  document.querySelectorAll("[data-act-respond]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-respond");
-    CG.modal("Official response",
-      '<label class="fld"><span>Response to the member</span><textarea id="arResp" rows="5"></textarea></label>'+
-      '<p class="caption">Shown on their case as the league’s written decision — pair it with Resolve or Deny.</p>',
-      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="arGo">Save response</button>');
-    document.getElementById("arGo").addEventListener("click", function(){
-      var txt=(document.getElementById("arResp").value||"").trim();
-      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        if(!r.data||!r.data.length){ CG.toast("You can’t respond on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Response saved","ok"); CG.refreshActions();
-      });
-    });
-  }); });
-  document.querySelectorAll("[data-act-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-del");
-    CG.confirm("Delete this case?","It’s removed permanently for everyone. This can’t be undone.","Delete case", function(){
-      CG.sb.from("action_requests").delete().eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-        if(!r.data||!r.data.length){ CG.toast("Only a commissioner can delete a case.","err"); return; }
-        CG.toast("Case deleted","ok"); CG.refreshActions();
-      });
-    });
-  }); });
-};
-/* route the hub + admin complaint views to the live system */
-CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
-/* Open one case from anywhere it's listed. The conversation itself is CG.actionCard — the same
-   component the list uses — so there is exactly one implementation of a case thread and replies,
-   attachments, staff-only notes and the ruling buttons behave identically however you reached it.
-   Its handlers are bound by AFTER._complaints, which already covers the "complaint" route. */
-CG.findCase = function(caseId){
-  var all = (CG.lg && CG.lg._actionReqs) || [], id = String(caseId||"").trim();
-  if (!id) return null;
-  return all.find(function(a){ return a.id === id; })
-      /* links written elsewhere carry only the first 8 characters of the id */
-      || all.find(function(a){ return String(a.id||"").slice(0, id.length) === id; })
-      || null;
-};
-CG.hubComplaintDetail = function(caseId){
-  var review = CG.role()==="commish" || CG.role()==="staff";
-  var a = CG.findCase(caseId);
-  var back = '<a class="sec-link" href="#/hub/complaints">'+CG.ic("back",14)+' All cases</a>';
-  if (!a){
-    /* a failed load and a genuinely missing case are different problems — say which */
-    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
-      '<div class="e-art">'+CG.ic("flag",22)+'</div>'+
-      '<b>'+(CG._actionLoadError ? "Couldn’t load this case" : "That case isn’t here")+'</b>'+
-      '<p>'+(CG._actionLoadError ? esc(CG._actionLoadError)+" — reload and try again."
-                                 : "It may have been deleted, or it isn’t one you have access to.")+'</p>'+
-      '</div></div>';
-  }
-  var meta = CG.ACTION_META[a.type] || { label:a.type };
-  return '<div style="margin-bottom:18px">'+back+
-    '<h1 class="h-sec" style="margin-top:10px">'+esc(meta.label)+'</h1>'+
-    '<p class="lede" style="margin-top:6px">'+
-      (review ? "The filer sees every reply here except staff-only notes."
-              : "Replies from the league office appear here — you’ll be notified when one lands.")+
-    '</p></div>'+
-    CG.actionCard(a, review);
-};
-
-/* ================================================================
-   STAFF DESK — one page for the officials: cases, discipline,
-   import spot-checks, and tonight's slate. Staff + commissioner.
-   ================================================================ */
-/* ================================================================
-   STAFF DESK data cards — EA import triage, shared task list, staff
-   directory, and the activity feed. Data comes from CG._staffExtras
-   (loaded by CG.loadStaffExtras for staff/commissioners).
-   ================================================================ */
-CG._auditLabel = function(a){
-  var m = { role_change:"changed a member’s role", season_rollover:"ran the season rollover",
-    case_assign:"assigned a case", discipline_from_case:"issued discipline from a case",
-    season_award_finalized:"finalized a season award", playoff_round:"generated a playoff round",
-    playoff_clear:"cleared a playoff round", season_status:"changed a season’s status",
-    team_upsert:"edited a club", division_upsert:"edited a division", ea_reingest:"re-ran an EA import" };
-  return m[a] || String(a||"acted").replace(/_/g," ");
-};
-CG.staffEaCard = function(){
-  var ea = CG._staffExtras && CG._staffExtras.ea; if (!ea) return "";
-  var un = ea.unmatched||[], ms = ea.missing_stats||[];
-  if (!un.length && !ms.length) return "";
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>EA imports needing a look</h3><span class="chip chip-warn">'+(un.length+ms.length)+'</span></div>';
-  if (un.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Unmatched imports</span>'+
-    un.slice(0,8).map(function(u){
-      return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line-soft)">'+
-        '<span class="mono caption" style="flex-shrink:0">#'+esc(String(u.match_id||"").slice(0,10))+'</span>'+
-        '<span class="small" style="flex:1;min-width:180px;color:var(--steel)">'+esc(u.reason||"couldn’t match to a scheduled game")+'</span>'+
-        '<span class="caption">'+(u.at?CG.fmtDay(Date.parse(u.at)):"")+'</span>'+
-        '<button class="btn btn-ghost btn-sm" data-ea-dismiss="'+esc(String(u.match_id||""))+'">Dismiss</button></div>'; }).join("")+
-    '<p class="caption" style="margin-top:8px">These EA matches couldn’t be tied to a league game — usually a club EA ID that isn’t linked, or a pickup game against a club outside CGHL. Link clubs in <a href="#/admin/eastats" style="font-weight:700;border-bottom:2px solid var(--chrome)">EA stats</a>, or dismiss the ones that aren’t league games.</p></div>';
-  if (ms.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Finals missing box scores</span>'+
-    ms.slice(0,8).map(function(m){ return '<div class="small" style="padding:6px 0;border-top:1px solid var(--line-soft)">'+esc(m.away||"?")+' @ '+esc(m.home||"?")+'<span class="caption"> · '+(m.at?CG.fmtDay(Date.parse(m.at)):"")+'</span></div>'; }).join("")+'</div>';
-  return h+'</div>';
-};
-CG.staffTasksCard = function(){
-  var ex = CG._staffExtras; if (!ex) return "";
-  var tasks = (ex.tasks||[]), uid = CG.auth.user && CG.auth.user.id;
-  var open = tasks.filter(function(t){ return t.status==="open"; });
-  var mine = open.filter(function(t){ return t.assignee===uid; });
-  var unassigned = open.filter(function(t){ return !t.assignee; });
-  var names = {}; ((ex.directory)||[]).forEach(function(d){ names[d.id]=d.gamertag; });
-  function row(t){
-    var who = t.assignee ? (names[t.assignee]||"assigned") : null;
-    return '<div class="card-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<div style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+esc(t.title)+'</b>'+
-      (t.detail?'<p class="caption" style="margin-top:2px">'+esc(t.detail)+'</p>':"")+
-      (who?'<span class="chip chip-chrome" style="font-size:9px;margin-top:4px">'+esc(who)+'</span>':'<span class="chip chip-warn" style="font-size:9px;margin-top:4px">Unassigned</span>')+'</div>'+
-      (t.assignee!==uid?'<button class="btn btn-ghost btn-sm" data-task-claim="'+t.id+'">Claim</button>':"")+
-      '<button class="btn btn-ghost btn-sm" data-task-done="'+t.id+'">Done</button>'+
-      '<button class="btn btn-ghost btn-sm" data-task-del="'+t.id+'" aria-label="Delete task">'+CG.ic("x",14)+'</button></div>';
-  }
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff tasks</h3>'+
-    '<button class="btn btn-chrome btn-sm" data-task-add>New task</button></div>';
-  if (!open.length){ h += '<div class="card-b"><p class="caption">No open tasks. Spin one up with <b>New task</b> — assign it to yourself or leave it in the pool for whoever’s free.</p></div>'; }
-  else {
-    if (mine.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Yours</span></div>'+mine.map(row).join(""); }
-    var others = open.filter(function(t){ return t.assignee!==uid; });
-    if (others.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">'+(unassigned.length?"Unassigned & others":"Assigned to others")+'</span></div>'+others.map(row).join(""); }
-  }
-  return h+'</div>';
-};
-/* Staff votes — any official can put a topic to the office and choose which departments get a
-   ballot (none selected = the whole office). Eligibility, valid choices and one-ballot-per-person
-   are all enforced by the RPCs; this only renders what the board returns. */
-CG.staffVotesCard = function(){
-  var ex = CG._staffExtras; if (!ex) return "";
-  var votes = ex.votes || [];
-  var lab = {}; (CG.STAFF_DEPARTMENTS||[]).forEach(function(d){ lab[d[0]] = d[1]; });
-  var isCommish = CG.role() === "commish";
-  function deptChips(list){
-    if (!list || !list.length) return '<span class="chip" style="font-size:9px">All staff</span>';
-    return list.map(function(k){ return '<span class="chip" style="font-size:9px">'+esc(lab[k]||k)+'</span>'; }).join(" ");
-  }
-  function block(v){
-    var opts = v.options||[], tally = v.tally||{}, cast = 0;
-    opts.forEach(function(o){ cast += (tally[o]||0); });
-    var pool = Math.max(cast, v.eligibleCount||0), isOpen = v.status === "open", canManage = isCommish || v.mine;
-    var h = '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
-      '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
-        '<b style="font-family:var(--f-disp);font-size:15px">'+esc(v.title)+'</b>'+
-        (isOpen?"":'<span class="chip chip-warn" style="font-size:9px">Closed</span>')+
-        '<span class="caption" style="margin-left:auto">'+cast+' of '+pool+' voted</span></div>'+
-      (v.detail?'<p class="caption" style="margin-top:4px">'+esc(v.detail)+'</p>':"")+
-      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+deptChips(v.departments)+'</div>';
-    /* Media staff hold no ballot on any staff vote (Rule 2.7) — a rule change can bend toward the
-       club they run, and Media is the one department allowed to run one. The server says so via
-       mediaBarred; fall back to the local check if an older board payload lacks it. */
-    var mediaBlocked = (v.mediaBarred === true) ||
-      (v.mediaBarred === undefined && CG.isMediaOnlyStaff());
-    if (isOpen && v.eligible && !mediaBlocked){
-      h += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'+opts.map(function(o){
-        return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
-        (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
-    } else if (isOpen && mediaBlocked){
-      h += '<p class="caption" style="margin-top:8px">Media staff don’t hold a ballot on staff votes (Rule 2.7) — the department reports on the league rather than deciding for it. Every vote is read-only for you.</p>';
-    } else if (isOpen){
-      h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
-    }
-    h += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">'+opts.map(function(o){
-      var n = tally[o]||0, pct = cast ? Math.round(n/cast*100) : 0;
-      return '<div style="display:flex;align-items:center;gap:9px">'+
-        '<span class="mono" style="font-size:11px;min-width:92px">'+esc(o)+'</span>'+
-        '<span style="flex:1;height:6px;border-radius:99px;background:var(--line-soft);overflow:hidden">'+
-          '<i style="display:block;height:100%;width:'+pct+'%;background:var(--chrome)"></i></span>'+
-        '<span class="mono num" style="font-size:11px;min-width:30px;text-align:right">'+n+'</span></div>'; }).join("")+'</div>';
-    var bal = v.ballots||[];
-    if (bal.length) h += '<p class="caption" style="margin-top:7px">'+bal.map(function(b){
-      return esc(b.who)+' · '+esc(b.choice); }).join(" &nbsp;·&nbsp; ")+'</p>';
-    h += '<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;align-items:center">'+
-      '<span class="caption" style="margin-right:auto">Opened by '+esc(v.createdByTag||"staff")+'</span>'+
-      (canManage&&isOpen?'<button class="btn btn-ghost btn-sm" data-vote-close="'+v.id+'">Close voting</button>':"")+
-      (canManage?'<button class="btn btn-ghost btn-sm" data-vote-del="'+v.id+'">Delete</button>':"")+
-      '</div></div>';
-    return h;
-  }
-  var live = votes.filter(function(v){ return v.status === "open"; });
-  var done = votes.filter(function(v){ return v.status !== "open"; }).slice(0, 4);
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff votes</h3>'+
-    '<button class="btn btn-chrome btn-sm" data-vote-add>Create vote</button></div>';
-  if (!live.length && !done.length){
-    h += '<div class="card-b"><p class="caption">Nothing on the ballot. Use <b>Create vote</b> to put a decision to the office — choose which departments get a vote, or leave it open to all staff.</p></div>';
-  } else {
-    h += live.map(block).join("");
-    if (done.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Closed</span></div>'+done.map(block).join("");
-  }
-  return h+'</div>';
-};
-CG.staffVoteCreateModal = function(){
-  var chips = (CG.STAFF_DEPARTMENTS||[]).map(function(d){
-    return '<button type="button" class="chip" data-vdept="'+d[0]+'" aria-pressed="false" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
-  CG.modal("Create a staff vote",
-    '<label class="fld"><span>Topic</span><input id="svTitle" maxlength="140" placeholder="e.g. Move game night to Thursdays?"></label>'+
-    '<label class="fld"><span>Details (optional)</span><textarea id="svDetail" rows="3" placeholder="Anything the office should know before voting."></textarea></label>'+
-    '<label class="fld"><span>Options — one per line (blank = Yes / No / Abstain)</span><textarea id="svOpts" rows="3" placeholder="Yes&#10;No&#10;Abstain"></textarea></label>'+
-    '<label class="fld"><span>Who can vote — none selected means all staff</span></label>'+
-    '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="svGo">Open vote</button>');
-  var sel = [];
-  document.querySelectorAll("[data-vdept]").forEach(function(b){ b.addEventListener("click", function(){
-    var k = this.getAttribute("data-vdept"), i = sel.indexOf(k);
-    if (i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
-    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
-  }); });
-  document.getElementById("svGo").addEventListener("click", function(){
-    var btn = this, title = (document.getElementById("svTitle").value||"").trim();
-    if (!title){ CG.toast("Give the vote a title","err"); return; }
-    var opts = (document.getElementById("svOpts").value||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
-    btn.disabled = true;
-    CG.sb.rpc("staff_vote_create",{ p_title:title, p_detail:(document.getElementById("svDetail").value||""),
-      p_options:(opts.length?opts:null), p_departments:sel, p_closes_at:null }).then(function(r){
-      btn.disabled = false;
-      if (r.error){ CG.toast(r.error.message||"Couldn’t open the vote","err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Vote opened","ok"); CG.refreshStaffExtras();
-    });
-  });
-};
-CG.staffDirectoryCard = function(){
-  var ex = CG._staffExtras; if (!ex || !ex.directory) return "";
-  var dir = ex.directory, uid = CG.auth.user && CG.auth.user.id, isCommish = CG.role()==="commish";
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League staff</h3><span class="chip">'+dir.length+'</span></div>';
-  h += dir.map(function(s){
-    var depts = (s.departments||[]).map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" ");
-    var canEdit = isCommish || s.id===uid;
-    return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span class="chip '+(s.role==="commissioner"?"chip-chrome":"")+'" style="font-size:9px">'+(s.role==="commissioner"?"COMMISH":"STAFF")+'</span>'+
-      '<b style="font-family:var(--f-disp);min-width:120px">'+esc(s.gamertag||"—")+'</b>'+
-      '<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap">'+(depts||'<span class="caption">no departments set</span>')+'</span>'+
-      (s.timezone?'<span class="caption mono">'+esc(s.timezone)+'</span>':"")+
-      (canEdit?'<button class="btn btn-ghost btn-sm" data-staff-edit="'+s.id+'">Edit</button>':"")+'</div>';
-  }).join("");
-  return h+'</div>';
-};
-CG.staffActivityCard = function(){
-  var acts = (CG._staffExtras && CG._staffExtras.activity)||[]; if (!acts.length) return "";
-  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent staff activity</h3><span class="chip">audit log</span></div>'+
-    '<div class="card-b" style="padding-top:6px">'+acts.slice(0,12).map(function(a){
-      return '<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line-soft)">'+
-        '<b class="small" style="font-family:var(--f-disp);min-width:110px">'+esc(a.actor||"League office")+'</b>'+
-        '<span class="small" style="flex:1;color:var(--steel)">'+esc(CG._auditLabel(a.action))+'</span>'+
-        '<span class="caption mono">'+(a.at?CG.fmtFull(Date.parse(a.at)):"")+'</span></div>';
-    }).join("")+'</div></div>';
-};
-CG.staffTaskAddModal = function(){
-  var dir = (CG._staffExtras&&CG._staffExtras.directory)||[];
-  var opts = '<option value="">Leave in the pool</option>'+dir.map(function(d){ return '<option value="'+d.id+'">'+esc(d.gamertag||"staff")+'</option>'; }).join("");
-  CG.modal("New staff task",
-    '<label class="fld"><span>Task</span><input id="stTitle" placeholder="e.g. Re-link CHI’s EA club ID" maxlength="140"></label>'+
-    '<label class="fld"><span>Detail (optional)</span><textarea id="stDetail" rows="3"></textarea></label>'+
-    '<label class="fld"><span>Assign to</span><select id="stWho">'+opts+'</select></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="stGo">Create task</button>');
-  document.getElementById("stGo").addEventListener("click", function(){
-    var title=(document.getElementById("stTitle").value||"").trim();
-    if(!title){ CG.toast("Give the task a title","err"); return; }
-    var btn=this; btn.disabled=true;
-    CG.sb.from("staff_tasks").insert({ title:title, detail:(document.getElementById("stDetail").value||"").trim()||null,
-      assignee:(document.getElementById("stWho").value||null), created_by:CG.auth.user.id }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Task created","ok"); CG.refreshStaffExtras();
-    });
-  });
-};
-CG.staffProfileEditModal = function(entry){
-  /* Normalize what's stored BEFORE it drives the editor: map legacy keys through DEPT_ALIAS and
-     drop any key that has no chip. Seeding the selection from the raw array was a trap — a legacy
-     key (e.g. "player-relations", displayed as Community) lit no chip yet was carried into every
-     save, so that department could never be unassigned, and consumers keyed on the new name
-     (discord-sync's department roles) never saw it at all. Saving now always writes canonical,
-     de-duplicated keys, which also self-heals a stale row the first time it's edited. */
-  var known = {}; CG.STAFF_DEPARTMENTS.forEach(function(d){ known[d[0]] = 1; });
-  var picked = (entry.departments||[])
-    .map(function(k){ return (CG.DEPT_ALIAS && CG.DEPT_ALIAS[k]) || k; })
-    .filter(function(k, i, arr){ return known[k] && arr.indexOf(k) === i; });
-  var chips = CG.STAFF_DEPARTMENTS.map(function(d){ var on=picked.indexOf(d[0])>=0;
-    return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-dept="'+d[0]+'" aria-pressed="'+on+'" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
-  CG.modal("Staff profile — "+esc(entry.gamertag||""),
-    '<label class="fld"><span>Departments</span></label><div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>'+
-    '<label class="fld"><span>Time zone</span><input id="spTz" value="'+esc(entry.timezone||"")+'" placeholder="e.g. ET, PT, GMT"></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="spGo">Save</button>');
-  var sel = picked.slice();
-  document.querySelectorAll("[data-dept]").forEach(function(b){ b.addEventListener("click", function(){
-    var k=this.getAttribute("data-dept"), i=sel.indexOf(k);
-    if(i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
-    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
-  }); });
-  document.getElementById("spGo").addEventListener("click", function(){
-    var btn=this; btn.disabled=true;
-    CG.sb.rpc("set_staff_profile",{ p_target:entry.id, p_departments:sel, p_timezone:(document.getElementById("spTz").value||"") }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Staff profile updated","ok"); CG.refreshStaffExtras();
-    });
-  });
-};
-CG.wireStaffExtras = function(){
-  var t = document.querySelector("[data-task-add]"); if (t) t.addEventListener("click", CG.staffTaskAddModal);
-  document.querySelectorAll("[data-ea-dismiss]").forEach(function(b){ b.addEventListener("click", function(){
-    var mid=this.getAttribute("data-ea-dismiss"), btn=this; btn.disabled=true;
-    CG.sb.rpc("ea_dismiss_import",{ p_match_id:mid }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t dismiss","err"); return; }
-      CG.toast("Import dismissed — not a league game","ok"); CG.refreshStaffExtras();
-    }); }); });
-  document.querySelectorAll("[data-task-claim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).then(function(r){
-      if(r.error){ CG.toast("Couldn’t claim","err"); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
-  document.querySelectorAll("[data-task-done]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.from("staff_tasks").update({ status:"done", completed_at:new Date().toISOString() }).eq("id",this.getAttribute("data-task-done")).then(function(r){
-      if(r.error){ CG.toast("Couldn’t update","err"); return; } CG.toast("Task done","ok"); CG.refreshStaffExtras(); }); }); });
-  document.querySelectorAll("[data-task-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-task-del");
-    CG.confirm("Delete this task?","It’s removed for the whole staff.","Delete", function(){
-      CG.sb.from("staff_tasks").delete().eq("id",id).then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete","err"); return; } CG.toast("Task deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
-  document.querySelectorAll("[data-staff-edit]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
-    if(entry) CG.staffProfileEditModal(entry); }); });
-  /* --- staff votes --- */
-  var va = document.querySelector("[data-vote-add]"); if (va) va.addEventListener("click", CG.staffVoteCreateModal);
-  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-vote-cast"), choice=this.getAttribute("data-choice"), btn=this; btn.disabled=true;
-    CG.sb.rpc("staff_vote_cast",{ p_vote:id, p_choice:choice, p_note:null }).then(function(r){
-      btn.disabled=false;
-      if(r.error){ CG.toast(r.error.message||"Couldn’t record your vote","err"); return; }
-      CG.toast("Vote recorded","ok"); CG.refreshStaffExtras(); }); }); });
-  document.querySelectorAll("[data-vote-close]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-vote-close");
-    CG.confirm("Close this vote?","No further ballots can be cast — the result stays on the desk.","Close voting", function(){
-      CG.sb.rpc("staff_vote_close",{ p_vote:id }).then(function(r){
-        if(r.error){ CG.toast(r.error.message||"Couldn’t close","err"); return; }
-        CG.toast("Voting closed","ok"); CG.refreshStaffExtras(); }); }); }); });
-  document.querySelectorAll("[data-vote-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-vote-del");
-    CG.confirm("Delete this vote?","The topic and every ballot are removed for the whole office.","Delete", function(){
-      CG.sb.rpc("staff_vote_delete",{ p_vote:id }).then(function(r){
-        if(r.error){ CG.toast(r.error.message||"Couldn’t delete","err"); return; }
-        CG.toast("Vote deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
-};
-/* Consolidated "Needs attention" triage card — the in-app twin of the daily #staff-general
-   briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
-   client-side (open cases, applications, suspensions) if the RPC hasn't returned yet. */
-CG.staffAttentionCard = function(){
-  var a = CG._staffAttention, lg = CG.lg;
-  /* client fallback for the counts the RPC would provide */
-  if (!a){
-    var oc = (lg._actionReqs||[]).filter(function(x){ return x.status!=="resolved" && x.status!=="denied"; }).length;
-    a = { open_cases:oc, oldest_case_hours:null, sla_breached:0,
-      pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
-      pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
-      active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
-      unmatched_ea:null, finals_missing_stats:null,
-      /* votes the office has already loaded for the desk — open, and still short a ballot */
-      votes_awaiting_ballots:((CG._staffExtras&&CG._staffExtras.votes)||[]).filter(function(v){
-        var cast = Object.keys(v.tally||{}).reduce(function(s,k){ return s+(v.tally[k]||0); },0);
-        return v.status==="open" && cast < (v.eligibleCount||0);
-      }).length };
-  }
-  var n = function(v){ return (v==null?0:(v|0)); };
-  var apps = n(a.pending_staff_apps)+n(a.pending_owner_apps);
-  var items = [];
-  if (n(a.open_cases)>0) items.push({ label:(n(a.open_cases))+" open case"+(n(a.open_cases)===1?"":"s")+
-      (a.oldest_case_hours!=null?" · oldest "+(a.oldest_case_hours>=24?Math.round(a.oldest_case_hours/24)+"d":a.oldest_case_hours+"h"):""),
-      go:"#/hub/complaints", warn:n(a.sla_breached)>0 });
-  if (apps>0) items.push({ label:apps+" application"+(apps===1?"":"s")+" to review", go:"#/hub/staffdesk", warn:false });
-  if (n(a.votes_awaiting_ballots)>0) items.push({ label:n(a.votes_awaiting_ballots)+" staff vote"+(n(a.votes_awaiting_ballots)===1?"":"s")+" awaiting your ballot", go:"#/hub/staffdesk", warn:false });
-  if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
-  if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
-  if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
-
-  if (!items.length){
-    return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
-      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, votes, or imports need attention right now.</span></div>';
-  }
-  return '<div class="card" style="margin-bottom:20px;border-color:var(--chrome)"><div class="card-h" style="background:var(--chrome-tint)">'+
-    '<h3>'+CG.ic("flag",15)+' Needs attention</h3>'+
-    (n(a.sla_breached)>0?'<span class="chip chip-loss">'+n(a.sla_breached)+' past 48h</span>':'<span class="chip chip-warn">'+items.length+' item'+(items.length===1?"":"s")+'</span>')+'</div>'+
-    '<div class="card-b" style="display:flex;flex-wrap:wrap;gap:8px">'+items.map(function(it){
-      return '<button class="chip '+(it.warn?"chip-loss":"chip-chrome")+'" style="cursor:pointer;padding:8px 12px" data-go="'+it.go+'">'+esc(it.label)+' →</button>';
-    }).join("")+'</div></div>';
-};
-/* One application opened into its own page — the full submission, plus a written response and the
-   decision, the same way a case opens from the queue. type is "staff" or "owner". */
-/* Application chat — a two-way thread between the applicant and the league office. UNLIKE the
-   staff ballot, this is applicant-visible: RLS lets the applicant read/write their own thread and
-   the office read/write any. Both sides are notified on each message (trg_application_message). */
-CG._groupAppMsgs = function(rows){
-  var map = {}; (rows||[]).forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
-  return map;
-};
-CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[type+":"+id] || []; };
-/* Resolves to TRUE only when the thread data actually changed since the last load, so callers
-   can re-render exactly when there is something new (and a token refresh re-running
-   applySession an hour in doesn't yank the page for no reason). A failed fetch keeps the
-   previous map — blanking it would repaint an open thread as "No messages yet" over a blip. */
-CG.loadAppMessages = function(){
-  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
-    .then(function(mm){
-      if (!mm || mm.error) return false;
-      var rows = mm.data || [];
-      var fp = rows.length + "|" + (rows.length ? rows[rows.length-1].created_at : "");
-      var changed = fp !== CG._appMsgsFp;
-      CG._appMsgsFp = fp;
-      if (CG.lg) CG.lg._appMsgs = CG._groupAppMsgs(rows);
-      return changed;
-    }, function(){ return false; });
-};
-/* GM/AGM nominations — same contract: true only when something changed. */
-CG.loadMgmtApps = function(){
-  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  return CG.sb.from("management_applications").select("*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)").order("created_at",{ascending:false})
-    .then(function(ma){
-      if (!ma || ma.error) return false;
-      var rows = ma.data || [];
-      var fp = rows.length + "|" + (rows.length ? (rows[0].updated_at || rows[0].created_at) : "");
-      var changed = fp !== CG._mgmtAppsFp;
-      CG._mgmtAppsFp = fp;
-      if (CG.lg) CG.lg._mgmtApps = rows;
-      return changed;
-    }, function(){ return false; });
-};
-/* live thread: subscribe to application_messages inserts. No recipient filter — Supabase Realtime
-   applies the table's RLS, so the office receives every thread and an applicant only their own
-   (same model as direct_messages). A new message re-renders the open thread in place. */
-CG._appMsgChannel = null;
-CG.subscribeAppMessages = function(){
-  if (!CG.sb || !CG.auth.user || CG._appMsgChannel) return;
-  var me = CG.auth.user.id;
-  try {
-    CG._appMsgChannel = CG.sb.channel("appmsg-"+me)
-      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"application_messages" }, function(payload){
-        var m = payload && payload.new;
-        if (!m || m.sender_id === me) return;   /* my own send already refreshed the thread */
-        CG.loadAppMessages().then(function(){
-          var onThread = /#\/hub\/application\b/.test(location.hash) || /#\/(owner|staffapply)\b/.test(location.hash) || /#\/hub\/roster\b/.test(location.hash);
-          if (onThread && CG.router){
-            /* keep a half-typed message across the live re-render */
-            var cur = document.querySelector("[data-appchat-input]");
-            var draft = cur ? cur.value : "", hadFocus = cur && document.activeElement===cur;
-            CG.router();
-            if (draft){ var ni = document.querySelector("[data-appchat-input]"); if(ni){ ni.value = draft; if(hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
-          } else { CG.toast("New message on an application","ok"); }
-        });
-      }).subscribe();
-  } catch(e){}
-};
-CG.teardownAppMessages = function(){
-  if (CG._appMsgChannel){ try{ CG.sb.removeChannel(CG._appMsgChannel); }catch(e){} CG._appMsgChannel = null; }
-};
-/* complaints & tickets: the case thread and the Staff Desk queue now update live.
-   A new reply / new case reloads the case data and re-renders any case surface in
-   place. The chime rides the notification stream (notify_action_message writes a
-   notification to the OTHER party), so there is no double ping and no self-ping. */
-CG.subscribeActions = function(){
-  if (!CG.sb || !CG.auth.user || CG._actionChannel) return;
-  var me = CG.auth.user.id;
-  try {
-    CG._actionChannel = CG.sb.channel("actions-"+me)
-      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"action_messages" }, function(payload){
-        var m = payload && payload.new;
-        if (!m || m.author_id === me) return;   /* my own reply already re-rendered the thread */
-        if (CG.refreshActions) CG.refreshActions();
-      })
-      .on("postgres_changes",{ event:"*", schema:"public", table:"action_requests" }, function(){
-        if (CG.refreshActions) CG.refreshActions();
-      }).subscribe();
-  } catch(e){}
-};
-CG.teardownActions = function(){
-  if (CG._actionChannel){ try{ CG.sb.removeChannel(CG._actionChannel); }catch(e){} CG._actionChannel = null; }
-};
-/* opts.office = the league-office view (staff/commish) vs the applicant's own view. Both can send;
-   labels differ so the applicant sees "League office" rather than a specific official's name. */
-CG.appChatSection = function(type, appId, opts){
-  opts = opts || {}; var office = !!opts.office;
-  var uid = CG.auth.user && CG.auth.user.id;
-  var msgs = CG.appMsgsFor(type, appId);
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(office?"Messages with the applicant":"Messages with the league office")+'</h3>'+
-    (msgs.length?'<span class="chip chip-xs">'+msgs.length+' message'+(msgs.length===1?"":"s")+'</span>':"")+'</div><div class="card-b">';
-  if (msgs.length){
-    h += '<div class="stack" style="gap:10px;margin-bottom:14px">'+msgs.map(function(m){
-      var mine = m.sender_id===uid;
-      var isStaff = m.sender && (m.sender.role==="staff" || m.sender.role==="commissioner");
-      var who = mine ? "You"
-        : isStaff ? (office ? ((m.sender&&m.sender.gamertag)||"Official")+" · league office" : "League office")
-        : ((m.sender&&m.sender.gamertag)||"Applicant");
-      return '<div style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
-        '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
-          '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
-          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtFull(Date.parse(m.created_at)):"")+'</span></div>'+
-          '<span class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
-    }).join("")+'</div>';
-  } else {
-    h += '<p class="caption" style="margin-bottom:14px">'+(office
-      ? "No messages yet. Reach out to the applicant with any questions before the ballot or a decision — they can read and reply here."
-      : "No messages yet. The league office may reach out here about your application, and you can message them any time. You’ll get a notification when they reply.")+'</p>';
-  }
-  var key = type+":"+appId;
-  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" aria-label="Write a message to '+(office?"the applicant":"the league office")+'" autocomplete="off" style="flex:1">'+
-    '<button class="btn btn-ink btn-sm" data-appchat-send="'+esc(key)+'">Send</button></div>';
-  h += '<p class="caption" style="margin-top:10px">'+(office
-    ? "The applicant can read and reply to this thread. The staff ballot below stays private to the league office."
-    : "Both sides are notified of new messages.")+'</p>';
-  return h + '</div></div>';
-};
-/* shared binder — used by the office detail page and both applicant views */
-CG.wireAppChat = function(){
-  document.querySelectorAll("[data-appchat-send]").forEach(function(b){ b.addEventListener("click", function(){
-    var key = this.getAttribute("data-appchat-send"), btn = this;
-    var inp = document.querySelector('[data-appchat-input="'+key+'"]');
-    var body = ((inp && inp.value) || "").trim();
-    if (!body){ CG.toast("Write a message first","err"); return; }
-    var i = key.indexOf(":"), type = key.slice(0,i), appId = key.slice(i+1);
-    btn.disabled = true;
-    CG.sb.from("application_messages").insert({ app_type:type, application_id:appId, sender_id:CG.auth.user.id, body:body }).select("id").then(function(r){
-      btn.disabled = false;
-      if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
-      if (!r.data || !r.data.length){ CG.toast("You can’t message on this application.","err"); return; }
-      if (inp) inp.value = "";
-      CG.toast("Message sent","ok");
-      CG.loadAppMessages().then(function(){ if(CG.router) CG.router(); });
-    });
-  }); });
-};
-/* ---- club management appointments: owners must APPLY to appoint a GM/AGM; the reviewer vote
-   approves. Rendered on the roster page (Team HQ). ---- */
-CG.clubMgmt = function(){
-  var club = CG.myClub && CG.myClub(); if(!club) return null;
-  var t = CG.TEAM[club]; if(!t) return null;
-  var uid = CG.auth.user && CG.auth.user.id;
-  return { club:club, t:t, teamId:t.id, isOwner: !!(uid && t.owner===uid) };
-};
-/* ---- Team HQ · team overview (dashboard console) ---- */
-CG.teamOverviewCard = function(mt){
-  if (!mt || !mt.code) return "";
-  var lg=CG.lg||{}, code=mt.code, names=lg._profName||{};
-  var rec=(lg.teams&&lg.teams[code])||{w:0,l:0,otl:0};
-  var pr=(lg.powerRankings||[]).find(function(p){ return p.team===code; })||{rank:0};
-  var prN=(lg.powerRankings||[]).length;
-  var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).length, rosterMax=CG.ROSTER_MAX||15;
-  var pay=(CG.teamPayroll?CG.teamPayroll(lg,code):0), cap=CG.CAP||60000000;
-  var payPct=cap?Math.min(100,Math.round(pay/cap*100)):0, over=pay>cap;
-  var played=(rec.w+rec.l+rec.otl)>0||lg.prManual;
-  var next=(lg.schedule||[]).filter(function(g){ return (g.home===code||g.away===code) && g.status!=="final"; })
-            .sort(function(a,b){ return a.at-b.at; })[0];
-  var opp=next?(next.home===code?next.away:next.home):null;
-  var seats=[["Owner",mt.owner],["GM",mt.gm],["AGM",mt.agm]].map(function(s){
-    var nm=s[1]?(names[s[1]]||"Assigned"):null;
-    return '<span style="display:flex;flex-direction:column;gap:2px">'+
-      '<span class="rb-lab">'+s[0]+'</span>'+
-      '<b style="font-family:var(--f-disp);font-size:13px'+(nm?'':';color:var(--steel-2)')+'">'+(nm?esc(nm):"Vacant")+'</b></span>';
-  }).join("");
-  return '<div class="card" style="--tc:'+esc(mt.color||"#8899A6")+';grid-column:1/-1">'+
-    '<div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+code+'">Club page →</a></div>'+
-    '<div class="card-b" style="display:flex;gap:14px;align-items:center;padding-bottom:14px">'+CG.crest(code,40)+
-      '<div style="flex:1;min-width:0"><b style="font-family:var(--f-disp);font-size:16px;display:block">'+esc(mt.name)+'</b>'+
-      '<span class="caption">'+esc(mt.div||"")+' Division'+(played?"":" · Pre-season")+'</span></div>'+
-      '<span class="ovrbox" title="Power rank">#'+(pr.rank||"—")+'</span></div>'+
-    '<div class="card-b" style="padding-top:0;padding-bottom:16px"><div class="ovstat">'+
-      '<div class="cell"><b>'+(rec.w||0)+"–"+(rec.l||0)+"–"+(rec.otl||0)+'</b><span>Record</span></div>'+
-      '<div class="cell"><b>#'+(pr.rank||"—")+'<small> / '+prN+'</small></b><span>'+(played?"Power rank":"Pre-season seed")+'</span></div>'+
-      '<div class="cell"><b>'+rosterN+'<small> / '+rosterMax+'</small></b><span>Roster</span></div>'+
-      '<div class="cell"><b'+(over?' style="color:var(--red-ink)"':'')+'>'+CG.fmtMoney(pay)+'</b><span>of '+CG.fmtMoney(cap)+' cap</span></div>'+
-    '</div>'+
-    '<div style="margin-top:12px">'+
-      '<div class="rbar"><span class="rb-lab">Roster</span><div class="rb-track"><div class="rb-fill" style="width:'+Math.round(rosterN/rosterMax*100)+'%"></div></div><span class="rb-v">'+rosterN+'/'+rosterMax+'</span></div>'+
-      '<div class="rbar"><span class="rb-lab">Cap</span><div class="rb-track"><div class="rb-fill" style="width:'+payPct+'%'+(over?";background:linear-gradient(90deg,var(--red),var(--red-ink))":"")+'"></div></div><span class="rb-v"'+(over?' style="color:var(--red-ink)"':'')+'>'+payPct+'%</span></div>'+
-    '</div></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap;align-items:center">'+
-      '<div style="display:flex;gap:18px;flex-wrap:wrap;flex:1">'+seats+'</div>'+
-      '<a class="sec-link" href="#/hub/management">Front office →</a></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">'+
-      '<span class="rb-lab">Next</span>'+
-      (next&&opp&&CG.TEAM[opp]?'<span class="teamcell">'+CG.crest(opp,22)+'<span class="nm">'+(next.home===code?"vs ":"@ ")+esc(CG.TEAM[opp].name)+'</span></span>'+
-            '<span class="caption" style="margin-left:auto">'+CG.fmtDay(next.at)+' · '+CG.fmtTime(next.at)+'</span>'
-           :'<span class="caption">'+(played?"No upcoming games scheduled.":"No games scheduled — the pre-season slate posts soon.")+'</span>')+
-    '</div></div>';
-};
-
-/* ---- Team HQ · Management tab (front office + owner GM/AGM nominations) ---- */
-CG.mgmtSeatsTable = function(m){
-  var lg=CG.lg||{}, names=lg._profName||{}, uid=(CG.auth.user||{}).id;
-  var pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
-  function row(role,label,required){
-    var owner=role==="owner";
-    var hid=owner?m.t.owner:role==="gm"?m.t.gm:m.t.agm, holder=hid?(names[hid]||"Assigned"):null;
-    var isMe=hid&&hid===uid;
-    var pend=pending.find(function(a){ return a.role===role; });
-    var status=pend?'<span class="chip chip-warn chip-xs">Pending reviewer vote</span>'
-      :owner?'<span class="chip chip-xs">Club owner</span>'
-      :holder?'<span class="chip chip-win chip-xs">Confirmed</span>'
-      :required?'<span class="chip chip-xs" style="color:var(--amber-ink);border-color:var(--amber-ink)">Vacant — required</span>'
-      :'<span class="chip chip-xs">Vacant — optional</span>';
-    var action=owner?'<span class="caption">—</span>'
-      :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
-      :m.isOwner?'<button class="btn '+(required&&!holder?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>'
-      :'<span class="caption">—</span>';
-    return '<tr>'+
-      '<td class="tleft"><span class="chip chip-chrome chip-xs">'+esc(label.toUpperCase())+'</span></td>'+
-      '<td class="tleft"><b style="font-family:var(--f-disp)">'+(holder?esc(holder):'<span style="color:var(--steel-2)">Vacant</span>')+'</b>'+(isMe?' <span class="caption">· you</span>':'')+'</td>'+
-      '<td class="tleft">'+status+'</td>'+
-      '<td class="tleft" style="text-align:right">'+action+'</td></tr>';
-  }
-  return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px">'+
-    '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">Read-only</span>')+'</div>'+
-    '<div class="tblwrap"><table class="tbl compact"><thead><tr>'+
-      '<th class="tleft">Seat</th><th class="tleft">Holder</th><th class="tleft">Status</th><th class="tleft" style="text-align:right">Action</th>'+
-    '</tr></thead><tbody>'+
-      row("owner","Owner",true)+row("gm","General Manager",true)+row("agm","Assistant GM",false)+
-    '</tbody></table></div></div>';
-};
-CG.hubManagement = function(){
-  var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
-  var lg=CG.lg||{}, pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
-  var needsGm=!m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
-  var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
-    '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the owner nominates management for the league office to approve.</p></div>';
-  if (needsGm && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">A General Manager is required</b>Every club must appoint a GM before its first regular-season game. Nominate one below — the league office’s reviewers approve it.</div>';
-  h+=CG.mgmtSeatsTable(m);
-  if (m.isOwner) pending.forEach(function(a){
-    var rl=a.role==="gm"?"General Manager":"Assistant GM";
-    h+='<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(rl)+'</h3>'+
-      '<span class="chip chip-warn chip-xs">Pending the reviewer vote</span></div><div class="card-b">'+
-      '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw="'+a.id+'">Withdraw this nomination</button></div></div>';
-    h+=CG.appChatSection("management", a.id, {office:false});
-  });
-  h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
-    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract or on league staff — they don’t have to be on your roster. "
-               : "Only the club owner can nominate a GM or AGM. ")+
-    "The league office’s reviewers vote; on approval the nominee is set automatically, and if denied nothing changes. A GM is required before your first regular-season game; an AGM is optional.</div>";
-  return h;
-};
-CG.AFTER._management = function(){
-  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
-  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-mgmt-withdraw");
-    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
-      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
-        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-  if (CG.wireAppChat) CG.wireAppChat();
-};
-CG.nominateManagerModal = function(role){
-  var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
-  var label = role==="gm"?"General Manager":"Assistant GM";
-  CG.modal("Nominate a "+label,
-    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season who isn’t already under contract — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
-      (role==="gm" ? ' Every club needs an active GM before its first regular-season game.' : ' An AGM is optional.')+'</p>'+
-    CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
-    '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
-  CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
-  var go = document.getElementById("mgGo");
-  if (go) go.addEventListener("click", function(){
-    var pick = CG.readMemberPicker("mgNominee");
-    if(!pick || !pick.id){ CG.toast("Pick a member first","err"); return; }
-    this.disabled = true;
-    CG.submitMgmtApp(role, pick.id, ((document.getElementById("mgPitch")||{}).value||"").trim()||null);
-  });
-};
-CG.submitMgmtApp = function(role, nomineeId, pitch){
-  var m = CG.clubMgmt(); if(!m || !m.isOwner){ CG.toast("Only the club owner can nominate management","err"); return; }
-  CG.sb.from("management_applications").insert({ team_id:m.teamId, role:role, submitted_by:CG.auth.user.id, nominee_id:nomineeId, pitch:pitch }).select("id").then(function(r){
-    if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-    if(!r.data||!r.data.length){ CG.toast("You can only nominate management for your own club","err"); return; }
-    if(CG.closeOverlay) CG.closeOverlay();
-    CG.toast("Nomination submitted — the reviewers will vote","ok"); CG.reloadLeague();
-  });
-};
-/* inject the management card into the roster page + wire its controls */
-/* Front-office management now lives on its own Team HQ → Management tab (CG.hubManagement),
-   not bolted onto the roster page. (The old roster-append override here was already clobbered
-   by the dead-cap hubRoster wrapper further down, so the card rendered nowhere.) */
-CG._origAfterRoster = CG.AFTER._roster;
-CG.AFTER._roster = function(){
-  if (CG._origAfterRoster) CG._origAfterRoster();
-  /* Pro roster <-> training camp (Rule 2.1). Every limit — the 2/4/6 position
-     caps, the 3-player camp, and the 3-swaps-a-season ceiling — is enforced by
-     the database trigger, so the button never has to be the last line of
-     defence: whatever the DB refuses comes back as its own rule message. */
-  document.querySelectorAll("[data-squad]").forEach(function(b){ b.addEventListener("click", function(){
-    var spot = this.getAttribute("data-squad"), to = this.getAttribute("data-squad-to"), btn = this;
-    btn.disabled = true;
-    CG.sb.rpc("set_roster_squad", { p_spot: spot, p_squad: to }).then(function(r){
-      if (r.error){ btn.disabled = false; CG.toast(r.error.message, "err"); return; }
-      var left = (r.data && r.data.moves_left);
-      CG.toast((to==="tc" ? "Moved to training camp" : "Moved to the pro roster")+
-        (left!=null ? " · "+left+" swap"+(left===1?"":"s")+" left this season" : ""), "ok");
-      CG.reloadLeague();
-    }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
-  }); });
-  /* Full roster: a straight, same-position pro<->camp swap (Rule 2.1). The picker
-     only lists legal counterparts (opposite squad, same position group, a swap
-     still left); the database validates the exchange as one atomic move. */
-  document.querySelectorAll("[data-squad-swap]").forEach(function(b){ b.addEventListener("click", function(){
-    var spot = this.getAttribute("data-squad-swap");
-    var club = CG.myClub(), roster = (CG.lg.byTeam[club]||[]);
-    var me = roster.find(function(x){ return x.spotId===spot; });
-    if (!me) return;
-    var grp = CG.posGroup(me.pos), wantSquad = me.squad==="tc" ? "pro" : "tc";
-    var opts = roster.filter(function(x){
-      return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
-        CG.posGroup(x.pos)===grp && (3-(x.squadMoves||0))>0;
-    });
-    if (!opts.length){
-      CG.toast("No eligible "+(wantSquad==="tc"?"camp":"pro")+" "+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+
-        " to swap with — everyone at this position has used their 3 changes.", "err");
-      return;
-    }
-    var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
-    CG.modal("Swap "+esc(me.tag),
-      '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
-      ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
-      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+'. Each player uses one of their three season swaps.</p>'+
-      '<div class="stack" style="gap:6px">'+opts.map(function(x){
-        return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
-          '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+(3-(x.squadMoves||0))+' swaps left</span></button>';
-      }).join("")+'</div>');
-    document.querySelectorAll("[data-swap-with]").forEach(function(sb){ sb.addEventListener("click", function(){
-      var other = this.getAttribute("data-swap-with");
-      var proSpot = pro ? pro.spotId : other, tcSpot = camp ? camp.spotId : other;
-      this.disabled = true;
-      CG.sb.rpc("swap_roster_squad", { p_pro_spot: proSpot, p_tc_spot: tcSpot }).then(function(r){
-        if (r.error){ CG.toast(r.error.message, "err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast("Squads swapped", "ok"); CG.reloadLeague();
-      }, function(e){ CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
-    }); });
-  }); });
-  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
-  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-mgmt-withdraw");
-    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
-      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
-        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-  CG.wireAppChat();
-};
-/* Staff ballot on an application — each official casts an advisory approve/deny (with an optional
-   reason). Visible ONLY to staff + commissioners: the application_ballots RLS enforces office-only
-   read, so the applicant never sees the votes, only the final decision. */
-CG.appBallotsFor = function(type, id){
-  return ((CG.lg && CG.lg._appBallots) || []).filter(function(v){ return v.app_type===type && v.application_id===id; });
-};
-CG.loadAppBallots = function(){
-  if (!CG.sb) return Promise.resolve(false);
-  return CG.sb.from("application_ballots")
-    .select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
-    .then(function(vb){ if(CG.lg) CG.lg._appBallots = (vb && !vb.error && vb.data) || []; return true; }, function(){ return false; });
-};
-/* The reviewer vote IS the decision. Once every reviewer (staff carrying the 'applications'
-   department) has voted, the DB auto-applies 50%+1. Commissioners don't vote but can override. */
-CG.appBallotSection = function(type, a, decided){
-  var uid = CG.auth.user && CG.auth.user.id;
-  var reviewers = CG.appReviewers();
-  var N = reviewers.length, need = Math.floor(N/2)+1;
-  var voteBy = {}; CG.appBallotsFor(type, a.id).forEach(function(v){ voteBy[v.voter_id] = v; });
-  var cast = reviewers.filter(function(r){ return voteBy[r.id]; }).length;
-  var yes = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="approve"; }).length;
-  var no  = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="deny"; }).length;
-  var mine = voteBy[uid], isReviewer = CG.isAppReviewer(), isCommish = CG.role()==="commish";
-
-  var head = decided
-    ? '<span class="chip '+(a.status==="approved"?"chip-win":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
-    : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
-  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
-
-  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
-    '<span class="chip chip-win chip-xs">'+yes+' approve</span><span class="chip chip-loss chip-xs">'+no+' deny</span>'+
-    (N?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';
-
-  if (N){
-    h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+reviewers.slice().sort(function(x,y){ return (x.gamertag||"").localeCompare(y.gamertag||""); }).map(function(r){
-      var v = voteBy[r.id];
-      var chip = v ? '<span class="chip '+(v.vote==="approve"?"chip-win":"chip-loss")+' chip-xs">'+(v.vote==="approve"?"Approve":"Deny")+'</span>'
-                   : '<span class="chip chip-warn chip-xs">Pending</span>';
-      return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+chip+
-        '<b style="font-family:var(--f-disp);font-size:13px">'+esc(r.gamertag||"An official")+(r.id===uid?" · you":"")+'</b>'+
-        (v&&v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
-    }).join("")+'</div>';
-  } else if (!decided){
-    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)">No application reviewers are assigned yet. A commissioner needs to add staff to the <b>Applications review</b> department — or decide this directly below.</p>';
-  }
-
-  if (!decided && isReviewer){
-    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
-      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time until the last reviewer votes":"Cast your vote")+'</span>'+
-      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
-        '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
-        (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
-  }
-  if (!decided && isCommish){
-    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px">'+
-      '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-        '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
-        '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button></div></div>';
-  }
-
-  h += '<p class="caption" style="margin-top:12px">'+(decided
-    ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
-    : N===0
-      ? "There’s no reviewer vote yet — no staff are assigned to Applications review. A commissioner can add reviewers or decide with the override above."
-      : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
-  return h + '</div></div>';
-};
-CG.hubApplicationDetail = function(id, type){
-  var review = CG.role()==="commish" || CG.role()==="staff";
-  var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
-  if (!review) return CG.unauthorized("Applications are reviewed by league staff.");
-  var isOwner = type==="owner", isMgmt = type==="management";
-  var list = isMgmt ? (CG.lg._mgmtApps||[]) : isOwner ? (CG.lg._ownerApps||[]) : (CG.lg._staffApps||[]);
-  var idS = String(id||"");
-  var a = list.find(function(x){ return x.id===id; })
-       || list.find(function(x){ return String(x.id||"").slice(0, idS.length)===idS; });
-  if (!a){
-    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
-      '<div class="e-art">'+CG.ic("flag",22)+'</div><b>That application isn’t here</b>'+
-      '<p>It may have been withdrawn or already decided. Head back to the Staff Desk.</p></div></div>';
-  }
-  var decided = a.status==="approved" || a.status==="denied" || a.status==="withdrawn";
-  function row(label, val){ return val ? '<div style="display:flex;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft)"><span class="caption" style="min-width:118px;flex-shrink:0">'+esc(label)+'</span><span class="small" style="flex:1">'+val+'</span></div>' : ''; }
-
-  var name, eyebrow, eyeClass, lede, fields = '';
-  if (isMgmt){
-    var clubCode = (CG.lg._idToCode||{})[a.team_id];
-    var clubName = (clubCode && CG.TEAM && CG.TEAM[clubCode] && CG.TEAM[clubCode].name) || clubCode || "the club";
-    var roleLabel = a.role==="gm" ? "General Manager" : "Assistant GM";
-    name = ((a.nominee&&a.nominee.gamertag)||"A member");
-    eyebrow = a.role==="gm" ? "GM" : "AGM"; eyeClass = "chip-chrome";
-    lede = "Nominated as "+roleLabel+" of "+clubName+".";
-    fields += row("Club", esc(clubName)+(clubCode?' <span class="caption">('+esc(clubCode)+')</span>':""));
-    fields += row("Role", esc(roleLabel));
-    fields += row("Nominee", esc((a.nominee&&a.nominee.gamertag)||"—"));
-    fields += row("Submitted by", esc((a.submitter&&a.submitter.gamertag)||"the owner"));
-    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
-  } else {
-    var prof = a.profiles||{}; name = prof.gamertag||"Applicant";
-    eyebrow = isOwner ? "OWNER" : "STAFF"; eyeClass = isOwner ? "chip" : "chip-chrome";
-    lede = isOwner ? "Application to own a club." : "Application to join the league staff.";
-    if (isOwner){
-      fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
-      fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
-      fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
-      fields += row("Franchise picks", CG.franchisePicksLine(a));
-      fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
-      fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
-    } else if (a.departments && a.departments.length){
-      fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
-    }
-    fields += row("Timezone", a.timezone?esc(a.timezone):"");
-    fields += row("Availability", a.availability?esc(a.availability):"");
-    fields += row("Experience", a.experience?esc(a.experience):"");
-    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
-  }
-
-  var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
-    : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
-    : a.status==="withdrawn" ? '<span class="chip">Withdrawn</span>'
-    : '<span class="chip chip-warn">Pending</span>';
-
-  var h = '<div style="margin-bottom:18px">'+back+
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">'+
-      '<span class="chip '+eyeClass+' chip-xs">'+esc(eyebrow)+'</span>'+
-      '<h1 class="h-sec">'+esc(name)+'</h1>'+statusChip+'</div>'+
-    '<p class="lede" style="margin-top:8px">'+esc(lede)+'</p></div>';
-
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-b">'+fields+
-    (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">'+(isMgmt?"The owner’s case":"Their pitch")+'</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
-    '</div></div>';
-
-  /* which club they're getting is decided before the vote lands — the approval acts on it */
-  if (isOwner) h += CG.ownerAppClubPicker(a);
-  /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
-  h += CG.appChatSection(type, a.id, {office:true});
-  /* the reviewer vote IS the decision — no manual approve/deny */
-  h += CG.appBallotSection(type, a, decided);
-  return h;
-};
-CG.AFTER._applicationDetail = function(){
-  /* the review board's club choice. Awarding after an approval places the owner on the
-     spot, so the toast reports what the server actually did rather than assuming. */
-  document.querySelectorAll("[data-club-award]").forEach(function(b){ b.addEventListener("click", function(){
-    var club = this.getAttribute("data-club-award") || null, id = this.getAttribute("data-app");
-    var all = document.querySelectorAll("[data-club-award]");
-    all.forEach(function(x){ x.disabled = true; });
-    CG.sb.rpc("set_owner_app_club", { p_id:id, p_club:club }).then(function(r){
-      if (r.error){
-        all.forEach(function(x){ x.disabled = false; });
-        CG.toast(r.error.message || "Couldn’t set the club","err"); return;
-      }
-      /* the RPC saves the choice even when it can't create the club — report which of the
-         two actually happened rather than painting every non-error green */
-      var d = r.data || {};
-      CG.toast(d.message || (club ? "Club chosen" : "Choice cleared"), d.ok === false ? "err" : "ok");
-      CG.reloadLeague();   /* a placement changes the club list, not just this row */
-    });
-  }); });
-  /* commissioner override — decide immediately, bypassing the reviewer vote */
-  document.querySelectorAll("[data-app-override]").forEach(function(b){ b.addEventListener("click", function(){
-    var approve = this.getAttribute("data-app-override")==="approve";
-    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
-    CG.confirm((approve?"Approve":"Deny")+" this now?","This overrides the reviewer vote and applies the decision immediately.",(approve?"Approve":"Deny")+" now", function(){
-      CG.sb.rpc("override_application_decision", { p_type:t, p_id:id, p_approve:approve }).then(function(r){
-        if (r.error){ CG.toast("Couldn’t override: "+r.error.message,"err"); return; }
-        CG.toast("Decision applied — "+(approve?"approved":"denied"),"ok");
-        CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
-      });
-    });
-  }); });
-  /* the reviewer vote — cast/change/retract; .select() so an RLS-blocked write (a non-reviewer)
-     is reported honestly instead of a false success. Casting the last vote auto-resolves server-side. */
-  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
-    var v=this.getAttribute("data-vote-cast"), t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
-    var note=((document.getElementById("appVoteNote")||{}).value||"").trim();
-    var btns=document.querySelectorAll("[data-vote-cast],[data-vote-retract]"); btns.forEach(function(x){ x.disabled=true; });
-    CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null), updated_at:new Date().toISOString() }, {onConflict:"app_type,application_id,voter_id"}).select("id").then(function(r){
-      if(r.error){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Couldn’t save your vote: "+r.error.message,"err"); return; }
-      if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only assigned application reviewers can vote.","err"); return; }
-      CG.toast("Vote recorded — "+(v==="approve"?"approve":"deny"),"ok");
-      /* full reload — casting the final vote may resolve the application (status + role assignment) */
-      CG.reloadLeague();
-    });
-  }); });
-  document.querySelectorAll("[data-vote-retract]").forEach(function(b){ b.addEventListener("click", function(){
-    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
-    CG.sb.from("application_ballots").delete().eq("app_type",t).eq("application_id",id).eq("voter_id",CG.auth.user.id).select("id").then(function(r){
-      if(r.error){ CG.toast("Couldn’t retract: "+r.error.message,"err"); return; }
-      CG.toast("Vote retracted","ok"); CG.reloadLeague();
-    });
-  }); });
-  CG.wireAppChat();
-};
-/* Every ticket the league office has handled, in one place — complaints, appeals, trade and
-   position requests, and staff/owner applications, open or closed. Each row opens its own detail
-   page (the case thread or the application response), so the whole history is browsable. */
-CG.allTickets = function(){
-  var lg = CG.lg || {}, out = [];
-  (lg._actionReqs||[]).forEach(function(a){
-    var meta = CG.ACTION_META[a.type] || { label:a.type, icon:"flag" };
-    var closed = a.status==="resolved" || a.status==="denied";
-    out.push({ group:a.type, typeLabel:meta.label, icon:meta.icon||"flag",
-      title: a.subject || (a.details||"Request").slice(0,64),
-      who: (a.profiles&&a.profiles.gamertag)||"member",
-      result: a.status==="resolved" ? "Resolved" : a.status==="denied" ? "Denied" : "Open",
-      isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
-      route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
-  });
-  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":"Pending"; }
-  (lg._staffApps||[]).forEach(function(a){
-    var closed = a.status!=="pending";
-    out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
-      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
-      result: appResult(a.status), isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=staff", replies:CG.appMsgsFor("staff",a.id).length });
-  });
-  (lg._ownerApps||[]).forEach(function(a){
-    var closed = a.status!=="pending";
-    out.push({ group:"owner", typeLabel:"Owner application", icon:"shield",
-      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
-      result: appResult(a.status), isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=owner", replies:CG.appMsgsFor("owner",a.id).length });
-  });
-  (lg._mgmtApps||[]).forEach(function(a){
-    var closed = a.status!=="pending";
-    var code = (lg._idToCode||{})[a.team_id];
-    var club = (code && CG.TEAM && CG.TEAM[code] && CG.TEAM[code].name) || code || "a club";
-    out.push({ group:"management", typeLabel:(a.role==="gm"?"GM application":"AGM application"), icon:"shield",
-      title:((a.nominee&&a.nominee.gamertag)||"A member")+" · "+club, who:(a.submitter&&a.submitter.gamertag)||"owner",
-      result: appResult(a.status), isOpen:!closed,
-      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=management", replies:CG.appMsgsFor("management",a.id).length });
-  });
-  return out.sort(function(x,y){ return y.at - x.at; });
-};
-CG.hubTicketArchive = function(){
-  if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
-  var type = CG._arcType||"all", status = CG._arcStatus||"all";
-  var shown = CG.allTickets().filter(function(t){
-    if (type!=="all" && t.group!==type) return false;
-    if (status==="open" && !t.isOpen) return false;
-    if (status==="closed" && t.isOpen) return false;
-    return true;
-  });
-  function fbtn(attr, cur, val, label){ return '<button type="button" class="chip '+(cur===val?"chip-chrome":"")+'" style="cursor:pointer" '+attr+'="'+val+'" aria-pressed="'+(cur===val)+'">'+esc(label)+'</button>'; }
-  function resultChip(t){
-    var cls = (t.result==="Resolved"||t.result==="Approved") ? "chip-win" : t.result==="Denied" ? "chip-loss" : "chip-warn";
-    return '<span class="chip '+cls+' chip-xs">'+esc(t.result)+'</span>';
-  }
-  function row(t){
-    return '<div class="card-b row-go" data-go="'+esc(t.route)+'" role="link" tabindex="0" '+
-      'data-arc-text="'+esc((t.title+" "+t.who+" "+t.typeLabel).toLowerCase())+'" '+
-      'aria-label="Open '+esc(t.typeLabel)+': '+esc(t.title)+'" '+
-      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span style="color:var(--steel);flex-shrink:0">'+CG.ic(t.icon,15)+'</span>'+
-      '<span style="flex:1;min-width:170px"><b style="font-family:var(--f-disp);display:block">'+esc(t.title)+'</b>'+
-        '<span class="caption">'+esc(t.typeLabel)+' · '+esc(t.who)+(t.replies?' · '+t.replies+' repl'+(t.replies===1?"y":"ies"):"")+'</span></span>'+
-      resultChip(t)+
-      '<span class="caption">'+(t.at?CG.fmtDay(t.at):"")+'</span>'+
-      '<span class="caption" aria-hidden="true">→</span></div>';
-  }
-  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"],["management","GM / AGM"]];
-  var statusF = [["all","All"],["open","Open / pending"],["closed","Resolved / decided"]];
-
-  var h = '<div style="margin-bottom:18px"><a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>'+
-    '<h1 class="h-sec" style="margin-top:10px">Ticket archive</h1>'+
-    '<p class="lede" style="margin-top:8px">Every complaint, appeal, request, and application — open or closed — with its result. Open any one to read the full conversation and the decision.</p></div>';
-  h += '<div class="card" style="margin-bottom:16px"><div class="card-b" style="display:grid;gap:12px">'+
-    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Type</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+typeF.map(function(f){ return fbtn("data-arc-type",type,f[0],f[1]); }).join("")+'</div></div>'+
-    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Status</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+statusF.map(function(f){ return fbtn("data-arc-status",status,f[0],f[1]); }).join("")+'</div></div>'+
-    '<div style="display:flex;gap:12px;align-items:center"><span class="caption" style="min-width:54px">Search</span><input id="arcSearch" type="search" placeholder="Filter by name, subject, or type…" style="flex:1" autocomplete="off"></div>'+
-  '</div></div>';
-  h += '<div class="card"><div class="card-h"><h3>Tickets</h3><span class="chip" id="arcCount">'+shown.length+'</span></div>'+
-    (shown.length ? shown.map(row).join("") : '<div class="card-b"><p class="caption">No tickets match these filters. Try widening them above.</p></div>')+'</div>';
-  return h;
-};
-CG.AFTER._ticketArchive = function(){
-  document.querySelectorAll("[data-arc-type]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcType = this.getAttribute("data-arc-type"); if(CG.router) CG.router(); }); });
-  document.querySelectorAll("[data-arc-status]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcStatus = this.getAttribute("data-arc-status"); if(CG.router) CG.router(); }); });
-  var s = document.getElementById("arcSearch");
-  if (s) s.addEventListener("input", function(){
-    /* live filter without a re-render, so the search box keeps focus */
-    var q = this.value.trim().toLowerCase(), n = 0;
-    document.querySelectorAll("[data-arc-text]").forEach(function(r){
-      var hit = !q || r.getAttribute("data-arc-text").indexOf(q) >= 0;
-      r.style.display = hit ? "" : "none"; if (hit) n++;
-    });
-    var c = document.getElementById("arcCount"); if (c) c.textContent = n;
-  });
-};
-CG.hubStaffDesk = function(){
-  var lg = CG.lg;
-  var reqs = (lg._actionReqs||[]);
-  /* terminal statuses are 'resolved' and 'denied' — a denied case is closed, not open */
-  var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
-  /* warnings live in the same table but never count as suspensions */
-  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active" && s.mode!=="warning"; });
-  var now = Date.now();
-  var finals = (lg.allResults||[]).slice().sort(function(a,b){ return b.at-a.at; });
-  var weekFinals = finals.filter(function(r){ return now - r.at < 7*86400000; });
-  var tonight = lg.tonight||[];
-
-  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">League staff · officials’ tools</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Staff Desk</h1>'+
-    '<p class="lede" style="margin-top:8px">The case queue, active discipline, and the imports worth a second look — everything an official touches, in one place.</p></div>';
-
-  h += CG.staffAttentionCard();
-
-  h += '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-bottom:20px">'+
-    '<div class="kpi'+(open.length?" alert":"")+'" style="cursor:pointer" data-go="#/hub/complaints"><b class="num">'+open.length+'</b><span>open cases</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+sus.length+'</b><span>active suspensions</span></div>'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+weekFinals.length+'</b><span>finals · last 7 days</span></div>'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+tonight.length+'</b><span>games tonight</span></div></div>';
-
-  /* applications — owner + staff, decided right here */
-  var ownerApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
-  var staffApps = (lg._staffApps||[]).filter(function(a){ return a.status==="pending"; });
-  var mgmtApps  = (lg._mgmtApps||[]).filter(function(a){ return a.status==="pending"; });
-  var pendCount = ownerApps.length+staffApps.length+mgmtApps.length;
-  var revCount = CG.appReviewers().length;
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3>'+
-    '<span class="chip '+(pendCount?"chip-warn":"chip-win")+'">'+(pendCount?pendCount+" awaiting the vote":"none pending")+'</span></div>';
-  /* each row opens the application into its own page (CG.hubApplicationDetail) — the reviewer vote
-     decides it there. Glance-level tally shows where the vote stands. */
-  function appRow(a, type){
-    var isOwner=type==="owner", isMgmt=type==="management";
-    var chipLabel = isMgmt ? (a.role==="gm"?"GM":"AGM") : isOwner?"OWNER":"STAFF";
-    var title, sub;
-    if (isMgmt){
-      var code=(lg._idToCode||{})[a.team_id], club=(code&&CG.TEAM&&CG.TEAM[code]&&CG.TEAM[code].name)||code||"a club";
-      title=(a.nominee&&a.nominee.gamertag)||"A member";
-      sub=(a.role==="gm"?"General Manager":"Assistant GM")+" · "+esc(club)+" · by "+esc((a.submitter&&a.submitter.gamertag)||"owner");
-    } else {
-      var prof=a.profiles||{}; title=prof.gamertag||"Applicant";
-      sub = isOwner ? CG.franchisePicksLine(a)
-        : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
-    }
-    var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
-    var tally = (vb.length ? '<span class="chip chip-xs" title="Reviewer vote so far">'+vy+' approve · '+vn+' deny</span>' : "")
-      + (revCount ? '<span class="caption">'+vb.length+'/'+revCount+' voted</span>' : "");
-    return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
-      'aria-label="Open '+esc(chipLabel)+' application: '+esc(title)+'" '+
-      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+esc(chipLabel)+'</span>'+
-      '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(title)+'</b>'+
-        '<span class="caption">'+sub+'</span></span>'+
-      tally+
-      '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
-      '<span class="caption" aria-hidden="true">→</span></div>';
-  }
-  if (staffApps.length) h += staffApps.map(function(a){ return appRow(a,"staff"); }).join("");
-  if (ownerApps.length) h += ownerApps.map(function(a){ return appRow(a,"owner"); }).join("");
-  if (mgmtApps.length)  h += mgmtApps.map(function(a){ return appRow(a,"management"); }).join("");
-  if (!pendCount){
-    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply to own a club (#/owner) or join the staff (#/staffapply); owners nominate a GM/AGM from their Team HQ.</p></div>';
-  } else {
-    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to read it and cast your vote. '+
-      (revCount ? 'Once all <b>'+revCount+'</b> application reviewer'+(revCount===1?"":"s")+' vote, 50%+1 decides it automatically.'
-                : '<b style="color:var(--amber-ink)">No reviewers are assigned</b> — a commissioner must add staff to the Applications review department, or decide with the commissioner override.')+'</span></div>';
-  }
-  h += '</div>';
-
-  /* case queue preview */
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Case queue</h3>'+
-    '<a class="sec-link" href="#/hub/complaints">Open the queue</a></div>';
-  h += open.length ? open.slice(0,5).map(function(a){
-      var meta = CG.ACTION_META[a.type] || { label:a.type };
-      var replies = ((lg._actionMsgs||{})[a.id]||[]).length;
-      var names = (lg&&lg._profName)||{};
-      return '<div class="card-b row-go" data-go="#/hub/complaint?id='+esc(a.id)+'" role="link" tabindex="0" '+
-        'aria-label="Open case: '+esc(a.subject||meta.label)+'" '+
-        'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<span class="chip chip-warn" style="text-transform:capitalize">'+esc(a.status||"open")+'</span>'+
-        '<span style="flex:1;min-width:160px">'+
-          '<b style="font-family:var(--f-disp);display:block">'+esc(a.subject||meta.label)+'</b>'+
-          '<span class="caption">'+esc(meta.label)+' · filed by '+esc((a.profiles&&a.profiles.gamertag)||"member")+
-          (a.assigned_to ? ' · claimed by '+esc(names[a.assigned_to]||"a colleague") : '')+'</span></span>'+
-        (replies ? '<span class="chip chip-xs">'+replies+' repl'+(replies===1?"y":"ies")+'</span>' : "")+
-        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
-        '<span class="caption" aria-hidden="true">→</span></div>';
-    }).join("")
-    : CG._actionLoadError
-      /* never report an empty queue we aren't sure about — an unanswered case looks identical to
-         a clean room, and that is exactly how two open cases went unseen */
-      ? '<div class="card-b"><p class="caption" style="color:var(--red-ink)"><b>Couldn’t load the case queue.</b> '+esc(CG._actionLoadError)+' — the count above comes straight from the database, so cases may be waiting. Reload; if it persists this is a bug worth reporting.</p></div>'
-      : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
-  h += '</div>';
-
-  /* ticket archive — the full history, open or closed */
-  var arcAll = CG.allTickets(), arcClosed = arcAll.filter(function(t){ return !t.isOpen; }).length;
-  h += '<div class="card raise" style="margin-bottom:18px;cursor:pointer" data-go="#/hub/archive" role="link" tabindex="0" aria-label="Open the ticket archive">'+
-    '<div class="card-h"><h3>Ticket archive</h3><span class="sec-link">'+CG.ic("db",14)+' Open the archive</span></div>'+
-    '<div class="card-b"><p class="caption">Every complaint, appeal, request, and application the league office has handled — open or closed — with its result and full conversation. '+
-      '<b>'+arcAll.length+'</b> ticket'+(arcAll.length===1?"":"s")+' on file'+(arcClosed?', '+arcClosed+' resolved':"")+'.</p></div></div>';
-
-  /* active discipline */
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3><span class="chip">'+sus.length+'</span></div>';
-  h += sus.length ? sus.map(function(s){
-      var p = CG.playerById(lg, s.playerId);
-      /* an enforcement-void suspension belongs to a player with no roster spot, so they aren't in
-         lg.players — fall back to the name carried on the suspension record itself */
-      var nm = p ? p.tag : (s.playerName || "A player");
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<b style="font-family:var(--f-disp)">'+esc(nm)+'</b>'+
-        '<span class="caption" style="flex:1">'+esc(s.reason||"")+'</span>'+
-        '<span class="chip chip-loss">'+(s.mode==="date"?("until "+(s.endsAt?CG.fmtDay(Date.parse(s.endsAt)):"further notice")):s.mode==="seasons"?("through Season "+(s.untilSeason||"—")):(s.games+" game"+(s.games===1?"":"s")))+'</span>'+
-        (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
-    }).join("")
-    : '<div class="card-b"><p class="caption">No one is suspended. '+(CG.role()==="commish"?'Suspensions are issued from <a href="#/admin/users" style="font-weight:700;border-bottom:2px solid var(--chrome)">Users &amp; roles</a>.':'The commissioner issues suspensions; the record shows here and on profiles.')+'</p></div>';
-  h += '</div>';
-
-  /* recent finals — spot-check the EA imports */
-  h += '<div class="card"><div class="card-h"><h3>Recent finals — spot-check the imports</h3><span class="chip">auto-imported from EA</span></div>';
-  h += finals.length ? finals.slice(0,6).map(function(r){
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:120px">'+CG.fmtDay(r.at)+'</span>'+
-        '<span class="teamcell">'+CG.crest(r.away,20)+'<b class="mono" style="font-size:12px">'+esc(r.away)+' '+r.score[r.away]+'</b></span><span class="caption">@</span>'+
-        '<span class="teamcell">'+CG.crest(r.home,20)+'<b class="mono" style="font-size:12px">'+esc(r.home)+' '+r.score[r.home]+'</b></span>'+
-        (r.ot?'<span class="chip" style="font-size:9px">OT</span>':"")+
-        '<a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/matchup/'+r.id+'">Box score</a></div>';
-    }).join("")
-    : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
-  h += '</div>';
-
-  /* staff tools — actionable first (tasks, EA triage), then reference (directory, activity) */
-  h += CG.staffTasksCard();
-  h += CG.staffVotesCard();
-  h += CG.staffEaCard();
-  h += CG.staffDirectoryCard();
-  h += CG.staffActivityCard();
-
-  /* season award ballots — staff vote all season; the commissioner finalizes after the finale */
-  var BALLOT_CATS = [
-    ["mvp","Most Valuable Player", null],
-    ["best_goalie","Best Goaltender", "G"],
-    ["best_defenseman","Best Defenseman", "D"],
-    ["rookie_of_year","Rookie of the Year", null]
-  ];
-  var isCommish = CG.role()==="commish";
-  /* Rule 2.7 — Media holds no ballot; the RLS policy refuses the write either way */
-  var mediaNoBallot = CG.isMediaOnlyStaff();
-  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3>'+
-    '<span class="chip">'+(mediaNoBallot?"read-only for Media":"one vote each")+'</span></div>';
-  h += BALLOT_CATS.map(function(cat){
-    var pool = (lg.players||[]).filter(function(p){
-      if (cat[2]==="G") return p.pos==="G";
-      if (cat[2]==="D") return ["LD","RD","D"].indexOf(p.pos)>=0;
-      return true;
-    }).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
-    var opts = '<option value="">— pick a player —</option>'+pool.map(function(p){
-      return '<option value="'+p.id+'">'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
-    var won = (lg.seasonAwards||[]).find(function(a){ return a.category===cat[0]; });
-    return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
-      '<b style="font-family:var(--f-disp);min-width:190px">'+cat[1]+'</b>'+
-      (won ? '<span class="chip chip-win">Decided</span><span class="caption" data-ballot-tally="'+cat[0]+'"></span>'
-        : mediaNoBallot
-          /* Rule 2.7 — an MVP vote is the purest form of voting for your own club, and Media is the
-             one department that may run one. Tally stays visible; the picker doesn't. */
-          ? '<span class="caption" style="flex:1">Media staff don’t hold a ballot (Rule 2.7).</span>'+
-            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'
-          : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
-            '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
-            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
-            (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
-      '</div>';
-  }).join("");
-  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
-    (mediaNoBallot
-      ? 'Media staff read the tallies but don’t vote on awards (Rule 2.7) — the department covers the league rather than deciding it.'
-      : 'Every staff member and commissioner gets one vote per award (change it any time before the finalize). Media staff are the exception — they hold no ballot (Rule 2.7). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.')+
-    '</span></div></div>';
-  return h;
-};
-CG.AFTER._staffdesk = function(){
-  /* applications open into their own page (the reviewer vote decides there) — no inline decide */
-  CG.wireStaffExtras();
-
-  /* ---- season award ballots ---- */
-  var sid = CG.SEASON && CG.SEASON.id;
-  if (sid && CG.sb && document.querySelector("[data-ballot-cat],[data-ballot-tally]")){
-    var names = {}; (CG.lg._profilesRaw||[]).forEach(function(p){ names[p.id]=p.gamertag||p.display_name||"—"; });
-    CG.sb.from("award_ballots").select("category,voter_id,profile_id").eq("season_id", sid).then(function(r){
-      var rows = (r&&r.data)||[];
-      document.querySelectorAll("[data-ballot-cat]").forEach(function(sel){
-        var mine = rows.find(function(x){ return x.category===sel.getAttribute("data-ballot-cat") && x.voter_id===CG.auth.user.id; });
-        if (mine) sel.value = mine.profile_id;
-      });
-      document.querySelectorAll("[data-ballot-tally]").forEach(function(el){
-        var cat = el.getAttribute("data-ballot-tally");
-        var votes = rows.filter(function(x){ return x.category===cat; });
-        if (!votes.length){ el.textContent = "no votes yet"; return; }
-        var counts = {}; votes.forEach(function(v){ counts[v.profile_id]=(counts[v.profile_id]||0)+1; });
-        var top = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a]; }).slice(0,3);
-        el.textContent = votes.length+" vote"+(votes.length===1?"":"s")+" · leading: "+
-          top.map(function(pid){ return (names[pid]||"?")+" ("+counts[pid]+")"; }).join(", ");
-      });
-    });
-  }
-  document.querySelectorAll("[data-ballot-save]").forEach(function(b){ b.addEventListener("click", function(){
-    var cat=this.getAttribute("data-ballot-save"), btn=this;
-    var sel=document.querySelector('[data-ballot-cat="'+cat+'"]');
-    if(!sel||!sel.value){ CG.toast("Pick a player first","err"); return; }
-    btn.disabled=true;
-    CG.sb.from("award_ballots").upsert({ season_id:CG.SEASON.id, category:cat, voter_id:CG.auth.user.id,
-      profile_id:sel.value, updated_at:new Date().toISOString() },{ onConflict:"season_id,category,voter_id" })
-      .then(function(r){
-        btn.disabled=false;
-        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        CG.toast("Vote saved — change it any time","ok"); CG.router();
-      });
-  }); });
-  document.querySelectorAll("[data-ballot-final]").forEach(function(b){ b.addEventListener("click", function(){
-    var cat=this.getAttribute("data-ballot-final"), label=this.getAttribute("data-label");
-    CG.confirm("Finalize "+label+"?",
-      "Tallies the staff ballots and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to break it. Re-running later corrects the record.",
-      "Finalize award", function(){
-      CG.sb.rpc("finalize_season_award",{ p_season:CG.SEASON.id, p_category:cat }).then(function(r){
-        if(r.error){ CG.toast(r.error.message,"err"); return; }
-        CG.toast(String(r.data||"Winner")+" wins "+label,"ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-};
-CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
-
-/* ================================================================
-   LIVE ADMIN: OVERVIEW — real league state, real action items
-   ================================================================ */
-CG.admOverviewLive = function(){
-  var lg = CG.lg;
-  var unlinked = (CG.TEAMS||[]).filter(function(t){ return !t.eaClubId; });
-  var pendingApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
-  var openCases = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; });
-  var unsigned = (lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===((CG.SEASON&&CG.SEASON.id)||null)) && !(lg._rosteredIds||{})[r.profile_id]; });
-  var nextG = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at>CG.now(); }).sort(function(a,b){ return a.at-b.at; })[0];
-  var days = CG.daysToStart ? CG.daysToStart() : null;
-  var draftSt = lg.draftState ? lg.draftState.status : null;
-  var h = '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>days to puck drop</span></div>'+
-    '<div class="kpi'+(unsigned.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+unsigned.length+'</b><span>'+(draftSt==="complete"?"free agents unsigned":"signed up · no club")+'</span></div>'+
-    '<div class="kpi'+(pendingApps.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+pendingApps.length+'</b><span>owner apps pending</span></div>'+
-    '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
-    '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
-    '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">5</b><span>automations</span></div></div>';
-  var actions = [];
-  if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
-  if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
-  if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason","Pre-season"]);
-  if (openCases.length) actions.push([openCases.length+' complaint'+(openCases.length===1?"":"s / requests")+' open in the league office',"#/admin/complaints","Case queue"]);
-  if (draftSt && draftSt!=="complete") actions.push(["The draft is "+draftSt,"#/draft","Draft room"]);
-  h += '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>Needs your attention</h3>'+(actions.length?'<span class="chip chip-warn">'+actions.length+'</span>':'<span class="chip chip-win">All clear</span>')+'</div>'+
-    (actions.length ? actions.map(function(a){
-      return '<div class="titem" style="padding:12px 18px;border-top:1px solid var(--line-soft)"><span class="t-dot red"></span><span style="flex:1">'+a[0]+'</span><a class="btn btn-ghost btn-sm" href="'+a[1]+'">'+a[2]+'</a></div>';
-    }).join("") : '<div class="card-b"><span class="caption">Nothing pending — registrations, cases, and club links are all handled.</span></div>')+'</div>';
-  h += '<div class="stack"><div class="card"><div class="card-h"><h3>Next game night</h3><a class="sec-link" href="#/admin/schedule">Schedule</a></div><div class="card-b">'+
-    (nextG ? '<b style="font-family:var(--f-disp);font-size:16px">'+CG.fmtDay(nextG.at)+'</b><p class="caption" style="margin-top:6px">First puck drop '+CG.fmtTime(nextG.at)+' · codes at T-30 · servers set 30 min before the first game.</p>'
-           : '<span class="caption">No games scheduled yet.</span>')+'</div></div>'+
-    '<div class="card"><div class="card-h"><h3>How results work</h3><a class="sec-link" href="#/admin/eastats">EA stats</a></div><div class="card-b"><p class="small" style="color:var(--steel)">Scores and full box scores import automatically from the EA NHL match record after every final — standings, stats, overalls, news recaps, and Discord posts all follow with no manual entry.</p></div></div></div></div>';
-  return h;
-};
-
-/* ================================================================
-   LIVE ADMIN: AUTOMATIONS — real heartbeats + run-now buttons
-   ================================================================ */
-/* ================================================================
-   RULE 2.5 DEAD CAP — unsigned contracts count against the cap.
-   Mirrors public.team_cap_used: an active, non-management contract
-   covering this season whose player has no roster spot holds its full
-   salary against the club until the player registers. ============= */
-CG.deadCapEntries = function(lg, code){
-  if (!lg || !lg.live || !lg._contractsRaw) return [];
-  var sn = (CG.SEASON && CG.SEASON.number) || 1, rostered = lg._rosteredIds || {}, idToCode = lg._idToCode || {};
-  return lg._contractsRaw.filter(function(c){
-    return c.status==="active" && !c.is_manager && c.team_id && idToCode[c.team_id]===code &&
-           (c.start_season||1)<=sn && (c.end_season||1)>=sn && !rostered[c.profile_id];
-  });
-};
-CG.deadCapFor = function(lg, code){
-  return CG.deadCapEntries(lg, code).reduce(function(s,c){ return s+(c.salary||0); },0);
-};
-/* profile ids under an active team contract this season. A contracted player returns to
-   their own club by registering (Rule 2.5), so they must never appear as a free agent or a
-   draft prospect — this guards the client pools even if an auto-activation hasn't run yet. */
-CG.contractHeldIds = function(){
-  var out = {}, sn = (CG.SEASON && CG.SEASON.number) || 1;
-  ((CG.lg && CG.lg._contractsRaw) || []).forEach(function(c){
-    if (c.status==="active" && !c.is_manager && c.team_id && (c.start_season||1)<=sn && (c.end_season||1)>=sn) out[c.profile_id]=true;
-  });
-  return out;
-};
-CG._origTeamPayroll = CG._origTeamPayroll || CG.teamPayroll;
-CG.teamPayroll = function(lg, code){
-  return CG._origTeamPayroll(lg, code) + ((lg && lg.live) ? CG.deadCapFor(lg, code) : 0);
-};
-/* Team HQ → Roster: name the dead money so management knows exactly why the number moved */
-CG._origHubRoster = CG._origHubRoster || CG.hubRoster;
-CG.hubRoster = function(qs){
-  var h = CG._origHubRoster(qs);
-  var club = CG.myClub && CG.myClub(); if (!club) return h;
-  var dead = CG.deadCapEntries(CG.lg, club);
-  if (!dead.length) return h;
-  var names = dead.map(function(c){
-    var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===c.profile_id; });
-    return '<b>'+esc((pr && (pr.gamertag||pr.display_name)) || "A player")+'</b> ('+CG.fmtMoney(c.salary||0)+' through Season '+(c.end_season||"—")+')';
-  }).join(", ");
-  var note = '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
-    '<span><b style="font-family:var(--f-disp)">Dead cap — unsigned contracts.</b> '+names+' — under contract but not yet registered for this season. The salary counts against your cap and they can’t play until they sign up; registering puts them straight back on your roster at no extra cap cost. If the club changes owners first, the deal is voided and the player is suspended for its remaining length (Rule 2.5).</span></div>';
-  var anchor = '<span>Salary cap</span></div></div>';
-  h = h.indexOf(anchor) > -1 ? h.replace(anchor, anchor + note) : note + h;
-  return h.replace('<span>Active payroll</span>', '<span>Payroll + dead cap</span>');
-};
-
-CG.AUTOMATIONS = [
-  { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
-  { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
-  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
-  { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
-  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
-  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
-  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
-  { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
-  { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
-  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
-  { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
-  { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
-];
-CG.admAutomationsLive = function(){
-  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
-  /* staff channel configuration — turns on the staff notifications */
-  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Staff Discord channels</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
-    '<div class="card-b">'+
-    '<p class="caption" style="margin-bottom:14px;max-width:74ch">One webhook per staff channel. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Each channel below falls back to <b>general</b> until you set it, so nothing is ever lost.</p>'+
-    '<label class="fld"><span>Staff general — applications, daily briefing, weekly report</span><input id="staffWh" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Staff welcome — the bot’s welcome post for each new staff member</span><input id="staffWhWelcome" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Casework &amp; enforcement — cases filed, discipline issued, forfeit rulings</span><input id="staffWhCase" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
-    '<label class="fld"><span>Staff role ID to ping on urgent items (optional)</span><input id="staffRole" placeholder="e.g. 1524970…" autocomplete="off"></label>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-chrome btn-sm" id="staffChanSave">Save channels</button>'+
-    '<button class="btn btn-ghost btn-sm" id="staffChanTest">Send test to general</button></div>'+
-    '<p class="caption" style="margin-top:10px">Saved webhooks are never shown back here — re-paste to change one. A blank field leaves that channel as-is.</p></div></div>';
-  h += '<div class="card">'+CG.AUTOMATIONS.map(function(a,i){
-    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-      '<div style="flex:1;min-width:220px"><b style="font-family:var(--f-disp)">'+esc(a.name)+'</b>'+
-        '<p class="caption" style="margin-top:2px">'+esc(a.desc)+' '+esc(a.every)+'.</p></div>'+
-      '<span class="chip" id="auto-st-'+a.key+'">checking…</span>'+
-      '<span class="caption mono" id="auto-ts-'+a.key+'" style="min-width:110px;text-align:right">—</span>'+
-      '<button class="btn btn-ghost btn-sm" data-auto-run="'+a.key+'">Run now</button></div>';
-  }).join("")+
-  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Also fully automatic, inside the database: standings on every final, auto news (recaps, spotlights, Three Stars), server resolution at lock, and every notification. Those have no off switch — they’re triggers.</span></div></div>';
-  return h;
-};
-CG.AFTER._admAutomations = function(){
-  /* staff channel config */
-  var chSt = document.getElementById("staffChanSt");
-  if (chSt){
-    /* refresh only the status chip — NOT the whole AFTER binder (re-running it would
-       re-addEventListener on the same, un-re-rendered buttons and stack duplicate handlers) */
-    function refreshChip(){
-      CG.sb.rpc("staff_channel_status").then(function(r){
-        var d = (r&&!r.error&&r.data)||{};
-        var on = [d.configured&&"general", d.welcome&&"welcome", d.casework&&"casework"].filter(Boolean);
-        chSt.textContent = on.length ? on.join(" · ")+(d.has_role?" · pings on":"") : "Not set up";
-        chSt.className = "chip "+(d.configured?(on.length===3?"chip-win":"chip-chrome"):"chip-warn");
-      });
-    }
-    refreshChip();
-    var saveBtn = document.getElementById("staffChanSave");
-    if (saveBtn) saveBtn.addEventListener("click", function(){
-      var v=function(id){ return (document.getElementById(id).value||"").trim(); };
-      var btn=this; btn.disabled=true;
-      CG.sb.rpc("set_staff_channels",{ p_general:v("staffWh"), p_welcome:v("staffWhWelcome"),
-        p_casework:v("staffWhCase"), p_role_id:v("staffRole") }).then(function(r){
-        btn.disabled=false;
-        if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
-        CG.toast("Staff channels saved","ok");
-        ["staffWh","staffWhWelcome","staffWhCase","staffRole"].forEach(function(id){ document.getElementById(id).value=""; });
-        refreshChip();
-      });
-    });
-    var testBtn = document.getElementById("staffChanTest");
-    if (testBtn) testBtn.addEventListener("click", function(){
-      var btn=this; btn.disabled=true; btn.textContent="Sending…";
-      CG.sb.rpc("staff_channel_test").then(function(r){
-        btn.disabled=false; btn.textContent="Send test to general";
-        if(r.error){ CG.toast(r.error.message||"Test failed","err"); return; }
-        CG.toast(r.data==="sent"?"Test posted to #staff-general":"Set up the webhook first",r.data==="sent"?"ok":"err");
-      });
-    });
-  }
-  /* heartbeats + per-run results: each function stamps rl_<key> every run and rl_<key>_result
-     with {ok, errCount, lastError}. A run that happened but FAILED shows red, not green. */
-  CG.sb.from("app_config").select("key,value").like("key","rl_%").then(function(r){
-    var map = {}, results = {};
-    ((r&&r.data)||[]).forEach(function(row){
-      var k = row.key.replace(/^rl_/,"");
-      if (/_result$/.test(k)){
-        try { results[k.replace(/_result$/,"")] = JSON.parse(row.value); } catch(e){}
-      } else map[k] = row.value;
-    });
-    CG.AUTOMATIONS.forEach(function(a){
-      var ts = map[a.key] ? Date.parse(map[a.key]) : null;
-      var stEl = document.getElementById("auto-st-"+a.key), tsEl = document.getElementById("auto-ts-"+a.key);
-      if (!stEl) return;
-      if (!ts){ stEl.textContent="never ran"; stEl.className="chip chip-warn"; return; }
-      var mins = Math.round((Date.now()-ts)/60000);
-      tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
-      var res = results[a.key];
-      var failed = res && res.ok === false;
-      var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
-      if (failed){
-        stEl.textContent = "Failing";
-        stEl.className = "chip chip-loss";
-        stEl.title = res.lastError ? String(res.lastError).slice(0,180) : "last run reported errors";
-      } else {
-        stEl.textContent = fresh ? "Running" : "Check";
-        stEl.className = "chip "+(fresh?"chip-win":"chip-warn");
-        stEl.title = "";
-      }
-    });
-  });
-  document.querySelectorAll("[data-auto-run]").forEach(function(b){ b.addEventListener("click", function(){
-    var key = this.getAttribute("data-auto-run"), btn=this;
-    var job = CG.AUTOMATIONS.find(function(a){ return a.key===key; });
-    btn.disabled = true; btn.textContent = "Running…";
-    if (job && job.rpc){
-      /* database-side job — run it the way the scheduler does */
-      CG.sb.rpc(job.rpc).then(function(r){
-        btn.disabled=false; btn.textContent="Run now";
-        if (r.error){ CG.toast(key+" failed: "+r.error.message,"err"); return; }
-        CG.toast(job.name+": "+JSON.stringify(r.data).slice(0,140),"ok");
-        if (CG.router) CG.router();
-      });
-      return;
-    }
-    fetch("/.netlify/functions/"+key, { method:"GET" }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
-      .then(function(out){
-        btn.disabled=false; btn.textContent="Run now";
-        CG.toast(key+": "+JSON.stringify(out).slice(0,140),"ok");
-        if (CG.router) CG.router();
-      })
-      .catch(function(e){ btn.disabled=false; btn.textContent="Run now"; CG.toast(key+" failed: "+e.message,"err"); });
-  }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: NEWSROOM — publish / edit / delete on the news table
-   (INSERTs auto-post to #news via the notify_discord_news trigger)
-   ================================================================ */
-CG.NEWS_CATS = ["League News","Game Recap","Transactions","Awards","Commissioner Update","Team Feature"];
-CG.admNewsLive = function(){
-  var arts = (CG.CONTENT.articles||[]).slice();
-  var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
-    '<div><h2 class="h-sec">Newsroom</h2><p class="lede" style="margin-top:6px">Stories publish straight to the site and auto-post to Discord’s #news. Recaps and player spotlights write themselves after finals — everything is editable here.</p></div>'+
-    '<button class="btn btn-chrome" id="newArt" style="align-self:flex-start">'+CG.ic("plus",15)+'New story</button></div>';
-  h += arts.length ? '<div class="card"><div class="card-h"><h3>Published</h3><span class="chip">'+arts.length+'</span></div>'+
-    arts.map(function(a){
-      var auto = /CGHL Wire/i.test(a.author||"");
-      return '<div class="card-b" style="display:flex;align-items:center;gap:12px;border-top:1px solid var(--line-soft)">'+
-        '<span class="nf-ic">'+CG.ic("doc",14)+'</span>'+
-        '<div style="flex:1;min-width:0;cursor:pointer" data-go="#/article/'+esc(a.slug)+'"><b>'+esc(a.title)+'</b>'+
-          '<p class="caption" style="margin-top:2px">'+esc(a.category)+' · '+esc(a.author)+' · '+CG.fmtDate(a.dateIso)+(auto?' · <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">AUTO</span>':"")+'</p></div>'+
-        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-news-edit="'+esc(a.slug)+'">Edit</button>'+
-        /* Media staff write and edit the paper; only the commissioner can unpublish. The
-           database agrees — news has INSERT/UPDATE policies for the media department and no
-           DELETE policy, so a delete would silently remove zero rows rather than error. */
-        (CG.role()==="commish" ? '<button class="btn btn-ghost btn-sm" data-news-del="'+esc(a.slug)+'" data-title="'+esc(a.title)+'">Delete</button>' : "")+
-        '</span></div>';
-    }).join("")+'</div>'
-  : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>No stories yet</b><p>Publish the first one — or wait for opening night, when recaps start writing themselves.</p></div></div>';
-  return h;
-};
-CG.newsForm = function(slug){
-  var a = slug ? (CG.CONTENT.articles||[]).find(function(x){ return x.slug===slug; }) : null;
-  var isNew = !a;
-  CG.modal(isNew?"New story":"Edit — "+esc(a.title),
-    '<label class="fld"><span>Headline</span><input id="nwT" value="'+esc(a?a.title:"")+'" placeholder="Sentence case, specific, no clickbait"></label>'+
-    '<label class="fld"><span>Category</span><select id="nwC">'+CG.NEWS_CATS.map(function(c){ return '<option'+(a&&a.category===c?" selected":"")+'>'+c+'</option>'; }).join("")+'</select></label>'+
-    '<label class="fld"><span>Body</span><textarea id="nwB" rows="8" placeholder="Write like a beat reporter. Blank lines become paragraphs.">'+esc(a?a.body.join("\n\n"):"")+'</textarea></label>'+
-    '<p class="caption">'+(isNew?"Publishing posts to the site immediately and announces in #news on Discord.":"Edits update the site — Discord isn’t re-posted.")+'</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="nwGo">'+(isNew?"Publish":"Save changes")+'</button>');
-  document.getElementById("nwGo").addEventListener("click", function(){
-    var t=(document.getElementById("nwT").value||"").trim();
-    if (t.length<8){ CG.toast("Give it a real headline first","err"); return; }
-    var body=(document.getElementById("nwB").value||"").trim();
-    if (!body){ CG.toast("Write the story body","err"); return; }
-    var rec={ title:t, category:document.getElementById("nwC").value, body:body };
-    var btn=this; btn.disabled=true;
-    /* The newsroom feed only renders rows stamped with the current season, so publishing without
-       one would write an article that is invisible the moment it saves. Refuse instead. */
-    if (isNew && !(CG.SEASON && CG.SEASON.id)){
-      btn.disabled=false; CG.toast("No active season — create one before publishing","err"); return;
-    }
-    var q = isNew
-      /* The byline was hardcoded to "— Commissioner", so a media-department story would have
-         published under a title its author doesn't hold. Sign it with the seat they actually sit in. */
-      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"League office")+" — "+(CG.role()==="commish"?"Commissioner":"League staff"), published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
-      : CG.sb.from("news").update(rec).eq("id", slug);
-    q.then(function(r){
-      btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(isNew?"Published — it’s live and posted to #news":"Story updated","ok");
-      CG.reloadLeague();
-    });
-  });
-};
-CG.AFTER._admNewsLive = function(){
-  var na=document.getElementById("newArt");
-  if (na) na.addEventListener("click", function(){ CG.newsForm(null); });
-  document.querySelectorAll("[data-news-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.newsForm(this.getAttribute("data-news-edit")); }); });
-  document.querySelectorAll("[data-news-del]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-news-del"), title=this.getAttribute("data-title");
-    CG.confirm("Delete “"+esc(title)+"”?","It comes off the site immediately. The Discord post (if any) stays.","Delete story", function(){
-      CG.sb.from("news").delete().eq("id",id).then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-        CG.toast("Story deleted","ok"); CG.reloadLeague();
-      });
-    });
-  }); });
-};
-
-/* ================================================================
-   LIVE ADMIN: POWER RANKINGS — automatic formula + manual override
-   ================================================================ */
-CG.admRankingsLive = function(){
-  var lg = CG.lg;
-  var order = CG._prDraft || (lg.powerRankings||[]).map(function(p){ return p.team; });
-  var dirty = !!CG._prDraft;
-  var manual = !!lg.prManual;
-  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Power rankings</h2><p class="lede" style="margin-top:6px">'+
-    (manual ? "Running on your <b>manual order</b>. The formula keeps computing underneath — return to automatic any time."
-            : "Running on the <b>automatic formula</b>: points percentage, goal differential per game, and last-five form. Reorder below to take manual control.")+'</p></div>';
-  h += '<div class="note '+(manual?"chr":"grn")+'" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp)">'+(manual?"Manual override active":"Automatic")+'</b>'+
-    '<span style="margin-left:auto;display:inline-flex;gap:8px">'+
-    (dirty?'<button class="btn btn-chrome btn-sm" id="prSave">Save this order</button><button class="btn btn-ghost btn-sm" id="prDiscard">Discard changes</button>':"")+
-    (manual&&!dirty?'<button class="btn btn-ghost btn-sm" id="prAuto">Return to automatic</button>':"")+'</span></div>';
-  h += '<div class="card">'+order.map(function(code,i){
-    var t = CG.TEAM[code]; if (!t) return "";
-    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
-      '<b class="num" style="font-family:var(--f-disp);font-size:20px;width:28px">'+(i+1)+'</b>'+CG.crest(code,28)+
-      '<b style="font-family:var(--f-disp);flex:1">'+esc(t.name)+'</b>'+
-      '<span class="caption">'+CG.lg.teams[code].w+"-"+CG.lg.teams[code].l+"-"+CG.lg.teams[code].otl+'</span>'+
-      '<span style="display:inline-flex;gap:4px">'+
-        '<button class="btn btn-ghost btn-sm" data-pr-up="'+i+'" '+(i===0?"disabled":"")+' aria-label="Move '+esc(t.name)+' up">'+CG.ic("up",13)+'</button>'+
-        '<button class="btn btn-ghost btn-sm" data-pr-down="'+i+'" '+(i===order.length-1?"disabled":"")+' aria-label="Move '+esc(t.name)+' down">'+CG.ic("down",13)+'</button></span></div>';
-  }).join("")+
-  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">The public rankings page and the homepage widget follow whatever is live here. Manual orders persist until you return to automatic.</span></div></div>';
-  return h;
-};
-CG.AFTER._admRankings = function(){
-  function draft(){ return CG._prDraft || (CG.lg.powerRankings||[]).map(function(p){ return p.team; }); }
-  document.querySelectorAll("[data-pr-up]").forEach(function(b){ b.addEventListener("click", function(){
-    var i=+this.getAttribute("data-pr-up"); var d=draft().slice();
-    var x=d[i-1]; d[i-1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
-  }); });
-  document.querySelectorAll("[data-pr-down]").forEach(function(b){ b.addEventListener("click", function(){
-    var i=+this.getAttribute("data-pr-down"); var d=draft().slice();
-    var x=d[i+1]; d[i+1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
-  }); });
-  /* These went straight at site_config, which is commissioner-only for good reason — the same
-     table holds the Discord invite and the playoff format. The rankings now move through two
-     RPCs pinned to the one key, so the media department can publish an order without being
-     handed the site's configuration. */
-  var sv=document.getElementById("prSave");
-  if (sv) sv.addEventListener("click", function(){
-    CG.sb.rpc("rankings_set_order", { p_codes: CG._prDraft }).then(function(r){
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      CG._prDraft=null; CG.toast("Manual ranking saved — live everywhere","ok"); CG.reloadLeague();
-    });
-  });
-  var dc=document.getElementById("prDiscard");
-  if (dc) dc.addEventListener("click", function(){ CG._prDraft=null; CG.router(); });
-  var au=document.getElementById("prAuto");
-  if (au) au.addEventListener("click", function(){
-    CG.sb.rpc("rankings_clear").then(function(r){
-      if (r.error){ CG.toast("Couldn’t switch: "+r.error.message,"err"); return; }
-      CG.toast("Back to the automatic formula","ok"); CG.reloadLeague();
-    });
-  });
-};
-
-/* ================================================================
-   LIVE ADMIN: HOMEPAGE MODULES — persisted league-wide via feature_flags
-   ================================================================ */
-CG.admHomepageLive = function(){
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Homepage</h2><p class="lede" style="margin-top:6px">Toggle front-page modules for everyone — saved to the league database, applied on the next load.</p></div>'+
-    '<div class="card"><div class="card-h"><h3>Homepage modules</h3><a class="sec-link" href="#/home">View front page</a></div>'+
-    CG.HOMEMODS.map(function(m){
-      var on = CG.modOn(m.key);
-      return '<div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line-soft)">'+
-        '<span style="flex:1;font-weight:600;font-size:14px">'+m.label+'</span>'+
-        '<button class="toggle'+(on?" on":"")+'" data-mod-live="'+m.key+'" role="switch" aria-checked="'+on+'" aria-label="'+m.label+'"></button></div>';
-    }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Sections hidden here disappear for every visitor. The hero, and anything a section needs to explain the season, stays.</span></div></div>';
-};
-CG.AFTER._admHomepage = function(){
-  document.querySelectorAll("[data-mod-live]").forEach(function(t){
-    t.addEventListener("click", function(){
-      var k = t.getAttribute("data-mod-live");
-      var next = !CG.modOn(k);
-      CG.sb.from("feature_flags").upsert({ key:"home_"+k, enabled:next, label:"Homepage: "+k },{ onConflict:"key" }).then(function(r){
-        if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        CG._flags["home_"+k]=next;
-        t.classList.toggle("on", next); t.setAttribute("aria-checked", next);
-        CG.toast("Front page updated for everyone","ok");
-      });
-    });
-  });
-};
-
-/* ================================================================
-   LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
-   ================================================================ */
-/* round-robin schedule generator (ported from the classic site, verified in prod
-   there): 3 ET slots a night, Wed/Thu/Fri, every club plays once per slot —
-   3 a night, 9 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
-   Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
-CG.GAMES_PER_CLUB = 54;
-CG.PRESEASON_WEEKS = 2;
-CG.OFFSEASON_DARK_DAYS = 14;   /* 2 weeks of no on-ice activity — staff seat owners + management */
-CG.FA_WINDOW_DAYS = 7;         /* free agency runs a full week; puck drop waits for it to close */
-CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
-/* Nights per playing week. Wednesday, Thursday, Friday — three slots a night means a club plays
-   three games an evening and nine a week. Lived in four places as a bare "2"; a schedule and a
-   season-date spacer that disagree about the length of a week silently produce a calendar that
-   does not match its own games. */
-CG.NIGHTS_PER_WEEK = 3;
-/* Wednesday-anchored night names, for copy that has to say which nights a week runs on. */
-CG.NIGHT_NAMES = function(n){
-  var d=["Wednesday","Thursday","Friday","Saturday","Sunday","Monday","Tuesday"].slice(0, Math.max(1,Math.min(7,n||3)));
-  return d.length===1 ? d[0] : d.slice(0,-1).join(", ")+" and "+d[d.length-1];
-};
-
-/* ================= THE SHAPE OF A SEASON =================
-   Weeks, nights a week, puck-drop times and the divisional split now live on the season row, set
-   from the Control Center. The constants above are only the fallback for a season saved before the
-   settings existed. Everything that needs to know the shape reads it from here, so the generator,
-   the season-date spacer and the published rulebook cannot drift apart. */
-CG.seasonShape = function(season){
-  var s = season || CG.SEASON || {};
-  var slots = String(s.night_slots || CG.NIGHT_SLOTS.join(","))
-    .split(",").map(function(t){ return t.trim(); })
-    .filter(function(t){ return /^\d{1,2}:\d{2}$/.test(t); });
-  if (!slots.length) slots = CG.NIGHT_SLOTS.slice();
-  var nights = Math.max(1, Math.min(7, +s.nights_per_week || CG.NIGHTS_PER_WEEK));
-  var weeks  = Math.max(1, +s.weeks || Math.ceil(CG.GAMES_PER_CLUB / slots.length / nights));
-  var perClub = weeks * nights * slots.length;
-  var teams = CG.TEAMS || [];
-  var divs = {};
-  teams.forEach(function(t){ divs[t.div || "—"] = (divs[t.div || "—"] || 0) + 1; });
-  var divNames = Object.keys(divs);
-  var rivals = teams.length ? (divs[teams[0].div || "—"] - 1) : 0;
-  var others = Math.max(0, teams.length - 1 - rivals);
-  var even = divNames.length > 1 && divNames.every(function(d){ return divs[d] === divs[divNames[0]]; });
-  var x = s.div_games == null ? null : +s.div_games;
-  var y = s.nondiv_games == null ? null : +s.nondiv_games;
-  var weighted = x != null && y != null && x > 0 && y > 0;
-  return {
-    weeks: weeks, nights: nights, slots: slots, perNight: slots.length,
-    perClub: perClub, perWeek: nights * slots.length,
-    teams: teams.length, divisions: divNames.length, evenDivisions: even,
-    rivals: rivals, others: others,
-    div: x, nondiv: y, weighted: weighted,
-    weightedTotal: weighted ? (rivals * x + others * y) : null
-  };
-};
-
-/* Which divisional splits actually fit a given games-per-club, for the settings screen to offer.
-   A split has to use up exactly the games the calendar provides — no remainder, no shortfall. */
-CG.splitOptions = function(shape){
-  var out = [];
-  if (!shape.evenDivisions || shape.rivals < 1 || shape.others < 1) return out;
-  for (var x = 1; x <= 40; x++){
-    var rem = shape.perClub - shape.rivals * x;
-    if (rem <= 0) break;
-    if (rem % shape.others) continue;
-    var y = rem / shape.others;
-    if (y < 1 || x < y) continue;                 /* rivals should not be played LESS than strangers */
-    out.push({ div:x, nondiv:y, ratio: +(x / y).toFixed(2) });
-  }
-  return out;
-};
-
-/* Build the meetings the season calls for and deal them into rounds — one round per time slot,
-   every club playing exactly once. A single greedy pass strands on lopsided splits, so this uses
-   seeded randomised restarts and then VERIFIES the result against what was asked for; it returns a
-   schedule that has been checked, or an error, never a broken schedule. */
-CG.buildRounds = function(codes, divOf, xDiv, yNon, opts){
-  opts = opts || {};
-  var tries = opts.tries || 400, perRound = codes.length / 2;
-  /* Rounds are grouped into nights, and a club must not draw the same opponent twice in one
-     evening. The rotation never did this for free; a weighted build will, repeatedly, because it
-     is only trying to hit meeting counts. It matters beyond aesthetics: if two clubs can meet
-     twice on one night then clubs + date no longer identify a fixture, and a game resumed after a
-     disconnect cannot be told apart from a genuine second meeting. */
-  var nightSize = Math.max(1, opts.nightSize || 1);
-  var key = function(a,b){ return a < b ? a+"|"+b : b+"|"+a; };
-  if (codes.length % 2) return { error:"An odd number of clubs cannot all play every slot." };
-  var seed = opts.seed || 12345;
-  var rnd = function(){ seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-
-  var base = {};
-  for (var i=0;i<codes.length;i++) for (var j=i+1;j<codes.length;j++){
-    var a=codes[i], b=codes[j], n = divOf[a]===divOf[b] ? xDiv : yNon;
-    if (n>0) base[key(a,b)] = n;
-  }
-  var total = Object.keys(base).reduce(function(s,k){ return s + base[k]; }, 0);
-  if (!total) return { error:"That works out to no games." };
-  if (total % perRound) return { error:"Those numbers give "+total+" meetings, which will not divide into rounds of "+perRound+"." };
-  var perClub = total * 2 / codes.length;
-
-  for (var attempt=0; attempt<tries; attempt++){
-    var need = {}; for (var k in base) need[k] = base[k];
-    var rounds = [], ok = true;
-    while (ok){
-      var left = 0; for (var k2 in need) left += need[k2];
-      if (!left) break;
-      var used = {}, round = [];
-      var fill = function(){
-        if (round.length === perRound) return true;
-        /* the club with the fewest remaining options goes first — it is the one that strands */
-        var a = null, bestN = Infinity;
-        for (var ci=0; ci<codes.length; ci++){
-          var c = codes[ci]; if (used[c]) continue;
-          var n = 0;
-          for (var di=0; di<codes.length; di++){ var d=codes[di];
-            if (d!==c && !used[d] && (need[key(c,d)]||0) > 0) n++; }
-          if (n < bestN){ bestN = n; a = c; }
-        }
-        if (a === null) return false;
-        var nightStart = rounds.length - (rounds.length % nightSize);
-        var sameNight = {};
-        for (var ri = nightStart; ri < rounds.length; ri++)
-          rounds[ri].forEach(function(pr){ sameNight[key(pr[0], pr[1])] = 1; });
-        var opts2 = codes.filter(function(b){
-          return b!==a && !used[b] && (need[key(a,b)]||0) > 0 && !sameNight[key(a,b)];
-        });
-        for (var q=opts2.length-1;q>0;q--){ var w=Math.floor(rnd()*(q+1)); var tmp=opts2[q]; opts2[q]=opts2[w]; opts2[w]=tmp; }
-        opts2.sort(function(p,r){ return (need[key(a,r)]||0) - (need[key(a,p)]||0); });
-        for (var oi=0; oi<opts2.length; oi++){
-          var b2 = opts2[oi];
-          used[a]=1; used[b2]=1; round.push([a,b2]); need[key(a,b2)]--;
-          if (fill()) return true;
-          need[key(a,b2)]++; round.pop(); delete used[a]; delete used[b2];
-        }
-        return false;
-      };
-      if (fill()) rounds.push(round); else ok = false;
-    }
-    if (!ok) continue;
-    /* verify before returning: pair counts, club loads, and no club twice in a round */
-    var meet = {}, per = {}, bad = null;
-    rounds.forEach(function(rd){
-      var seen = {};
-      if (rd.length !== perRound) bad = "short round";
-      rd.forEach(function(pr){
-        var a=pr[0], b=pr[1];
-        if (seen[a] || seen[b]) bad = "a club appears twice in one slot";
-        seen[a]=1; seen[b]=1;
-        meet[key(a,b)] = (meet[key(a,b)]||0)+1; per[a]=(per[a]||0)+1; per[b]=(per[b]||0)+1;
-      });
-    });
-    for (var bk in base) if (meet[bk] !== base[bk]) bad = bad || "a matchup came out the wrong number of times";
-    codes.forEach(function(c){ if (per[c] !== perClub) bad = bad || "clubs did not all get the same number of games"; });
-    if (!bad) return { rounds: rounds, perClub: perClub, attempts: attempt+1 };
-  }
-  return { error:"That split cannot be scheduled with "+codes.length+" clubs in these divisions. Try moving a game between the two figures." };
-};
-
-CG.HOLIDAYS = ["12-25","07-01","07-04"];
-
-/* One timeline card, shared by the Register page and My Hub, so a member sees the same road
-   ahead in both places. Steps auto-hide until their date is set. */
-CG.roadAheadCard = function(s, opts){
-  s = s || CG.SEASON || {}; opts = opts || {};
-  var steps = [
-    [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
-    [s.registration_deadline, "Sign-up deadline", "Register by now to be eligible for the draft. Miss it and you can still join — you’ll be randomly placed on a club after the draft instead."],
-    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
-    [s.draft_at, "Draft night", "Clubs pick from the eligible pool. Ten minutes after the final pick, first-year players under the five-game minimum are placed on random clubs."],
-    [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
-    [s.starts_at, "Puck drop", "The regular season starts once free agency closes — 54 games, every stat imported automatically from EA."]
-  ].filter(function(st){ return st[0]; });
-  if (!steps.length) return "";
-  var nowT = CG.now(), nextIdx = steps.findIndex(function(st){ return Date.parse(st[0]) > nowT; });
-  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">'+(opts.chip||"what registering starts")+'</span></div>'+
-    steps.map(function(st,i){
-      var t = Date.parse(st[0]), past = t <= nowT, isNext = i===nextIdx;
-      return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;'+(i?"border-top:1px solid var(--line-soft)":"")+(past?"opacity:.5":"")+'">'+
-        '<span class="mono" style="flex:0 0 150px;font-size:11.5px;color:var(--steel);padding-top:2px">'+CG.fmtFull(t)+(isNext?' <span class="chip chip-chrome" style="font-size:9px;vertical-align:middle">NEXT UP</span>':past?' <span style="font-size:9px;color:var(--steel)">✓</span>':"")+'</span>'+
-        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+st[1]+'</b><p class="caption" style="margin-top:2px">'+st[2]+'</p></span></div>';
-    }).join("")+'</div>';
-};
-
-/* ---- shared ET-safe date helpers ---- */
-CG.dayAdd = function(ymd, n){
-  var p=ymd.split("-").map(Number);
-  var d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
-  d.setUTCDate(d.getUTCDate()+n);
-  return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");
-};
-CG.dayOfWeek = function(ymd){ var p=ymd.split("-").map(Number); return new Date(Date.UTC(p[0],p[1]-1,p[2],12)).getUTCDay(); };
-CG.etISO = function(ymd, hm){ /* correct across EDT/EST */
-  var guess = new Date(ymd+"T"+hm+":00-04:00");
-  var et = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(guess);
-  if (et !== hm) guess = new Date(ymd+"T"+hm+":00-05:00");
-  return guess.toISOString();
-};
-CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(iso)); };
-CG.holidayWeek = function(wedYmd){ /* the Mon..Sun week around a game Wednesday */
-  var mon = CG.dayAdd(wedYmd,-2);
-  for (var i=0;i<7;i++){ if (CG.HOLIDAYS.indexOf(CG.dayAdd(mon,i).slice(5))>=0) return true; }
-  return false;
-};
-CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, then Wed..Fri; skip holiday weeks */
-  var wed = anchorYmd;
-  while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
-  var out=[], skipped=[], guard=0;
-  while (out.length < weeks && guard++ < 60){
-    if (CG.holidayWeek(wed)){ skipped.push(wed); wed = CG.dayAdd(wed,7); continue; }
-    /* days[] is the real list; wed/fri remain as the FIRST and LAST night of the week, which is
-       what the season-date spacer and the playoff seeder actually mean by them. */
-    var days = []; for (var d = 0; d < CG.NIGHTS_PER_WEEK; d++) days.push(CG.dayAdd(wed, d));
-    out.push({ week: out.length+1, days: days, wed: days[0], fri: days[days.length-1] });
-    wed = CG.dayAdd(wed,7);
-  }
-  return { nights: out, skipped: skipped };
-};
-
-CG.generateSchedule = function(stage){
-  stage = stage==="preseason" ? "preseason" : "regular";
-  var s = CG.SEASON;
-  if (!s || !s.id){ CG.toast("Create a season first — the schedule hangs off it","err"); return; }
-  var anchorIso = stage==="preseason" ? s.preseason_starts_at : s.starts_at;
-  if (!anchorIso){ CG.toast("Set the "+(stage==="preseason"?"pre-season":"season")+" start date in Seasons first (Auto-space fills it)","err"); return; }
-  var codes = (CG.TEAMS||[]).map(function(t){ return t.code; });
-  if (codes.length<2){ CG.toast("You need at least two clubs to build a schedule","err"); return; }
-  if ((CG.lg.schedule||[]).some(function(g){ return g.stage===stage; })){
-    CG.toast("A "+(stage==="preseason"?"pre-season":"regular-season")+" schedule already exists — clear it first","err"); return; }
-  var shape = CG.seasonShape(s);
-  var perNight = shape.perNight;
-  var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*shape.nights*perNight : shape.perClub;
-  var weeks = Math.ceil(slots/perNight/shape.nights);
-  /* A weighted split only applies to the regular season — the pre-season is a short shakedown and
-     is always played evenly. */
-  var useWeighted = stage!=="preseason" && shape.weighted;
-  if (useWeighted && shape.weightedTotal !== slots){
-    CG.toast("The divisional split adds up to "+shape.weightedTotal+" games but the calendar gives "+slots+" — fix it in Schedule settings","err");
-    return;
-  }
-  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks);
-  var skipNote = plan.skipped.length ? " Holiday week"+(plan.skipped.length===1?"":"s")+" skipped: "+plan.skipped.join(", ")+"." : "";
-  CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
-    codes.length+" clubs · "+slots+" games each"+(useWeighted?" ("+shape.div+" vs each division rival, "+shape.nondiv+" vs the rest)":"")+" · "+perNight+" a night, "+shape.perWeek+" a week ("+CG.NIGHT_NAMES(shape.nights)+", "+
-    shape.slots.map(function(t){ var h=+t.slice(0,2); return ((h%12)||12)+":"+t.slice(3); }).join(" / ")+" ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
-    "Generate "+(stage==="preseason"?"pre-season":"schedule"), function(){
-    function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
-    var dates=[];
-    plan.nights.forEach(function(n){ n.days.forEach(function(d){ dates.push({week:n.week,date:d}); }); });
-    var arr=codes.slice(); if (arr.length%2) arr.push(null);
-    var m=arr.length, fixed=arr[0], others=arr.slice(1), rows=[];
-    for (var r=0; r<slots; r++){
-      var day=dates[Math.floor(r/perNight)]; if(!day) continue;
-      var iso=CG.etISO(day.date, CG.NIGHT_SLOTS[r%perNight]);
-      var order=[fixed].concat(rrRotate(others,r));
-      for (var i=0;i<m/2;i++){
-        var a=order[i], b=order[m-1-i]; if(!a||!b) continue;
-        if (r%2===1){ var t=a; a=b; b=t; }
-        rows.push({ season_id:s.id, week:day.week, stage:stage, home_team_id:(CG.lg._codeToId||{})[a], away_team_id:(CG.lg._codeToId||{})[b], scheduled_at:iso, status:"scheduled" });
-      }
-    }
-    var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
-    (function insertNext(idx){
-      if (idx>=chunks.length){ CG.toast(rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks","ok"); CG.reloadLeague(); return; }
       CG.sb.from("games").insert(chunks[idx]).then(function(rz){
         if (rz.error){ CG.toast("Generation stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
         insertNext(idx+1);
@@ -10552,6 +3720,3286 @@ CG.generateSchedule = function(stage){
     })(0);
   });
 };
+CG.preseasonRelease = function(){
+  var s=CG.SEASON; if (!s || !s.id) return;
+  var n=(CG.lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
+  CG.confirm("Release all "+n+" random pre-season assignments?",
+    "This is what happens automatically when the final pre-season game ends — use it early only if you mean to. "+
+    "Players return to the draft pool; their pre-season stats and eligibility are kept. Management and manually signed players stay put.",
+    "Release to draft pool", function(){
+    CG.sb.from("roster_spots").delete().eq("season_id",s.id).eq("origin","preseason_random").select("profile_id").then(function(r){
+      if (r.error){ CG.toast("Couldn’t release: "+r.error.message,"err"); return; }
+      var ids=(r.data||[]).map(function(x){ return x.profile_id; });
+      var after=function(){
+        CG.sb.from("transactions").insert({ season_id:s.id, type:"release",
+          description:"Pre-season complete — "+ids.length+" randomly assigned players returned to the draft pool" }).then(function(){
+          CG.toast(ids.length+" players released to the draft pool","ok"); CG.reloadLeague();
+        });
+      };
+      if (ids.length) CG.sb.from("season_registrations").update({ status:"pending" }).eq("season_id",s.id).in("profile_id",ids).then(after);
+      else { CG.toast("Nothing to release","ok"); CG.reloadLeague(); }
+    });
+  });
+};
+
+CG.distributeRookies = function(){
+  var lg=CG.lg, s=CG.SEASON; if (!s || !s.id) return;
+  var rosteredIds=lg._rosteredIds||{};
+  var rookies=(lg._registrationsRaw||[]).filter(function(r){
+    return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined" &&
+      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
+  });
+  if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
+  CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
+    "This runs on its own ten minutes after the draft’s final pick — the button forces it early or re-runs it by hand. "+
+    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot, "+
+    "so rosters are settled before free agency and nobody can park a prospect to poach them later.",
+    "Distribute rookies", function(){
+    CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
+      CG.toast((r.data||0)+" rookie"+((r.data||0)===1?"":"s")+" placed on random clubs","ok"); CG.reloadLeague();
+    });
+  });
+};
+/* Late sign-ups (registered after the draft-eligibility cutoff) + anyone who joins mid-season are
+   randomly assigned to a club with an open spot. Runs on its own every 5 min; this forces it. */
+CG.assignLatecomers = function(){
+  CG.confirm("Assign late sign-ups now?",
+    "Everyone who registered after the sign-up deadline (or joined mid-season) and isn’t on a club yet "+
+    "goes to the emptiest club with an open roster spot. This also runs automatically every few minutes — "+
+    "the button just forces it. Puck-drop rosters are never blocked by a late arrival.",
+    "Assign late sign-ups", function(){
+    CG.sb.rpc("auto_assign_latecomers",{ p_force:true }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t assign: "+r.error.message,"err"); return; }
+      CG.toast((r.data||0)+" late sign-up"+((r.data||0)===1?"":"s")+" placed on clubs","ok"); CG.reloadLeague();
+    });
+  });
+};
+/* Decline / reinstate a registration (keeps banned or duplicate accounts out of assignment + the draft). */
+CG.setRegStatus = function(regId, status, name){
+  CG.sb.from("season_registrations").update({status:status}).eq("id",regId).then(function(r){
+    if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+    CG.toast((name||"Registration")+(status==="declined"?" declined":" reinstated"),"ok");
+    var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===regId;}); if(reg)reg.status=status;
+    CG.reloadLeague();
+  });
+};
+
+CG.assignRegistration = async function(regId, profileId, position, playerName, code){
+  var s=CG.SEASON, teamId=(CG.lg._codeToId||{})[code];
+  if(!s||!teamId){ CG.toast("Missing season/club","err"); return; }
+  var used={}; (CG.lg.byTeam[code]||[]).forEach(function(p){ if(p.jersey) used[p.jersey]=1; });
+  var num=0; for(var n=1;n<=99;n++){ if(!used[n]){ num=n; break; } }
+  var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 });
+  if(r1.error){ CG.toast("Couldn’t sign: "+r1.error.message,"err"); return; }
+  await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId);
+  await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" });
+  /* optimistic local update so the view reflects it immediately */
+  CG.lg._rosteredIds[profileId]=true;
+  if(CG.lg.byTeam[code]) CG.lg.byTeam[code].push({ id:profileId, tag:playerName, team:code, pos:position, jersey:num, mgmt:null, salary:0, depth:9 });
+  CG.toast(playerName+" signed to "+CG.TEAM[code].name+" · #"+num,"ok");
+  CG.router();
+};
+CG.setOwnerAppStatus = async function(id, status){
+  var r = await CG.sb.from("owner_applications").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id);
+  if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+  var app=(CG.lg._ownerApps||[]).find(function(x){ return x.id===id; }); if(app) app.status=status;
+  CG.toast("Application "+status,"ok"); CG.router();
+};
+/* ================================================================
+   LIVE ADMIN: USERS & ROLES (set_member_role / set_team_manager / ban)
+   ================================================================ */
+CG.admUsersLive = function(){
+  var lg=CG.lg;
+  var profs=(lg._profilesRaw||[]).slice().sort(function(a,b){ return (a.gamertag||a.display_name||"").localeCompare(b.gamertag||b.display_name||""); });
+  var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
+  /* management from the team registry, not roster spots — a manager without a
+     roster spot still holds the seat */
+  var mgmtBy={}; (CG.TEAMS||[]).forEach(function(t){
+    if(t.owner) mgmtBy[t.owner]={club:t.code, role:"owner"};
+    if(t.gm)    mgmtBy[t.gm]   ={club:t.code, role:"gm"};
+    if(t.agm)   mgmtBy[t.agm]  ={club:t.code, role:"agm"};
+  });
+  var banned=profs.filter(function(p){ return p.banned; }).length;
+  var staffN=profs.filter(function(p){ return p.role==="staff"; }).length;
+  function roleOpts(cur){ return ["member","staff","commissioner"].map(function(r){ return '<option value="'+r+'"'+(cur===r?" selected":"")+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>'; }).join(""); }
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
+  /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
+     (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
+  /* Media-only staff are expressly allowed a club seat (Rule 2.7), so they aren't a conflict */
+  var conflicts = profs.filter(function(pr){
+    return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id] && !CG.isMediaOnly(pr);
+  });
+  var mediaSeated = profs.filter(function(pr){ return CG.isMediaOnly(pr) && mgmtBy[pr.id]; });
+  h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation.</b> '+
+    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). '+
+    '<b>Media is the exception</b> (Rule 2.7): staff whose only department is Media may run a club, because Media rules on nothing. A commissioner can override the rest when there’s a reason to. '+
+    'Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
+    (mediaSeated.length?' <span style="display:block;margin-top:8px">Media staff running a club (allowed): '+
+      mediaSeated.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+
+    (conflicts.length?' <span style="display:block;margin-top:8px">Holding both hats right now (grandfathered for Season 1): '+
+      conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
+  h+='<div class="grid g3" style="margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+profs.filter(function(p){return p.role==="commissioner";}).length+'</b><span>commissioners</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+staffN+'</b><span>staff</span></div></div>';
+  h+='<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">'+
+    '<input type="search" id="userSearch" placeholder="Search players…" style="flex:1;min-width:200px" aria-label="Search users">'+
+    '<button class="btn btn-ghost btn-sm" id="bannedToggle" aria-pressed="false" style="white-space:nowrap">Banned only ('+banned+')</button></div>';
+  h+='<div class="card"><div class="card-h"><h3>Members</h3><span class="chip">'+profs.length+'</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>All users</caption><thead><tr><th class="tleft">Player</th><th class="tleft">League role</th><th class="tleft">Club</th><th>Status</th><th class="tright">Actions</th></tr></thead><tbody id="usersBody">'+
+    profs.map(function(pr){
+      var pl=playerById[pr.id], mg=mgmtBy[pr.id]||null, club=pl?pl.team:(mg?mg.club:null), mgmt=mg?mg.role:null;
+      var sus=(lg.suspensions||[]).find(function(s){ return s.playerId===pr.id && s.status==="active"; });
+      var gr=["member","staff","commissioner"].indexOf(pr.role)>=0?pr.role:"member";
+      return '<tr data-user-name="'+esc((pr.gamertag||pr.display_name||"").toLowerCase())+'" data-user-banned="'+(pr.banned?1:0)+'">'+
+        '<td class="tleft"><span class="playercell">'+(CG.safeAvatar(pr.avatar_url)?'<img src="'+CG.safeAvatar(pr.avatar_url)+'" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover">':"")+'<span class="nm">'+esc(pr.gamertag||pr.display_name||"—")+'</span></span></td>'+
+        '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
+        '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
+        '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
+        '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<button class="btn btn-ghost btn-sm" data-uedit="'+pr.id+'">Edit</button>'+
+          (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
+              :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
+          (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
+        '</span></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">League role saves the moment you change it. To make a member a club’s Owner, GM or AGM — or clear a seat — open that club under Teams and use its Front office pickers. Suspensions block roster moves and lineups for a set number of games or until a date (Rule 7.4) and show on the profile. Banning removes site access and Discord membership; it’s reversible.</span></div></div>';
+  return h;
+};
+CG.setUserRole = function(profileId, role, selEl){
+  var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; });
+  var prev = pr ? pr.role : null;
+  var name = pr ? (pr.gamertag||pr.display_name||"this member") : "this member";
+  if (selEl && prev) selEl.value = prev;   /* revert the visible dropdown now; a confirmed change re-renders on reload */
+  var roleLabel = role==="commissioner"?"Commissioner":role==="staff"?"Staff":"Member";
+  CG.confirm("Make "+esc(name)+" a "+roleLabel+"?",
+    role==="commissioner" ? "Commissioners have full league control and can’t hold a club seat. The last commissioner can’t be demoted."
+    : role==="staff" ? "Staff work the case queue and reviews, and can’t own or manage a club."
+    : "Member is a normal player account.",
+    "Set role", function(){
+    CG.sb.rpc("set_member_role",{ p_target:profileId, p_role:role, p_team_code:null }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t set role: "+r.error.message,"err"); return; }
+      if(pr) pr.role=role;
+      CG.toast(esc(name)+" is now "+roleLabel,"ok"); CG.reloadLeague();
+    });
+  });
+};
+/* Club-role assignment now lives on each club's edit page (CG.teamForm → Front office) via
+   type-ahead member pickers; the old per-user modals were removed with those buttons. */
+CG.suspendUser = function(profileId, name){
+  CG.modal("Suspend "+esc(name),
+    '<label class="fld"><span>Reason (shown on the profile’s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.2 — abusive conduct in lobby"></textarea></label>'+
+    '<div class="grid g2" style="gap:12px;margin-top:4px">'+
+    '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
+    '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
+    '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
+    '<p class="caption">A suspended member can’t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
+  var modeSel=document.getElementById("susMode");
+  modeSel.addEventListener("change", function(){
+    var byDate=this.value==="date";
+    document.getElementById("susGamesWrap").style.display=byDate?"none":"";
+    document.getElementById("susDateWrap").style.display=byDate?"":"none";
+  });
+  document.getElementById("susGo").addEventListener("click", function(){
+    var reason=(document.getElementById("susReason").value||"").trim();
+    if(!reason){ CG.toast("Give the suspension a reason — it’s the league record","err"); return; }
+    var mode=modeSel.value, games=null, ends=null;
+    if (mode==="games"){
+      games=parseInt(document.getElementById("susGames").value,10);
+      if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
+    } else {
+      var v=document.getElementById("susDate").value;
+      if(!v){ CG.toast("Pick the end date","err"); return; }
+      ends=CG.etISO(v.slice(0,10), v.slice(11,16));
+    }
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
+      if(CG.closeOverlay) CG.closeOverlay();
+      CG.toast(name+" suspended "+(mode==="games"?"for "+games+" game"+(games===1?"":"s"):"until "+CG.fmtFull(Date.parse(ends))),"ok");
+      CG.reloadLeague();
+    });
+  });
+};
+CG.liftUserSuspension = function(susId, name){
+  CG.confirm("Lift "+esc(name)+"’s suspension?","They can be rostered and make moves again immediately. The record stays on their profile as served.","Lift suspension", function(){
+    CG.sb.rpc("lift_suspension",{ p_id:susId }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t lift: "+r.error.message,"err"); return; }
+      CG.toast(name+"’s suspension lifted","ok"); CG.reloadLeague();
+    });
+  });
+};
+CG.banUser = function(profileId, name){
+  CG.modal("Ban "+esc(name)+"?",
+    '<label class="fld"><span>Reason (shown to the member)</span><textarea id="banReason" rows="2" placeholder="e.g. repeated conduct violations"></textarea></label>'+
+    '<p class="caption">Bans remove site access and remove the member from the Chel Gaming Discord. Reversible with Unban.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="banGo">Ban member</button>');
+  document.getElementById("banGo").addEventListener("click", function(){
+    var reason=(document.getElementById("banReason").value||"").trim();
+    CG.sb.rpc("ban_player",{ p_profile:profileId, p_reason:reason }).then(function(r){
+      if(r.error){ CG.toast("Couldn’t ban: "+r.error.message,"err"); return; }
+      var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr){ pr.banned=true; pr.ban_reason=reason; }
+      if(CG.closeOverlay) CG.closeOverlay(); CG.toast(name+" banned","ok"); CG.router();
+    });
+  });
+};
+CG.unbanUser = function(profileId){
+  CG.sb.rpc("unban_player",{ p_profile:profileId }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t unban: "+r.error.message,"err"); return; }
+    var pr=(CG.lg._profilesRaw||[]).find(function(x){ return x.id===profileId; }); if(pr) pr.banned=false;
+    CG.toast("Member unbanned","ok"); CG.router();
+  });
+};
+/* Full profile editor — every identity field the office might need to correct.
+   Saved with .select() so an RLS-blocked write fails loud instead of toasting
+   success over nothing (the case-system lesson). */
+CG.userEditModal = function(id){
+  var pr = (CG.lg._profilesRaw||[]).find(function(p){ return p.id===id; });
+  if (!pr){ CG.toast("Profile not found — reload and try again","err"); return; }
+  var nm = pr.gamertag||pr.display_name||"member";
+  function fld(label,fid,val,attrs){ return '<label class="fld"><span>'+label+'</span><input id="'+fid+'" value="'+esc(val==null?"":val)+'" '+(attrs||"")+'></label>'; }
+  CG.modal("Edit player — "+esc(nm),
+    '<div class="grid g2" style="gap:12px">'+
+    fld("Gamertag","ueGT",pr.gamertag)+
+    fld("Display name","ueDN",pr.display_name)+
+    fld("EA gamertag (exact)","ueEA",pr.ea_id,'placeholder="as it appears in NHL"')+
+    '<label class="fld"><span>Platform</span><select id="uePlat">'+
+      ["","PlayStation 5","Xbox Series X|S","PC"].map(function(p){ return '<option value="'+esc(p)+'"'+((pr.platform||"")===p?" selected":"")+'>'+(p||"—")+'</option>'; }).join("")+
+      '</select></label>'+
+    fld("Time zone","ueTZ",pr.timezone,'placeholder="e.g. Eastern"')+
+    fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
+    fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
+    fld("Twitch channel","ueTw",pr.twitch,'placeholder="channel name only"')+
+    '</div>'+
+    '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ueGo">Save player</button>');
+  document.getElementById("ueGo").addEventListener("click", function(){
+    var jer = parseInt(document.getElementById("ueJer").value,10);
+    var ovr = parseInt(document.getElementById("ueOvr").value,10);
+    var payload = {
+      gamertag:(document.getElementById("ueGT").value||"").trim()||null,
+      display_name:(document.getElementById("ueDN").value||"").trim()||null,
+      ea_id:(document.getElementById("ueEA").value||"").trim()||null,
+      platform:document.getElementById("uePlat").value||null,
+      timezone:(document.getElementById("ueTZ").value||"").trim()||null,
+      jersey_number:isNaN(jer)?null:Math.max(1,Math.min(99,jer)),
+      overall:isNaN(ovr)?null:Math.max(40,Math.min(99,ovr)),
+      twitch:(document.getElementById("ueTw").value||"").trim()||null
+    };
+    if (!payload.gamertag){ CG.toast("A player needs a gamertag","err"); return; }
+    var btn=this; btn.disabled=true;
+    CG.sb.from("profiles").update(payload).eq("id",id).select("id").then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (!r.data || !r.data.length){ CG.toast("The database refused the edit (no row updated) — check your seat and retry","err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast("Player saved","ok");
+      CG.reloadLeague();
+    });
+  });
+};
+CG.AFTER._admUsers = function(){
+  document.querySelectorAll("[data-uedit]").forEach(function(b){
+    b.addEventListener("click", function(){ CG.userEditModal(this.getAttribute("data-uedit")); });
+  });
+  var search=document.getElementById("userSearch"), bannedBtn=document.getElementById("bannedToggle");
+  function applyFilter(){
+    var qy=(search&&search.value||"").toLowerCase();
+    var bannedOnly = bannedBtn && bannedBtn.getAttribute("aria-pressed")==="true";
+    var shown=0;
+    document.querySelectorAll("#usersBody tr").forEach(function(tr){
+      var hit = tr.getAttribute("data-user-name").indexOf(qy)>=0 &&
+                (!bannedOnly || tr.getAttribute("data-user-banned")==="1");
+      tr.style.display = hit ? "" : "none";
+      if (hit) shown++;
+    });
+    var empty=document.getElementById("usersEmpty");
+    if (!shown && !empty){
+      empty=document.createElement("div");
+      empty.id="usersEmpty"; empty.className="card-b";
+      empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>';
+      var tbl=document.querySelector("#usersBody").closest(".tblwrap");
+      tbl.parentNode.insertBefore(empty, tbl.nextSibling);
+    } else if (shown && empty){ empty.remove(); }
+    else if (empty){ empty.innerHTML='<span class="caption">'+(bannedOnly?"No banned members — the room is clean.":"No players match that search.")+'</span>'; }
+  }
+  if(search) search.addEventListener("input", applyFilter);
+  if(bannedBtn) bannedBtn.addEventListener("click", function(){
+    var on = this.getAttribute("aria-pressed")==="true";
+    this.setAttribute("aria-pressed", on?"false":"true");
+    this.classList.toggle("btn-ink", !on);
+    this.classList.toggle("btn-ghost", on);
+    applyFilter();
+  });
+  document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value, this); }); });
+  document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-lift]").forEach(function(b){ b.addEventListener("click", function(){ CG.liftUserSuspension(this.getAttribute("data-lift"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
+};
+
+/* ================================================================
+   LIVE ADMIN: LEAGUES & TIERS (CG umbrella — create_league RPC)
+   ================================================================ */
+/* The tier's mark: the emblem when one is set, the TIER n plate when not.
+   The plate is always in the markup and the emblem is laid over it, so hiding a failed <img>
+   reveals the plate rather than a broken-image glyph. Hiding it is the onerror below — the
+   overlay is opaque, so without that the plate stays covered. Belt: CG.installEmblemFallback
+   does the same from a captured error event, which keeps working if inline handlers are ever
+   dropped from the CSP. */
+/* Error events on <img> don't bubble, but they can be captured — one listener covers every tier
+   mark on every page, present or future, without an inline handler. */
+CG.installEmblemFallback = function(){
+  if (CG._emblemFallback) return;
+  CG._emblemFallback = true;
+  document.addEventListener("error", function(e){
+    var el = e.target;
+    if (el && el.tagName === "IMG" && el.classList && el.classList.contains("tier-img")) el.style.display = "none";
+  }, true);
+};
+CG.tierPlate = function(l, size){
+  CG.installEmblemFallback();
+  return '<span class="tier-plate">'+
+      '<span class="tp-label">TIER</span>'+
+      '<b class="tp-num" style="font-size:'+(size|0)+'px">'+(l.tier|0)+'</b>'+
+    '</span>'+
+    (l.emblem ? '<img class="tier-img" src="'+esc(l.emblem)+'" alt="'+esc(l.code)+' emblem"'+
+                ' onerror="this.style.display=\'none\'">' : "");
+};
+/* The tier block doubles as the emblem slot in the Control Center: click it or drop an image on
+   it to change that tier's emblem. Saves on upload rather than behind a Save button — it's one
+   field, and a half-applied emblem is a worse state than no emblem. */
+CG.leagueEmblemZone = function(l){
+  return '<div class="lg-emblem" data-lg-zone="'+esc(l.code)+'"'+
+    ' role="button" tabindex="0" aria-label="Change the '+esc(l.code)+' emblem" title="Click or drop an image to set the '+esc(l.code)+' emblem">'+
+    CG.tierPlate(l, 24)+
+    '<span class="lg-emblem-hint">'+(l.emblem?"Replace":"Add emblem")+'</span></div>'+
+    '<input type="file" accept="image/*" hidden data-lg-file="'+esc(l.code)+'">';
+};
+CG.admLeagues = function(){
+  var leagues=(CG.LEAGUES||[]).slice().sort(function(a,b){ return a.tier-b.tier || a.sort-b.sort; });
+  var totalClubs=(CG.TEAMS||[]).length;
+  var top=(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL";
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Leagues &amp; tiers</h2><p class="lede" style="margin-top:6px">Chel Gaming is the umbrella. Each tier is its own league modeled on a real-world circuit — the <b>'+esc(top)+'</b> sits on top, built on the NHL. Add tiers beneath it (a CGAHL on the AHL, and so on) to grow the pyramid.</p></div>';
+  h+='<div class="grid g3" style="margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+leagues.length+'</b><span>tier'+(leagues.length===1?"":"s")+'</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+totalClubs+'</b><span>clubs</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc(top)+'</b><span>top tier</span></div></div>';
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The Chel Gaming pyramid</h3><span class="chip">'+leagues.length+' tier'+(leagues.length===1?"":"s")+'</span></div>';
+  h+=leagues.map(function(l,i){
+    return '<div class="card-b" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line)":"")+'">'+
+      CG.leagueEmblemZone(l)+
+      '<div style="flex:1 1 160px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b class="mono" style="font-size:16px">'+esc(l.code)+'</b>'+(i===0?' <span class="chip chip-chrome" style="font-size:9px">TOP TIER</span>':'')+'</div><div style="color:var(--steel);font-size:13px;margin-top:2px">'+esc(l.name)+'</div></div>'+
+      '<div style="flex:0 0 auto;text-align:right"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">MODELED ON</div><b style="font-family:var(--f-disp);font-size:16px">'+esc(l.inspiration||"—")+'</b></div>'+
+      '<div style="flex:0 0 auto;text-align:right;min-width:56px"><div style="font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--steel)">CLUBS</div><b class="num" style="font-family:var(--f-disp);font-size:16px">'+(l.teamCount||0)+'</b></div>'+
+      (l.emblem ? '<button class="btn btn-ghost btn-sm" data-lg-clear="'+esc(l.code)+'" style="flex:0 0 auto">Remove emblem</button>' : "")+
+    '</div>';
+  }).join("")+
+  '<div class="card-b" style="border-top:1px solid var(--line)"><p class="caption" style="margin:0">'+
+    'Click a tier plate or drop an image on it to set that tier’s emblem — PNG, JPG, WebP, GIF or SVG, under 2 MB. '+
+    'It saves straight away. The top tier’s emblem headlines the public Clubs page; the rest show here, and on '+
+    'their own pages as those are built. Tiers without an emblem keep the plain TIER plate.'+
+  '</p></div></div>';
+  var insp=["NHL","AHL","ECHL","KHL","SHL","Liiga","NCAA","CHL","OHL","WHL","QMJHL"];
+  h+='<div class="card"><div class="card-h"><h3>Add a tier</h3></div><div class="card-b">'+
+    '<div class="grid g2" style="gap:14px">'+
+    '<label class="fld"><span>League code</span><input id="lgCode" placeholder="e.g. CGAHL" maxlength="8" style="text-transform:uppercase"></label>'+
+    '<label class="fld"><span>Tier number</span><input id="lgTier" type="number" min="1" max="20" value="'+(leagues.length+1)+'"></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Full name</span><input id="lgName" placeholder="e.g. Chel Gaming American Hockey League"></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Real-world inspiration</span><input id="lgInsp" list="inspList" placeholder="e.g. AHL"><datalist id="inspList">'+insp.map(function(x){ return '<option value="'+x+'">'; }).join("")+'</datalist></label>'+
+    '</div>'+
+    '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn btn-chrome" id="lgCreate">Create tier</button></div>'+
+    '<p class="caption" style="margin-top:12px">A new tier is created empty. Clubs stay in their current league — assigning clubs to a tier (and promotion / relegation between them) is coming next.</p>'+
+  '</div></div>';
+  return h;
+};
+CG.createLeague = function(){
+  var code=(document.getElementById("lgCode").value||"").trim().toUpperCase();
+  var name=(document.getElementById("lgName").value||"").trim();
+  var tier=parseInt(document.getElementById("lgTier").value,10);
+  var insp=(document.getElementById("lgInsp").value||"").trim();
+  if(!code){ CG.toast("Give the tier a code","err"); return; }
+  if(!name){ CG.toast("Give the tier a full name","err"); return; }
+  if(!(tier>=1)){ CG.toast("Tier number must be 1 or more","err"); return; }
+  if((CG.LEAGUE_BY_CODE||{})[code]){ CG.toast(code+" already exists","err"); return; }
+  var btn=document.getElementById("lgCreate"); if(btn){ btn.disabled=true; btn.textContent="Creating…"; }
+  CG.sb.rpc("create_league",{ p_code:code, p_name:name, p_tier:tier, p_inspiration:insp||null }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); if(btn){ btn.disabled=false; btn.textContent="Create tier"; } return; }
+    CG.toast(code+" created","ok");
+    CG.loadLeagues().then(function(){ if(location.hash.indexOf("/leagues")>=0 && CG.router) CG.router(); });
+  });
+};
+/* Persist an emblem (or clear it with null) and refresh the panel from the DB, so what's on screen
+   is what's stored rather than what we hoped we stored. */
+CG.saveLeagueEmblem = function(code, url, zone){
+  return CG.sb.rpc("set_league_emblem", { p_code:code, p_url:url }).then(function(r){
+    if (r.error){
+      if (zone) zone.classList.remove("busy");
+      CG.toast(r.error.message || "Couldn’t save the emblem","err");
+      return false;
+    }
+    return CG.loadLeagues().then(function(fresh){
+      if (!fresh){
+        /* the write landed but the read-back didn't — don't repaint stale state and call it done */
+        if (zone) zone.classList.remove("busy");
+        CG.toast("Saved, but the panel couldn’t refresh — reload to see it","err");
+        return false;
+      }
+      CG.toast(url ? code+" emblem updated" : code+" emblem removed","ok");
+      if (location.hash.indexOf("/leagues")>=0 && CG.router) CG.router();
+      return true;
+    });
+  });
+};
+CG.AFTER._admLeagues = function(){
+  var b=document.getElementById("lgCreate"); if(b) b.addEventListener("click", CG.createLeague);
+  var code=document.getElementById("lgCode"); if(code) code.addEventListener("input", function(){ var s=this.selectionStart; this.value=this.value.toUpperCase(); try{ this.setSelectionRange(s,s); }catch(e){} });
+
+  /* --- tier emblems: click or drop on the tier plate --- */
+  document.querySelectorAll("[data-lg-zone]").forEach(function(zone){
+    var lgCode = zone.getAttribute("data-lg-zone");
+    var fileIn = document.querySelector('[data-lg-file="'+cssQ(lgCode)+'"]');
+    var clearBtn = document.querySelector('[data-lg-clear="'+cssQ(lgCode)+'"]');
+    function setBusy(on){
+      zone.classList.toggle("busy", !!on);
+      /* the lock has to cover the tier's Remove button too — it writes the same row through the
+         same RPC, so a clear confirmed mid-upload would race it and one of the two toasts lies */
+      if (clearBtn) clearBtn.disabled = !!on;
+    }
+    function upload(f){
+      if (!f) return;
+      /* the bucket's real allowlist, not /^image\//: an iPhone .heic passes "is an image" and is
+         then rejected by storage with a raw mime error the commissioner can do nothing with */
+      if (!CG.UPLOAD_MIME.test(f.type||"")){
+        CG.toast("Use a PNG, JPG, WebP, GIF or SVG — "+((f.type||"that file type")+" can’t be stored"),"err"); return;
+      }
+      if (f.size > 2*1024*1024){ CG.toast("Keep the emblem under 2 MB","err"); return; }
+      if (zone.classList.contains("busy")) return;            /* one upload at a time per tier */
+      setBusy(true);
+      CG.uploadLeagueEmblem(f, lgCode)
+        .then(function(url){ return CG.saveLeagueEmblem(lgCode, url, zone); })
+        .catch(function(e){
+          setBusy(false);
+          CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
+        });
+    }
+    if (fileIn){
+      zone.addEventListener("click", function(){ if(!zone.classList.contains("busy")) fileIn.click(); });
+      zone.addEventListener("keydown", function(e){
+        if (e.key==="Enter"||e.key===" "){ e.preventDefault(); if(!zone.classList.contains("busy")) fileIn.click(); }
+      });
+      fileIn.addEventListener("change", function(){
+        /* clear the input before uploading: browsers fire no change event when the same file is
+           picked twice, so after a failure re-picking that file would do nothing at all */
+        var f = fileIn.files[0]; fileIn.value = ""; if (f) upload(f);
+      });
+    }
+    zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
+    zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
+    zone.addEventListener("drop", function(e){
+      e.preventDefault(); zone.classList.remove("drag");
+      if (e.dataTransfer && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+    });
+  });
+  document.querySelectorAll("[data-lg-clear]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var lgCode = this.getAttribute("data-lg-clear");
+      CG.confirm("Remove the "+lgCode+" emblem?",
+        "The tier goes back to the plain TIER plate. The image file itself stays in storage — this only "+
+        "stops the site using it. You can upload a new one any time.",
+        "Remove", function(){ CG.saveLeagueEmblem(lgCode, null, null); });
+    });
+  });
+};
+
+/* ================================================================
+   LIVE ADMIN: EA STATS — automatic stats pipeline (replaces manual
+   results entry). Link each club to its EA club id; the scheduled
+   poller + ingest-stats function do the rest.
+   ================================================================ */
+CG.admEAStats = function(){
+  var lg = CG.lg;
+  var teams = (CG.TEAMS||[]).slice();
+  var linked = teams.filter(function(t){ return t.eaClubId; }).length;
+  var finals = (lg.schedule||[]).filter(function(g){ return g.status==="final"; });
+  var imported = finals.filter(function(g){ return g.eaMatchId; });
+  var pending = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at < CG.now()-30*60000; });
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">EA stats — automatic</h2><p class="lede" style="margin-top:6px">Final scores and full box scores import straight from the EA NHL match record — there is no manual results entry. Link each club to its EA club below; the poller pulls finished games automatically on game nights and writes every stat.</p></div>';
+  h+='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'+
+    '<div class="kpi'+(linked<teams.length?" alert":"")+'" style="cursor:default"><b class="num">'+linked+'/'+teams.length+'</b><span>clubs linked</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+imported.length+'</b><span>auto-imported finals</span></div>'+
+    '<div class="kpi'+(pending.length?" alert":"")+'" style="cursor:default"><b class="num">'+pending.length+'</b><span>awaiting stats</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:18px">'+(linked?(linked<teams.length?"Partial":"Active"):"Setup")+'</b><span>pipeline</span></div></div>';
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Club → EA club link</h3><span class="chip">'+linked+'/'+teams.length+' linked</span></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Each club needs its numeric EA club id</caption><thead><tr><th class="tleft">Club</th><th class="tleft">EA club id</th><th class="tleft">EA club name (optional)</th><th class="tright">Save</th></tr></thead><tbody>'+
+    teams.map(function(t){
+      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,22)+'<span class="nm">'+esc(t.name)+'</span></span></td>'+
+        '<td class="tleft"><input data-ea-id="'+t.id+'" value="'+esc(t.eaClubId||"")+'" placeholder="e.g. 45210" inputmode="numeric" style="max-width:130px"></td>'+
+        '<td class="tleft"><input data-ea-name="'+t.id+'" value="'+esc(t.eaClub||"")+'" placeholder="EA club name" style="max-width:200px"></td>'+
+        '<td class="tright"><button class="btn btn-ghost btn-sm" data-ea-save="'+t.id+'" data-code="'+esc(t.code)+'">Save</button></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the scheduled poller matches EA games to your schedule by club-pair + date and writes the final score and every box-score stat — no manual entry.</span></div></div>';
+  h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
+  if (imported.length){
+    h+= imported.slice().sort(function(a,b){ return b.at-a.at; }).slice(0,8).map(function(g){
+      return '<div class="card-b" style="border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+' '+g.awayScore+'</span></span><span class="caption">@</span><span class="teamcell"><span class="mono" style="font-size:12px">'+esc(g.home)+' '+g.homeScore+'</span>'+CG.crest(g.home,20)+'</span>'+
+        '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Box score</a>'+
+        '<button class="btn btn-ghost btn-sm" data-reopen-final="'+g.id+'" data-label="'+esc(g.away)+' @ '+esc(g.home)+'">Re-open</button></span></div>';
+    }).join("");
+  } else if (pending.length){
+    h+='<div class="card-b"><span class="caption"><b>'+pending.length+'</b> scheduled game'+(pending.length>1?"s have":" has")+' passed and '+(pending.length>1?"are":"is")+' still waiting for EA stats. If a game never imports, confirm both clubs are linked above and were in the same EA match.</span></div>';
+  } else {
+    h+='<div class="card-b"><div class="empty" style="padding:30px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No finals yet</b><p>Once the season starts, finished games appear here automatically as the poller imports them.</p></div></div>';
+  }
+  h+='</div>';
+  /* every EA payload the poller has seen is archived — anything that didn't land shows here */
+  h+='<div class="card"><div class="card-h"><h3>Unmatched EA matches</h3><span class="chip" id="eaUnCount">checking…</span></div>'+
+    '<div id="eaUnmatchedBody"><div class="card-b"><span class="caption">Loading the ingest archive…</span></div></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every EA match the poller sees is archived, even when it can’t be matched to a fixture — EA’s own history only keeps a club’s few most recent games, so nothing is lost. Fix the cause (link the club, move the fixture, or Re-open a wrongly-claimed final above) and hit <b>Re-ingest</b> to replay the archived box score.</span></div></div>';
+  return h;
+};
+CG.saveEAClub = function(teamId, code){
+  var idEl=document.querySelector('[data-ea-id="'+teamId+'"]'), nameEl=document.querySelector('[data-ea-name="'+teamId+'"]');
+  if(!idEl) return;
+  var eaId=(idEl.value||"").trim(), eaName=(nameEl.value||"").trim();
+  if (eaId && !/^\d+$/.test(eaId)){ CG.toast("EA club id should be numbers only","err"); return; }
+  var btn=document.querySelector('[data-ea-save="'+teamId+'"]'); if(btn){ btn.disabled=true; btn.textContent="Saving…"; }
+  CG.sb.from("teams").update({ ea_club_id: eaId||null, ea_club_name: eaName||null }).eq("id",teamId).then(function(r){
+    if(btn){ btn.disabled=false; btn.textContent="Save"; }
+    if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+    var t=CG.TEAM[code]; if(t){ t.eaClubId=eaId||null; t.eaClub=eaName||null; }
+    CG.toast(code+" EA link saved","ok"); CG.router();
+  });
+};
+CG.AFTER._admEAStats = function(){
+  document.querySelectorAll("[data-ea-save]").forEach(function(b){ b.addEventListener("click", function(){ CG.saveEAClub(this.getAttribute("data-ea-save"), this.getAttribute("data-code")); }); });
+  /* re-open a wrongly-matched final: clears the result + box score so the real import can land */
+  document.querySelectorAll("[data-reopen-final]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-reopen-final"), label=this.getAttribute("data-label");
+    CG.confirm("Re-open "+label+"?",
+      "The final score and every box-score stat for this game are cleared and it returns to the schedule. Use this when the EA match that claimed the slot was actually a different game (a scrim between the same clubs). The archived payload stays replayable below.",
+      "Re-open the game", function(){
+      CG.sb.rpc("reopen_game_final",{ p_game:id }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t re-open: "+r.error.message,"err"); return; }
+        CG.toast("Game re-opened — the result and box score were cleared","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+  /* unmatched / errored archive rows, with one-click replay */
+  var body=document.getElementById("eaUnmatchedBody"), count=document.getElementById("eaUnCount");
+  if (body && CG.sb){
+    CG.sb.from("ea_ingest_log").select("ea_match_id,et_day,ea_club_ids,status,reason,last_attempt_at")
+      .in("status",["unmatched","error"]).order("last_attempt_at",{ascending:false}).limit(20)
+      .then(function(r){
+        var rows=(r&&r.data)||[];
+        if (count) count.textContent = rows.length ? rows.length+" need attention" : "all clear";
+        if (count) count.className = "chip "+(rows.length?"chip-warn":"chip-win");
+        if (r&&r.error){ body.innerHTML='<div class="card-b"><span class="caption">Couldn’t read the archive: '+esc(r.error.message)+'</span></div>'; return; }
+        if (!rows.length){ body.innerHTML='<div class="card-b"><span class="caption">Nothing waiting — every archived EA match either imported or was intentionally skipped.</span></div>'; return; }
+        body.innerHTML = rows.map(function(x){
+          return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+            '<span class="mono" style="font-size:11px;color:var(--steel)">'+esc(x.et_day||"?")+'</span>'+
+            '<span class="chip '+(x.status==="error"?"chip-loss":"chip-warn")+'" style="font-size:9px">'+esc(x.status.toUpperCase())+'</span>'+
+            '<span class="caption" style="flex:1;min-width:200px">'+esc(x.reason||"—")+'</span>'+
+            '<button class="btn btn-ghost btn-sm" data-reingest="'+esc(x.ea_match_id)+'">Re-ingest</button></div>';
+        }).join("");
+        body.querySelectorAll("[data-reingest]").forEach(function(b){ b.addEventListener("click", function(){
+          var mid=this.getAttribute("data-reingest"), btn=this;
+          btn.disabled=true; btn.textContent="Replaying…";
+          CG.sb.auth.getSession().then(function(s){
+            var tok = s && s.data && s.data.session && s.data.session.access_token;
+            if (!tok){ CG.toast("Sign in again — no session token","err"); btn.disabled=false; btn.textContent="Re-ingest"; return; }
+            fetch("/api/ingest-stats",{ method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
+              body: JSON.stringify({ reingest: mid }) })
+              .then(function(r){ return r.json(); })
+              .then(function(out){
+                btn.disabled=false; btn.textContent="Re-ingest";
+                if ((out.ingested||[]).length){ CG.toast("Box score imported — "+out.ingested[0].score,"ok"); CG.reloadLeague(); }
+                else if ((out.unmatched||[]).length){ CG.toast("Still unmatched: "+out.unmatched[0].reason,"err"); }
+                else if ((out.skipped||[]).length){ CG.toast("Already ingested — nothing to do","ok"); }
+                else { CG.toast("Replay failed: "+esc(JSON.stringify(out.errors||out).slice(0,120)),"err"); }
+              })
+              .catch(function(e){ btn.disabled=false; btn.textContent="Re-ingest"; CG.toast("Replay failed: "+e.message,"err"); });
+          });
+        }); });
+      });
+  }
+};
+
+/* ================================================================
+   LIVE ADMIN: TEAMS — add / edit / remove clubs (real teams table)
+   ================================================================ */
+CG.reloadLeague = async function(){
+  try {
+    CG.lg = await CG.buildLiveLeague();
+    await CG.loadManagerData();
+    await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
+    CG.renderChrome(); CG.router();
+  } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
+};
+
+/* ================================================================
+   LIVE LEAGUE DATA — scores, standings and stats update themselves.
+   A game import writes several rows (the game, then every player's
+   box-score line), so the realtime events are coalesced into ONE
+   reload after a short quiet period. The reload is single-flight
+   (never two builds at once) and gentle: it keeps your scroll
+   position, and while you're typing in a field or have a dialog
+   open it refreshes the data in memory but waits to re-draw until
+   you're done, so nothing you're doing is interrupted.
+   ================================================================ */
+CG._liveT = null; CG._liveBusy = false; CG._liveAgain = false;
+function pvBusyInteracting(){
+  var a = document.activeElement, tn = a && a.tagName;
+  if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT" || (a && a.isContentEditable)) return true;
+  var ov = document.getElementById("overlay-root");
+  return !!(ov && ov.innerHTML.trim());   /* a modal / drawer / palette is open */
+}
+CG.liveReload = function(){
+  clearTimeout(CG._liveT);
+  CG._liveT = setTimeout(function run(){
+    if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
+    CG._liveBusy = true;
+    CG.buildLiveLeague().then(function(lg){
+      CG.lg = lg;
+      return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
+    }).then(function(){
+      /* don't yank the page out from under an active interaction — the data is
+         already fresh in memory, so the next navigation shows it. Otherwise
+         re-draw in place and hold the scroll position. */
+      if (!pvBusyInteracting()){
+        var y = window.pageYOffset;
+        if (CG.renderChrome) CG.renderChrome();
+        if (CG.router) CG.router();
+        window.scrollTo(0, y);
+      }
+    }).catch(function(){}).then(function(){
+      CG._liveBusy = false;
+      if (CG._liveAgain){ CG._liveAgain = false; CG.liveReload(); }
+    });
+  }, 1000);
+};
+/* one public channel — scores/standings/stats are the same for everyone, so this
+   runs for signed-out viewers too. Idempotent: subscribed once for the session. */
+CG.subscribeLeague = function(){
+  if (!CG.sb || CG._leagueChannel) return;
+  try {
+    CG._leagueChannel = CG.sb.channel("league-live")
+      .on("postgres_changes",{ event:"*", schema:"public", table:"games" },      function(){ CG.liveReload(); })
+      .on("postgres_changes",{ event:"*", schema:"public", table:"game_stats" }, function(){ CG.liveReload(); })
+      .subscribe();
+  } catch(e){}
+};
+CG.admTeamsLive = function(){
+  var teams = (CG.TEAMS||[]).slice();
+  var h='<div style="margin-bottom:16px"><h2 class="h-sec">Teams</h2><p class="lede" style="margin-top:6px">Every club in the league — identity, division, and home arena. Edits go straight to the database and the whole site updates with them.</p></div>';
+  h+='<div class="grid g3" style="margin-bottom:18px">'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+teams.length+'</b><span>clubs</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+(CG.DIVISIONS?CG.DIVISIONS.length:2)+'</b><span>divisions</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+esc((CG.TOP_LEAGUE&&CG.TOP_LEAGUE.code)||"CGHL")+'</b><span>league</span></div></div>';
+  h+='<div class="card"><div class="card-h"><h3>Clubs</h3><button class="btn btn-chrome btn-sm" id="teamAdd">'+CG.ic("plus",14)+'Add a club</button></div>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>All clubs</caption><thead><tr><th class="tleft">Club</th><th class="tleft">Code</th><th class="tleft">Division</th><th>Roster</th><th class="tright">Actions</th></tr></thead><tbody>'+
+    teams.map(function(t){
+      var n=(CG.lg.byTeam[t.code]||[]).length;
+      return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,24)+'<span><span class="nm">'+esc(t.name)+'</span><small>'+esc(t.city||"—")+'</small></span></span></td>'+
+        '<td class="tleft mono" style="font-size:12px">'+esc(t.code)+'</td>'+
+        '<td class="tleft">'+esc(t.div)+'</td>'+
+        '<td data-v="'+n+'">'+n+'</td>'+
+        '<td class="tright"><span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-team-edit="'+t.id+'">Edit</button>'+
+        '<button class="btn btn-ghost btn-sm" data-team-del="'+t.id+'" data-name="'+esc(t.name)+'">Remove</button></span></td></tr>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Renames propagate everywhere instantly (rosters, schedule, and history follow the club, not the name). Removing a club is blocked while it still has rostered players or scheduled games.</span></div></div>';
+  /* custom divisions — the league's groupings are data, not hardcoded */
+  var divs = (CG._divisionsRaw||[]).slice().sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
+  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Divisions</h3><span class="chip">'+divs.length+'</span></div>'+
+    divs.map(function(d,i){
+      var n = teams.filter(function(t){ return t.div===d.name; }).length;
+      return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+        '<b style="font-family:var(--f-disp);font-size:15px;flex:1">'+esc(d.name)+'</b>'+
+        '<span class="caption">'+n+' club'+(n===1?"":"s")+'</span>'+
+        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-div-rename="'+d.id+'" data-name="'+esc(d.name)+'">Rename</button>'+
+        '<button class="btn btn-ghost btn-sm" data-div-del="'+d.id+'" data-name="'+esc(d.name)+'" data-count="'+n+'">Delete</button></span></div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center">'+
+      '<input id="divNew" placeholder="New division name…" style="flex:1" maxlength="24">'+
+      '<button class="btn btn-chrome btn-sm" id="divAdd">Add division</button></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Standings, team pages, and the standings race group by these automatically. Renames carry every club along; deleting needs the division empty first.</span></div></div>';
+  return h;
+};
+CG.addDivision = function(){
+  var name=(document.getElementById("divNew").value||"").trim();
+  if(!name){ CG.toast("Give the division a name","err"); return; }
+  if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
+  var maxSort=(CG._divisionsRaw||[]).reduce(function(m,d){ return Math.max(m,d.sort_order||0); },0);
+  CG.sb.from("divisions").insert({ name:name, sort_order:maxSort+1 }).then(function(r){
+    if(r.error){ CG.toast("Couldn’t add: "+r.error.message,"err"); return; }
+    CG.toast(name+" division added","ok"); CG.reloadLeague();
+  });
+};
+CG.renameDivision = function(id, oldName){
+  CG.modal("Rename — "+esc(oldName),
+    '<label class="fld"><span>Division name</span><input id="divName" value="'+esc(oldName)+'" maxlength="24"></label>'+
+    '<p class="caption">Every club in '+esc(oldName)+' moves with the new name — standings and team pages update instantly.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="divGo">Rename</button>');
+  document.getElementById("divGo").addEventListener("click", function(){
+    var name=(document.getElementById("divName").value||"").trim();
+    if(!name){ CG.toast("Give the division a name","err"); return; }
+    if(name===oldName){ if(CG.closeOverlay)CG.closeOverlay(); return; }
+    if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
+    CG.sb.from("divisions").update({ name:name }).eq("id",id).then(function(r){
+      if(r.error){ CG.toast("Couldn’t rename: "+r.error.message,"err"); return; }
+      /* clubs reference the division by name — carry them along */
+      CG.sb.from("teams").update({ division:name }).eq("division",oldName).then(function(r2){
+        if(r2.error){ CG.toast("Division renamed, but clubs didn’t follow: "+r2.error.message,"err"); return; }
+        if(CG.closeOverlay)CG.closeOverlay();
+        CG.toast(oldName+" is now "+name,"ok"); CG.reloadLeague();
+      });
+    });
+  });
+};
+CG.deleteDivision = function(id, name, count){
+  if (count>0){ CG.toast("Can’t delete "+name+" — move its "+count+" club"+(count===1?"":"s")+" to another division first","err"); return; }
+  if ((CG._divisionsRaw||[]).length<=1){ CG.toast("The league needs at least one division","err"); return; }
+  CG.confirm("Delete the "+esc(name)+" division?","It’s empty, so nothing moves. This can’t be undone.","Delete division", function(){
+    CG.sb.from("divisions").delete().eq("id",id).then(function(r){
+      if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+      CG.toast(name+" deleted","ok"); CG.reloadLeague();
+    });
+  });
+};
+/* upload a club logo to the public team-logos bucket (commissioner-only RLS).
+   Token-explicit: a tab whose session lapsed (multi-tab refresh-token rotation)
+   silently falls back to the anon key in the storage client, which reads as
+   "violates row-level security". So we fetch the session ourselves, prove it
+   server-side, send it explicitly, and retry once through a refresh. */
+/* Club artwork arrives at whatever resolution the club had to hand — one upload was 2357x2357 —
+   while the largest crest the site ever paints is 104 CSS px (about 312 device px on a 3x screen).
+   Shipping the originals made the eight logos 884 KB, roughly two-thirds of the home page. Resize
+   once here, at upload, so the cost isn't paid by every visitor on every load.
+   WebP where the browser can encode it (all current ones can, and it holds transparency); the
+   original blob is returned untouched if anything about the decode fails, so a club can never be
+   blocked from uploading by this optimisation. */
+CG.shrinkImage = async function(file, cap){
+  var fallback = { blob:file, type:file.type||"image/png", ext:null };
+  try {
+    if (!/^image\//.test(file.type||"") || /svg/.test(file.type||"")) return fallback;
+    var bmp = await createImageBitmap(file);
+    var scale = Math.min(1, cap/Math.max(bmp.width, bmp.height));
+    var w = Math.max(1, Math.round(bmp.width*scale)), h = Math.max(1, Math.round(bmp.height*scale));
+    var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    var ctx = cv.getContext("2d");
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close && bmp.close();
+    var out = await new Promise(function(res){ cv.toBlob(res, "image/webp", 0.92); });
+    if (!out) out = await new Promise(function(res){ cv.toBlob(res, "image/png"); });
+    if (!out || out.size >= file.size) return fallback;   // never upload a bigger file than we got
+    return { blob:out, type:out.type, ext:(out.type==="image/webp"?"webp":"png") };
+  } catch (e) { return fallback; }
+};
+/* One uploader for every piece of commissioner-uploaded artwork. Club crests and tier emblems
+   share the team-logos bucket and its policy (can_write_team_logo is is_commissioner(), whatever
+   the path), so they share the token dance and the resize too — a second copy of this would be a
+   second place for the stale-token bug to come back. `slug` names the file, `opts.prefix` puts it
+   in a folder, `opts.cap` is the longest edge kept. */
+/* exactly what storage.buckets.allowed_mime_types permits for team-logos — keep the two in step */
+CG.UPLOAD_MIME = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/i;
+/* CSS.escape isn't in every browser this site still serves; the codes are [A-Z0-9] in practice,
+   so quote-escaping is enough to keep the attribute selector well-formed either way */
+function cssQ(v){ return String(v==null?"":v).replace(/["\\]/g, "\\$&"); }
+CG.uploadArtwork = async function(file, slug, opts){
+  opts = opts || {};
+  var s = await CG.sb.auth.getSession();
+  var session = s && s.data && s.data.session;
+  if (!session){
+    var rf = await CG.sb.auth.refreshSession();
+    session = rf && rf.data && rf.data.session;
+  }
+  if (!session) throw new Error("your sign-in expired — sign out and back in, then retry");
+  var isComm = await CG.sb.rpc("is_commissioner");
+  if (isComm && isComm.error) throw new Error(isComm.error.message);
+  if (!isComm.data){
+    /* the token the server sees isn't a commissioner — one refresh, one recheck */
+    var rf2 = await CG.sb.auth.refreshSession();
+    session = (rf2 && rf2.data && rf2.data.session) || session;
+    isComm = await CG.sb.rpc("is_commissioner");
+    if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
+  }
+  var shrunk = await CG.shrinkImage(file, opts.cap || 384);
+  var body = shrunk.blob, type = shrunk.type;
+  var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
+  /* the slug reaches an object name and a URL, so keep it to characters that survive both */
+  var safe = String(slug||"logo").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"") || "logo";
+  /* normalise the folder too, so a future caller passing "awards" (no slash) doesn't silently
+     write "awardsbos-123.webp" at the bucket root, and ".." can't aim the object elsewhere */
+  var pre = String(opts.prefix||"").toLowerCase().replace(/[^a-z0-9/-]+/g,"")
+    .split("/").filter(function(seg){ return seg && seg !== "." && seg !== ".."; }).join("/");
+  var path = (pre ? pre+"/" : "")+safe+"-"+Date.now()+"."+ext;
+  async function put(tok){
+    /* encode per segment — encodeURIComponent on the whole path would turn the folder slash into
+       %2F and flatten the prefix into the filename */
+    return fetch(CG.SB_URL+"/storage/v1/object/team-logos/"+path.split("/").map(encodeURIComponent).join("/"), {
+      method:"POST",
+      /* every upload gets a fresh timestamped path, so the bytes at a given URL never change and
+         can be cached for a year — the old 3600 made every visitor revalidate eight logos hourly */
+      headers:{ "Authorization":"Bearer "+tok, "apikey":CG.SB_KEY, "Content-Type":type, "x-upsert":"true", "cache-control":"public, max-age=31536000, immutable" },
+      body:body
+    });
+  }
+  var res = await put(session.access_token);
+  if (!res.ok){
+    /* errBody, NOT body: `var` is function-scoped, so naming this `body` reused the very binding
+       put() closes over for the image bytes. The retry below then POSTed the parsed error object,
+       which fetch stringifies to "[object Object]" — 15 bytes sent as image/webp, which the bucket
+       happily accepts, so a stale-token retry "succeeded" and stored a file that isn't an image.
+       That is the exact race this retry exists to handle, and it hit club logos too. */
+    var errBody = await res.json().catch(function(){ return {}; });
+    if (res.status===400 || res.status===403){
+      /* stale token race — refresh once and retry with the new one */
+      var rf3 = await CG.sb.auth.refreshSession();
+      var fresh = rf3 && rf3.data && rf3.data.session;
+      if (fresh){ res = await put(fresh.access_token); }
+      if (!res.ok){ errBody = await res.json().catch(function(){ return errBody; }); throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")")); }
+    } else {
+      throw new Error(errBody.message||errBody.error||("upload rejected (HTTP "+res.status+")"));
+    }
+  }
+  return CG.sb.storage.from("team-logos").getPublicUrl(path).data.publicUrl;
+};
+CG.uploadTeamLogo = function(file, code){ return CG.uploadArtwork(file, code, { cap:384 }); };
+/* a tier emblem is painted bigger than a crest (it headlines the Leagues panel), so it keeps more pixels */
+CG.uploadLeagueEmblem = function(file, code){
+  return CG.uploadArtwork(file, "league-"+(code||"tier"), { prefix:"leagues/", cap:512 });
+};
+CG.teamForm = function(t){
+  var isNew = !t;
+  t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
+  var divOpts = (CG.DIVISIONS&&CG.DIVISIONS.length?CG.DIVISIONS:["East","West"]).map(function(d){ return '<option'+(t.div===d?" selected":"")+'>'+esc(d)+'</option>'; }).join("");
+  var isEdit = !isNew;
+  function holderName(pid){
+    if(!pid) return "";
+    var p=(CG.lg&&CG.lg._profilesRaw||[]).find(function(x){ return x.id===pid; });
+    return p ? (p.gamertag||p.display_name||"") : "";
+  }
+  /* Front office lives on the club, so it's edited here (edit-only — a club must exist first). */
+  var anySeat = !!(t.owner||t.gm||t.agm);
+  function vacBtn(role){
+    return '<div style="text-align:right;margin-top:5px;min-height:20px">'+
+      '<button type="button" class="btn btn-ghost btn-sm rm-btn" data-vacate-seat="'+role+'"'+(t[role]?'':' style="display:none"')+'>Vacate seat</button></div>';
+  }
+  var mgmtBlock = isEdit ? (
+    '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 2px">'+
+        '<h3 class="h-sec" style="font-size:15px;margin:0">Front office</h3>'+
+        '<button type="button" class="btn btn-ghost btn-sm rm-btn" id="tfClearAll"'+(anySeat?'':' style="display:none"')+'>Remove all seats</button>'+
+      '</div>'+
+      '<p class="caption" style="margin:0 0 12px">Owner, GM and AGM run this club’s Team HQ — roster, trades, lineups and draft picks. Type a member’s name and pick them to assign a seat. <b>Vacate seat</b> (or <b>Remove all seats</b>) clears management immediately — a player’s roster spot and contract are untouched. One person holds one seat per club.</p>'+
+      '<div class="grid g3" style="gap:12px">'+
+        '<div>'+CG.memberPickerField("tfOwner","Owner")+vacBtn("owner")+'</div>'+
+        '<div>'+CG.memberPickerField("tfGm","General Manager")+vacBtn("gm")+'</div>'+
+        '<div>'+CG.memberPickerField("tfAgm","Assistant GM")+vacBtn("agm")+'</div>'+
+      '</div>'+
+    '</div>'
+  ) : '';
+  CG.modal(isNew?"Add a club":"Edit — "+esc(t.name),
+    '<div class="grid g2" style="gap:12px">'+
+    '<label class="fld"><span>Club name</span><input id="tfName" value="'+esc(t.name)+'" placeholder="e.g. Boston Bruins"></label>'+
+    '<label class="fld"><span>City</span><input id="tfCity" value="'+esc(t.city||"")+'" placeholder="e.g. Boston"></label>'+
+    '<label class="fld"><span>Code (2–4 letters)</span><input id="tfCode" value="'+esc(t.code)+'" maxlength="4" style="text-transform:uppercase" placeholder="e.g. BOS"></label>'+
+    '<label class="fld"><span>Division</span><select id="tfDiv">'+divOpts+'</select></label>'+
+    '<label class="fld" style="grid-column:1/-1"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
+    '</div>'+
+    '<label class="fld" style="margin-top:2px"><span>Club logo</span></label>'+
+    '<div class="logo-drop" id="tfLogoDrop" role="button" tabindex="0" aria-label="Upload a club logo" data-url="'+esc(t.logo||"")+'">'+
+      (t.logo?'<img src="'+esc(t.logo)+'" alt="Current logo">':'<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>')+
+    '</div>'+
+    '<input type="file" id="tfLogoFile" accept="image/*" hidden>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'+
+      '<span class="caption">Uploads apply when you save the club.</span>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="tfLogoClear"'+(t.logo?'':' style="display:none"')+'>Use generated crest</button>'+
+    '</div>'+mgmtBlock,
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="tfSave">'+(isNew?"Add club":"Save changes")+'</button>');
+  /* --- drag & drop logo wiring --- */
+  var zone = document.getElementById("tfLogoDrop"), fileIn = document.getElementById("tfLogoFile"),
+      clearBtn = document.getElementById("tfLogoClear");
+  function setPreview(url){
+    zone.setAttribute("data-url", url||"");
+    zone.innerHTML = url ? '<img src="'+esc(url)+'" alt="Club logo">' :
+      '<span class="lp-hint">Drag a logo here, or click to upload — PNG/JPG, under 2 MB. Without one, the site draws the club crest.</span>';
+    clearBtn.style.display = url ? "" : "none";
+  }
+  function doUpload(f){
+    if (!f) return;
+    if (!/^image\//.test(f.type)){ CG.toast("That isn’t an image — use a PNG or JPG","err"); return; }
+    if (f.size > 2*1024*1024){ CG.toast("Keep the logo under 2 MB","err"); return; }
+    var prev = zone.getAttribute("data-url");
+    zone.classList.add("busy");
+    zone.innerHTML = '<span class="lp-hint">Uploading…</span>';
+    var code = (document.getElementById("tfCode").value||t.code||"logo").trim();
+    CG.uploadTeamLogo(f, code).then(function(url){
+      zone.classList.remove("busy"); setPreview(url);
+      CG.toast("Logo uploaded — save the club to apply it","ok");
+    }).catch(function(e){
+      zone.classList.remove("busy"); setPreview(prev);
+      CG.toast("Upload failed: "+((e&&e.message)||"try again"),"err");
+    });
+  }
+  zone.addEventListener("click", function(){ fileIn.click(); });
+  zone.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fileIn.click(); } });
+  fileIn.addEventListener("change", function(){ if(fileIn.files[0]) doUpload(fileIn.files[0]); });
+  zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.classList.add("drag"); });
+  zone.addEventListener("dragleave", function(){ zone.classList.remove("drag"); });
+  zone.addEventListener("drop", function(e){ e.preventDefault(); zone.classList.remove("drag"); if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
+  clearBtn.addEventListener("click", function(){ setPreview(""); CG.toast("Back to the generated crest — save to apply","ok"); });
+  /* --- front-office pickers: wire the type-ahead, pre-fill current holders --- */
+  if (isEdit){
+    ["tfOwner","tfGm","tfAgm"].forEach(function(id){ CG.wireMemberPicker(id, ["members"]); });
+    var pf=function(id,pid){ var el=document.getElementById(id); if(el&&pid){ el.value=holderName(pid); el.dataset.acId=pid; } };
+    pf("tfOwner",t.owner); pf("tfGm",t.gm); pf("tfAgm",t.agm);
+    /* --- explicit seat removal: Vacate a seat or Remove all, applied immediately (two-click confirm) --- */
+    var seatId={owner:"tfOwner",gm:"tfGm",agm:"tfAgm"}, seatName={owner:"Owner",gm:"General Manager",agm:"Assistant GM"};
+    var refreshClearAll=function(){ var ca=document.getElementById("tfClearAll"); if(ca) ca.style.display=(t.owner||t.gm||t.agm)?"":"none"; };
+    var doVacate=function(role, done){
+      CG.sb.rpc("set_team_manager",{ p_team_code:t.code, p_role:role, p_profile:null }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t vacate: "+r.error.message,"err"); if(done)done(false); return; }
+        t[role]=null;
+        var el=document.getElementById(seatId[role]); if(el){ el.value=""; delete el.dataset.acId; el.classList.remove("ac-ok"); }
+        var vb=document.querySelector('[data-vacate-seat="'+role+'"]'); if(vb) vb.style.display="none";
+        refreshClearAll(); if(done)done(true);
+      });
+    };
+    var arm=function(btn, confirmLabel, run){
+      if(!btn) return; var orig=btn.textContent, armed=false, tmr=null;
+      var reset=function(){ armed=false; if(tmr)clearTimeout(tmr); btn.textContent=orig; btn.style.color=""; btn.style.borderColor=""; };
+      btn.addEventListener("click", function(){
+        if(armed){ reset(); run(); return; }
+        armed=true; btn.textContent=confirmLabel; btn.style.color="var(--red-ink)"; btn.style.borderColor="var(--red-ink)";
+        tmr=setTimeout(reset, 4000);
+      });
+    };
+    document.querySelectorAll("[data-vacate-seat]").forEach(function(b){
+      var role=b.getAttribute("data-vacate-seat");
+      arm(b, "Confirm — vacate?", function(){ doVacate(role, function(ok){ if(ok) CG.toast(seatName[role]+" seat vacated","ok"); }); });
+    });
+    arm(document.getElementById("tfClearAll"), "Confirm — remove all?", function(){
+      var roles=["owner","gm","agm"].filter(function(r){ return t[r]; });
+      if(!roles.length) return;
+      (function next(i){ if(i>=roles.length){ CG.toast("All front-office seats removed","ok"); return; } doVacate(roles[i], function(){ next(i+1); }); })(0);
+    });
+  }
+  document.getElementById("tfSave").addEventListener("click", function(){
+    var name=(document.getElementById("tfName").value||"").trim(),
+        code=(document.getElementById("tfCode").value||"").trim().toUpperCase();
+    if(!name){ CG.toast("Give the club a name","err"); return; }
+    if(!/^[A-Z]{2,4}$/.test(code)){ CG.toast("Code should be 2–4 letters","err"); return; }
+    var clash=(CG.TEAMS||[]).find(function(x){ return x.code===code && (!t.id || x.id!==t.id); });
+    if(clash){ CG.toast(code+" is already "+clash.name+"’s code","err"); return; }
+    /* front-office changes (edit only): diff each seat against what the club currently holds */
+    var mgmtChanges=[];
+    if(isEdit){
+      var want={ owner:CG.readMemberPicker("tfOwner").id||null,
+                 gm:CG.readMemberPicker("tfGm").id||null,
+                 agm:CG.readMemberPicker("tfAgm").id||null };
+      var picked=[want.owner,want.gm,want.agm].filter(Boolean);
+      if(picked.some(function(v,i){ return picked.indexOf(v)!==i; })){
+        CG.toast("One member can only hold one seat on a club — pick different people for Owner, GM and AGM","err"); return;
+      }
+      if(want.owner!==(t.owner||null)) mgmtChanges.push({role:"owner",profile:want.owner});
+      if(want.gm!==(t.gm||null))       mgmtChanges.push({role:"gm",profile:want.gm});
+      if(want.agm!==(t.agm||null))     mgmtChanges.push({role:"agm",profile:want.agm});
+    }
+    var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
+      division:document.getElementById("tfDiv").value,
+      color:document.getElementById("tfColor").value,
+      logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
+    var btn=this; btn.disabled=true;
+    var q = isNew
+      ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null }))
+      : CG.sb.from("teams").update(rec).eq("id", t.id);
+    q.then(function(r){
+      if(r.error){ btn.disabled=false; CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      /* apply front-office moves one at a time — each RPC clears the member’s prior seat first */
+      var chain=Promise.resolve();
+      mgmtChanges.forEach(function(ch){
+        chain=chain.then(function(){
+          return CG.sb.rpc("set_team_manager",{ p_team_code:code, p_role:ch.role, p_profile:ch.profile }).then(function(rr){
+            if(rr.error) throw new Error(rr.error.message);
+          });
+        });
+      });
+      chain.then(function(){
+        btn.disabled=false;
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast(isNew?name+" added to the league":"Club saved","ok");
+        CG.reloadLeague();
+      }).catch(function(e){
+        btn.disabled=false;
+        CG.toast("Club saved, but a front-office change failed: "+((e&&e.message)||"try again"),"err");
+        CG.reloadLeague();
+      });
+    });
+  });
+};
+CG.removeTeam = function(teamId, name){
+  /* guarded: block removal while the club has rostered players or games */
+  Promise.all([
+    CG.sb.from("roster_spots").select("id",{count:"exact",head:true}).eq("team_id",teamId),
+    CG.sb.from("games").select("id",{count:"exact",head:true}).or("home_team_id.eq."+teamId+",away_team_id.eq."+teamId)
+  ]).then(function(rs){
+    var spots=(rs[0]&&rs[0].count)||0, games=(rs[1]&&rs[1].count)||0;
+    if (spots||games){
+      CG.toast("Can’t remove "+name+" — it has "+(spots?spots+" rostered player"+(spots===1?"":"s"):"")+(spots&&games?" and ":"")+(games?games+" scheduled game"+(games===1?"":"s"):"")+". Reassign those first.","err");
+      return;
+    }
+    CG.confirm("Remove "+esc(name)+"?","The club comes off the site everywhere. This can’t be undone.","Remove club", function(){
+      CG.sb.from("teams").delete().eq("id",teamId).then(function(r){
+        if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
+        CG.toast(name+" removed","ok");
+        CG.reloadLeague();
+      });
+    });
+  });
+};
+CG.AFTER._admTeams = function(){
+  var add=document.getElementById("teamAdd");
+  if(add) add.addEventListener("click", function(){ CG.teamForm(null); });
+  document.querySelectorAll("[data-team-edit]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-team-edit");
+    CG.teamForm((CG.TEAMS||[]).find(function(t){ return t.id===id; }));
+  }); });
+  document.querySelectorAll("[data-team-del]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.removeTeam(this.getAttribute("data-team-del"), this.getAttribute("data-name"));
+  }); });
+  var dAdd=document.getElementById("divAdd");
+  if(dAdd) dAdd.addEventListener("click", CG.addDivision);
+  var dNew=document.getElementById("divNew");
+  if(dNew) dNew.addEventListener("keydown", function(e){ if(e.key==="Enter") CG.addDivision(); });
+  document.querySelectorAll("[data-div-rename]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.renameDivision(this.getAttribute("data-div-rename"), this.getAttribute("data-name"));
+  }); });
+  document.querySelectorAll("[data-div-del]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.deleteDivision(this.getAttribute("data-div-del"), this.getAttribute("data-name"), +this.getAttribute("data-count"));
+  }); });
+};
+
+/* ================================================================
+   LIVE LEAGUE OFFICE — complaints & requests on the real
+   action_requests / action_messages tables (replaces the demo cases)
+   ================================================================ */
+CG.ACTION_META = {
+  complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
+  appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
+  trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s management for a move — private to your club." },
+  position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." }
+};
+CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
+CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
+CG.loadActionRequests = async function(){
+  if (!CG.sb || !CG.lg || !CG.auth.user) return;
+  CG._actionLoadError = null;
+  try {
+    var q = await Promise.all([
+      /* action_requests has THREE foreign keys to profiles — filer, assignee and the case subject —
+         so a bare profiles(...) embed is ambiguous and PostgREST rejects the whole query (PGRST201).
+         Name the constraint. `profiles` stays the response key, so consumers are unchanged. */
+      CG.sb.from("action_requests")
+        .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
+        .order("created_at",{ascending:false}),
+      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true})
+    ]);
+    /* This used to fall back to [] on any error, so a failed query was indistinguishable from an
+       empty queue — the Staff Desk read "the room is clean" while cases sat unanswered. Keep
+       whatever we already had and say so loudly instead of inventing an empty case list. */
+    if (q[0] && q[0].error) throw new Error("cases: "+(q[0].error.message||q[0].error.code||"query failed"));
+    if (q[1] && q[1].error) throw new Error("case messages: "+(q[1].error.message||q[1].error.code||"query failed"));
+    CG.lg._actionReqs = (q[0] && q[0].data) || [];
+    var msgs = {};
+    ((q[1] && q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
+    CG.lg._actionMsgs = msgs;
+  } catch(e){
+    CG._actionLoadError = String((e && e.message) || e);
+    console.error("loadActionRequests:", CG._actionLoadError);
+  }
+};
+/* Case data is read by six surfaces — the hub dashboard tile, hub complaints, the Staff Desk (its
+   KPIs, queue and assigned list), the admin overview and admin complaints — but only the complaints
+   routes ever asked for a redraw when the rows finally arrived. That is why the Staff Desk could
+   show "Nothing open" and "0 open cases" directly under a banner counting two: the banner comes
+   from an RPC that does re-render (loadStaffAttention), the cards from an array that didn't.
+   One predicate for every view that renders cases, so a new surface can't be forgotten again. */
+CG.viewShowsCases = function(){ return /#\/(hub|admin)/.test(location.hash); };
+CG.rerenderIfShowingCases = function(){
+  /* never redraw out from under an open modal — the user may be mid-way through filing */
+  var ov = document.getElementById("overlay-root");
+  if (ov && ov.innerHTML.trim()) return;
+  if (CG.viewShowsCases() && CG.router) CG.router();
+};
+CG.refreshActions = function(){
+  CG.loadActionRequests().then(CG.rerenderIfShowingCases);
+};
+/* dashboard tiles + counts read this — map real rows to the prototype shape */
+CG.visibleComplaints = function(){
+  return (CG.lg._actionReqs||[]).map(function(a){
+    var closed = a.status==="resolved"||a.status==="denied";
+    return { caseId:(a.id||"").slice(0,8), category:(CG.ACTION_META[a.type]||{}).label||a.type,
+      status: closed?"Resolved":"Under review", assignedTo:"", confidential:false,
+      summary:(a.subject||a.details||"").slice(0,90), filedBy:(a.profiles&&a.profiles.gamertag)||"member", against:a.target||"—" };
+  });
+};
+CG.actionStatusChip = function(st){
+  var map={ open:["chip","Open"], reviewing:["chip-warn","Reviewing"], acknowledged:["chip-chrome","Acknowledged"], resolved:["chip-win","Resolved"], denied:["chip-loss","Denied"] };
+  var m=map[st]||["chip",st||"Open"];
+  return '<span class="chip '+m[0]+'">'+esc(m[1])+'</span>';
+};
+CG.actionCard = function(a, review){
+  var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
+  var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
+  var uid = CG.auth.user && CG.auth.user.id, names = (CG.lg&&CG.lg._profName)||{};
+  /* conflict of interest: a staff member who filed this case or is named in it can't rule on it —
+     RLS enforces the same at the database (silently), so the ruling tools are hidden here to match.
+     Commissioners are unrestricted. */
+  var isCommish = CG.role()==="commish";
+  var conflicted = review && !isCommish && !!uid && (a.profile_id===uid || a.target_profile_id===uid);
+  var metaBits = [];
+  if (a.type==="position_change" && a.requested_position) metaBits.push(esc(a.current_position||"?")+" → "+esc(a.requested_position));
+  /* prefer the subject's current gamertag over the text captured when the case was filed, so a
+     rename doesn't leave the case pointing at a name nobody recognises any more */
+  var aboutName = (a.target_profile && a.target_profile.gamertag) || a.target;
+  if (aboutName) metaBits.push("About: "+esc(aboutName));
+  metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
+  var isPos = a.type==="position_change";
+  var posLine = isPos ? (a.current_position||"?")+" → "+(a.requested_position||"?") : "";
+  var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
+      '<b style="font-family:var(--f-disp)">'+esc(meta.label)+'</b>'+CG.actionStatusChip(a.status)+
+      (review?'<span class="caption">filed by <b>'+esc((a.profiles&&a.profiles.gamertag)||"member")+'</b></span>':"")+
+      '<span class="caption" style="margin-left:auto">'+metaBits.join(" · ")+'</span></div>';
+  /* the request itself gets a proper banner — it was buried as fine print in the meta row, and
+     nothing on the card could actually APPLY the switch */
+  if (isPos){
+    h += '<div class="note chr" style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+      '<b style="font-family:var(--f-disp)">Requested switch</b>'+
+      '<span class="chip chip-chrome">'+esc(a.current_position||"?")+'</span><span aria-hidden="true">→</span>'+
+      '<span class="chip chip-win">'+esc(a.requested_position||"?")+'</span>'+
+      (a.status==="resolved"?'<span class="caption">applied to their registration</span>'
+        :a.status==="denied"?'<span class="caption">denied — registration unchanged</span>'
+        :'<span class="caption">approving applies it to their registration instantly</span>')+'</div>';
+  }
+  /* one-owner assignment (staff/commish) */
+  if (review){
+    var who = a.assigned_to ? (names[a.assigned_to]||"a colleague") : null;
+    h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+      (who ? '<span class="chip chip-chrome" style="font-size:9px">'+esc("Claimed by "+who)+'</span>' : '<span class="chip chip-warn" style="font-size:9px">Unclaimed</span>')+
+      (conflicted ? '' : (a.assigned_to===uid ? '<button class="btn btn-ghost btn-sm" data-case-unclaim="'+a.id+'">Release</button>'
+        : '<button class="btn btn-ghost btn-sm" data-case-claim="'+a.id+'">Claim</button>'))+'</div>';
+  }
+  h += (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
+    '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
+    (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
+  if (msgs.length){
+    h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
+      var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
+      var att = (m.attachments||[]).map(function(u){
+        /* render ONLY http(s) links — never a javascript:/data: scheme a filer could inject */
+        return /^https?:\/\//i.test(String(u))
+          ? '<a href="'+esc(u)+'" target="_blank" rel="noopener nofollow" class="caption" style="border-bottom:2px solid var(--chrome)">'+CG.ic("link",12)+' attachment</a>'
+          : '<span class="caption">'+esc(String(u))+'</span>'; }).join(" ");
+      return '<div style="display:flex;flex-direction:column;gap:3px'+(m.internal?';background:var(--chrome-tint);border-radius:8px;padding:8px 10px':'')+'">'+
+        '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+(m.internal?' · staff-only note':"")+'</b>'+
+        '<span class="small" style="color:var(--steel);white-space:pre-wrap;flex:1">'+esc(m.body||"")+'</span></div>'+
+        (att?'<div style="padding-left:2px">'+att+'</div>':"")+'</div>';
+    }).join("")+'</div>';
+  }
+  var closed = a.status==="resolved"||a.status==="denied";
+  if (!closed){
+    h += '<div style="display:flex;flex-direction:column;gap:6px">'+
+      '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
+        '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input data-reply-att="'+a.id+'" placeholder="Attach a link (optional)" style="flex:1;min-width:180px">'+
+        (review && !conflicted?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
+  }
+  if (review && !conflicted){
+    h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
+      (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
+      (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
+      /* a position change is decided, not merely closed: Approve applies the switch to the
+         registration through decide_position_change; the generic Resolve/Deny (which changed
+         nothing but the status) and the discipline tools stay off this card type */
+      (isPos && !closed
+        ? '<button class="btn btn-chrome btn-sm" data-pos-decide="approve" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Approve '+esc(posLine)+'</button>'+
+          '<button class="btn btn-ghost btn-sm" data-pos-decide="deny" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Deny request</button>'
+        : "")+
+      (isPos ? "" :
+      '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'" data-target-id="'+esc(a.target_profile_id||"")+'">Issue discipline</button>'+
+      '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>'+
+      (!closed?'<button class="btn btn-ghost btn-sm" data-act-status="resolved" data-act-id="'+a.id+'">Resolve</button>'+
+        '<button class="btn btn-ghost btn-sm" data-act-status="denied" data-act-id="'+a.id+'">Deny</button>':""))+
+      /* deletion is a commissioner-only power (RLS enforces it too); staff never see a Delete they can't use */
+      (isCommish?'<button class="btn btn-ghost btn-sm" data-act-del="'+a.id+'" style="margin-left:auto">Delete</button>':"")+'</div>';
+  } else if (conflicted){
+    h += '<div class="note" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">You’re involved in this case</b>'+
+      'You filed it or you’re named in it, so another official has to rule on it. You can still add a reply as a participant.</div>';
+  }
+  return h+'</div></div>';
+};
+CG.hubComplaintsLive = function(opts){
+  opts = opts||{};
+  var isCommish = CG.role()==="commish";
+  var review = isCommish || CG.role()==="staff";
+  var all = (CG.lg._actionReqs||[]);
+  var uid = CG.auth.user && CG.auth.user.id;
+  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
+  var queue = review && !opts.mineOnly ? all : mine;
+  /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
+  var flt = review ? (CG._caseFilter||"all") : null;
+  if (review){
+    if (flt==="mine") queue = queue.filter(function(a){ return a.assigned_to===uid; });
+    else if (flt==="unclaimed") queue = queue.filter(function(a){ return !a.assigned_to && a.status!=="resolved" && a.status!=="denied"; });
+    else if (flt==="open") queue = queue.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
+  }
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"Action Center")+'</h1>'+
+    '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
+  h += '<div class="grid g2" style="margin-bottom:22px">'+Object.keys(CG.ACTION_META).map(function(k){
+    var m = CG.ACTION_META[k];
+    return '<div class="card raise" data-file-action="'+k+'" role="button" tabindex="0" style="cursor:pointer"><div class="card-b" style="display:flex;gap:12px;align-items:flex-start">'+
+      '<span class="nf-ic">'+CG.ic(m.icon,16)+'</span><div><b style="font-family:var(--f-disp)">'+esc(m.label)+'</b>'+
+      '<p class="caption" style="margin-top:3px">'+esc(m.blurb)+'</p></div></div></div>';
+  }).join("")+'</div>';
+  h += '<div class="card-h" style="padding:0 0 12px;border:0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h3>'+(review?"Case queue ("+queue.length+")":"Your filed cases ("+queue.length+")")+'</h3>'+
+    (review?'<div class="seg" role="tablist" aria-label="Filter cases">'+
+      [["all","All"],["open","Open"],["mine","Mine"],["unclaimed","Unclaimed"]].map(function(f){
+        return '<button data-case-filter="'+f[0]+'" class="'+(flt===f[0]?"on":"")+'" role="tab" aria-selected="'+(flt===f[0])+'">'+f[1]+'</button>'; }).join("")+'</div>':"")+'</div>';
+  h += queue.length
+    ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
+    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
+  h += '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
+  return h;
+};
+/* Everyone in the league, not just everyone on a roster. A complaint can name a free agent or a
+   player between clubs, and the roster-derived list can't see them. Sorted so exact-prefix matches
+   feel right when typing, and each entry says where the person actually sits. */
+CG.memberIndex = function(){
+  var lg = CG.lg || {}, rostered = lg._rosteredIds || {};
+  var byId = {}; (lg.players||[]).forEach(function(p){ byId[p.id] = p; });
+  return (lg._profilesRaw||[])
+    .filter(function(pr){ return !pr.banned; })
+    .map(function(pr){
+      var p = byId[pr.id];
+      var name = pr.gamertag || pr.display_name || "Member";
+      var sub = p && CG.TEAM[p.team]
+        ? CG.TEAM[p.team].name+" · "+p.pos+(p.jersey?" · #"+p.jersey:"")
+        : (rostered[pr.id] ? "Rostered" : (CG.poolState?CG.poolState(pr.id).label:"Unsigned"));
+      /* searchable aliases: a member whose gamertag is stylized ("ₛₕₑᵢ𝒻") is otherwise
+         unfindable, and the office usually knows people by their Discord name — so match on
+         the display name as well as the gamertag (both folded to plain text by CG.acNorm). */
+      var alias = pr.display_name && pr.display_name !== name ? " "+pr.display_name : "";
+      return { kind:"player", id:pr.id, label:name, sub:sub+(alias?" · "+pr.display_name:""),
+               search:name+alias, team:(p&&p.team)||null };
+    })
+    .sort(function(a,b){ return a.label.localeCompare(b.label); });
+};
+/* GM/AGM candidates: ANY player signed up for the upcoming season — a club's own roster is not the
+   limit. A roster spot counts too (being rostered means they're in the season). */
+CG.seasonPlayerIndex = function(){
+  var lg = CG.lg||{}, sid = (CG.SEASON && CG.SEASON.id) || null, ok = {};
+  (lg._registrationsRaw||[]).forEach(function(r){
+    if ((!r.season_id || r.season_id===sid) && r.status!=="declined") ok[r.profile_id] = true;
+  });
+  Object.keys(lg._rosteredIds||{}).forEach(function(id){ ok[id] = true; });
+  /* staff and commissioners can't hold a club seat (Rule 2.7) — keep them out of the picker, except
+     staff whose only department is Media, who are expressly allowed one */
+  var office = {};
+  (lg._profilesRaw||[]).forEach(function(p){
+    if ((p.role==="staff" || p.role==="commissioner") && !CG.isMediaOnly(p)) office[p.id] = true;
+  });
+  /* a player already under a contract this season can't be nominated — only free agents are eligible */
+  var held = (CG.contractHeldIds && CG.contractHeldIds()) || {};
+  return CG.memberIndex().filter(function(m){ return ok[m.id] && !office[m.id] && !held[m.id]; });
+};
+/* attachAC indexes players off the roster; "members" widens it to the whole league for the places
+   that need to name someone rather than look up a rostered player. */
+CG._origAcIndex = CG.acIndex;
+CG.acIndex = function(kinds){
+  if ((kinds||[]).indexOf("seasonplayers") >= 0) return CG.seasonPlayerIndex();
+  if ((kinds||[]).indexOf("members") >= 0) return CG.memberIndex();
+  return CG._origAcIndex.call(CG, kinds||[]);
+};
+/* A free-text name is unmatchable later, so every "who is this about?" field is a combobox that
+   resolves to a real profile. Returns { name, id } — id is null when nothing was picked, which is
+   allowed: the field is optional and a member may need to name someone off-roster. */
+CG.memberPickerField = function(id, label, hint){
+  return '<label class="fld"><span>'+esc(label)+'</span>'+
+    '<input id="'+id+'" type="text" autocomplete="off" placeholder="Start typing a name…">'+
+    (hint ? '<small class="caption" style="display:block;margin-top:5px">'+esc(hint)+'</small>' : '')+
+    '</label>';
+};
+CG.wireMemberPicker = function(id, kinds){
+  var el = document.getElementById(id);
+  if (el && CG.attachAC) CG.attachAC(el, { kinds: kinds || ["members"] });
+  return el;
+};
+CG.readMemberPicker = function(id){
+  var el = document.getElementById(id);
+  if (!el) return { name:null, id:null };
+  var name = (el.value||"").trim();
+  if (!name) return { name:null, id:null };
+  var picked = el.dataset.acId || null;
+  /* typed the whole name without touching the menu — resolve it rather than lose the link */
+  if (!picked){
+    var hit = CG.memberIndex().find(function(m){ return m.label.toLowerCase() === name.toLowerCase(); });
+    if (hit) picked = hit.id;
+  }
+  return { name:name, id:picked };
+};
+CG.fileActionRequest = function(type){
+  if (!CG.auth.user){ CG.toast("Sign in with Discord first","err"); return; }
+  var meta = CG.ACTION_META[type]; if(!meta) return;
+  var me = CG.me();
+  var fields = "";
+  if (type==="complaint" || type==="appeal"){
+    var subs = type==="complaint" ? CG.COMPLAINT_SUBJECTS : CG.APPEAL_SUBJECTS;
+    fields += '<label class="fld"><span>'+(type==="complaint"?"What’s the complaint about?":"What are you appealing?")+'</span><select id="acSubject"><option value="">Select one…</option>'+subs.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join("")+'</select></label>';
+    if (type==="complaint"){
+      fields += CG.memberPickerField("acTarget", "Who is this about? (optional)",
+        "Type a name and pick from the list — that links the case to their record.");
+    }
+  }
+  if (type==="position_change"){
+    var posOpts = ["C","LW","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
+    fields += '<div class="grid g2" style="gap:12px">'+
+      '<label class="fld"><span>Current position</span><select id="acCur">'+posOpts+'</select></label>'+
+      '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>';
+  }
+  if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
+  fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
+    '<p class="caption">'+(meta.route==="manager"?"Private to your club’s management.":"Goes to the league office — commissioners are notified instantly.")+'</p>';
+  CG.modal("File — "+esc(meta.label), fields,
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="acGo">Submit</button>');
+  CG.wireMemberPicker("acTarget");
+  document.getElementById("acGo").addEventListener("click", function(){
+    var subEl=document.getElementById("acSubject");
+    var subject = subEl ? subEl.value : null;
+    if (subEl && !subject){ CG.toast("Pick what this is about","err"); return; }
+    var details = (document.getElementById("acDetails").value||"").trim();
+    if (!details){ CG.toast("Add details — describe what happened","err"); return; }
+    var tgt = CG.readMemberPicker("acTarget");
+    var payload = { profile_id: CG.auth.user.id, type:type, route:meta.route, details:details,
+      season_id: (CG.SEASON&&CG.SEASON.id)||null, subject: subject||null,
+      target: tgt.name, target_profile_id: tgt.id };
+    if (type==="trade_request") payload.team_id = (CG.lg._codeToId||{})[me.team]||null;
+    if (type==="position_change"){
+      payload.current_position = document.getElementById("acCur").value;
+      payload.requested_position = document.getElementById("acReq").value;
+      if (payload.current_position===payload.requested_position){ CG.toast("Pick a different requested position","err"); return; }
+    }
+    var btn=this; btn.disabled=true;
+    CG.sb.from("action_requests").insert(payload).then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(meta.route==="manager"?"Sent to your club’s management":"Filed — the league office has it","ok");
+      CG.refreshActions();
+    });
+  });
+};
+/* issue a warning or suspension straight from a case — resolves it and links the record */
+CG.caseDisciplineModal = function(caseId, targetName, targetId){
+  var players = (CG.lg.players||[]).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
+  /* Prefer the profile the filer actually picked. Falling back to a name comparison is what the
+     old behaviour did everywhere, and it silently stops matching the moment someone changes their
+     gamertag — so it's now only the path for cases filed before the picker existed. */
+  var match = (targetId && players.find(function(p){ return p.id===targetId; }))
+    || players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
+  var opts = '<option value="">— pick the player —</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
+  var cur = (CG.SEASON&&CG.SEASON.number)||1;
+  CG.modal("Issue discipline",
+    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label>'+
+    '<label class="fld"><span>Type</span><select id="dcType">'+
+      '<option value="warning">Formal warning — on record, no games lost</option>'+
+      '<option value="games">Suspension — number of games</option>'+
+      '<option value="date">Suspension — until a date</option>'+
+      '<option value="seasons">Suspension — through a season</option></select></label>'+
+    '<div id="dcGames" class="fld" style="display:none"><label><span>Games</span><input id="dcGamesN" type="number" min="1" value="1"></label></div>'+
+    '<div id="dcDate" class="fld" style="display:none"><label><span>Ends after</span><input id="dcDateN" type="date"></label></div>'+
+    '<div id="dcSeasons" class="fld" style="display:none"><label><span>Through season number</span><input id="dcSeasonsN" type="number" min="'+cur+'" value="'+cur+'"></label></div>'+
+    '<label class="fld"><span>Reason (recorded on the player and the case)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
+    '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
+  function sync(){ var t=document.getElementById("dcType").value;
+    document.getElementById("dcGames").style.display=t==="games"?"block":"none";
+    document.getElementById("dcDate").style.display=t==="date"?"block":"none";
+    document.getElementById("dcSeasons").style.display=t==="seasons"?"block":"none"; }
+  document.getElementById("dcType").addEventListener("change", sync); sync();
+  document.getElementById("dcGo").addEventListener("click", function(){
+    var pid=document.getElementById("dcPlayer").value; if(!pid){ CG.toast("Pick the player","err"); return; }
+    var t=document.getElementById("dcType").value;
+    var args={ p_request:caseId, p_profile:pid, p_mode:t, p_reason:(document.getElementById("dcReason").value||"").trim()||null };
+    if(t==="games") args.p_games=parseInt(document.getElementById("dcGamesN").value,10)||0;
+    /* ET, not the browser's zone. This built the instant from local time while the Users-and-roles
+       suspension path used CG.etISO, so the same "until Mar 3" ruling expired at different moments
+       depending on which screen issued it — and for a staffer abroad, up to a day early. */
+    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=CG.etISO(d, "23:59"); }
+    if(t==="seasons") args.p_until_season=parseInt(document.getElementById("dcSeasonsN").value,10)||cur;
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("discipline_from_case", args).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t issue discipline","err"); return; }
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Discipline issued — case resolved","ok");
+      if(CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+    });
+  });
+};
+/* rap sheet / precedent for the player a case is about */
+CG.caseHistoryModal = function(targetName){
+  var p = (CG.lg.players||[]).find(function(x){ return targetName && x.tag.toLowerCase()===String(targetName).toLowerCase(); });
+  if(!p){ CG.toast("No rostered player matches “"+(targetName||"—")+"”","err"); return; }
+  CG.modal("History — "+esc(p.tag), '<div id="rapBody" class="caption">Loading…</div>', '<button class="btn btn-ghost" data-close>Close</button>');
+  CG.sb.rpc("player_rap_sheet",{ p_profile:p.id }).then(function(r){
+    var el=document.getElementById("rapBody"); if(!el) return;
+    if(r.error){ el.textContent=r.error.message||"Couldn’t load"; return; }
+    function dl(x){ return x.mode==="games"?(x.games+"-game suspension"):x.mode==="seasons"?("suspension through Season "+x.until_season):x.mode==="date"?("suspension until "+(x.ends_at?CG.fmtDay(Date.parse(x.ends_at)):"—")):x.mode; }
+    var d=r.data||{}, s=d.suspensions||[], w=d.warnings||[], c=d.cases||[], h='';
+    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Suspensions</b>'+(s.length?'<div class="stack" style="gap:6px;margin-top:6px">'+s.map(function(x){ return '<div class="small">'+esc(dl(x))+' <span class="caption">· '+esc(x.reason||"no reason")+' · '+CG.fmtDay(Date.parse(x.at))+' · '+esc(x.status)+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
+    h+='<div style="margin-bottom:14px"><b style="font-family:var(--f-disp)">Warnings</b>'+(w.length?'<div class="stack" style="gap:6px;margin-top:6px">'+w.map(function(x){ return '<div class="small">'+esc(x.reason||"formal warning")+' <span class="caption">· '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None on record.</p>')+'</div>';
+    h+='<div><b style="font-family:var(--f-disp)">Prior cases about them</b>'+(c.length?'<div class="stack" style="gap:6px;margin-top:6px">'+c.map(function(x){ return '<div class="small">'+esc((CG.ACTION_META[x.type]||{}).label||x.type)+(x.subject?' — '+esc(x.subject):"")+' <span class="caption">· '+esc(x.status)+' · '+CG.fmtDay(Date.parse(x.at))+'</span></div>'; }).join("")+'</div>':'<p class="caption" style="margin-top:4px">None.</p>')+'</div>';
+    el.innerHTML=h;
+  });
+};
+CG.AFTER._complaintsLive = function(){
+  document.querySelectorAll("[data-file-action]").forEach(function(c){
+    var go = function(){ CG.fileActionRequest(c.getAttribute("data-file-action")); };
+    c.addEventListener("click", go);
+    c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
+  });
+  document.querySelectorAll("[data-case-filter]").forEach(function(b){ b.addEventListener("click", function(){
+    CG._caseFilter = this.getAttribute("data-case-filter"); if(CG.router) CG.router();
+  }); });
+  document.querySelectorAll("[data-reply-send]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-reply-send");
+    var inp=document.querySelector('[data-reply-for="'+id+'"]');
+    var body=(inp&&inp.value||"").trim();
+    if(!body){ CG.toast("Write the reply first","err"); return; }
+    var att=((document.querySelector('[data-reply-att="'+id+'"]')||{}).value||"").trim();
+    if (att && !/^https?:\/\//i.test(att)){ CG.toast("Attachments must be an http(s) link","err"); return; }
+    var internalEl=document.querySelector('[data-reply-internal="'+id+'"]');
+    var row={ request_id:id, author_id:CG.auth.user.id, body:body, internal:!!(internalEl&&internalEl.checked) };
+    if (att) row.attachments=[att];
+    CG.sb.from("action_messages").insert(row).then(function(r){
+      if(r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
+      CG.toast(row.internal?"Staff-only note added":"Reply added","ok"); CG.refreshActions();
+    });
+  }); });
+  document.querySelectorAll("[data-case-claim]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-claim"), p_assignee:CG.auth.user.id }).then(function(r){
+      if(r.error){ CG.toast(r.error.message||"Couldn’t claim","err"); return; } CG.toast("Case claimed — it’s yours","ok"); CG.refreshActions(); }); }); });
+  document.querySelectorAll("[data-case-unclaim]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.rpc("assign_case",{ p_request:this.getAttribute("data-case-unclaim"), p_assignee:null }).then(function(r){
+      if(r.error){ CG.toast(r.error.message||"Couldn’t release","err"); return; } CG.toast("Released back to the queue","ok"); CG.refreshActions(); }); }); });
+  document.querySelectorAll("[data-case-discipline]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target"), this.getAttribute("data-target-id")||null); }); });
+  document.querySelectorAll("[data-pos-decide]").forEach(function(b){ b.addEventListener("click", function(){
+    var approve=this.getAttribute("data-pos-decide")==="approve", id=this.getAttribute("data-pos-id"), line=this.getAttribute("data-pos-line")||"the change";
+    CG.confirm(approve?"Approve this position change?":"Deny this position change?",
+      approve?"Their registration flips to the requested position ("+esc(line)+") and the case closes. The Discord position role follows on the next sync."
+             :"The registration stays as it is and the case closes as denied. They're notified either way.",
+      approve?"Approve the switch":"Deny the request", function(){
+        CG.sb.rpc("decide_position_change",{ p_request:id, p_approve:approve }).then(function(r){
+          if (r.error){ CG.toast(r.error.message||"Couldn’t decide the request","err"); return; }
+          CG.toast(approve?"Approved — their registration is updated":"Request denied","ok");
+          if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+        });
+      });
+  }); });
+  document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.caseHistoryModal(this.getAttribute("data-target")); }); });
+  document.querySelectorAll("[data-act-status]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
+    /* .select() so a row blocked by RLS (a conflict of interest) comes back as 0 rows, not a
+       silent success — otherwise the official is told the case was ruled when nothing changed */
+    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
+      if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+      if(!r.data||!r.data.length){ CG.toast("You can’t rule on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
+      CG.toast("Case "+st,"ok"); CG.refreshActions();
+    });
+  }); });
+  document.querySelectorAll("[data-act-respond]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-act-respond");
+    CG.modal("Official response",
+      '<label class="fld"><span>Response to the member</span><textarea id="arResp" rows="5"></textarea></label>'+
+      '<p class="caption">Shown on their case as the league’s written decision — pair it with Resolve or Deny.</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="arGo">Save response</button>');
+    document.getElementById("arGo").addEventListener("click", function(){
+      var txt=(document.getElementById("arResp").value||"").trim();
+      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        if(!r.data||!r.data.length){ CG.toast("You can’t respond on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Response saved","ok"); CG.refreshActions();
+      });
+    });
+  }); });
+  document.querySelectorAll("[data-act-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-act-del");
+    CG.confirm("Delete this case?","It’s removed permanently for everyone. This can’t be undone.","Delete case", function(){
+      CG.sb.from("action_requests").delete().eq("id",id).select("id").then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        if(!r.data||!r.data.length){ CG.toast("Only a commissioner can delete a case.","err"); return; }
+        CG.toast("Case deleted","ok"); CG.refreshActions();
+      });
+    });
+  }); });
+};
+/* route the hub + admin complaint views to the live system */
+CG.hubComplaints = function(){ return CG.hubComplaintsLive({}); };
+/* Open one case from anywhere it's listed. The conversation itself is CG.actionCard — the same
+   component the list uses — so there is exactly one implementation of a case thread and replies,
+   attachments, staff-only notes and the ruling buttons behave identically however you reached it.
+   Its handlers are bound by AFTER._complaints, which already covers the "complaint" route. */
+CG.findCase = function(caseId){
+  var all = (CG.lg && CG.lg._actionReqs) || [], id = String(caseId||"").trim();
+  if (!id) return null;
+  return all.find(function(a){ return a.id === id; })
+      /* links written elsewhere carry only the first 8 characters of the id */
+      || all.find(function(a){ return String(a.id||"").slice(0, id.length) === id; })
+      || null;
+};
+CG.hubComplaintDetail = function(caseId){
+  var review = CG.role()==="commish" || CG.role()==="staff";
+  var a = CG.findCase(caseId);
+  var back = '<a class="sec-link" href="#/hub/complaints">'+CG.ic("back",14)+' All cases</a>';
+  if (!a){
+    /* a failed load and a genuinely missing case are different problems — say which */
+    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("flag",22)+'</div>'+
+      '<b>'+(CG._actionLoadError ? "Couldn’t load this case" : "That case isn’t here")+'</b>'+
+      '<p>'+(CG._actionLoadError ? esc(CG._actionLoadError)+" — reload and try again."
+                                 : "It may have been deleted, or it isn’t one you have access to.")+'</p>'+
+      '</div></div>';
+  }
+  var meta = CG.ACTION_META[a.type] || { label:a.type };
+  return '<div style="margin-bottom:18px">'+back+
+    '<h1 class="h-sec" style="margin-top:10px">'+esc(meta.label)+'</h1>'+
+    '<p class="lede" style="margin-top:6px">'+
+      (review ? "The filer sees every reply here except staff-only notes."
+              : "Replies from the league office appear here — you’ll be notified when one lands.")+
+    '</p></div>'+
+    CG.actionCard(a, review);
+};
+
+/* ================================================================
+   STAFF DESK — one page for the officials: cases, discipline,
+   import spot-checks, and tonight's slate. Staff + commissioner.
+   ================================================================ */
+/* ================================================================
+   STAFF DESK data cards — EA import triage, shared task list, staff
+   directory, and the activity feed. Data comes from CG._staffExtras
+   (loaded by CG.loadStaffExtras for staff/commissioners).
+   ================================================================ */
+CG._auditLabel = function(a){
+  var m = { role_change:"changed a member’s role", season_rollover:"ran the season rollover",
+    case_assign:"assigned a case", discipline_from_case:"issued discipline from a case",
+    season_award_finalized:"finalized a season award", playoff_round:"generated a playoff round",
+    playoff_clear:"cleared a playoff round", season_status:"changed a season’s status",
+    team_upsert:"edited a club", division_upsert:"edited a division", ea_reingest:"re-ran an EA import" };
+  return m[a] || String(a||"acted").replace(/_/g," ");
+};
+CG.staffEaCard = function(){
+  var ea = CG._staffExtras && CG._staffExtras.ea; if (!ea) return "";
+  var un = ea.unmatched||[], ms = ea.missing_stats||[];
+  if (!un.length && !ms.length) return "";
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>EA imports needing a look</h3><span class="chip chip-warn">'+(un.length+ms.length)+'</span></div>';
+  if (un.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Unmatched imports</span>'+
+    un.slice(0,8).map(function(u){
+      return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line-soft)">'+
+        '<span class="mono caption" style="flex-shrink:0">#'+esc(String(u.match_id||"").slice(0,10))+'</span>'+
+        '<span class="small" style="flex:1;min-width:180px;color:var(--steel)">'+esc(u.reason||"couldn’t match to a scheduled game")+'</span>'+
+        '<span class="caption">'+(u.at?CG.fmtDay(Date.parse(u.at)):"")+'</span>'+
+        '<button class="btn btn-ghost btn-sm" data-ea-dismiss="'+esc(String(u.match_id||""))+'">Dismiss</button></div>'; }).join("")+
+    '<p class="caption" style="margin-top:8px">These EA matches couldn’t be tied to a league game — usually a club EA ID that isn’t linked, or a pickup game against a club outside CGHL. Link clubs in <a href="#/admin/eastats" style="font-weight:700;border-bottom:2px solid var(--chrome)">EA stats</a>, or dismiss the ones that aren’t league games.</p></div>';
+  if (ms.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="eyebrow chr" style="display:block;margin-bottom:8px">Finals missing box scores</span>'+
+    ms.slice(0,8).map(function(m){ return '<div class="small" style="padding:6px 0;border-top:1px solid var(--line-soft)">'+esc(m.away||"?")+' @ '+esc(m.home||"?")+'<span class="caption"> · '+(m.at?CG.fmtDay(Date.parse(m.at)):"")+'</span></div>'; }).join("")+'</div>';
+  return h+'</div>';
+};
+CG.staffTasksCard = function(){
+  var ex = CG._staffExtras; if (!ex) return "";
+  var tasks = (ex.tasks||[]), uid = CG.auth.user && CG.auth.user.id;
+  var open = tasks.filter(function(t){ return t.status==="open"; });
+  var mine = open.filter(function(t){ return t.assignee===uid; });
+  var unassigned = open.filter(function(t){ return !t.assignee; });
+  var names = {}; ((ex.directory)||[]).forEach(function(d){ names[d.id]=d.gamertag; });
+  function row(t){
+    var who = t.assignee ? (names[t.assignee]||"assigned") : null;
+    return '<div class="card-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<div style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+esc(t.title)+'</b>'+
+      (t.detail?'<p class="caption" style="margin-top:2px">'+esc(t.detail)+'</p>':"")+
+      (who?'<span class="chip chip-chrome" style="font-size:9px;margin-top:4px">'+esc(who)+'</span>':'<span class="chip chip-warn" style="font-size:9px;margin-top:4px">Unassigned</span>')+'</div>'+
+      (t.assignee!==uid?'<button class="btn btn-ghost btn-sm" data-task-claim="'+t.id+'">Claim</button>':"")+
+      '<button class="btn btn-ghost btn-sm" data-task-done="'+t.id+'">Done</button>'+
+      '<button class="btn btn-ghost btn-sm" data-task-del="'+t.id+'" aria-label="Delete task">'+CG.ic("x",14)+'</button></div>';
+  }
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff tasks</h3>'+
+    '<button class="btn btn-chrome btn-sm" data-task-add>New task</button></div>';
+  if (!open.length){ h += '<div class="card-b"><p class="caption">No open tasks. Spin one up with <b>New task</b> — assign it to yourself or leave it in the pool for whoever’s free.</p></div>'; }
+  else {
+    if (mine.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Yours</span></div>'+mine.map(row).join(""); }
+    var others = open.filter(function(t){ return t.assignee!==uid; });
+    if (others.length){ h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">'+(unassigned.length?"Unassigned & others":"Assigned to others")+'</span></div>'+others.map(row).join(""); }
+  }
+  return h+'</div>';
+};
+/* Staff votes — any official can put a topic to the office and choose which departments get a
+   ballot (none selected = the whole office). Eligibility, valid choices and one-ballot-per-person
+   are all enforced by the RPCs; this only renders what the board returns. */
+CG.staffVotesCard = function(){
+  var ex = CG._staffExtras; if (!ex) return "";
+  var votes = ex.votes || [];
+  var lab = {}; (CG.STAFF_DEPARTMENTS||[]).forEach(function(d){ lab[d[0]] = d[1]; });
+  var isCommish = CG.role() === "commish";
+  function deptChips(list){
+    if (!list || !list.length) return '<span class="chip" style="font-size:9px">All staff</span>';
+    return list.map(function(k){ return '<span class="chip" style="font-size:9px">'+esc(lab[k]||k)+'</span>'; }).join(" ");
+  }
+  function block(v){
+    var opts = v.options||[], tally = v.tally||{}, cast = 0;
+    opts.forEach(function(o){ cast += (tally[o]||0); });
+    var pool = Math.max(cast, v.eligibleCount||0), isOpen = v.status === "open", canManage = isCommish || v.mine;
+    var h = '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+      '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
+        '<b style="font-family:var(--f-disp);font-size:15px">'+esc(v.title)+'</b>'+
+        (isOpen?"":'<span class="chip chip-warn" style="font-size:9px">Closed</span>')+
+        '<span class="caption" style="margin-left:auto">'+cast+' of '+pool+' voted</span></div>'+
+      (v.detail?'<p class="caption" style="margin-top:4px">'+esc(v.detail)+'</p>':"")+
+      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+deptChips(v.departments)+'</div>';
+    /* Media staff hold no ballot on any staff vote (Rule 2.7) — a rule change can bend toward the
+       club they run, and Media is the one department allowed to run one. The server says so via
+       mediaBarred; fall back to the local check if an older board payload lacks it. */
+    var mediaBlocked = (v.mediaBarred === true) ||
+      (v.mediaBarred === undefined && CG.isMediaOnlyStaff());
+    if (isOpen && v.eligible && !mediaBlocked){
+      h += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'+opts.map(function(o){
+        return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
+        (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
+    } else if (isOpen && mediaBlocked){
+      h += '<p class="caption" style="margin-top:8px">Media staff don’t hold a ballot on staff votes (Rule 2.7) — the department reports on the league rather than deciding for it. Every vote is read-only for you.</p>';
+    } else if (isOpen){
+      h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
+    }
+    h += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">'+opts.map(function(o){
+      var n = tally[o]||0, pct = cast ? Math.round(n/cast*100) : 0;
+      return '<div style="display:flex;align-items:center;gap:9px">'+
+        '<span class="mono" style="font-size:11px;min-width:92px">'+esc(o)+'</span>'+
+        '<span style="flex:1;height:6px;border-radius:99px;background:var(--line-soft);overflow:hidden">'+
+          '<i style="display:block;height:100%;width:'+pct+'%;background:var(--chrome)"></i></span>'+
+        '<span class="mono num" style="font-size:11px;min-width:30px;text-align:right">'+n+'</span></div>'; }).join("")+'</div>';
+    var bal = v.ballots||[];
+    if (bal.length) h += '<p class="caption" style="margin-top:7px">'+bal.map(function(b){
+      return esc(b.who)+' · '+esc(b.choice); }).join(" &nbsp;·&nbsp; ")+'</p>';
+    h += '<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;align-items:center">'+
+      '<span class="caption" style="margin-right:auto">Opened by '+esc(v.createdByTag||"staff")+'</span>'+
+      (canManage&&isOpen?'<button class="btn btn-ghost btn-sm" data-vote-close="'+v.id+'">Close voting</button>':"")+
+      (canManage?'<button class="btn btn-ghost btn-sm" data-vote-del="'+v.id+'">Delete</button>':"")+
+      '</div></div>';
+    return h;
+  }
+  var live = votes.filter(function(v){ return v.status === "open"; });
+  var done = votes.filter(function(v){ return v.status !== "open"; }).slice(0, 4);
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Staff votes</h3>'+
+    '<button class="btn btn-chrome btn-sm" data-vote-add>Create vote</button></div>';
+  if (!live.length && !done.length){
+    h += '<div class="card-b"><p class="caption">Nothing on the ballot. Use <b>Create vote</b> to put a decision to the office — choose which departments get a vote, or leave it open to all staff.</p></div>';
+  } else {
+    h += live.map(block).join("");
+    if (done.length) h += '<div class="card-b" style="border-top:1px solid var(--line-soft);padding-bottom:4px"><span class="eyebrow chr">Closed</span></div>'+done.map(block).join("");
+  }
+  return h+'</div>';
+};
+CG.staffVoteCreateModal = function(){
+  var chips = (CG.STAFF_DEPARTMENTS||[]).map(function(d){
+    return '<button type="button" class="chip" data-vdept="'+d[0]+'" aria-pressed="false" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
+  CG.modal("Create a staff vote",
+    '<label class="fld"><span>Topic</span><input id="svTitle" maxlength="140" placeholder="e.g. Move game night to Thursdays?"></label>'+
+    '<label class="fld"><span>Details (optional)</span><textarea id="svDetail" rows="3" placeholder="Anything the office should know before voting."></textarea></label>'+
+    '<label class="fld"><span>Options — one per line (blank = Yes / No / Abstain)</span><textarea id="svOpts" rows="3" placeholder="Yes&#10;No&#10;Abstain"></textarea></label>'+
+    '<label class="fld"><span>Who can vote — none selected means all staff</span></label>'+
+    '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="svGo">Open vote</button>');
+  var sel = [];
+  document.querySelectorAll("[data-vdept]").forEach(function(b){ b.addEventListener("click", function(){
+    var k = this.getAttribute("data-vdept"), i = sel.indexOf(k);
+    if (i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
+    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
+  }); });
+  document.getElementById("svGo").addEventListener("click", function(){
+    var btn = this, title = (document.getElementById("svTitle").value||"").trim();
+    if (!title){ CG.toast("Give the vote a title","err"); return; }
+    var opts = (document.getElementById("svOpts").value||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
+    btn.disabled = true;
+    CG.sb.rpc("staff_vote_create",{ p_title:title, p_detail:(document.getElementById("svDetail").value||""),
+      p_options:(opts.length?opts:null), p_departments:sel, p_closes_at:null }).then(function(r){
+      btn.disabled = false;
+      if (r.error){ CG.toast(r.error.message||"Couldn’t open the vote","err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Vote opened","ok"); CG.refreshStaffExtras();
+    });
+  });
+};
+CG.staffDirectoryCard = function(){
+  var ex = CG._staffExtras; if (!ex || !ex.directory) return "";
+  var dir = ex.directory, uid = CG.auth.user && CG.auth.user.id, isCommish = CG.role()==="commish";
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League staff</h3><span class="chip">'+dir.length+'</span></div>';
+  h += dir.map(function(s){
+    var depts = (s.departments||[]).map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" ");
+    var canEdit = isCommish || s.id===uid;
+    return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<span class="chip '+(s.role==="commissioner"?"chip-chrome":"")+'" style="font-size:9px">'+(s.role==="commissioner"?"COMMISH":"STAFF")+'</span>'+
+      '<b style="font-family:var(--f-disp);min-width:120px">'+esc(s.gamertag||"—")+'</b>'+
+      '<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap">'+(depts||'<span class="caption">no departments set</span>')+'</span>'+
+      (s.timezone?'<span class="caption mono">'+esc(s.timezone)+'</span>':"")+
+      (canEdit?'<button class="btn btn-ghost btn-sm" data-staff-edit="'+s.id+'">Edit</button>':"")+'</div>';
+  }).join("");
+  return h+'</div>';
+};
+CG.staffActivityCard = function(){
+  var acts = (CG._staffExtras && CG._staffExtras.activity)||[]; if (!acts.length) return "";
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent staff activity</h3><span class="chip">audit log</span></div>'+
+    '<div class="card-b" style="padding-top:6px">'+acts.slice(0,12).map(function(a){
+      return '<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line-soft)">'+
+        '<b class="small" style="font-family:var(--f-disp);min-width:110px">'+esc(a.actor||"League office")+'</b>'+
+        '<span class="small" style="flex:1;color:var(--steel)">'+esc(CG._auditLabel(a.action))+'</span>'+
+        '<span class="caption mono">'+(a.at?CG.fmtFull(Date.parse(a.at)):"")+'</span></div>';
+    }).join("")+'</div></div>';
+};
+CG.staffTaskAddModal = function(){
+  var dir = (CG._staffExtras&&CG._staffExtras.directory)||[];
+  var opts = '<option value="">Leave in the pool</option>'+dir.map(function(d){ return '<option value="'+d.id+'">'+esc(d.gamertag||"staff")+'</option>'; }).join("");
+  CG.modal("New staff task",
+    '<label class="fld"><span>Task</span><input id="stTitle" placeholder="e.g. Re-link CHI’s EA club ID" maxlength="140"></label>'+
+    '<label class="fld"><span>Detail (optional)</span><textarea id="stDetail" rows="3"></textarea></label>'+
+    '<label class="fld"><span>Assign to</span><select id="stWho">'+opts+'</select></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="stGo">Create task</button>');
+  document.getElementById("stGo").addEventListener("click", function(){
+    var title=(document.getElementById("stTitle").value||"").trim();
+    if(!title){ CG.toast("Give the task a title","err"); return; }
+    var btn=this; btn.disabled=true;
+    CG.sb.from("staff_tasks").insert({ title:title, detail:(document.getElementById("stDetail").value||"").trim()||null,
+      assignee:(document.getElementById("stWho").value||null), created_by:CG.auth.user.id }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast("Couldn’t create: "+r.error.message,"err"); return; }
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Task created","ok"); CG.refreshStaffExtras();
+    });
+  });
+};
+CG.staffProfileEditModal = function(entry){
+  /* Normalize what's stored BEFORE it drives the editor: map legacy keys through DEPT_ALIAS and
+     drop any key that has no chip. Seeding the selection from the raw array was a trap — a legacy
+     key (e.g. "player-relations", displayed as Community) lit no chip yet was carried into every
+     save, so that department could never be unassigned, and consumers keyed on the new name
+     (discord-sync's department roles) never saw it at all. Saving now always writes canonical,
+     de-duplicated keys, which also self-heals a stale row the first time it's edited. */
+  var known = {}; CG.STAFF_DEPARTMENTS.forEach(function(d){ known[d[0]] = 1; });
+  var picked = (entry.departments||[])
+    .map(function(k){ return (CG.DEPT_ALIAS && CG.DEPT_ALIAS[k]) || k; })
+    .filter(function(k, i, arr){ return known[k] && arr.indexOf(k) === i; });
+  var chips = CG.STAFF_DEPARTMENTS.map(function(d){ var on=picked.indexOf(d[0])>=0;
+    return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-dept="'+d[0]+'" aria-pressed="'+on+'" style="cursor:pointer;padding:7px 12px">'+esc(d[1])+'</button>'; }).join(" ");
+  CG.modal("Staff profile — "+esc(entry.gamertag||""),
+    '<label class="fld"><span>Departments</span></label><div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+chips+'</div>'+
+    '<label class="fld"><span>Time zone</span><input id="spTz" value="'+esc(entry.timezone||"")+'" placeholder="e.g. ET, PT, GMT"></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="spGo">Save</button>');
+  var sel = picked.slice();
+  document.querySelectorAll("[data-dept]").forEach(function(b){ b.addEventListener("click", function(){
+    var k=this.getAttribute("data-dept"), i=sel.indexOf(k);
+    if(i>=0){ sel.splice(i,1); this.classList.remove("chip-chrome"); this.setAttribute("aria-pressed","false"); }
+    else { sel.push(k); this.classList.add("chip-chrome"); this.setAttribute("aria-pressed","true"); }
+  }); });
+  document.getElementById("spGo").addEventListener("click", function(){
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("set_staff_profile",{ p_target:entry.id, p_departments:sel, p_timezone:(document.getElementById("spTz").value||"") }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Staff profile updated","ok"); CG.refreshStaffExtras();
+    });
+  });
+};
+CG.wireStaffExtras = function(){
+  var t = document.querySelector("[data-task-add]"); if (t) t.addEventListener("click", CG.staffTaskAddModal);
+  document.querySelectorAll("[data-ea-dismiss]").forEach(function(b){ b.addEventListener("click", function(){
+    var mid=this.getAttribute("data-ea-dismiss"), btn=this; btn.disabled=true;
+    CG.sb.rpc("ea_dismiss_import",{ p_match_id:mid }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t dismiss","err"); return; }
+      CG.toast("Import dismissed — not a league game","ok"); CG.refreshStaffExtras();
+    }); }); });
+  document.querySelectorAll("[data-task-claim]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).then(function(r){
+      if(r.error){ CG.toast("Couldn’t claim","err"); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
+  document.querySelectorAll("[data-task-done]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.sb.from("staff_tasks").update({ status:"done", completed_at:new Date().toISOString() }).eq("id",this.getAttribute("data-task-done")).then(function(r){
+      if(r.error){ CG.toast("Couldn’t update","err"); return; } CG.toast("Task done","ok"); CG.refreshStaffExtras(); }); }); });
+  document.querySelectorAll("[data-task-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-task-del");
+    CG.confirm("Delete this task?","It’s removed for the whole staff.","Delete", function(){
+      CG.sb.from("staff_tasks").delete().eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete","err"); return; } CG.toast("Task deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
+  document.querySelectorAll("[data-staff-edit]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
+    if(entry) CG.staffProfileEditModal(entry); }); });
+  /* --- staff votes --- */
+  var va = document.querySelector("[data-vote-add]"); if (va) va.addEventListener("click", CG.staffVoteCreateModal);
+  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-vote-cast"), choice=this.getAttribute("data-choice"), btn=this; btn.disabled=true;
+    CG.sb.rpc("staff_vote_cast",{ p_vote:id, p_choice:choice, p_note:null }).then(function(r){
+      btn.disabled=false;
+      if(r.error){ CG.toast(r.error.message||"Couldn’t record your vote","err"); return; }
+      CG.toast("Vote recorded","ok"); CG.refreshStaffExtras(); }); }); });
+  document.querySelectorAll("[data-vote-close]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-vote-close");
+    CG.confirm("Close this vote?","No further ballots can be cast — the result stays on the desk.","Close voting", function(){
+      CG.sb.rpc("staff_vote_close",{ p_vote:id }).then(function(r){
+        if(r.error){ CG.toast(r.error.message||"Couldn’t close","err"); return; }
+        CG.toast("Voting closed","ok"); CG.refreshStaffExtras(); }); }); }); });
+  document.querySelectorAll("[data-vote-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-vote-del");
+    CG.confirm("Delete this vote?","The topic and every ballot are removed for the whole office.","Delete", function(){
+      CG.sb.rpc("staff_vote_delete",{ p_vote:id }).then(function(r){
+        if(r.error){ CG.toast(r.error.message||"Couldn’t delete","err"); return; }
+        CG.toast("Vote deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
+};
+/* Consolidated "Needs attention" triage card — the in-app twin of the daily #staff-general
+   briefing. Reads the DB aggregation (CG._staffAttention); falls back to what's already loaded
+   client-side (open cases, applications, suspensions) if the RPC hasn't returned yet. */
+CG.staffAttentionCard = function(){
+  var a = CG._staffAttention, lg = CG.lg;
+  /* client fallback for the counts the RPC would provide */
+  if (!a){
+    var oc = (lg._actionReqs||[]).filter(function(x){ return x.status!=="resolved" && x.status!=="denied"; }).length;
+    a = { open_cases:oc, oldest_case_hours:null, sla_breached:0,
+      pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
+      pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
+      active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
+      unmatched_ea:null, finals_missing_stats:null,
+      /* votes the office has already loaded for the desk — open, and still short a ballot */
+      votes_awaiting_ballots:((CG._staffExtras&&CG._staffExtras.votes)||[]).filter(function(v){
+        var cast = Object.keys(v.tally||{}).reduce(function(s,k){ return s+(v.tally[k]||0); },0);
+        return v.status==="open" && cast < (v.eligibleCount||0);
+      }).length };
+  }
+  var n = function(v){ return (v==null?0:(v|0)); };
+  var apps = n(a.pending_staff_apps)+n(a.pending_owner_apps);
+  var items = [];
+  if (n(a.open_cases)>0) items.push({ label:(n(a.open_cases))+" open case"+(n(a.open_cases)===1?"":"s")+
+      (a.oldest_case_hours!=null?" · oldest "+(a.oldest_case_hours>=24?Math.round(a.oldest_case_hours/24)+"d":a.oldest_case_hours+"h"):""),
+      go:"#/hub/complaints", warn:n(a.sla_breached)>0 });
+  if (apps>0) items.push({ label:apps+" application"+(apps===1?"":"s")+" to review", go:"#/hub/staffdesk", warn:false });
+  if (n(a.votes_awaiting_ballots)>0) items.push({ label:n(a.votes_awaiting_ballots)+" staff vote"+(n(a.votes_awaiting_ballots)===1?"":"s")+" awaiting your ballot", go:"#/hub/staffdesk", warn:false });
+  if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
+  if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
+  if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
+
+  if (!items.length){
+    return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
+      '<span><b style="font-family:var(--f-disp)">All clear.</b> No cases, applications, votes, or imports need attention right now.</span></div>';
+  }
+  return '<div class="card" style="margin-bottom:20px;border-color:var(--chrome)"><div class="card-h" style="background:var(--chrome-tint)">'+
+    '<h3>'+CG.ic("flag",15)+' Needs attention</h3>'+
+    (n(a.sla_breached)>0?'<span class="chip chip-loss">'+n(a.sla_breached)+' past 48h</span>':'<span class="chip chip-warn">'+items.length+' item'+(items.length===1?"":"s")+'</span>')+'</div>'+
+    '<div class="card-b" style="display:flex;flex-wrap:wrap;gap:8px">'+items.map(function(it){
+      return '<button class="chip '+(it.warn?"chip-loss":"chip-chrome")+'" style="cursor:pointer;padding:8px 12px" data-go="'+it.go+'">'+esc(it.label)+' →</button>';
+    }).join("")+'</div></div>';
+};
+/* One application opened into its own page — the full submission, plus a written response and the
+   decision, the same way a case opens from the queue. type is "staff" or "owner". */
+/* Application chat — a two-way thread between the applicant and the league office. UNLIKE the
+   staff ballot, this is applicant-visible: RLS lets the applicant read/write their own thread and
+   the office read/write any. Both sides are notified on each message (trg_application_message). */
+CG._groupAppMsgs = function(rows){
+  var map = {}; (rows||[]).forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
+  return map;
+};
+CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[type+":"+id] || []; };
+/* Resolves to TRUE only when the thread data actually changed since the last load, so callers
+   can re-render exactly when there is something new (and a token refresh re-running
+   applySession an hour in doesn't yank the page for no reason). A failed fetch keeps the
+   previous map — blanking it would repaint an open thread as "No messages yet" over a blip. */
+CG.loadAppMessages = function(){
+  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
+  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
+    .then(function(mm){
+      if (!mm || mm.error) return false;
+      var rows = mm.data || [];
+      var fp = rows.length + "|" + (rows.length ? rows[rows.length-1].created_at : "");
+      var changed = fp !== CG._appMsgsFp;
+      CG._appMsgsFp = fp;
+      if (CG.lg) CG.lg._appMsgs = CG._groupAppMsgs(rows);
+      return changed;
+    }, function(){ return false; });
+};
+/* GM/AGM nominations — same contract: true only when something changed. */
+CG.loadMgmtApps = function(){
+  if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
+  return CG.sb.from("management_applications").select("*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)").order("created_at",{ascending:false})
+    .then(function(ma){
+      if (!ma || ma.error) return false;
+      var rows = ma.data || [];
+      var fp = rows.length + "|" + (rows.length ? (rows[0].updated_at || rows[0].created_at) : "");
+      var changed = fp !== CG._mgmtAppsFp;
+      CG._mgmtAppsFp = fp;
+      if (CG.lg) CG.lg._mgmtApps = rows;
+      return changed;
+    }, function(){ return false; });
+};
+/* live thread: subscribe to application_messages inserts. No recipient filter — Supabase Realtime
+   applies the table's RLS, so the office receives every thread and an applicant only their own
+   (same model as direct_messages). A new message re-renders the open thread in place. */
+CG._appMsgChannel = null;
+CG.subscribeAppMessages = function(){
+  if (!CG.sb || !CG.auth.user || CG._appMsgChannel) return;
+  var me = CG.auth.user.id;
+  try {
+    CG._appMsgChannel = CG.sb.channel("appmsg-"+me)
+      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"application_messages" }, function(payload){
+        var m = payload && payload.new;
+        if (!m || m.sender_id === me) return;   /* my own send already refreshed the thread */
+        CG.loadAppMessages().then(function(){
+          var onThread = /#\/hub\/application\b/.test(location.hash) || /#\/(owner|staffapply)\b/.test(location.hash) || /#\/hub\/roster\b/.test(location.hash);
+          if (onThread && CG.router){
+            /* keep a half-typed message across the live re-render */
+            var cur = document.querySelector("[data-appchat-input]");
+            var draft = cur ? cur.value : "", hadFocus = cur && document.activeElement===cur;
+            CG.router();
+            if (draft){ var ni = document.querySelector("[data-appchat-input]"); if(ni){ ni.value = draft; if(hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
+          } else { CG.toast("New message on an application","ok"); }
+        });
+      }).subscribe();
+  } catch(e){}
+};
+CG.teardownAppMessages = function(){
+  if (CG._appMsgChannel){ try{ CG.sb.removeChannel(CG._appMsgChannel); }catch(e){} CG._appMsgChannel = null; }
+};
+/* complaints & tickets: the case thread and the Staff Desk queue now update live.
+   A new reply / new case reloads the case data and re-renders any case surface in
+   place. The chime rides the notification stream (notify_action_message writes a
+   notification to the OTHER party), so there is no double ping and no self-ping. */
+CG.subscribeActions = function(){
+  if (!CG.sb || !CG.auth.user || CG._actionChannel) return;
+  var me = CG.auth.user.id;
+  try {
+    CG._actionChannel = CG.sb.channel("actions-"+me)
+      .on("postgres_changes",{ event:"INSERT", schema:"public", table:"action_messages" }, function(payload){
+        var m = payload && payload.new;
+        if (!m || m.author_id === me) return;   /* my own reply already re-rendered the thread */
+        if (CG.refreshActions) CG.refreshActions();
+      })
+      .on("postgres_changes",{ event:"*", schema:"public", table:"action_requests" }, function(){
+        if (CG.refreshActions) CG.refreshActions();
+      }).subscribe();
+  } catch(e){}
+};
+CG.teardownActions = function(){
+  if (CG._actionChannel){ try{ CG.sb.removeChannel(CG._actionChannel); }catch(e){} CG._actionChannel = null; }
+};
+/* opts.office = the league-office view (staff/commish) vs the applicant's own view. Both can send;
+   labels differ so the applicant sees "League office" rather than a specific official's name. */
+CG.appChatSection = function(type, appId, opts){
+  opts = opts || {}; var office = !!opts.office;
+  var uid = CG.auth.user && CG.auth.user.id;
+  var msgs = CG.appMsgsFor(type, appId);
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(office?"Messages with the applicant":"Messages with the league office")+'</h3>'+
+    (msgs.length?'<span class="chip chip-xs">'+msgs.length+' message'+(msgs.length===1?"":"s")+'</span>':"")+'</div><div class="card-b">';
+  if (msgs.length){
+    h += '<div class="stack" style="gap:10px;margin-bottom:14px">'+msgs.map(function(m){
+      var mine = m.sender_id===uid;
+      var isStaff = m.sender && (m.sender.role==="staff" || m.sender.role==="commissioner");
+      var who = mine ? "You"
+        : isStaff ? (office ? ((m.sender&&m.sender.gamertag)||"Official")+" · league office" : "League office")
+        : ((m.sender&&m.sender.gamertag)||"Applicant");
+      return '<div style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
+        '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
+          '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
+          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtFull(Date.parse(m.created_at)):"")+'</span></div>'+
+          '<span class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
+    }).join("")+'</div>';
+  } else {
+    h += '<p class="caption" style="margin-bottom:14px">'+(office
+      ? "No messages yet. Reach out to the applicant with any questions before the ballot or a decision — they can read and reply here."
+      : "No messages yet. The league office may reach out here about your application, and you can message them any time. You’ll get a notification when they reply.")+'</p>';
+  }
+  var key = type+":"+appId;
+  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" aria-label="Write a message to '+(office?"the applicant":"the league office")+'" autocomplete="off" style="flex:1">'+
+    '<button class="btn btn-ink btn-sm" data-appchat-send="'+esc(key)+'">Send</button></div>';
+  h += '<p class="caption" style="margin-top:10px">'+(office
+    ? "The applicant can read and reply to this thread. The staff ballot below stays private to the league office."
+    : "Both sides are notified of new messages.")+'</p>';
+  return h + '</div></div>';
+};
+/* shared binder — used by the office detail page and both applicant views */
+CG.wireAppChat = function(){
+  document.querySelectorAll("[data-appchat-send]").forEach(function(b){ b.addEventListener("click", function(){
+    var key = this.getAttribute("data-appchat-send"), btn = this;
+    var inp = document.querySelector('[data-appchat-input="'+key+'"]');
+    var body = ((inp && inp.value) || "").trim();
+    if (!body){ CG.toast("Write a message first","err"); return; }
+    var i = key.indexOf(":"), type = key.slice(0,i), appId = key.slice(i+1);
+    btn.disabled = true;
+    CG.sb.from("application_messages").insert({ app_type:type, application_id:appId, sender_id:CG.auth.user.id, body:body }).select("id").then(function(r){
+      btn.disabled = false;
+      if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
+      if (!r.data || !r.data.length){ CG.toast("You can’t message on this application.","err"); return; }
+      if (inp) inp.value = "";
+      CG.toast("Message sent","ok");
+      CG.loadAppMessages().then(function(){ if(CG.router) CG.router(); });
+    });
+  }); });
+};
+/* ---- club management appointments: owners must APPLY to appoint a GM/AGM; the reviewer vote
+   approves. Rendered on the roster page (Team HQ). ---- */
+CG.clubMgmt = function(){
+  var club = CG.myClub && CG.myClub(); if(!club) return null;
+  var t = CG.TEAM[club]; if(!t) return null;
+  var uid = CG.auth.user && CG.auth.user.id;
+  return { club:club, t:t, teamId:t.id, isOwner: !!(uid && t.owner===uid) };
+};
+/* ---- Team HQ · team overview (dashboard console) ---- */
+CG.teamOverviewCard = function(mt){
+  if (!mt || !mt.code) return "";
+  var lg=CG.lg||{}, code=mt.code, names=lg._profName||{};
+  var rec=(lg.teams&&lg.teams[code])||{w:0,l:0,otl:0};
+  var pr=(lg.powerRankings||[]).find(function(p){ return p.team===code; })||{rank:0};
+  var prN=(lg.powerRankings||[]).length;
+  var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).length, rosterMax=CG.ROSTER_MAX||15;
+  var pay=(CG.teamPayroll?CG.teamPayroll(lg,code):0), cap=CG.CAP||60000000;
+  var payPct=cap?Math.min(100,Math.round(pay/cap*100)):0, over=pay>cap;
+  var played=(rec.w+rec.l+rec.otl)>0||lg.prManual;
+  var next=(lg.schedule||[]).filter(function(g){ return (g.home===code||g.away===code) && g.status!=="final"; })
+            .sort(function(a,b){ return a.at-b.at; })[0];
+  var opp=next?(next.home===code?next.away:next.home):null;
+  var seats=[["Owner",mt.owner],["GM",mt.gm],["AGM",mt.agm]].map(function(s){
+    var nm=s[1]?(names[s[1]]||"Assigned"):null;
+    return '<span style="display:flex;flex-direction:column;gap:2px">'+
+      '<span class="rb-lab">'+s[0]+'</span>'+
+      '<b style="font-family:var(--f-disp);font-size:13px'+(nm?'':';color:var(--steel-2)')+'">'+(nm?esc(nm):"Vacant")+'</b></span>';
+  }).join("");
+  return '<div class="card" style="--tc:'+esc(mt.color||"#8899A6")+';grid-column:1/-1">'+
+    '<div class="card-h"><h3>My club</h3><a class="sec-link" href="#/team/'+code+'">Club page →</a></div>'+
+    '<div class="card-b" style="display:flex;gap:14px;align-items:center;padding-bottom:14px">'+CG.crest(code,40)+
+      '<div style="flex:1;min-width:0"><b style="font-family:var(--f-disp);font-size:16px;display:block">'+esc(mt.name)+'</b>'+
+      '<span class="caption">'+esc(mt.div||"")+' Division'+(played?"":" · Pre-season")+'</span></div>'+
+      '<span class="ovrbox" title="Power rank">#'+(pr.rank||"—")+'</span></div>'+
+    '<div class="card-b" style="padding-top:0;padding-bottom:16px"><div class="ovstat">'+
+      '<div class="cell"><b>'+(rec.w||0)+"–"+(rec.l||0)+"–"+(rec.otl||0)+'</b><span>Record</span></div>'+
+      '<div class="cell"><b>#'+(pr.rank||"—")+'<small> / '+prN+'</small></b><span>'+(played?"Power rank":"Pre-season seed")+'</span></div>'+
+      '<div class="cell"><b>'+rosterN+'<small> / '+rosterMax+'</small></b><span>Roster</span></div>'+
+      '<div class="cell"><b'+(over?' style="color:var(--red-ink)"':'')+'>'+CG.fmtMoney(pay)+'</b><span>of '+CG.fmtMoney(cap)+' cap</span></div>'+
+    '</div>'+
+    '<div style="margin-top:12px">'+
+      '<div class="rbar"><span class="rb-lab">Roster</span><div class="rb-track"><div class="rb-fill" style="width:'+Math.round(rosterN/rosterMax*100)+'%"></div></div><span class="rb-v">'+rosterN+'/'+rosterMax+'</span></div>'+
+      '<div class="rbar"><span class="rb-lab">Cap</span><div class="rb-track"><div class="rb-fill" style="width:'+payPct+'%'+(over?";background:linear-gradient(90deg,var(--red),var(--red-ink))":"")+'"></div></div><span class="rb-v"'+(over?' style="color:var(--red-ink)"':'')+'>'+payPct+'%</span></div>'+
+    '</div></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap;align-items:center">'+
+      '<div style="display:flex;gap:18px;flex-wrap:wrap;flex:1">'+seats+'</div>'+
+      '<a class="sec-link" href="#/hub/management">Front office →</a></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">'+
+      '<span class="rb-lab">Next</span>'+
+      (next&&opp&&CG.TEAM[opp]?'<span class="teamcell">'+CG.crest(opp,22)+'<span class="nm">'+(next.home===code?"vs ":"@ ")+esc(CG.TEAM[opp].name)+'</span></span>'+
+            '<span class="caption" style="margin-left:auto">'+CG.fmtDay(next.at)+' · '+CG.fmtTime(next.at)+'</span>'
+           :'<span class="caption">'+(played?"No upcoming games scheduled.":"No games scheduled — the pre-season slate posts soon.")+'</span>')+
+    '</div></div>';
+};
+
+/* ---- Team HQ · Management tab (front office + owner GM/AGM nominations) ---- */
+CG.mgmtSeatsTable = function(m){
+  var lg=CG.lg||{}, names=lg._profName||{}, uid=(CG.auth.user||{}).id;
+  var pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
+  function row(role,label,required){
+    var owner=role==="owner";
+    var hid=owner?m.t.owner:role==="gm"?m.t.gm:m.t.agm, holder=hid?(names[hid]||"Assigned"):null;
+    var isMe=hid&&hid===uid;
+    var pend=pending.find(function(a){ return a.role===role; });
+    var status=pend?'<span class="chip chip-warn chip-xs">Pending reviewer vote</span>'
+      :owner?'<span class="chip chip-xs">Club owner</span>'
+      :holder?'<span class="chip chip-win chip-xs">Confirmed</span>'
+      :required?'<span class="chip chip-xs" style="color:var(--amber-ink);border-color:var(--amber-ink)">Vacant — required</span>'
+      :'<span class="chip chip-xs">Vacant — optional</span>';
+    var action=owner?'<span class="caption">—</span>'
+      :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
+      :m.isOwner?'<button class="btn '+(required&&!holder?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>'
+      :'<span class="caption">—</span>';
+    return '<tr>'+
+      '<td class="tleft"><span class="chip chip-chrome chip-xs">'+esc(label.toUpperCase())+'</span></td>'+
+      '<td class="tleft"><b style="font-family:var(--f-disp)">'+(holder?esc(holder):'<span style="color:var(--steel-2)">Vacant</span>')+'</b>'+(isMe?' <span class="caption">· you</span>':'')+'</td>'+
+      '<td class="tleft">'+status+'</td>'+
+      '<td class="tleft" style="text-align:right">'+action+'</td></tr>';
+  }
+  return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px">'+
+    '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">Read-only</span>')+'</div>'+
+    '<div class="tblwrap"><table class="tbl compact"><thead><tr>'+
+      '<th class="tleft">Seat</th><th class="tleft">Holder</th><th class="tleft">Status</th><th class="tleft" style="text-align:right">Action</th>'+
+    '</tr></thead><tbody>'+
+      row("owner","Owner",true)+row("gm","General Manager",true)+row("agm","Assistant GM",false)+
+    '</tbody></table></div></div>';
+};
+CG.hubManagement = function(){
+  var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
+  var lg=CG.lg||{}, pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
+  var needsGm=!m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
+  var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
+    '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the owner nominates management for the league office to approve.</p></div>';
+  if (needsGm && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">A General Manager is required</b>Every club must appoint a GM before its first regular-season game. Nominate one below — the league office’s reviewers approve it.</div>';
+  h+=CG.mgmtSeatsTable(m);
+  if (m.isOwner) pending.forEach(function(a){
+    var rl=a.role==="gm"?"General Manager":"Assistant GM";
+    h+='<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(rl)+'</h3>'+
+      '<span class="chip chip-warn chip-xs">Pending the reviewer vote</span></div><div class="card-b">'+
+      '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw="'+a.id+'">Withdraw this nomination</button></div></div>';
+    h+=CG.appChatSection("management", a.id, {office:false});
+  });
+  h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
+    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract or on league staff — they don’t have to be on your roster. "
+               : "Only the club owner can nominate a GM or AGM. ")+
+    "The league office’s reviewers vote; on approval the nominee is set automatically, and if denied nothing changes. A GM is required before your first regular-season game; an AGM is optional.</div>";
+  return h;
+};
+CG.AFTER._management = function(){
+  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
+  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-mgmt-withdraw");
+    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
+      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
+        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
+        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+  if (CG.wireAppChat) CG.wireAppChat();
+};
+CG.nominateManagerModal = function(role){
+  var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
+  var label = role==="gm"?"General Manager":"Assistant GM";
+  CG.modal("Nominate a "+label,
+    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season who isn’t already under contract — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
+      (role==="gm" ? ' Every club needs an active GM before its first regular-season game.' : ' An AGM is optional.')+'</p>'+
+    CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
+    '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
+  CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
+  var go = document.getElementById("mgGo");
+  if (go) go.addEventListener("click", function(){
+    var pick = CG.readMemberPicker("mgNominee");
+    if(!pick || !pick.id){ CG.toast("Pick a member first","err"); return; }
+    this.disabled = true;
+    CG.submitMgmtApp(role, pick.id, ((document.getElementById("mgPitch")||{}).value||"").trim()||null);
+  });
+};
+CG.submitMgmtApp = function(role, nomineeId, pitch){
+  var m = CG.clubMgmt(); if(!m || !m.isOwner){ CG.toast("Only the club owner can nominate management","err"); return; }
+  CG.sb.from("management_applications").insert({ team_id:m.teamId, role:role, submitted_by:CG.auth.user.id, nominee_id:nomineeId, pitch:pitch }).select("id").then(function(r){
+    if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+    if(!r.data||!r.data.length){ CG.toast("You can only nominate management for your own club","err"); return; }
+    if(CG.closeOverlay) CG.closeOverlay();
+    CG.toast("Nomination submitted — the reviewers will vote","ok"); CG.reloadLeague();
+  });
+};
+/* inject the management card into the roster page + wire its controls */
+/* Front-office management now lives on its own Team HQ → Management tab (CG.hubManagement),
+   not bolted onto the roster page. (The old roster-append override here was already clobbered
+   by the dead-cap hubRoster wrapper further down, so the card rendered nowhere.) */
+CG._origAfterRoster = CG.AFTER._roster;
+CG.AFTER._roster = function(){
+  if (CG._origAfterRoster) CG._origAfterRoster();
+  /* Pro roster <-> training camp (Rule 2.1). Every limit — the 2/4/6 position
+     caps, the 3-player camp, and the 3-swaps-a-season ceiling — is enforced by
+     the database trigger, so the button never has to be the last line of
+     defence: whatever the DB refuses comes back as its own rule message. */
+  document.querySelectorAll("[data-squad]").forEach(function(b){ b.addEventListener("click", function(){
+    var spot = this.getAttribute("data-squad"), to = this.getAttribute("data-squad-to"), btn = this;
+    btn.disabled = true;
+    CG.sb.rpc("set_roster_squad", { p_spot: spot, p_squad: to }).then(function(r){
+      if (r.error){ btn.disabled = false; CG.toast(r.error.message, "err"); return; }
+      var left = (r.data && r.data.moves_left);
+      CG.toast((to==="tc" ? "Moved to training camp" : "Moved to the pro roster")+
+        (left!=null ? " · "+left+" swap"+(left===1?"":"s")+" left this season" : ""), "ok");
+      CG.reloadLeague();
+    }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
+  }); });
+  /* Full roster: a straight, same-position pro<->camp swap (Rule 2.1). The picker
+     only lists legal counterparts (opposite squad, same position group, a swap
+     still left); the database validates the exchange as one atomic move. */
+  document.querySelectorAll("[data-squad-swap]").forEach(function(b){ b.addEventListener("click", function(){
+    var spot = this.getAttribute("data-squad-swap");
+    var club = CG.myClub(), roster = (CG.lg.byTeam[club]||[]);
+    var me = roster.find(function(x){ return x.spotId===spot; });
+    if (!me) return;
+    var grp = CG.posGroup(me.pos), wantSquad = me.squad==="tc" ? "pro" : "tc";
+    var opts = roster.filter(function(x){
+      return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
+        CG.posGroup(x.pos)===grp && (3-(x.squadMoves||0))>0;
+    });
+    if (!opts.length){
+      CG.toast("No eligible "+(wantSquad==="tc"?"camp":"pro")+" "+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+
+        " to swap with — everyone at this position has used their 3 changes.", "err");
+      return;
+    }
+    var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
+    CG.modal("Swap "+esc(me.tag),
+      '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
+      ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
+      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+'. Each player uses one of their three season swaps.</p>'+
+      '<div class="stack" style="gap:6px">'+opts.map(function(x){
+        return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
+          '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+(3-(x.squadMoves||0))+' swaps left</span></button>';
+      }).join("")+'</div>');
+    document.querySelectorAll("[data-swap-with]").forEach(function(sb){ sb.addEventListener("click", function(){
+      var other = this.getAttribute("data-swap-with");
+      var proSpot = pro ? pro.spotId : other, tcSpot = camp ? camp.spotId : other;
+      this.disabled = true;
+      CG.sb.rpc("swap_roster_squad", { p_pro_spot: proSpot, p_tc_spot: tcSpot }).then(function(r){
+        if (r.error){ CG.toast(r.error.message, "err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast("Squads swapped", "ok"); CG.reloadLeague();
+      }, function(e){ CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
+    }); });
+  }); });
+  document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
+  document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-mgmt-withdraw");
+    CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
+      CG.sb.from("management_applications").update({ status:"withdrawn", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
+        if(r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
+        CG.toast("Nomination withdrawn","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+  CG.wireAppChat();
+};
+/* Staff ballot on an application — each official casts an advisory approve/deny (with an optional
+   reason). Visible ONLY to staff + commissioners: the application_ballots RLS enforces office-only
+   read, so the applicant never sees the votes, only the final decision. */
+CG.appBallotsFor = function(type, id){
+  return ((CG.lg && CG.lg._appBallots) || []).filter(function(v){ return v.app_type===type && v.application_id===id; });
+};
+CG.loadAppBallots = function(){
+  if (!CG.sb) return Promise.resolve(false);
+  return CG.sb.from("application_ballots")
+    .select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
+    .then(function(vb){ if(CG.lg) CG.lg._appBallots = (vb && !vb.error && vb.data) || []; return true; }, function(){ return false; });
+};
+/* The reviewer vote IS the decision. Once every reviewer (staff carrying the 'applications'
+   department) has voted, the DB auto-applies 50%+1. Commissioners don't vote but can override. */
+CG.appBallotSection = function(type, a, decided){
+  var uid = CG.auth.user && CG.auth.user.id;
+  var reviewers = CG.appReviewers();
+  var N = reviewers.length, need = Math.floor(N/2)+1;
+  var voteBy = {}; CG.appBallotsFor(type, a.id).forEach(function(v){ voteBy[v.voter_id] = v; });
+  var cast = reviewers.filter(function(r){ return voteBy[r.id]; }).length;
+  var yes = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="approve"; }).length;
+  var no  = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="deny"; }).length;
+  var mine = voteBy[uid], isReviewer = CG.isAppReviewer(), isCommish = CG.role()==="commish";
+
+  var head = decided
+    ? '<span class="chip '+(a.status==="approved"?"chip-win":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
+    : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
+
+  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+    '<span class="chip chip-win chip-xs">'+yes+' approve</span><span class="chip chip-loss chip-xs">'+no+' deny</span>'+
+    (N?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';
+
+  if (N){
+    h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+reviewers.slice().sort(function(x,y){ return (x.gamertag||"").localeCompare(y.gamertag||""); }).map(function(r){
+      var v = voteBy[r.id];
+      var chip = v ? '<span class="chip '+(v.vote==="approve"?"chip-win":"chip-loss")+' chip-xs">'+(v.vote==="approve"?"Approve":"Deny")+'</span>'
+                   : '<span class="chip chip-warn chip-xs">Pending</span>';
+      return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+chip+
+        '<b style="font-family:var(--f-disp);font-size:13px">'+esc(r.gamertag||"An official")+(r.id===uid?" · you":"")+'</b>'+
+        (v&&v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
+    }).join("")+'</div>';
+  } else if (!decided){
+    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)">No application reviewers are assigned yet. A commissioner needs to add staff to the <b>Applications review</b> department — or decide this directly below.</p>';
+  }
+
+  if (!decided && isReviewer){
+    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
+      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time until the last reviewer votes":"Cast your vote")+'</span>'+
+      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
+        '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
+        (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
+  }
+  if (!decided && isCommish){
+    h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px">'+
+      '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
+        '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button></div></div>';
+  }
+
+  h += '<p class="caption" style="margin-top:12px">'+(decided
+    ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
+    : N===0
+      ? "There’s no reviewer vote yet — no staff are assigned to Applications review. A commissioner can add reviewers or decide with the override above."
+      : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
+  return h + '</div></div>';
+};
+CG.hubApplicationDetail = function(id, type){
+  var review = CG.role()==="commish" || CG.role()==="staff";
+  var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
+  if (!review) return CG.unauthorized("Applications are reviewed by league staff.");
+  var isOwner = type==="owner", isMgmt = type==="management";
+  var list = isMgmt ? (CG.lg._mgmtApps||[]) : isOwner ? (CG.lg._ownerApps||[]) : (CG.lg._staffApps||[]);
+  var idS = String(id||"");
+  var a = list.find(function(x){ return x.id===id; })
+       || list.find(function(x){ return String(x.id||"").slice(0, idS.length)===idS; });
+  if (!a){
+    return '<div style="margin-bottom:18px">'+back+'</div><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("flag",22)+'</div><b>That application isn’t here</b>'+
+      '<p>It may have been withdrawn or already decided. Head back to the Staff Desk.</p></div></div>';
+  }
+  var decided = a.status==="approved" || a.status==="denied" || a.status==="withdrawn";
+  function row(label, val){ return val ? '<div style="display:flex;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft)"><span class="caption" style="min-width:118px;flex-shrink:0">'+esc(label)+'</span><span class="small" style="flex:1">'+val+'</span></div>' : ''; }
+
+  var name, eyebrow, eyeClass, lede, fields = '';
+  if (isMgmt){
+    var clubCode = (CG.lg._idToCode||{})[a.team_id];
+    var clubName = (clubCode && CG.TEAM && CG.TEAM[clubCode] && CG.TEAM[clubCode].name) || clubCode || "the club";
+    var roleLabel = a.role==="gm" ? "General Manager" : "Assistant GM";
+    name = ((a.nominee&&a.nominee.gamertag)||"A member");
+    eyebrow = a.role==="gm" ? "GM" : "AGM"; eyeClass = "chip-chrome";
+    lede = "Nominated as "+roleLabel+" of "+clubName+".";
+    fields += row("Club", esc(clubName)+(clubCode?' <span class="caption">('+esc(clubCode)+')</span>':""));
+    fields += row("Role", esc(roleLabel));
+    fields += row("Nominee", esc((a.nominee&&a.nominee.gamertag)||"—"));
+    fields += row("Submitted by", esc((a.submitter&&a.submitter.gamertag)||"the owner"));
+    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
+  } else {
+    var prof = a.profiles||{}; name = prof.gamertag||"Applicant";
+    eyebrow = isOwner ? "OWNER" : "STAFF"; eyeClass = isOwner ? "chip" : "chip-chrome";
+    lede = isOwner ? "Application to own a club." : "Application to join the league staff.";
+    if (isOwner){
+      fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
+      fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
+      fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
+      fields += row("Franchise picks", CG.franchisePicksLine(a));
+      fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
+      fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
+    } else if (a.departments && a.departments.length){
+      fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
+    }
+    fields += row("Timezone", a.timezone?esc(a.timezone):"");
+    fields += row("Availability", a.availability?esc(a.availability):"");
+    fields += row("Experience", a.experience?esc(a.experience):"");
+    fields += row("Submitted", a.created_at?CG.fmtFull(Date.parse(a.created_at)):"");
+  }
+
+  var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
+    : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
+    : a.status==="withdrawn" ? '<span class="chip">Withdrawn</span>'
+    : '<span class="chip chip-warn">Pending</span>';
+
+  var h = '<div style="margin-bottom:18px">'+back+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">'+
+      '<span class="chip '+eyeClass+' chip-xs">'+esc(eyebrow)+'</span>'+
+      '<h1 class="h-sec">'+esc(name)+'</h1>'+statusChip+'</div>'+
+    '<p class="lede" style="margin-top:8px">'+esc(lede)+'</p></div>';
+
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-b">'+fields+
+    (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">'+(isMgmt?"The owner’s case":"Their pitch")+'</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
+    '</div></div>';
+
+  /* which club they're getting is decided before the vote lands — the approval acts on it */
+  if (isOwner) h += CG.ownerAppClubPicker(a);
+  /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
+  h += CG.appChatSection(type, a.id, {office:true});
+  /* the reviewer vote IS the decision — no manual approve/deny */
+  h += CG.appBallotSection(type, a, decided);
+  return h;
+};
+CG.AFTER._applicationDetail = function(){
+  /* the review board's club choice. Awarding after an approval places the owner on the
+     spot, so the toast reports what the server actually did rather than assuming. */
+  document.querySelectorAll("[data-club-award]").forEach(function(b){ b.addEventListener("click", function(){
+    var club = this.getAttribute("data-club-award") || null, id = this.getAttribute("data-app");
+    var all = document.querySelectorAll("[data-club-award]");
+    all.forEach(function(x){ x.disabled = true; });
+    CG.sb.rpc("set_owner_app_club", { p_id:id, p_club:club }).then(function(r){
+      if (r.error){
+        all.forEach(function(x){ x.disabled = false; });
+        CG.toast(r.error.message || "Couldn’t set the club","err"); return;
+      }
+      /* the RPC saves the choice even when it can't create the club — report which of the
+         two actually happened rather than painting every non-error green */
+      var d = r.data || {};
+      CG.toast(d.message || (club ? "Club chosen" : "Choice cleared"), d.ok === false ? "err" : "ok");
+      CG.reloadLeague();   /* a placement changes the club list, not just this row */
+    });
+  }); });
+  /* commissioner override — decide immediately, bypassing the reviewer vote */
+  document.querySelectorAll("[data-app-override]").forEach(function(b){ b.addEventListener("click", function(){
+    var approve = this.getAttribute("data-app-override")==="approve";
+    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
+    CG.confirm((approve?"Approve":"Deny")+" this now?","This overrides the reviewer vote and applies the decision immediately.",(approve?"Approve":"Deny")+" now", function(){
+      CG.sb.rpc("override_application_decision", { p_type:t, p_id:id, p_approve:approve }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t override: "+r.error.message,"err"); return; }
+        CG.toast("Decision applied — "+(approve?"approved":"denied"),"ok");
+        CG.reloadLeague().then(function(){ location.hash = "#/hub/staffdesk"; });
+      });
+    });
+  }); });
+  /* the reviewer vote — cast/change/retract; .select() so an RLS-blocked write (a non-reviewer)
+     is reported honestly instead of a false success. Casting the last vote auto-resolves server-side. */
+  document.querySelectorAll("[data-vote-cast]").forEach(function(b){ b.addEventListener("click", function(){
+    var v=this.getAttribute("data-vote-cast"), t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
+    var note=((document.getElementById("appVoteNote")||{}).value||"").trim();
+    var btns=document.querySelectorAll("[data-vote-cast],[data-vote-retract]"); btns.forEach(function(x){ x.disabled=true; });
+    CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null), updated_at:new Date().toISOString() }, {onConflict:"app_type,application_id,voter_id"}).select("id").then(function(r){
+      if(r.error){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Couldn’t save your vote: "+r.error.message,"err"); return; }
+      if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only assigned application reviewers can vote.","err"); return; }
+      CG.toast("Vote recorded — "+(v==="approve"?"approve":"deny"),"ok");
+      /* full reload — casting the final vote may resolve the application (status + role assignment) */
+      CG.reloadLeague();
+    });
+  }); });
+  document.querySelectorAll("[data-vote-retract]").forEach(function(b){ b.addEventListener("click", function(){
+    var t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
+    CG.sb.from("application_ballots").delete().eq("app_type",t).eq("application_id",id).eq("voter_id",CG.auth.user.id).select("id").then(function(r){
+      if(r.error){ CG.toast("Couldn’t retract: "+r.error.message,"err"); return; }
+      CG.toast("Vote retracted","ok"); CG.reloadLeague();
+    });
+  }); });
+  CG.wireAppChat();
+};
+/* Every ticket the league office has handled, in one place — complaints, appeals, trade and
+   position requests, and staff/owner applications, open or closed. Each row opens its own detail
+   page (the case thread or the application response), so the whole history is browsable. */
+CG.allTickets = function(){
+  var lg = CG.lg || {}, out = [];
+  (lg._actionReqs||[]).forEach(function(a){
+    var meta = CG.ACTION_META[a.type] || { label:a.type, icon:"flag" };
+    var closed = a.status==="resolved" || a.status==="denied";
+    out.push({ group:a.type, typeLabel:meta.label, icon:meta.icon||"flag",
+      title: a.subject || (a.details||"Request").slice(0,64),
+      who: (a.profiles&&a.profiles.gamertag)||"member",
+      result: a.status==="resolved" ? "Resolved" : a.status==="denied" ? "Denied" : "Open",
+      isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
+      route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
+  });
+  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":"Pending"; }
+  (lg._staffApps||[]).forEach(function(a){
+    var closed = a.status!=="pending";
+    out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
+      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
+      result: appResult(a.status), isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=staff", replies:CG.appMsgsFor("staff",a.id).length });
+  });
+  (lg._ownerApps||[]).forEach(function(a){
+    var closed = a.status!=="pending";
+    out.push({ group:"owner", typeLabel:"Owner application", icon:"shield",
+      title:(a.profiles&&a.profiles.gamertag)||"Applicant", who:(a.profiles&&a.profiles.gamertag)||"applicant",
+      result: appResult(a.status), isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=owner", replies:CG.appMsgsFor("owner",a.id).length });
+  });
+  (lg._mgmtApps||[]).forEach(function(a){
+    var closed = a.status!=="pending";
+    var code = (lg._idToCode||{})[a.team_id];
+    var club = (code && CG.TEAM && CG.TEAM[code] && CG.TEAM[code].name) || code || "a club";
+    out.push({ group:"management", typeLabel:(a.role==="gm"?"GM application":"AGM application"), icon:"shield",
+      title:((a.nominee&&a.nominee.gamertag)||"A member")+" · "+club, who:(a.submitter&&a.submitter.gamertag)||"owner",
+      result: appResult(a.status), isOpen:!closed,
+      at: a.created_at?Date.parse(a.created_at):0, route:"#/hub/application?id="+a.id+"&type=management", replies:CG.appMsgsFor("management",a.id).length });
+  });
+  return out.sort(function(x,y){ return y.at - x.at; });
+};
+CG.hubTicketArchive = function(){
+  if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
+  var type = CG._arcType||"all", status = CG._arcStatus||"all";
+  var shown = CG.allTickets().filter(function(t){
+    if (type!=="all" && t.group!==type) return false;
+    if (status==="open" && !t.isOpen) return false;
+    if (status==="closed" && t.isOpen) return false;
+    return true;
+  });
+  function fbtn(attr, cur, val, label){ return '<button type="button" class="chip '+(cur===val?"chip-chrome":"")+'" style="cursor:pointer" '+attr+'="'+val+'" aria-pressed="'+(cur===val)+'">'+esc(label)+'</button>'; }
+  function resultChip(t){
+    var cls = (t.result==="Resolved"||t.result==="Approved") ? "chip-win" : t.result==="Denied" ? "chip-loss" : "chip-warn";
+    return '<span class="chip '+cls+' chip-xs">'+esc(t.result)+'</span>';
+  }
+  function row(t){
+    return '<div class="card-b row-go" data-go="'+esc(t.route)+'" role="link" tabindex="0" '+
+      'data-arc-text="'+esc((t.title+" "+t.who+" "+t.typeLabel).toLowerCase())+'" '+
+      'aria-label="Open '+esc(t.typeLabel)+': '+esc(t.title)+'" '+
+      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<span style="color:var(--steel);flex-shrink:0">'+CG.ic(t.icon,15)+'</span>'+
+      '<span style="flex:1;min-width:170px"><b style="font-family:var(--f-disp);display:block">'+esc(t.title)+'</b>'+
+        '<span class="caption">'+esc(t.typeLabel)+' · '+esc(t.who)+(t.replies?' · '+t.replies+' repl'+(t.replies===1?"y":"ies"):"")+'</span></span>'+
+      resultChip(t)+
+      '<span class="caption">'+(t.at?CG.fmtDay(t.at):"")+'</span>'+
+      '<span class="caption" aria-hidden="true">→</span></div>';
+  }
+  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"],["management","GM / AGM"]];
+  var statusF = [["all","All"],["open","Open / pending"],["closed","Resolved / decided"]];
+
+  var h = '<div style="margin-bottom:18px"><a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>'+
+    '<h1 class="h-sec" style="margin-top:10px">Ticket archive</h1>'+
+    '<p class="lede" style="margin-top:8px">Every complaint, appeal, request, and application — open or closed — with its result. Open any one to read the full conversation and the decision.</p></div>';
+  h += '<div class="card" style="margin-bottom:16px"><div class="card-b" style="display:grid;gap:12px">'+
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Type</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+typeF.map(function(f){ return fbtn("data-arc-type",type,f[0],f[1]); }).join("")+'</div></div>'+
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><span class="caption" style="min-width:54px">Status</span><div style="display:flex;gap:6px;flex-wrap:wrap">'+statusF.map(function(f){ return fbtn("data-arc-status",status,f[0],f[1]); }).join("")+'</div></div>'+
+    '<div style="display:flex;gap:12px;align-items:center"><span class="caption" style="min-width:54px">Search</span><input id="arcSearch" type="search" placeholder="Filter by name, subject, or type…" style="flex:1" autocomplete="off"></div>'+
+  '</div></div>';
+  h += '<div class="card"><div class="card-h"><h3>Tickets</h3><span class="chip" id="arcCount">'+shown.length+'</span></div>'+
+    (shown.length ? shown.map(row).join("") : '<div class="card-b"><p class="caption">No tickets match these filters. Try widening them above.</p></div>')+'</div>';
+  return h;
+};
+CG.AFTER._ticketArchive = function(){
+  document.querySelectorAll("[data-arc-type]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcType = this.getAttribute("data-arc-type"); if(CG.router) CG.router(); }); });
+  document.querySelectorAll("[data-arc-status]").forEach(function(b){ b.addEventListener("click", function(){ CG._arcStatus = this.getAttribute("data-arc-status"); if(CG.router) CG.router(); }); });
+  var s = document.getElementById("arcSearch");
+  if (s) s.addEventListener("input", function(){
+    /* live filter without a re-render, so the search box keeps focus */
+    var q = this.value.trim().toLowerCase(), n = 0;
+    document.querySelectorAll("[data-arc-text]").forEach(function(r){
+      var hit = !q || r.getAttribute("data-arc-text").indexOf(q) >= 0;
+      r.style.display = hit ? "" : "none"; if (hit) n++;
+    });
+    var c = document.getElementById("arcCount"); if (c) c.textContent = n;
+  });
+};
+CG.hubStaffDesk = function(){
+  var lg = CG.lg;
+  var reqs = (lg._actionReqs||[]);
+  /* terminal statuses are 'resolved' and 'denied' — a denied case is closed, not open */
+  var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
+  /* warnings live in the same table but never count as suspensions */
+  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active" && s.mode!=="warning"; });
+  var now = Date.now();
+  var finals = (lg.allResults||[]).slice().sort(function(a,b){ return b.at-a.at; });
+  var weekFinals = finals.filter(function(r){ return now - r.at < 7*86400000; });
+  var tonight = lg.tonight||[];
+
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">League staff · officials’ tools</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Staff Desk</h1>'+
+    '<p class="lede" style="margin-top:8px">The case queue, active discipline, and the imports worth a second look — everything an official touches, in one place.</p></div>';
+
+  h += CG.staffAttentionCard();
+
+  h += '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-bottom:20px">'+
+    '<div class="kpi'+(open.length?" alert":"")+'" style="cursor:pointer" data-go="#/hub/complaints"><b class="num">'+open.length+'</b><span>open cases</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+sus.length+'</b><span>active suspensions</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+weekFinals.length+'</b><span>finals · last 7 days</span></div>'+
+    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+tonight.length+'</b><span>games tonight</span></div></div>';
+
+  /* applications — owner + staff, decided right here */
+  var ownerApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
+  var staffApps = (lg._staffApps||[]).filter(function(a){ return a.status==="pending"; });
+  var mgmtApps  = (lg._mgmtApps||[]).filter(function(a){ return a.status==="pending"; });
+  var pendCount = ownerApps.length+staffApps.length+mgmtApps.length;
+  var revCount = CG.appReviewers().length;
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3>'+
+    '<span class="chip '+(pendCount?"chip-warn":"chip-win")+'">'+(pendCount?pendCount+" awaiting the vote":"none pending")+'</span></div>';
+  /* each row opens the application into its own page (CG.hubApplicationDetail) — the reviewer vote
+     decides it there. Glance-level tally shows where the vote stands. */
+  function appRow(a, type){
+    var isOwner=type==="owner", isMgmt=type==="management";
+    var chipLabel = isMgmt ? (a.role==="gm"?"GM":"AGM") : isOwner?"OWNER":"STAFF";
+    var title, sub;
+    if (isMgmt){
+      var code=(lg._idToCode||{})[a.team_id], club=(code&&CG.TEAM&&CG.TEAM[code]&&CG.TEAM[code].name)||code||"a club";
+      title=(a.nominee&&a.nominee.gamertag)||"A member";
+      sub=(a.role==="gm"?"General Manager":"Assistant GM")+" · "+esc(club)+" · by "+esc((a.submitter&&a.submitter.gamertag)||"owner");
+    } else {
+      var prof=a.profiles||{}; title=prof.gamertag||"Applicant";
+      sub = isOwner ? CG.franchisePicksLine(a)
+        : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
+    }
+    var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
+    var tally = (vb.length ? '<span class="chip chip-xs" title="Reviewer vote so far">'+vy+' approve · '+vn+' deny</span>' : "")
+      + (revCount ? '<span class="caption">'+vb.length+'/'+revCount+' voted</span>' : "");
+    return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
+      'aria-label="Open '+esc(chipLabel)+' application: '+esc(title)+'" '+
+      'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+esc(chipLabel)+'</span>'+
+      '<span style="flex:1;min-width:160px"><b style="font-family:var(--f-disp);display:block">'+esc(title)+'</b>'+
+        '<span class="caption">'+sub+'</span></span>'+
+      tally+
+      '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
+      '<span class="caption" aria-hidden="true">→</span></div>';
+  }
+  if (staffApps.length) h += staffApps.map(function(a){ return appRow(a,"staff"); }).join("");
+  if (ownerApps.length) h += ownerApps.map(function(a){ return appRow(a,"owner"); }).join("");
+  if (mgmtApps.length)  h += mgmtApps.map(function(a){ return appRow(a,"management"); }).join("");
+  if (!pendCount){
+    h += '<div class="card-b"><p class="caption">No applications waiting. Members apply to own a club (#/owner) or join the staff (#/staffapply); owners nominate a GM/AGM from their Team HQ.</p></div>';
+  } else {
+    h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to read it and cast your vote. '+
+      (revCount ? 'Once all <b>'+revCount+'</b> application reviewer'+(revCount===1?"":"s")+' vote, 50%+1 decides it automatically.'
+                : '<b style="color:var(--amber-ink)">No reviewers are assigned</b> — a commissioner must add staff to the Applications review department, or decide with the commissioner override.')+'</span></div>';
+  }
+  h += '</div>';
+
+  /* case queue preview */
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Case queue</h3>'+
+    '<a class="sec-link" href="#/hub/complaints">Open the queue</a></div>';
+  h += open.length ? open.slice(0,5).map(function(a){
+      var meta = CG.ACTION_META[a.type] || { label:a.type };
+      var replies = ((lg._actionMsgs||{})[a.id]||[]).length;
+      var names = (lg&&lg._profName)||{};
+      return '<div class="card-b row-go" data-go="#/hub/complaint?id='+esc(a.id)+'" role="link" tabindex="0" '+
+        'aria-label="Open case: '+esc(a.subject||meta.label)+'" '+
+        'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="chip chip-warn" style="text-transform:capitalize">'+esc(a.status||"open")+'</span>'+
+        '<span style="flex:1;min-width:160px">'+
+          '<b style="font-family:var(--f-disp);display:block">'+esc(a.subject||meta.label)+'</b>'+
+          '<span class="caption">'+esc(meta.label)+' · filed by '+esc((a.profiles&&a.profiles.gamertag)||"member")+
+          (a.assigned_to ? ' · claimed by '+esc(names[a.assigned_to]||"a colleague") : '')+'</span></span>'+
+        (replies ? '<span class="chip chip-xs">'+replies+' repl'+(replies===1?"y":"ies")+'</span>' : "")+
+        '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
+        '<span class="caption" aria-hidden="true">→</span></div>';
+    }).join("")
+    : CG._actionLoadError
+      /* never report an empty queue we aren't sure about — an unanswered case looks identical to
+         a clean room, and that is exactly how two open cases went unseen */
+      ? '<div class="card-b"><p class="caption" style="color:var(--red-ink)"><b>Couldn’t load the case queue.</b> '+esc(CG._actionLoadError)+' — the count above comes straight from the database, so cases may be waiting. Reload; if it persists this is a bug worth reporting.</p></div>'
+      : '<div class="card-b"><p class="caption">Nothing open — the room is clean.</p></div>';
+  h += '</div>';
+
+  /* ticket archive — the full history, open or closed */
+  var arcAll = CG.allTickets(), arcClosed = arcAll.filter(function(t){ return !t.isOpen; }).length;
+  h += '<div class="card raise" style="margin-bottom:18px;cursor:pointer" data-go="#/hub/archive" role="link" tabindex="0" aria-label="Open the ticket archive">'+
+    '<div class="card-h"><h3>Ticket archive</h3><span class="sec-link">'+CG.ic("db",14)+' Open the archive</span></div>'+
+    '<div class="card-b"><p class="caption">Every complaint, appeal, request, and application the league office has handled — open or closed — with its result and full conversation. '+
+      '<b>'+arcAll.length+'</b> ticket'+(arcAll.length===1?"":"s")+' on file'+(arcClosed?', '+arcClosed+' resolved':"")+'.</p></div></div>';
+
+  /* active discipline */
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3><span class="chip">'+sus.length+'</span></div>';
+  h += sus.length ? sus.map(function(s){
+      var p = CG.playerById(lg, s.playerId);
+      /* an enforcement-void suspension belongs to a player with no roster spot, so they aren't in
+         lg.players — fall back to the name carried on the suspension record itself */
+      var nm = p ? p.tag : (s.playerName || "A player");
+      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<b style="font-family:var(--f-disp)">'+esc(nm)+'</b>'+
+        '<span class="caption" style="flex:1">'+esc(s.reason||"")+'</span>'+
+        '<span class="chip chip-loss">'+(s.mode==="date"?("until "+(s.endsAt?CG.fmtDay(Date.parse(s.endsAt)):"further notice")):s.mode==="seasons"?("through Season "+(s.untilSeason||"—")):(s.games+" game"+(s.games===1?"":"s")))+'</span>'+
+        (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
+    }).join("")
+    : '<div class="card-b"><p class="caption">No one is suspended. '+(CG.role()==="commish"?'Suspensions are issued from <a href="#/admin/users" style="font-weight:700;border-bottom:2px solid var(--chrome)">Users &amp; roles</a>.':'The commissioner issues suspensions; the record shows here and on profiles.')+'</p></div>';
+  h += '</div>';
+
+  /* recent finals — spot-check the EA imports */
+  h += '<div class="card"><div class="card-h"><h3>Recent finals — spot-check the imports</h3><span class="chip">auto-imported from EA</span></div>';
+  h += finals.length ? finals.slice(0,6).map(function(r){
+      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:120px">'+CG.fmtDay(r.at)+'</span>'+
+        '<span class="teamcell">'+CG.crest(r.away,20)+'<b class="mono" style="font-size:12px">'+esc(r.away)+' '+r.score[r.away]+'</b></span><span class="caption">@</span>'+
+        '<span class="teamcell">'+CG.crest(r.home,20)+'<b class="mono" style="font-size:12px">'+esc(r.home)+' '+r.score[r.home]+'</b></span>'+
+        (r.ot?'<span class="chip" style="font-size:9px">OT</span>':"")+
+        '<a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/matchup/'+r.id+'">Box score</a></div>';
+    }).join("")
+    : '<div class="card-b"><p class="caption">No finals yet — box scores land here automatically as games are played.</p></div>';
+  h += '</div>';
+
+  /* staff tools — actionable first (tasks, EA triage), then reference (directory, activity) */
+  h += CG.staffTasksCard();
+  h += CG.staffVotesCard();
+  h += CG.staffEaCard();
+  h += CG.staffDirectoryCard();
+  h += CG.staffActivityCard();
+
+  /* season award ballots — staff vote all season; the commissioner finalizes after the finale */
+  var BALLOT_CATS = [
+    ["mvp","Most Valuable Player", null],
+    ["best_goalie","Best Goaltender", "G"],
+    ["best_defenseman","Best Defenseman", "D"],
+    ["rookie_of_year","Rookie of the Year", null]
+  ];
+  var isCommish = CG.role()==="commish";
+  /* Rule 2.7 — Media holds no ballot; the RLS policy refuses the write either way */
+  var mediaNoBallot = CG.isMediaOnlyStaff();
+  h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3>'+
+    '<span class="chip">'+(mediaNoBallot?"read-only for Media":"one vote each")+'</span></div>';
+  h += BALLOT_CATS.map(function(cat){
+    var pool = (lg.players||[]).filter(function(p){
+      if (cat[2]==="G") return p.pos==="G";
+      if (cat[2]==="D") return ["LD","RD","D"].indexOf(p.pos)>=0;
+      return true;
+    }).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
+    var opts = '<option value="">— pick a player —</option>'+pool.map(function(p){
+      return '<option value="'+p.id+'">'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
+    var won = (lg.seasonAwards||[]).find(function(a){ return a.category===cat[0]; });
+    return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
+      '<b style="font-family:var(--f-disp);min-width:190px">'+cat[1]+'</b>'+
+      (won ? '<span class="chip chip-win">Decided</span><span class="caption" data-ballot-tally="'+cat[0]+'"></span>'
+        : mediaNoBallot
+          /* Rule 2.7 — an MVP vote is the purest form of voting for your own club, and Media is the
+             one department that may run one. Tally stays visible; the picker doesn't. */
+          ? '<span class="caption" style="flex:1">Media staff don’t hold a ballot (Rule 2.7).</span>'+
+            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'
+          : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
+            '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
+            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
+            (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
+      '</div>';
+  }).join("");
+  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
+    (mediaNoBallot
+      ? 'Media staff read the tallies but don’t vote on awards (Rule 2.7) — the department covers the league rather than deciding it.'
+      : 'Every staff member and commissioner gets one vote per award (change it any time before the finalize). Media staff are the exception — they hold no ballot (Rule 2.7). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.')+
+    '</span></div></div>';
+  return h;
+};
+CG.AFTER._staffdesk = function(){
+  /* applications open into their own page (the reviewer vote decides there) — no inline decide */
+  CG.wireStaffExtras();
+
+  /* ---- season award ballots ---- */
+  var sid = CG.SEASON && CG.SEASON.id;
+  if (sid && CG.sb && document.querySelector("[data-ballot-cat],[data-ballot-tally]")){
+    var names = {}; (CG.lg._profilesRaw||[]).forEach(function(p){ names[p.id]=p.gamertag||p.display_name||"—"; });
+    CG.sb.from("award_ballots").select("category,voter_id,profile_id").eq("season_id", sid).then(function(r){
+      var rows = (r&&r.data)||[];
+      document.querySelectorAll("[data-ballot-cat]").forEach(function(sel){
+        var mine = rows.find(function(x){ return x.category===sel.getAttribute("data-ballot-cat") && x.voter_id===CG.auth.user.id; });
+        if (mine) sel.value = mine.profile_id;
+      });
+      document.querySelectorAll("[data-ballot-tally]").forEach(function(el){
+        var cat = el.getAttribute("data-ballot-tally");
+        var votes = rows.filter(function(x){ return x.category===cat; });
+        if (!votes.length){ el.textContent = "no votes yet"; return; }
+        var counts = {}; votes.forEach(function(v){ counts[v.profile_id]=(counts[v.profile_id]||0)+1; });
+        var top = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a]; }).slice(0,3);
+        el.textContent = votes.length+" vote"+(votes.length===1?"":"s")+" · leading: "+
+          top.map(function(pid){ return (names[pid]||"?")+" ("+counts[pid]+")"; }).join(", ");
+      });
+    });
+  }
+  document.querySelectorAll("[data-ballot-save]").forEach(function(b){ b.addEventListener("click", function(){
+    var cat=this.getAttribute("data-ballot-save"), btn=this;
+    var sel=document.querySelector('[data-ballot-cat="'+cat+'"]');
+    if(!sel||!sel.value){ CG.toast("Pick a player first","err"); return; }
+    btn.disabled=true;
+    CG.sb.from("award_ballots").upsert({ season_id:CG.SEASON.id, category:cat, voter_id:CG.auth.user.id,
+      profile_id:sel.value, updated_at:new Date().toISOString() },{ onConflict:"season_id,category,voter_id" })
+      .then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG.toast("Vote saved — change it any time","ok"); CG.router();
+      });
+  }); });
+  document.querySelectorAll("[data-ballot-final]").forEach(function(b){ b.addEventListener("click", function(){
+    var cat=this.getAttribute("data-ballot-final"), label=this.getAttribute("data-label");
+    CG.confirm("Finalize "+label+"?",
+      "Tallies the staff ballots and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to break it. Re-running later corrects the record.",
+      "Finalize award", function(){
+      CG.sb.rpc("finalize_season_award",{ p_season:CG.SEASON.id, p_category:cat }).then(function(r){
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        CG.toast(String(r.data||"Winner")+" wins "+label,"ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+};
+CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
+
+/* ================================================================
+   LIVE ADMIN: OVERVIEW — real league state, real action items
+   ================================================================ */
+CG.admOverviewLive = function(){
+  var lg = CG.lg;
+  var unlinked = (CG.TEAMS||[]).filter(function(t){ return !t.eaClubId; });
+  var pendingApps = (lg._ownerApps||[]).filter(function(a){ return a.status==="pending"; });
+  var openCases = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; });
+  var unsigned = (lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===((CG.SEASON&&CG.SEASON.id)||null)) && !(lg._rosteredIds||{})[r.profile_id]; });
+  var nextG = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && g.at>CG.now(); }).sort(function(a,b){ return a.at-b.at; })[0];
+  var days = CG.daysToStart ? CG.daysToStart() : null;
+  var draftSt = lg.draftState ? lg.draftState.status : null;
+  var h = '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">'+
+    '<div class="kpi" style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>days to puck drop</span></div>'+
+    '<div class="kpi'+(unsigned.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+unsigned.length+'</b><span>'+(draftSt==="complete"?"free agents unsigned":"signed up · no club")+'</span></div>'+
+    '<div class="kpi'+(pendingApps.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/preseason"><b class="num">'+pendingApps.length+'</b><span>owner apps pending</span></div>'+
+    '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
+    '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
+    '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">5</b><span>automations</span></div></div>';
+  var actions = [];
+  if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
+  if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
+  if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason","Pre-season"]);
+  if (openCases.length) actions.push([openCases.length+' complaint'+(openCases.length===1?"":"s / requests")+' open in the league office',"#/admin/complaints","Case queue"]);
+  if (draftSt && draftSt!=="complete") actions.push(["The draft is "+draftSt,"#/draft","Draft room"]);
+  h += '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>Needs your attention</h3>'+(actions.length?'<span class="chip chip-warn">'+actions.length+'</span>':'<span class="chip chip-win">All clear</span>')+'</div>'+
+    (actions.length ? actions.map(function(a){
+      return '<div class="titem" style="padding:12px 18px;border-top:1px solid var(--line-soft)"><span class="t-dot red"></span><span style="flex:1">'+a[0]+'</span><a class="btn btn-ghost btn-sm" href="'+a[1]+'">'+a[2]+'</a></div>';
+    }).join("") : '<div class="card-b"><span class="caption">Nothing pending — registrations, cases, and club links are all handled.</span></div>')+'</div>';
+  h += '<div class="stack"><div class="card"><div class="card-h"><h3>Next game night</h3><a class="sec-link" href="#/admin/schedule">Schedule</a></div><div class="card-b">'+
+    (nextG ? '<b style="font-family:var(--f-disp);font-size:16px">'+CG.fmtDay(nextG.at)+'</b><p class="caption" style="margin-top:6px">First puck drop '+CG.fmtTime(nextG.at)+' · codes at T-30 · servers set 30 min before the first game.</p>'
+           : '<span class="caption">No games scheduled yet.</span>')+'</div></div>'+
+    '<div class="card"><div class="card-h"><h3>How results work</h3><a class="sec-link" href="#/admin/eastats">EA stats</a></div><div class="card-b"><p class="small" style="color:var(--steel)">Scores and full box scores import automatically from the EA NHL match record after every final — standings, stats, overalls, news recaps, and Discord posts all follow with no manual entry.</p></div></div></div></div>';
+  return h;
+};
+
+/* ================================================================
+   LIVE ADMIN: AUTOMATIONS — real heartbeats + run-now buttons
+   ================================================================ */
+/* ================================================================
+   RULE 2.5 DEAD CAP — unsigned contracts count against the cap.
+   Mirrors public.team_cap_used: an active, non-management contract
+   covering this season whose player has no roster spot holds its full
+   salary against the club until the player registers. ============= */
+CG.deadCapEntries = function(lg, code){
+  if (!lg || !lg.live || !lg._contractsRaw) return [];
+  var sn = (CG.SEASON && CG.SEASON.number) || 1, rostered = lg._rosteredIds || {}, idToCode = lg._idToCode || {};
+  return lg._contractsRaw.filter(function(c){
+    return c.status==="active" && !c.is_manager && c.team_id && idToCode[c.team_id]===code &&
+           (c.start_season||1)<=sn && (c.end_season||1)>=sn && !rostered[c.profile_id];
+  });
+};
+CG.deadCapFor = function(lg, code){
+  return CG.deadCapEntries(lg, code).reduce(function(s,c){ return s+(c.salary||0); },0);
+};
+/* profile ids under an active team contract this season. A contracted player returns to
+   their own club by registering (Rule 2.5), so they must never appear as a free agent or a
+   draft prospect — this guards the client pools even if an auto-activation hasn't run yet. */
+CG.contractHeldIds = function(){
+  var out = {}, sn = (CG.SEASON && CG.SEASON.number) || 1;
+  ((CG.lg && CG.lg._contractsRaw) || []).forEach(function(c){
+    if (c.status==="active" && !c.is_manager && c.team_id && (c.start_season||1)<=sn && (c.end_season||1)>=sn) out[c.profile_id]=true;
+  });
+  return out;
+};
+CG._origTeamPayroll = CG._origTeamPayroll || CG.teamPayroll;
+CG.teamPayroll = function(lg, code){
+  return CG._origTeamPayroll(lg, code) + ((lg && lg.live) ? CG.deadCapFor(lg, code) : 0);
+};
+/* Team HQ → Roster: name the dead money so management knows exactly why the number moved */
+CG._origHubRoster = CG._origHubRoster || CG.hubRoster;
+CG.hubRoster = function(qs){
+  var h = CG._origHubRoster(qs);
+  var club = CG.myClub && CG.myClub(); if (!club) return h;
+  var dead = CG.deadCapEntries(CG.lg, club);
+  if (!dead.length) return h;
+  var names = dead.map(function(c){
+    var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===c.profile_id; });
+    return '<b>'+esc((pr && (pr.gamertag||pr.display_name)) || "A player")+'</b> ('+CG.fmtMoney(c.salary||0)+' through Season '+(c.end_season||"—")+')';
+  }).join(", ");
+  var note = '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
+    '<span><b style="font-family:var(--f-disp)">Dead cap — unsigned contracts.</b> '+names+' — under contract but not yet registered for this season. The salary counts against your cap and they can’t play until they sign up; registering puts them straight back on your roster at no extra cap cost. If the club changes owners first, the deal is voided and the player is suspended for its remaining length (Rule 2.5).</span></div>';
+  var anchor = '<span>Salary cap</span></div></div>';
+  h = h.indexOf(anchor) > -1 ? h.replace(anchor, anchor + note) : note + h;
+  return h.replace('<span>Active payroll</span>', '<span>Payroll + dead cap</span>');
+};
+
+CG.AUTOMATIONS = [
+  { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
+  { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
+  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
+  { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
+  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
+  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Ten minutes after the draft’s final pick, assigns rookies under the 5-game pre-season minimum to random clubs.", rpc:"distribute_unproven_rookies" },
+  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
+  { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
+  { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
+  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
+  { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
+  { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
+];
+CG.admAutomationsLive = function(){
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
+  /* staff channel configuration — turns on the staff notifications */
+  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Staff Discord channels</h3><span class="chip" id="staffChanSt">checking…</span></div>'+
+    '<div class="card-b">'+
+    '<p class="caption" style="margin-bottom:14px;max-width:74ch">One webhook per staff channel. In Discord: the channel → <b>Edit Channel → Integrations → Webhooks → New Webhook → Copy URL</b>. Each channel below falls back to <b>general</b> until you set it, so nothing is ever lost.</p>'+
+    '<label class="fld"><span>Staff general — applications, daily briefing, weekly report</span><input id="staffWh" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Staff welcome — the bot’s welcome post for each new staff member</span><input id="staffWhWelcome" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Casework &amp; enforcement — cases filed, discipline issued, forfeit rulings</span><input id="staffWhCase" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label>'+
+    '<label class="fld"><span>Staff role ID to ping on urgent items (optional)</span><input id="staffRole" placeholder="e.g. 1524970…" autocomplete="off"></label>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-chrome btn-sm" id="staffChanSave">Save channels</button>'+
+    '<button class="btn btn-ghost btn-sm" id="staffChanTest">Send test to general</button></div>'+
+    '<p class="caption" style="margin-top:10px">Saved webhooks are never shown back here — re-paste to change one. A blank field leaves that channel as-is.</p></div></div>';
+  h += '<div class="card">'+CG.AUTOMATIONS.map(function(a,i){
+    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+      '<div style="flex:1;min-width:220px"><b style="font-family:var(--f-disp)">'+esc(a.name)+'</b>'+
+        '<p class="caption" style="margin-top:2px">'+esc(a.desc)+' '+esc(a.every)+'.</p></div>'+
+      '<span class="chip" id="auto-st-'+a.key+'">checking…</span>'+
+      '<span class="caption mono" id="auto-ts-'+a.key+'" style="min-width:110px;text-align:right">—</span>'+
+      '<button class="btn btn-ghost btn-sm" data-auto-run="'+a.key+'">Run now</button></div>';
+  }).join("")+
+  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Also fully automatic, inside the database: standings on every final, auto news (recaps, spotlights, Three Stars), server resolution at lock, and every notification. Those have no off switch — they’re triggers.</span></div></div>';
+  return h;
+};
+CG.AFTER._admAutomations = function(){
+  /* staff channel config */
+  var chSt = document.getElementById("staffChanSt");
+  if (chSt){
+    /* refresh only the status chip — NOT the whole AFTER binder (re-running it would
+       re-addEventListener on the same, un-re-rendered buttons and stack duplicate handlers) */
+    function refreshChip(){
+      CG.sb.rpc("staff_channel_status").then(function(r){
+        var d = (r&&!r.error&&r.data)||{};
+        var on = [d.configured&&"general", d.welcome&&"welcome", d.casework&&"casework"].filter(Boolean);
+        chSt.textContent = on.length ? on.join(" · ")+(d.has_role?" · pings on":"") : "Not set up";
+        chSt.className = "chip "+(d.configured?(on.length===3?"chip-win":"chip-chrome"):"chip-warn");
+      });
+    }
+    refreshChip();
+    var saveBtn = document.getElementById("staffChanSave");
+    if (saveBtn) saveBtn.addEventListener("click", function(){
+      var v=function(id){ return (document.getElementById(id).value||"").trim(); };
+      var btn=this; btn.disabled=true;
+      CG.sb.rpc("set_staff_channels",{ p_general:v("staffWh"), p_welcome:v("staffWhWelcome"),
+        p_casework:v("staffWhCase"), p_role_id:v("staffRole") }).then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast(r.error.message||"Couldn’t save","err"); return; }
+        CG.toast("Staff channels saved","ok");
+        ["staffWh","staffWhWelcome","staffWhCase","staffRole"].forEach(function(id){ document.getElementById(id).value=""; });
+        refreshChip();
+      });
+    });
+    var testBtn = document.getElementById("staffChanTest");
+    if (testBtn) testBtn.addEventListener("click", function(){
+      var btn=this; btn.disabled=true; btn.textContent="Sending…";
+      CG.sb.rpc("staff_channel_test").then(function(r){
+        btn.disabled=false; btn.textContent="Send test to general";
+        if(r.error){ CG.toast(r.error.message||"Test failed","err"); return; }
+        CG.toast(r.data==="sent"?"Test posted to #staff-general":"Set up the webhook first",r.data==="sent"?"ok":"err");
+      });
+    });
+  }
+  /* heartbeats + per-run results: each function stamps rl_<key> every run and rl_<key>_result
+     with {ok, errCount, lastError}. A run that happened but FAILED shows red, not green. */
+  CG.sb.from("app_config").select("key,value").like("key","rl_%").then(function(r){
+    var map = {}, results = {};
+    ((r&&r.data)||[]).forEach(function(row){
+      var k = row.key.replace(/^rl_/,"");
+      if (/_result$/.test(k)){
+        try { results[k.replace(/_result$/,"")] = JSON.parse(row.value); } catch(e){}
+      } else map[k] = row.value;
+    });
+    CG.AUTOMATIONS.forEach(function(a){
+      var ts = map[a.key] ? Date.parse(map[a.key]) : null;
+      var stEl = document.getElementById("auto-st-"+a.key), tsEl = document.getElementById("auto-ts-"+a.key);
+      if (!stEl) return;
+      if (!ts){ stEl.textContent="never ran"; stEl.className="chip chip-warn"; return; }
+      var mins = Math.round((Date.now()-ts)/60000);
+      tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
+      var res = results[a.key];
+      var failed = res && res.ok === false;
+      var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
+      if (failed){
+        stEl.textContent = "Failing";
+        stEl.className = "chip chip-loss";
+        stEl.title = res.lastError ? String(res.lastError).slice(0,180) : "last run reported errors";
+      } else {
+        stEl.textContent = fresh ? "Running" : "Check";
+        stEl.className = "chip "+(fresh?"chip-win":"chip-warn");
+        stEl.title = "";
+      }
+    });
+  });
+  document.querySelectorAll("[data-auto-run]").forEach(function(b){ b.addEventListener("click", function(){
+    var key = this.getAttribute("data-auto-run"), btn=this;
+    var job = CG.AUTOMATIONS.find(function(a){ return a.key===key; });
+    btn.disabled = true; btn.textContent = "Running…";
+    if (job && job.rpc){
+      /* database-side job — run it the way the scheduler does */
+      CG.sb.rpc(job.rpc).then(function(r){
+        btn.disabled=false; btn.textContent="Run now";
+        if (r.error){ CG.toast(key+" failed: "+r.error.message,"err"); return; }
+        CG.toast(job.name+": "+JSON.stringify(r.data).slice(0,140),"ok");
+        if (CG.router) CG.router();
+      });
+      return;
+    }
+    fetch("/.netlify/functions/"+key, { method:"GET" }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
+      .then(function(out){
+        btn.disabled=false; btn.textContent="Run now";
+        CG.toast(key+": "+JSON.stringify(out).slice(0,140),"ok");
+        if (CG.router) CG.router();
+      })
+      .catch(function(e){ btn.disabled=false; btn.textContent="Run now"; CG.toast(key+" failed: "+e.message,"err"); });
+  }); });
+};
+
+/* ================================================================
+   LIVE ADMIN: NEWSROOM — publish / edit / delete on the news table
+   (INSERTs auto-post to #news via the notify_discord_news trigger)
+   ================================================================ */
+CG.NEWS_CATS = ["League News","Game Recap","Transactions","Awards","Commissioner Update","Team Feature"];
+CG.admNewsLive = function(){
+  var arts = (CG.CONTENT.articles||[]).slice();
+  var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
+    '<div><h2 class="h-sec">Newsroom</h2><p class="lede" style="margin-top:6px">Stories publish straight to the site and auto-post to Discord’s #news. Recaps and player spotlights write themselves after finals — everything is editable here.</p></div>'+
+    '<button class="btn btn-chrome" id="newArt" style="align-self:flex-start">'+CG.ic("plus",15)+'New story</button></div>';
+  h += arts.length ? '<div class="card"><div class="card-h"><h3>Published</h3><span class="chip">'+arts.length+'</span></div>'+
+    arts.map(function(a){
+      var auto = /CGHL Wire/i.test(a.author||"");
+      return '<div class="card-b" style="display:flex;align-items:center;gap:12px;border-top:1px solid var(--line-soft)">'+
+        '<span class="nf-ic">'+CG.ic("doc",14)+'</span>'+
+        '<div style="flex:1;min-width:0;cursor:pointer" data-go="#/article/'+esc(a.slug)+'"><b>'+esc(a.title)+'</b>'+
+          '<p class="caption" style="margin-top:2px">'+esc(a.category)+' · '+esc(a.author)+' · '+CG.fmtDate(a.dateIso)+(auto?' · <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">AUTO</span>':"")+'</p></div>'+
+        '<span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-news-edit="'+esc(a.slug)+'">Edit</button>'+
+        /* Media staff write and edit the paper; only the commissioner can unpublish. The
+           database agrees — news has INSERT/UPDATE policies for the media department and no
+           DELETE policy, so a delete would silently remove zero rows rather than error. */
+        (CG.role()==="commish" ? '<button class="btn btn-ghost btn-sm" data-news-del="'+esc(a.slug)+'" data-title="'+esc(a.title)+'">Delete</button>' : "")+
+        '</span></div>';
+    }).join("")+'</div>'
+  : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("doc",22)+'</div><b>No stories yet</b><p>Publish the first one — or wait for opening night, when recaps start writing themselves.</p></div></div>';
+  return h;
+};
+CG.newsForm = function(slug){
+  var a = slug ? (CG.CONTENT.articles||[]).find(function(x){ return x.slug===slug; }) : null;
+  var isNew = !a;
+  CG.modal(isNew?"New story":"Edit — "+esc(a.title),
+    '<label class="fld"><span>Headline</span><input id="nwT" value="'+esc(a?a.title:"")+'" placeholder="Sentence case, specific, no clickbait"></label>'+
+    '<label class="fld"><span>Category</span><select id="nwC">'+CG.NEWS_CATS.map(function(c){ return '<option'+(a&&a.category===c?" selected":"")+'>'+c+'</option>'; }).join("")+'</select></label>'+
+    '<label class="fld"><span>Body</span><textarea id="nwB" rows="8" placeholder="Write like a beat reporter. Blank lines become paragraphs.">'+esc(a?a.body.join("\n\n"):"")+'</textarea></label>'+
+    '<p class="caption">'+(isNew?"Publishing posts to the site immediately and announces in #news on Discord.":"Edits update the site — Discord isn’t re-posted.")+'</p>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="nwGo">'+(isNew?"Publish":"Save changes")+'</button>');
+  document.getElementById("nwGo").addEventListener("click", function(){
+    var t=(document.getElementById("nwT").value||"").trim();
+    if (t.length<8){ CG.toast("Give it a real headline first","err"); return; }
+    var body=(document.getElementById("nwB").value||"").trim();
+    if (!body){ CG.toast("Write the story body","err"); return; }
+    var rec={ title:t, category:document.getElementById("nwC").value, body:body };
+    var btn=this; btn.disabled=true;
+    /* The newsroom feed only renders rows stamped with the current season, so publishing without
+       one would write an article that is invisible the moment it saves. Refuse instead. */
+    if (isNew && !(CG.SEASON && CG.SEASON.id)){
+      btn.disabled=false; CG.toast("No active season — create one before publishing","err"); return;
+    }
+    var q = isNew
+      /* The byline was hardcoded to "— Commissioner", so a media-department story would have
+         published under a title its author doesn't hold. Sign it with the seat they actually sit in. */
+      ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"League office")+" — "+(CG.role()==="commish"?"Commissioner":"League staff"), published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
+      : CG.sb.from("news").update(rec).eq("id", slug);
+    q.then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(isNew?"Published — it’s live and posted to #news":"Story updated","ok");
+      CG.reloadLeague();
+    });
+  });
+};
+CG.AFTER._admNewsLive = function(){
+  var na=document.getElementById("newArt");
+  if (na) na.addEventListener("click", function(){ CG.newsForm(null); });
+  document.querySelectorAll("[data-news-edit]").forEach(function(b){ b.addEventListener("click", function(){ CG.newsForm(this.getAttribute("data-news-edit")); }); });
+  document.querySelectorAll("[data-news-del]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-news-del"), title=this.getAttribute("data-title");
+    CG.confirm("Delete “"+esc(title)+"”?","It comes off the site immediately. The Discord post (if any) stays.","Delete story", function(){
+      CG.sb.from("news").delete().eq("id",id).then(function(r){
+        if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        CG.toast("Story deleted","ok"); CG.reloadLeague();
+      });
+    });
+  }); });
+};
+
+/* ================================================================
+   LIVE ADMIN: POWER RANKINGS — automatic formula + manual override
+   ================================================================ */
+CG.admRankingsLive = function(){
+  var lg = CG.lg;
+  var order = CG._prDraft || (lg.powerRankings||[]).map(function(p){ return p.team; });
+  var dirty = !!CG._prDraft;
+  var manual = !!lg.prManual;
+  var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Power rankings</h2><p class="lede" style="margin-top:6px">'+
+    (manual ? "Running on your <b>manual order</b>. The formula keeps computing underneath — return to automatic any time."
+            : "Running on the <b>automatic formula</b>: points percentage, goal differential per game, and last-five form. Reorder below to take manual control.")+'</p></div>';
+  h += '<div class="note '+(manual?"chr":"grn")+'" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp)">'+(manual?"Manual override active":"Automatic")+'</b>'+
+    '<span style="margin-left:auto;display:inline-flex;gap:8px">'+
+    (dirty?'<button class="btn btn-chrome btn-sm" id="prSave">Save this order</button><button class="btn btn-ghost btn-sm" id="prDiscard">Discard changes</button>':"")+
+    (manual&&!dirty?'<button class="btn btn-ghost btn-sm" id="prAuto">Return to automatic</button>':"")+'</span></div>';
+  h += '<div class="card">'+order.map(function(code,i){
+    var t = CG.TEAM[code]; if (!t) return "";
+    return '<div class="card-b" style="display:flex;align-items:center;gap:14px;'+(i?"border-top:1px solid var(--line-soft)":"")+'">'+
+      '<b class="num" style="font-family:var(--f-disp);font-size:20px;width:28px">'+(i+1)+'</b>'+CG.crest(code,28)+
+      '<b style="font-family:var(--f-disp);flex:1">'+esc(t.name)+'</b>'+
+      '<span class="caption">'+CG.lg.teams[code].w+"-"+CG.lg.teams[code].l+"-"+CG.lg.teams[code].otl+'</span>'+
+      '<span style="display:inline-flex;gap:4px">'+
+        '<button class="btn btn-ghost btn-sm" data-pr-up="'+i+'" '+(i===0?"disabled":"")+' aria-label="Move '+esc(t.name)+' up">'+CG.ic("up",13)+'</button>'+
+        '<button class="btn btn-ghost btn-sm" data-pr-down="'+i+'" '+(i===order.length-1?"disabled":"")+' aria-label="Move '+esc(t.name)+' down">'+CG.ic("down",13)+'</button></span></div>';
+  }).join("")+
+  '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">The public rankings page and the homepage widget follow whatever is live here. Manual orders persist until you return to automatic.</span></div></div>';
+  return h;
+};
+CG.AFTER._admRankings = function(){
+  function draft(){ return CG._prDraft || (CG.lg.powerRankings||[]).map(function(p){ return p.team; }); }
+  document.querySelectorAll("[data-pr-up]").forEach(function(b){ b.addEventListener("click", function(){
+    var i=+this.getAttribute("data-pr-up"); var d=draft().slice();
+    var x=d[i-1]; d[i-1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
+  }); });
+  document.querySelectorAll("[data-pr-down]").forEach(function(b){ b.addEventListener("click", function(){
+    var i=+this.getAttribute("data-pr-down"); var d=draft().slice();
+    var x=d[i+1]; d[i+1]=d[i]; d[i]=x; CG._prDraft=d; CG.router();
+  }); });
+  /* These went straight at site_config, which is commissioner-only for good reason — the same
+     table holds the Discord invite and the playoff format. The rankings now move through two
+     RPCs pinned to the one key, so the media department can publish an order without being
+     handed the site's configuration. */
+  var sv=document.getElementById("prSave");
+  if (sv) sv.addEventListener("click", function(){
+    CG.sb.rpc("rankings_set_order", { p_codes: CG._prDraft }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      CG._prDraft=null; CG.toast("Manual ranking saved — live everywhere","ok"); CG.reloadLeague();
+    });
+  });
+  var dc=document.getElementById("prDiscard");
+  if (dc) dc.addEventListener("click", function(){ CG._prDraft=null; CG.router(); });
+  var au=document.getElementById("prAuto");
+  if (au) au.addEventListener("click", function(){
+    CG.sb.rpc("rankings_clear").then(function(r){
+      if (r.error){ CG.toast("Couldn’t switch: "+r.error.message,"err"); return; }
+      CG.toast("Back to the automatic formula","ok"); CG.reloadLeague();
+    });
+  });
+};
+
+/* ================================================================
+   LIVE ADMIN: HOMEPAGE MODULES — persisted league-wide via feature_flags
+   ================================================================ */
+CG.admHomepageLive = function(){
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Homepage</h2><p class="lede" style="margin-top:6px">Toggle front-page modules for everyone — saved to the league database, applied on the next load.</p></div>'+
+    '<div class="card"><div class="card-h"><h3>Homepage modules</h3><a class="sec-link" href="#/home">View front page</a></div>'+
+    CG.HOMEMODS.map(function(m){
+      var on = CG.modOn(m.key);
+      return '<div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line-soft)">'+
+        '<span style="flex:1;font-weight:600;font-size:14px">'+m.label+'</span>'+
+        '<button class="toggle'+(on?" on":"")+'" data-mod-live="'+m.key+'" role="switch" aria-checked="'+on+'" aria-label="'+m.label+'"></button></div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Sections hidden here disappear for every visitor. The hero, and anything a section needs to explain the season, stays.</span></div></div>';
+};
+CG.AFTER._admHomepage = function(){
+  document.querySelectorAll("[data-mod-live]").forEach(function(t){
+    t.addEventListener("click", function(){
+      var k = t.getAttribute("data-mod-live");
+      var next = !CG.modOn(k);
+      CG.sb.from("feature_flags").upsert({ key:"home_"+k, enabled:next, label:"Homepage: "+k },{ onConflict:"key" }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG._flags["home_"+k]=next;
+        t.classList.toggle("on", next); t.setAttribute("aria-checked", next);
+        CG.toast("Front page updated for everyone","ok");
+      });
+    });
+  });
+};
+
+/* ================================================================
+   LIVE ADMIN: SCHEDULE — real reschedules (games.scheduled_at, ET)
+   ================================================================ */
+/* round-robin schedule generator (ported from the classic site, verified in prod
+   there): 3 ET slots a night, Wed/Thu/Fri, every club plays once per slot —
+   3 a night, 9 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
+   Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
+CG.GAMES_PER_CLUB = 54;
+CG.PRESEASON_WEEKS = 2;
+CG.OFFSEASON_DARK_DAYS = 14;   /* 2 weeks of no on-ice activity — staff seat owners + management */
+CG.FA_WINDOW_DAYS = 7;         /* free agency runs a full week; puck drop waits for it to close */
+CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
+/* Nights per playing week. Wednesday, Thursday, Friday — three slots a night means a club plays
+   three games an evening and nine a week. Lived in four places as a bare "2"; a schedule and a
+   season-date spacer that disagree about the length of a week silently produce a calendar that
+   does not match its own games. */
+CG.NIGHTS_PER_WEEK = 3;
+/* Wednesday-anchored night names, for copy that has to say which nights a week runs on. */
+CG.NIGHT_NAMES = function(n){
+  var d=["Wednesday","Thursday","Friday","Saturday","Sunday","Monday","Tuesday"].slice(0, Math.max(1,Math.min(7,n||3)));
+  return d.length===1 ? d[0] : d.slice(0,-1).join(", ")+" and "+d[d.length-1];
+};
+
+/* ================= THE SHAPE OF A SEASON =================
+   Weeks, nights a week, puck-drop times and the divisional split now live on the season row, set
+   from the Control Center. The constants above are only the fallback for a season saved before the
+   settings existed. Everything that needs to know the shape reads it from here, so the generator,
+   the season-date spacer and the published rulebook cannot drift apart. */
+CG.seasonShape = function(season){
+  var s = season || CG.SEASON || {};
+  var slots = String(s.night_slots || CG.NIGHT_SLOTS.join(","))
+    .split(",").map(function(t){ return t.trim(); })
+    .filter(function(t){ return /^\d{1,2}:\d{2}$/.test(t); });
+  if (!slots.length) slots = CG.NIGHT_SLOTS.slice();
+  var nights = Math.max(1, Math.min(7, +s.nights_per_week || CG.NIGHTS_PER_WEEK));
+  var weeks  = Math.max(1, +s.weeks || Math.ceil(CG.GAMES_PER_CLUB / slots.length / nights));
+  var perClub = weeks * nights * slots.length;
+  var teams = CG.TEAMS || [];
+  var divs = {};
+  teams.forEach(function(t){ divs[t.div || "—"] = (divs[t.div || "—"] || 0) + 1; });
+  var divNames = Object.keys(divs);
+  var rivals = teams.length ? (divs[teams[0].div || "—"] - 1) : 0;
+  var others = Math.max(0, teams.length - 1 - rivals);
+  var even = divNames.length > 1 && divNames.every(function(d){ return divs[d] === divs[divNames[0]]; });
+  return {
+    weeks: weeks, nights: nights, slots: slots, perNight: slots.length,
+    perClub: perClub, perWeek: nights * slots.length,
+    teams: teams.length, divisions: divNames.length, evenDivisions: even,
+    rivals: rivals, others: others,
+    /* every opponent is played the same number of times — see the rotation in generateSchedule */
+    evenOnly: true
+  };
+};
+
+CG.HOLIDAYS = ["12-25","07-01","07-04"];
+
+/* One timeline card, shared by the Register page and My Hub, so a member sees the same road
+   ahead in both places. Steps auto-hide until their date is set. */
+CG.roadAheadCard = function(s, opts){
+  s = s || CG.SEASON || {}; opts = opts || {};
+  var steps = [
+    [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
+    [s.registration_deadline, "Sign-up deadline", "Register by now to be eligible for the draft. Miss it and you can still join — you’ll be randomly placed on a club after the draft instead."],
+    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
+    [s.draft_at, "Draft night", "Clubs pick from the eligible pool. Ten minutes after the final pick, first-year players under the five-game minimum are placed on random clubs."],
+    [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
+    [s.starts_at, "Puck drop", "The regular season starts once free agency closes — 54 games, every stat imported automatically from EA."]
+  ].filter(function(st){ return st[0]; });
+  if (!steps.length) return "";
+  var nowT = CG.now(), nextIdx = steps.findIndex(function(st){ return Date.parse(st[0]) > nowT; });
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">'+(opts.chip||"what registering starts")+'</span></div>'+
+    steps.map(function(st,i){
+      var t = Date.parse(st[0]), past = t <= nowT, isNext = i===nextIdx;
+      return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;'+(i?"border-top:1px solid var(--line-soft)":"")+(past?"opacity:.5":"")+'">'+
+        '<span class="mono" style="flex:0 0 150px;font-size:11.5px;color:var(--steel);padding-top:2px">'+CG.fmtFull(t)+(isNext?' <span class="chip chip-chrome" style="font-size:9px;vertical-align:middle">NEXT UP</span>':past?' <span style="font-size:9px;color:var(--steel)">✓</span>':"")+'</span>'+
+        '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+st[1]+'</b><p class="caption" style="margin-top:2px">'+st[2]+'</p></span></div>';
+    }).join("")+'</div>';
+};
+
+/* ---- shared ET-safe date helpers ---- */
+CG.dayAdd = function(ymd, n){
+  var p=ymd.split("-").map(Number);
+  var d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
+  d.setUTCDate(d.getUTCDate()+n);
+  return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");
+};
+CG.dayOfWeek = function(ymd){ var p=ymd.split("-").map(Number); return new Date(Date.UTC(p[0],p[1]-1,p[2],12)).getUTCDay(); };
+CG.etISO = function(ymd, hm){ /* correct across EDT/EST */
+  var guess = new Date(ymd+"T"+hm+":00-04:00");
+  var et = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(guess);
+  if (et !== hm) guess = new Date(ymd+"T"+hm+":00-05:00");
+  return guess.toISOString();
+};
+CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(iso)); };
+CG.holidayWeek = function(wedYmd){ /* the Mon..Sun week around a game Wednesday */
+  var mon = CG.dayAdd(wedYmd,-2);
+  for (var i=0;i<7;i++){ if (CG.HOLIDAYS.indexOf(CG.dayAdd(mon,i).slice(5))>=0) return true; }
+  return false;
+};
+CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, then Wed..Fri; skip holiday weeks */
+  var wed = anchorYmd;
+  while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
+  var out=[], skipped=[], guard=0;
+  while (out.length < weeks && guard++ < 60){
+    if (CG.holidayWeek(wed)){ skipped.push(wed); wed = CG.dayAdd(wed,7); continue; }
+    /* days[] is the real list; wed/fri remain as the FIRST and LAST night of the week, which is
+       what the season-date spacer and the playoff seeder actually mean by them. */
+    var days = []; for (var d = 0; d < CG.NIGHTS_PER_WEEK; d++) days.push(CG.dayAdd(wed, d));
+    out.push({ week: out.length+1, days: days, wed: days[0], fri: days[days.length-1] });
+    wed = CG.dayAdd(wed,7);
+  }
+  return { nights: out, skipped: skipped };
+};
+
 CG.clearSchedule = function(stage){
   stage = stage==="preseason" ? "preseason" : "regular";
   var s = CG.SEASON; if (!s || !s.id) return;
@@ -10605,10 +7053,9 @@ CG.admScheduleLive = function(){
                 : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Generate season</button>')+'</span></div>';
   /* ---- schedule shape: the settings the generator builds from ---- */
   var shp = CG.seasonShape(CG.SEASON);
-  var opts = CG.splitOptions(shp);
   var locked = lg.schedule.some(function(g){ return g.stage!=="preseason" && g.status==="final"; });
   h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Season shape</h3>'+
-      '<span class="chip'+(shp.weighted?' chip-chrome':'')+'">'+shp.perClub+' games per club</span></div>'+
+      '<span class="chip">'+shp.perClub+' games per club</span></div>'+
     '<div class="card-b" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:14px">'+
       '<label class="fld"><span>Game weeks</span><input id="shWeeks" type="number" min="1" max="40" value="'+shp.weeks+'"></label>'+
       '<label class="fld"><span>Nights per week</span><input id="shNights" type="number" min="1" max="7" value="'+shp.nights+'"></label>'+
@@ -10616,17 +7063,8 @@ CG.admScheduleLive = function(){
         '<input id="shSlots" type="text" value="'+esc(shp.slots.join(", "))+'" placeholder="21:00, 21:35, 22:10"></label>'+
     '</div>'+
     '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
-      '<p class="caption" id="shMath" style="margin:0 0 10px"></p>'+
-      (shp.evenDivisions
-        ? '<label class="fld"><span>Divisional weighting</span><select id="shSplit">'+
-            '<option value="">Even — every opponent the same</option>'+
-            opts.map(function(o){
-              var on = shp.weighted && o.div===shp.div && o.nondiv===shp.nondiv;
-              return '<option value="'+o.div+':'+o.nondiv+'"'+(on?' selected':'')+'>'+
-                o.div+' vs each division rival · '+o.nondiv+' vs the rest  ('+o.ratio+':1)</option>';
-            }).join("")+'</select></label>'+
-          (opts.length ? '' : '<p class="caption" style="color:var(--red-ink);margin:8px 0 0">No divisional split divides evenly into '+shp.perClub+' games. Change the weeks, nights or times and the options will change with them.</p>')
-        : '<p class="caption">Divisional weighting needs every division to hold the same number of clubs. Right now they do not, so the season is scheduled evenly.</p>')+
+      '<p class="caption" id="shMath" style="margin:0"></p>'+
+      '<p class="caption" style="margin:8px 0 0">Every club plays every other club the same number of times, and never twice on the same night or on back-to-back nights.</p>'+
     '</div>'+
     '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
       '<button class="btn btn-chrome btn-sm" id="shSave">Save shape</button>'+
@@ -10661,8 +7099,8 @@ CG.AFTER._admScheduleLive = function(){
      number that cannot work should say so before it is saved, not after a schedule is generated. */
   (function(){
     var W=document.getElementById("shWeeks"), N=document.getElementById("shNights"),
-        S=document.getElementById("shSlots"), SP=document.getElementById("shSplit"),
-        M=document.getElementById("shMath"), B=document.getElementById("shSave");
+        S=document.getElementById("shSlots"), M=document.getElementById("shMath"),
+        B=document.getElementById("shSave");
     if (!W || !N || !S || !B) return;
     var parseSlots = function(){
       return String(S.value||"").split(",").map(function(t){ return t.trim(); })
@@ -10670,23 +7108,12 @@ CG.AFTER._admScheduleLive = function(){
     };
     var recalc = function(){
       var slots=parseSlots(), n=Math.max(1,+N.value||0), w=Math.max(1,+W.value||0);
-      var per = w*n*slots.length;
-      var shape = CG.seasonShape({ weeks:w, nights_per_week:n, night_slots:slots.join(",") });
       var bad = String(S.value||"").split(",").map(function(t){return t.trim();})
         .filter(function(t){ return t && !/^\d{1,2}:\d{2}$/.test(t); });
       M.innerHTML = bad.length
         ? '<b style="color:var(--red-ink)">Not a time: '+esc(bad.join(", "))+'</b> — use 24-hour times like 21:00.'
         : w+' weeks × '+n+' night'+(n===1?'':'s')+' × '+slots.length+' game'+(slots.length===1?'':'s')+
-          ' a night = <b>'+per+' games per club</b>, '+(n*slots.length)+' a week, on '+esc(CG.NIGHT_NAMES(n))+'.';
-      if (SP){
-        var cur = SP.value;
-        var list = CG.splitOptions(shape);
-        SP.innerHTML = '<option value="">Even — every opponent the same</option>'+
-          list.map(function(o){ return '<option value="'+o.div+':'+o.nondiv+'">'+o.div+
-            ' vs each division rival · '+o.nondiv+' vs the rest  ('+o.ratio+':1)</option>'; }).join("");
-        SP.value = cur;                       /* keep the choice if it still fits */
-        if (SP.value !== cur) SP.value = "";  /* it does not — fall back to even rather than lie */
-      }
+          ' a night = <b>'+(w*n*slots.length)+' games per club</b>, '+(n*slots.length)+' a week, on '+esc(CG.NIGHT_NAMES(n))+'.';
     };
     [W,N,S].forEach(function(el){ el.addEventListener("input", recalc); });
     recalc();
@@ -10695,16 +7122,10 @@ CG.AFTER._admScheduleLive = function(){
       if (!slots.length){ CG.toast("Give at least one puck-drop time, like 21:00","err"); return; }
       var w=Math.max(1,+W.value||0), n=Math.max(1,+N.value||0);
       if (n>7){ CG.toast("A week has seven nights","err"); return; }
-      var split=(SP&&SP.value)?SP.value.split(":"):null;
-      var patch={ weeks:w, nights_per_week:n, night_slots:slots.join(","),
-                  div_games: split?+split[0]:null, nondiv_games: split?+split[1]:null };
-      /* prove the split is actually buildable before storing it — an unschedulable split saved here
-         would only surface as a failure at generation time, with no explanation of why */
-      if (split){
-        var divOf={}; (CG.TEAMS||[]).forEach(function(t){ divOf[t.code]=t.div||"—"; });
-        var probe=CG.buildRounds((CG.TEAMS||[]).map(function(t){return t.code;}), divOf, +split[0], +split[1], { seed:20260802, tries:120, nightSize:(CG.seasonShape(CG.SEASON).perNight||3) });
-        if (probe.error){ CG.toast(probe.error,"err"); return; }
-      }
+      /* div/nondiv are cleared on save: the weighted scheduler is gone (it produced same-night and
+         back-to-back rematches), and a stale split left in the row would imply the schedule still
+         honours it when nothing reads it */
+      var patch={ weeks:w, nights_per_week:n, night_slots:slots.join(","), div_games:null, nondiv_games:null };
       B.disabled=true;
       CG.sb.from("seasons").update(patch).eq("id", CG.SEASON.id).select("id").then(function(r){
         B.disabled=false;
