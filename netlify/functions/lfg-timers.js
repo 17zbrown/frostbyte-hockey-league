@@ -279,11 +279,15 @@ async function sweepCaptains(errors, out) {
 }
 
 export default async () => {
+  // Without Supabase there is nowhere to record anything, so this is the one unavoidable silent exit.
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
-  if (!BOT) return json({ skipped: "no bot token" });
   const errors = [];
   const out = { warned: 0, dropped: 0, retired: 0, refreshed: 0, autoCaptained: 0, raced: 0 };
-  try {
+  // A missing bot token is recorded as a FAILING run, never as a quiet skip. Returning early here
+  // would leave no heartbeat and no result at all, so a clock that never ran would look identical to
+  // one that ran with nothing to do — dead and invisible rather than dead and loud.
+  if (!BOT) errors.push("DISCORD_BOT_TOKEN is not set — the pickup clock cannot warn or drop anyone");
+  else try {
     await sweepOpen(errors, out);
     await sweepCaptains(errors, out);
   } catch (e) { errors.push(String(e.message || e)); }
