@@ -240,12 +240,15 @@ const remainingPool = (s) => (s.signups || []).filter((x) => x.id !== s.captains
 /* ---------- view builders ---------- */
 // The private per-player picker (ephemeral): six position buttons showing what's open, plus Leave if
 // they're already in. Buttons are keyed by CHANNEL id so the lobby is created lazily on first click.
-function pickerView(channelId, s, userId) {
+function pickerView(channelId, s, userId, renewedPos) {
   const mine = (s.signups || []).find((x) => x.id === userId);
   return {
     embeds: [{
-      title: "🏒 Pick your position",
-      description: (mine ? `You're in at **${POS_LABEL[mine.pos]}**. Press **Leave** to drop, then /join again to switch.` : "Tap your position to jump in.") +
+      title: renewedPos ? "\uD83D\uDD04 Spot renewed" : "\uD83C\uDFD2 Pick your position",
+      description: (renewedPos
+          ? `Thirty fresh minutes at **${POS_LABEL[renewedPos] || renewedPos}** — you're safe. Tap a different position to move there, or just dismiss this.`
+          : mine ? `You're in at **${POS_LABEL[mine.pos]}**. Tap a different position to move there, or **Leave** to drop.`
+                 : "Tap your position to jump in.") +
         `\n\n**${(s.signups || []).length}/${FULL}** signed up — the number on each button is how many spots are left.`,
       color: BRAND,
     }],
@@ -613,13 +616,30 @@ async function handleCommand(interaction) {
   if (cmd === "kick") return handleKick(interaction);
   return ephemeral("Unknown command.");
 }
-// /join -> a private position picker showing what's open. Reads the lobby (no create) so counts are live.
+// /join -> a private position picker showing what's open. For someone already on the sheet, the
+// slash command ITSELF is the renewal: the lapse warning says "run /join again to renew", so the
+// renewal cannot hide behind a second click on the position button — a player racing a two-minute
+// clock through Discord's command UI would lose their spot to a technicality.
 async function handleJoin(interaction) {
   const channelId = interaction.channel_id;
   const userId = userIdOf(interaction);
   let state = { signups: [] };
-  try { const lobby = await sbGetOpenLobby(channelId); if (lobby && lobby.state) state = lobby.state; } catch (e) {}
-  return respond({ type: REPLY, data: { ...pickerView(channelId, state, userId), flags: EPHEMERAL } });
+  let renewed = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let lobby = null;
+    try { lobby = await sbGetOpenLobby(channelId); } catch (e) {}
+    if (!lobby || !lobby.state) break;
+    state = lobby.state;
+    const mine = (state.signups || []).find((x) => x.id === userId);
+    if (!mine) break;                       // not on the sheet — just show the picker
+    mine.at = new Date().toISOString();     // fresh 30 minutes
+    delete mine.warned;                     // eligible to be warned again next time
+    state.lastSignupAt = new Date().toISOString();
+    const saved = await sbSaveLobby(lobby.id, lobby.updated_at, state, lobby.status);
+    if (saved) { renewed = mine.pos; break; }
+    // CAS lost — a click landed at the same moment; re-read and retry
+  }
+  return respond({ type: REPLY, data: { ...pickerView(channelId, state, userId, renewed), flags: EPHEMERAL } });
 }
 // /leave -> drop off the open signup sheet without reopening the picker. Same CAS loop as the
 // buttons so a simultaneous click can't eat the write; only ever touches an OPEN lobby (a full
@@ -741,5 +761,5 @@ export const handler = async (event) => {
 
 // Exposed for local unit tests only; Netlify invokes the named handler export.
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
-  applyKickPropose, applyKickApprove, applyKickDecline,
+  applyKickPropose, applyKickApprove, applyKickDecline, handleJoin, pickerView,
   startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };

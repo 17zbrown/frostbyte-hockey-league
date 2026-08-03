@@ -121,5 +121,63 @@ console.log("\n— the import matcher refuses to guess");
   A("a strictly better overlap wins over a partial one", better && better.lobby.id === "A" && better.overlap === 8);
 }
 
+
+console.log("\n— /join itself renews an existing spot (the warning's promise)");
+{
+  const MIN = 60000;
+  let OPEN = null; const patches = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url), m = opts.method || "GET";
+    const J = (b) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.includes("/rest/v1/lfg_lobbies") && m === "GET") return J(OPEN ? [OPEN] : []);
+    if (u.includes("/rest/v1/lfg_lobbies") && m === "PATCH") {
+      const body = JSON.parse(opts.body); patches.push(body);
+      Object.assign(OPEN, body);
+      return J([OPEN]);   // return=representation -> CAS won
+    }
+    return J([]);
+  };
+  const ix = (uid) => ({ channel_id: "chan", member: { user: { id: uid, username: "U" } } });
+  const sheet = () => ({ id: "OL", status: "open", channel_id: "chan", updated_at: new Date(Date.now() - 40 * MIN).toISOString(),
+    state: { signups: [{ id: "me", name: "Me", pos: "C", at: new Date(Date.now() - 28 * MIN).toISOString(), warned: true },
+                       { id: "other", name: "O", pos: "G", at: new Date(Date.now() - 2 * MIN).toISOString() }],
+             captains: [], teams: { A: [], B: [] } } });
+
+  OPEN = sheet(); patches.length = 0;
+  const res = JSON.parse((await I.handleJoin(ix("me"))).body);
+  const saved = patches.find((p) => p.state);
+  const meRow = saved && saved.state.signups.find((x) => x.id === "me");
+  A("the renewal is WRITTEN, not just displayed", !!meRow, patches.length + " patches");
+  A("the clock is fresh", meRow && (Date.now() - Date.parse(meRow.at)) / MIN < 0.2);
+  A("the warned flag is cleared for the next cycle", meRow && meRow.warned === undefined);
+  A("position untouched", meRow && meRow.pos === "C");
+  A("the other player's clock is untouched", saved && (Date.now() - Date.parse(saved.state.signups.find((x) => x.id === "other").at)) / MIN > 1.5);
+  A("the reply SAYS it renewed", /Spot renewed/.test(JSON.stringify(res.data.embeds)));
+  A("the reply is ephemeral", (res.data.flags & 64) === 64);
+  A("the picker still offers a move", JSON.stringify(res.data.components).includes("lfg:join:chan:"));
+
+  OPEN = sheet(); patches.length = 0;
+  const res2 = JSON.parse((await I.handleJoin(ix("stranger"))).body);
+  A("someone NOT on the sheet gets the plain picker", patches.length === 0 && /Pick your position/.test(JSON.stringify(res2.data.embeds)));
+
+  OPEN = null; patches.length = 0;
+  const res3 = JSON.parse((await I.handleJoin(ix("me"))).body);
+  A("no open sheet -> plain picker, no writes", patches.length === 0 && !!res3.data.components);
+
+  // CAS permanently lost: never claim a renewal that didn't persist
+  OPEN = sheet();
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url), m = opts.method || "GET";
+    const J = (b) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.includes("/rest/v1/lfg_lobbies") && m === "GET") return J([OPEN]);
+    if (u.includes("/rest/v1/lfg_lobbies") && m === "PATCH") return J([]);   // 0 rows = CAS lost
+    return J([]);
+  };
+  const res4 = JSON.parse((await I.handleJoin(ix("me"))).body);
+  A("a lost CAS never claims a renewal", !/Spot renewed/.test(JSON.stringify(res4.data.embeds)));
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);
