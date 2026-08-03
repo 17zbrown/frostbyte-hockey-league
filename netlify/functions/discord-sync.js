@@ -1426,9 +1426,11 @@ export default async (req) => {
   try {
     if (memberListOk && roleId["not signed up"]) {
       const linkedIds = new Set(links.filter((l) => l.discord_id).map((l) => String(l.discord_id)));
+      sum.unlinkedSeen = 0;
       for (const [uid, mem] of memberById) {
         if (linkedIds.has(uid)) continue;                       // pass 1 owned this member
         if (mem.user && mem.user.bot) continue;                 // bots never sign up
+        sum.unlinkedSeen++;
         const desired = new Set();
         if (regOpen) desired.add(roleId["not signed up"]);
         const current = new Set(mem.roles || []);
@@ -1445,7 +1447,6 @@ export default async (req) => {
           sum.unlinkedSkipped = (sum.unlinkedSkipped || 0) + 1;
         }
       }
-      sum.unlinkedSeen = memberById.size - linkedIds.size;
     }
   } catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
 
