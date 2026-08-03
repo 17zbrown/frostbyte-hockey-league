@@ -8,7 +8,7 @@
     var roundPairs = [];
     if (useWeighted){
       var divOf = {}; (CG.TEAMS||[]).forEach(function(t){ divOf[t.code] = t.div || "—"; });
-      var built = CG.buildRounds(codes, divOf, shape.div, shape.nondiv, { seed: 20260802 });
+      var built = CG.buildRounds(codes, divOf, shape.div, shape.nondiv, { seed: 20260802, nightSize: perNight });
       if (built.error){ CG.toast(built.error, "err"); return; }
       roundPairs = built.rounds;
     } else {
@@ -6929,6 +6929,12 @@ CG.splitOptions = function(shape){
 CG.buildRounds = function(codes, divOf, xDiv, yNon, opts){
   opts = opts || {};
   var tries = opts.tries || 400, perRound = codes.length / 2;
+  /* Rounds are grouped into nights, and a club must not draw the same opponent twice in one
+     evening. The rotation never did this for free; a weighted build will, repeatedly, because it
+     is only trying to hit meeting counts. It matters beyond aesthetics: if two clubs can meet
+     twice on one night then clubs + date no longer identify a fixture, and a game resumed after a
+     disconnect cannot be told apart from a genuine second meeting. */
+  var nightSize = Math.max(1, opts.nightSize || 1);
   var key = function(a,b){ return a < b ? a+"|"+b : b+"|"+a; };
   if (codes.length % 2) return { error:"An odd number of clubs cannot all play every slot." };
   var seed = opts.seed || 12345;
@@ -6963,7 +6969,13 @@ CG.buildRounds = function(codes, divOf, xDiv, yNon, opts){
           if (n < bestN){ bestN = n; a = c; }
         }
         if (a === null) return false;
-        var opts2 = codes.filter(function(b){ return b!==a && !used[b] && (need[key(a,b)]||0) > 0; });
+        var nightStart = rounds.length - (rounds.length % nightSize);
+        var sameNight = {};
+        for (var ri = nightStart; ri < rounds.length; ri++)
+          rounds[ri].forEach(function(pr){ sameNight[key(pr[0], pr[1])] = 1; });
+        var opts2 = codes.filter(function(b){
+          return b!==a && !used[b] && (need[key(a,b)]||0) > 0 && !sameNight[key(a,b)];
+        });
         for (var q=opts2.length-1;q>0;q--){ var w=Math.floor(rnd()*(q+1)); var tmp=opts2[q]; opts2[q]=opts2[w]; opts2[w]=tmp; }
         opts2.sort(function(p,r){ return (need[key(a,r)]||0) - (need[key(a,p)]||0); });
         for (var oi=0; oi<opts2.length; oi++){
@@ -7256,7 +7268,7 @@ CG.AFTER._admScheduleLive = function(){
          would only surface as a failure at generation time, with no explanation of why */
       if (split){
         var divOf={}; (CG.TEAMS||[]).forEach(function(t){ divOf[t.code]=t.div||"—"; });
-        var probe=CG.buildRounds((CG.TEAMS||[]).map(function(t){return t.code;}), divOf, +split[0], +split[1], { seed:20260802, tries:120 });
+        var probe=CG.buildRounds((CG.TEAMS||[]).map(function(t){return t.code;}), divOf, +split[0], +split[1], { seed:20260802, tries:120, nightSize:(CG.seasonShape(CG.SEASON).perNight||3) });
         if (probe.error){ CG.toast(probe.error,"err"); return; }
       }
       B.disabled=true;
