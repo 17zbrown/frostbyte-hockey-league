@@ -238,6 +238,10 @@ async function fetchGuildIconPng(hash) {
 async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   const guild = await dApi("GET", `/guilds/${GUILD}`);
   const features = (guild && guild.features) || [];
+  /* answers "do we even have a screening gate?" from the horse's mouth, and the true member count
+     with it — the client sidebar rounds, this does not */
+  sum.gate = features.includes("MEMBER_VERIFICATION_GATE_ENABLED");
+  sum.guildMemberCount = guild && guild.approximate_member_count;
   if (!features.includes("ROLE_ICONS")) {
     await sbUpsertCfg("discord_role_icons", JSON.stringify({
       at: new Date().toISOString(), skipped: "guild lacks ROLE_ICONS (needs Boost Level 2)" }));
@@ -1321,6 +1325,8 @@ export default async (req) => {
     }
     memberListOk = true;
     sum.memberList = memberById.size;
+    sum.pendingAtGate = [...memberById.values()].filter((mm) => mm.pending === true).length;
+    sum.bots = [...memberById.values()].filter((mm) => mm.user && mm.user.bot).length;
   } catch (e) { sum.errors.push({ memberList: String(e.message || e) }); }
 
   for (const m of links) {
@@ -1456,6 +1462,8 @@ export default async (req) => {
       body: JSON.stringify({ key: "rl_discord-sync_result", value: JSON.stringify({
         at: new Date().toISOString(), ok: sum.errors.length === 0, checked: sum.checked,
         unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
+        gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
+        pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
       }), updated_at: new Date().toISOString() }) });
