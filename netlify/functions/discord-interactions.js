@@ -198,7 +198,6 @@ async function launchLobbyRoom(lobby, guildId, categoryId) {
   await dApi("POST", `/channels/${ch.id}/messages`, {
     content: `${pings}\n**Lobby's full — let's set it up! 🏒**`,
     embeds: [instructionsEmbed()],
-    components: [{ type: 1, components: [{ type: 2, style: 4, label: "🗑 Delete lobby", custom_id: `lfg:closelobby:${lobby.id}` }] }],
     allowed_mentions: { users: ids.slice(0, 100) },
   });
   return ch.id;
@@ -209,11 +208,11 @@ function instructionsEmbed() {
     description:
       "**1 · Captains** — two of you run **/captain** to volunteer. The first two become **Team A** & **Team B**. " +
       "(Nobody claims it within ~5 min? The first two who signed up are set automatically.)\n\n" +
-      "**2 · Mini draft** — the captains take turns picking players from a dropdown (snake order) until both teams are full.\n\n" +
+      "**2 · Mini draft** — the other player at each captain's position starts on the opposite team automatically. Captains then take turns picking (snake order), one of each position per team — the dropdown only shows who's legal.\n\n" +
       "**3 · Server & code** — Team A's captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
       "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
       `**5 · Stats** — after the game, statistics staff enter the box score by **club search** at ${CLUB_SEARCH}.\n\n` +
-      "**6 · Done** — entering the box score clears this channel on its own a couple of minutes later (staff can also press 🗑 below). Someone no-show or out of line? A captain can start a vote with **/kick** — the other captain approves, and the spot refills from #pickup-games.",
+      "**6 · Done** — entering the box score clears this channel on its own a couple of minutes later. Want it gone sooner? When a **majority of the lobby runs /delete**, it closes — and any quiet room clears within 12 hours regardless. Someone no-show or out of line? A captain can start a vote with **/kick** — the other captain approves, and the spot refills from #pickup-games.",
     color: BRAND,
   };
 }
@@ -279,7 +278,10 @@ function draftView(lobby) {
   const s = lobby.state;
   const pool = remainingPool(s);
   const capName = `<@${currentCaptain(s)}>`;
-  const options = pool.slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
+  /* the dropdown only offers LEGAL picks — a position the team already holds isn't a choice */
+  const posOf = {}; (s.signups || []).forEach((x) => { posOf[x.id] = x.pos; });
+  const filled = ((s.teams && s.teams[s.turn]) || []).map((id) => posOf[id]);
+  const options = pool.filter((x) => !filled.includes(x.pos)).slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
   return {
     embeds: [{
       title: "🧢 Captains' draft",
@@ -353,6 +355,19 @@ function applyLeave(lobby, userId) {
 function startDraft(s, capA, capB) {
   s.captains = [capA, capB];
   s.teams = { A: [capA], B: [capB] };
+  /* Each team ends with ONE of every position and a captain fills their own slot — so the other
+     player at a captain's position can only legally land on the opposite team. Place them there up
+     front rather than letting a doomed pick happen. (Two same-position captains ARE each other's
+     twins, so there is nothing to place.) The draft then runs 8 picks instead of 10; the existing
+     pool-empty check ends it, and the snake's first eight turns split 4/4. KEEP IN SYNC with the
+     auto-captain path in lfg-timers.js. */
+  const posOf = {}; (s.signups || []).forEach((x) => { posOf[x.id] = x.pos; });
+  if (posOf[capA] !== posOf[capB]) {
+    const twinA = (s.signups || []).find((x) => x.pos === posOf[capA] && x.id !== capA);
+    const twinB = (s.signups || []).find((x) => x.pos === posOf[capB] && x.id !== capB);
+    if (twinA) s.teams.B.push(twinA.id);
+    if (twinB) s.teams.A.push(twinB.id);
+  }
   s.order = draftOrder();
   s.pickIndex = 0;
   s.turn = s.order[0];
@@ -422,10 +437,30 @@ function applyKickApprove(lobby, presserId, openSignups) {
   if (sub) s.signups = s.signups.concat([{ id: sub.id, name: sub.name, pos: sub.pos, at: new Date().toISOString() }]);
   return { state: s, target: kv.target, targetName: entry.name, pos: entry.pos, replacement: sub || null, side: side };
 }
+/* ---------- /delete: majority vote to close the lobby ----------
+   The only manual way a lobby room goes away: each member runs /delete, and when a MAJORITY of the
+   current roster has voted, the lobby closes (the sync sweep then removes the channel). Votes are
+   idempotent and there is no withdraw — walking a vote back on a room half the lobby wants gone
+   buys nothing but confusion. */
+function applyDeleteVote(lobby, userId) {
+  const s = lobby.state;
+  const roster = (s.signups || []).map((x) => x.id);
+  if (!roster.includes(userId)) return { error: "Only players in this lobby can vote to close it." };
+  s.deleteVotes = (s.deleteVotes || []).filter((id) => roster.includes(id));   // a kicked voter's vote dies with them
+  const already = s.deleteVotes.includes(userId);
+  if (!already) s.deleteVotes.push(userId);
+  const needed = Math.floor(roster.length / 2) + 1;
+  return { state: s, votes: s.deleteVotes.length, needed, already, closed: s.deleteVotes.length >= needed };
+}
 function applyPick(lobby, userId, pickId) {
   const s = lobby.state;
   if (userId !== currentCaptain(s)) return { error: "Only the captain on the clock can pick right now." };
   if (!remainingPool(s).some((x) => x.id === pickId)) return { error: "That player is no longer on the board." };
+  /* one of each position per team — the captain already fills their own slot, so their position is
+     blocked from the start and every other position caps at one */
+  const posOf = {}; (s.signups || []).forEach((x) => { posOf[x.id] = x.pos; });
+  const filled = (s.teams[s.turn] || []).map((id) => posOf[id]);
+  if (filled.includes(posOf[pickId])) return { error: `Team ${s.turn} already has a ${POS_LABEL[posOf[pickId]] || posOf[pickId]} — pick a different position.` };
   s.teams[s.turn] = s.teams[s.turn].concat([pickId]);
   s.pickIndex += 1;
   if (s.pickIndex >= s.order.length || remainingPool(s).length === 0) {
@@ -519,18 +554,15 @@ async function handleComponent(interaction) {
     }
     return ephemeral("The lobby was busy — try that again.");
   }
-  // Delete-lobby button (in the lobby channel): staff-only. Marks it closed; discord-sync removes the
+  // Delete-lobby button — NO LONGER RENDERED anywhere (removed 2026-08-03 so a delete control
+  // never sits in front of players; cleanup is the stats-import auto-close plus the 12-hour
+  // sweep). The handler stays because messages posted before the removal still carry the button,
+  // and a click on one of those must degrade gracefully, not error. Staff-only, as it always was. Marks it closed; discord-sync removes the
   // channel on its next sweep (avoids responding to an interaction whose channel you just deleted).
   if (action === "closelobby") {
-    if (!(await sbIsStatsStaff(userId))) {
-      return ephemeral("Only statistics staff or a commissioner can delete a lobby — it's tied to entering the box score. If you think this one should be removed, open a ticket on **chelgamingleague.com** and staff will handle it.");
-    }
-    const lobby = await sbGetLobby(key);
-    if (!lobby || lobby.status === "closed") return ephemeral("This lobby is already closed.");
-    await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${lobby.id}`, { method: "PATCH", headers: sbHead(),
-      body: JSON.stringify({ status: "closed", updated_at: new Date().toISOString() }), signal: AbortSignal.timeout(2000) }).catch(() => {});
-    return respond({ type: UPDATE, data: { embeds: [{ title: "🗑 Lobby closed",
-      description: `Closed by <@${userId}> — this channel will be removed shortly.`, color: BRAND }], components: [] } });
+    /* the delete button is retired — messages posted before the removal still carry it, and a
+       click must degrade into directions, not an error */
+    return ephemeral("The delete button is retired \u2014 a lobby closes when a **majority of its players run /delete**, when its box score is entered, or on its own after 12 quiet hours.");
   }
 
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -614,6 +646,7 @@ async function handleCommand(interaction) {
   }
   if (cmd === "captain") return handleCaptain(interaction);
   if (cmd === "kick") return handleKick(interaction);
+  if (cmd === "delete") return handleDelete(interaction);
   return ephemeral("Unknown command.");
 }
 // /join -> a private position picker showing what's open. For someone already on the sheet, the
@@ -695,6 +728,28 @@ async function handleKick(interaction) {
   }
   return ephemeral("The lobby was busy — try that again.");
 }
+// /delete (in a lobby's room) -> vote to close it; a majority of the current roster closes the
+// lobby and the sync sweep removes the channel a couple of minutes later.
+async function handleDelete(interaction) {
+  const channelId = interaction.channel_id;
+  const userId = userIdOf(interaction);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lobby = await sbGetRoomLobbyAny(channelId);
+    if (!lobby) return ephemeral("There's no active pickup lobby in this channel — **/delete** works inside a lobby's own room.");
+    const out = applyDeleteVote(lobby, userId);
+    if (out.error) return ephemeral(out.error);
+    const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, out.closed ? "closed" : lobby.status);
+    if (!saved) continue;   // CAS lost — re-read and retry
+    if (out.closed) return respond({ type: REPLY, data: { embeds: [{ title: "\uD83D\uDDD1 Lobby closed by majority vote",
+      description: `**${out.votes} of ${out.state.signups.length}** voted to close — this channel clears itself in a couple of minutes. Run **/join** in #pickup-games any time to start the next one.`,
+      color: BRAND }], allowed_mentions: { parse: [] } } });
+    return respond({ type: REPLY, data: { embeds: [{ title: "\uD83D\uDDF3\uFE0F Vote to close this lobby",
+      description: (out.already ? `<@${userId}>'s vote was already counted.` : `<@${userId}> voted to close.`) +
+        `\n\n**${out.votes} / ${out.needed}** needed — a majority of the lobby closes it. Run **/delete** to add yours.`,
+      color: BRAND }], allowed_mentions: { parse: [] } } });
+  }
+  return ephemeral("The lobby was busy — try that again.");
+}
 // /captain (in a full lobby's channel) -> volunteer as a captain; the second volunteer starts the draft.
 async function handleCaptain(interaction) {
   const channelId = interaction.channel_id;
@@ -761,5 +816,5 @@ export const handler = async (event) => {
 
 // Exposed for local unit tests only; Netlify invokes the named handler export.
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
-  applyKickPropose, applyKickApprove, applyKickDecline, handleJoin, pickerView,
+  applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, handleJoin, pickerView,
   startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };

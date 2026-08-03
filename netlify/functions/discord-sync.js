@@ -780,6 +780,7 @@ const GUILD_COMMANDS = [
   { name: "captain", type: 1, description: "Volunteer as a captain — run in a full pickup lobby's channel" },
   { name: "kick", type: 1, description: "Captains: vote to kick a player from this pickup lobby",
     options: [{ type: 6, name: "player", description: "Who to kick", required: true }] },
+  { name: "delete", type: 1, description: "Vote to close this pickup lobby — a majority of the lobby closes it" },
 ];
 async function ensureGuildCommands(sum) {
   /* the marker only needs to CHANGE when the command set changes — the JSON itself is the

@@ -101,7 +101,10 @@ function draftView(lobby) {
   const s = lobby.state;
   const cur = s.turn === "A" ? s.captains[0] : s.captains[1];
   const pool = (s.signups || []).filter((x) => x.id !== s.captains[0] && x.id !== s.captains[1] && !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
-  const options = pool.slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
+  /* KEEP IN SYNC with discord-interactions.js: only legal picks appear in the dropdown */
+  const posOf = {}; (s.signups || []).forEach((x) => { posOf[x.id] = x.pos; });
+  const filled = ((s.teams && s.teams[s.turn]) || []).map((id) => posOf[id]);
+  const options = pool.filter((x) => !filled.includes(x.pos)).slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
   return { embeds: [{ title: "🧢 Captains' draft",
     description: `<@${cur}> is on the clock — pick a player.\n\n**Team A** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Team B** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
     color: BRAND, footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` } }],
@@ -262,6 +265,16 @@ async function sweepCaptains(errors, out) {
     if (!capA || !capB) continue;
     st.captains = [capA, capB];
     st.teams = { A: [capA], B: [capB] };
+    /* KEEP IN SYNC with startDraft in discord-interactions.js: the other player at a captain's
+       position can only legally land on the opposite team (one of each position per side), so
+       they are placed there up front. Same-position captains are each other's twins — no-op. */
+    const posOf = {}; (st.signups || []).forEach((x) => { posOf[x.id] = x.pos; });
+    if (posOf[capA] !== posOf[capB]) {
+      const twinA = (st.signups || []).find((x) => x.pos === posOf[capA] && x.id !== capA);
+      const twinB = (st.signups || []).find((x) => x.pos === posOf[capB] && x.id !== capB);
+      if (twinA) st.teams.B.push(twinA.id);
+      if (twinB) st.teams.A.push(twinB.id);
+    }
     st.order = ["A", "B", "B", "A", "A", "B", "B", "A", "A", "B"];
     st.pickIndex = 0; st.turn = "A";
     let claimed = false;

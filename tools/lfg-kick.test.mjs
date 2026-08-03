@@ -179,5 +179,72 @@ console.log("\n— /join itself renews an existing spot (the warning's promise)"
   globalThis.fetch = realFetch;
 }
 
+
+console.log("\n— /delete: a majority of the lobby, nothing less");
+{
+  const lobby = mk();
+  A("a stranger cannot vote", !!I.applyDeleteVote(lobby, "stranger").error);
+  let out = I.applyDeleteVote(lobby, "capA");
+  A("first vote counts 1 of 7", out.votes === 1 && out.needed === 7 && !out.closed);
+  out = I.applyDeleteVote(lobby, "capA");
+  A("voting twice does not double-count", out.votes === 1 && out.already === true);
+  ["capB","p3","p4","p5","p6"].forEach((u) => { out = I.applyDeleteVote(lobby, u); });
+  A("six of twelve is not a majority", out.votes === 6 && !out.closed);
+  out = I.applyDeleteVote(lobby, "p7");
+  A("the seventh vote closes the lobby", out.votes === 7 && out.closed === true);
+
+  const short = mk(); short.state.signups = short.state.signups.slice(0, 11);   // one kicked, 11 left
+  let o2 = null; ["capA","capB","p3","p4","p5"].forEach((u) => { o2 = I.applyDeleteVote(short, u); });
+  A("majority tracks the CURRENT roster (11 -> 6 needed)", o2.needed === 6 && !o2.closed);
+  o2 = I.applyDeleteVote(short, "p6");
+  A("...and six closes an 11-player lobby", o2.closed === true);
+
+  const purge = mk(); I.applyDeleteVote(purge, "p3");
+  purge.state.signups = purge.state.signups.filter((x) => x.id !== "p3");        // voter got kicked
+  const o3 = I.applyDeleteVote(purge, "capA");
+  A("a kicked player's vote dies with them", o3.votes === 1);
+}
+
+console.log("\n— captains' twins auto-land on the opposite team");
+{
+  const s = mk().state; s.teams = { A: [], B: [] };
+  I.startDraft(s, "capA", "p12");                    // capA is a C, p12 is a G
+  A("the other C starts on Team B", s.teams.B.includes("p7"), JSON.stringify(s.teams));
+  A("the other G starts on Team A", s.teams.A.includes("capB") && s.teams.A.length === 2, JSON.stringify(s.teams));
+  const s2 = mk().state; s2.teams = { A: [], B: [] };
+  I.startDraft(s2, "capA", "p7");                    // BOTH captains are centers
+  A("same-position captains place no twins", s2.teams.A.length === 1 && s2.teams.B.length === 1);
+}
+
+console.log("\n— one of each position per team, and the draft always completes");
+{
+  const s = mk().state; s.teams = { A: [], B: [] };
+  I.startDraft(s, "capA", "p12");                    // C captain vs G captain; twins p7->B, capB(G)->A
+  // run the whole draft greedily-legal, probing every illegal pick along the way
+  let guard = 0;
+  while (guard++ < 20) {
+    const cur = s.turn === "A" ? "capA" : "p12";
+    const posOf = {}; s.signups.forEach((x) => { posOf[x.id] = x.pos; });
+    const filled = s.teams[s.turn].map((id) => posOf[id]);
+    const pool = s.signups.filter((x) => x.id !== "capA" && x.id !== "p12" &&
+      !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
+    const illegal = pool.find((x) => filled.includes(x.pos));
+    if (illegal) {
+      const ref = I.applyPick({ id:"L", status:"drafting", state: s }, cur, illegal.id);
+      A("a duplicate-position pick is refused (" + illegal.pos + ")", !!ref.error);
+    }
+    const legal = pool.find((x) => !filled.includes(x.pos));
+    if (!legal) break;
+    const out = I.applyPick({ id:"L", status:"drafting", state: s }, cur, legal.id);
+    if (out.error) { A("legal pick unexpectedly refused", false, out.error); break; }
+    if (out.status === "server") break;
+  }
+  const posOf = {}; s.signups.forEach((x) => { posOf[x.id] = x.pos; });
+  const sig = (side) => s.teams[side].map((id) => posOf[id]).sort().join(",");
+  A("Team A ends with one of every position", sig("A") === "C,G,LD,LW,RD,RW", sig("A"));
+  A("Team B ends with one of every position", sig("B") === "C,G,LD,LW,RD,RW", sig("B"));
+  A("everyone is on a team", s.teams.A.length === 6 && s.teams.B.length === 6);
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);
