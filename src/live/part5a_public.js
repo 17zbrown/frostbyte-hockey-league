@@ -1649,7 +1649,8 @@ CG.ROUTES.team = function(code, qs){
   var mgmt = { owner: roster.find(function(p){return p.mgmt==="owner";}),
                gm: roster.find(function(p){return p.mgmt==="gm";}),
                agm: roster.find(function(p){return p.mgmt==="agm";}) };
-  var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+'"><div class="shell">'+
+  var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+
+    (t.color2?';border-image:linear-gradient(90deg,'+t.color+','+t.color2+') 1;box-shadow:0 1px 0 var(--line)':'')+'"><div class="shell">'+
     '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
       '<span class="crest3d">'+CG.crest(code,52,{decorative:true})+'</span>'+
       '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+t.div+' Division · '+esc(t.city)+' · '+esc(t.arena)+'</span>'+
@@ -1891,6 +1892,7 @@ CG.ROUTES.player = function(pid, qs){
      charcoal scrim so the crest, name and overall stay fully legible; the club colour rides the
      6px border. The base #101519 shows if the image 404s. */
   var head = '<section class="sec-dark" style="padding:clamp(28px,4vw,52px) 0;border-bottom:6px solid '+t.color+
+    (t.color2?';border-image:linear-gradient(90deg,'+t.color+','+t.color2+') 1;box-shadow:0 1px 0 var(--line)':'')+
     ';background:linear-gradient(90deg,rgba(16,21,25,.95),rgba(16,21,25,.72) 46%,rgba(16,21,25,.5)),linear-gradient(180deg,rgba(16,21,25,.32),rgba(16,21,25,.58)),#101519 url(\'/assets/cinema/profile-hero-21x9.jpg\') center/cover no-repeat"><div class="shell">'+
     '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
       /* the club logo itself, tilted in 3D → links to the team page (same site-wide crest mark) */
@@ -1900,6 +1902,9 @@ CG.ROUTES.player = function(pid, qs){
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
           (p.rookie?'<span class="chip chip-chrome">Rookie</span>':"")+
           '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>'+
+          /* the envelope: one click into a DM with this player (hidden on your own profile) */
+          (CG.auth && CG.auth.user && CG.auth.user.id!==p.id
+            ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(p.id)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
           (p.twitchLive&&p.twitch?'<a class="chip" target="_blank" rel="noopener" href="https://twitch.tv/'+encodeURIComponent(p.twitch)+'" style="background:'+CG.TWITCH_PURPLE+';border-color:'+CG.TWITCH_PURPLE+';color:#fff"><span class="live-dot"></span>LIVE on Twitch</a>':"")+
           (!archived?'<span class="chip chip-ink" style="border-color:#39434B">'+
             (p.mgmt?(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+" · "+CG.fmtMoney(p.salary):CG.fmtMoney(p.salary)+" · "+p.term+" yr")+'</span>':"")+
@@ -2244,7 +2249,10 @@ CG.AFTER.player = function(pid, qs){
   if (!CG.lg.players.find(function(x){ return x.id===pid; }) && CG.sb){
     CG.sb.from("profiles").select("gamertag").eq("id", pid).maybeSingle().then(function(r){
       var hdr = document.getElementById("acctHdr"); if (!hdr) return;
-      if (r && r.data) hdr.innerHTML = '<b style="font-family:var(--f-disp);font-size:16px">'+esc(r.data.gamertag||"Player")+'</b><p class="caption" style="margin:4px 0 0">This account isn’t on a league roster — only pickup game stats show here.</p>';
+      if (r && r.data) hdr.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp);font-size:16px;flex:1">'+esc(r.data.gamertag||"Player")+'</b>'+
+        (CG.auth && CG.auth.user && CG.auth.user.id!==pid
+          ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(pid)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
+        '</div><p class="caption" style="margin:4px 0 0">This account isn’t on a league roster — only pickup game stats show here.</p>';
       else { hdr.innerHTML = '<b>Profile not found.</b>'; var ps=document.getElementById("pickupSection"); if (ps) ps.innerHTML=""; }
     }, function(){});
   }

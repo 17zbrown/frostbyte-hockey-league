@@ -585,6 +585,13 @@ CG.hubTabs = function(){
 };
 /* back-compat: first tab (My Hub) for any older callers */
 CG.hubLabel = function(){ var t = CG.hubTabs(); return t.length ? t[0] : null; };
+/* The "Join the Discord" escape hatch: a signed-in member who is not in the guild (left, or never
+   joined) gets a persistent way back in from the account menus. Profiles are never deleted when
+   someone leaves the server — the site account stands on its own; this is the road back. */
+CG.discordJoinLink = function(){
+  if (!(CG.LIVE_MODE && CG.auth && CG.auth.profile && !CG.auth.profile.in_guild)) return null;
+  return (CG._siteCfg && CG._siteCfg.discord_invite) || null;
+};
 CG.renderChrome = function(){
   /* demo bar (prototype only — the live site uses real Discord auth, no seat switcher) */
   var demobar = $("#demobar");
@@ -698,7 +705,9 @@ CG.renderChrome = function(){
     mnav.map(function(n){ return '<a href="'+n[1]+'">'+n[0]+' <span style="color:var(--chrome)">→</span></a>'; }).join("")+
     '<div class="mn-g">Account</div>'+
     (CG.role()==="guest" ? '<a href="#/signin">Sign in</a>' :
-      (CG.LIVE_MODE?'<a href="#/hub/messages">Messages</a>':"")+'<a href="#/hub/notifications">Notifications</a><a href="#/hub/settings">Settings</a><a href="#/signin">Switch role</a>');
+      (CG.LIVE_MODE?'<a href="#/hub/messages">Messages</a>':"")+
+      (CG.discordJoinLink&&CG.discordJoinLink()?'<a href="'+esc(CG.discordJoinLink())+'" target="_blank" rel="noopener">Join the Discord <span style="color:var(--chrome)">→</span></a>':"")+
+      '<a href="#/hub/notifications">Notifications</a><a href="#/hub/settings">Settings</a><a href="#/signin">Switch role</a>');
   /* footer */
   $("#sitefoot").innerHTML = '<div class="shell">'+
     '<div class="ft-top">'+
@@ -1317,6 +1326,7 @@ document.addEventListener("click", function(e){
       (CG.me()?'<a class="pop-item" href="'+CG.playerRoute(CG.me())+'" data-close-nav>'+CG.ic("user",16)+'My player profile</a>':"")+
       (CG.LIVE_MODE?'<a class="pop-item" href="#/hub/messages" data-close-nav>'+CG.ic("msg",16)+'Messages'+
         (CG.dmUnreadTotal&&CG.dmUnreadTotal()?'<span class="hs-n" style="margin-left:auto">'+CG.dmUnreadTotal()+'</span>':"")+'</a>':"")+
+      (CG.discordJoinLink&&CG.discordJoinLink()?'<a class="pop-item" href="'+esc(CG.discordJoinLink())+'" target="_blank" rel="noopener" data-close-nav>'+CG.ic("msg",16)+'Join the Discord</a>':"")+
       '<a class="pop-item" href="#/hub/notifications" data-close-nav>'+CG.ic("bell",16)+'Notifications</a>'+
       '<a class="pop-item" href="#/hub/settings" data-close-nav>'+CG.ic("gear",16)+'Settings</a>'+
       '<div class="pop-sep"></div>'+

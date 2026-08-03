@@ -203,7 +203,9 @@ CG.buildLiveLeague = async function(){
     var lg2 = t.league_id ? leagueById[t.league_id] : topLeague;
     if (lg2) lg2.teamCount++;
     var obj = { code:t.code, name:t.name, city:t.city||"", arena:t.arena||"",
-      div:t.division||"East", color:(t.color||"#8899A6").toUpperCase(), est:t.founded_season||1,
+      div:t.division||"East", color:(t.color||"#8899A6").toUpperCase(),
+      color2:(t.color2 && /^#?[0-9a-f]{6}$/i.test(t.color2) ? ("#"+String(t.color2).replace("#","")).toUpperCase() : null),
+      est:t.founded_season||1,
       logo:t.logo_url||null, id:t.id,
       leagueId:(lg2&&lg2.id)||null, leagueCode:(lg2&&lg2.code)||"CGHL",
       owner:t.owner_profile_id, gm:t.gm_profile_id, agm:t.agm_profile_id,
@@ -711,7 +713,9 @@ CG.applySession = async function(session){
   if (CG.renderViewAsBar) CG.renderViewAsBar();
 };
 CG.teardownDMs = function(){
-  CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false;
+  CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false; CG._dm.compose=false;
+  /* signed URLs are per-user credentials — they must not survive a sign-out into the next session */
+  CG._dm.mediaUrls={}; CG._dm.mediaExp={}; CG._dm.mediaPending={};
   if(CG._dm.channel){ try{ CG.sb.removeChannel(CG._dm.channel); }catch(e){} CG._dm.channel=null; }
 };
 /* re-map the draft board/pool with the same maps the adapter built */
@@ -3180,6 +3184,89 @@ CG.dmSend = async function(){
   if(r.error){ CG.toast(/banned/i.test(r.error.message)?"That player can’t receive messages":"Couldn’t send: "+r.error.message,"err"); inp.value=body; return; }
   CG._dm.msgs.push(r.data); CG.router();
 };
+/* Photos and videos ride the private dm-media bucket: upload into the sender's own folder, then
+   the message row carries the path. Reads go through short-lived signed URLs — the bucket is not
+   public, and storage RLS only serves a file to its sender or to the recipient of a message that
+   references it. */
+CG.dmSendMedia = async function(file){
+  if (!file || !CG._dm.active) return;
+  if (file.size > 50*1024*1024){ CG.toast("Keep attachments under 50 MB","err"); return; }
+  if (!/^(image\/(png|jpeg|webp|gif)|video\/(mp4|webm|quicktime))$/.test(file.type)){
+    CG.toast("Photos (PNG/JPG/WebP/GIF) and videos (MP4/WebM/MOV) only","err"); return;
+  }
+  var ext = (file.name.split(".").pop()||"bin").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,5) || "bin";
+  var path = CG.dmUid()+"/"+Date.now()+"-"+Math.random().toString(36).slice(2,9)+"."+ext;
+  var inp = document.getElementById("dmInput");
+  /* take the caption and clear the box NOW — leaving the text sitting there through an await let
+     Enter fire mid-upload and send the same words twice, once alone and once as the caption */
+  var caption = inp ? inp.value.trim() : "";
+  if (inp) inp.value = "";
+  CG.toast("Uploading\u2026","ok");
+  var up = await CG.sb.storage.from("dm-media").upload(path, file, { contentType:file.type, upsert:false });
+  if (up.error){ if (inp) inp.value = caption; CG.toast("Upload failed: "+up.error.message,"err"); return; }
+  var r = await CG.sb.from("direct_messages").insert({
+    sender_id:CG.dmUid(), recipient_id:CG._dm.active, body:caption, media_path:path, media_type:file.type
+  }).select().single();
+  if (r.error){
+    if (inp) inp.value = caption;
+    /* the file made it up but the message never existed — don't leave an orphan in the bucket */
+    try { CG.sb.storage.from("dm-media").remove([path]); } catch(e){}
+    CG.toast("Couldn\u2019t send: "+r.error.message,"err"); return;
+  }
+  CG._dm.msgs.push(r.data);
+  CG._dm.mediaUrls = CG._dm.mediaUrls || {};
+  CG._dm.mediaExp = CG._dm.mediaExp || {};
+  var su = await CG.sb.storage.from("dm-media").createSignedUrl(path, 3600);
+  if (su.data && su.data.signedUrl){ CG._dm.mediaUrls[path] = su.data.signedUrl; CG._dm.mediaExp[path] = Date.now() + 3300*1000; }
+  CG.router();
+};
+/* resolve signed URLs for any attachment in the open thread that hasn't been resolved yet;
+   re-renders once when the batch lands */
+CG.dmResolveMedia = function(active){
+  CG._dm.mediaUrls = CG._dm.mediaUrls || {};
+  CG._dm.mediaExp = CG._dm.mediaExp || {};
+  /* a real in-flight set — assigning undefined into mediaUrls would be a no-op, and every
+     re-render while a batch was pending would re-request the same signed URLs */
+  CG._dm.mediaPending = CG._dm.mediaPending || {};
+  var now = Date.now();
+  var need = CG._dm.msgs.filter(function(m){
+    if (!m.media_path || CG.dmOtherId(m)!==active || CG._dm.mediaPending[m.media_path]) return false;
+    if (CG._dm.mediaUrls[m.media_path]===undefined) return true;
+    /* signed URLs live an hour; re-sign inside the last five minutes so a tab left open
+       overnight never renders against an expired token */
+    var exp = CG._dm.mediaExp[m.media_path];
+    return !!exp && now > exp - 5*60*1000;
+  });
+  if (!need.length) return;
+  need.forEach(function(m){ CG._dm.mediaPending[m.media_path] = 1; });
+  var got = 0;
+  Promise.all(need.map(function(m){
+    return CG.sb.storage.from("dm-media").createSignedUrl(m.media_path, 3600).then(function(r){
+      var url = (r.data && r.data.signedUrl) || null;
+      /* a failure is NOT cached — the entry stays unresolved so the next render retries;
+         pinning null here turned one network blip into "unavailable" for the whole session */
+      if (url){ CG._dm.mediaUrls[m.media_path] = url; CG._dm.mediaExp[m.media_path] = Date.now() + 3300*1000; got++; }
+      delete CG._dm.mediaPending[m.media_path];
+    }).catch(function(){ delete CG._dm.mediaPending[m.media_path]; });
+  })).then(function(){ if (got && location.hash.indexOf("/messages")>=0) CG.router(); });
+};
+/* The envelope chips ([data-pm]) live on both player-profile variants — one of which is injected
+   asynchronously after the AFTER hook has already run — so the click wiring is delegated at the
+   document level rather than bound per-render. Runs before the href navigates. */
+if (typeof document !== "undefined" && !CG._dmDelegated){
+  CG._dmDelegated = true;
+  document.addEventListener("click", function(ev){
+    var el = ev.target && ev.target.closest ? ev.target.closest("[data-pm]") : null;
+    if (!el) return;
+    var pid = el.getAttribute("data-pm");
+    CG._dm.compose = false; CG._dm.active = pid;
+    /* seed the name/avatar from the league-wide profile list so a fresh thread never says "Member" */
+    if (!CG._dm.profiles[pid]){
+      var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===pid; });
+      if (pr) CG._dm.profiles[pid] = pr;
+    }
+  });
+}
 CG.subscribeDMs = function(){
   if(!CG.sb||!CG.dmUid()||CG._dm.channel) return;
   var me=CG.dmUid();
@@ -3329,29 +3416,53 @@ CG.messagesBody = function(){
   var me=CG.dmUid(), convos=CG.dmConvos(), active=CG._dm.active;
   var list = convos.slice();
   if (active && !list.find(function(c){return c.other===active;})) list.unshift({other:active,msgs:[],last:null,unread:0});
+  var newBtn = '<div style="padding:10px;border-bottom:1px solid var(--line)">'+
+    '<button class="btn btn-chrome btn-sm" id="dmNew" style="width:100%">'+CG.ic("msg",14)+' New message</button></div>';
   var listHtml = list.length ? list.map(function(c){
-    var prev = c.last ? ((c.last.sender_id===me?"You: ":"")+c.last.body) : "New conversation";
+    var prev = c.last ? ((c.last.sender_id===me?"You: ":"")+
+      (c.last.body || (/^video\//.test(c.last.media_type||"") ? "\uD83C\uDFAC Video" : c.last.media_path ? "\uD83D\uDCF7 Photo" : ""))) : "New conversation";
     return '<div class="notif'+(c.other===active?" unread":"")+'" data-dm-open="'+c.other+'" style="cursor:pointer'+(c.other===active?';background:var(--chrome-tint)':"")+'">'+CG.dmAva(c.other)+
       '<span style="min-width:0;flex:1"><b style="font-family:var(--f-disp);font-size:13.5px">'+esc(CG.dmName(c.other))+'</b>'+
       '<p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(prev)+'</p></span>'+
       (c.unread?'<span class="hs-n">'+(c.unread>9?"9+":c.unread)+'</span>':"")+'</div>';
   }).join("") : '<div class="empty" style="padding:40px 16px"><b>No conversations yet</b><p>Open a member’s profile to start one.</p></div>';
   var thread;
-  if (!active){ thread = '<div class="empty" style="padding:70px 20px"><div class="e-art">'+CG.ic("msg",20)+'</div><b>Pick a conversation</b><p>Your messages appear here.</p></div>'; }
+  if (CG._dm.compose){
+    /* the fresh-PM pane: look a member up by name (same autocomplete as the rest of the site)
+       and the thread opens the moment you pick them */
+    thread = '<div style="padding:26px 22px;max-width:480px">'+
+      '<h3 class="h-sec" style="font-size:16px;margin:0 0 4px">New message</h3>'+
+      '<p class="caption" style="margin:0 0 14px">Look a member up by gamertag or Discord name \u2014 suggestions fill in as you type.</p>'+
+      CG.memberPickerField("dmTo","To")+
+      '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-chrome btn-sm" id="dmComposeGo">Start conversation</button>'+
+      '<button class="btn btn-ghost btn-sm" id="dmComposeCancel">Cancel</button></div></div>';
+  }
+  else if (!active){ thread = '<div class="empty" style="padding:70px 20px"><div class="e-art">'+CG.ic("msg",20)+'</div><b>Pick a conversation</b><p>Open a member\u2019s profile and hit the envelope \u2014 or start one with New message.</p></div>'; }
   else {
     var msgs = CG._dm.msgs.filter(function(m){ return CG.dmOtherId(m)===active; });
     var body = msgs.length ? msgs.map(function(m){
       var mine = m.sender_id===me;
-      return '<div style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+esc(m.body)+
+      var media = "";
+      if (m.media_path){
+        var mu = (CG._dm.mediaUrls||{})[m.media_path];
+        if (mu === undefined) media = '<span class="caption" style="display:block;opacity:.75">Loading attachment\u2026</span>';
+        else if (!mu) media = '<span class="caption" style="display:block;opacity:.75">Attachment unavailable</span>';
+        else if (/^video\//.test(m.media_type||"")) media = '<video controls playsinline preload="metadata" src="'+esc(mu)+'" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></video>';
+        else media = '<a href="'+esc(mu)+'" target="_blank" rel="noopener"><img src="'+esc(mu)+'" alt="Attachment" loading="lazy" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></a>';
+      }
+      return '<div style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+media+(m.body?esc(m.body):"")+
         '<span style="display:block;font-size:10px;opacity:.6;margin-top:3px">'+CG.fmtTime(Date.parse(m.created_at))+'</span></div>';
     }).join("") : '<div class="empty" style="padding:40px"><p>No messages yet — say hi.</p></div>';
     thread = '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center">'+CG.dmAva(active)+'<b style="font-family:var(--f-disp)">'+esc(CG.dmName(active))+'</b></div>'+
       '<div id="dmMsgs" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;min-height:300px">'+body+'</div>'+
-      '<div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px"><textarea id="dmInput" rows="1" placeholder="Message '+esc(CG.dmName(active))+'…" maxlength="2000" style="flex:1;resize:none"></textarea><button class="btn btn-chrome btn-sm" id="dmSend">Send</button></div>';
+      '<div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end">'+
+      '<button class="btn btn-ghost btn-sm" id="dmAttach" title="Send a photo or video" aria-label="Send a photo or video" style="padding:8px 10px">'+CG.ic("plus",15)+'</button>'+
+      '<input type="file" id="dmFile" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden>'+
+      '<textarea id="dmInput" rows="1" placeholder="Message '+esc(CG.dmName(active))+'…" maxlength="2000" style="flex:1;resize:none"></textarea><button class="btn btn-chrome btn-sm" id="dmSend">Send</button></div>';
   }
   return head + '<div class="card" style="padding:0;overflow:hidden">'+
     '<div class="grid" style="grid-template-columns:280px 1fr;gap:0;min-height:520px">'+
-    '<div style="border-right:1px solid var(--line);overflow-y:auto;max-height:600px">'+listHtml+'</div>'+
+    '<div style="border-right:1px solid var(--line);overflow-y:auto;max-height:600px">'+newBtn+listHtml+'</div>'+
     '<div style="display:flex;flex-direction:column">'+thread+'</div>'+
     '</div></div>';
 };
@@ -3363,6 +3474,37 @@ CG.AFTER.messages = function(param){
   var inp=document.getElementById("dmInput"); if(inp) inp.addEventListener("keydown", function(e){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); CG.dmSend(); } });
   var mv=document.getElementById("dmMsgs"); if(mv) mv.scrollTop=mv.scrollHeight;
   if (CG._dm.active) CG.dmMarkRead(CG._dm.active);
+  if (CG._dm.active) CG.dmResolveMedia(CG._dm.active);
+  /* fresh-PM compose */
+  var nb=document.getElementById("dmNew");
+  if(nb) nb.addEventListener("click", function(){ CG._dm.compose=true; CG._dm.active=null; CG.router(); });
+  var cc=document.getElementById("dmComposeCancel");
+  if(cc) cc.addEventListener("click", function(){ CG._dm.compose=false; CG.router(); });
+  var go=document.getElementById("dmComposeGo");
+  if(go){
+    CG.wireMemberPicker("dmTo");
+    var start=function(){
+      var pick=CG.readMemberPicker("dmTo");
+      if(!pick.id){ CG.toast("Pick a member from the suggestions","err"); return; }
+      if(pick.id===CG.dmUid()){ CG.toast("That\u2019s you \u2014 pick someone else","err"); return; }
+      if(!CG._dm.profiles[pick.id]){
+        var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===pick.id; });
+        if (pr) CG._dm.profiles[pick.id] = pr;
+      }
+      CG._dm.compose=false; CG._dm.active=pick.id; CG.router();
+      setTimeout(function(){ var i=document.getElementById("dmInput"); if(i) i.focus(); },0);
+    };
+    go.addEventListener("click", start);
+    var toEl=document.getElementById("dmTo");
+    if(toEl) toEl.addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); start(); } });
+    if(toEl) setTimeout(function(){ toEl.focus(); },0);
+  }
+  /* attachments */
+  var ab=document.getElementById("dmAttach"), af=document.getElementById("dmFile");
+  if(ab&&af){
+    ab.addEventListener("click", function(){ af.click(); });
+    af.addEventListener("change", function(){ if(this.files&&this.files[0]) CG.dmSendMedia(this.files[0]); this.value=""; });
+  }
 };
 
 /* ================================================================
@@ -4456,7 +4598,8 @@ CG.admTeamsLive = function(){
     teams.map(function(t){
       var n=(CG.lg.byTeam[t.code]||[]).length;
       return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,24)+'<span><span class="nm">'+esc(t.name)+'</span><small>'+esc(t.city||"—")+'</small></span></span></td>'+
-        '<td class="tleft mono" style="font-size:12px">'+esc(t.code)+'</td>'+
+        '<td class="tleft mono" style="font-size:12px"><span style="display:inline-flex;align-items:center;gap:7px">'+esc(t.code)+
+          '<i aria-hidden="true" style="width:34px;height:10px;border-radius:5px;border:1px solid var(--line);background:linear-gradient(90deg,'+esc(t.color)+','+esc(t.color2||t.color)+')"></i></span></td>'+
         '<td class="tleft">'+esc(t.div)+'</td>'+
         '<td data-v="'+n+'">'+n+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-team-edit="'+t.id+'">Edit</button>'+
@@ -4627,7 +4770,7 @@ CG.uploadLeagueEmblem = function(file, code){
 };
 CG.teamForm = function(t){
   var isNew = !t;
-  t = t || { name:"", city:"", code:"", color:"#8899A6", arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
+  t = t || { name:"", city:"", code:"", color:"#8899A6", color2:null, arena:"", div:(CG.DIVISIONS&&CG.DIVISIONS[0])||"East", logo:null };
   var divOpts = (CG.DIVISIONS&&CG.DIVISIONS.length?CG.DIVISIONS:["East","West"]).map(function(d){ return '<option'+(t.div===d?" selected":"")+'>'+esc(d)+'</option>'; }).join("");
   var isEdit = !isNew;
   function holderName(pid){
@@ -4661,7 +4804,10 @@ CG.teamForm = function(t){
     '<label class="fld"><span>City</span><input id="tfCity" value="'+esc(t.city||"")+'" placeholder="e.g. Boston"></label>'+
     '<label class="fld"><span>Code (2–4 letters)</span><input id="tfCode" value="'+esc(t.code)+'" maxlength="4" style="text-transform:uppercase" placeholder="e.g. BOS"></label>'+
     '<label class="fld"><span>Division</span><select id="tfDiv">'+divOpts+'</select></label>'+
-    '<label class="fld" style="grid-column:1/-1"><span>Club color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
+    '<label class="fld"><span>Primary color</span><input id="tfColor" type="color" value="'+esc(t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
+    '<label class="fld"><span>Secondary color</span><input id="tfColor2" type="color" value="'+esc(t.color2||t.color||"#8899A6")+'" style="height:44px;padding:4px;width:100%"></label>'+
+    '<div style="grid-column:1/-1"><div id="tfGrad" style="height:14px;border-radius:7px;border:1px solid var(--line);background:linear-gradient(90deg,'+esc(t.color||"#8899A6")+','+esc(t.color2||t.color||"#8899A6")+')"></div>'+
+    '<p class="caption" style="margin:6px 0 0">Both colors drive the club\u2019s Discord role gradient and the site\u2019s club accents. The pair above previews live.</p></div>'+
     '</div>'+
     '<label class="fld" style="margin-top:2px"><span>Club logo</span></label>'+
     '<div class="logo-drop" id="tfLogoDrop" role="button" tabindex="0" aria-label="Upload a club logo" data-url="'+esc(t.logo||"")+'">'+
@@ -4741,6 +4887,12 @@ CG.teamForm = function(t){
       (function next(i){ if(i>=roles.length){ CG.toast("All front-office seats removed","ok"); return; } doVacate(roles[i], function(){ next(i+1); }); })(0);
     });
   }
+  (function(){
+    var c1=document.getElementById("tfColor"), c2=document.getElementById("tfColor2"), g=document.getElementById("tfGrad");
+    var paint=function(){ if(g&&c1&&c2) g.style.background="linear-gradient(90deg,"+c1.value+","+c2.value+")"; };
+    if(c1) c1.addEventListener("input",paint);
+    if(c2) c2.addEventListener("input",paint);
+  })();
   document.getElementById("tfSave").addEventListener("click", function(){
     var name=(document.getElementById("tfName").value||"").trim(),
         code=(document.getElementById("tfCode").value||"").trim().toUpperCase();
@@ -4765,6 +4917,7 @@ CG.teamForm = function(t){
     var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
       division:document.getElementById("tfDiv").value,
       color:document.getElementById("tfColor").value,
+      color2:document.getElementById("tfColor2").value,
       logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
     var btn=this; btn.disabled=true;
     var q = isNew

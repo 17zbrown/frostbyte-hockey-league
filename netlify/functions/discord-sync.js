@@ -288,24 +288,68 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
 // here creates or deletes.
 async function syncClubIdentity(guildChannels, guildRoles, teams, sum) {
   const snapshot = [];
+  /* One gradient probe per sweep: if Discord refuses the first colors PATCH because the guild
+     lacks ENHANCED_ROLE_COLORS (a boost-gated feature), every later club skips straight to flat
+     color this sweep instead of burning nine more doomed API calls every two minutes. The flag
+     resets next sweep, so the moment the server is boosted the gradients apply themselves. */
+  let gradientBlocked = false;
   for (const t of teams) {
     if (!t.name) continue;
     const wantRole = t.name;
     const wantChan = slug(t.name);
     const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
+    /* null = no secondary on file; 0 is a legitimate value (pure black), so the sentinel must
+       not be falsy-conflated with it */
+    const wantColor2 = /^#?[0-9a-f]{6}$/i.test(t.color2 || "") ? parseInt(String(t.color2).replace("#", ""), 16) : null;
 
     if (t.discord_role_id) {
       const role = guildRoles.find((r) => r.id === t.discord_role_id);
       if (role && !role.managed) {
         const patch = {};
         if (role.name !== wantRole) patch.name = wantRole;
-        if (wantColor && role.color !== wantColor) patch.color = wantColor;
+        /* Both club colors on file -> a two-color gradient role (Discord's enhanced role styles).
+           The `colors` object supersedes the flat `color`; primary_color doubles as the fallback
+           everywhere gradients don't render. Requires the ENHANCED_ROLE_COLORS guild feature
+           (server boosts) — if Discord refuses, fall back to the flat primary and record why,
+           rather than erroring the whole sweep. */
+        const curColors = role.colors || {};
+        const cur1 = curColors.primary_color != null ? curColors.primary_color : role.color;
+        const curSecondary = curColors.secondary_color != null ? curColors.secondary_color : null;
+        if (wantColor && wantColor2 != null && !gradientBlocked) {
+          if (cur1 !== wantColor || curSecondary !== wantColor2) {
+            patch.colors = { primary_color: wantColor, secondary_color: wantColor2 };
+          }
+        } else if (wantColor) {
+          /* no secondary wanted: clear a stale gradient if one is showing, else fix flat drift */
+          if (wantColor2 == null && curSecondary != null && !gradientBlocked) {
+            patch.colors = { primary_color: wantColor, secondary_color: null };
+          } else if (role.color !== wantColor) patch.color = wantColor;
+        }
         if (Object.keys(patch).length) {
           try {
             await dApi("PATCH", `/guilds/${GUILD}/roles/${role.id}`, patch);
-            Object.assign(role, patch);
+            if (patch.colors) { role.colors = patch.colors; role.color = patch.colors.primary_color; sum.roleGradients = (sum.roleGradients || 0) + 1; }
+            Object.assign(role, patch.colors ? { name: patch.name || role.name } : patch);
             sum.clubRolesRenamed = (sum.clubRolesRenamed || 0) + 1;
-          } catch (e) { sum.errors.push({ clubRole: t.code, error: String(e.message || e) }); }
+          } catch (e) {
+            const msg = String(e.message || e);
+            /* Only a 400 means "this guild can't do gradients" — a 5xx or a network blip is
+               transient, must NOT set the blocked flag, and simply retries next sweep. */
+            if (patch.colors && / -> 400\b/.test(msg)) {
+              gradientBlocked = true;
+              sum.roleGradientUnsupported = msg.slice(0, 100);
+              const flat = {};
+              if (patch.name) flat.name = patch.name;
+              if (role.color !== wantColor) flat.color = wantColor;
+              if (Object.keys(flat).length) {
+                try {
+                  await dApi("PATCH", `/guilds/${GUILD}/roles/${role.id}`, flat);
+                  Object.assign(role, flat);
+                  sum.clubRolesRenamed = (sum.clubRolesRenamed || 0) + 1;
+                } catch (e2) { sum.errors.push({ clubRole: t.code, error: String(e2.message || e2) }); }
+              }
+            } else sum.errors.push({ clubRole: t.code, error: msg });
+          }
         }
       }
     }
@@ -886,7 +930,7 @@ export default async (req) => {
       const out = { deletedVoice: [], deletedRooms: [], deletedRoles: [], createdRoles: [], createdRooms: [], errors: [] };
       const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
       const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const teams = await sbGet("teams?select=id,code,name,color,discord_role_id,discord_channel_id");
+      const teams = await sbGet("teams?select=id,code,name,color,color2,discord_role_id,discord_channel_id");
       const teamRoomsCat = chans.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team rooms");
       const currentSlugs = new Set(teams.map((t) => slug(t.name)));
       const roleIdByName = {}; for (const r of roles) roleIdByName[(r.name || "").toLowerCase()] = r.id;
@@ -1113,7 +1157,7 @@ export default async (req) => {
   const inGuildById = {};
   for (const p of await sbGet("profiles?select=id,in_guild")) inGuildById[p.id] = p.in_guild;
   const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
-  const teams = await sbGet("teams?select=id,code,name,color,logo_url,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
+  const teams = await sbGet("teams?select=id,code,name,color,color2,logo_url,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
   // team management role now lives on the team's slots (owner/gm/agm), not profiles.role
   const mgmtRoleByProfile = {};
@@ -1618,6 +1662,7 @@ export default async (req) => {
         unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
+        roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
