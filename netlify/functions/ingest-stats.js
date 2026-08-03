@@ -9,6 +9,8 @@
 //   Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, INGEST_KEY
 // Node 18+ runtime (global fetch, no dependencies).
 
+export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
+
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const INGEST_KEY = process.env.INGEST_KEY;
@@ -84,7 +86,82 @@ function normalizeMatch(raw) {
   // CGHL plays continuous sudden-death OT and no shootout (Rule 4.1), so any non-regulation
   // finish is overtime. If either club reports 5 or 6, the game went to OT.
   const wentOt = clubs.some((c) => c.result === 5 || c.result === 6);
-  return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), clubs, went_ot: wentOt };
+  return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), ts: +raw.timestamp || 0, clubs, went_ot: wentOt };
+}
+
+// ---- Merge the segments of a disconnected game into one box score ----
+//
+// A mid-game disconnect produces TWO EA matches: the partial first sitting, then a fresh lobby
+// where the clubs replay only the remaining time. League rule: that is ONE game. The segments are
+// summed per player; the win/OT outcome comes from the FINAL sitting; a shutout is re-derived from
+// the combined line (a goalie clean in the resume but scored on in the first sitting has no
+// shutout); the per-game ratings are time-on-ice-weighted rather than summed. The game-winning
+// goal cannot be attributed without goal timings, so it is zeroed rather than guessed.
+const REGULATION_S = 720;                 // 3 periods x 4 minutes
+const RESUME_WINDOW_S = 3 * 3600;         // segments further apart than this are not one game
+const COMBINED_CAP_S = Math.round(REGULATION_S * 1.7);   // room for OT on the resumed end
+
+function segElapsed(seg) {
+  // the longest time-on-ice in a segment is how long that sitting actually ran
+  return seg.clubs.reduce((m, c) => c.players.reduce((m2, p) => Math.max(m2, p.time_on_ice_seconds || 0), m), 0);
+}
+
+function mergeSegments(segments) {
+  const segs = segments.slice().sort((a, b) => a.ts - b.ts);
+  const last = segs[segs.length - 1];
+  const ids = segs[0].clubs.map((c) => c.ea_club_id).sort();
+  for (const sg of segs) {
+    const here = sg.clubs.map((c) => c.ea_club_id).sort();
+    if (here[0] !== ids[0] || here[1] !== ids[1]) return { error: "segments are not between the same two clubs" };
+  }
+  const outClubs = segs[0].clubs.map((c0) => {
+    const cid = c0.ea_club_id;
+    const parts = segs.map((sg) => sg.clubs.find((c) => c.ea_club_id === cid));
+    const players = new Map();
+    for (const part of parts) {
+      for (const p of part.players) {
+        const prev = players.get(p.ea_player_id);
+        if (!prev) { players.set(p.ea_player_id, { ...p, _toiW: [(p.time_on_ice_seconds || 0)], _rat: [[p.offense_rating, p.defense_rating, p.team_play_rating]] }); continue; }
+        for (const k of ["goals","assists","shots","hits","pim","plus_minus","takeaways","giveaways",
+                         "faceoffs_won","faceoffs_lost","time_on_ice_seconds","pp_goals","sh_goals",
+                         "blocked_shots","interceptions","passes_completed","passes_attempted",
+                         "shot_attempts","possession_seconds","penalties_drawn","deflections",
+                         "saucer_passes","saves","shots_against","goals_against",
+                         "breakaway_shots","breakaway_saves","poke_checks"]) prev[k] = (prev[k] || 0) + (p[k] || 0);
+        prev.is_goalie = prev.is_goalie || p.is_goalie;
+        // the segment the player skated longest in names the position and the latest gamertag wins
+        if ((p.time_on_ice_seconds || 0) > Math.max(...prev._toiW)) prev.position = p.position;
+        if (p.gamertag) prev.gamertag = p.gamertag;
+        prev._toiW.push(p.time_on_ice_seconds || 0);
+        prev._rat.push([p.offense_rating, p.defense_rating, p.team_play_rating]);
+      }
+    }
+    const merged = [...players.values()].map((p) => {
+      const w = p._toiW, tot = w.reduce((a, b) => a + b, 0);
+      const wavg = (idx) => tot ? Math.round(p._rat.reduce((a, r, i) => a + (r[i0(idx)] || 0) * w[i], 0) / tot) : (p._rat[0][i0(idx)] || 0);
+      function i0(n){ return n; }
+      p.offense_rating = wavg(0); p.defense_rating = wavg(1); p.team_play_rating = wavg(2);
+      p.gwg = 0;                                            // not attributable across segments
+      p.shutout = !!p.is_goalie && (p.goals_against || 0) === 0 && (p.shots_against || 0) > 0;
+      delete p._toiW; delete p._rat;
+      return p;
+    });
+    return {
+      ea_club_id: cid, name: parts.map((x) => x.name).filter(Boolean).pop() || null,
+      score: parts.reduce((a, x) => a + (x.score || 0), 0),
+      ppg: parts.reduce((a, x) => a + (x.ppg || 0), 0),
+      ppo: parts.reduce((a, x) => a + (x.ppo || 0), 0),
+      result: parts[parts.length - 1].result,
+      players: merged
+    };
+  });
+  return {
+    ea_match_id: segs[0].ea_match_id,      // the fixture keeps the FIRST sitting's id
+    et_day: segs[0].et_day, ts: last.ts,
+    clubs: outClubs,
+    went_ot: last.clubs.some((c) => c.result === 5 || c.result === 6),   // only the final sitting can end in OT
+    merged_from: segs.map((sg) => sg.ea_match_id)
+  };
 }
 
 // ---- Resolve an EA roster entry to one of our profiles (best effort) ----
@@ -120,12 +197,18 @@ async function logAttempt(norm, raw, status, reason, gameId) {
 }
 
 // ---- Ingest ONE normalized match ----
-async function ingestOne(norm, raw, summary) {
-  // dedupe
+async function ingestOne(norm, raw, summary, batch) {
+  // dedupe — a match that owns a game, or was merged into one as a resume segment, is done.
+  // Without the second check every later poll would re-merge the resume segment and double it.
   const dup = await sbGet(`games?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=id&limit=1`);
   if (dup[0]) {
     summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already ingested" });
     await logAttempt(norm, raw, "ingested", "already ingested (dedupe)", dup[0].id);
+    return;
+  }
+  const mdup = await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&status=eq.merged&select=game_id&limit=1`);
+  if (mdup[0]) {
+    summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already merged into a resumed game" });
     return;
   }
 
@@ -145,7 +228,13 @@ async function ingestOne(norm, raw, summary) {
   // midnight ET (or spills into OT) reports the *next* ET day while the fixture stays on game
   // night — exact-day matching would silently drop those box scores, so widen the window.
   const or = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
-  const games = await sbGet(`games?${or}&ea_match_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id`);
+  const gamesAll = await sbGet(`games?${or}&ea_match_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id`);
+  // A match cannot belong to a fixture that had not started when the match ENDED (codes go out at
+  // T-30). Without this, a stray payload could mark a future game final with someone else's score.
+  const matchEndMs = (norm.ts || 0) * 1000;
+  const games = matchEndMs
+    ? gamesAll.filter((g) => Date.parse(g.scheduled_at) <= matchEndMs + 2 * 3600000)
+    : gamesAll;
   const DAY = 86400000;
   const matchDayUnix = Date.parse(`${norm.et_day}T12:00:00Z`); // noon avoids DST edge wobble
   let game = games.find((g) => etDayISO(g.scheduled_at) === norm.et_day);
@@ -157,6 +246,11 @@ async function ingestOne(norm, raw, summary) {
     if (near[0]) game = near[0].g;
   }
   if (!game) {
+    // No unclaimed fixture. If a FINAL game between these same clubs sits close by in time, this
+    // payload may be the second sitting of a disconnected game — the league replays only the
+    // remaining time in a fresh lobby, and that lobby reports as a brand-new EA match.
+    const done = await ingestContinuation(norm, raw, summary, batch, tA, tB);
+    if (done) return;
     summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: `no scheduled game for these clubs within a day of ${norm.et_day}` });
     await logAttempt(norm, raw, "unmatched", `no scheduled game for these clubs within a day of ${norm.et_day}`);
     return;
@@ -206,6 +300,130 @@ async function ingestOne(norm, raw, summary) {
   await logAttempt(norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id);
 }
 
+// ---- A resume segment: merge it into the final game it continues ----
+//
+// The league's procedure for a mid-game disconnect is to restart the lobby and play only the time
+// remaining, so ONE fixture arrives as TWO (or more) EA matches. This merges them, under four
+// tests, every one of which must pass — anything that fails falls through to "unmatched" and a
+// commissioner decides:
+//   1. a FINAL game between the same two clubs exists within the day window;
+//   2. the sittings are close in time (RESUME_WINDOW_S);
+//   3. NEITHER club played anyone else in between — a club that moved on to a different opponent
+//      finished its game (a quit still counts in full; it is not a disconnect);
+//   4. the incoming sitting is shorter than a whole game, and all sittings together fit inside
+//      one game plus overtime — two full-length games are a replay for the commissioner to rule
+//      on, never an automatic merge.
+async function ingestContinuation(norm, raw, summary, batch, tA, tB) {
+  const orC = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
+  const finals = await sbGet(`games?${orC}&status=eq.final&ea_match_id=not.is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id`);
+  const matchEndMs = (norm.ts || 0) * 1000;
+  const cand = finals
+    .filter((g) => Math.abs(Date.parse(g.scheduled_at) - matchEndMs) < 86400000)
+    .sort((a, b) => Math.abs(Date.parse(a.scheduled_at) - matchEndMs) - Math.abs(Date.parse(b.scheduled_at) - matchEndMs))[0];
+  if (!cand) return false;
+
+  // every prior sitting of this fixture: the one on the game row + any already merged into it
+  const logRows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(cand.ea_match_id)},and(game_id.eq.${cand.id},status.eq.merged))&select=ea_match_id,payload`);
+  const priors = [];
+  for (const rowL of logRows) {
+    if (!rowL.payload) continue;
+    const n2 = normalizeMatch(rowL.payload);
+    if (n2 && !priors.some((x) => x.ea_match_id === n2.ea_match_id)) priors.push(n2);
+  }
+  if (!priors.length) {
+    const why = "looks like a resume of an ingested game, but its first sitting is not archived — commissioner re-ingest needed";
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+    await logAttempt(norm, raw, "unmatched", why);
+    return true;
+  }
+
+  // 2. time proximity, against the nearest prior sitting
+  const nearest = priors.reduce((m, p2) => Math.min(m, Math.abs((norm.ts || 0) - (p2.ts || 0))), Infinity);
+  if (nearest > RESUME_WINDOW_S) return false;
+
+  // 3. neither club played a DIFFERENT opponent between the sittings. The poll batch carries each
+  //    club's recent history, so an intervening game is visible right here.
+  const pair = norm.clubs.map((c) => c.ea_club_id).sort().join("|");
+  const t0 = Math.min(...priors.map((p2) => p2.ts || 0)), t1 = Math.max(norm.ts || 0, ...priors.map((p2) => p2.ts || 0));
+  for (const other of (batch || [])) {
+    if (!other || other.ea_match_id === norm.ea_match_id) continue;
+    if (priors.some((p2) => p2.ea_match_id === other.ea_match_id)) continue;
+    const ids2 = other.clubs.map((c) => c.ea_club_id);
+    const involvesUs = ids2.some((id2) => pair.includes(id2));
+    const samePair = ids2.slice().sort().join("|") === pair;
+    if (involvesUs && !samePair && (other.ts || 0) > t0 && (other.ts || 0) < t1) {
+      const why = "a different opponent came between the two sittings — not a disconnect resume";
+      summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+      await logAttempt(norm, raw, "unmatched", why);
+      return true;
+    }
+  }
+
+  // 4. the sittings must LOOK like one game split in two
+  const incomingLen = segElapsed(norm);
+  const totalLen = priors.reduce((a, p2) => a + segElapsed(p2), 0) + incomingLen;
+  if (incomingLen >= REGULATION_S || totalLen > COMBINED_CAP_S) {
+    const why = `same clubs back to back but the sittings do not fit one game (${incomingLen}s incoming, ${totalLen}s combined) — flagged for commissioner`;
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+    await logAttempt(norm, raw, "unmatched", why);
+    return true;
+  }
+
+  const merged = mergeSegments(priors.concat([norm]));
+  if (merged.error) {
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: merged.error });
+    await logAttempt(norm, raw, "unmatched", merged.error);
+    return true;
+  }
+
+  // write exactly as a normal ingest writes, from the merged line
+  const clubByTeam = {};
+  const teamRows = await sbGet(`teams?id=in.(${tA},${tB})&select=id,ea_club_id`);
+  for (const tr of teamRows) clubByTeam[tr.id] = merged.clubs.find((c) => c.ea_club_id === String(tr.ea_club_id));
+  const homeClub = clubByTeam[cand.home_team_id], awayClub = clubByTeam[cand.away_team_id];
+  if (!homeClub || !awayClub) {
+    summary.errors.push({ ea_match_id: norm.ea_match_id, error: "resume merge could not map clubs to teams" });
+    await logAttempt(norm, raw, "error", "resume merge could not map clubs to teams");
+    return true;
+  }
+
+  const cache = new Map();
+  const rows = [];
+  for (const tid of [cand.home_team_id, cand.away_team_id]) {
+    const c = clubByTeam[tid];
+    for (const e of c.players) {
+      const profile_id = await resolveProfile(e, cand.season_id, cache);
+      rows.push({
+        game_id: cand.id, team_id: tid, profile_id, skater_name: e.gamertag, position: e.position,
+        goals: e.goals, assists: e.assists, shots: e.shots, hits: e.hits, pim: e.pim, is_goalie: e.is_goalie,
+        saves: e.saves, shots_against: e.shots_against, goals_against: e.goals_against,
+        ea_player_id: e.ea_player_id, plus_minus: e.plus_minus, takeaways: e.takeaways, giveaways: e.giveaways,
+        faceoffs_won: e.faceoffs_won, faceoffs_lost: e.faceoffs_lost, time_on_ice_seconds: e.time_on_ice_seconds,
+        pp_goals: e.pp_goals, sh_goals: e.sh_goals, gwg: e.gwg,
+        blocked_shots: e.blocked_shots, interceptions: e.interceptions,
+        passes_completed: e.passes_completed, passes_attempted: e.passes_attempted,
+        shot_attempts: e.shot_attempts, possession_seconds: e.possession_seconds,
+        penalties_drawn: e.penalties_drawn, deflections: e.deflections, saucer_passes: e.saucer_passes,
+        offense_rating: e.offense_rating, defense_rating: e.defense_rating, team_play_rating: e.team_play_rating,
+        breakaway_shots: e.breakaway_shots, breakaway_saves: e.breakaway_saves,
+        poke_checks: e.poke_checks, shutout: e.shutout
+      });
+    }
+  }
+  await sbSend("DELETE", `game_stats?game_id=eq.${cand.id}`);
+  if (rows.length) await sbSend("POST", "game_stats", rows, "return=minimal");
+  await sbSend("PATCH", `games?id=eq.${cand.id}`,
+    { home_score: homeClub.score, away_score: awayClub.score, went_ot: !!merged.went_ot,
+      home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+    "return=minimal");
+
+  await logAttempt(norm, raw, "merged",
+    `second sitting of a disconnected game — merged into ${cand.ea_match_id} (${priors.length + 1} sittings, ${totalLen}s)`, cand.id);
+  summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, merged_into: cand.ea_match_id,
+    score: `${homeClub.score}-${awayClub.score}`, players: rows.length, resumed: true });
+  return true;
+}
+
 // ---- Commissioner re-ingest: replay an archived payload by ea_match_id ----
 async function isCommissioner(jwt) {
   try {
@@ -240,22 +458,27 @@ export const handler = async (event) => {
     try {
       const norm = normalizeMatch(row.payload);
       if (!norm) summary.errors.push({ reason: "archived payload is unparseable" });
-      else await ingestOne(norm, row.payload, summary);
+      else await ingestOne(norm, row.payload, summary, [norm]);
     } catch (e) { summary.errors.push({ ea_match_id: body.reingest, error: String(e.message || e) }); }
     return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(summary) };
   }
 
   if (!authed) return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
 
-  const matches = Array.isArray(body) ? body : (Array.isArray(body.matches) ? body.matches : (body.matchId ? [body] : null));
+  const matchesRaw = Array.isArray(body) ? body : (Array.isArray(body.matches) ? body.matches : (body.matchId ? [body] : null));
+  // oldest first: the first sitting of a disconnected game must be ingested before its resume
+  const matches = matchesRaw && matchesRaw.slice().sort((a, b) => (+a?.timestamp || 0) - (+b?.timestamp || 0));
   if (!matches) return { statusCode: 400, body: JSON.stringify({ error: "Expected { matches: [...] } or a single match object." }) };
 
   const summary = { received: matches.length, ingested: [], skipped: [], unmatched: [], errors: [] };
+  /* the whole batch, normalized, is the adjacency context: the resume check needs to see whether a
+     club played someone else between two sittings, and the poll's per-club history is right here */
+  const batch = matches.map((m) => { try { return normalizeMatch(m); } catch (e) { return null; } }).filter(Boolean);
   for (const raw of matches) {
     try {
       const norm = normalizeMatch(raw);
       if (!norm) { summary.errors.push({ reason: "unparseable match (need 2 clubs + matchId)" }); continue; }
-      await ingestOne(norm, raw, summary);
+      await ingestOne(norm, raw, summary, batch);
     } catch (e) {
       summary.errors.push({ ea_match_id: raw && raw.matchId, error: String(e.message || e) });
       // best-effort archive even when the attempt blew up, so the payload is never lost
