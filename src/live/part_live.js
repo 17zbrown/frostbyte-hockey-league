@@ -3687,8 +3687,9 @@ CG.generateSchedule = function(stage){
   var perNight = shape.perNight;
   var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*shape.nights*perNight : shape.perClub;
   var weeks = Math.ceil(slots/perNight/shape.nights);
-  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks);
-  var skipNote = plan.skipped.length ? " Holiday week"+(plan.skipped.length===1?"":"s")+" skipped: "+plan.skipped.join(", ")+"." : "";
+  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks, shape.nights, CG.seasonHolidayKeys(s));
+  if (!plan.nights.length){ CG.toast("Every candidate week is a holiday week — turn some off in Holidays","err"); return; }
+  var skipNote = plan.skipped.length ? " Skipping "+plan.skipped.map(function(h){ return h.name+" (week of "+h.week+")"; }).join(", ")+"." : "";
 
   CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
     codes.length+" clubs · "+slots+" games each · "+perNight+" a night, "+shape.perWeek+" a week ("+
@@ -7119,7 +7120,145 @@ CG.seasonShape = function(season){
   };
 };
 
-CG.HOLIDAYS = ["12-25","07-01","07-04"];
+/* ================= HOLIDAYS =================
+   The old list was three MM-DD strings ("12-25","07-01","07-04"), which is why American
+   Thanksgiving was never skipped: it is the FOURTH THURSDAY of November, and a fixed-date list
+   cannot express a moveable feast. Every holiday below resolves to a real date for any year, and
+   which ones a season observes is a per-season choice (seasons.skip_holidays).
+
+   `where` is shown to the commissioner so a mostly-Canadian or mostly-American roster can pick
+   sensibly. `on` is the default for a season that has never been configured — the days that
+   actually empty a Discord on a game night, plus the three the league already skipped. */
+CG.HOLIDAY_RULES = {
+  /* fixed calendar date */
+  fixed: function(y, r){ return y+"-"+String(r.m).padStart(2,"0")+"-"+String(r.d).padStart(2,"0"); },
+  /* the r.n-th r.weekday of month r.m (weekday: 0=Sun … 6=Sat) */
+  nth: function(y, r){
+    var first = y+"-"+String(r.m).padStart(2,"0")+"-01";
+    return CG.dayAdd(first, ((r.weekday - CG.dayOfWeek(first) + 7) % 7) + (r.n-1)*7);
+  },
+  /* the LAST r.weekday of month r.m */
+  last: function(y, r){
+    var d = y+"-"+String(r.m).padStart(2,"0")+"-"+new Date(Date.UTC(y, r.m, 0, 12)).getUTCDate();
+    while (CG.dayOfWeek(d) !== r.weekday) d = CG.dayAdd(d,-1);
+    return d;
+  },
+  /* the r.weekday on or before m/d — Victoria Day is the Monday preceding May 25 */
+  onOrBefore: function(y, r){
+    var d = y+"-"+String(r.m).padStart(2,"0")+"-"+String(r.d).padStart(2,"0");
+    while (CG.dayOfWeek(d) !== r.weekday) d = CG.dayAdd(d,-1);
+    return d;
+  },
+  /* Easter Sunday (Gregorian computus) plus an offset — Good Friday is -2 */
+  easter: function(y, r){
+    var a=y%19, b=Math.floor(y/100), c=y%100, d=Math.floor(b/4), e=b%4,
+        f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30,
+        i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+        mo=Math.floor((h+l-7*m+114)/31), da=((h+l-7*m+114)%31)+1;
+    return CG.dayAdd(y+"-"+String(mo).padStart(2,"0")+"-"+String(da).padStart(2,"0"), r.offset||0);
+  }
+};
+CG.HOLIDAYS = [
+  { key:"new-years-day",   name:"New Year's Day",        where:"US & Canada", on:true,  rule:{ type:"fixed", m:1,  d:1 } },
+  { key:"mlk-day",         name:"Martin Luther King Jr. Day", where:"US",     on:false, rule:{ type:"nth",   m:1,  weekday:1, n:3 } },
+  { key:"family-day",      name:"Family Day / Presidents' Day", where:"US & Canada", on:false, rule:{ type:"nth", m:2, weekday:1, n:3 } },
+  { key:"good-friday",     name:"Good Friday",           where:"US & Canada", on:false, rule:{ type:"easter", offset:-2 } },
+  { key:"easter",          name:"Easter Sunday",         where:"US & Canada", on:false, rule:{ type:"easter", offset:0 } },
+  { key:"victoria-day",    name:"Victoria Day",          where:"Canada",      on:false, rule:{ type:"onOrBefore", m:5, d:24, weekday:1 } },  /* the Monday IMMEDIATELY preceding May 25, so anchored on the 24th: when the 25th is itself a Monday (2015, 2026) the holiday is the week before */
+  { key:"memorial-day",    name:"Memorial Day",          where:"US",          on:false, rule:{ type:"last",  m:5,  weekday:1 } },
+  { key:"juneteenth",      name:"Juneteenth",            where:"US",          on:false, rule:{ type:"fixed", m:6,  d:19 } },
+  { key:"canada-day",      name:"Canada Day",            where:"Canada",      on:true,  rule:{ type:"fixed", m:7,  d:1 } },
+  { key:"independence-day",name:"Independence Day",      where:"US",          on:true,  rule:{ type:"fixed", m:7,  d:4 } },
+  { key:"civic-holiday",   name:"Civic Holiday",         where:"Canada",      on:false, rule:{ type:"nth",   m:8,  weekday:1, n:1 } },
+  { key:"labor-day",       name:"Labor Day / Labour Day",where:"US & Canada", on:false, rule:{ type:"nth",   m:9,  weekday:1, n:1 } },
+  { key:"ca-thanksgiving", name:"Thanksgiving (Canada)", where:"Canada",      on:false, rule:{ type:"nth",   m:10, weekday:1, n:2 } },
+  { key:"halloween",       name:"Halloween",             where:"US & Canada", on:false, rule:{ type:"fixed", m:10, d:31 } },
+  { key:"remembrance-day", name:"Remembrance Day / Veterans Day", where:"US & Canada", on:false, rule:{ type:"fixed", m:11, d:11 } },
+  { key:"us-thanksgiving", name:"Thanksgiving (US)",     where:"US",          on:true,  rule:{ type:"nth",   m:11, weekday:4, n:4 } },
+  { key:"christmas-eve",   name:"Christmas Eve",         where:"US & Canada", on:true,  rule:{ type:"fixed", m:12, d:24 } },
+  { key:"christmas-day",   name:"Christmas Day",         where:"US & Canada", on:true,  rule:{ type:"fixed", m:12, d:25 } },
+  { key:"boxing-day",      name:"Boxing Day",            where:"Canada",      on:true,  rule:{ type:"fixed", m:12, d:26 } },
+  { key:"new-years-eve",   name:"New Year's Eve",        where:"US & Canada", on:true,  rule:{ type:"fixed", m:12, d:31 } }
+];
+CG.HOLIDAY_BY_KEY = CG.HOLIDAYS.reduce(function(m,h){ m[h.key]=h; return m; }, {});
+/* Which of a season's game weeks each holiday would actually cost. A toggle whose holiday falls in
+   the off-season removes nothing, and saying so up front stops the list reading as twenty decisions
+   when it is really two or three. */
+CG.holidayImpact = function(season){
+  var s = season || CG.SEASON || {};
+  var shape = CG.seasonShape(s);
+  var anchor = s.preseason_starts_at || s.starts_at;
+  if (!anchor) return {};
+  /* walk a generous window from the anchor: the weeks the season could plausibly occupy, plus room
+     for the ones it would slide into as holidays push it later */
+  var start = CG.etYMD(anchor), out = {};
+  var wed = start; while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
+  var horizon = (shape.weeks + CG.PRESEASON_WEEKS + CG.HOLIDAYS.length + 6);
+  for (var w=0; w<horizon; w++){
+    var mon = CG.dayAdd(wed,-2);
+    for (var i=0;i<7;i++){
+      var day = CG.dayAdd(mon,i), year=+day.slice(0,4);
+      CG.HOLIDAYS.forEach(function(h){
+        if (CG.holidayDate(h.key, year) === day && !out[h.key]) out[h.key] = { date:day, week:wed };
+      });
+    }
+    wed = CG.dayAdd(wed,7);
+  }
+  return out;
+};
+/* The holiday toggles. Each row states the real date for THIS season's calendar, so the choice is
+   "do we play the week of Nov 25" rather than an abstraction. */
+CG.holidayCard = function(){
+  var s = CG.SEASON || {};
+  var on = CG.seasonHolidayKeys(s), onMap = {};
+  on.forEach(function(k){ onMap[k]=true; });
+  var impact = CG.holidayImpact(s);
+  var live = CG.HOLIDAYS.filter(function(h){ return impact[h.key]; });
+  var costs = live.filter(function(h){ return onMap[h.key]; });
+  var row = function(h){
+    var hit = impact[h.key], sel = !!onMap[h.key];
+    var when = hit ? CG.fmtDate(CG.etISO(hit.date,"12:00")) : "outside this season";
+    return '<button type="button" class="gamecard" data-hol="'+h.key+'" aria-pressed="'+sel+'" '+
+      'style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%'+(sel?";border-color:var(--chrome)":"")+'">'+
+      '<span class="chip '+(sel?"chip-chrome":"")+'" style="font-size:9px;align-self:center">'+(sel?"SKIP":"PLAY")+'</span>'+
+      '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+esc(h.name)+'</b>'+
+        '<span class="caption" style="display:block">'+esc(h.where)+' · '+esc(when)+'</span></span>'+
+      (hit ? '<span class="caption" style="align-self:center;white-space:nowrap">week of '+esc(hit.week.slice(5))+'</span>' : '')+
+    '</button>';
+  };
+  var section = function(title, list){
+    return list.length ? '<p class="caption" style="margin:14px 0 8px;font-weight:700">'+title+'</p>'+
+      '<div class="stack" style="gap:8px">'+list.map(row).join("")+'</div>' : "";
+  };
+  return '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Holidays</h3>'+
+      '<span class="chip'+(costs.length?" chip-warn":"")+'" id="holCount">'+costs.length+' week'+(costs.length===1?"":"s")+' skipped</span></div>'+
+    '<div class="card-b">'+
+      '<p class="caption" style="margin:0 0 4px;max-width:78ch">Turn a holiday on and the generator steps over the whole week it falls in, then carries on — the season keeps its full game count and simply ends a week later. Dates are for this season\'s calendar.</p>'+
+      section("Land inside this season", live) +
+      section("Elsewhere in the year", CG.HOLIDAYS.filter(function(h){ return !impact[h.key]; })) +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">'+
+        '<button class="btn btn-chrome btn-sm" id="holSave">Save holidays</button>'+
+        '<span class="caption" style="margin:0">Applies the next time you generate a schedule.</span>'+
+      '</div>'+
+    '</div></div>';
+};
+CG.HOLIDAY_DEFAULTS = CG.HOLIDAYS.filter(function(h){ return h.on; }).map(function(h){ return h.key; });
+/* The date this holiday falls on in a given year. */
+CG.holidayDate = function(key, year){
+  var h = CG.HOLIDAY_BY_KEY[key]; if (!h) return null;
+  var fn = CG.HOLIDAY_RULES[h.rule.type]; if (!fn) return null;
+  return fn(year, h.rule);
+};
+/* Which holidays this season observes. NULL (never configured) means the defaults, so an existing
+   season keeps sensible behaviour; an explicit empty array means "skip nothing", which is a real
+   and different choice. */
+CG.seasonHolidayKeys = function(season){
+  var s = season || CG.SEASON || {};
+  var v = s.skip_holidays;
+  if (v == null) return CG.HOLIDAY_DEFAULTS.slice();
+  if (typeof v === "string"){ try { v = JSON.parse(v); } catch(e){ v = String(v).replace(/[{}"]/g,"").split(",").filter(Boolean); } }
+  return Array.isArray(v) ? v.filter(function(k){ return CG.HOLIDAY_BY_KEY[k]; }) : CG.HOLIDAY_DEFAULTS.slice();
+};
 
 /* One timeline card, shared by the Register page and My Hub, so a member sees the same road
    ahead in both places. Steps auto-hide until their date is set. */
@@ -7159,20 +7298,37 @@ CG.etISO = function(ymd, hm){ /* correct across EDT/EST */
   return guess.toISOString();
 };
 CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(iso)); };
-CG.holidayWeek = function(wedYmd){ /* the Mon..Sun week around a game Wednesday */
+/* The observed holiday landing in the Mon..Sun week around a game Wednesday, or null. Returns the
+   holiday itself rather than a boolean so the generator can say WHICH one cost a week — "skipped
+   the week of Nov 25 for Thanksgiving (US)" is a reason; "holiday week skipped" is a shrug. */
+CG.holidayWeek = function(wedYmd, keys){
+  keys = keys || CG.seasonHolidayKeys();
   var mon = CG.dayAdd(wedYmd,-2);
-  for (var i=0;i<7;i++){ if (CG.HOLIDAYS.indexOf(CG.dayAdd(mon,i).slice(5))>=0) return true; }
-  return false;
+  for (var i=0;i<7;i++){
+    var day = CG.dayAdd(mon,i), year = +day.slice(0,4);
+    for (var k=0;k<keys.length;k++){
+      if (CG.holidayDate(keys[k], year) === day){
+        return { key:keys[k], name:(CG.HOLIDAY_BY_KEY[keys[k]]||{}).name || keys[k], date:day, week:wedYmd };
+      }
+    }
+  }
+  return null;
 };
-CG.gameNights = function(anchorYmd, weeks){ /* snap to Wednesday, then Wed..Fri; skip holiday weeks */
+/* Snap to Wednesday, lay out `nights` consecutive evenings a week, and step over any week holding
+   an observed holiday. `nights` comes from the season shape — it used to read the CG.NIGHTS_PER_WEEK
+   constant, so a season set to 4 nights got 3 nights of dates and the generator ran short. */
+CG.gameNights = function(anchorYmd, weeks, nights, keys){
+  nights = Math.max(1, Math.min(7, nights || CG.NIGHTS_PER_WEEK));
+  keys = keys || CG.seasonHolidayKeys();
   var wed = anchorYmd;
   while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
   var out=[], skipped=[], guard=0;
-  while (out.length < weeks && guard++ < 60){
-    if (CG.holidayWeek(wed)){ skipped.push(wed); wed = CG.dayAdd(wed,7); continue; }
+  while (out.length < weeks && guard++ < 120){
+    var hit = CG.holidayWeek(wed, keys);
+    if (hit){ skipped.push(hit); wed = CG.dayAdd(wed,7); continue; }
     /* days[] is the real list; wed/fri remain as the FIRST and LAST night of the week, which is
        what the season-date spacer and the playoff seeder actually mean by them. */
-    var days = []; for (var d = 0; d < CG.NIGHTS_PER_WEEK; d++) days.push(CG.dayAdd(wed, d));
+    var days = []; for (var d = 0; d < nights; d++) days.push(CG.dayAdd(wed, d));
     out.push({ week: out.length+1, days: days, wed: days[0], fri: days[days.length-1] });
     wed = CG.dayAdd(wed,7);
   }
@@ -7295,6 +7451,8 @@ CG.admScheduleLive = function(){
                 : 'Applies the next time you generate a schedule. Clear the existing one first to rebuild with these settings.')+
       '</span></div></div>';
 
+  h += CG.holidayCard();
+
   var mism = CG.shapeMismatch();
   if (mism)
     h += '<div class="card" style="margin-bottom:16px;border-color:var(--red)"><div class="card-h">'+
@@ -7316,11 +7474,15 @@ CG.admScheduleLive = function(){
         (g.stage==="preseason"?'<span class="chip" style="font-size:9px">PRE</span>':g.stage==="playoff"?'<span class="chip chip-chrome" style="font-size:9px">PO</span>':"")+
         '<span class="teamcell">'+CG.crest(g.away,20)+'<span class="mono" style="font-size:12px">'+esc(g.away)+'</span></span><span class="caption">@</span>'+
         '<span class="teamcell">'+CG.crest(g.home,20)+'<span class="mono" style="font-size:12px">'+esc(g.home)+'</span></span>'+
+        /* the lobby code, folded in from the retired Game codes tab — it was the same query as this
+           slate with one extra column and no controls. g.code is already on every schedule row. */
+        (g.code ? '<span class="chip" style="font-size:10px;font-family:var(--f-mono)" title="Lobby code">'+esc(g.code)+'</span>'
+                : '<span class="caption" style="font-size:10px">no code yet</span>')+
         '<span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Open</a>'+
         '<button class="btn btn-ghost btn-sm" data-resched-live="'+g.id+'">Reschedule</button>'+
         '<button class="btn btn-ghost btn-sm" data-forfeit-live="'+g.id+'">Forfeit</button></span></div>';
     }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">All times Eastern. Moving a game keeps its lobby code and server picks; both clubs see the change instantly. <b>Forfeit</b> records a game a club didn’t show for — a 1-0 win for the opponent with no player stats (Rule 5.3), which also clears the game from release and playoff gates.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">All times Eastern. Lobby codes are shown here for the league office; players only see a code from 30 minutes before puck drop (Rule 4.2). Moving a game keeps its code and server picks; both clubs see the change instantly. <b>Forfeit</b> records a game a club didn’t show for — a 1-0 win for the opponent with no player stats (Rule 5.3), which also clears the game from release and playoff gates.</span></div></div>';
   return h;
 };
 CG.AFTER._admScheduleLive = function(){
@@ -7370,6 +7532,42 @@ CG.AFTER._admScheduleLive = function(){
         if (r.error){ CG.toast("Could not save: "+r.error.message,"err"); return; }
         if (!r.data || !r.data.length){ CG.toast("Save was blocked — commissioner only","err"); return; }
         CG.toast("Season shape saved"+(patch.trade_deadline_week?" · movement deadline moved to week "+patch.trade_deadline_week:""),"ok");
+        CG.reloadLeague();
+      });
+    });
+  })();
+
+  /* Holiday toggles. The chip recounts as you click, but only the holidays that actually land in
+     this season's calendar are counted — the rest cost nothing whichever way they are set. */
+  (function(){
+    var save=document.getElementById("holSave"); if(!save) return;
+    var impact = CG.holidayImpact(CG.SEASON);
+    var chip=document.getElementById("holCount");
+    var recount=function(){
+      var n=[].slice.call(document.querySelectorAll('[data-hol][aria-pressed="true"]'))
+        .filter(function(b){ return impact[b.getAttribute("data-hol")]; }).length;
+      if(chip){ chip.textContent=n+" week"+(n===1?"":"s")+" skipped"; chip.className="chip"+(n?" chip-warn":""); }
+    };
+    document.querySelectorAll("[data-hol]").forEach(function(b){ b.addEventListener("click", function(){
+      var on=this.getAttribute("aria-pressed")!=="true";
+      this.setAttribute("aria-pressed", on?"true":"false");
+      this.style.borderColor = on ? "var(--chrome)" : "";
+      var c=this.querySelector(".chip");
+      if(c){ c.classList.toggle("chip-chrome", on); c.textContent = on ? "SKIP" : "PLAY"; }
+      recount();
+    }); });
+    save.addEventListener("click", function(){
+      var keys=[].slice.call(document.querySelectorAll('[data-hol][aria-pressed="true"]'))
+        .map(function(b){ return b.getAttribute("data-hol"); });
+      save.disabled=true;
+      /* [] is stored as [], never null — "skip nothing" is a real choice and must not be read back
+         as "never configured, use the defaults" */
+      CG.sb.from("seasons").update({ skip_holidays: keys }).eq("id", CG.SEASON.id).select("id").then(function(r){
+        save.disabled=false;
+        if (r.error){ CG.toast("Could not save: "+r.error.message,"err"); return; }
+        if (!r.data || !r.data.length){ CG.toast("Save was blocked — commissioner only","err"); return; }
+        var live=keys.filter(function(k){ return impact[k]; }).length;
+        CG.toast("Holidays saved — "+(live?live+" week"+(live===1?"":"s")+" will be skipped":"no weeks skipped"),"ok");
         CG.reloadLeague();
       });
     });
@@ -7538,14 +7736,17 @@ CG.seasonForm = function(id){
     var preV = document.getElementById("ssPre").value;
     if (!offV && !preV){ CG.toast("Give “Off-season begins” or “Pre-season starts” a date — everything spaces from it","err"); return; }
     var offDay = offV ? offV.slice(0,10) : null, darkEnd = null, ownDl, regDl;
+    /* every leg of the spacer walks the same nights-per-week and the same observed holidays as the
+       generator, so the dates it writes are dates the generator will actually be able to use */
+    var shpS = CG.seasonShape(CG.SEASON), hKeys = CG.seasonHolidayKeys(CG.SEASON);
     var pre;
     if (offDay){
       darkEnd = CG.dayAdd(offDay, CG.OFFSEASON_DARK_DAYS-1);    /* 2 weeks, no on-ice activity */
-      pre = CG.gameNights(CG.dayAdd(darkEnd,1), CG.PRESEASON_WEEKS); /* pre-season the next week */
+      pre = CG.gameNights(CG.dayAdd(darkEnd,1), CG.PRESEASON_WEEKS, shpS.nights, hKeys); /* pre-season the next week */
       regDl = CG.etISO(darkEnd,"20:00");                        /* sign-ups close ending the 2 weeks */
       ownDl = CG.etISO(CG.dayAdd(offDay,6),"20:00");            /* week 1 takes apps, week 2 seats them */
     } else {
-      pre = CG.gameNights(preV.slice(0,10), CG.PRESEASON_WEEKS);
+      pre = CG.gameNights(preV.slice(0,10), CG.PRESEASON_WEEKS, shpS.nights, hKeys);
     }
     var preStart = pre.nights[0].wed, preFinal = pre.nights[CG.PRESEASON_WEEKS-1].fri;
     if (!offDay){
@@ -7556,9 +7757,9 @@ CG.seasonForm = function(id){
     var faOpenDay  = CG.dayAdd(draftDay,1);                     /* 24h after draft night */
     var faCloseDay = CG.dayAdd(faOpenDay,CG.FA_WINDOW_DAYS);    /* a full week of free agency */
     /* Puck drop waits for free agency to close, so every club starts game 1 settled. */
-    var reg = CG.gameNights(CG.dayAdd(faCloseDay,1), Math.ceil(CG.GAMES_PER_CLUB/CG.NIGHT_SLOTS.length/CG.NIGHTS_PER_WEEK));
+    var reg = CG.gameNights(CG.dayAdd(faCloseDay,1), Math.ceil(shpS.perClub/shpS.perNight/shpS.nights), shpS.nights, hKeys);
     var regStart = reg.nights[0].wed, regEnd = reg.nights[reg.nights.length-1].fri;
-    var po = CG.gameNights(CG.dayAdd(regEnd,1), 1);
+    var po = CG.gameNights(CG.dayAdd(regEnd,1), 1, shpS.nights, hKeys);
     function put(id, iso){ document.getElementById(id).value = dt(iso); }
     if (offDay) put("ssOff", CG.etISO(offDay,"00:00"));
     put("ssPre",      CG.etISO(preStart,"21:00"));
@@ -7805,7 +8006,8 @@ CG.generatePlayoffRound = function(round){
   var anchor = s.playoffs_start_at ? CG.etYMD(s.playoffs_start_at) : CG.etYMD(new Date(CG.now()+2*86400000).toISOString());
   var priorPlayoff = (CG.lg.playoffGames||[]);
   if (priorPlayoff.length){ var last=priorPlayoff.reduce(function(m,g){ return Math.max(m,g.at); },0); anchor=CG.dayAdd(CG.etYMD(new Date(last).toISOString()),2); }
-  var plan=CG.gameNights(anchor, Math.ceil(bestOf/2)+1);
+  var shpP = CG.seasonShape(s);
+  var plan=CG.gameNights(anchor, Math.ceil(bestOf/2)+1, shpP.nights, CG.seasonHolidayKeys(s));
   var nights=[]; plan.nights.forEach(function(n){ n.days.forEach(function(d){ nights.push(d); }); });
   var rows=[];
   matchups.forEach(function(m){
@@ -7862,28 +8064,46 @@ CG.clearPlayoffRound = function(round){
 
 /* register live Control Center sections */
 CG._origAdminRoute = CG.ROUTES.admin;
+/* Tabs that were folded into a neighbour. The old hash still works — it is normalised here and the
+   address bar corrected with replaceState, never by assigning location.hash, which would re-enter
+   the router and render twice. Keeps every bookmark, notification deep-link and rulebook reference
+   pointing somewhere real. */
+CG.ADMIN_ALIAS = { codes:"schedule", playoffs:"schedule", leagues:"clubs", homepage:"news", audit:"automations", teams:"clubs" };
 CG.ROUTES.admin = function(param, qs){
   if (CG.role()!=="commish") return CG.unauthorized("The Control Center is commissioner-only.");
+  /* Overall ratings was a read-only table of the same rows the public players page renders with
+     filters and search on top. Retired rather than merged; the page it duplicated is one link away. */
+  if (param==="ratings" || param==="players"){
+    try { history.replaceState(null,"","#/players"); } catch(e){}
+    /* players() reads qs.team/qs.pos straight off its second argument, so it must be handed one */
+    return CG.ROUTES.players ? CG.ROUTES.players(null, qs||{}) : CG.ROUTES._404();
+  }
+  if (CG.ADMIN_ALIAS[param]){
+    var to = CG.ADMIN_ALIAS[param];
+    try { history.replaceState(null,"","#/admin/"+to); } catch(e){}
+    param = to;
+  }
   if (param==="" || param==null) return CG.adminShell("", CG.admOverviewLive());
   if (param==="preseason") return CG.adminShell("preseason", CG.admPreseason(qs||{}));
   if (param==="users") return CG.adminShell("users", CG.admUsersLive(qs||{}));
-  if (param==="leagues") return CG.adminShell("leagues", CG.admLeagues(qs||{}));
-  if (param==="clubs") return CG.adminShell("clubs", CG.admTeamsLive(qs||{}));
+  /* Teams absorbs Leagues & tiers: one row in `leagues`, and both pages opened with the same
+     club-count KPI strip. */
+  if (param==="clubs") return CG.adminShell("clubs", CG.admTeamsLive(qs||{}) + CG.admLeagues(qs||{}));
   if (param==="presets") return CG.ROUTES._404();  /* retired: fixed league-standard lobby settings + club server picks (Rule 4) */
   if (param==="eastats") return CG.adminShell("eastats", CG.admEAStats(qs||{}));
   if (param==="complaints") return CG.adminShell("complaints", CG.hubComplaintsLive({admin:true}));
-  if (param==="automations") return CG.adminShell("automations", CG.admAutomationsLive());
-  if (param==="news") return CG.adminShell("news", CG.admNewsLive());
+  /* System: the jobs, then the privileged-action log they write into. */
+  if (param==="automations") return CG.adminShell("automations", CG.admAutomationsLive() + CG.admAuditLive());
+  /* Newsroom absorbs the front-page module switches — same job: what the public sees. */
+  if (param==="news") return CG.adminShell("news", CG.admNewsLive() + CG.admHomepageLive());
   if (param==="rankings") return CG.adminShell("rankings", CG.admRankingsLive());
-  if (param==="homepage") return CG.adminShell("homepage", CG.admHomepageLive());
-  if (param==="schedule") return CG.adminShell("schedule", CG.admScheduleLive());
-  if (param==="ratings") return CG.adminShell("ratings", CG.admRatingsLive());
+  /* Schedule absorbs Playoffs (a third writer into the same `games` table). The regular-season
+     slate stays FIRST: it is what a commissioner opens mid-game-night, and the generators — one
+     confirm click from clearing every fixture — must never be the landing view. */
+  if (param==="schedule") return CG.adminShell("schedule", CG.admScheduleLive() + CG.admPlayoffsLive());
   if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive());
-  if (param==="playoffs") return CG.adminShell("playoffs", CG.admPlayoffsLive());
   if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
   if (param==="draft") return CG.adminShell("draft", CG.admDraftLive());
-  if (param==="codes") return CG.adminShell("codes", CG.admCodesLive());
-  if (param==="audit") return CG.adminShell("audit", CG.admAuditLive());
   /* retired prototype panels — their buttons toasted success while saving nothing real:
      awards (awards program is DB-driven), carousel/media/settings/data (localStorage-only),
      rulebook editor (content ships versioned through the repo) */
@@ -7894,21 +8114,15 @@ CG._origAdminAfter = CG.AFTER.admin;
 CG.AFTER.admin = function(param, qs){
   if (param==="preseason"){ CG.AFTER._preseason(); return; }
   if (param==="users"){ CG.AFTER._admUsers(); return; }
-  if (param==="leagues"){ CG.AFTER._admLeagues(); return; }
-  if (param==="clubs"){ CG.AFTER._admTeams(); return; }
+  if (param==="clubs"){ CG.AFTER._admTeams(); CG.AFTER._admLeagues(); return; }
   if (param==="eastats"){ CG.AFTER._admEAStats(); return; }
   if (param==="complaints"){ CG.AFTER._complaintsLive(); return; }
-  if (param==="automations"){ CG.AFTER._admAutomations(); return; }
-  if (param==="news"){ CG.AFTER._admNewsLive(); return; }
+  if (param==="automations"){ CG.AFTER._admAutomations(); CG.AFTER._admAudit(); return; }
+  if (param==="news"){ CG.AFTER._admNewsLive(); CG.AFTER._admHomepage(); return; }
   if (param==="rankings"){ CG.AFTER._admRankings(); return; }
-  if (param==="homepage"){ CG.AFTER._admHomepage(); return; }
-  if (param==="schedule"){ CG.AFTER._admScheduleLive(); return; }
+  if (param==="schedule"){ CG.AFTER._admScheduleLive(); CG.AFTER._admPlayoffs(); return; }
   if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
-  if (param==="playoffs"){ CG.AFTER._admPlayoffs(); return; }
-  if (param==="ratings"){ return; }
   if (param==="draft"){ CG.AFTER._admDraft(); return; }
-  if (param==="codes"){ return; }
-  if (param==="audit"){ CG.AFTER._admAudit(); return; }
   if (param==="" || param==null){ return; }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
@@ -8409,34 +8623,33 @@ CG.bootLive = async function(){
     /* Messages lives in the player hub (hub sidebar + #/hub/messages) — no top-nav slot */
     /* Control Center nav, grouped by job: run game nights → manage people &
        clubs → shape the league → publish → keep the machine running */
+    /* Twelve tabs, not eighteen. Six pages were folded into the neighbour that already did the same
+       job — Game codes and Playoffs into Schedule (all three write `games`), Leagues & tiers into
+       Teams (one row in the table), Homepage into Newsroom (both decide what the public sees), and
+       the Audit log into Automations. Overall ratings was retired outright: it was a read-only
+       subset of the public players page. Old hashes still resolve via CG.ADMIN_ALIAS.
+       Draft manager and Seasons deliberately stay their own tabs: the first is the highest-stakes
+       three hours of the year, and the second is the sole owner of the season record. */
     CG.ADMIN_NAV = [
       ["Operations", [
         ["","Overview","home"],
-        ["schedule","Schedule","cal"],
+        ["schedule","Schedule & codes","cal"],
         ["draft","Draft manager","play"],
-        ["eastats","EA stats","chart"],
-        ["codes","Game codes","code"]
+        ["eastats","EA stats","chart"]
       ]],
       ["Clubs & members", [
         ["preseason","Pre-season","users"],
         ["users","Users & roles","users"],
-        ["clubs","Teams","grid"],
+        ["clubs","Teams & tiers","grid"],
         ["complaints","Complaints","flag"]
       ]],
       ["League", [
         ["seasons","Seasons","db"],
-        ["playoffs","Playoffs","trophy"],
-        ["leagues","Leagues & tiers","trophy"],
-        ["rankings","Power rankings","up"],
-        ["ratings","Overall ratings","chart"]
-      ]],
-      ["Content", [
-        ["news","Newsroom","doc"],
-        ["homepage","Homepage","grid"]
+        ["rankings","Power rankings","up"]
       ]],
       ["System", [
-        ["automations","Automations","clock"],
-        ["audit","Audit log","eye"]
+        ["news","Newsroom & front page","doc"],
+        ["automations","Automations & audit","clock"]
       ]]
     ];
   } catch(e){
