@@ -1,3 +1,40 @@
+    function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
+    var dates=[];
+    plan.nights.forEach(function(n){ n.days.forEach(function(d){ dates.push({week:n.week,date:d}); }); });
+
+    /* Each round is one time slot: every club plays exactly once in it. Unweighted seasons rotate a
+       circle, which is the classic construction and always balanced. A weighted season has to be
+       built and then checked, so it goes through CG.buildRounds. */
+    var roundPairs = [];
+    if (useWeighted){
+      var divOf = {}; (CG.TEAMS||[]).forEach(function(t){ divOf[t.code] = t.div || "—"; });
+      var built = CG.buildRounds(codes, divOf, shape.div, shape.nondiv, { seed: 20260802 });
+      if (built.error){ CG.toast(built.error, "err"); return; }
+      roundPairs = built.rounds;
+    } else {
+      var arr=codes.slice(); if (arr.length%2) arr.push(null);
+      var m=arr.length, fixed=arr[0], others=arr.slice(1);
+      for (var r0=0; r0<slots; r0++){
+        var order=[fixed].concat(rrRotate(others,r0)), pairs=[];
+        for (var i0=0;i0<m/2;i0++){
+          var a0=order[i0], b0=order[m-1-i0]; if(!a0||!b0) continue;
+          if (r0%2===1){ var t0=a0; a0=b0; b0=t0; }
+          pairs.push([a0,b0]);
+        }
+        roundPairs.push(pairs);
+      }
+    }
+
+    var rows=[];
+    for (var r=0; r<roundPairs.length; r++){
+      var day=dates[Math.floor(r/perNight)]; if(!day) continue;
+      var iso=CG.etISO(day.date, shape.slots[r%perNight]);
+      roundPairs[r].forEach(function(pr){
+        rows.push({ season_id:s.id, week:day.week, stage:stage,
+          home_team_id:(CG.lg._codeToId||{})[pr[0]], away_team_id:(CG.lg._codeToId||{})[pr[1]],
+          scheduled_at:iso, status:"scheduled" });
+      });
+    }
 /* ================================================================
    LIVE DATA ADAPTER
    Replaces the simulated engine with real Supabase data. Builds the
@@ -6829,6 +6866,136 @@ CG.NIGHT_SLOTS = ["21:00","21:35","22:10"];
    season-date spacer that disagree about the length of a week silently produce a calendar that
    does not match its own games. */
 CG.NIGHTS_PER_WEEK = 3;
+/* Wednesday-anchored night names, for copy that has to say which nights a week runs on. */
+CG.NIGHT_NAMES = function(n){
+  var d=["Wednesday","Thursday","Friday","Saturday","Sunday","Monday","Tuesday"].slice(0, Math.max(1,Math.min(7,n||3)));
+  return d.length===1 ? d[0] : d.slice(0,-1).join(", ")+" and "+d[d.length-1];
+};
+
+/* ================= THE SHAPE OF A SEASON =================
+   Weeks, nights a week, puck-drop times and the divisional split now live on the season row, set
+   from the Control Center. The constants above are only the fallback for a season saved before the
+   settings existed. Everything that needs to know the shape reads it from here, so the generator,
+   the season-date spacer and the published rulebook cannot drift apart. */
+CG.seasonShape = function(season){
+  var s = season || CG.SEASON || {};
+  var slots = String(s.night_slots || CG.NIGHT_SLOTS.join(","))
+    .split(",").map(function(t){ return t.trim(); })
+    .filter(function(t){ return /^\d{1,2}:\d{2}$/.test(t); });
+  if (!slots.length) slots = CG.NIGHT_SLOTS.slice();
+  var nights = Math.max(1, Math.min(7, +s.nights_per_week || CG.NIGHTS_PER_WEEK));
+  var weeks  = Math.max(1, +s.weeks || Math.ceil(CG.GAMES_PER_CLUB / slots.length / nights));
+  var perClub = weeks * nights * slots.length;
+  var teams = CG.TEAMS || [];
+  var divs = {};
+  teams.forEach(function(t){ divs[t.div || "—"] = (divs[t.div || "—"] || 0) + 1; });
+  var divNames = Object.keys(divs);
+  var rivals = teams.length ? (divs[teams[0].div || "—"] - 1) : 0;
+  var others = Math.max(0, teams.length - 1 - rivals);
+  var even = divNames.length > 1 && divNames.every(function(d){ return divs[d] === divs[divNames[0]]; });
+  var x = s.div_games == null ? null : +s.div_games;
+  var y = s.nondiv_games == null ? null : +s.nondiv_games;
+  var weighted = x != null && y != null && x > 0 && y > 0;
+  return {
+    weeks: weeks, nights: nights, slots: slots, perNight: slots.length,
+    perClub: perClub, perWeek: nights * slots.length,
+    teams: teams.length, divisions: divNames.length, evenDivisions: even,
+    rivals: rivals, others: others,
+    div: x, nondiv: y, weighted: weighted,
+    weightedTotal: weighted ? (rivals * x + others * y) : null
+  };
+};
+
+/* Which divisional splits actually fit a given games-per-club, for the settings screen to offer.
+   A split has to use up exactly the games the calendar provides — no remainder, no shortfall. */
+CG.splitOptions = function(shape){
+  var out = [];
+  if (!shape.evenDivisions || shape.rivals < 1 || shape.others < 1) return out;
+  for (var x = 1; x <= 40; x++){
+    var rem = shape.perClub - shape.rivals * x;
+    if (rem <= 0) break;
+    if (rem % shape.others) continue;
+    var y = rem / shape.others;
+    if (y < 1 || x < y) continue;                 /* rivals should not be played LESS than strangers */
+    out.push({ div:x, nondiv:y, ratio: +(x / y).toFixed(2) });
+  }
+  return out;
+};
+
+/* Build the meetings the season calls for and deal them into rounds — one round per time slot,
+   every club playing exactly once. A single greedy pass strands on lopsided splits, so this uses
+   seeded randomised restarts and then VERIFIES the result against what was asked for; it returns a
+   schedule that has been checked, or an error, never a broken schedule. */
+CG.buildRounds = function(codes, divOf, xDiv, yNon, opts){
+  opts = opts || {};
+  var tries = opts.tries || 400, perRound = codes.length / 2;
+  var key = function(a,b){ return a < b ? a+"|"+b : b+"|"+a; };
+  if (codes.length % 2) return { error:"An odd number of clubs cannot all play every slot." };
+  var seed = opts.seed || 12345;
+  var rnd = function(){ seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+  var base = {};
+  for (var i=0;i<codes.length;i++) for (var j=i+1;j<codes.length;j++){
+    var a=codes[i], b=codes[j], n = divOf[a]===divOf[b] ? xDiv : yNon;
+    if (n>0) base[key(a,b)] = n;
+  }
+  var total = Object.keys(base).reduce(function(s,k){ return s + base[k]; }, 0);
+  if (!total) return { error:"That works out to no games." };
+  if (total % perRound) return { error:"Those numbers give "+total+" meetings, which will not divide into rounds of "+perRound+"." };
+  var perClub = total * 2 / codes.length;
+
+  for (var attempt=0; attempt<tries; attempt++){
+    var need = {}; for (var k in base) need[k] = base[k];
+    var rounds = [], ok = true;
+    while (ok){
+      var left = 0; for (var k2 in need) left += need[k2];
+      if (!left) break;
+      var used = {}, round = [];
+      var fill = function(){
+        if (round.length === perRound) return true;
+        /* the club with the fewest remaining options goes first — it is the one that strands */
+        var a = null, bestN = Infinity;
+        for (var ci=0; ci<codes.length; ci++){
+          var c = codes[ci]; if (used[c]) continue;
+          var n = 0;
+          for (var di=0; di<codes.length; di++){ var d=codes[di];
+            if (d!==c && !used[d] && (need[key(c,d)]||0) > 0) n++; }
+          if (n < bestN){ bestN = n; a = c; }
+        }
+        if (a === null) return false;
+        var opts2 = codes.filter(function(b){ return b!==a && !used[b] && (need[key(a,b)]||0) > 0; });
+        for (var q=opts2.length-1;q>0;q--){ var w=Math.floor(rnd()*(q+1)); var tmp=opts2[q]; opts2[q]=opts2[w]; opts2[w]=tmp; }
+        opts2.sort(function(p,r){ return (need[key(a,r)]||0) - (need[key(a,p)]||0); });
+        for (var oi=0; oi<opts2.length; oi++){
+          var b2 = opts2[oi];
+          used[a]=1; used[b2]=1; round.push([a,b2]); need[key(a,b2)]--;
+          if (fill()) return true;
+          need[key(a,b2)]++; round.pop(); delete used[a]; delete used[b2];
+        }
+        return false;
+      };
+      if (fill()) rounds.push(round); else ok = false;
+    }
+    if (!ok) continue;
+    /* verify before returning: pair counts, club loads, and no club twice in a round */
+    var meet = {}, per = {}, bad = null;
+    rounds.forEach(function(rd){
+      var seen = {};
+      if (rd.length !== perRound) bad = "short round";
+      rd.forEach(function(pr){
+        var a=pr[0], b=pr[1];
+        if (seen[a] || seen[b]) bad = "a club appears twice in one slot";
+        seen[a]=1; seen[b]=1;
+        meet[key(a,b)] = (meet[key(a,b)]||0)+1; per[a]=(per[a]||0)+1; per[b]=(per[b]||0)+1;
+      });
+    });
+    for (var bk in base) if (meet[bk] !== base[bk]) bad = bad || "a matchup came out the wrong number of times";
+    codes.forEach(function(c){ if (per[c] !== perClub) bad = bad || "clubs did not all get the same number of games"; });
+    if (!bad) return { rounds: rounds, perClub: perClub, attempts: attempt+1 };
+  }
+  return { error:"That split cannot be scheduled with "+codes.length+" clubs in these divisions. Try moving a game between the two figures." };
+};
+
 CG.HOLIDAYS = ["12-25","07-01","07-04"];
 
 /* One timeline card, shared by the Register page and My Hub, so a member sees the same road
@@ -6899,14 +7066,20 @@ CG.generateSchedule = function(stage){
   if (codes.length<2){ CG.toast("You need at least two clubs to build a schedule","err"); return; }
   if ((CG.lg.schedule||[]).some(function(g){ return g.stage===stage; })){
     CG.toast("A "+(stage==="preseason"?"pre-season":"regular-season")+" schedule already exists — clear it first","err"); return; }
-  var perNight=CG.NIGHT_SLOTS.length;
-  var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*CG.NIGHTS_PER_WEEK*perNight : CG.GAMES_PER_CLUB;
-  var weeks = Math.ceil(slots/perNight/CG.NIGHTS_PER_WEEK);
-  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks);
-  var skipNote = plan.skipped.length ? " Holiday week"+(plan.skipped.length===1?"":"s")+" skipped: "+plan.skipped.join(", ")+"." : "";
+  var shape = CG.seasonShape(s);
+  var perNight = shape.perNight;
+  var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*shape.nights*perNight : shape.perClub;
+  var weeks = Math.ceil(slots/perNight/shape.nights);
+  /* A weighted split only applies to the regular season — the pre-season is a short shakedown and
+     is always played evenly. */
+  var useWeighted = stage!=="preseason" && shape.weighted;
+  if (useWeighted && shape.weightedTotal !== slots){
+    CG.toast("The divisional split adds up to "+shape.weightedTotal+" games but the calendar gives "+slots+" — fix it in Schedule settings","err");
+    return;
+  }
   CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
-    codes.length+" clubs · "+slots+" games each · "+perNight+" a night, "+(perNight*CG.NIGHTS_PER_WEEK)+" a week (Wed/Thu/Fri, "+
-    CG.NIGHT_SLOTS.map(function(t){ var h=+t.slice(0,2); return ((h%12)||12)+":"+t.slice(3); }).join(" / ")+" PM ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
+    codes.length+" clubs · "+slots+" games each"+(useWeighted?" ("+shape.div+" vs each division rival, "+shape.nondiv+" vs the rest)":"")+" · "+perNight+" a night, "+shape.perWeek+" a week ("+CG.NIGHT_NAMES(shape.nights)+", "+
+    shape.slots.map(function(t){ var h=+t.slice(0,2); return ((h%12)||12)+":"+t.slice(3); }).join(" / ")+" ET) · "+weeks+" weeks from "+plan.nights[0].wed+"."+skipNote,
     "Generate "+(stage==="preseason"?"pre-season":"schedule"), function(){
     function rrRotate(a,r){ var n=a.length,out=[]; for(var i=0;i<n;i++) out.push(a[(i+r)%n]); return out; }
     var dates=[];
@@ -6984,6 +7157,38 @@ CG.admScheduleLive = function(){
                 : '<button class="btn btn-ghost" id="preGen">'+CG.ic("plus",15)+'Generate pre-season</button>')+
     (reg.length ? '<button class="btn btn-ghost" id="schedClear">Clear season ('+reg.length+')</button>'
                 : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Generate season</button>')+'</span></div>';
+  /* ---- schedule shape: the settings the generator builds from ---- */
+  var shp = CG.seasonShape(CG.SEASON);
+  var opts = CG.splitOptions(shp);
+  var locked = lg.schedule.some(function(g){ return g.stage!=="preseason" && g.status==="final"; });
+  h += '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Season shape</h3>'+
+      '<span class="chip'+(shp.weighted?' chip-chrome':'')+'">'+shp.perClub+' games per club</span></div>'+
+    '<div class="card-b" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:14px">'+
+      '<label class="fld"><span>Game weeks</span><input id="shWeeks" type="number" min="1" max="40" value="'+shp.weeks+'"></label>'+
+      '<label class="fld"><span>Nights per week</span><input id="shNights" type="number" min="1" max="7" value="'+shp.nights+'"></label>'+
+      '<label class="fld" style="grid-column:span 2"><span>Puck-drop times (ET, comma separated)</span>'+
+        '<input id="shSlots" type="text" value="'+esc(shp.slots.join(", "))+'" placeholder="21:00, 21:35, 22:10"></label>'+
+    '</div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+      '<p class="caption" id="shMath" style="margin:0 0 10px"></p>'+
+      (shp.evenDivisions
+        ? '<label class="fld"><span>Divisional weighting</span><select id="shSplit">'+
+            '<option value="">Even — every opponent the same</option>'+
+            opts.map(function(o){
+              var on = shp.weighted && o.div===shp.div && o.nondiv===shp.nondiv;
+              return '<option value="'+o.div+':'+o.nondiv+'"'+(on?' selected':'')+'>'+
+                o.div+' vs each division rival · '+o.nondiv+' vs the rest  ('+o.ratio+':1)</option>';
+            }).join("")+'</select></label>'+
+          (opts.length ? '' : '<p class="caption" style="color:var(--red-ink);margin:8px 0 0">No divisional split divides evenly into '+shp.perClub+' games. Change the weeks, nights or times and the options will change with them.</p>')
+        : '<p class="caption">Divisional weighting needs every division to hold the same number of clubs. Right now they do not, so the season is scheduled evenly.</p>')+
+    '</div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+      '<button class="btn btn-chrome btn-sm" id="shSave">Save shape</button>'+
+      '<span class="caption" style="margin:0">'+
+        (locked ? 'Games have already been played. Saving changes what the NEXT generated schedule looks like; it does not touch the games on the ice.'
+                : 'Applies the next time you generate a schedule. Clear the existing one first to rebuild with these settings.')+
+      '</span></div></div>';
+
   if (issues.length)
     h += '<div class="card" style="margin-bottom:16px;border-color:var(--red)"><div class="card-h"><h3>The schedule disagrees with the season dates</h3>'+
       '<span class="chip chip-warn">'+issues.length+' to resolve</span></div><div class="card-b">'+
@@ -7005,6 +7210,65 @@ CG.admScheduleLive = function(){
   return h;
 };
 CG.AFTER._admScheduleLive = function(){
+  /* Season shape: the arithmetic is shown live, because weeks x nights x times decides how many
+     games there are, and that in turn decides which divisional splits are even possible. Typing a
+     number that cannot work should say so before it is saved, not after a schedule is generated. */
+  (function(){
+    var W=document.getElementById("shWeeks"), N=document.getElementById("shNights"),
+        S=document.getElementById("shSlots"), SP=document.getElementById("shSplit"),
+        M=document.getElementById("shMath"), B=document.getElementById("shSave");
+    if (!W || !N || !S || !B) return;
+    var parseSlots = function(){
+      return String(S.value||"").split(",").map(function(t){ return t.trim(); })
+        .filter(function(t){ return /^\d{1,2}:\d{2}$/.test(t); });
+    };
+    var recalc = function(){
+      var slots=parseSlots(), n=Math.max(1,+N.value||0), w=Math.max(1,+W.value||0);
+      var per = w*n*slots.length;
+      var shape = CG.seasonShape({ weeks:w, nights_per_week:n, night_slots:slots.join(",") });
+      var bad = String(S.value||"").split(",").map(function(t){return t.trim();})
+        .filter(function(t){ return t && !/^\d{1,2}:\d{2}$/.test(t); });
+      M.innerHTML = bad.length
+        ? '<b style="color:var(--red-ink)">Not a time: '+esc(bad.join(", "))+'</b> — use 24-hour times like 21:00.'
+        : w+' weeks × '+n+' night'+(n===1?'':'s')+' × '+slots.length+' game'+(slots.length===1?'':'s')+
+          ' a night = <b>'+per+' games per club</b>, '+(n*slots.length)+' a week, on '+esc(CG.NIGHT_NAMES(n))+'.';
+      if (SP){
+        var cur = SP.value;
+        var list = CG.splitOptions(shape);
+        SP.innerHTML = '<option value="">Even — every opponent the same</option>'+
+          list.map(function(o){ return '<option value="'+o.div+':'+o.nondiv+'">'+o.div+
+            ' vs each division rival · '+o.nondiv+' vs the rest  ('+o.ratio+':1)</option>'; }).join("");
+        SP.value = cur;                       /* keep the choice if it still fits */
+        if (SP.value !== cur) SP.value = "";  /* it does not — fall back to even rather than lie */
+      }
+    };
+    [W,N,S].forEach(function(el){ el.addEventListener("input", recalc); });
+    recalc();
+    B.addEventListener("click", function(){
+      var slots=parseSlots();
+      if (!slots.length){ CG.toast("Give at least one puck-drop time, like 21:00","err"); return; }
+      var w=Math.max(1,+W.value||0), n=Math.max(1,+N.value||0);
+      if (n>7){ CG.toast("A week has seven nights","err"); return; }
+      var split=(SP&&SP.value)?SP.value.split(":"):null;
+      var patch={ weeks:w, nights_per_week:n, night_slots:slots.join(","),
+                  div_games: split?+split[0]:null, nondiv_games: split?+split[1]:null };
+      /* prove the split is actually buildable before storing it — an unschedulable split saved here
+         would only surface as a failure at generation time, with no explanation of why */
+      if (split){
+        var divOf={}; (CG.TEAMS||[]).forEach(function(t){ divOf[t.code]=t.div||"—"; });
+        var probe=CG.buildRounds((CG.TEAMS||[]).map(function(t){return t.code;}), divOf, +split[0], +split[1], { seed:20260802, tries:120 });
+        if (probe.error){ CG.toast(probe.error,"err"); return; }
+      }
+      B.disabled=true;
+      CG.sb.from("seasons").update(patch).eq("id", CG.SEASON.id).select("id").then(function(r){
+        B.disabled=false;
+        if (r.error){ CG.toast("Could not save: "+r.error.message,"err"); return; }
+        if (!r.data || !r.data.length){ CG.toast("Save was blocked — commissioner only","err"); return; }
+        CG.toast("Season shape saved","ok"); CG.reloadLeague();
+      });
+    });
+  })();
+
   var gen=document.getElementById("schedGen");
   if (gen) gen.addEventListener("click", function(){ CG.generateSchedule("regular"); });
   var pgen=document.getElementById("preGen");

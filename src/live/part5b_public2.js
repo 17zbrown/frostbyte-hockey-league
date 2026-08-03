@@ -196,8 +196,33 @@ CG.ROUTES.article = function(slug){
 };
 
 /* ---------- RULEBOOK ---------- */
+/* Rule 3.1 states the season's shape in words, and that shape is now a per-season setting a
+   commissioner can change. Reconcile the published sentence against the live season at render time:
+   a rulebook that contradicts the schedule the league is actually playing is worse than one that
+   never gave numbers at all. Idempotent — it rewrites the same sentence, it does not append. */
+CG.rulebookShapeSync = function(rb){
+  if (!rb || typeof CG.seasonShape !== "function") return rb;
+  var sh = CG.seasonShape(CG.SEASON);
+  if (!sh || !sh.perClub || !sh.weeks) return rb;
+  var w = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve"];
+  var word = function(n){ return w[n] || String(n); };
+  var nights = typeof CG.NIGHT_NAMES === "function" ? CG.NIGHT_NAMES(sh.nights) : "Wednesday, Thursday and Friday";
+  var line = "The CGHL regular season runs " + word(sh.weeks) + " (" + sh.weeks + ") game-weeks \u2014 " +
+    word(sh.nights) + " nights a week, " + nights + ", " + word(sh.perNight) + " games a night, for " +
+    sh.perClub + " games per club \u2014";
+  (rb.chapters || []).forEach(function(ch){
+    (ch.sections || []).forEach(function(sec){
+      (sec.paragraphs || []).forEach(function(t, i){
+        if (typeof t === "string" && t.indexOf("The CGHL regular season runs") === 0)
+          sec.paragraphs[i] = t.replace(/^The CGHL regular season runs [\s\S]*?\u2014/, line);
+      });
+    });
+  });
+  return rb;
+};
+
 CG.ROUTES.rulebook = function(param, qs){
-  var rb = CG.CONTENT.rulebook;
+  var rb = CG.rulebookShapeSync(CG.CONTENT.rulebook);
   var q = (qs.q||"").toLowerCase();
   var target = qs.rule||"";
   var edits = CG.store.get("rbEdits")||{};
