@@ -1939,7 +1939,7 @@ CG.ROUTES.player = function(pid, qs){
       : (anyGp===0
         ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
           '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
-          'The '+r.ovr+' overall is the staff scouting number from registration; production, defence, and discipline bars '+
+          'The '+r.ovr+' overall is the staff scouting number from registration; production, defense, and discipline bars '+
           'appear here once box scores exist.</p></div></div>'
         : '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
         Object.keys(r.parts).map(function(k){

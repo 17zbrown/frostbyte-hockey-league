@@ -1805,7 +1805,7 @@ CG.ROUTES.brand = function(){
       '<span class="eyebrow chr">The Chel Gaming brand</span>'+
       '<div style="margin:22px 0 26px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">'+mk("reversed",64)+wtext(true)+'</div>'+
       '<h1 class="h-page" style="color:#fff">One mark. One voice. One accent.</h1>'+
-      '<p class="lede" style="color:var(--on-ink-dim);margin-top:14px;max-width:60ch">How the league looks and sounds — the logos, the colour, the type, and the handful of rules that keep every surface, from the site to the Discord to a printed sheet, unmistakably Chel Gaming.</p>'+
+      '<p class="lede" style="color:var(--on-ink-dim);margin-top:14px;max-width:60ch">How the league looks and sounds — the logos, the color, the type, and the handful of rules that keep every surface, from the site to the Discord to a printed sheet, unmistakably Chel Gaming.</p>'+
     '</div></div></section>';
 
   /* ---- logo ---- */
@@ -1881,7 +1881,7 @@ CG.ROUTES.brand = function(){
     '</div>'+
     '<div class="note chr" style="margin-top:24px;background:var(--bc2);color:var(--on-ink);border-color:var(--chrome)">'+
       '<b style="font-family:var(--f-disp);display:block;margin-bottom:4px;color:#fff">The fill-vs-ink rule</b>'+
-      'Red and green are <b>fills</b> — light text sits on them, so they stay dark in both themes. The <span class="mono">--*-ink</span> values are the <b>text</b> colours and flip per theme. Never use a fill as a foreground; it can’t clear 4.5:1 on both a light and dark surface at once. Contrast floor is WCAG AA, enforced.'+
+      'Red and green are <b>fills</b> — light text sits on them, so they stay dark in both themes. The <span class="mono">--*-ink</span> values are the <b>text</b> colors and flip per theme. Never use a fill as a foreground; it can’t clear 4.5:1 on both a light and dark surface at once. Contrast floor is WCAG AA, enforced.'+
     '</div>'+
     '</div></section>';
 
@@ -5654,16 +5654,21 @@ CG.staffAttentionCard = function(){
      draft night into silent random placement. A deadline getting closer is not an empty queue. */
   var dp = a.days_to_preseason, dd = a.days_to_draft;
   var by = function(days, what){ return days==null ? "" : " · "+(days===0?"today":days+"d to "+what); };
+  /* Each `go` must be a param the admin router actually dispatches — there is no #/admin/teams
+     (the route is `clubs`) and no #/admin/players at all, so both silently 404'd. Point each item
+     at the page that can actually FIX it: EA club ids are entered on EA stats, a club gets an owner
+     by approving an owner application in Pre-season, and Pre-season is also the only place that
+     lists registrants alongside the EA id they are missing. */
   if (n(a.clubs_missing_ea_id)>0)
     items.push({ label:n(a.clubs_missing_ea_id)+" club"+(n(a.clubs_missing_ea_id)===1?"":"s")+
       " not linked to an EA club — no stats can import"+by(dp,"pre-season"),
-      go:"#/admin/teams", warn:true });
+      go:"#/admin/eastats", warn:true });
   if (n(a.clubs_without_owner)>0)
     items.push({ label:n(a.clubs_without_owner)+" club"+(n(a.clubs_without_owner)===1?"":"s")+
-      " without an owner"+by(dd,"the draft"), go:"#/admin/teams", warn:true });
+      " without an owner"+by(dd,"the draft"), go:"#/admin/preseason", warn:true });
   if (n(a.registrants_missing_ea_id)>0)
     items.push({ label:n(a.registrants_missing_ea_id)+" registered player"+(n(a.registrants_missing_ea_id)===1?"":"s")+
-      " with no EA id — their box scores cannot be attributed", go:"#/admin/players", warn:false });
+      " with no EA id — their box scores cannot be attributed", go:"#/admin/preseason", warn:false });
 
   if (!items.length){
     return '<div class="note grn" style="margin-bottom:20px;display:flex;gap:10px;align-items:center">'+CG.ic("check",16)+
@@ -6570,6 +6575,111 @@ CG.AFTER._staffdesk = function(){
 CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };
 
 /* ================================================================
+   LIVE ADMIN: OVERVIEW CHARTS — the shape of the league, not its score
+
+   Every chart here answers a question that has an answer TODAY. The
+   season has not started (450 games scheduled, none final, game_stats
+   empty), so anything about goals, standings or scoring leaders would
+   draw an empty box; those belong here only once results land, and each
+   chart below notes what it becomes then.
+   ================================================================ */
+CG.overviewCharts = function(){
+  var lg = CG.lg; if (!lg || !CG.viz) return "";
+  var seasonId = (CG.SEASON && CG.SEASON.id) || null;
+  var regs = (lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===seasonId; });
+  var rostered = lg._rosteredIds || {};
+  var out = [];
+
+  /* 1 — Sign-ups over time. The one number that decides whether there is a season to run.
+     Bucketed by ET calendar day and GAP-FILLED: CG.viz.area spaces points evenly by index, so
+     plotting only the days that have a sign-up would compress the calendar and draw a quiet
+     stretch as a single confident step. Carrying the running total across empty days keeps the
+     slope honest about a stall. */
+  var withDates = regs.filter(function(r){ return r.created_at; });
+  if (withDates.length >= 3){
+    var byDay = {};
+    withDates.forEach(function(r){ var d = CG.etYMD(r.created_at); byDay[d] = (byDay[d]||0) + 1; });
+    var days = Object.keys(byDay).sort();
+    var cur = new Date(days[0]+"T12:00:00Z"), end = new Date(days[days.length-1]+"T12:00:00Z");
+    var pts = [], run = 0, first = null, last = null;
+    while (cur <= end){
+      var key = cur.toISOString().slice(0,10);
+      run += (byDay[key]||0);
+      pts.push({ v: run });
+      var lbl = new Intl.DateTimeFormat("en-US",{ timeZone:"UTC", month:"short", day:"numeric" }).format(cur);
+      if (first === null) first = lbl;
+      last = lbl;
+      cur = new Date(cur.getTime() + 864e5);
+    }
+    out.push(CG.viz.card({ title:"Sign-ups for the season", sub:"Running total, by day", wide:true,
+      value: run, count:true, body: CG.viz.area(pts, { from:first, to:last }) }));
+  }
+
+  /* 2 — Where people fall out between signing in and playing. Strictly nested, so each stage is a
+     subset of the one above it: the last stage counts people who registered AND hold a spot, not
+     everyone holding a spot, because those are not the same set (see the note). */
+  var accounts = (lg._profilesRaw||[]).length;
+  var regIds = {}; regs.forEach(function(r){ regIds[r.profile_id] = true; });
+  var placed = regs.filter(function(r){ return rostered[r.profile_id]; }).length;
+  var waiting = regs.length - placed;
+  var spotNoReg = Object.keys(rostered).filter(function(id){ return !regIds[id]; }).length;
+  if (accounts && regs.length){
+    var funnelNote = waiting + " registered player" + (waiting===1?"":"s") + " still waiting on a club" +
+      (spotNoReg ? " · " + spotNoReg + " hold" + (spotNoReg===1?"s":"") + " a roster spot without registering for the season" : "");
+    out.push(CG.viz.card({ title:"From an account to a roster spot", sub:"Season "+((CG.SEASON&&CG.SEASON.number)||1),
+      value: Math.round(100*placed/Math.max(1,accounts))+"%",
+      body: CG.viz.hbars([
+        { k:"Signed in to the site", v:accounts },
+        { k:"Registered for the season", v:regs.length },
+        { k:"Placed on a club", v:placed }
+      ], { sort:false, note:funnelNote }) }));
+  }
+
+  /* 3 — Positional supply against the ten starting jobs each position has to fill. Deliberately
+     hbars with the count in the label rather than a two-series bar: a stacked "taken vs total"
+     clamps at full once supply meets demand, which makes "exactly enough" and "three short" draw
+     the identical picture — the one comparison this chart exists to make. */
+  /* Ice order, not sorted by count, so the eye reads forwards and the gaps sit where you expect
+     them. Names come from CG.POS_NAME (part2_engine.js) rather than a second list here. */
+  var POSN = ["C","LW","RW","LD","RD","G"];
+  var need = (CG.TEAMS||[]).length || 10;
+  var byPos = {}; regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
+  if (Object.keys(byPos).length){
+    var short = POSN.filter(function(p){ return (byPos[p]||0) < need; })
+      .map(function(p){ return (need-(byPos[p]||0))+" short at "+(CG.POS_NAME[p]||p).toLowerCase(); });
+    out.push(CG.viz.card({ title:"Positions against "+need+" starting jobs", sub:"Every club ices one of each",
+      value: regs.length,
+      body: CG.viz.hbars(POSN.map(function(p){ return { k:CG.POS_NAME[p]||p, v:byPos[p]||0 }; }),
+        { sort:false, fmt:function(v){ return v+" / "+need; },
+          note: short.length ? short.join(" · ") : "Every position has enough registrants to ice a full league." }) }));
+  }
+
+  /* 4 — Front-office seats. Owner + GM + AGM per club; a club running on one person is a club
+     whose line-ups and trades have a single point of failure before the draft. */
+  var SEATS = 3;
+  var seats = (CG.TEAMS||[]).map(function(t){
+    /* lg.players already resolves each roster spot to a club code and a management role
+       (owner/gm/agm, part_live.js ~line 236), so this counts seats rather than bodies. */
+    var n = (lg.players||[]).filter(function(p){ return p.team===t.code && p.mgmt; }).length;
+    /* Deliberately NOT tinted with t.color. hbars paints its label in dark ink over the bar, so a
+       club with a dark primary (half the league — TOR and VAN are both #00205B) rendered its own
+       code invisible. The color carried nothing the label doesn't already say. */
+    return { k:t.code, v:n };
+  });
+  if (seats.length && seats.some(function(s){ return s.v; })){
+    var filled = seats.reduce(function(s,r){ return s+r.v; },0), total = seats.length*SEATS;
+    var solo = seats.filter(function(s){ return s.v <= 1; }).length;
+    out.push(CG.viz.card({ title:"Front-office seats filled", sub:"Owner, GM and AGM per club",
+      value: filled+" / "+total,
+      body: CG.viz.hbars(seats, { fmt:function(v){ return v+" / "+SEATS; },
+        note: solo ? solo+" club"+(solo===1?"":"s")+" running on one person" : "Every club has more than one person in charge." }) }));
+  }
+
+  if (!out.length) return "";
+  return '<div class="grid g2" style="align-items:start;gap:12px;margin-bottom:20px">'+out.join("")+'</div>';
+};
+
+/* ================================================================
    LIVE ADMIN: OVERVIEW — real league state, real action items
    ================================================================ */
 CG.admOverviewLive = function(){
@@ -6588,6 +6698,7 @@ CG.admOverviewLive = function(){
     '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
     '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
     '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">'+(CG.AUTOMATIONS||[]).length+'</b><span>automations</span></div></div>';
+  h += CG.overviewCharts();
   var actions = [];
   if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
   if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);

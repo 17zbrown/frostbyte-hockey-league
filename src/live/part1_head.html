@@ -611,9 +611,17 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
   background:linear-gradient(90deg,var(--hb,var(--em-2)),color-mix(in srgb,var(--hb,var(--em-3)) 72%,var(--em-4)))}
 @supports not (color: color-mix(in srgb,red,blue)){
   .vz-hbt>i{background:linear-gradient(90deg,var(--hb,var(--em-2)),var(--em-4))}}
+/* The label sits INSIDE the bar but routinely overruns it onto the track, so one ink has to read on
+   both. It is pinned to the dark end of the ramp rather than var(--ink): the fill is a bright ember
+   in either theme, so in dark mode a light --ink washed out to 1.4:1 the moment a bar grew under it.
+   The track is lifted to match, which keeps the same ink legible where the label overruns. */
+.vz-hbt{background:var(--hb-track,var(--line-soft))}
 .vz-hbt>em{position:relative;z-index:1;padding:0 11px;font-family:var(--f-mono);font-size:10.5px;
-  font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink);font-style:normal;
+  font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#101519;font-style:normal;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (prefers-color-scheme:dark){ :root{--hb-track:#C6CDD4} }
+html[data-theme="dark"]{--hb-track:#C6CDD4}
+html[data-theme="light"]{--hb-track:var(--line-soft)}
 .vz-hbv{font-family:var(--f-mono);font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
 
 /* ---- donut ---- */
