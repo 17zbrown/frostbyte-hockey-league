@@ -7054,6 +7054,49 @@ CG.clearSchedule = function(stage){
    how the pre-season came to run Sep 23 - Oct 2 while preseason_starts_at said Sep 16, putting half
    of it AFTER draft night and inside free agency, with the 5-game eligibility gate judged on games
    that hadn't been played. Dates are compared as calendar days in league time, never as instants. */
+/* Does the schedule on the ice match the shape the season says it has? The two drifted silently:
+   the season row was changed to 6 weeks x 3 nights while the games table kept a 9-week Wed/Fri
+   build, so the rulebook, the home page and the schedule page each told a different story, and
+   Rule 5.1's availability floor was unsatisfiable against the games that actually existed. */
+CG.shapeMismatch = function(){
+  var lg = CG.lg, s = CG.SEASON;
+  if (!s || !lg || !lg.schedule) return null;
+  var reg = lg.schedule.filter(function(g){ return g.stage !== "preseason" && g.stage !== "playoff"; });
+  if (!reg.length) return null;
+  var shape = CG.seasonShape(s);
+
+  var nightSet = {}, perClub = {};
+  reg.forEach(function(g){
+    nightSet[CG.etYMD(g.at)] = 1;
+    perClub[g.home] = (perClub[g.home] || 0) + 1;
+    perClub[g.away] = (perClub[g.away] || 0) + 1;
+  });
+  var nights = Object.keys(nightSet).sort();
+  var weekdays = {};
+  nights.forEach(function(d){
+    weekdays[new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(new Date(d+"T18:00:00Z"))] = 1;
+  });
+  var counts = Object.keys(perClub).map(function(k){ return perClub[k]; });
+  var actualPerClub = counts.length ? Math.max.apply(null, counts) : 0;
+  var wantDays = ["Wed","Thu","Fri","Sat","Sun","Mon","Tue"].slice(0, shape.nights);
+
+  var out = [];
+  if (actualPerClub !== shape.perClub)
+    out.push("The schedule gives each club " + actualPerClub + " games; the season is set to " +
+             shape.perClub + " (" + shape.weeks + " weeks × " + shape.nights + " nights × " + shape.perNight + " a night).");
+  var haveDays = Object.keys(weekdays);
+  var missing = wantDays.filter(function(d){ return !weekdays[d]; });
+  if (missing.length)
+    out.push("The season is set to play " + wantDays.join("/") + " but the schedule has no " +
+             missing.join(" or ") + " games — it runs " + haveDays.join("/") + ".");
+  var slotSet = {};
+  reg.forEach(function(g){ slotSet[new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(g.at))] = 1; });
+  var wantSlots = shape.slots.slice().sort(), haveSlots = Object.keys(slotSet).sort();
+  if (wantSlots.join(",") !== haveSlots.join(","))
+    out.push("Puck-drop times differ: the season says " + wantSlots.join(" / ") + ", the schedule uses " + haveSlots.join(" / ") + ".");
+  return out.length ? out : null;
+};
+
 CG.scheduleIssues = function(){
   var lg = CG.lg, s = CG.SEASON, out = [];
   if (!s || !lg || !lg.schedule || !lg.schedule.length) return out;
@@ -7107,6 +7150,14 @@ CG.admScheduleLive = function(){
                 : 'Applies the next time you generate a schedule. Clear the existing one first to rebuild with these settings.')+
       '</span></div></div>';
 
+  var mism = CG.shapeMismatch();
+  if (mism)
+    h += '<div class="card" style="margin-bottom:16px;border-color:var(--red)"><div class="card-h">'+
+      '<h3>The schedule on the ice does not match the season shape</h3>'+
+      '<span class="chip chip-warn">'+mism.length+' difference'+(mism.length===1?'':'s')+'</span></div><div class="card-b">'+
+      '<ul style="margin:0 0 10px;padding-left:20px;display:grid;gap:6px">'+
+        mism.map(function(t){ return '<li>'+esc(t)+'</li>'; }).join("")+'</ul>'+
+      '<p class="caption">The rulebook and the home page describe the season shape above, so while these differ the site contradicts itself. Set the shape you want in <b>Season shape</b>, then clear and regenerate the season to rebuild the fixtures from it. Nothing has been played yet, so regenerating costs no results.</p></div></div>';
   if (issues.length)
     h += '<div class="card" style="margin-bottom:16px;border-color:var(--red)"><div class="card-h"><h3>The schedule disagrees with the season dates</h3>'+
       '<span class="chip chip-warn">'+issues.length+' to resolve</span></div><div class="card-b">'+
