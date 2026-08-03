@@ -11,6 +11,7 @@
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, HTTPS_PROXY, optional PLATFORM. Node 18+.
 
 const SB_URL = process.env.SUPABASE_URL;
+const BOT = process.env.DISCORD_BOT_TOKEN;   // optional: lets an import announce + close its lobby room
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const PLATFORM = process.env.PLATFORM || "common-gen5";
 const PROXY = process.env.HTTPS_PROXY;
@@ -29,6 +30,46 @@ async function sbSend(method, path, body, prefer) {
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
 const reply = (obj, code) => ({ statusCode: code || 200, headers: { "content-type": "application/json" }, body: JSON.stringify(obj) });
+
+/* ---------- close the lobby room a just-imported game came from ----------
+   A pickup_games row carries no lobby reference, so the link is inferred from PEOPLE: the lobby
+   whose Discord roster overlaps the imported box score's matched players. The bar is deliberately
+   high — at least 6 of the lobby's 12, and a strictly unique best match — because the failure mode
+   of a wrong guess is deleting a channel mid-draft. No match simply means the room waits for the
+   staff Delete button or the 12-hour sweep, exactly as before. */
+function matchLobbyForImport(lobbies, discordIds) {
+  const ids = new Set(discordIds);
+  let best = null, bestOverlap = 0, tied = false;
+  for (const lo of lobbies || []) {
+    const sign = ((lo.state && lo.state.signups) || []).map((x) => String(x.id));
+    const overlap = sign.filter((id) => ids.has(id)).length;
+    if (overlap > bestOverlap) { best = lo; bestOverlap = overlap; tied = false; }
+    else if (overlap === bestOverlap && overlap > 0 && best && lo.id !== best.id) tied = true;
+  }
+  if (!best || bestOverlap < 6 || tied) return null;
+  return { lobby: best, overlap: bestOverlap };
+}
+async function closePlayedLobby(rows) {
+  const profileIds = [...new Set(rows.map((r) => r.profile_id).filter(Boolean))];
+  if (profileIds.length < 4) return null;   // too few matched accounts to identify a lobby safely
+  const profs = await sbGet(`profiles?id=in.(${profileIds.join(",")})&select=id,discord_id`);
+  const discordIds = profs.map((p) => String(p.discord_id || "")).filter(Boolean);
+  if (discordIds.length < 4) return null;
+  const lobbies = await sbGet("lfg_lobbies?thread_id=not.is.null&status=in.(captains,drafting,server,done)&select=id,thread_id,status,state");
+  const hit = matchLobbyForImport(lobbies, discordIds);
+  if (!hit) return null;
+  if (BOT) {
+    try {
+      await fetch(`https://discord.com/api/v10/channels/${hit.lobby.thread_id}/messages`, {
+        method: "POST", headers: { Authorization: `Bot ${BOT}`, "Content-Type": "application/json", "User-Agent": "DiscordBot (https://chelgamingleague.com,1.0)" },
+        body: JSON.stringify({ embeds: [{ title: "\uD83D\uDCCA Box score is in \u2014 GG!",
+          description: `${hit.overlap} of this lobby's players matched the imported game. Stats are on your profiles at chelgamingleague.com \u2014 this channel clears itself in a couple of minutes.`,
+          color: 0xFFE500 }] }), signal: AbortSignal.timeout(4000) });
+    } catch (e) { /* the announcement is a courtesy; the close below is the point */ }
+  }
+  await sbSend("PATCH", `lfg_lobbies?id=eq.${hit.lobby.id}`, { status: "closed", updated_at: new Date().toISOString() });
+  return { lobbyId: hit.lobby.id, overlap: hit.overlap };
+}
 
 // Verify the caller's Supabase JWT and return their auth user id (so an import is tied to a real login).
 async function authUser(token) {
@@ -126,6 +167,8 @@ async function resolveProfile(entry, cache) {
   cache.set(entry.ea_player_id, pid); return pid;
 }
 
+export const _internals = { matchLobbyForImport, normalizeMatch, mapPos };
+
 export const handler = async (event) => {
   // temp diag: is the residential proxy set, and does an EA call through it work?
   if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag === "puproxy9") {
@@ -214,7 +257,10 @@ export const handler = async (event) => {
       await sbSend("POST", "pickup_stats", rows.map((r) => ({ ...r, pickup_game_id: pickupGameId })), "return=minimal");
 
       const unmatched = preview.filter((p) => !p.matched).length;
-      return reply({ ok: true, pickupGameId, players: preview, unmatched });
+      /* if this game came out of a Discord pickup lobby, thank the room and let the sweep clear it */
+      let lobbyClosed = null;
+      try { lobbyClosed = await closePlayedLobby(rows); } catch (e) { /* never fail an import over cleanup */ }
+      return reply({ ok: true, pickupGameId, players: preview, unmatched, lobbyClosed });
     }
 
     return reply({ error: "Unknown action." }, 400);

@@ -770,6 +770,31 @@ async function ensureRoleOrder(guildRoles, teams, roleId, sum) {
   } catch (e) { /* observability only — never fail the sync over it */ }
 }
 
+/* The guild slash commands, self-registered by the sweep. The old GET ?register=commands path
+   still exists but Netlify refuses public HTTP to scheduled functions, so it can never run again —
+   without this, a new command could be coded but never registered. The desired set is hashed into
+   app_config (discord_cmds_hash) so steady-state sweeps cost zero Discord calls. */
+const GUILD_COMMANDS = [
+  { name: "join", type: 1, description: "Join or start a pickup game lobby — run in #pickup-games" },
+  { name: "leave", type: 1, description: "Leave the pickup signup sheet — run in #pickup-games" },
+  { name: "captain", type: 1, description: "Volunteer as a captain — run in a full pickup lobby's channel" },
+  { name: "kick", type: 1, description: "Captains: vote to kick a player from this pickup lobby",
+    options: [{ type: 6, name: "player", description: "Who to kick", required: true }] },
+];
+async function ensureGuildCommands(sum) {
+  /* the marker only needs to CHANGE when the command set changes — the JSON itself is the
+     simplest collision-free fingerprint and avoids importing crypto for a config stamp */
+  const hash = JSON.stringify(GUILD_COMMANDS);
+  try {
+    const cur = await sbGet(`app_config?key=eq.discord_cmds_hash&select=value`);
+    if (cur && cur[0] && cur[0].value === hash) return;
+    const app = await dApi("GET", `/applications/@me`);
+    const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, GUILD_COMMANDS);
+    await sbUpsertCfg("discord_cmds_hash", hash);
+    sum.commandsRegistered = (res || []).map((c) => c.name);
+  } catch (e) { sum.errors.push({ commands: String(e.message || e) }); }
+}
+
 async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) {
   const commish = roleId["commissioner"], staff = roleId["staff"];
   if (!commish || !staff) return; // office roles not provisioned yet — next run
@@ -841,12 +866,7 @@ export default async (req) => {
     // replaces the old /lfg. (The handler still accepts an "lfg" name as a harmless safety net.)
     if (BOT && GUILD && regMode === "commands") {
       const app = await dApi("GET", `/applications/@me`);
-      const cmds = [
-        { name: "join", type: 1, description: "Join or start a pickup game lobby — run in #pickup-games" },
-        { name: "leave", type: 1, description: "Leave the pickup signup sheet — run in #pickup-games" },
-        { name: "captain", type: 1, description: "Volunteer as a captain — run in a full pickup lobby's channel" },
-      ];
-      const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, cmds);
+      const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, GUILD_COMMANDS);
       return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
         { status: 200, headers: { "content-type": "application/json" } });
     }
@@ -1197,6 +1217,7 @@ export default async (req) => {
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
   // (its role + commissioners) instead of the category default (all staff).
   try { await ensureStaffDepartments(guildChannels, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
+  try { await ensureGuildCommands(sum); } catch (e) { sum.errors.push({ commands: String(e.message || e) }); }
   /* the commissioner-only departures room, and its id for the announcer further down */
   try { const dch = await ensureDeparturesChannel(guildChannels, roleId, sum); if (dch && dch.id) sum.__departChanId = dch.id; }
   catch (e) { sum.errors.push({ departChan: String(e.message || e) }); }

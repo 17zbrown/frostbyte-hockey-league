@@ -85,6 +85,15 @@ async function sbGetRoomLobby(channelId, status) {
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) ? rows[0] : null;
 }
+// the lobby whose room channel is `channelId`, in ANY post-fill state — /kick works from the moment
+// the room exists to the moment the game is reported, including "done" (a no-show is usually
+// discovered at puck drop, well after the code went out)
+const KICKABLE_STATES = "captains,drafting,server,done";
+async function sbGetRoomLobbyAny(channelId) {
+  const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?thread_id=eq.${encodeURIComponent(channelId)}&status=in.(${KICKABLE_STATES})&select=*&limit=1`, withTimeout({ headers: sbHead() }));
+  const rows = await r.json().catch(() => []);
+  return Array.isArray(rows) ? rows[0] : null;
+}
 // optimistic compare-and-swap on updated_at so two simultaneous clicks can't clobber each other
 async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&updated_at=eq.${encodeURIComponent(prevUpdatedAt)}`, withTimeout({
@@ -204,7 +213,7 @@ function instructionsEmbed() {
       "**3 · Server & code** — Team A's captain picks the server, then the bot drops a **private 6-digit lobby code**.\n\n" +
       "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
       `**5 · Stats** — after the game, statistics staff enter the box score by **club search** at ${CLUB_SEARCH}.\n\n` +
-      "**6 · Done** — staff press **🗑 Delete lobby** below to clear this channel (it also auto-clears later).",
+      "**6 · Done** — entering the box score clears this channel on its own a couple of minutes later (staff can also press 🗑 below). Someone no-show or out of line? A captain can start a vote with **/kick** — the other captain approves, and the spot refills from #pickup-games.",
     color: BRAND,
   };
 }
@@ -361,6 +370,55 @@ function applyCaptain(lobby, userId) {
   }
   return { status: "captains", state: s, started: false };
 }
+/* ---------- /kick: captain vote-kick with position-matched replacement ----------
+   A kick is a two-key launch: one captain proposes, the OTHER captain approves. The kicked spot
+   refills from the public #pickup-games signup sheet with someone at the same position, who
+   inherits the kicked player's team slot if the draft had already placed them. */
+function applyKickPropose(lobby, byId, targetId) {
+  const s = lobby.state;
+  const caps = s.captains || [];
+  if (caps.length < 2) return { error: "Captains aren't set yet — run **/captain** first; kicks are a captains' vote." };
+  if (!caps.includes(byId)) return { error: "Only a captain can start a kick vote." };
+  if (caps.includes(targetId)) return { error: "Captains can't be vote-kicked — flag a staff member instead." };
+  if (byId === targetId) return { error: "You can't kick yourself." };
+  const entry = (s.signups || []).find((x) => x.id === targetId);
+  if (!entry) return { error: "They're not in this lobby." };
+  s.kickVote = { target: targetId, by: byId, at: new Date().toISOString() };
+  return { state: s, targetName: entry.name, otherCaptain: caps.find((c) => c !== byId) };
+}
+function applyKickDecline(lobby, presserId) {
+  const s = lobby.state;
+  if (!s.kickVote) return { error: "There's no kick vote open." };
+  if (!(s.captains || []).includes(presserId)) return { error: "Only a captain can rule on a kick vote." };
+  const kv = s.kickVote;
+  delete s.kickVote;
+  return { state: s, target: kv.target };
+}
+/* openSignups: the CURRENT public signup sheet (may be null/empty). Mutates only the ROOM state;
+   the caller removes the chosen replacement from the open lobby afterwards under its own CAS. */
+function applyKickApprove(lobby, presserId, openSignups) {
+  const s = lobby.state;
+  const kv = s.kickVote;
+  if (!kv) return { error: "There's no kick vote open." };
+  const caps = s.captains || [];
+  if (!caps.includes(presserId)) return { error: "Only a captain can approve a kick." };
+  if (presserId === kv.by) return { error: "Your vote is already counted — the **other** captain has to approve." };
+  const entry = (s.signups || []).find((x) => x.id === kv.target);
+  delete s.kickVote;
+  if (!entry) return { error: "They already left the lobby — vote closed.", state: s };
+  s.signups = s.signups.filter((x) => x.id !== kv.target);
+  s.kicked = (s.kicked || []).concat([kv.target]);
+  /* same position, not previously kicked from this lobby, not already in this lobby */
+  const inRoom = {}; s.signups.forEach((x) => { inRoom[x.id] = 1; });
+  const sub = (openSignups || []).find((x) => x.pos === entry.pos && !inRoom[x.id] && (s.kicked || []).indexOf(x.id) < 0);
+  let side = null;
+  ["A", "B"].forEach(function(k){
+    const i = ((s.teams && s.teams[k]) || []).indexOf(kv.target);
+    if (i >= 0){ side = k; if (sub) s.teams[k][i] = sub.id; else s.teams[k].splice(i, 1); }
+  });
+  if (sub) s.signups = s.signups.concat([{ id: sub.id, name: sub.name, pos: sub.pos, at: new Date().toISOString() }]);
+  return { state: s, target: kv.target, targetName: entry.name, pos: entry.pos, replacement: sub || null, side: side };
+}
 function applyPick(lobby, userId, pickId) {
   const s = lobby.state;
   if (userId !== currentCaptain(s)) return { error: "Only the captain on the clock can pick right now." };
@@ -412,6 +470,52 @@ async function handleComponent(interaction) {
     return ephemeral("You need a Chel Gaming account to join pickup games — sign in at **chelgamingleague.com** first (10 seconds with Discord), then run /join again.");
   }
 
+  // Kick-vote buttons. Handled ahead of the generic loop: its closed-lobby guard treats "done" as
+  // closed, and a done lobby (code issued, game about to start) is exactly when a no-show surfaces.
+  if (action === "kickok" || action === "kickno") {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const lobby = await sbGetLobby(key);
+      if (!lobby || KICKABLE_STATES.indexOf(lobby.status) < 0) return ephemeral("This lobby has closed — the vote is moot.");
+      if (action === "kickno") {
+        const out = applyKickDecline(lobby, userId);
+        if (out.error) return ephemeral(out.error);
+        const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, lobby.status);
+        if (!saved) continue;
+        return respond({ type: UPDATE, data: { content: `Kick vote declined by <@${userId}>.`, embeds: [], components: [], allowed_mentions: { parse: [] } } });
+      }
+      /* approve: the replacement pool is the CURRENT public signup sheet in #pickup-games */
+      let openLobby = null;
+      try { openLobby = await sbGetOpenLobby(lobby.channel_id); } catch (e) {}
+      const out = applyKickApprove(lobby, userId, (openLobby && openLobby.state && openLobby.state.signups) || []);
+      if (out.error && !out.state) return ephemeral(out.error);
+      const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, lobby.status);
+      if (!saved) continue;
+      if (out.error) return respond({ type: UPDATE, data: { content: out.error, embeds: [], components: [], allowed_mentions: { parse: [] } } });
+      /* Take the replacement OFF the public sheet. Room-first ordering on purpose: if this write
+         loses, the player is briefly on both lists and their public-sheet 30-minute clock
+         self-heals it — the reverse order could lose their signup entirely. */
+      if (out.replacement && openLobby) {
+        for (let a2 = 0; a2 < 4; a2++) {
+          const ol = await sbGetLobby(openLobby.id);
+          if (!ol || ol.status !== "open") break;
+          const st = ol.state || {};
+          if (!((st.signups || []).some((x) => x.id === out.replacement.id))) break;
+          st.signups = st.signups.filter((x) => x.id !== out.replacement.id);
+          if (await sbSaveLobby(ol.id, ol.updated_at, st, ol.status)) {
+            if (BOT) { try { const mid = await ensureSummary(ol.channel_id, st, ol.message_id); if (mid && mid !== ol.message_id) await sbStashMessage(ol.id, mid); } catch (e) {} }
+            break;
+          }
+        }
+      }
+      const posName = POS_LABEL[out.pos] || out.pos || "player";
+      const line = out.replacement
+        ? `\u2705 **${out.targetName}** was kicked. <@${out.replacement.id}> steps in at **${posName}**${out.side ? " on Team " + out.side : ""} — welcome!`
+        : `\u2705 **${out.targetName}** was kicked. Nobody is waiting at **${posName}** on the #pickup-games sheet right now, so the lobby plays one short — anyone who signs up there can be pulled in by staff.`;
+      return respond({ type: UPDATE, data: { content: line, embeds: [], components: [],
+        allowed_mentions: out.replacement ? { users: [out.replacement.id] } : { parse: [] } } });
+    }
+    return ephemeral("The lobby was busy — try that again.");
+  }
   // Delete-lobby button (in the lobby channel): staff-only. Marks it closed; discord-sync removes the
   // channel on its next sweep (avoids responding to an interaction whose channel you just deleted).
   if (action === "closelobby") {
@@ -506,6 +610,7 @@ async function handleCommand(interaction) {
     return handleLeaveCmd(interaction);
   }
   if (cmd === "captain") return handleCaptain(interaction);
+  if (cmd === "kick") return handleKick(interaction);
   return ephemeral("Unknown command.");
 }
 // /join -> a private position picker showing what's open. Reads the lobby (no create) so counts are live.
@@ -538,6 +643,35 @@ async function handleLeaveCmd(interaction) {
     if (newMsgId && newMsgId !== lobby.message_id) await sbStashMessage(lobby.id, newMsgId);
     return respond({ type: REPLY, data: { embeds: [{ title: "👋 You left the lobby",
       description: "Your spot is open again. Run **/join** anytime to jump back in.", color: BRAND }], flags: EPHEMERAL } });
+  }
+  return ephemeral("The lobby was busy — try that again.");
+}
+// /kick @player (in a lobby's room channel) -> a captain proposes; the OTHER captain approves via
+// buttons. On approval the player is removed and the spot refills from the public signup sheet with
+// someone at the same position, who inherits the team slot if the draft had placed the kicked player.
+async function handleKick(interaction) {
+  const channelId = interaction.channel_id;
+  const userId = userIdOf(interaction);
+  const opt = ((interaction.data && interaction.data.options) || []).find((o) => o.name === "player");
+  const targetId = opt ? String(opt.value || "") : "";
+  if (!targetId) return ephemeral("Pick the player to kick: **/kick player:@name**");
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lobby = await sbGetRoomLobbyAny(channelId);
+    if (!lobby) return ephemeral("There's no active pickup lobby in this channel — **/kick** works inside a lobby's own room.");
+    const out = applyKickPropose(lobby, userId, targetId);
+    if (out.error) return ephemeral(out.error);
+    const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, lobby.status);
+    if (!saved) continue;   // CAS lost — re-read and retry
+    return respond({ type: REPLY, data: {
+      content: `\u2696\uFE0F <@${userId}> proposes kicking <@${targetId}> — <@${out.otherCaptain}>, your call.`,
+      embeds: [{ title: "Kick vote", color: BRAND,
+        description: `**${out.targetName}** would be removed and their **${POS_LABEL[(out.state.signups.find((x)=>x.id===targetId)||{}).pos] || "spot"}** refilled from the #pickup-games signup sheet if anyone's waiting at that position.\n\nOnly the other captain's vote counts.` }],
+      components: [{ type: 1, components: [
+        { type: 2, style: 4, label: "Approve kick", custom_id: `lfg:kickok:${lobby.id}:${targetId}` },
+        { type: 2, style: 2, label: "Decline", custom_id: `lfg:kickno:${lobby.id}` },
+      ] }],
+      allowed_mentions: { users: [targetId, out.otherCaptain] },
+    } });
   }
   return ephemeral("The lobby was busy — try that again.");
 }
@@ -607,4 +741,5 @@ export const handler = async (event) => {
 
 // Exposed for local unit tests only; Netlify invokes the named handler export.
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
+  applyKickPropose, applyKickApprove, applyKickDecline,
   startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };
