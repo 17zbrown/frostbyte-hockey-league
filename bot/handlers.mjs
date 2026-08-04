@@ -21,6 +21,7 @@ export function createHandlers(env, opts = {}) {
   // silently instead of mass-pinging a channel (raid) or spamming the commissioners (outage).
   const BURST_CAP = opts.burstCap ?? 15;
   const BURST_WINDOW_MS = opts.burstWindowMs ?? 10 * 60 * 1000;
+  const gatewayState = opts.gatewayState;
 
   const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
 
@@ -56,7 +57,7 @@ export function createHandlers(env, opts = {}) {
         method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
-      if (r.status === 404) return { __notfound: true };
+      if (r.status === 404) return { __notfound: true };   // callers MUST check — see dPost
       if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
       if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
       if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
@@ -64,6 +65,18 @@ export function createHandlers(env, opts = {}) {
       return t ? JSON.parse(t) : null;
     }
     throw new Error(`${method} ${path} -> rate-limited after retries`);
+  }
+  /* Posting a message is the one call whose success we RECORD, so it is the one call that must
+     never report success it didn't achieve. dApi turns a 404 (channel deleted mid-flight) into
+     {__notfound:true} rather than throwing, and Discord answers a successful post with the
+     message object — so anything without an id means the member was not actually told, and the
+     exactly-once claim must not be burned. Same trap as the pickup lobby's warned-flag. */
+  async function dPost(path, body) {
+    const res = await dApi("POST", path, body);
+    if (!res || res.__notfound || !res.id) {
+      throw new Error(`post to ${path} did not deliver (${res && res.__notfound ? "channel is gone" : "no message id"})`);
+    }
+    return res;
   }
   async function cfgGet(key) {
     try {
@@ -143,7 +156,7 @@ export function createHandlers(env, opts = {}) {
       const welcomeChan = (await cfgGet("discord_welcome_channel_id")) || byName["welcome"];
       if (!welcomeChan) { sum.skipped++; return "no-channel"; }   // sweep will greet within 5 min
       // Post first, record after — a failed post stays unrecorded so the sweep retries it.
-      await dApi("POST", `/channels/${welcomeChan}/messages`, {
+      await dPost(`/channels/${welcomeChan}/messages`, {
         content: welcomeText(m.id, { rules: byName["rules"], general: byName["general-chat"] }),
         allowed_mentions: { users: [m.id] },
       });
@@ -219,7 +232,7 @@ export function createHandlers(env, opts = {}) {
       if (days != null) fields.push({ name: "In the server", value: days === 0 ? "less than a day" : days + " day" + (days === 1 ? "" : "s"), inline: true });
       if (wasRegistered) fields.push({ name: "Season sign-up", value: "was registered to play", inline: true });
       try {
-        await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
+        await dPost(`/channels/${chId}/messages`, { embeds: [{
           title: "👋 " + who + " left the server",
           description: (link ? "" : "No linked site account — they never signed in at chelgamingleague.com.\n") +
             "`" + id + "`",
@@ -233,18 +246,26 @@ export function createHandlers(env, opts = {}) {
 
   /* ============ heartbeat + per-run result, in the shapes the watchdog already reads ============ */
 
-  async function beat() {
+  /* A heartbeat that only proves "the timer fired" is worse than none: it makes a deaf bot look
+     healthy on the Automations panel and satisfies the watchdog's staleness check. So the row
+     reports the GATEWAY's state, and a disconnected bot writes ok:false — which the watchdog's
+     failing-run branch pages on, without waiting out the 10-minute staleness window. */
+  async function beat(opts = {}) {
     const nowIso = new Date().toISOString();
-    await cfgSet("rl_gateway-bot", nowIso);
+    const gw = typeof gatewayState === "function" ? gatewayState() : { connected: true, detail: "not instrumented" };
     const recent = errors.filter((e) => Date.now() - e.at < 60 * 60 * 1000);
+    const fatal = opts.fatal || null;
+    const healthy = recent.length === 0 && gw.connected !== false && !fatal;
+    await cfgSet("rl_gateway-bot", nowIso);
     await cfgSet("rl_gateway-bot_result", JSON.stringify({
-      at: nowIso, ok: recent.length === 0,
+      at: nowIso, ok: healthy, connected: gw.connected !== false,
       welcomed: sum.welcomed, welcomedSilent: sum.welcomedSilent,
       departures: sum.departures, departAnnounced: sum.departAnnounced,
       departUnannounced: sum.departUnannounced,
       uptimeMin: Math.round((Date.now() - startedAt) / 60000),
       errCount: errors.length,
-      lastError: errors.length ? errors[errors.length - 1].error : null
+      lastError: fatal || (gw.connected === false ? `not connected to Discord (${gw.detail})` : null)
+        || (errors.length ? errors[errors.length - 1].error : null)
     }));
   }
 

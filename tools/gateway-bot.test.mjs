@@ -22,6 +22,9 @@ const world = {
   teams: { T1: "BOS" },
   registered: new Set(),
   failDiscordPosts: false,
+  /* channels the cache still knows about but that Discord has since deleted — the real race
+     between resolving a channel and posting into it */
+  deadPostChannels: new Set(),
 };
 const events = [];           // ordered log of writes, for interlock-order assertions
 const cfg = {};              // app_config upserts (heartbeat etc.)
@@ -34,7 +37,12 @@ globalThis.fetch = async (url, opts = {}) => {
     if (u.includes(`/guilds/G1/channels`)) return J(world.channels);
     if (/\/channels\/\w+\/messages$/.test(u) && m === "POST") {
       if (world.failDiscordPosts) return J({ message: "boom" }, 500);
-      events.push({ post: u.match(/channels\/(\w+)\//)[1], body: JSON.parse(opts.body) });
+      /* Discord 404s a post to a channel that no longer exists — the stub has to model that or
+         the delivered-vs-attempted assertions below would pass against a fiction. */
+      const chId = u.match(/channels\/(\w+)\//)[1];
+      if (world.deadPostChannels.has(chId) || !world.channels.some((c) => c.id === chId))
+        return J({ message: "Unknown Channel" }, 404);
+      events.push({ post: chId, body: JSON.parse(opts.body) });
       return J({ id: "msg1" });
     }
     return J({});
@@ -171,6 +179,50 @@ console.log("\n— heartbeat");
   await H.beat();
   const res2 = JSON.parse(cfg["rl_gateway-bot_result"]);
   A("a recent error flips ok false with the detail", res2.ok === false && /welcome hb2/.test(res2.lastError));
+}
+
+console.log("\n— a post that didn't deliver is never recorded as delivered");
+{
+  /* Discord answers a deleted channel with 404, which dApi turns into {__notfound:true} rather
+     than throwing. Treating that as a successful post would burn the exactly-once claim and the
+     member would never be greeted by either lane. */
+  const gone = { ...world };
+  world.channels = world.channels.filter((c) => c.name !== "welcome");
+  world.welcomeOverride = "DEAD";     // resolves, but the channel 404s
+  const H = mk();
+  const r = await H.onMemberAdd(member("ghosted"));
+  A("a 404'd welcome is an error, not a success", r === "error");
+  A("...and the member stays unwelcomed so the sweep retries", !world.welcomed.has("ghosted"));
+  world.welcomeOverride = null;
+  world.channels = gone.channels.concat([{ id: "CW", type: 0, name: "welcome" }]);
+}
+{
+  world.deadPostChannels.add("CD");    // still in the channel list, already deleted on Discord
+  const H = mk();
+  events.length = 0;
+  const r = await H.onMemberRemove(member("silent"));
+  A("a departure whose post 404s is recorded, not counted as announced", r === "recorded-postfail");
+  A("...the row is still written so the census won't re-announce it", events.some((e) => e.departure));
+  A("...and it surfaces as an error for the watchdog", H.errors.some((e) => /depart-post/.test(e.error)));
+  world.deadPostChannels.clear();
+}
+
+console.log("\n— the heartbeat reports the GATEWAY, not the timer");
+{
+  let connected = true;
+  const H = mk({ gatewayState: () => ({ connected, detail: connected ? "ws status 0" : "ws status 5" }) });
+  await H.beat();
+  let res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("a connected bot reports ok", res.ok === true && res.connected === true);
+  connected = false;
+  await H.beat();
+  res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("a DEAF bot reports ok:false even with no errors", res.ok === false && res.connected === false);
+  A("...and says why, so the page isn't a mystery", /not connected to Discord/.test(res.lastError));
+  A("the heartbeat still writes — staleness is a separate signal", !!cfg["rl_gateway-bot"]);
+  await H.beat({ fatal: "gateway closed with code 4014" });
+  res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("a fatal close is reported verbatim", res.ok === false && /4014/.test(res.lastError));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

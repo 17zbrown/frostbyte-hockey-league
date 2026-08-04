@@ -26,7 +26,17 @@ if (missing.length) {
   process.exit(1);
 }
 
-const H = createHandlers(env);
+/* The heartbeat must answer "is this bot hearing Discord", not "is this process running".
+   Without this the timer below keeps stamping a healthy row while the gateway is dead, and
+   both the Automations panel and automation_watchdog stay green over a deaf bot. */
+let ready = false;
+const H = createHandlers(env, {
+  gatewayState: () => {
+    // discord.js Status.Ready === 0; ws.status is the live shard state, not a cached flag.
+    const st = client && client.ws ? client.ws.status : null;
+    return { connected: ready && st === 0, detail: ready ? `ws status ${st}` : "never reached ready" };
+  },
+});
 
 // Guilds for channel metadata; GuildMembers (privileged — already enabled in the Developer
 // Portal for the welcome sweep) for join/leave events. Partials so a leave still fires for
@@ -62,11 +72,29 @@ client.on(Events.GuildMemberRemove, (m) => {
 });
 
 client.once(Events.ClientReady, (c) => {
+  ready = true;
   console.log(`gateway-bot: connected as ${c.user.tag} — watching guild ${env.GUILD}`);
   H.beat().catch((e) => console.error("first heartbeat failed:", e.message));
 });
 client.on(Events.Error, (e) => console.error("gateway error:", e.message));
-client.on(Events.ShardDisconnect, () => console.warn("gateway disconnected — discord.js will reconnect"));
+/* Events.ShardError carries the real reason for a fatal close ("Used disallowed intents",
+   "Authentication failed"). discord.js does not surface it anywhere else, so without this
+   listener the one useful line is discarded. */
+client.on(Events.ShardError, (e) => console.error("shard error:", (e && e.message) || e));
+client.on(Events.ShardReconnecting, () => console.warn("gateway reconnecting…"));
+/* discord.js emits ShardDisconnect ONLY for close codes it will NOT recover from — bad token,
+   disallowed/invalid intents, invalid shard. It does not reconnect, does not throw, and does not
+   exit: the process would sit here forever, event loop held open by the heartbeat interval,
+   looking healthy to systemd and to the watchdog while hearing nothing. Exit instead, so
+   Restart=always cycles it and — if the cause is permanent — the start limit trips, the
+   heartbeat goes stale, and the watchdog pages. The Netlify sweeps carry the load throughout. */
+client.on(Events.ShardDisconnect, (event) => {
+  const code = event && event.code;
+  console.error(`gateway closed unrecoverably (code ${code}) — exiting so this cannot sit here deaf`);
+  H.beat({ fatal: `gateway closed with code ${code}` })
+    .catch(() => {})
+    .finally(() => process.exit(1));
+});
 
 // The heartbeat is the watchdog's view of this process: rl_gateway-bot every minute, and the
 // per-run result alongside it. Stop beating and the automation_watchdog pages within ~25 min.
