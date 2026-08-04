@@ -115,6 +115,7 @@ CG.hubNav = function(section){
     if (CG.can("roster.manage")) club.push(["management","Management","shield"]);
     if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
+    if (CG.LIVE_MODE && CG.can("lineup.build") && CG.hubGameStats) club.push(["gamestats","Game stats","chart"]);
     if (CG.can("lineup.build")) club.push(["lineup","Lineup builder","grid"]);
     if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
     if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);

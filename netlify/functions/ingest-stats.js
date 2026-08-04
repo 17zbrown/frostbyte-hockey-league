@@ -196,7 +196,7 @@ async function logAttempt(norm, raw, status, reason, gameId) {
   } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); }
 }
 
-export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff };
+export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame };
 
 // ---- Ingest ONE normalized match ----
 async function ingestOne(norm, raw, summary, batch) {
@@ -452,6 +452,54 @@ async function isStatsStaff(jwt) {
   } catch { return false; }
 }
 
+/* Who may work a SPECIFIC game's lag-out merge.
+     - statistics staff (and commissioners) may work any game, with no window limit — that
+       unrestricted reach is the whole point of the staff override.
+     - a club's Owner/GM/AGM may work only games THEIR OWN club played. The seat is checked
+       against the two teams on THAT game, so a manager can never reach another club's fixture
+       by changing the id in the request.
+   Returns the actor so the merge can be stamped with who did it — once non-staff can rebuild a
+   box score, "who did this" has to be recoverable from the archive. */
+async function authForGame(jwt, game) {
+  const deny = { ok: false };
+  if (!jwt) return deny;
+  let uid = null;
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${jwt}` } });
+    if (!r.ok) return deny;
+    const u = await r.json();
+    uid = u && u.id;
+  } catch { return deny; }
+  if (!uid) return deny;
+  let prof;
+  try { prof = (await sbGet(`profiles?id=eq.${uid}&select=role,departments,gamertag,banned&limit=1`))[0]; }
+  catch { return deny; }
+  if (!prof || prof.banned) return deny;
+  const who = prof.gamertag || uid;
+  if (prof.role === "commissioner") return { ok: true, uid, who, via: "staff" };
+  if (prof.role === "staff" && (prof.departments || []).indexOf("statistics") >= 0) return { ok: true, uid, who, via: "staff" };
+  let seats = [];
+  try { seats = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,owner_profile_id,gm_profile_id,agm_profile_id`); }
+  catch { return deny; }
+  const mine = (seats || []).find((t) => t.owner_profile_id === uid || t.gm_profile_id === uid || t.agm_profile_id === uid);
+  if (mine) return { ok: true, uid, who, via: "management", club: mine.code, teamId: mine.id };
+  return deny;
+}
+
+/* A club rebuilding its own box score is a normal, expected repair — but staff should never
+   learn about it only by noticing the number changed. Fire-and-forget: a dead webhook must
+   never fail the merge that already succeeded. */
+async function tellStaff(text) {
+  try {
+    const rows = await sbGet("app_config?key=in.(discord_staff_webhook,discord_updates_webhook)&select=key,value");
+    const byKey = Object.fromEntries((rows || []).map((r) => [r.key, r.value]));
+    const hook = byKey.discord_staff_webhook || byKey.discord_updates_webhook;
+    if (!hook) return;
+    await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: text.slice(0, 1800), allowed_mentions: { parse: [] } }) });
+  } catch { /* never breaks the merge */ }
+}
+
 /* KEEP IN SYNC with the row builders in ingestOne and the auto-resume path — same columns, same
    order, so a manually merged game is indistinguishable from an auto-ingested one downstream. */
 async function leagueBoxRows(game, clubByTeam) {
@@ -500,10 +548,11 @@ export const handler = async (event) => {
      games' data. */
   if (!authed && body && body.leagueCandidates) {
     const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
-    if (!jwt || !(await isStatsStaff(jwt))) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff only." }) };
     const gameId = String(body.leagueCandidates.gameId || body.leagueCandidates);
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,home_score,away_score`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
+    const actor = await authForGame(jwt, game);
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away || !home.ea_club_id || !away.ea_club_id)
@@ -527,13 +576,12 @@ export const handler = async (event) => {
       });
     }
     candidates.sort((x, y) => (x.ts || 0) - (y.ts || 0));
-    return { statusCode: 200, body: JSON.stringify({ game: { id: game.id, week: game.week, status: game.status,
+    return { statusCode: 200, body: JSON.stringify({ role: actor.via, game: { id: game.id, week: game.week, status: game.status,
       home: home.code, away: away.code, score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null }, candidates }) };
   }
 
   if (!authed && body && body.leagueMerge) {
     const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
-    if (!jwt || !(await isStatsStaff(jwt))) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff only." }) };
     const gameId = String(body.leagueMerge.gameId || "");
     const matchIds = (Array.isArray(body.leagueMerge.matchIds) ? body.leagueMerge.matchIds : []).map(String).filter(Boolean);
     if (!gameId || !matchIds.length) return { statusCode: 400, body: JSON.stringify({ error: "Missing gameId/matchIds." }) };
@@ -541,6 +589,8 @@ export const handler = async (event) => {
     if (new Set(matchIds).size !== matchIds.length) return { statusCode: 400, body: JSON.stringify({ error: "The same sitting is selected twice." }) };
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
+    const actor = await authForGame(jwt, game);
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (game.voided) return { statusCode: 422, body: JSON.stringify({ error: "That game is voided." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
@@ -556,12 +606,25 @@ export const handler = async (event) => {
     const stolen = logRows.find((r) => r.game_id && r.game_id !== game.id);
     if (stolen) return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${stolen.ea_match_id} already belongs to another game — it can't be merged here.` }) };
     const pair = [String(home.ea_club_id), String(away.ea_club_id)].sort().join("|");
+    /* A club may only merge sittings from its fixture's own night (±1 ET day) — exactly the set
+       the desk offered it. Two clubs meet several times a season, so without this a manager
+       could graft a different meeting's sitting onto this game. Staff keep the unrestricted
+       reach: a legitimately resumed sitting days later is theirs to judge. The window is
+       recomputed from the payload through the SAME formatter the candidate list uses, so the
+       two can never disagree about which day a sitting belongs to. */
+    const mgmtDays = actor.via === "management"
+      ? new Set([etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000) - 86400),
+                 etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000)),
+                 etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000) + 86400)])
+      : null;
     const norms = [];
     for (const row of logRows) {
       const nrm = normalizeMatch(row.payload);
       if (!nrm) return { statusCode: 422, body: JSON.stringify({ error: `Couldn't read sitting ${row.ea_match_id}.` }) };
       if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair)
         return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} is not between ${home.code} and ${away.code}.` }) };
+      if (mgmtDays && !mgmtDays.has(nrm.et_day))
+        return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} wasn't played around this fixture — statistics staff can merge that one for you.` }) };
       norms.push(nrm);
     }
     norms.sort((x, y) => (x.ts || 0) - (y.ts || 0));
@@ -580,17 +643,25 @@ export const handler = async (event) => {
       "return=minimal");
     /* provenance: the first sitting owns the game, the rest are merged — the SAME marks the
        automatic path leaves, so its dedupe logic treats this game identically from now on */
+    const byWhom = actor.via === "management" ? `${actor.who} (${actor.club} management)` : `${actor.who} (stats staff)`;
     for (const row of logRows) {
       const first = row.ea_match_id === merged.ea_match_id;
       await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(row.ea_match_id)}`,
         { status: first ? "ingested" : "merged", game_id: game.id, reason: first
-          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"})`
-          : `manually merged into ${merged.ea_match_id}` });
+          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}`
+          : `manually merged into ${merged.ea_match_id} by ${byWhom}` });
     }
     const linked = rows.filter((r) => r.profile_id).length;
+    /* Staff should never find out a box score changed only by noticing the number moved. */
+    if (actor.via === "management") {
+      await tellStaff(`🧩 **Lag-out merge by a club** — ${byWhom} rebuilt ${away.code} @ ${home.code}` +
+        (game.week ? ` (week ${game.week})` : "") + ` from ${norms.length} sitting${norms.length === 1 ? "" : "s"}: ` +
+        `final ${homeClub.score}-${awayClub.score}${merged.went_ot ? " (OT)" : ""}, ${rows.length} player lines. ` +
+        `Review it in the Stats Manager if anything looks off.`);
+    }
     return { statusCode: 200, body: JSON.stringify({ ok: true, gameId: game.id,
       score: `${homeClub.score}-${awayClub.score}`, wentOt: !!merged.went_ot,
-      sittings: norms.length, players: rows.length, linked }) };
+      sittings: norms.length, players: rows.length, linked, by: byWhom }) };
   }
 
   // Commissioner re-ingest: { reingest: "<ea_match_id>" } with the signed-in user's JWT.
