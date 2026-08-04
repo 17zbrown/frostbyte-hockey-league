@@ -5028,10 +5028,17 @@ CG.teamForm = function(t){
       if(want.gm!==(t.gm||null))       mgmtChanges.push({role:"gm",profile:want.gm});
       if(want.agm!==(t.agm||null))     mgmtChanges.push({role:"agm",profile:want.agm});
     }
+    /* every club ships with its two real palette colors — the secondary picker seeds from the
+       primary, and letting that seed save unchanged is how Montreal briefly wore a red-on-red
+       "gradient". A club's second color is a decision, not a default. */
+    var c1v=document.getElementById("tfColor").value, c2v=document.getElementById("tfColor2").value;
+    if ((c1v||"").toLowerCase() === (c2v||"").toLowerCase()){
+      CG.toast("Pick the club's secondary color too — the Discord gradient and the site accents use both","err"); return;
+    }
     var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
       division:document.getElementById("tfDiv").value,
-      color:document.getElementById("tfColor").value,
-      color2:document.getElementById("tfColor2").value,
+      color:c1v,
+      color2:c2v,
       logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
     var btn=this; btn.disabled=true;
     var q = isNew
