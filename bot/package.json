@@ -1,0 +1,15 @@
+{
+  "name": "chel-gaming-gateway-bot",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Always-on Discord gateway process for Chel Gaming — instant welcomes, departures, and future live features. Runs on the Oracle Cloud VM; the Netlify sweeps remain the reconciliation backstop.",
+  "type": "module",
+  "main": "chel-bot.mjs",
+  "scripts": {
+    "start": "node chel-bot.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "discord.js": "^14.16.3"
+  }
+}

@@ -1,0 +1,8 @@
+# One-shot: pull the repo and restart the bot if bot/ changed. Fired by chel-bot-update.timer.
+[Unit]
+Description=Chel Gaming gateway bot auto-update
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/chel-gaming/bot/deploy/update.sh

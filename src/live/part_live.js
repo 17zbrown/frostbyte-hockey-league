@@ -7064,6 +7064,7 @@ CG.AUTOMATIONS = [
   { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
   { key:"lfg-timers",       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
+  { key:"gateway-bot",      name:"Gateway bot (always on)",   every:"Continuously, from its own server", desc:"A live Discord connection — welcomes and departure logs land in about a second instead of on the next sweep. The sweeps above stay on as its safety net, so “never ran” here just means the bot’s server isn’t set up yet.", noRun:true },
   { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Retired by rulebook v2.7 — with no games-played minimum, no registrant is ever draft-ineligible. Kept as a stamped no-op so the watchdog sees a healthy heartbeat.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
@@ -7091,7 +7092,7 @@ CG.admAutomationsLive = function(){
         '<p class="caption" style="margin-top:2px">'+esc(a.desc)+' '+esc(a.every)+'.</p></div>'+
       '<span class="chip" id="auto-st-'+a.key+'">checking…</span>'+
       '<span class="caption mono" id="auto-ts-'+a.key+'" style="min-width:110px;text-align:right">—</span>'+
-      '<button class="btn btn-ghost btn-sm" data-auto-run="'+a.key+'">Run now</button></div>';
+      (a.noRun ? '' : '<button class="btn btn-ghost btn-sm" data-auto-run="'+a.key+'">Run now</button>')+'</div>';
   }).join("")+
   '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Also fully automatic, inside the database: standings on every final, auto news (recaps, spotlights, Three Stars), server resolution at lock, and every notification. Those have no off switch — they’re triggers.</span></div></div>';
   return h;

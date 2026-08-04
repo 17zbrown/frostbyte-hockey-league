@@ -1,0 +1,10 @@
+# Every 5 minutes: check origin/main for bot changes — push to deploy, same as the site.
+[Unit]
+Description=Chel Gaming gateway bot auto-update timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

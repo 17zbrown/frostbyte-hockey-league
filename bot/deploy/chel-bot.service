@@ -1,0 +1,23 @@
+# Chel Gaming gateway bot — systemd unit. Installed by setup.sh to /etc/systemd/system/.
+# Restarts on any crash; an invalid token exits 1 repeatedly and trips the start limit
+# instead of hammering Discord forever.
+[Unit]
+Description=Chel Gaming Discord gateway bot
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/chel-gaming/bot
+EnvironmentFile=/etc/chel-bot.env
+ExecStart=/usr/bin/node chel-bot.mjs
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
