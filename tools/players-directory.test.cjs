@@ -112,5 +112,23 @@ console.log("\n— the search palette covers accounts and teams");
   A("no duplicate entries for rostered players", labels.filter((l) => l === "IceWizard").length === 1);
 }
 
+console.log("\n— goalie DNA");
+{
+  const elite = CG.goalieDNA({ gp: 10, sv: 94, sa: 100, ga: 6, qs: 9, so: 3, w: 9 });
+  const weak  = CG.goalieDNA({ gp: 10, sv: 78, sa: 100, ga: 22, qs: 2, so: 0, w: 2 });
+  A("six axes, six values", CG.GOALIE_DNA_AXES.length === 6 && elite.length === 6);
+  A("a .940 goalie out-stops a .780 goalie", elite[0] > weak[0], elite[0] + " vs " + weak[0]);
+  A("lower GAA scores higher", elite[1] > weak[1]);
+  A("quality starts separate them", elite[3] > weak[3]);
+  A("shutouts and wins register", elite[4] > weak[4] && elite[5] > weak[5]);
+  A("values clamp to the 4..100 band", [...elite, ...weak].every((v) => v >= 4 && v <= 100));
+  A("equal workload reads equal", elite[2] === weak[2]);
+  const zero = CG.goalieDNA({ gp: 0, sv: 0, sa: 0, ga: 0, qs: 0, so: 0, w: 0 });
+  A("an empty line floors instead of NaN", zero.every((v) => Number.isFinite(v) && v >= 4));
+  const svg = CG.vizRadar(CG.GOALIE_DNA_AXES, elite, null, "Tendy");
+  A("the radar renders every axis label", CG.GOALIE_DNA_AXES.every((ax) => svg.includes(ax.toUpperCase())));
+  A("...as a real SVG with the player named", svg.includes("<svg") && svg.includes("Tendy"));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

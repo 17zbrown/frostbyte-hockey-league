@@ -2035,11 +2035,13 @@ CG.ROUTES.player = function(pid, qs){
        pre-season games has an all-zero season line, which would collapse the radar to its floor,
        so they keep the numeric pre-season card without the misleading shape. */
     var playerViz = (isEmpty || archived || (s.gp||0)<1) ? "" : (isG
-      ? '<div class="viz-card" style="margin-bottom:16px"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
-          CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
-          CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
-          CG.vizGauge(s.qs||0, Math.max(s.gp,1), ""+(s.qs||0), "Quality starts","var(--steel)")+
-        '</div></div>'
+      ? '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
+          '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(s), null, p.tag)+'</div>'+
+          '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
+            CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
+            CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
+            CG.vizGauge(s.qs||0, Math.max(s.gp,1), ""+(s.qs||0), "Quality starts","var(--steel)")+
+          '</div></div></div>'
       : '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
           '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), null, p.tag)+'</div>'+
           '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
@@ -2175,6 +2177,24 @@ CG.skaterDNA = function(s){
   ];
 };
 CG.SKATER_DNA_AXES = ["Shooting","Playmaking","Defense","Physical","Discipline","Clutch"];
+/* The goalie counterpart. Every axis is computable from BOTH the league season line and a pickup
+   aggregate, so the same radar reads the same way everywhere: Stopping maps save % across the
+   realistic CHEL band (.780 floors it, .950 maxes it), Goals Against inverts GAA, Workload is how
+   much rubber they face, and the rest are rates per start. */
+CG.goalieDNA = function(s){
+  var gp=Math.max(1,s.gp||0), cl=function(x){return Math.max(4,Math.min(100,Math.round(x)));};
+  var svp = s.sa ? (s.sv||0)/s.sa : 0;
+  return [
+    cl((svp-.78)/(.95-.78)*100),          /* Stopping    — save % */
+    cl((4.5-(s.ga||0)/gp)/4.5*100),       /* Goals Against — inverted GAA; 4.5+ floors */
+    cl((s.sa||0)/gp/12*100),              /* Workload    — shots faced per game; 12 = under siege */
+    cl(((s.qs||0)/gp)*100),               /* Quality Starts */
+    cl((s.so||0)/gp*250),                 /* Shutouts    — one every 2.5 starts maxes it */
+    cl(((s.w||0)/gp)*100)                 /* Winning */
+  ];
+};
+/* "GAA" not "Goals Against": the radar's right-edge anchor clips two-word labels at this viewBox */
+CG.GOALIE_DNA_AXES = ["Stopping","GAA","Workload","Quality Starts","Shutouts","Winning"];
 
 /* Pickup Stats tab — the same stat presentation as league play (KPI grid + game-by-game table),
    built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
@@ -2185,14 +2205,18 @@ CG.renderPickupStats = function(rows){
     return note + '<div class="card"><div class="empty" style="padding:48px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No pickup games yet</b>'+
       '<p>#pickup-games matches between two EASHL clubs appear here once their box score is imported.</p></div></div>';
   }
-  var gp=rows.length, g=0,a=0,sh=0,hit=0,pim=0,pm=0,tk=0, gGames=0, sv=0,sa=0,ga=0, so=0, w=0,l=0,otl=0;
+  var gp=rows.length, g=0,a=0,sh=0,hit=0,pim=0,pm=0,tk=0, gGames=0, sv=0,sa=0,ga=0, so=0, w=0,l=0,otl=0, qsG=0, gw=0;
   function sideScores(x){ var gm=x.pickup_games||{}, side=(x.team_side||"").toUpperCase();
     return { my: side==="A"?gm.score_a:(side==="B"?gm.score_b:null), opp: side==="A"?gm.score_b:(side==="B"?gm.score_a:null), ot:gm.went_ot }; }
   rows.forEach(function(x){
     g+=x.goals||0; a+=x.assists||0; sh+=x.shots||0; hit+=x.hits||0; pim+=x.pim||0; pm+=x.plus_minus||0; tk+=x.takeaways||0;
-    if (x.is_goalie){ gGames++; sv+=x.saves||0; sa+=x.shots_against||0; ga+=x.goals_against||0; if(x.shutout) so++; }
+    if (x.is_goalie){
+      gGames++; sv+=x.saves||0; sa+=x.shots_against||0; ga+=x.goals_against||0; if(x.shutout) so++;
+      /* same quality-start bar the league uses: .885 in that game (a clean sheet with no rubber counts) */
+      if (((x.shots_against||0) > 0 ? (x.saves||0)/(x.shots_against||0) : 1) >= .885) qsG++;
+    }
     var ss=sideScores(x);
-    if (ss.my!=null && ss.opp!=null){ if (ss.my>ss.opp) w++; else if (ss.ot) otl++; else l++; }
+    if (ss.my!=null && ss.opp!=null){ if (ss.my>ss.opp){ w++; if (x.is_goalie) gw++; } else if (ss.ot) otl++; else l++; }
   });
   var mostlyG = gGames > gp/2;
   var vizCards = "";
@@ -2207,11 +2231,14 @@ CG.renderPickupStats = function(rows){
         CG.vizGauge(hit, Math.max(gp*5,1), ""+hit, "Hits", "var(--gold)")+
       '</div></div></div>';
   } else {
-    vizCards = '<div class="viz-card" style="margin-bottom:16px"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
+    var gdna = CG.goalieDNA({ gp:gGames, sv:sv, sa:sa, ga:ga, qs:qsG, so:so, w:gw });
+    vizCards = '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
+      '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, gdna, null, "This goalie")+'</div>'+
+      '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
       CG.vizGauge(sa?(sv/sa*100):0, 100, sa?(sv/sa).toFixed(3).replace(/^0/,""):"—", "Save %")+
       CG.vizGauge(gGames?(3-Math.min(3,ga/gGames)):0, 3, gGames?(ga/gGames).toFixed(2):"—", "GAA", "var(--gold)")+
       CG.vizGauge(sv, Math.max(sa,1), ""+sv, "Saves", "var(--steel)")+
-    '</div></div>';
+    '</div></div></div>';
   }
   var cells = mostlyG
     ? [["GP",gp],["Record",w+"-"+l+"-"+otl],["SV%",sa?(sv/sa).toFixed(3).replace(/^0/,""):"—"],["GAA",gGames?(ga/gGames).toFixed(2):"—"],["Saves",sv],["GA",ga],["Shutouts",so]]
