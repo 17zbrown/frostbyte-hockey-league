@@ -1707,6 +1707,7 @@ export default async (req) => {
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
+        reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
