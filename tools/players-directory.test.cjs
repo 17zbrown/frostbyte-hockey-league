@@ -130,5 +130,32 @@ console.log("\n— goalie DNA");
   A("...as a real SVG with the player named", svg.includes("<svg") && svg.includes("Tendy"));
 }
 
+console.log("\n— by-position stat splits");
+{
+  /* three nights at center, one on right D, two in the crease — the position on each stat LINE
+     decides where it lands, never the roster position */
+  const rows = [
+    { position:"C",  is_goalie:false, goals:2, assists:1, shots:6, hits:3, pim:0, time_on_ice_seconds:2400 },
+    { position:"C",  is_goalie:false, goals:1, assists:0, shots:4, hits:1, pim:2, time_on_ice_seconds:2500 },
+    { position:"C",  is_goalie:false, goals:0, assists:2, shots:3, hits:2, pim:0, time_on_ice_seconds:2300 },
+    { position:"RD", is_goalie:false, goals:0, assists:1, shots:2, hits:5, pim:4, time_on_ice_seconds:2600 },
+    { position:"G",  is_goalie:true,  saves:24, shots_against:26, goals_against:2, time_on_ice_seconds:3600 },
+    { position:"G",  is_goalie:true,  saves:18, shots_against:18, goals_against:0, time_on_ice_seconds:3600 },
+  ];
+  const split = CG.posSplit(rows);
+  A("games sort into their played position", split.C.gp===3 && split.RD.gp===1 && split.G.gp===2);
+  A("skater lines sum per position", split.C.g===3 && split.C.a===3 && split.RD.hit===5);
+  A("goalie games never leak into skater pools", split.C.sv===0 && split.G.g===0);
+  A("the shutout is derived per game", split.G.so===1);
+  const html = CG.posSplitTable(split);
+  A("the table renders every played position", html.includes("Center") && html.includes("Right Defense") && html.includes("Goaltender"));
+  A("skaters and goalies keep their own columns", html.includes("TOI/GP") && html.includes("SV%"));
+  A("save percentage computes across goalie games", html.includes(".955"));
+  A("a single-position player gets no table", CG.posSplitTable(CG.posSplit(rows.slice(0,3))) === "");
+  A("no rows, no table, no crash", CG.posSplitTable(CG.posSplit([])) === "" && CG.posSplitTable(null) === "");
+  const pickup = CG.renderPickupStats(rows.map((r) => ({ ...r, pickup_games:{ id:"pg1", played_at:"2026-08-01", club_a:"A", club_b:"B", score_a:1, score_b:0 }, team_side:"A" })));
+  A("the pickup profile section carries the split", pickup.includes("By position") && pickup.includes("positions played"));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

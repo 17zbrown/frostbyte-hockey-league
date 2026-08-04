@@ -2049,10 +2049,14 @@ CG.ROUTES.player = function(pid, qs){
             CG.vizGauge(s.p||0, Math.max(s.gp*3,1), ((s.p||0)/Math.max(1,s.gp)).toFixed(2), "Pts / GP","var(--steel)")+
             CG.vizGauge(s.hits||0, Math.max(s.gp*5,1), ""+(s.hits||0), "Hits","var(--gold)")+
           '</div></div></div>');
+    /* by-position split: only for the live season (archived seasons kept aggregates, not rows),
+       and it hides itself unless the player really logged games at 2+ positions */
+    var posCard = archived ? "" : CG.posSplitTable(CG.posSplit((CG.lg.posSplitRows||{})[p.id]));
     var leftTop = isEmpty ? emptyCard :
       playerViz +
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
       cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
+      posCard +
       '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
     if (isEmpty) sideCard = "";   /* the fresh-sheet card already explains the scouted overall */
@@ -2199,6 +2203,57 @@ CG.GOALIE_DNA_AXES = ["Stopping","GAA","Workload","Quality Starts","Shutouts","W
 /* Pickup Stats tab — the same stat presentation as league play (KPI grid + game-by-game table),
    built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
    game score + the player's team side. Never feeds league totals, eligibility, or overall. */
+/* ---- By-position split, shared by league profiles and pickup stats ----
+   Fed by per-game stat lines, each carrying the position EA recorded for THAT game — never the
+   roster or lobby position. Hides itself for single-position players (the table would just
+   restate the season line). Skaters and goalies get their own column sets: one table with mixed
+   columns would either bury SV% or pad wingers with dashes. */
+CG.posSplit = function(rows){
+  var split = {};
+  (rows||[]).forEach(function(r){
+    var pos = r.is_goalie ? "G" : (r.position || "C");
+    var b = split[pos] = split[pos] || { gp:0, g:0, a:0, sh:0, hit:0, pim:0, toi:0, sv:0, sa:0, ga:0, so:0 };
+    b.gp++; b.toi += (+r.time_on_ice_seconds||0);
+    if (r.is_goalie){
+      b.sv += (+r.saves||0); b.sa += (+r.shots_against||0); b.ga += (+r.goals_against||0);
+      if ((+r.goals_against||0)===0 && (+r.shots_against||0)>0) b.so++;
+    } else {
+      b.g += (+r.goals||0); b.a += (+r.assists||0); b.sh += (+r.shots||0);
+      b.hit += (+r.hits||0); b.pim += (+r.pim||0);
+    }
+  });
+  return split;
+};
+CG.posSplitTable = function(split){
+  if (!split) return "";
+  var order = ["C","LW","RW","LD","RD","D","G"];
+  var have = order.filter(function(k){ return split[k] && split[k].gp>0; });
+  if (have.length < 2) return "";
+  var sk = have.filter(function(k){ return k!=="G"; });
+  var name = function(k){ return (CG.POS_NAME && CG.POS_NAME[k]) || k; };
+  var mmss = function(secs){ var s=Math.round(secs); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+  var h = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>By position</h3><span class="chip">'+have.length+' positions played</span></div>';
+  if (sk.length){
+    h += '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Skating stats by position</caption>'+
+      '<thead><tr><th class="tleft">Position</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>S</th><th>HIT</th><th>PIM</th><th class="tright">TOI/GP</th></tr></thead><tbody>'+
+      sk.map(function(k){ var b = split[k];
+        return '<tr><td class="tleft"><b>'+esc(name(k))+'</b></td><td>'+b.gp+'</td>'+
+          '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td>'+
+          '<td>'+b.sh+'</td><td>'+b.hit+'</td><td class="'+(b.pim?"":"z")+'">'+b.pim+'</td>'+
+          '<td class="tright mono" style="font-size:11px">'+(b.gp?mmss(b.toi/b.gp):"—")+'</td></tr>';
+      }).join("")+'</tbody></table></div>';
+  }
+  if (split.G && split.G.gp>0){
+    var b = split.G;
+    h += '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Goaltending by position</caption>'+
+      '<thead><tr><th class="tleft">Position</th><th>GP</th><th>SV</th><th>SV%</th><th>GAA</th><th class="tright">SO</th></tr></thead><tbody>'+
+      '<tr><td class="tleft"><b>'+esc(name("G"))+'</b></td><td>'+b.gp+'</td><td>'+b.sv+'</td>'+
+      '<td>'+(b.sa?(b.sv/b.sa).toFixed(3).replace(/^0/,""):"—")+'</td><td>'+(b.gp?(b.ga/b.gp).toFixed(2):"—")+'</td>'+
+      '<td class="tright">'+b.so+'</td></tr></tbody></table></div>';
+  }
+  h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Split by the position actually played in each game — EA records it per box score, so a night at a different spot lands on its own line.</span></div></div>';
+  return h;
+};
 CG.renderPickupStats = function(rows){
   var note = '<div class="note" style="margin-bottom:16px">These are <b>pickup games</b> from the #pickup-games lobbies — the same stats as league play, kept separate. They never count toward league totals, draft or bid eligibility, or the overall rating.</div>';
   if (!rows || !rows.length){
@@ -2262,7 +2317,7 @@ CG.renderPickupStats = function(rows){
           : '<td class="'+((x.goals||0)?"":"z")+'">'+(x.goals||0)+'</td><td class="'+((x.assists||0)?"":"z")+'">'+(x.assists||0)+'</td><td class="pts">'+((x.goals||0)+(x.assists||0))+'</td><td>'+(x.shots||0)+'</td><td>'+((x.plus_minus||0)>0?"+":"")+(x.plus_minus||0)+'</td><td class="'+((x.pim||0)?"":"z")+'">'+(x.pim||0)+'</td>')+
         '</tr>';
     }).join("")+'</tbody></table></div></div>';
-  return note + vizCards + kpiGrid + logTable;
+  return note + vizCards + kpiGrid + CG.posSplitTable(CG.posSplit(rows)) + logTable;
 };
 /* Twitch broadcast card on the profile: watch link for everyone; the profile's own
    player also gets Go Live / End Stream + channel controls. Omitted entirely when

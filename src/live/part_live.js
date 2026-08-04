@@ -426,10 +426,12 @@ CG.buildLiveLeague = async function(){
 
   /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
      from the box above via CG.aggregate; these power the advanced leaders + profiles) */
+  lg.posSplitRows = {};   // per-player raw stat lines for the by-position profile split
   if (gameStatsRows.length){
     var finalIds = {}; regResults.forEach(function(r){ finalIds[r.id]=true; });
     gameStatsRows.forEach(function(r){
       if (!finalIds[r.game_id] || !r.profile_id) return;
+      (lg.posSplitRows[r.profile_id] = lg.posSplitRows[r.profile_id] || []).push(r);
       var s = lg.pstats[r.profile_id]; if (!s) return;
       s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
       if (r.is_goalie){
