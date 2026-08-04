@@ -97,6 +97,41 @@ function normalizeMatch(raw) {
 // the combined line (a goalie clean in the resume but scored on in the first sitting has no
 // shutout); the per-game ratings are time-on-ice-weighted rather than summed. The game-winning
 // goal cannot be attributed without goal timings, so it is zeroed rather than guessed.
+/* ---- live EA transport for the fixture desk's on-demand fetch ----
+   KEEP IN SYNC with eaFetch in pickup-import.js — same proxy dance, same reasons:
+   undici's fetch honours `dispatcher` (Node's global fetch silently drops it), a NEW ProxyAgent
+   per attempt = a fresh rotating IP for EA's flaky 403s, and proxyless falls back to global
+   fetch so tests can stub it. */
+const PLATFORM = process.env.PLATFORM || "common-gen5";
+const EA_PROXY = process.env.HTTPS_PROXY;
+const EA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+async function eaFetch(url) {
+  const { ProxyAgent, fetch: uFetch } = await import("undici");
+  const headers = {
+    "User-Agent": EA_UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
+  };
+  let last = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const opts = { headers, signal: AbortSignal.timeout(2800) };
+      if (EA_PROXY) opts.dispatcher = new ProxyAgent(EA_PROXY);
+      const r = await (EA_PROXY ? uFetch : fetch)(url, opts);
+      if (r.ok) return r.json();
+      last = `EA ${r.status}`;
+      if (r.status !== 403) throw new Error(last);
+    } catch (e) { last = String(e.message || e); }
+  }
+  throw new Error(`EA unreachable (${last}${last.includes("403") ? " — EA is throttling; try again in a moment" : ""})`);
+}
+const eaSearchClubs = (name) =>
+  eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);
+const eaClubMatches = (clubId) =>
+  eaFetch(`https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${encodeURIComponent(clubId)}`);
+
 const REGULATION_S = 720;                 // 3 periods x 4 minutes
 const RESUME_WINDOW_S = 3 * 3600;         // segments further apart than this are not one game
 const COMBINED_CAP_S = Math.round(REGULATION_S * 1.7);   // room for OT on the resumed end
@@ -555,29 +590,126 @@ export const handler = async (event) => {
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
-    if (!home || !away || !home.ea_club_id || !away.ea_club_id)
-      return { statusCode: 422, body: JSON.stringify({ error: "Both clubs need their EA club id linked (EA stats tab) before sittings can be found." }) };
+    if (!home || !away) return { statusCode: 422, body: JSON.stringify({ error: "This game's clubs no longer exist." }) };
+    const linked = { home: home.ea_club_id != null, away: away.ea_club_id != null };
+    const gameInfo = { id: game.id, week: game.week, status: game.status, home: home.code, away: away.code,
+      score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null };
+    /* With NEITHER club linked the archive can't be searched at all — tell the desk so it can
+       walk the manager through linking their own club, instead of a dead-end error. */
+    if (!linked.home && !linked.away)
+      return { statusCode: 200, body: JSON.stringify({ role: actor.via, game: gameInfo, linked, needsLink: true, candidates: [] }) };
     const dayS = Math.floor(Date.parse(game.scheduled_at) / 1000);
     const days = [etDayUnix(dayS - 86400), etDayUnix(dayS), etDayUnix(dayS + 86400)];
-    const logRows = await sbGet(`ea_ingest_log?ea_club_ids=cs.{${encodeURIComponent(home.ea_club_id)},${encodeURIComponent(away.ea_club_id)}}` +
+    /* One linked side is enough to find this fixture's sittings: rows containing OUR club id,
+       with the opposing club read out of each payload. The merge re-verifies consistency. */
+    const ourId = linked.home ? String(home.ea_club_id) : String(away.ea_club_id);
+    const containQ = linked.home && linked.away
+      ? `ea_club_ids=cs.{${encodeURIComponent(home.ea_club_id)},${encodeURIComponent(away.ea_club_id)}}`
+      : `ea_club_ids=cs.{${encodeURIComponent(ourId)}}`;
+    const logRows = await sbGet(`ea_ingest_log?${containQ}` +
       `&et_day=in.(${days.map(encodeURIComponent).join(",")})&select=ea_match_id,status,game_id,et_day,payload&order=et_day`);
-    const pair = [String(home.ea_club_id), String(away.ea_club_id)].sort().join("|");
+    const pair = linked.home && linked.away ? [String(home.ea_club_id), String(away.ea_club_id)].sort().join("|") : null;
     const candidates = [];
     for (const row of logRows || []) {
       const nrm = normalizeMatch(row.payload); if (!nrm) continue;
-      if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair) continue;
-      const homeClub = nrm.clubs.find((c) => c.ea_club_id === String(home.ea_club_id));
-      const awayClub = nrm.clubs.find((c) => c.ea_club_id === String(away.ea_club_id));
+      if (pair && nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair) continue;
+      const ourClub = nrm.clubs.find((c) => c.ea_club_id === ourId);
+      const oppClub = nrm.clubs.find((c) => c.ea_club_id !== ourId);
+      if (!ourClub || !oppClub) continue;
+      /* map scores onto the fixture's sides: ourId belongs to whichever side is linked */
+      const ourSideIsHome = linked.home && String(home.ea_club_id) === ourId;
       candidates.push({
         matchId: nrm.ea_match_id, ts: nrm.ts, minutes: Math.round(segElapsed(nrm) / 60),
-        homeScore: homeClub.score, awayScore: awayClub.score, status: row.status,
+        homeScore: ourSideIsHome ? ourClub.score : oppClub.score,
+        awayScore: ourSideIsHome ? oppClub.score : ourClub.score,
+        status: row.status,
+        oppEaName: pair ? null : oppClub.name || null,
+        oppEaId: pair ? null : String(oppClub.ea_club_id),
         attached: row.game_id === game.id || game.ea_match_id === nrm.ea_match_id,
         usedElsewhere: !!(row.game_id && row.game_id !== game.id)
       });
     }
     candidates.sort((x, y) => (x.ts || 0) - (y.ts || 0));
-    return { statusCode: 200, body: JSON.stringify({ role: actor.via, game: { id: game.id, week: game.week, status: game.status,
-      home: home.code, away: away.code, score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null }, candidates }) };
+    return { statusCode: 200, body: JSON.stringify({ role: actor.via, game: gameInfo, linked, candidates }) };
+  }
+
+  /* ---- The live-EA fallback for the fixture desk: when the archive has nothing (the poller
+     wasn't watching, or the club was never linked), management searches EA for their OWN club,
+     links it, and pulls its recent sessions into the archive — after which the normal
+     candidates/merge path takes over. Everything stays scoped to one fixture via authForGame. */
+  if (!authed && body && body.leagueEaSearch) {
+    const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
+    const gameId = String(body.leagueEaSearch.gameId || "");
+    const name = String(body.leagueEaSearch.clubName || "").trim();
+    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id`))[0];
+    if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
+    const actor = await authForGame(jwt, game);
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (name.length < 2) return { statusCode: 400, body: JSON.stringify({ error: "Enter at least 2 characters." }) };
+    const data = await eaSearchClubs(name).catch((e) => ({ __err: e.message }));
+    if (data && data.__err) return { statusCode: 502, body: JSON.stringify({ error: data.__err }) };
+    const list = Array.isArray(data)
+      ? data.map((c) => ({ clubId: String(c.clubId || c.clubInfo?.clubId || ""), name: c.name || c.clubInfo?.name, memberCount: c.memberCount }))
+      : Object.entries(data || {}).map(([clubId, c]) => ({ clubId: String((c && c.clubId) || clubId), name: (c && (c.name || (c.clubInfo && c.clubInfo.name))) || null, memberCount: c && c.memberCount }));
+    return { statusCode: 200, body: JSON.stringify({ clubs: list.filter((c) => c.clubId && c.name).slice(0, 15) }) };
+  }
+
+  if (!authed && body && body.leagueEaLink) {
+    const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
+    const gameId = String(body.leagueEaLink.gameId || "");
+    const clubId = String(body.leagueEaLink.clubId || "").trim();
+    const clubName = String(body.leagueEaLink.clubName || "").trim() || null;
+    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id`))[0];
+    if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
+    const actor = await authForGame(jwt, game);
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!clubId || !/^\d+$/.test(clubId)) return { statusCode: 400, body: JSON.stringify({ error: "Pick a club from the search results." }) };
+    /* Management may link only its OWN club, and only when it isn't linked yet — re-pointing an
+       established linkage would redirect every future auto-import and is a staff decision. */
+    const teamId = actor.via === "management" ? actor.teamId
+      : String(body.leagueEaLink.teamId || "");
+    if (!teamId || (teamId !== game.home_team_id && teamId !== game.away_team_id))
+      return { statusCode: 422, body: JSON.stringify({ error: "That club isn't in this game." }) };
+    const team = (await sbGet(`teams?id=eq.${encodeURIComponent(teamId)}&select=id,code,ea_club_id`))[0];
+    if (!team) return { statusCode: 404, body: JSON.stringify({ error: "No such club." }) };
+    if (team.ea_club_id != null && String(team.ea_club_id) !== clubId)
+      return { statusCode: 422, body: JSON.stringify({ error: `${team.code} is already linked to a different EA club — ask statistics staff to change it.` }) };
+    /* one EA club can back only one league club */
+    const taken = await sbGet(`teams?ea_club_id=eq.${encodeURIComponent(clubId)}&id=neq.${encodeURIComponent(teamId)}&select=code&limit=1`);
+    if (taken[0]) return { statusCode: 422, body: JSON.stringify({ error: `That EA club is already linked to ${taken[0].code}.` }) };
+    if (team.ea_club_id == null) {
+      await sbSend("PATCH", `teams?id=eq.${encodeURIComponent(teamId)}`, { ea_club_id: clubId }, "return=minimal");
+      await tellStaff(`🔗 **EA club linked** — ${actor.who} (${team.code} ${actor.via === "management" ? "management" : "staff"}) linked ${team.code} to EA club “${clubName || clubId}” (${clubId}) from the fixture desk. Auto-imports now cover ${team.code}. Correct it in the Control Center if it's wrong.`);
+    }
+    return { statusCode: 200, body: JSON.stringify({ ok: true, teamCode: team.code, clubId }) };
+  }
+
+  if (!authed && body && body.leagueEaFetch) {
+    const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
+    const gameId = String(body.leagueEaFetch.gameId || "");
+    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id,scheduled_at`))[0];
+    if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
+    const actor = await authForGame(jwt, game);
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
+    /* fetch as the actor's own club when it's linked; otherwise any linked side of the fixture */
+    const mine = actor.via === "management" ? teams.find((t) => t.id === actor.teamId) : null;
+    const src = (mine && mine.ea_club_id != null) ? mine : teams.find((t) => t.ea_club_id != null);
+    if (!src) return { statusCode: 422, body: JSON.stringify({ error: "Link your club's EA club first (search above)." }) };
+    const raw = await eaClubMatches(String(src.ea_club_id)).catch((e) => ({ __err: e.message }));
+    if (raw && raw.__err) return { statusCode: 502, body: JSON.stringify({ error: raw.__err }) };
+    /* Archive everything EA returned, exactly as the poller would — but NEVER clobber a row the
+       pipeline already owns: ignore-duplicates leaves existing status/game_id untouched. */
+    const rows = [];
+    for (const m of Array.isArray(raw) ? raw : []) {
+      const nrm = normalizeMatch(m); if (!nrm) continue;
+      rows.push({ ea_match_id: nrm.ea_match_id, payload: m, et_day: nrm.et_day,
+        ea_club_ids: nrm.clubs.map((c) => c.ea_club_id),
+        status: "unmatched", reason: `fetched on demand from the fixture desk by ${actor.who}`,
+        last_attempt_at: new Date().toISOString() });
+    }
+    if (rows.length) await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", rows, "resolution=ignore-duplicates,return=minimal");
+    return { statusCode: 200, body: JSON.stringify({ ok: true, fetched: rows.length, club: src.code }) };
   }
 
   if (!authed && body && body.leagueMerge) {
@@ -594,8 +726,8 @@ export const handler = async (event) => {
     if (game.voided) return { statusCode: 422, body: JSON.stringify({ error: "That game is voided." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
-    if (!home || !away || !home.ea_club_id || !away.ea_club_id)
-      return { statusCode: 422, body: JSON.stringify({ error: "Both clubs need their EA club id linked first." }) };
+    if (!home || !away || (home.ea_club_id == null && away.ea_club_id == null))
+      return { statusCode: 422, body: JSON.stringify({ error: "Link a club's EA club first — search EA from the fixture page." }) };
     /* the sitting already on the game must be part of the selection — leaving it out would orphan
        a box score the standings already counted */
     if (game.ea_match_id && matchIds.indexOf(String(game.ea_match_id)) < 0)
@@ -605,7 +737,14 @@ export const handler = async (event) => {
       return { statusCode: 404, body: JSON.stringify({ error: "A selected sitting has no archived payload — it was never seen by the poller." }) };
     const stolen = logRows.find((r) => r.game_id && r.game_id !== game.id);
     if (stolen) return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${stolen.ea_match_id} already belongs to another game — it can't be merged here.` }) };
-    const pair = [String(home.ea_club_id), String(away.ea_club_id)].sort().join("|");
+    /* Pair check. Both linked: exact pair. One linked: every selected sitting must contain OUR
+       club and agree on a single opposing club — that consistency is what lets the merge then
+       LINK the opponent from evidence: the payload of the game being attached to this fixture
+       IS the proof of which EA club the opponent is. A manager never asserts the opponent's
+       identity directly. */
+    const bothLinked = home.ea_club_id != null && away.ea_club_id != null;
+    const pair = bothLinked ? [String(home.ea_club_id), String(away.ea_club_id)].sort().join("|") : null;
+    const ourLinked = home.ea_club_id != null ? { team: home, side: "home" } : { team: away, side: "away" };
     /* A club may only merge sittings from its fixture's own night (±1 ET day) — exactly the set
        the desk offered it. Two clubs meet several times a season, so without this a manager
        could graft a different meeting's sitting onto this game. Staff keep the unrestricted
@@ -618,20 +757,39 @@ export const handler = async (event) => {
                  etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000) + 86400)])
       : null;
     const norms = [];
+    let derivedOpp = null;   // {id, name} consistent across every selected sitting
     for (const row of logRows) {
       const nrm = normalizeMatch(row.payload);
       if (!nrm) return { statusCode: 422, body: JSON.stringify({ error: `Couldn't read sitting ${row.ea_match_id}.` }) };
-      if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair)
-        return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} is not between ${home.code} and ${away.code}.` }) };
+      if (pair) {
+        if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair)
+          return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} is not between ${home.code} and ${away.code}.` }) };
+      } else {
+        const ourClub = nrm.clubs.find((c) => c.ea_club_id === String(ourLinked.team.ea_club_id));
+        const oppClub = nrm.clubs.find((c) => c.ea_club_id !== String(ourLinked.team.ea_club_id));
+        if (!ourClub || !oppClub)
+          return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} doesn't involve ${ourLinked.team.code}.` }) };
+        if (derivedOpp && derivedOpp.id !== String(oppClub.ea_club_id))
+          return { statusCode: 422, body: JSON.stringify({ error: "The selected sittings are against different opponents — they can't be one game." }) };
+        derivedOpp = { id: String(oppClub.ea_club_id), name: oppClub.name || null };
+      }
       if (mgmtDays && !mgmtDays.has(nrm.et_day))
         return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} wasn't played around this fixture — statistics staff can merge that one for you.` }) };
       norms.push(nrm);
+    }
+    /* Evidence linkage must not silently re-point an EA club that's already backing another
+       league club — that would let one wrong selection hijack auto-imports elsewhere. */
+    if (derivedOpp) {
+      const clash = await sbGet(`teams?ea_club_id=eq.${encodeURIComponent(derivedOpp.id)}&select=code&limit=1`);
+      if (clash[0]) return { statusCode: 422, body: JSON.stringify({ error: `These sittings are against ${clash[0].code}'s EA club — not this fixture's opponent.` }) };
     }
     norms.sort((x, y) => (x.ts || 0) - (y.ts || 0));
     const merged = norms.length > 1 ? mergeSegments(norms) : norms[0];
     if (merged.error) return { statusCode: 422, body: JSON.stringify({ error: merged.error }) };
     const clubByClubId = Object.fromEntries(merged.clubs.map((c) => [String(c.ea_club_id), c]));
-    const clubByTeam = { [game.home_team_id]: clubByClubId[String(home.ea_club_id)], [game.away_team_id]: clubByClubId[String(away.ea_club_id)] };
+    const homeEaId = home.ea_club_id != null ? String(home.ea_club_id) : derivedOpp.id;
+    const awayEaId = away.ea_club_id != null ? String(away.ea_club_id) : derivedOpp.id;
+    const clubByTeam = { [game.home_team_id]: clubByClubId[homeEaId], [game.away_team_id]: clubByClubId[awayEaId] };
     const rows = await leagueBoxRows(game, clubByTeam);
     await sbSend("DELETE", `game_stats?game_id=eq.${game.id}`);
     if (rows.length) await sbSend("POST", "game_stats", rows, "return=minimal");
@@ -639,8 +797,20 @@ export const handler = async (event) => {
     await sbSend("PATCH", `games?id=eq.${game.id}`,
       { status: "final", home_score: homeClub.score, away_score: awayClub.score,
         ea_match_id: merged.ea_match_id, went_ot: !!merged.went_ot,
+        /* real sittings supersede any forfeit ruling — a game that was actually played is not
+           a forfeit (Rule 3.2's mutual-consent clause) */
+        forfeit_team_id: null,
         home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 },
       "return=minimal");
+    /* Evidence linkage: attaching these sittings to this fixture proves the opponent's EA club.
+       Link it so auto-imports cover them from now on; staff are told either way. */
+    if (derivedOpp) {
+      const oppTeam = home.ea_club_id == null ? home : away;
+      await sbSend("PATCH", `teams?id=eq.${oppTeam.id}`, { ea_club_id: derivedOpp.id }, "return=minimal");
+      await tellStaff(`🔗 **EA club linked by evidence** — merging sittings into ${away.code} @ ${home.code} established that ` +
+        `${oppTeam.code}'s EA club is “${derivedOpp.name || derivedOpp.id}” (${derivedOpp.id}). Auto-imports now cover ${oppTeam.code}. ` +
+        `Correct it in the Control Center if that looks wrong.`);
+    }
     /* provenance: the first sitting owns the game, the rest are merged — the SAME marks the
        automatic path leaves, so its dedupe logic treats this game identically from now on */
     const byWhom = actor.via === "management" ? `${actor.who} (${actor.club} management)` : `${actor.who} (stats staff)`;

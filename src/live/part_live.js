@@ -1459,6 +1459,19 @@ CG._smRenderList = function(body){
         '<button class="btn btn-chrome" id="smLgLoad">Load sittings</button></div></label>'+
         '<div id="smLgOut" style="margin-top:14px"></div>'+
       '</div></div>';
+    /* forfeit rulings: the staff act for no-shows and before-game forfeits (Rule 3.2) */
+    var forfeitCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Forfeit a game</h3><span class="chip chip-warn">Rule 3.2</span></div>'+
+      '<div class="card-b">'+
+      '<p class="caption" style="margin:0 0 12px;max-width:78ch">For a club that didn’t show, couldn’t ice six, or forfeited before the scheduled time. Recorded as a 1–0 regulation win for the club that showed, with no individual player statistics. If the game was actually played after a disconnect, use the lag-out merge instead — and by convention the winning club’s management enters that one themselves from Team HQ.</p>'+
+      '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<select id="smFfGame" style="flex:1;min-width:240px"><option value="">Pick a game…</option>'+lgGames.map(function(g){
+        return '<option value="'+esc(g.id)+'" data-home="'+esc(g.home)+'" data-away="'+esc(g.away)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" · ")+g.away+" @ "+g.home+" · "+CG.fmtDay(g.at)+" · "+(g.status==="final"?"final":"scheduled"))+'</option>';
+      }).join("")+'</select>'+
+      '<select id="smFfTeam" style="min-width:170px"><option value="">Who forfeited?</option></select>'+
+      '<input id="smFfWhy" placeholder="Reason (no-show, couldn’t ice six…)" style="flex:1;min-width:180px">'+
+      '<button class="btn btn-chrome" id="smFfGo">Rule forfeit</button>'+
+      '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button></div></label>'+
+      '</div></div>';
     var listCard = '<div class="card"><div class="card-h"><h3>EA games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
     if (!games.length){
       listCard += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No EA games yet</b><p>Import one above and it will appear here to manage.</p></div></div>';
@@ -1474,7 +1487,54 @@ CG._smRenderList = function(body){
         }).join("")+'</tbody></table></div>';
     }
     listCard += '</div>';
-    body.innerHTML = addCard + leagueCard + listCard;
+    body.innerHTML = addCard + leagueCard + forfeitCard + listCard;
+
+    /* --- wire the forfeit ruling --- */
+    (function(){
+      var gSel = document.getElementById("smFfGame"), tSel = document.getElementById("smFfTeam");
+      var go = document.getElementById("smFfGo"), undo = document.getElementById("smFfUndo");
+      if (!gSel || !tSel) return;
+      gSel.addEventListener("change", function(){
+        var opt = gSel.options[gSel.selectedIndex] || {};
+        var h = opt.getAttribute && opt.getAttribute("data-home"), a = opt.getAttribute && opt.getAttribute("data-away");
+        tSel.innerHTML = '<option value="">Who forfeited?</option>'+
+          (h&&a ? [a,h].map(function(code){
+            var id = (CG.lg && CG.lg._codeToId && CG.lg._codeToId[code]) || "";
+            return '<option value="'+esc(id)+'">'+esc(code)+' forfeited</option>';
+          }).join("") : '');
+      });
+      if (go) go.addEventListener("click", function(){
+        var gid2 = gSel.value, tid2 = tSel.value, why = (document.getElementById("smFfWhy").value||"").trim();
+        if (!gid2 || !tid2){ CG.toast("Pick the fixture and who forfeited","err"); return; }
+        var loser = (tSel.options[tSel.selectedIndex]||{}).textContent || "that club";
+        CG.confirm("Rule this game a forfeit?",
+          loser.replace(" forfeited","")+" takes the forfeit loss. Recorded 1–0 with no player statistics (Rule 3.2); standings update immediately. A later lag-out merge of the real game replaces this ruling.",
+          "Rule forfeit", function(){
+            go.disabled = true;
+            CG.sb.rpc("forfeit_game", { p_game: gid2, p_forfeiting_team: tid2, p_reason: why || null }).then(function(r){
+              go.disabled = false;
+              if (r.error){ CG.toast(r.error.message||"Couldn’t rule the forfeit","err"); return; }
+              CG.toast("Forfeit ruled — 1–0","ok");
+              CG.reloadLeague && CG.reloadLeague();
+            });
+          });
+      });
+      if (undo) undo.addEventListener("click", function(){
+        var gid2 = gSel.value;
+        if (!gid2){ CG.toast("Pick the fixture first","err"); return; }
+        CG.confirm("Undo the forfeit on this game?",
+          "The game returns to scheduled with no result. Use this only for a ruling made in error — a game that was actually played should get a lag-out merge instead.",
+          "Undo forfeit", function(){
+            undo.disabled = true;
+            CG.sb.rpc("unforfeit_game", { p_game: gid2 }).then(function(r){
+              undo.disabled = false;
+              if (r.error){ CG.toast(r.error.message||"Couldn’t undo it","err"); return; }
+              CG.toast("Forfeit undone — game back to scheduled","ok");
+              CG.reloadLeague && CG.reloadLeague();
+            });
+          });
+      });
+    })();
 
     /* --- wire the league lag-out merge --- */
     (function(){
@@ -8553,7 +8613,7 @@ CG.hubGameStats = function(qs){
 CG._gsList = function(el){
   var tid = el.getAttribute("data-team");
   CG.sb.from("games")
-    .select("id,week,stage,scheduled_at,status,home_team_id,away_team_id,home_score,away_score,voided,game_stats(count)")
+    .select("id,week,stage,scheduled_at,status,home_team_id,away_team_id,home_score,away_score,voided,forfeit_team_id,game_stats(count)")
     .or("home_team_id.eq."+tid+",away_team_id.eq."+tid)
     .order("scheduled_at", { ascending:false }).limit(60)
     .then(function(r){
@@ -8572,8 +8632,10 @@ CG._gsList = function(el){
         var lines = (g.game_stats && g.game_stats[0] && g.game_stats[0].count) || 0;
         var at = Date.parse(g.scheduled_at), isFinal = g.status==="final", past = at < CG.now();
         var mine = homeSide ? g.home_score : g.away_score, theirs = homeSide ? g.away_score : g.home_score;
+        var isForfeit = !!g.forfeit_team_id, weForfeited = g.forfeit_team_id===tid;
         var chip, label = null;
         if (g.voided){ chip = '<span class="chip">Voided</span>'; }
+        else if (isForfeit){ chip = '<span class="chip chip-warn">Forfeit</span>'; if (!weForfeited) label = "Enter the played game"; }
         else if (isFinal && lines>0){ chip = '<span class="chip chip-win">Box score in</span>'; label = "Fix a lag-out"; }
         else if (isFinal){ chip = '<span class="chip chip-warn">No box score</span>'; label = "Build the box score"; needsWork++; }
         else if (past){ chip = '<span class="chip chip-warn">Awaiting EA import</span>'; label = "Enter it manually"; needsWork++; }
@@ -8582,7 +8644,7 @@ CG._gsList = function(el){
            W/L there would read as a result the standings never counted */
         var result = (isFinal && !g.voided && mine!=null)
           ? '<b>'+mine+'–'+theirs+'</b>'+(mine===theirs ? '' :
-              ' <span class="chip'+(mine>theirs?' chip-win':' chip-loss')+'" style="font-size:9px">'+(mine>theirs?"W":"L")+'</span>')
+              ' <span class="chip'+(mine>theirs?' chip-win':' chip-loss')+'" style="font-size:9px">'+(isForfeit?"FF ":"")+(mine>theirs?"W":"L")+'</span>')
           : '<span class="caption">—</span>';
         return '<tr><td class="tleft mono" style="font-size:11px;white-space:nowrap">'+esc(CG.fmtDate(g.scheduled_at))+'</td>'+
           '<td class="tleft"><span class="teamcell">'+CG.crest(opp,20)+'<span class="nm">'+(homeSide?"vs ":"@ ")+esc(opp)+'</span></span>'+
@@ -8598,7 +8660,7 @@ CG._gsList = function(el){
         '<div class="card"><div class="card-h"><h3>Your games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>'+
         '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Date</th><th class="tleft">Opponent</th><th>Result</th><th>Box score</th><th class="tright">Lines</th><th class="tright">Manual entry</th></tr></thead>'+
         '<tbody>'+rows+'</tbody></table></div>'+
-        '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Lines” is how many player stat lines the box score holds — a full game is normally 12. A game that lagged out and resumed often imports only its first sitting, which is what the manual rebuild fixes.</span></div></div>';
+        '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Lines” is how many player stat lines the box score holds — a full game is normally 12. A game that lagged out and resumed often imports only its first sitting, which is what the manual rebuild fixes. By league convention, the <b>winning club’s management</b> enters the stats after a forfeit win or a win that followed a disconnect. A game forfeited before its scheduled time, or over a no-show, is ruled by statistics staff (Rule 3.2: recorded 1–0, no player stats).</span></div></div>';
     });
 };
 
@@ -8607,7 +8669,7 @@ CG._gsOne = function(el){
   var gid = el.getAttribute("data-game"), tid = el.getAttribute("data-team");
   var eb = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
   CG.sb.from("games")
-    .select("id,week,stage,scheduled_at,status,home_team_id,away_team_id,home_score,away_score,voided,game_stats(count)")
+    .select("id,week,stage,scheduled_at,status,home_team_id,away_team_id,home_score,away_score,voided,forfeit_team_id,game_stats(count)")
     .eq("id", gid).maybeSingle()
     .then(function(r){
       var g = r && r.data;
@@ -8628,33 +8690,103 @@ CG._gsOne = function(el){
           '<div><span class="caption">Current result</span><div id="gsCurScore" style="font-family:var(--f-disp);font-size:20px">'+
             (g.status==="final" && g.home_score!=null ? esc(g.home_score+"–"+g.away_score)+' <span class="caption" style="font-size:11px">('+esc(idToCode[g.home_team_id]||"home")+' first)</span>' : 'not final yet')+'</div></div>'+
           '<div><span class="caption">Box score lines</span><div id="gsCurLines" style="font-family:var(--f-disp);font-size:20px">'+lines+'</div></div>'+
+          (g.forfeit_team_id ? '<div><span class="caption">Ruling</span><div style="padding-top:5px"><span class="chip chip-warn">Forfeit — '+esc(idToCode[g.forfeit_team_id]||"?")+' did not play</span></div></div>' : '')+
         '</div></div>'+
+        (g.forfeit_team_id ? '<div class="note" style="margin-bottom:14px">This game stands as a 1–0 forfeit (Rule 3.2). If it was actually played — or finished after a disconnect — the winning club’s management enters the real result below, which replaces the forfeit ruling.</div>' : '')+
         '<div id="gsCands"><p class="caption">Looking for this game’s sittings in the EA archive…</p></div>';
-      CG._smLeagueApi({ leagueCandidates: { gameId: gid } }).then(function(o){
+      function loadCands(){
+        var out0 = document.getElementById("gsCands");
+        if (out0) out0.innerHTML = '<p class="caption">Looking for this game’s sittings in the EA archive…</p>';
+        CG._smLeagueApi({ leagueCandidates: { gameId: gid } }).then(function(o){
         var out = document.getElementById("gsCands");
         if (!out) return;
         if (o.error){ out.innerHTML = eb(o.error); return; }
+        /* EA search -> link own club -> pull sessions -> reload the candidate list */
+        function wireEa(){
+          var sBtn = document.getElementById("gsClubSearch"), sOut = document.getElementById("gsClubOut");
+          function doClubSearch(){
+            var q = (document.getElementById("gsClubQ").value||"").trim();
+            if (q.length < 2){ CG.toast("Enter your club’s name","err"); return; }
+            sOut.innerHTML = '<p class="caption">Searching EA…</p>';
+            CG._smLeagueApi({ leagueEaSearch: { gameId: gid, clubName: q } }).then(function(r){
+              if (r.error){ sOut.innerHTML = eb(r.error); return; }
+              var clubs = r.clubs||[];
+              if (!clubs.length){ sOut.innerHTML = '<div class="note">No EA clubs found for “'+esc(q)+'”. Check the spelling — it must match the club name in NHL exactly.</div>'; return; }
+              sOut.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick your club:</div>'+clubs.map(function(c){
+                return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+                  '<div style="flex:1;min-width:0"><b>'+esc(c.name)+'</b>'+(c.memberCount?' <span class="caption">'+esc(String(c.memberCount))+' members</span>':'')+'<div class="caption mono">EA club '+esc(c.clubId)+'</div></div>'+
+                  '<button class="btn btn-chrome btn-sm" data-gslink="'+esc(c.clubId)+'" data-gsname="'+esc(c.name)+'">This is us</button></div></div>';
+              }).join("");
+              sOut.querySelectorAll("[data-gslink]").forEach(function(b){ b.addEventListener("click", function(){
+                var btn=this, cid=btn.getAttribute("data-gslink"), cname=btn.getAttribute("data-gsname");
+                btn.disabled = true; btn.textContent = "Linking…";
+                CG._smLeagueApi({ leagueEaLink: { gameId: gid, clubId: cid, clubName: cname } }).then(function(lr){
+                  if (lr.error){ btn.disabled=false; btn.textContent="This is us"; CG.toast(lr.error,"err"); return; }
+                  CG.toast(lr.teamCode+" linked to “"+cname+"”","ok");
+                  btn.textContent = "Pulling sessions…";
+                  return CG._smLeagueApi({ leagueEaFetch: { gameId: gid } }).then(function(fr){
+                    if (fr && fr.error) CG.toast(fr.error,"err");
+                    else if (fr) CG.toast("Pulled "+fr.fetched+" recent session"+(fr.fetched===1?"":"s")+" from EA","ok");
+                    loadCands();
+                  });
+                }).catch(function(e){ btn.disabled=false; btn.textContent="This is us"; CG.toast(e.message,"err"); });
+              }); });
+            }).catch(function(e){ sOut.innerHTML = eb(e.message); });
+          }
+          if (sBtn){ sBtn.addEventListener("click", doClubSearch);
+            var qEl = document.getElementById("gsClubQ");
+            if (qEl) qEl.addEventListener("keydown", function(ev){ if (ev.key==="Enter") doClubSearch(); }); }
+          var fBtn = document.getElementById("gsFetch");
+          if (fBtn) fBtn.addEventListener("click", function(){
+            var btn=this; btn.disabled = true; btn.textContent = "Checking EA…";
+            CG._smLeagueApi({ leagueEaFetch: { gameId: gid } }).then(function(fr){
+              if (fr.error){ btn.disabled=false; btn.textContent="Check EA again for newer sessions"; CG.toast(fr.error,"err"); return; }
+              CG.toast("Pulled "+fr.fetched+" recent session"+(fr.fetched===1?"":"s")+" from "+fr.club+"’s EA history","ok");
+              loadCands();
+            }).catch(function(e){ btn.disabled=false; btn.textContent="Check EA again for newer sessions"; CG.toast(e.message,"err"); });
+          });
+        }
         var cs = (o.candidates||[]).filter(function(c){ return !c.usedElsewhere; });
         var blocked = (o.candidates||[]).length - cs.length;
+        var lk = o.linked || { home:true, away:true };
+        var myLinked = homeSide ? lk.home : lk.away;
+        /* one-time linkage: until the club is tied to its EASHL club, EA can't be searched */
+        var searchCard = !myLinked
+          ? '<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Find your club on EA</h3><span class="chip">One-time setup</span></div>'+
+            '<div class="card-b"><p class="caption" style="margin:0 0 12px;max-width:78ch">Your club isn’t linked to its EASHL club yet, so EA’s records can’t be searched. Search the exact club name you play under and pick it — this desk then pulls your recent sessions automatically, and from that point on your games import on their own.</p>'+
+            '<label class="fld" style="margin:0"><span>EASHL club name</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
+            '<input id="gsClubQ" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
+            '<button class="btn btn-chrome" id="gsClubSearch">Search EA</button></div></label>'+
+            '<div id="gsClubOut" style="margin-top:12px"></div></div></div>'
+          : '';
+        var fetchBtn = myLinked
+          ? '<div style="margin-top:10px"><button class="btn '+(cs.length?'btn-ghost btn-sm':'btn-chrome')+'" id="gsFetch">'+(cs.length?'Check EA again for newer sessions':'Check EA for this game’s sessions')+'</button></div>'
+          : '';
         if (!cs.length){
-          out.innerHTML = '<div class="note">No EA sittings are archived for this fixture. The poller stores every game EA reports, so nothing here means EA never reported one — check that the game was played on the club’s EASHL club, then ask statistics staff.</div>';
+          out.innerHTML = searchCard +
+            '<div class="note">'+(myLinked
+              ? 'Nothing in the archive for this fixture yet. If the game just ended, EA can take a few minutes — pull your club’s latest sessions below. EA only keeps each club’s last few private matches, so do this soon after playing.'
+              : 'Nothing to show yet — link your club above first.')+'</div>' + fetchBtn;
+          wireEa();
           return;
         }
-        out.innerHTML = '<div class="card"><div class="card-h"><h3>Sittings EA recorded</h3><span class="chip chip-warn">Rebuilds the box score</span></div>'+
+        out.innerHTML = searchCard + '<div class="card"><div class="card-h"><h3>Sittings EA recorded</h3><span class="chip chip-warn">Rebuilds the box score</span></div>'+
           '<div class="card-b">'+
-          '<p class="caption" style="margin:0 0 12px;max-width:78ch">Select every sitting that was part of this one game — the first half and everything played after the lag-out. They are summed into a single final: stats added together, score aggregated, overtime taken from the deciding sitting. Anything already tied to a different game is not shown.</p>'+
+          '<p class="caption" style="margin:0 0 12px;max-width:78ch">Select every sitting that was part of this one game — the first half and everything played after the lag-out, or the single partial sitting if the game ended early on a forfeit. They are summed into a single final: stats added together, score aggregated, overtime taken from the deciding sitting. Anything already tied to a different game is not shown.</p>'+
           cs.map(function(c){
             return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
               '<button type="button" class="chip'+(c.attached?' chip-chrome':'')+'" data-gssel="'+esc(c.matchId)+'" aria-pressed="'+(c.attached?"true":"false")+'" style="cursor:pointer">'+(c.attached?'✓':'—')+'</button>'+
               '<div style="flex:1;min-width:0"><b>'+c.homeScore+' – '+c.awayScore+'</b> <span class="caption">('+esc(o.game.home)+' first)</span>'+
                 (c.minutes?' <span class="chip'+(c.minutes<10?' chip-warn':'')+'" style="font-size:9px">~'+c.minutes+' min</span>':'')+
+                (c.oppEaName?' <span class="chip" style="font-size:9px">vs '+esc(c.oppEaName)+' (EA)</span>':'')+
                 (c.attached?' <span class="chip chip-win" style="font-size:9px">already on this game</span>':'')+
                 '<div class="caption">'+(c.ts?CG.fmtFull(c.ts*1000):'')+'</div></div>'+
             '</div></div>';
           }).join("")+
           '<button class="btn btn-chrome" id="gsMerge" style="margin-top:6px">Combine the selected sittings into this game</button>'+
           (blocked ? '<p class="caption" style="margin-top:10px">'+blocked+' sitting'+(blocked===1?" is":"s are")+' already attached to a different game and can’t be used here.</p>' : '')+
-          '</div></div>';
+          '</div></div>' + fetchBtn;
+        wireEa();
         out.querySelectorAll("[data-gssel]").forEach(function(b){ b.addEventListener("click", function(){
           var on = this.getAttribute("aria-pressed")!=="true";
           this.setAttribute("aria-pressed", on?"true":"false");
@@ -8684,7 +8816,9 @@ CG._gsOne = function(el){
               }).catch(function(e){ btn.disabled = false; btn.textContent = "Combine the selected sittings into this game"; CG.toast(e.message,"err"); });
             });
         });
-      }).catch(function(e){ var out = document.getElementById("gsCands"); if (out) out.innerHTML = eb(e.message); });
+        }).catch(function(e){ var out2 = document.getElementById("gsCands"); if (out2) out2.innerHTML = eb(e.message); });
+      }
+      loadCands();
     });
 };
 

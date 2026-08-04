@@ -42,7 +42,10 @@ const SEATS = [
   { id: "T1", code: "BOS", owner_profile_id: "bos-owner", gm_profile_id: "bos-gm", agm_profile_id: null },
   { id: "T2", code: "TOR", owner_profile_id: "tor-owner", gm_profile_id: null, agm_profile_id: "tor-agm" },
 ];
-const EACLUBS = [{ id: "T1", code: "BOS", ea_club_id: "111" }, { id: "T2", code: "TOR", ea_club_id: "222" }];
+let EA_LINK = { T1: "111", T2: "222" };          // mutable: tests unlink sides
+const eaTeams = () => [{ id: "T1", code: "BOS", ea_club_id: EA_LINK.T1 ?? null }, { id: "T2", code: "TOR", ea_club_id: EA_LINK.T2 ?? null }];
+let EA_SEARCH = [];                                // what proclubs search returns
+let EA_MATCHES = [];                               // what proclubs matches returns
 
 const PROFILES = {
   "bos-gm":     { role: "member", departments: [], gamertag: "BosGM", banned: false },
@@ -55,8 +58,8 @@ const PROFILES = {
 
 let UID = "bos-gm";
 let LOG = [];
-const writes = { statDeletes: 0, statRows: [], gamePatches: [], logPatches: [], webhooks: [] };
-const reset = () => { writes.statDeletes = 0; writes.statRows = []; writes.gamePatches = []; writes.logPatches = []; writes.webhooks = []; };
+const writes = { statDeletes: 0, statRows: [], gamePatches: [], logPatches: [], webhooks: [], teamPatches: [], logInserts: [] };
+const reset = () => { writes.statDeletes = 0; writes.statRows = []; writes.gamePatches = []; writes.logPatches = []; writes.webhooks = []; writes.teamPatches = []; writes.logInserts = []; };
 
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = opts.method || "GET";
@@ -66,8 +69,29 @@ globalThis.fetch = async (url, opts = {}) => {
     const id = decodeURIComponent(u.match(/id=eq\.([^&]+)/)[1]);
     return J(PROFILES[id] ? [PROFILES[id]] : []);
   }
+  if (u.includes("proclubs.ea.com") && u.includes("clubs/search")) return J(EA_SEARCH);
+  if (u.includes("proclubs.ea.com") && u.includes("clubs/matches")) return J(EA_MATCHES);
   if (u.includes("/rest/v1/games?id=eq.g1") && m === "GET") return J([GAME]);
-  if (u.includes("/rest/v1/teams?id=in.")) return J(u.includes("owner_profile_id") ? SEATS : EACLUBS);
+  if (u.includes("/rest/v1/teams?id=in.")) return J(u.includes("owner_profile_id") ? SEATS : eaTeams());
+  if (u.includes("/rest/v1/teams?id=eq.") && m === "GET") {
+    const id = u.match(/id=eq\.([^&]+)/)[1];
+    return J(eaTeams().filter((t) => t.id === id));
+  }
+  if (u.includes("/rest/v1/teams?ea_club_id=eq.") && m === "GET") {
+    const cid = u.match(/ea_club_id=eq\.([^&]+)/)[1];
+    const neq = (u.match(/id=neq\.([^&]+)/) || [])[1];
+    return J(eaTeams().filter((t) => String(t.ea_club_id) === cid && t.id !== neq));
+  }
+  if (u.includes("/rest/v1/teams?id=eq.") && m === "PATCH") {
+    const id = u.match(/id=eq\.([^&]+)/)[1], b = JSON.parse(opts.body);
+    writes.teamPatches.push({ id, body: b });
+    if (b.ea_club_id !== undefined) EA_LINK[id] = b.ea_club_id;
+    return J(null);
+  }
+  if (u.includes("/rest/v1/ea_ingest_log") && m === "POST") {
+    writes.logInserts.push({ prefer: (opts.headers || {}).Prefer, rows: JSON.parse(opts.body) });
+    return J(null);
+  }
   if (u.includes("/rest/v1/app_config")) return J([{ key: "discord_staff_webhook", value: "https://discord.test/hook" }]);
   if (u.startsWith("https://discord.test/hook")) { writes.webhooks.push(JSON.parse(opts.body)); return J(null); }
   if (u.includes("/rest/v1/ea_ingest_log") && m === "GET") return J(LOG);
@@ -164,6 +188,71 @@ console.log("\n— the protections that already existed still hold for managers"
   const orphan = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m2"] } })).body);
   A("dropping the sitting already on the game is still refused", /Include the sitting/.test(orphan.error || ""));
   A("nothing was written by either refusal", writes.statDeletes === 0 && writes.gamePatches.length === 0);
+}
+
+console.log("\n— the live-EA fallback: search, link, fetch");
+{
+  EA_SEARCH = [{ clubId: 900111, name: "Chel Bruins", memberCount: 14 }, { clubId: 900999, name: "Chel Bruins Alumni", memberCount: 6 }];
+  UID = "rando";
+  A("search is gated like everything else", (await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel" } })).statusCode === 401);
+  UID = "bos-gm";
+  const sr = JSON.parse((await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel Bruins" } })).body);
+  A("the manager can search EA by club name", sr.clubs && sr.clubs.length === 2 && sr.clubs[0].name === "Chel Bruins");
+
+  reset(); EA_LINK = { T1: null, T2: null };
+  const lk = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111", clubName: "Chel Bruins" } })).body);
+  A("a manager links their OWN club", lk.ok === true && lk.teamCode === "BOS" && EA_LINK.T1 === "900111");
+  A("...and staff hear about the linkage", writes.webhooks.length === 1 && /Chel Bruins/.test(writes.webhooks[0].content));
+  A("linking is idempotent for the same id", JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111" } })).body).ok === true);
+  const relink = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900222" } })).body);
+  A("re-pointing an established linkage is refused", /already linked to a different EA club/.test(relink.error || ""));
+  UID = "tor-agm";
+  const steal = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111" } })).body);
+  A("one EA club can't back two league clubs", /already linked to BOS/.test(steal.error || ""));
+
+  reset(); UID = "bos-gm";
+  EA_MATCHES = [rawSitting("mNew1", SAME_NIGHT, 1, 0, false, 300), rawSitting("mNew2", SAME_NIGHT_LATER, 2, 1, true, 420)];
+  const fr = JSON.parse((await call({ leagueEaFetch: { gameId: "g1" } })).body);
+  A("the fetch archives what EA returned", fr.ok === true && fr.fetched === 2 && writes.logInserts.length === 1);
+  A("...WITHOUT clobbering rows the pipeline owns", /ignore-duplicates/.test(writes.logInserts[0].prefer));
+  A("...stamped with who pulled them", writes.logInserts[0].rows.every((r2) => /BosGM/.test(r2.reason)));
+  EA_LINK = { T1: null, T2: null };
+  const nofetch = JSON.parse((await call({ leagueEaFetch: { gameId: "g1" } })).body);
+  A("fetching with nothing linked points at the search step", /Link your club/.test(nofetch.error || ""));
+}
+
+console.log("\n— one linked side is enough: the opponent is derived, then proven");
+{
+  EA_LINK = { T1: "111", T2: null };               // TOR never linked
+  LOG = twoSittings();
+  UID = "bos-gm";
+  const res = JSON.parse((await call({ leagueCandidates: { gameId: "g1" } })).body);
+  A("candidates surface from one linked side", res.candidates.length === 2 && res.linked.home === true && res.linked.away === false);
+  A("the opposing EA club is named on each sitting", res.candidates.every((c) => c.oppEaId === "222" && c.oppEaName === "Leafs EA"));
+  A("scores still read home-first", res.candidates[1].homeScore === 2 && res.candidates[1].awayScore === 1);
+
+  reset();
+  const mg = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("the one-sided merge succeeds", mg.ok === true && mg.score === "3-1", mg.error);
+  A("the merge PROVES the opponent's EA club and links it", EA_LINK.T2 === "222" && writes.teamPatches.some((tp) => tp.id === "T2" && tp.body.ea_club_id === "222"));
+  A("...and tells staff about the evidence linkage", writes.webhooks.some((w) => /linked by evidence/.test(w.content)));
+  A("a merge clears any forfeit ruling", writes.gamePatches[0] && writes.gamePatches[0].forfeit_team_id === null);
+}
+{
+  EA_LINK = { T1: "111", T2: null };
+  /* the second sitting is against a DIFFERENT EA club — one game can't have two opponents */
+  LOG = [
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", SAME_NIGHT, 1, 0, false, 300) },
+    { ea_match_id: "mAlien", status: "unmatched", game_id: null, et_day: "2026-10-21",
+      payload: (() => { const r2 = rawSitting("mAlien", SAME_NIGHT_LATER, 2, 1, false, 420);
+        const c = r2.clubs["222"]; delete r2.clubs["222"]; r2.clubs["333"] = c;
+        const p2 = r2.players["222"]; delete r2.players["222"]; r2.players["333"] = p2; return r2; })() },
+  ];
+  reset(); UID = "bos-gm";
+  const mixed = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mAlien"] } })).body);
+  A("sittings against different opponents are refused", /different opponents/.test(mixed.error || ""), mixed.error);
+  A("...and no linkage happened", EA_LINK.T2 === null && writes.teamPatches.length === 0);
+  EA_LINK = { T1: "111", T2: "222" };
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
