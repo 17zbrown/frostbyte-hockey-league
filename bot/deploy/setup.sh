@@ -5,12 +5,15 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo."; exit 1; }
 [ -d /opt/chel-gaming/.git ] || { echo "Clone the repo to /opt/chel-gaming first (see bot/README.md)."; exit 1; }
 
+# Minimal images may lack the basics the rest of this script leans on.
+apt-get update -qq
+apt-get install -y -qq curl git ca-certificates
+
 # Node 22 LTS (NodeSource) if the box doesn't already have Node 20+.
 if ! command -v node >/dev/null 2>&1 || [ "$(node -v | sed 's/v\([0-9]*\).*/\1/')" -lt 20 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
-apt-get install -y git >/dev/null 2>&1 || true
 
 chown -R ubuntu:ubuntu /opt/chel-gaming
 cd /opt/chel-gaming/bot

@@ -44,6 +44,9 @@ never expires. This bot needs a fraction of the smallest slice.
 SSH in as `ubuntu`, then:
 
 ```bash
+# The Minimal Ubuntu image may lack git/curl — install them first
+sudo apt-get update && sudo apt-get install -y git curl
+
 # Clone the repo (create a fine-grained GitHub token with read-only Contents access:
 # GitHub → Settings → Developer settings → Fine-grained tokens, repo: frostbyte-hockey-league)
 sudo mkdir -p /opt/chel-gaming
