@@ -1413,6 +1413,15 @@ CG.AFTER._statsMgr = function(qs){
     else CG._smRenderList(body);
   });
 };
+/* -- league lag-out merge API (the ingest function, staff JWT) -- */
+CG._smLeagueApi = function(payload){
+  return CG.sb.auth.getSession().then(function(sess){
+    var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+    if (!tok) throw new Error("Sign in again — no session token");
+    return fetch("/api/ingest-stats", { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
+      body: JSON.stringify(payload) }).then(function(r){ return r.json(); });
+  });
+};
 /* -- EA import API (same backend the pickup importer uses) -- */
 CG._smApi = function(payload){
   return CG.sb.auth.getSession().then(function(s){
@@ -1434,6 +1443,22 @@ CG._smRenderList = function(body){
         '<div id="smSearchOut" style="margin-top:14px"></div>'+
         '<p class="caption" style="margin-top:12px">EA keeps only each club’s last few private matches, so import soon after the game. The box score attaches to matched profiles by their EA ID.</p>'+
       '</div></div>';
+    /* league lag-out merge: pick the fixture, pick its sittings, rebuild the box score as one.
+       Candidates come from the poller's archive, so this works even after EA's history ages out. */
+    var lgGames = (CG.lg && CG.lg.schedule || []).filter(function(g){
+      return !g.voided && Math.abs(g.at - CG.now()) < 5*86400000;
+    }).sort(function(x,y){ return Math.abs(x.at-CG.now()) - Math.abs(y.at-CG.now()); }).slice(0,40)
+      .sort(function(x,y){ return x.at - y.at; });
+    var leagueCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League lag-out merge</h3><span class="chip chip-warn">Rebuilds a box score</span></div>'+
+      '<div class="card-b">'+
+        '<p class="caption" style="margin:0 0 12px;max-width:78ch">A disconnected league game merges on its own when the resumed sitting arrives back-to-back. When it can\u2019t \u2014 sittings too far apart, a missed poll, or a wrong call \u2014 pick the fixture, select every sitting that belongs to it, and the box score is rebuilt as one game: stats summed, score aggregated, overtime from the deciding sitting.</p>'+
+        '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<select id="smLgGame" style="flex:1;min-width:240px"><option value="">Pick a game\u2026</option>'+lgGames.map(function(g){
+          return '<option value="'+esc(g.id)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" \u00b7 ")+g.away+" @ "+g.home+" \u00b7 "+CG.fmtDay(g.at)+" \u00b7 "+(g.status==="final"?"final":"scheduled"))+'</option>';
+        }).join("")+'</select>'+
+        '<button class="btn btn-chrome" id="smLgLoad">Load sittings</button></div></label>'+
+        '<div id="smLgOut" style="margin-top:14px"></div>'+
+      '</div></div>';
     var listCard = '<div class="card"><div class="card-h"><h3>EA games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
     if (!games.length){
       listCard += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No EA games yet</b><p>Import one above and it will appear here to manage.</p></div></div>';
@@ -1449,7 +1474,62 @@ CG._smRenderList = function(body){
         }).join("")+'</tbody></table></div>';
     }
     listCard += '</div>';
-    body.innerHTML = addCard + listCard;
+    body.innerHTML = addCard + leagueCard + listCard;
+
+    /* --- wire the league lag-out merge --- */
+    (function(){
+      var loadBtn = document.getElementById("smLgLoad"), out = document.getElementById("smLgOut");
+      if (!loadBtn || !out) return;
+      var eb = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
+      loadBtn.addEventListener("click", function(){
+        var gid = (document.getElementById("smLgGame")||{}).value;
+        if (!gid){ CG.toast("Pick a fixture first","err"); return; }
+        out.innerHTML = '<p class="caption">Loading the archived sittings\u2026</p>';
+        CG._smLeagueApi({ leagueCandidates: { gameId: gid } }).then(function(o){
+          if (o.error){ out.innerHTML = eb(o.error); return; }
+          var cs = o.candidates||[];
+          if (!cs.length){ out.innerHTML = '<div class="note">No archived EA sittings between these clubs around this fixture. The poller archives everything it sees \u2014 nothing here means EA never reported a game.</div>'; return; }
+          out.innerHTML = '<div class="caption" style="margin-bottom:8px">'+esc(o.game.away+" @ "+o.game.home)+(o.game.score?' \u00b7 currently '+esc(o.game.score):'')+' \u2014 select every sitting of this game:</div>'+
+            cs.map(function(c){
+              var dis = c.usedElsewhere;
+              return '<div class="card" style="margin-bottom:8px'+(dis?';opacity:.55':'')+'"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+                '<button type="button" class="chip'+(c.attached?' chip-chrome':'')+'" data-lgsel="'+esc(c.matchId)+'" aria-pressed="'+(c.attached?"true":"false")+'"'+(dis?' disabled':'')+' style="cursor:pointer">'+(c.attached?'\u2713':'\u2014')+'</button>'+
+                '<div style="flex:1;min-width:0"><b>'+c.homeScore+' \u2013 '+c.awayScore+'</b> <span class="caption">('+esc(o.game.home)+' first)</span>'+
+                  (c.minutes?' <span class="chip'+(c.minutes<10?' chip-warn':'')+'" style="font-size:9px">~'+c.minutes+' min</span>':'')+
+                  '<span class="chip" style="font-size:9px">'+esc(c.status)+'</span>'+
+                  (c.attached?' <span class="chip chip-win" style="font-size:9px">on this game</span>':'')+
+                  (dis?' <span class="chip chip-loss" style="font-size:9px">another game\u2019s</span>':'')+
+                  '<div class="caption">'+(c.ts?CG.fmtFull(c.ts*1000):'')+'</div></div>'+
+              '</div></div>';
+            }).join("")+
+            '<button class="btn btn-chrome" id="smLgMerge" style="margin-top:6px">Merge selected into this game</button>';
+          out.querySelectorAll("[data-lgsel]").forEach(function(b2){ b2.addEventListener("click", function(){
+            var on = this.getAttribute("aria-pressed")!=="true";
+            this.setAttribute("aria-pressed", on?"true":"false");
+            this.classList.toggle("chip-chrome", on);
+            this.textContent = on ? "\u2713" : "\u2014";
+          }); });
+          var mgo = document.getElementById("smLgMerge");
+          if (mgo) mgo.addEventListener("click", function(){
+            var ids = [].slice.call(out.querySelectorAll('[data-lgsel][aria-pressed="true"]')).map(function(x){ return x.getAttribute("data-lgsel"); });
+            if (!ids.length){ CG.toast("Select at least one sitting","err"); return; }
+            var btn2 = this;
+            CG.confirm("Rebuild this game from "+ids.length+" sitting"+(ids.length===1?"":"s")+"?",
+              "The existing box score is REPLACED by the merge \u2014 stats summed, score aggregated, overtime from the deciding sitting. Standings and profiles update immediately.",
+              "Merge", function(){
+              btn2.disabled = true; btn2.textContent = "Merging\u2026";
+              CG._smLeagueApi({ leagueMerge: { gameId: gid, matchIds: ids } }).then(function(r2){
+                btn2.disabled = false; btn2.textContent = "Merge selected into this game";
+                if (r2.error){ CG.toast(r2.error,"err"); return; }
+                out.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Merged.</b> '+r2.sittings+' sitting'+(r2.sittings===1?"":"s")+' \u2192 final '+esc(r2.score)+(r2.wentOt?" (OT)":"")+' \u00b7 '+r2.players+' player lines ('+r2.linked+' linked to profiles).</div>';
+                CG.toast("Game rebuilt from "+r2.sittings+" sittings","ok");
+                CG.reloadLeague && CG.reloadLeague();
+              }).catch(function(e2){ btn2.disabled = false; btn2.textContent = "Merge selected into this game"; CG.toast(e2.message,"err"); });
+            });
+          });
+        }).catch(function(e){ out.innerHTML = eb(e.message); });
+      });
+    })();
 
     /* --- wire the search flow --- */
     var out = document.getElementById("smSearchOut");
