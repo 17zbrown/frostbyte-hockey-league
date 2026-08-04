@@ -1219,6 +1219,28 @@ export default async (req) => {
   // (its role + commissioners) instead of the category default (all staff).
   try { await ensureStaffDepartments(guildChannels, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
   try { await ensureGuildCommands(sum); } catch (e) { sum.errors.push({ commands: String(e.message || e) }); }
+  /* One-shot Discord reap: when a club is removed from the league, its role and channel objects
+     outlive the database row — the sync creates guild furniture but deliberately never deletes any
+     on its own. The commissioner tooling writes the ids to reap into app_config (discord_reap:
+     {"roles":[],"channels":[]}); this consumes the list, deletes exactly those ids, and clears the
+     key. Explicit ids only — this must never infer what to delete. */
+  try {
+    const reapCfg = await sbGet(`app_config?key=eq.discord_reap&select=value`);
+    if (reapCfg && reapCfg[0] && reapCfg[0].value) {
+      const reap = JSON.parse(reapCfg[0].value);
+      for (const rid of (reap.roles || [])) {
+        try { await dApi("DELETE", `/guilds/${GUILD}/roles/${rid}`); sum.reapedRoles = (sum.reapedRoles || 0) + 1; }
+        catch (e) { sum.errors.push({ reapRole: rid, error: String(e.message || e) }); }
+      }
+      for (const cid of (reap.channels || [])) {
+        try { await dApi("DELETE", `/channels/${cid}`); sum.reapedChannels = (sum.reapedChannels || 0) + 1; }
+        catch (e) { sum.errors.push({ reapChannel: cid, error: String(e.message || e) }); }
+      }
+      /* consumed — errors above are surfaced but do NOT re-run forever on a dead id (dApi maps
+         404 to null, so an already-gone object counts as reaped) */
+      await fetch(`${SB_URL}/rest/v1/app_config?key=eq.discord_reap`, { method: "DELETE", headers: sbHead() });
+    }
+  } catch (e) { sum.errors.push({ reap: String(e.message || e) }); }
   /* the commissioner-only departures room, and its id for the announcer further down */
   try { const dch = await ensureDeparturesChannel(guildChannels, roleId, sum); if (dch && dch.id) sum.__departChanId = dch.id; }
   catch (e) { sum.errors.push({ departChan: String(e.message || e) }); }
