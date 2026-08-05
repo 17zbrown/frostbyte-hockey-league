@@ -514,14 +514,14 @@ CG.ROUTES.matchup = function(id){
          ["Mode","EASHL 6v6 · Club Private"],
          ["Grudge Match","Off"],
          ["Allow Replay Skips","On"],
-         ["Periods","3 × 5:00"],
-         ["Overtime","3v3 · 5:00, then SO (v1.2)"],
-         ["Host","Home club creates lobby"],
+         ["Periods","3 × 4:00"],
+         ["Overtime","Continuous 4:00 periods — no shootout"],
+         ["Sides","Match the site: the club listed Home selects Home, Away selects Away"],
          ["Streaming", g.stage==="playoff" ? "Required — at least one stream per club" : "Optional in the regular season"]].map(function(kv){
           return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px"><span style="color:var(--steel)">'+kv[0]+'</span><b style="text-align:right">'+kv[1]+'</b></div>';
         }).join("")+
         '<p class="caption" style="margin-top:10px">The server resolves from both clubs’ private picks 30 minutes before the night’s first puck drop — home names two choices, away holds a veto. Playoff games require at least one stream per club.'+
-        (g.stage==="playoff" ? ' Playoff rosters: no skater may appear in more than four games of this series — goaltenders are exempt (Rule 8.3).' : '')+
+        (g.stage==="playoff" ? ' Playoff rosters: a skater may be dressed in at most three games of this series, a goaltender in six (Rule 8.3).' : '')+
         ' <a href="#/rulebook?rule=4.1" style="border-bottom:2px solid var(--chrome);font-weight:600">Rule 4 →</a></p></div></div>'+
       '<div class="card"><div class="card-h"><h3>Broadcast</h3>'+(g.feature?'<span class="chip chip-live"><span class="live-dot"></span>Twitch flag armed</span>':"")+'</div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel)">'+(g.feature?"Tonight’s marquee stream goes live 15 minutes before puck drop on the league channel. Twitch sync flags this card LIVE automatically the moment a rostered player starts streaming.":"No league stream scheduled — if a rostered player goes live on Twitch, this card flags LIVE automatically (5-minute sync).")+'</p>'+

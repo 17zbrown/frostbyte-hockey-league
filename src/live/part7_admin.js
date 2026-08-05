@@ -129,7 +129,7 @@ CG.AFTER._admResults = function(){
       CG.modal("Enter final — "+CG.TEAM[g.away].code+" @ "+CG.TEAM[g.home].code,
         '<div class="grid g2"><label class="fld"><span>'+esc(CG.TEAM[g.away].name)+' (away)</span><input type="number" id="rsA" min="0" max="15" value="2"></label>'+
         '<label class="fld"><span>'+esc(CG.TEAM[g.home].name)+' (home)</span><input type="number" id="rsH" min="0" max="15" value="3"></label></div>'+
-        '<label class="check"><input type="checkbox" id="rsOT"><span>Decided in overtime / shootout (loser gets 1 point)</span></label>'+
+        '<label class="check"><input type="checkbox" id="rsOT"><span>Decided in overtime (loser gets 1 point)</span></label>'+
         '<p class="caption" style="margin-top:10px">A legal box score is synthesized around this line: goals distributed to the confirmed lineup, goalie saves reconciled, three stars picked. In production, staff enter or import the full box.</p>',
         '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="rsSave">Record final</button>');
       $("#rsSave").addEventListener("click", function(){
@@ -186,8 +186,8 @@ CG.AFTER._admCodes = function(){
 /* ---------- server presets ---------- */
 CG.admPresets = function(){
   var presets = [
-    { name:"League Night", assigned:"All regular-season games", set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 5:00"],["OT","3v3 5:00 → SO"],["Host","Home club"],["Pauses","2 per club"],["Streaming","Both goalie POVs"]] },
-    { name:"Playoff Standard", assigned:"Weeks 11+ (playoffs)", set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 6:00"],["OT","5v5 continuous"],["Host","Higher seed"],["Pauses","1 per club"],["Streaming","League broadcast + POVs"]] }
+    { name:"League Night", assigned:"All regular-season games", set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 4:00"],["OT","Continuous 4:00 — no shootout"],["Sides","Home selects Home, Away selects Away"],["Pauses","2 per club"],["Streaming","Both goalie POVs"]] },
+    { name:"Playoff Standard", assigned:"Playoff weeks", set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 4:00"],["OT","Continuous 4:00 — no shootout"],["Sides","Home selects Home, Away selects Away"],["Pauses","1 per club"],["Streaming","League broadcast + POVs"]] }
   ];
   return '<div class="grid g2">'+presets.map(function(p,i){
     return '<div class="card"><div class="card-h"><h3>'+p.name+'</h3><span class="chip'+(i===0?" chip-chrome":"")+'">'+(i===0?"Active default":"Scheduled")+'</span></div>'+

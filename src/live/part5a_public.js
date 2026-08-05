@@ -1533,7 +1533,7 @@ CG.ROUTES.standings = function(param, qs){
   /* playoff bracket — real series once the postseason is live, otherwise the
      Rule 8.1 projection from today's table. Clinched clubs get a lock icon. */
   var bracket = (view!=="preseason" && CG.TEAMS.length >= 6) ? CG.playoffBracket() : "";
-  var legend = '<p class="caption" style="margin-top:16px">GP games played · W wins · L regulation losses · OTL overtime/shootout losses · GF/GA goals for/against · DIFF goal differential · L5 last five · STRK streak · PTS points.</p>';
+  var legend = '<p class="caption" style="margin-top:16px">GP games played · W wins · L regulation losses · OTL overtime losses · GF/GA goals for/against · DIFF goal differential · L5 last five · STRK streak · PTS points.</p>';
   return head + '<div class="shell" style="padding-bottom:40px">'+bracket+body+legend+'</div>';
 };
 CG.AFTER.standings = function(param, qs){
