@@ -737,22 +737,42 @@ async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
    inherited by a role recreated from the @everyone template, is corrected within two minutes
    rather than discovered after a 3am mass ping.
 
-   KEPT deliberately: Commissioner and Staff (the league office), Media (media-only staff no
-   longer wear the Staff role, so their own role has to carry it), and managed integration roles
-   the API refuses to edit — except the premium-subscriber role, which is managed but editable
-   and would otherwise let anyone buy a megaphone with a boost. */
+   KEPT deliberately: Commissioner and Staff — the two roles Rule 1.3 names — and managed
+   integration roles the API refuses to edit, except the premium-subscriber role, which is managed
+   but editable and would otherwise let anyone buy a megaphone with a boost.
+
+   MEDIA WAS ONCE KEPT AND IS NOT ANYMORE. Media-only staffers wear only the Media role (they were
+   deliberately taken off the Staff role), so exempting Media handed the megaphone to someone
+   carrying neither Commissioner nor Staff — exactly what this guard exists to stop, and it went
+   unnoticed because the role audit looked clean while the wearer list did not. Rule 1.3 already
+   said "only commissioners and league staff"; the code was the thing that was wrong. */
 /* BigInt is load-bearing, not style: Discord permissions are a 64-bit bitfield and JavaScript's
    bitwise operators coerce to INT32. `2248473465835073 & ~(1<<17)` evaluates to -2043294143 —
    writing that back would not clear one bit, it would rewrite the role's entire permission set
    with garbage. Every value here stays a BigInt until it is stringified for the API. */
 const MENTION_EVERYONE = 1n << 17n;
-const MENTION_ALLOWED = new Set(["commissioner", "staff", "media"]);
+/* ADMINISTRATOR implies EVERY permission, so a role holding it can ping the whole server without
+   bit 17 ever being set. Stripping bit 17 from such a role would change nothing and hide the fact.
+   This guard therefore cannot enforce the policy against an admin role — so it REPORTS them
+   (sum.mentionViaAdmin) rather than pretending the server is clean. Commissioner is admin by
+   design; anything else appearing there is a real finding. */
+const ADMINISTRATOR = 1n << 3n;
+/* Exactly the two the rulebook names (Rule 1.3). Media is NOT here: a media-only staffer wears
+   only the Media role in Discord, and exempting that role let someone with no Commissioner or
+   Staff role ping the entire server — which is the thing this guard exists to prevent. Media asks
+   the office to post, like everyone else. */
+const MENTION_ALLOWED = new Set(["commissioner", "staff"]);
 async function enforceMentionPolicy(guildRoles, sum) {
   for (const r of guildRoles || []) {
     let perms;
     try { perms = BigInt(r.permissions || 0); } catch (e) { continue; }
+    const name0 = String(r.name || "").toLowerCase();
+    /* surfaced whether or not bit 17 is set — an admin role bypasses this policy entirely */
+    if ((perms & ADMINISTRATOR) !== 0n && !MENTION_ALLOWED.has(name0) && !r.managed) {
+      sum.mentionViaAdmin = (sum.mentionViaAdmin || []).concat(r.name);
+    }
     if ((perms & MENTION_EVERYONE) === 0n) continue;
-    const name = String(r.name || "").toLowerCase();
+    const name = name0;
     if (MENTION_ALLOWED.has(name)) continue;
     /* the bot's OWN integration role must keep it — the bot posts league-wide announcements —
        and Discord refuses PATCH on integration roles anyway. The booster role is managed but

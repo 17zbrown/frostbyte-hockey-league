@@ -162,15 +162,39 @@ console.log("\n— @everyone belongs to the league office only");
   A("boosting the server does not buy a megaphone", hit("Server Booster"));
   A("commissioners keep it", !hit("Commissioner"));
   A("staff keep it", !hit("Staff"));
-  A("media staff keep it — they don't wear the Staff role", !hit("Media"));
+  /* Media WAS exempt and must not be again: a media-only staffer wears the Media role and NEITHER
+     Commissioner nor Staff, so exempting it handed the megaphone to exactly the people Rule 1.3
+     excludes. Found in production by listing who WORE the roles, not which roles held the bit. */
+  A("media loses it — a media-only staffer wears neither Commissioner nor Staff", hit("Media"));
   A("the bot's own integration role is left alone", !hit("Chel Gaming"));
   A("a role that never had it is not touched", !hit("Player"));
-  A("the count is reported", sum.mentionStripped === 4);
+  A("the count is reported", sum.mentionStripped === 5);
   A("only the mention bit is cleared, other permissions survive",
     patched.every((p) => BigInt(p.perms) === BASE));
   A("...and the value is NOT 32-bit truncated (permissions are 64-bit)",
     patched.every((p) => BigInt(p.perms) > 4294967295n));
   A("nothing errored", sum.errors.length === 0);
+
+  /* ADMINISTRATOR implies every permission, so a role holding it can ping without bit 17. The
+     guard cannot strip its way out of that — it must at least say so rather than report a clean
+     server. This is the blind spot that made the Media leak invisible in the role audit. */
+  A("an admin role is named as able to bypass the policy",
+    (sum.mentionViaAdmin || []).includes("Commissioner") === false);
+  {
+    const ADMIN = 1n << 3n;
+    const sumA = { errors: [] };
+    await I.enforceMentionPolicy([
+      role("Commissioner", GRANTED | ADMIN),          // admin by design, allow-listed
+      role("Chel Gaming", GRANTED | ADMIN, true),     // managed integration role, expected
+      role("Tournament Host", (GRANTED & ~ME) | ADMIN), // NOT allow-listed: can ping via admin
+    ], sumA);
+    A("a non-office admin role is reported as a bypass",
+      (sumA.mentionViaAdmin || []).includes("Tournament Host"));
+    A("...and the office's own admin role is not noise",
+      !(sumA.mentionViaAdmin || []).includes("Commissioner"));
+    A("...nor is the bot's managed integration role",
+      !(sumA.mentionViaAdmin || []).includes("Chel Gaming"));
+  }
 
   /* second sweep over the corrected list is a no-op */
   patched.length = 0;
