@@ -1443,7 +1443,7 @@ CG._smRenderList = function(body){
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="smClub" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
         '<button class="btn btn-chrome" id="smSearch">Search EA</button></div></label>'+
         '<div id="smSearchOut" style="margin-top:14px"></div>'+
-        '<p class="caption" style="margin-top:12px">EA keeps only each club’s last few private matches, so import soon after the game. The box score attaches to matched profiles by their EA ID.</p>'+
+        '<p class="caption" style="margin-top:12px">EA keeps only each club’s last few private matches, so import soon after the game. The box score attaches to matched profiles by their EA ID. If a game lagged out, tick every session it was played across and use <b>Import as one game</b>.</p>'+
       '</div></div>';
     /* league lag-out merge: pick the fixture, pick its sittings, rebuild the box score as one.
        Candidates come from the poller's archive, so this works even after EA's history ages out. */
@@ -1616,25 +1616,62 @@ CG._smRenderList = function(body){
         if (o.error){ out.innerHTML = errBox(o.error); return; }
         var ms = o.matches||[];
         if (!ms.length){ out.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'.</div>'; return; }
-        out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import:</div>'+ms.map(function(m){
+        /* Selection toggles mirror #/pickup-import: one game imports on its own button, or tick
+           several sessions of a lagged-out game and combine them into one. KEEP IN SYNC. */
+        out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import — or <b>select several sessions</b> of a lagged-out game and import them as one:</div>'+ms.map(function(m){
           var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
+          var shortChip = (m.minutes && m.minutes < 45) ? ' <span class="chip chip-warn" title="Well under a full game — likely one session of a lagged-out game">~'+m.minutes+' min</span>' : '';
           return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-            '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+(+m.a.score||0)+' – '+(+m.b.score||0)+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+'<div class="caption">'+esc(when)+'</div></div>'+
+            '<button type="button" class="chip" data-smsel="'+esc(m.matchId)+'" aria-pressed="false" style="cursor:pointer" title="Select this session to merge with another">—</button>'+
+            '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+(+m.a.score||0)+' – '+(+m.b.score||0)+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+shortChip+'<div class="caption">'+esc(when)+'</div></div>'+
             '<button class="btn btn-chrome btn-sm" data-import="'+esc(m.matchId)+'" data-cid="'+esc(cid)+'">Import</button></div></div>';
-        }).join("");
+        }).join("")+
+        '<div id="smMergeBar" style="display:none;position:sticky;bottom:12px;margin-top:10px"><div class="card"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+          '<span style="flex:1"><b id="smMergeCount" style="font-family:var(--f-disp)"></b><span class="caption" style="display:block">Lagged out mid-game? Selected sessions combine into ONE game — stats summed, score aggregated, overtime from the deciding session only.</span></span>'+
+          '<button class="btn btn-chrome btn-sm" id="smMergeGo" data-cid="'+esc(cid)+'">Import as one game</button></div></div></div>';
+        var picked = {};
+        function syncBar(){
+          var ids = Object.keys(picked), bar = document.getElementById("smMergeBar");
+          if (bar) bar.style.display = ids.length >= 2 ? "" : "none";
+          var c = document.getElementById("smMergeCount");
+          if (c) c.textContent = ids.length + " sessions selected";
+        }
+        out.querySelectorAll("[data-smsel]").forEach(function(b){ b.addEventListener("click", function(){
+          var id = this.getAttribute("data-smsel");
+          var on = this.getAttribute("aria-pressed") !== "true";
+          if (on && Object.keys(picked).length >= 4){ CG.toast("Four sessions is the limit for one merge","err"); return; }
+          this.setAttribute("aria-pressed", on ? "true" : "false");
+          this.classList.toggle("chip-chrome", on);
+          this.textContent = on ? "\u2713" : "\u2014";
+          if (on) picked[id] = 1; else delete picked[id];
+          syncBar();
+        }); });
+        var mg = document.getElementById("smMergeGo");
+        if (mg) mg.addEventListener("click", function(){
+          var ids = Object.keys(picked);
+          if (ids.length < 2){ CG.toast("Select at least two sessions to merge","err"); return; }
+          doImport(this, ids);
+        });
         out.querySelectorAll("[data-import]").forEach(function(b){ b.addEventListener("click", function(){ doImport(this); }); });
       }).catch(function(e){ out.innerHTML = errBox(e.message); });
     }
-    function doImport(btn){
-      var mid = btn.getAttribute("data-import"), cid = btn.getAttribute("data-cid");
+    function doImport(btn, mergeIds){
+      var cid = btn.getAttribute("data-cid");
+      var payload = mergeIds && mergeIds.length
+        ? { action:"import", clubId:cid, matchIds:mergeIds }
+        : { action:"import", clubId:cid, matchId:btn.getAttribute("data-import") };
+      var was = btn.textContent;
       btn.disabled = true; btn.textContent = "Importing…";
-      CG._smApi({ action:"import", clubId:cid, matchId:mid }).then(function(o){
-        btn.disabled = false; btn.textContent = "Import";
+      CG._smApi(payload).then(function(o){
+        btn.disabled = false; btn.textContent = was;
         if (o.error){ CG.toast(o.error,"err"); return; }
         var players = o.players||[], matched = players.filter(function(p){ return p.matched; }).length;
-        CG.toast("Imported — "+matched+"/"+players.length+" players matched","ok");
+        var sessions = o.sessions||1;
+        CG.toast(sessions > 1
+          ? sessions+" sessions merged into one game — "+matched+"/"+players.length+" players matched"
+          : "Imported — "+matched+"/"+players.length+" players matched", "ok");
         CG.router();
-      }).catch(function(e){ btn.disabled = false; btn.textContent = "Import"; CG.toast("Import failed: "+e.message,"err"); });
+      }).catch(function(e){ btn.disabled = false; btn.textContent = was; CG.toast("Import failed: "+e.message,"err"); });
     }
     var sbtn = document.getElementById("smSearch"); if (sbtn) sbtn.addEventListener("click", doSearch);
     var sinp = document.getElementById("smClub"); if (sinp) sinp.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); doSearch(); } });
