@@ -729,6 +729,44 @@ async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
 // reaching for a higher slot. Discord refuses to move any role above the bot's own, and a
 // permutation can never ask for that, so this can't fail on hierarchy no matter where the bot sits.
 // Runs every sync, so a club role created a minute ago is in the right place on the next tick.
+/* ---------- @everyone / @here is the league office's alone ----------
+   MENTION_EVERYONE (bit 17) also covers @here and all-role pings, so a single role holding it
+   hands every wearer a server-wide megaphone. Every registered player wears a position role and
+   every staffer a department role, so a stray grant on any of those is effectively a grant to
+   the whole league. This re-strips it on every sweep: a permission changed by hand in the UI, or
+   inherited by a role recreated from the @everyone template, is corrected within two minutes
+   rather than discovered after a 3am mass ping.
+
+   KEPT deliberately: Commissioner and Staff (the league office), Media (media-only staff no
+   longer wear the Staff role, so their own role has to carry it), and managed integration roles
+   the API refuses to edit — except the premium-subscriber role, which is managed but editable
+   and would otherwise let anyone buy a megaphone with a boost. */
+/* BigInt is load-bearing, not style: Discord permissions are a 64-bit bitfield and JavaScript's
+   bitwise operators coerce to INT32. `2248473465835073 & ~(1<<17)` evaluates to -2043294143 —
+   writing that back would not clear one bit, it would rewrite the role's entire permission set
+   with garbage. Every value here stays a BigInt until it is stringified for the API. */
+const MENTION_EVERYONE = 1n << 17n;
+const MENTION_ALLOWED = new Set(["commissioner", "staff", "media"]);
+async function enforceMentionPolicy(guildRoles, sum) {
+  for (const r of guildRoles || []) {
+    let perms;
+    try { perms = BigInt(r.permissions || 0); } catch (e) { continue; }
+    if ((perms & MENTION_EVERYONE) === 0n) continue;
+    const name = String(r.name || "").toLowerCase();
+    if (MENTION_ALLOWED.has(name)) continue;
+    /* the bot's OWN integration role must keep it — the bot posts league-wide announcements —
+       and Discord refuses PATCH on integration roles anyway. The booster role is managed but
+       editable, so it is not exempt. */
+    if (r.managed && name !== "server booster") continue;
+    const cleared = (perms & ~MENTION_EVERYONE).toString();
+    try {
+      await dApi("PATCH", `/guilds/${GUILD}/roles/${r.id}`, { permissions: cleared });
+      sum.mentionStripped = (sum.mentionStripped || 0) + 1;
+      r.permissions = cleared;
+    } catch (e) { sum.errors.push({ mentionPolicy: r.name, error: String(e.message || e) }); }
+  }
+}
+
 async function ensureRoleOrder(guildRoles, teams, roleId, sum) {
   const byId = new Map(guildRoles.map((r) => [r.id, r]));
   // @everyone shares the guild id and integration-managed roles can't be moved at all
@@ -1206,6 +1244,9 @@ export default async (req) => {
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
+  /* @everyone/@here stays with the league office — re-checked every sweep, not just once */
+  try { await enforceMentionPolicy(guildRoles, sum); }
+  catch (e) { sum.errors.push({ mentionPolicy: String(e.message || e) }); }
   const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
   const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
   const roleId = {};
@@ -1717,6 +1758,7 @@ export default async (req) => {
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
+        mentionStripped: sum.mentionStripped || 0,
         pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
@@ -1728,4 +1770,5 @@ export default async (req) => {
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
-export const _internals = { trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY };
+export const _internals = { trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
+  enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };

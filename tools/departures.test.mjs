@@ -123,5 +123,61 @@ console.log("\n— a failed write does not half-report");
   failMemberWrite = false;
 }
 
+console.log("\n— @everyone belongs to the league office only");
+{
+  /* BigInt throughout: a real permission bitfield does not fit in the 32 bits JS bitwise ops use,
+     and computing the fixture with `|` would have quietly agreed with a broken implementation. */
+  const ME = I.MENTION_EVERYONE;              // 1n << 17n
+  const role = (name, perms, managed) => ({ id: "r-" + name, name, permissions: String(perms), managed: !!managed });
+  /* the real league-role bitfield ALREADY carries the mention bit — deriving the clean baseline
+     from it (rather than reusing it) is what makes the "never had it" case meaningful */
+  const GRANTED = 2248473465835073n;          // a real league role, as it was found live
+  const BASE = GRANTED & ~ME;                 // the same role with only the mention bit cleared
+  const roles = [
+    role("Commissioner", GRANTED),
+    role("Staff", GRANTED),
+    role("Media", GRANTED),
+    role("Center", GRANTED),
+    role("Owner", GRANTED),
+    role("Not Signed Up", GRANTED),
+    role("Chel Gaming", GRANTED, true),     // the bot's own integration role
+    role("Server Booster", GRANTED, true),  // managed BUT editable — a boost must not buy a megaphone
+    role("Player", BASE),                     // already clean, must not be touched
+  ];
+  const patched = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    if (opts.method === "PATCH" && /\/roles\//.test(String(url))) {
+      patched.push({ id: String(url).split("/roles/")[1], perms: JSON.parse(opts.body).permissions });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const sum = { errors: [] };
+  await I.enforceMentionPolicy(roles, sum);
+  const hit = (n) => patched.some((p) => p.id === "r-" + n);
+
+  A("a position role loses it", hit("Center"));
+  A("a club-seat role loses it", hit("Owner"));
+  A("an unregistered member's role loses it", hit("Not Signed Up"));
+  A("boosting the server does not buy a megaphone", hit("Server Booster"));
+  A("commissioners keep it", !hit("Commissioner"));
+  A("staff keep it", !hit("Staff"));
+  A("media staff keep it — they don't wear the Staff role", !hit("Media"));
+  A("the bot's own integration role is left alone", !hit("Chel Gaming"));
+  A("a role that never had it is not touched", !hit("Player"));
+  A("the count is reported", sum.mentionStripped === 4);
+  A("only the mention bit is cleared, other permissions survive",
+    patched.every((p) => BigInt(p.perms) === BASE));
+  A("...and the value is NOT 32-bit truncated (permissions are 64-bit)",
+    patched.every((p) => BigInt(p.perms) > 4294967295n));
+  A("nothing errored", sum.errors.length === 0);
+
+  /* second sweep over the corrected list is a no-op */
+  patched.length = 0;
+  const sum2 = { errors: [] };
+  await I.enforceMentionPolicy(roles, sum2);
+  A("a clean server needs no writes", patched.length === 0 && !sum2.mentionStripped);
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);
