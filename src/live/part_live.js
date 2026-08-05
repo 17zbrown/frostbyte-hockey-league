@@ -154,9 +154,16 @@ CG.buildLiveLeague = async function(){
      row (status 'upcoming') can never hijack the live site while Season 1 is still active. */
   CG.pickCurrentSeason = function(rows){        /* rows arrive ordered by number desc */
     rows = rows||[];
+    CG.SEASONS = rows;
     return rows.find(function(s){ return s.status==="active"; })
         || rows.find(function(s){ return s.status!=="complete"; })
         || rows[0] || null;
+  };
+  /* The season currently taking sign-ups. During the playoffs the DISPLAYED season (active,
+     playing out) and the REGISTERING season (next, opened by the rollover) are different rows —
+     the register page and the withdraw path always want this one, highest number first. */
+  CG.regSeason = function(){
+    return (CG.SEASONS||[]).find(function(s){ return s.registration_open; }) || CG.SEASON || null;
   };
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=CG.pickCurrentSeason(q[2].data||[]),
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
@@ -334,7 +341,10 @@ CG.buildLiveLeague = async function(){
         var code = id2code[r.team_id]; if(!code || !box[code]) return;
         var opp = code===g.home ? g.away : g.home;
         var key = r.profile_id || ("ea:"+r.id);
-        box[code][key] = r.is_goalie ? eaGoalieLine(r, score[code]>score[opp], g.ot) : eaSkaterLine(r);
+        /* a forfeit decides the goalie's W/L too — in a kept-score FFL the forfeiting club's
+           goalie must not be credited a win his club's ruling took away (Rule 4.3) */
+        var gWon = forfeit ? (forfeit !== code) : (score[code]>score[opp]);
+        box[code][key] = r.is_goalie ? eaGoalieLine(r, gWon, forfeit ? false : g.ot) : eaSkaterLine(r);
       });
       /* three stars — top performers across both clubs (linked players only) */
       var cand = [];
@@ -664,7 +674,7 @@ CG.computeRole = function(profile){
 CG.applySession = async function(session){
   CG.auth.user = session ? session.user : null;
   if (CG.auth.user){
-    var uid = CG.auth.user.id, sidA = (CG.SEASON && CG.SEASON.id) || null;
+    var uid = CG.auth.user.id, sidA = ((CG.regSeason && CG.regSeason()) || CG.SEASON || {}).id || null;
     /* Four independent single-row lookups that run for EVERY signed-in user before the first
        paint — batched rather than awaited one at a time. Each resolves to null on its own
        failure so one denied policy can't blank the other three. */
@@ -1106,7 +1116,7 @@ CG._wrapHubDashboard = function(){
        club-management dashboard instead. */
     var mt = CG.myManagedTeam && CG.myManagedTeam();
     if (mt) return CG._mgmtDashboard(mt);
-    var p = CG.auth.profile, s = CG.SEASON||{}, reg = CG.auth.registration;
+    var p = CG.auth.profile, s = (CG.regSeason && CG.regSeason()) || CG.SEASON || {}, reg = CG.auth.registration;
     var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+CG.fmtFull(CG.now())+'</span>'+
       '<h1 class="h-page" style="margin-top:8px">Welcome, '+esc(p.gamertag||p.display_name||"skater")+'.</h1>'+
       '<p class="lede" style="margin-top:10px">You’re signed in — here’s where you stand on the way to a roster spot.</p></div>';
@@ -1473,9 +1483,31 @@ CG._smRenderList = function(body){
         return '<option value="'+esc(g.id)+'" data-home="'+esc(g.home)+'" data-away="'+esc(g.away)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" · ")+g.away+" @ "+g.home+" · "+CG.fmtDay(g.at)+" · "+(g.status==="final"?"final":"scheduled"))+'</option>';
       }).join("")+'</select>'+
       '<select id="smFfTeam" style="min-width:170px"><option value="">Who forfeited?</option></select>'+
+      '<select id="smFfKind" style="min-width:230px">'+
+        '<option value="noshow">No-show / late (Rule 3.2) — 1–0, stats deleted</option>'+
+        '<option value="dc3">Three disconnections (Rule 4.3) — keep the played result</option></select>'+
       '<input id="smFfWhy" placeholder="Reason (no-show, couldn’t ice six…)" style="flex:1;min-width:180px">'+
       '<button class="btn btn-chrome" id="smFfGo">Rule forfeit</button>'+
       '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button></div></label>'+
+      '<p class="caption" style="margin-top:10px">The three-disconnection kind needs the game’s sessions merged first (League lag-out merge above) — it keeps the merged score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more.</p>'+
+      '</div></div>';
+    /* game incidents: the countable record behind Rules 3.2/4.3 — logging one computes the
+       ruling AND announces it to both clubs' channels within a second (the VM bot listens). */
+    var incidentCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Log a game incident</h3><span class="chip chip-chrome">Announces instantly</span></div>'+
+      '<div class="card-b">'+
+      '<p class="caption" style="margin:0 0 12px;max-width:78ch">Late start or disconnection. The occurrence count is kept for you — a second or third incident by the same club in the same game escalates automatically — and the ruling posts to both clubs’ Discord channels the moment you log it.</p>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<select id="smInGame" style="flex:1;min-width:240px"><option value="">Pick a game…</option>'+lgGames.map(function(g){
+        return '<option value="'+esc(g.id)+'" data-home="'+esc(g.home)+'" data-away="'+esc(g.away)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" · ")+g.away+" @ "+g.home+" · "+CG.fmtDay(g.at))+'</option>';
+      }).join("")+'</select>'+
+      '<select id="smInTeam" style="min-width:150px"><option value="">Which club?</option></select>'+
+      '<select id="smInKind" style="min-width:140px"><option value="late_start">Late start</option><option value="disconnect">Disconnection</option></select>'+
+      '<input id="smInMin" type="number" min="0" max="60" placeholder="Min late" style="width:90px">'+
+      '<select id="smInPeriod" style="width:110px;display:none"><option value="">Period…</option><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">OT</option></select>'+
+      '<label class="fld" id="smInEarlyWrap" style="margin:0;flex-direction:row;align-items:center;gap:6px;display:none"><input id="smInEarly" type="checkbox"><span style="margin:0;white-space:nowrap">First 5:00 of the 3rd</span></label>'+
+      '<input id="smInNotes" placeholder="Notes (optional)" style="flex:1;min-width:140px">'+
+      '<button class="btn btn-chrome" id="smInGo">Log &amp; announce</button></div>'+
+      '<div id="smInOut" style="margin-top:12px"></div>'+
       '</div></div>';
     var listCard = '<div class="card"><div class="card-h"><h3>EA games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
     if (!games.length){
@@ -1492,7 +1524,51 @@ CG._smRenderList = function(body){
         }).join("")+'</tbody></table></div>';
     }
     listCard += '</div>';
-    body.innerHTML = addCard + leagueCard + forfeitCard + listCard;
+    body.innerHTML = addCard + leagueCard + forfeitCard + incidentCard + listCard;
+
+    /* --- wire the incident log --- */
+    (function(){
+      var gSel = document.getElementById("smInGame"), tSel = document.getElementById("smInTeam");
+      var kSel = document.getElementById("smInKind"), go = document.getElementById("smInGo");
+      var out = document.getElementById("smInOut");
+      if (!gSel || !go) return;
+      gSel.addEventListener("change", function(){
+        var opt = gSel.options[gSel.selectedIndex] || {};
+        var h = opt.getAttribute && opt.getAttribute("data-home"), a = opt.getAttribute && opt.getAttribute("data-away");
+        tSel.innerHTML = '<option value="">Which club?</option>'+
+          (h&&a ? [a,h].map(function(code){
+            var id = (CG.lg && CG.lg._codeToId && CG.lg._codeToId[code]) || "";
+            return '<option value="'+esc(id)+'">'+esc(code)+'</option>';
+          }).join("") : '');
+      });
+      function syncKind(){
+        var dc = kSel.value === "disconnect";
+        document.getElementById("smInMin").style.display = dc ? "none" : "";
+        document.getElementById("smInPeriod").style.display = dc ? "" : "none";
+        document.getElementById("smInEarlyWrap").style.display = dc ? "flex" : "none";
+      }
+      kSel.addEventListener("change", syncKind); syncKind();
+      go.addEventListener("click", function(){
+        var gid2 = gSel.value, tid2 = tSel.value;
+        if (!gid2 || !tid2){ CG.toast("Pick the game and the club","err"); return; }
+        var dc = kSel.value === "disconnect";
+        go.disabled = true;
+        CG.sb.rpc("log_game_incident", {
+          p_game: gid2, p_team: tid2, p_kind: kSel.value,
+          p_minutes_late: dc ? null : (parseInt(document.getElementById("smInMin").value, 10) || 0),
+          p_period: dc ? (parseInt(document.getElementById("smInPeriod").value, 10) || null) : null,
+          p_game_clock: null,
+          p_early_third: dc ? !!document.getElementById("smInEarly").checked : false,
+          p_notes: (document.getElementById("smInNotes").value||"").trim() || null
+        }).then(function(r){
+          go.disabled = false;
+          if (r.error){ CG.toast(r.error.message||"Couldn’t log it","err"); return; }
+          var d = r.data || {};
+          out.innerHTML = '<div class="note'+(d.forfeit?' red':' grn')+'"><b style="font-family:var(--f-disp)">Occurrence '+(d.occurrence||1)+' logged.</b> '+esc(d.ruling||"")+' <span class="caption">Both clubs’ channels were notified.</span></div>';
+          CG.toast(d.forfeit ? "That’s a forfeit — rule it in the card above" : "Incident logged and announced","ok");
+        });
+      });
+    })();
 
     /* --- wire the forfeit ruling --- */
     (function(){
@@ -1512,11 +1588,14 @@ CG._smRenderList = function(body){
         var gid2 = gSel.value, tid2 = tSel.value, why = (document.getElementById("smFfWhy").value||"").trim();
         if (!gid2 || !tid2){ CG.toast("Pick the fixture and who forfeited","err"); return; }
         var loser = (tSel.options[tSel.selectedIndex]||{}).textContent || "that club";
+        var keep = (document.getElementById("smFfKind")||{}).value === "dc3";
         CG.confirm("Rule this game a forfeit?",
-          loser.replace(" forfeited","")+" takes the forfeit loss. Recorded 1–0 with no player statistics (Rule 3.2); standings update immediately. A later lag-out merge of the real game replaces this ruling.",
+          keep
+            ? loser.replace(" forfeited","")+" takes the forfeit loss, but the game WAS played: the merged score and every stat line stay exactly as entered, and the result publishes as an FFL (Rule 4.3)."
+            : loser.replace(" forfeited","")+" takes the forfeit loss. Recorded 1–0 with no player statistics (Rule 3.2); standings update immediately. A later lag-out merge of the real game replaces this ruling.",
           "Rule forfeit", function(){
             go.disabled = true;
-            CG.sb.rpc("forfeit_game", { p_game: gid2, p_forfeiting_team: tid2, p_reason: why || null }).then(function(r){
+            CG.sb.rpc("forfeit_game", { p_game: gid2, p_forfeiting_team: tid2, p_reason: why || null, p_keep_result: keep }).then(function(r){
               go.disabled = false;
               if (r.error){ CG.toast(r.error.message||"Couldn’t rule the forfeit","err"); return; }
               CG.toast("Forfeit ruled — 1–0","ok");
@@ -1802,7 +1881,7 @@ CG._smRenderDetail = function(body, gid){
    PARITY: SEASON REGISTRATION (season_registrations)
    ================================================================ */
 CG.ROUTES.register = function(){
-  var s = CG.SEASON || {}, open = !!s.registration_open;
+  var s = CG.regSeason() || {}, open = !!s.registration_open;
   var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
     "Register for the season", "One form puts you in the player pool. Sign up by the deadline to enter the draft; after it — or if you join mid-season — you're placed on a club with an open spot automatically (Rule 2.2).");
   if (!CG.auth.profile){
@@ -1834,7 +1913,11 @@ CG.ROUTES.register = function(){
   var onRoster = !!(myCt && p && ((CG.lg && CG.lg._rosteredIds) || {})[p.id]);
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> '+(myCt&&onRoster
       ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
-      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. Register by the deadline and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.')+' Update your details below any time before the deadline.</div>' : "";
+      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. Register by the deadline and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.')+' Update your details below any time before the deadline.'+
+      (reg && (reg.status==="pending"||!reg.status) && !onRoster
+        ? ' <button class="btn btn-ghost btn-sm" id="regWithdraw" style="color:var(--red);margin-left:6px">Withdraw my sign-up</button>'
+        : reg ? ' <span class="caption">Need out? You’ve already been placed — message the league office.</span>' : '')+
+      '</div>' : "";
   if (myCt && !reg){
     statusCard = '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re under contract with '+esc(ctName)+' through Season '+(myCt.end_season||snumR)+' — but a contract doesn’t replace registration.</b> Until you sign up you can’t play, and your '+CG.fmtMoney(myCt.salary||0)+' salary sits on the club’s cap as dead money. If '+esc(ctName)+' takes on a new owner and you still haven’t signed up after the deadline, the deal is voided and you’re suspended through Season '+(myCt.end_season||snumR)+' (Rule 2.5). Registering — any time — puts you straight back on the roster.</div>' + statusCard;
   }
@@ -1869,6 +1952,24 @@ CG.AFTER.register = function(){
   }); });
   var ea=document.getElementById("regEaBtn"); if(ea) ea.addEventListener("click", CG.promptEaId);
   var sub=document.getElementById("regSubmit"); if(sub) sub.addEventListener("click", function(){ CG.registerForSeason(sel, (document.getElementById("regNote")||{}).value||""); });
+  var wd=document.getElementById("regWithdraw"); if(wd) wd.addEventListener("click", function(){
+    var sReg = CG.regSeason() || {};
+    CG.confirm("Withdraw your Season "+(sReg.number||"")+" sign-up?",
+      "You come off the sign-up board and out of the draft pool. You can register again any time while registration is open — your spot in line is simply gone, not banked.",
+      "Withdraw", function(){
+        wd.disabled = true;
+        CG.sb.rpc("withdraw_registration", { p_season: sReg.id }).then(function(r){
+          wd.disabled = false;
+          if (r.error){ CG.toast(r.error.message||"Couldn’t withdraw","err"); return; }
+          CG.auth.registration = null;
+          CG.pingDiscordSync();   /* their Player/Free Agent roles come off without waiting for the cron */
+          CG.toast("Sign-up withdrawn — register again any time while the window is open","ok");
+          /* the pool labels and draft views are built from the league snapshot — reload it so
+             their own directory chip stops saying "Signed up" the moment they withdrew */
+          if (CG.reloadLeague) CG.reloadLeague(); else CG.router();
+        });
+      });
+  });
   var rc=document.getElementById("guildRecheck"); if(rc) rc.addEventListener("click", function(){
     var btn=this; btn.disabled=true; btn.textContent="Checking…";
     CG.sb.from("profiles").select("in_guild").eq("id",CG.auth.user.id).maybeSingle().then(function(r){
@@ -2217,7 +2318,7 @@ CG.saveEaId = async function(v){
 };
 CG.registerForSeason = async function(position, note){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
-  var s=CG.SEASON; if(!s||!s.registration_open){ CG.toast("Registration isn’t open","err"); return; }
+  var s=CG.regSeason(); if(!s||!s.registration_open){ CG.toast("Registration isn’t open","err"); return; }
   if(!CG.auth.profile.ea_id){ CG.toast("Add your EA ID first","err"); CG.promptEaId(); return; }
   if(!CG.auth.profile.in_guild){
     try { var fr=await CG.sb.from("profiles").select("in_guild").eq("id",CG.auth.user.id).maybeSingle(); if(fr.data&&fr.data.in_guild) CG.auth.profile.in_guild=true; } catch(e){}
@@ -3547,6 +3648,15 @@ CG.loadTrades = async function(){
    is_gm_of(), so this grants a commissioner nothing they did not already have, and grants a
    non-commissioner nothing at all — CG.role() is read from a signed session, and a forged
    local value would be refused by RLS on the first write. */
+/* Media-only staff run the newsroom, not the league office: no Staff Desk, no case queue
+   surfaces, and (server-side) no Staff role on Discord — just their Media lane. */
+CG.mediaOnlyStaff = function(){
+  if (CG.role() !== "staff") return false;
+  var d = ((CG.auth && CG.auth.profile && CG.auth.profile.departments) || [])
+    .map(function(k){ return String(k||"").trim().toLowerCase(); })
+    .filter(function(k){ return k.length > 0; });
+  return d.length > 0 && d.every(function(k){ return k === "media"; });
+};
 CG.previewClub = function(){
   if (CG.role() !== "commish") return null;
   var code = (CG.store.get("prefs")||{}).previewClub || null;
@@ -4219,9 +4329,8 @@ CG.distributeRookies = function(){
   });
   if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
   CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
-    "This runs on its own ten minutes after the draft’s final pick — the button forces it early or re-runs it by hand. "+
-    "Each player who missed the 5-game pre-season minimum goes to a completely random club with an open roster spot, "+
-    "so rosters are settled before free agency and nobody can park a prospect to poach them later.",
+    "Retired by rulebook v2.7 — with no games-played minimum, every registrant is draft-eligible and this job is a stamped no-op. "+
+    "Running it is harmless and simply re-verifies that nothing needs placing.",
     "Distribute rookies", function(){
     CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
       if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
@@ -5434,7 +5543,7 @@ CG.actionCard = function(a, review){
 CG.hubComplaintsLive = function(opts){
   opts = opts||{};
   var isCommish = CG.role()==="commish";
-  var review = isCommish || CG.role()==="staff";
+  var review = isCommish || (CG.role()==="staff" && !(CG.mediaOnlyStaff && CG.mediaOnlyStaff()));
   var all = (CG.lg._actionReqs||[]);
   var uid = CG.auth.user && CG.auth.user.id;
   var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
@@ -8070,7 +8179,7 @@ CG.declareForfeitPrompt = function(id){
       '<option value="home">'+esc(homeName)+' (home) forfeited → '+esc(awayName)+' wins 1-0</option>'+
       '<option value="void">Neither club played → void (no result, kept out of the standings)</option>'+
     '</select></label>'+
-    '<p class="caption">A forfeit is recorded as a 1-0 win with no individual stats (Rule 5.3). The losing club still burns the game toward its weekly count. The league has no double-forfeit rule, so a game neither club played is voided rather than scored. Reversible from the game once declared.</p>',
+    '<p class="caption">A no-show forfeit is recorded as a 1-0 win with no individual stats (Rule 3.2). The losing club still burns the game toward its weekly count. The league does not record double forfeits — a game neither club played is voided and kept out of the standings (Rule 3.2). A game that WAS played and ended on three disconnections keeps its stats instead: merge the sessions in the Stats Manager, then rule it there (Rule 4.3). Reversible from the game once declared.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ffGo">Record it</button>');
   document.getElementById("ffGo").addEventListener("click", function(){
     var who=document.getElementById("ffWho").value;
@@ -8946,12 +9055,12 @@ CG.ROUTES.hub = function(param, qs){
       : CG.unauthorized("The free-agent board is a team-management tool.");
   }
   if (param==="application"){
-    if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("Applications are reviewed by league staff.");
+    if ((CG.role()!=="staff" && CG.role()!=="commish") || CG.mediaOnlyStaff()) return CG.unauthorized("Applications are reviewed by league staff.");
     var appType = qs.type==="owner"?"owner":qs.type==="management"?"management":"staff";
     return CG.hubShell("staffdesk", CG.hubApplicationDetail(qs.id, appType));
   }
   if (param==="archive"){
-    if (CG.role()!=="staff" && CG.role()!=="commish") return CG.unauthorized("The ticket archive is for league staff.");
+    if ((CG.role()!=="staff" && CG.role()!=="commish") || CG.mediaOnlyStaff()) return CG.unauthorized("The ticket archive is for league staff.");
     return CG.hubShell("staffdesk", CG.hubTicketArchive());
   }
   if (param==="statsmgr"){
@@ -9076,7 +9185,7 @@ CG.hubFreeAgents = function(){
               ((!canSign)?' title="Signing opens with free agency"':full?' title="Your roster is full"':'')+'>Sign</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Rookies who missed the 5-game pre-season minimum never appear here — the league places them on random clubs ten minutes after the draft’s final pick. Signing is enforced server-side: the window, eligibility, and your roster space are all checked again on the click.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every registered player is draft-eligible — there is no games-played minimum (Rule 5.2, v2.7). Signing is enforced server-side: the window, eligibility, and your roster space are all checked again on the click.</span></div>'
     :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Unsigned, draft-eligible players land here after the draft. Check back once free agency opens.</p></div></div>')+'</div>';
 
   /* ---- Rookie bidding board (Rule 2.2): $750K start, $250K increments, 12h resets per bid ---- */

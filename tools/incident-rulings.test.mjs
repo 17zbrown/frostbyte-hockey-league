@@ -93,8 +93,22 @@ console.log("\n— a forfeit reads as a forfeit on both sides");
   await N.announce({ game_id: "g1", team_id: "T2", kind: "late_start", minutes_late: 12, occurrence: 1 });
   const off = posts.find((p) => p.channel === "chan-tor"), opp = posts.find((p) => p.channel === "chan-bos");
   A("the late club is told it forfeited", /Forfeit/.test(text(off)));
-  A("the ready club is told it won", /ruled in your favour/.test(text(opp)));
+  A("the ready club is told it won", /ruled in your favor/.test(text(opp)));
   A("no waiver is offered on a forfeit", !/agree to waive/.test(text(opp)));
+}
+
+console.log("\n— the waiver belongs to late starts only");
+{
+  posts = [];
+  await N.announce({ game_id: "g1", team_id: "T1", kind: "disconnect", occurrence: 2 });
+  const opp = posts.find((p) => p.channel === "chan-tor");
+  A("disconnect rulings never offer the mutual waiver", !/agree to waive/.test(text(opp)));
+  A("...but still hand the 5-on-3 choice over", /Your call/.test(text(opp)));
+  posts = [];
+  await N.announce({ game_id: "g1", team_id: "T1", kind: "late_start", minutes_late: 8, occurrence: 1 });
+  const opp2 = posts.find((p) => p.channel === "chan-tor");
+  A("late-start rulings still do", /agree to waive/.test(text(opp2)));
+  A("member-facing copy is American English", !/favour/.test(JSON.stringify(posts)));
 }
 
 console.log("\n— failures never pretend to have delivered");

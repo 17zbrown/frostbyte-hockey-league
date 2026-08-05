@@ -81,4 +81,21 @@ const src=html;
   if(!bad.includes(p)) bad.push(p);
 });
 A("every #/admin/* link resolves", bad.length===0, bad.join(", ")||"none dangling");
+console.log("\n— media-only staff see the newsroom, not the league office");
+{
+  CG.role = () => "staff";
+  CG.auth = CG.auth || {};
+  CG.auth.profile = { departments: ["media"] };
+  CG.hasDept = (d) => (CG.auth.profile.departments || []).indexOf(d) >= 0;
+  const nav = CG.hubNav("");
+  A("no Staff desk tab for media-only staff", !nav.includes("staffdesk"));
+  A("their Newsroom desk still shows", nav.includes("newsroom"));
+  A("the route agrees with the nav", CG.ROUTES.hub("staffdesk", {}).includes("don\u2019t have access"));
+  CG.auth.profile = { departments: ["media", "statistics"] };
+  const nav2 = CG.hubNav("");
+  A("media PLUS another department keeps the Staff desk", nav2.includes("staffdesk") && nav2.includes("newsroom"));
+  CG.role = () => "commish";
+  CG.auth.profile = { departments: [] };
+  A("commissioners are never media-scoped", CG.hubNav("").includes("staffdesk"));
+}
 console.log(`\n${ok?"PASS":"FAIL"}`);process.exit(ok?0:1);

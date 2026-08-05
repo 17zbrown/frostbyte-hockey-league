@@ -888,9 +888,11 @@ export default async (req) => {
         if (chunk.length < 1000) break;
         after = chunk[chunk.length - 1].user.id;
       }
-      const season = (await sbGet("seasons?select=id,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0] || {};
-      const deadline = season.signup_deadline_at || season.registration_deadline;
-      const regOpen = !!season.registration_open && (!deadline || Date.now() < Date.parse(deadline));
+      /* Rule 1.1 (v2.8): registration stays open until the NEXT season's opens — the deadline is
+         only the draft-eligibility line. Prefer the season whose registration is open. */
+      const season = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
+        || (await sbGet("seasons?select=id,registration_open&order=number.desc&limit=1"))[0] || {};
+      const regOpen = !!season.registration_open;
       const registered = new Set((await sbGet(`season_registrations?season_id=eq.${season.id}&select=profile_id&limit=10000`)).map((r) => r.profile_id));
       const linkRows = await sbGet("discord_links?select=profile_id,gamertag,discord_id");
       const byDiscord = {}; for (const l of linkRows) if (l.discord_id) byDiscord[String(l.discord_id)] = l;
@@ -1519,10 +1521,10 @@ export default async (req) => {
   // season; `regOpen` is the narrower "sign-ups still open" flag that drives Not Signed Up.
   let regOpen = false; const registered = new Set();
   try {
-    const s = (await sbGet("seasons?select=id,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0];
+    const s = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
+      || (await sbGet("seasons?select=id,registration_open&order=number.desc&limit=1"))[0];
     if (s) {
-      const deadline = s.signup_deadline_at || s.registration_deadline;
-      regOpen = !!s.registration_open && (!deadline || Date.now() < Date.parse(deadline));
+      regOpen = !!s.registration_open;   /* Rule 1.1 (v2.8): the deadline never closes registration */
       for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
     }
   } catch (e) { sum.errors.push({ regStatus: String(e.message || e) }); }
@@ -1621,11 +1623,18 @@ export default async (req) => {
       if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
       if (teamRole === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
       if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
-      // league officials: staff wear Staff; the commissioner is staff too
-      if ((m.role === "staff" || m.role === "commissioner") && roleId["staff"]) desired.add(roleId["staff"]);
+      // league officials: staff wear Staff; the commissioner is staff too.
+      // EXCEPTION (2026-08-05): media-only staff wear just their Media department role — no
+      // Staff role, so none of the staff rooms, pings, or oversight surfaces come with it.
+      // Reconciliation handles existing members: the Staff role is a managed role, so anyone
+      // it no longer belongs to loses it on the next sweep automatically.
+      const memberDepts = (deptByProfile[m.profile_id] || []);
+      const mediaDepts = memberDepts.map((k) => String(k || "").trim().toLowerCase()).filter((k) => k.length);
+      const mediaOnly = m.role === "staff" && mediaDepts.length > 0 && mediaDepts.every((k) => k === "media");
+      if ((m.role === "staff" || m.role === "commissioner") && !mediaOnly && roleId["staff"]) desired.add(roleId["staff"]);
       // department roles the official signed up for on the site — these open the department rooms
       if (m.role === "staff" || m.role === "commissioner") {
-        for (const key of (deptByProfile[m.profile_id] || [])) {
+        for (const key of memberDepts) {
           const d = STAFF_DEPARTMENTS.find((x) => x.key === key);
           const rid = d && roleId[d.role.toLowerCase()];
           if (rid) desired.add(rid);

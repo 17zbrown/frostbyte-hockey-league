@@ -96,13 +96,15 @@ CG.hubNav = function(section){
      under "Team HQ" (complaints is a player tool, so it stays out of Team HQ) */
   var mine = [["", "Dashboard", "home"]];
   if (CG.can("availability.submit")) mine.push(["availability","Availability","cal"]);
-  if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", r==="staff"?"Case queue":"Action Center","flag"]);
+  var _mo = CG.mediaOnlyStaff && CG.mediaOnlyStaff();
+  if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", (r==="staff" && !_mo)?"Case queue":"Action Center","flag"]);
   /* Messages lives in the account menu (avatar), not the hub sidebar */
   if (r==="staff" && !CG.LIVE_MODE) mine.push(["statsentry","Stats entry","chart"]);
   mine.push(["notifications","Notifications","bell"]);
   mine.push(["settings","Settings","gear"]);
   var staffTools = [];
-  if ((r==="staff" || r==="commish") && CG.hubStaffDesk) staffTools.push(["staffdesk","Staff desk","flag"]);
+  var mediaOnly = CG.mediaOnlyStaff && CG.mediaOnlyStaff();
+  if ((r==="staff" || r==="commish") && CG.hubStaffDesk && !mediaOnly) staffTools.push(["staffdesk","Staff desk","flag"]);
   /* One tab per department the signed-in person actually holds — the registry lives in
      part9_staffdesks.js, which loads after this file, so it's read at render time. A
      commissioner holds every department and sees the full set. */
@@ -159,7 +161,7 @@ CG.ROUTES.hub = function(param, qs){
   if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management.");
   if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool.");
   if (section==="schedule") return (CG.can("lineup.build") && CG.LIVE_MODE && CG.hubScheduleLive) ? CG.hubShell("schedule", CG.hubScheduleLive(qs)) : CG.unauthorized("The club schedule desk is a team-management tool.");
-  if (section==="staffdesk") return (r==="staff"||r==="commish") && CG.hubStaffDesk
+  if (section==="staffdesk") return (r==="staff"||r==="commish") && CG.hubStaffDesk && !(CG.mediaOnlyStaff && CG.mediaOnlyStaff())
     ? CG.hubShell("staffdesk", CG.hubStaffDesk())
     : CG.unauthorized("The Staff Desk is for league staff.");
   if (section==="complaints") return CG.hubShell("complaints", CG.hubComplaints());

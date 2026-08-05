@@ -521,10 +521,8 @@ async function signupReminder(cfg, et, dry, errors) {
   const roleId = cfg.discord_not_signed_up_role_id;
   if (!url) return "no signup webhook";
   if (!roleId) return "not-signed-up role not provisioned yet";
-  const s = (await sbGet("seasons?select=id,name,registration_open,signup_deadline_at,registration_deadline&order=number.desc&limit=1"))[0];
-  if (!s) return "no season";
-  const deadline = s.signup_deadline_at || s.registration_deadline;
-  if (!(s.registration_open && (!deadline || Date.now() < Date.parse(deadline)))) return "registration closed";
+  const s = (await sbGet("seasons?select=id,name,registration_open,signup_deadline_at,registration_deadline&registration_open=is.true&order=number.desc&limit=1"))[0];
+  if (!s) return "registration closed";   /* Rule 1.1 (v2.8): open until the next season's opens */
   const [members, regs] = await Promise.all([
     sbGet("profiles?select=id&role=eq.member&banned=eq.false&in_guild=eq.true"),
     sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`),

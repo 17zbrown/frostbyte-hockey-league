@@ -112,12 +112,12 @@ export function createIncidentNotifier(env, opts = {}) {
         const yours = r.penalties === 2
           ? `**Your call:** take them both at once for a 5-on-3, or one after the other for two 5-on-4s. Tell ${mine.code} before the puck drops.`
           : r.penalties === 1 ? `${mine.code} takes one penalty. You start on the power play.`
-          : r.forfeit ? `This one is ruled in your favour.`
+          : r.forfeit ? `This one is ruled in your favor.`
           : `Nothing owed — logged for the record.`;
         await post(other.discord_channel_id, { embeds: [{
           title: `⚖️ ${mine.code}: ${r.headline.toLowerCase()}`,
           description: `**${fixture}**\n\n${yours}` +
-            (r.penalties > 0 && !r.forfeit ? `\n\n_Both clubs may agree to waive the penalties — that is between you (Rule 3.2). The ten-minute forfeit is not waivable._` : ""),
+            (row.kind === "late_start" && r.penalties > 0 && !r.forfeit ? `\n\n_Both clubs may agree to waive the penalties — that is between you (Rule 3.2). The ten-minute forfeit is not waivable._` : ""),
           color: colour, footer: { text: "Ruled by league staff from the game incident log." },
         }], allowed_mentions: { parse: [] } });
         sum.announced++;
