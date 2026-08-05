@@ -1244,9 +1244,6 @@ export default async (req) => {
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
-  /* @everyone/@here stays with the league office — re-checked every sweep, not just once */
-  try { await enforceMentionPolicy(guildRoles, sum); }
-  catch (e) { sum.errors.push({ mentionPolicy: String(e.message || e) }); }
   const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
   const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
   const roleId = {};
@@ -1256,6 +1253,13 @@ export default async (req) => {
 
   const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0,
     staffChecked: 0, staffLocked: 0, staffMissing: 0, errors: [] };
+
+  /* @everyone/@here stays with the league office — re-checked every sweep, not just once.
+     Must run AFTER `sum` exists: this call sat nine lines above the declaration for one deploy,
+     and because the catch block also touches `sum`, the temporal-dead-zone ReferenceError threw
+     twice and killed the whole sweep before it could write its result. */
+  try { await enforceMentionPolicy(guildRoles, sum); }
+  catch (e) { sum.errors.push({ mentionPolicy: String(e.message || e) }); }
 
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private

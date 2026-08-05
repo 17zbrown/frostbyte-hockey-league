@@ -179,5 +179,21 @@ console.log("\n— @everyone belongs to the league office only");
   A("a clean server needs no writes", patched.length === 0 && !sum2.mentionStripped);
 }
 
+/* The guard above passed while the sweep was dead in production: the test called the function
+   directly, so it never saw that the CALL SITE sat above `const sum`. A temporal-dead-zone
+   ReferenceError threw, the catch block touched `sum` and threw again, and the whole sweep died
+   before writing its result — heartbeat fresh, result frozen. Assert the ordering itself. */
+console.log("\n— the guard is wired in where `sum` actually exists");
+{
+  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8"));
+  const lines = src.split("\n");
+  const declared = lines.findIndex((l) => /^\s*const sum = \{/.test(l));
+  const called = lines.findIndex((l) => /await enforceMentionPolicy\(/.test(l));
+  A("`sum` is declared in the sweep", declared > -1);
+  A("the guard is called", called > -1);
+  A("...after `sum` exists, not before it", called > declared,
+    `declared at line ${declared + 1}, called at line ${called + 1}`);
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);
