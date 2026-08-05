@@ -118,7 +118,10 @@ CG.gameCard = function(g){
   var lg = CG.lg;
   var res = (lg.allResults||lg.results).find(function(r){ return r.id===g.id; });
   var tag;
-  if (res) tag = '<span class="chip">'+ (res.ot?"Final / OT":"Final") +'</span>';
+  /* the bug reads FFL on a forfeit — a three-disconnection forfeit keeps its real score, so
+     without this the card would show a scoreline the standings deliberately contradict */
+  if (res && res.forfeit) tag = '<span class="chip chip-warn" title="Forfeit — '+esc(res.forfeit)+' forfeited this game">Final / FFL</span>';
+  else if (res) tag = '<span class="chip">'+ (res.ot?"Final / OT":"Final") +'</span>';
   else if (Math.abs(g.at - CG.now()) < 10*3600000 && g.at > CG.now()) tag = '<span class="chip chip-live"><span class="live-dot"></span>Tonight</span>';
   else if (g.at < CG.now()) tag = '<span class="chip chip-warn">Awaiting result</span>';
   else tag = '<span class="chip">'+(g.stage==="preseason"?"Pre-season · Wk "+g.week:g.stage==="playoff"?"Playoffs · Wk "+g.week:"Week "+g.week)+'</span>';
@@ -1736,12 +1739,12 @@ CG.ROUTES.team = function(code, qs){
     if (archived){
       var pgames = SD.results.filter(function(r){ return r.home===code||r.away===code; });
       body += '<div class="card">'+pgames.map(function(r){
-        var won = r.score[code] > r.score[r.home===code?r.away:r.home];
         var opp = r.home===code?r.away:r.home;
+        var won = r.forfeit ? (r.forfeit !== code) : (r.score[code] > r.score[opp]);
         return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.crest(opp,20)+'</span>'+
           '<span style="min-width:0"><b>'+(r.home===code?"vs ":"at ")+esc(CG.TEAM[opp].name)+'</b>'+
-          '<p>Final '+r.score[code]+'–'+r.score[opp]+(r.ot?" (OT)":"")+'</p></span>'+
-          '<span class="chip '+(won?"chip-win":"chip-loss")+'">'+(won?"W":"L")+'</span></div>';
+          '<p>Final '+r.score[code]+'–'+r.score[opp]+(r.forfeit?" (forfeit)":r.ot?" (OT)":"")+'</p></span>'+
+          '<span class="chip '+(won?"chip-win":"chip-loss")+'">'+(won?"W":(r.forfeit===code?"FFL":"L"))+'</span></div>';
       }).join("")+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Exhibition finals from '+esc(SD.label)+' — archived for the record.</span></div></div>';
     } else {

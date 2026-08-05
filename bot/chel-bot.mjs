@@ -13,6 +13,8 @@
 
 import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
 import { createHandlers } from "./handlers.mjs";
+import { createIncidentNotifier } from "./incidents.mjs";
+import { createClient } from "@supabase/supabase-js";
 
 const env = {
   SB_URL: process.env.SUPABASE_URL,
@@ -96,9 +98,29 @@ client.on(Events.ShardDisconnect, (event) => {
     .finally(() => process.exit(1));
 });
 
+/* ---- instant game-incident rulings (Rules 3.2 / 4.3) ----
+   Late starts and disconnections get argued out in club chats in seconds, so the ruling has to
+   land in seconds too — a sweep that runs every couple of minutes always arrives after the
+   argument. Supabase Realtime pushes the row the moment staff log it, and both clubs are told
+   at the same instant, which is the point: no "my guy said one penalty". */
+const INC = createIncidentNotifier(env);
+let incidentsLive = false;
+if (env.SB_URL && env.SB_KEY) {
+  const sb = createClient(env.SB_URL, env.SB_KEY, { auth: { persistSession: false } });
+  sb.channel("game-incidents")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_incidents" }, (payload) => {
+      INC.announce(payload.new).then((r) => console.log(`incident ${payload.new && payload.new.id}: ${r}`));
+    })
+    .subscribe((status) => {
+      incidentsLive = status === "SUBSCRIBED";
+      console.log(`game-incident rulings: ${status}`);
+    });
+}
+
 // The heartbeat is the watchdog's view of this process: rl_gateway-bot every minute, and the
 // per-run result alongside it. Stop beating and the automation_watchdog pages within ~25 min.
-setInterval(() => H.beat().catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
+setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced } })
+  .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, async () => {

@@ -326,6 +326,9 @@ CG.buildLiveLeague = async function(){
     .filter(function(g){ return g.status==="final" && !g.voided && g.homeScore!=null && g.awayScore!=null; })
     .map(function(g){
       var score={}; score[g.home]=g.homeScore; score[g.away]=g.awayScore;
+      /* a forfeit decides the result no matter what the goals say (Rule 4.3): the played
+         numbers are kept, but the club that forfeited takes the loss */
+      var forfeit = g.forfeit || null;
       var box={}; box[g.home]={}; box[g.away]={};
       (statsByGame[g.id]||[]).forEach(function(r){
         var code = id2code[r.team_id]; if(!code || !box[code]) return;
@@ -346,7 +349,7 @@ CG.buildLiveLeague = async function(){
       });
       var stars = cand.sort(function(a,b){ return b.val-a.val || b.g-a.g; }).slice(0,3).map(function(x){ return { pid:x.pid, team:x.team }; });
       return { id:g.id, week:g.week, stage:g.stage, home:g.home, away:g.away, at:g.at,
-        ot:g.ot, score:score, box:box, stars:stars, entered:true };
+        ot:g.ot, score:score, box:box, stars:stars, entered:true, forfeit:forfeit };
     });
 
   /* stage split: pre-season keeps its own standings and player lines, the regular

@@ -263,6 +263,7 @@ export function createHandlers(env, opts = {}) {
       departures: sum.departures, departAnnounced: sum.departAnnounced,
       departUnannounced: sum.departUnannounced,
       uptimeMin: Math.round((Date.now() - startedAt) / 60000),
+      ...(opts.extra || {}),          // e.g. the incident lane's own liveness
       errCount: errors.length,
       lastError: fatal || (gw.connected === false ? `not connected to Discord (${gw.detail})` : null)
         || (errors.length ? errors[errors.length - 1].error : null)

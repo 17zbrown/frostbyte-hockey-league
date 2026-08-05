@@ -416,9 +416,16 @@ CG.aggregate = function(lg, overrides){
       var code = pair[0], opp = pair[1];
       var t = teams[code]; t.gp++;
       t.gf += r.score[code]; t.ga += r.score[opp];
-      var won = r.score[code] > r.score[opp];
-      if (won){ t.w++; if (!r.ot) t.rw++; (code===r.home?t.hw++:t.aw++); t.res.push("W"); }
-      else if (r.ot){ t.otl++; t.res.push("OT"); }
+      /* A forfeit decides the result outright, whatever the goals say. A three-disconnection
+         forfeit (Rule 4.3) KEEPS the played score and stat lines, so the forfeiting club can
+         finish with more goals than its opponent and still take the loss — goals for and
+         against stay real (they are what the players actually earned), only the W/L is ruled.
+         A forfeit is a regulation result for tiebreakers (Rule 8.2), so it never awards the
+         overtime-loss point. */
+      var ff = r.forfeit || null;
+      var won = ff ? (ff !== code) : (r.score[code] > r.score[opp]);
+      if (won){ t.w++; if (ff || !r.ot) t.rw++; (code===r.home?t.hw++:t.aw++); t.res.push("W"); }
+      else if (!ff && r.ot){ t.otl++; t.res.push("OT"); }
       else { t.l++; (code===r.home?t.hl++:t.al++); t.res.push("L"); }
       Object.keys(r.box[code]).forEach(function(pid){
         var b = r.box[code][pid], s = pstats[pid];
