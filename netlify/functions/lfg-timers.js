@@ -86,18 +86,42 @@ const POS = [
 const POS_LABEL = POS.reduce((m, p) => (m[p.key] = p.label, m), {});
 const PER_POS = 2, FULL = POS.length * PER_POS;
 const posCount = (s, pos) => (s.signups || []).filter((x) => x.pos === pos).length;
-const teamNames = (s, side) => ((s.teams && s.teams[side]) || []).map((id) => `<@${id}>`).join(", ") || "—";
+const teamNames = (s, side, ea) => ((s.teams && s.teams[side]) || []).map((id) => nameWithEa(id, ea)).join(", ") || "—";
 
-function summaryEmbed(s) {
+/* KEEP IN SYNC with summaryView in discord-interactions.js — same queue semantics, same shape. */
+function summaryEmbed(s, ea) {
+  const need = POS.filter((p) => posCount(s, p.key) < PER_POS);
   const fields = POS.map((p) => {
-    const who = (s.signups || []).filter((x) => x.pos === p.key).map((x) => `<@${x.id}>`).join(", ");
-    return { name: `${p.label} (${posCount(s, p.key)}/${PER_POS})`, value: who || "_open_", inline: true };
+    const line = (s.signups || []).filter((x) => x.pos === p.key);
+    const who = line.map((x, i) => `${i < PER_POS ? "**" : ""}${i + 1}. ${nameWithEa(x.id, ea)}${i < PER_POS ? "**" : ""}`).join("\n");
+    return { name: `${p.label} (${line.length})`, value: who || "_nobody yet_", inline: true };
   });
-  return { title: "🏒 Pickup Lobby — who's in",
-    description: `**${(s.signups || []).length}/${FULL}** signed up. Run **/join** to grab an open spot — first ${FULL} (2 per position) locks the lobby and moves to its own channel.\n\nEach spot is held for **30 minutes**. You'll get a ping here before yours lapses — run **/join** again to renew it.`,
+  return { title: "🏒 Pickup queue — who's in",
+    description: `**${(s.signups || []).length}** signed up. Sign-ups are unlimited — run **/join** anytime.\n` +
+      (need.length
+        ? `A game forms once every position has two. Still needed: **${need.map((p) => `${p.label} ×${PER_POS - posCount(s, p.key)}`).join(", ")}**.`
+        : "Every position is covered — the next **/join** forms a lobby.") +
+      `\nThe first two at each position (**bold**) play; everyone else keeps their place in line for the next lobby.\n\nEach spot is held for **30 minutes**. You'll get a ping here before yours lapses — run **/join** again to renew it (renewing keeps your place in line).`,
     color: BRAND, fields };
 }
-function draftView(lobby) {
+/* KEEP IN SYNC with discord-interactions.js — EA gamertags beside names so players can find each
+   other in NHL, where the Discord name is useless. */
+function nameWithEa(id, ea) {
+  const tag = ea && ea[id];
+  return `<@${id}>${tag ? ` \`${tag}\`` : ""}`;
+}
+async function eaIdsFor(discordIds) {
+  const ids = [...new Set((discordIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return {};
+  try {
+    const rows = await sbGet(`profiles?discord_id=in.(${ids.map(encodeURIComponent).join(",")})&select=discord_id,ea_id,platform_gamertag`);
+    const map = {};
+    (rows || []).forEach((p) => { const t = p.ea_id || p.platform_gamertag; if (t) map[String(p.discord_id)] = t; });
+    return map;
+  } catch (e) { return {}; }
+}
+
+function draftView(lobby, ea) {
   const s = lobby.state;
   const cur = s.turn === "A" ? s.captains[0] : s.captains[1];
   const pool = (s.signups || []).filter((x) => x.id !== s.captains[0] && x.id !== s.captains[1] && !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
@@ -106,7 +130,7 @@ function draftView(lobby) {
   const filled = ((s.teams && s.teams[s.turn]) || []).map((id) => posOf[id]);
   const options = pool.filter((x) => !filled.includes(x.pos)).slice(0, 25).map((x) => ({ label: `${x.name}`.slice(0, 100), description: POS_LABEL[x.pos], value: x.id }));
   return { embeds: [{ title: "🧢 Captains' draft",
-    description: `<@${cur}> is on the clock — pick a player.\n\n**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
+    description: `<@${cur}> is on the clock — pick a player.\n\n**Home** (<@${s.captains[0]}>): ${teamNames(s, "A", ea)}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B", ea)}`,
     color: BRAND, footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` } }],
     components: [{ type: 1, components: [{ type: 3, custom_id: `lfg:pick:${lobby.id}`, placeholder: "Captain — pick a player", options, min_values: 1, max_values: 1 }] }] };
 }
@@ -241,12 +265,63 @@ async function keepSummaryLast(lo, st, errors, out, force) {
     if (!last || last.id === lo.message_id) return;
   }
   let posted;
-  try { posted = await dApi("POST", `/channels/${lo.channel_id}/messages`, { embeds: [summaryEmbed(st)], allowed_mentions: { parse: [] } }); }
+  const ea = await eaIdsFor((st.signups || []).map((x) => x.id));
+  try { posted = await dApi("POST", `/channels/${lo.channel_id}/messages`, { embeds: [summaryEmbed(st, ea)], allowed_mentions: { parse: [] } }); }
   catch (e) { errors.push(`lfg repost: ${String(e.message || e)}`); return; }
   if (!posted || !posted.id) return;
   try { await patchLobby(lo.id, { message_id: posted.id }); } catch (e) { errors.push(`lfg msgid: ${String(e.message || e)}`); }
   try { await dApi("DELETE", `/channels/${lo.channel_id}/messages/${lo.message_id}`); } catch (e) {}
   out.refreshed++;
+}
+
+/* ---------- (5) keep each active room's status card at the BOTTOM of its channel ----------
+   A lobby channel fills with chatter and the card with the teams, the server and the CODE scrolls
+   away exactly when people need it. Repost it whenever it is no longer the last message — and
+   only then, so a quiet room isn't spammed with duplicates every sweep. The room row's own
+   message_id tracks the live card (the board row uses the same column for the queue card). */
+function roomCardEmbed(s, ea) {
+  const stage = !((s.captains || []).length >= 2) ? "captains"
+    : s.code ? "done" : (s.server || s.vetoed != null) ? "server" : "drafting";
+  const roster = (s.signups || []).map((x) => `${nameWithEa(x.id, ea)} · ${POS_LABEL[x.pos] || x.pos}`).join("\n") || "—";
+  const teams = `**Home** (<@${(s.captains || [])[0]}>): ${teamNames(s, "A", ea)}\n**Away** (<@${(s.captains || [])[1]}>): ${teamNames(s, "B", ea)}`;
+  if (stage === "captains") {
+    return { title: "🏒 This lobby — waiting on captains", color: BRAND,
+      description: `Two of you run **/captain** to start the draft.\n\n**In this lobby**\n${roster}`,
+      footer: { text: "Names in `code` are EA gamertags — search those in NHL." } };
+  }
+  if (stage === "done") {
+    return { title: "✅ This lobby — ready to play", color: BRAND,
+      description: `${teams}\n\n**Server:** ${s.server}\n**Private lobby code:** \`${s.code}\`\n\n${STATS_HOWTO}`,
+      footer: { text: "Names in `code` are EA gamertags — search those in NHL." } };
+  }
+  return { title: stage === "server" ? "🌐 This lobby — picking the server" : "🧢 This lobby — drafting", color: BRAND,
+    description: `${teams}\n\n**In this lobby**\n${roster}`,
+    footer: { text: "Names in `code` are EA gamertags — search those in NHL." } };
+}
+const STATS_HOWTO =
+  "📊 **After the game** — import at chelgamingleague.com/#/pickup-import: search your EASHL club, pick the game. " +
+  "**Lagged out?** Tick every session you played and press **Import as one game** so they combine into one full-length game.";
+
+async function sweepRoomCards(errors, out) {
+  let rooms = [];
+  try { rooms = await sbGet("lfg_lobbies?status=in.(captains,drafting,server,done)&thread_id=not.is.null&select=id,thread_id,message_id,state,updated_at"); }
+  catch (e) { errors.push(`lfg room cards load: ${String(e.message || e)}`); return; }
+  for (const lo of rooms || []) {
+    const s = lo.state || {};
+    try {
+      let last = null;
+      try { const arr = await dApi("GET", `/channels/${lo.thread_id}/messages?limit=1`); last = arr && arr[0]; } catch (e) { continue; }
+      if (last && lo.message_id && last.id === lo.message_id) continue;   // already at the bottom
+      const ea = await eaIdsFor((s.signups || []).map((x) => x.id));
+      const posted = await dApi("POST", `/channels/${lo.thread_id}/messages`, { embeds: [roomCardEmbed(s, ea)], allowed_mentions: { parse: [] } });
+      if (!posted || !posted.id) continue;   // never record a card we didn't actually post
+      /* delete the buried copy only AFTER the new one exists, so a failure never leaves the room
+         with no card at all */
+      if (lo.message_id) { try { await dApi("DELETE", `/channels/${lo.thread_id}/messages/${lo.message_id}`); } catch (e) {} }
+      try { await patchLobby(lo.id, { message_id: posted.id }); } catch (e) { errors.push(`lfg card stash: ${String(e.message || e)}`); }
+      out.cardsBumped = (out.cardsBumped || 0) + 1;
+    } catch (e) { errors.push(`lfg room card ${lo.id}: ${String(e.message || e)}`); }
+  }
 }
 
 /* ---------- (4) full lobbies nobody captained ---------- */
@@ -295,7 +370,7 @@ export default async () => {
   // Without Supabase there is nowhere to record anything, so this is the one unavoidable silent exit.
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
   const errors = [];
-  const out = { warned: 0, dropped: 0, retired: 0, refreshed: 0, autoCaptained: 0, raced: 0 };
+  const out = { warned: 0, dropped: 0, retired: 0, refreshed: 0, autoCaptained: 0, raced: 0, cardsBumped: 0 };
   // A missing bot token is recorded as a FAILING run, never as a quiet skip. Returning early here
   // would leave no heartbeat and no result at all, so a clock that never ran would look identical to
   // one that ran with nothing to do — dead and invisible rather than dead and loud.
@@ -303,6 +378,7 @@ export default async () => {
   else try {
     await sweepOpen(errors, out);
     await sweepCaptains(errors, out);
+    await sweepRoomCards(errors, out);
   } catch (e) { errors.push(String(e.message || e)); }
   if (errors.length) console.error("lfg-timers:", JSON.stringify(errors));
   // Heartbeat + result for the Automations page and the database watchdog.

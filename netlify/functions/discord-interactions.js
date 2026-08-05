@@ -28,8 +28,25 @@ const POS = [
   { key: "G",  label: "Goaltender" },
 ];
 const POS_LABEL = POS.reduce((m, p) => (m[p.key] = p.label, m), {});
-const PER_POS = 2;
+const PER_POS = 2;                            // players per position IN A GAME (not a signup cap)
 const FULL = POS.length * PER_POS;            // 12
+
+/* The board is an unlimited queue. A game forms when every position has at least PER_POS
+   signed up; the first PER_POS at each position (insertion order = who signed up first) play,
+   and everyone else stays on the board, first in line for the next lobby. Renewing with /join
+   refreshes the 30-minute hold WITHOUT moving anyone back in line, so waiting your turn is never
+   punished for staying alive. */
+function readyToForm(s) {
+  return POS.every((p) => posCount(s, p.key) >= PER_POS);
+}
+function selectTwelve(signups) {
+  const chosen = [], taken = {};
+  POS.forEach((p) => {
+    (signups || []).filter((x) => x.pos === p.key).slice(0, PER_POS)
+      .forEach((x) => { chosen.push(x); taken[x.id] = 1; });
+  });
+  return { chosen, rest: (signups || []).filter((x) => !taken[x.id]) };
+}
 const SERVERS = ["NA East", "NA Northeast", "NA Central"];
 const BRAND = 0xFFE500;
 
@@ -106,6 +123,18 @@ async function sbActiveGameOf(userId) {
   } catch (e) { return null; }
 }
 // optimistic compare-and-swap on updated_at so two simultaneous clicks can't clobber each other
+/* Form a game out of the board: the twelve move into a NEW lobby row and the board keeps the
+   rest, in ONE transaction. Two separate writes could either leave the twelve on the board (and
+   immediately form a second lobby with the same people) or drop them from both. Returns the new
+   room row, or null when the CAS was lost so the caller re-reads and retries. */
+async function sbFormLobby(boardId, prevUpdatedAt, roomState, boardState) {
+  const row = await sbRpc("lfg_form_lobby", {
+    p_board_id: boardId, p_prev_updated: prevUpdatedAt,
+    p_room_state: roomState, p_board_state: boardState,
+  });
+  const out = Array.isArray(row) ? row[0] : row;
+  return out && out.id ? out : null;
+}
 async function sbSaveLobby(id, prevUpdatedAt, state, status) {
   const r = await fetch(`${SB_URL}/rest/v1/lfg_lobbies?id=eq.${id}&updated_at=eq.${encodeURIComponent(prevUpdatedAt)}`, withTimeout({
     method: "PATCH",
@@ -182,8 +211,8 @@ async function dApi(method, path, body, ms) {
 // Keep the public roster summary current + at the bottom of #pickup-games: edit it in place if it's
 // still the last message, otherwise repost it at the bottom (deleting the buried one). Returns the
 // live message id.
-async function ensureSummary(channelId, state, curMsgId) {
-  const view = summaryView(state);
+async function ensureSummary(channelId, state, curMsgId, ea) {
+  const view = summaryView(state, ea);
   let last = null;
   try { const arr = await dApi("GET", `/channels/${channelId}/messages?limit=1`, undefined, 1400); last = arr && arr[0]; } catch (e) {}
   if (curMsgId && last && last.id === curMsgId) {
@@ -228,7 +257,7 @@ function instructionsEmbed() {
       "**2 · Mini draft** — the other player at each captain's position starts on the opposite team automatically. Captains then take turns picking (snake order), one of each position per team — the dropdown only shows who's legal.\n\n" +
       "**3 · Server & code** — **Away** vetoes the server they don't want, **Home** picks between the other two, then the bot drops a **private 6-digit lobby code**.\n\n" +
       "**4 · Play** — set a private match with that code on the chosen server.\n\n" +
-      `**5 · Stats** — after the game, statistics staff enter the box score by **club search** at ${CLUB_SEARCH}.\n\n` +
+      `**5 · Stats** — after the game, import the box score at chelgamingleague.com/#/pickup-import. If the game lagged out, select **every session** you played and press **Import as one game** so the combined stats count as one full game. (Staff can also enter it by club search at ${CLUB_SEARCH}.)\n\n` +
       "**6 · Done** — entering the box score clears this channel on its own a couple of minutes later. Want it gone sooner? When a **majority of the lobby runs /delete**, it closes — and any quiet room clears within 12 hours regardless. Someone no-show or out of line? A captain can start a vote with **/kick** — the other captain approves, and the spot refills from #pickup-games.",
     color: BRAND,
   };
@@ -247,11 +276,35 @@ const nameOf = (interaction) => {
 };
 const userIdOf = (interaction) => (interaction.member && interaction.member.user && interaction.member.user.id) || (interaction.user && interaction.user.id);
 const posCount = (s, pos) => (s.signups || []).filter((x) => x.pos === pos).length;
-const teamNames = (s, side) => (s.teams[side] || []).map((id) => `<@${id}>`).join(", ") || "—";
+const teamNames = (s, side, ea) => (s.teams[side] || []).map((id) => nameWithEa(id, ea)).join(", ") || "—";
 const draftOrder = () => ["A", "B", "B", "A", "A", "B", "B", "A", "A", "B"]; // snake for 2 teams x 10 picks
 const currentCaptain = (s) => (s.turn === "A" ? s.captains[0] : s.captains[1]);
 const remainingPool = (s) => (s.signups || []).filter((x) => x.id !== s.captains[0] && x.id !== s.captains[1] &&
   !s.teams.A.includes(x.id) && !s.teams.B.includes(x.id));
+
+/* ---------- EA gamertags beside names ----------
+   Once teams are set, players have to FIND each other in EA's client, where the site gamertag is
+   useless — so every roster line carries the EA name. The map is discordId -> ea name; anything
+   unresolved simply renders without one rather than blocking the view. */
+function nameWithEa(entry, ea) {
+  const id = typeof entry === "string" ? entry : entry.id;
+  const tag = ea && ea[id];
+  return `<@${id}>${tag ? ` \`${tag}\`` : ""}`;
+}
+async function sbEaIds(discordIds) {
+  const ids = [...new Set((discordIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return {};
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/profiles?discord_id=in.(${ids.map(encodeURIComponent).join(",")})&select=discord_id,ea_id,platform_gamertag,gamertag`, withTimeout({ headers: sbHead() }));
+    const rows = await r.json().catch(() => []);
+    const map = {};
+    (Array.isArray(rows) ? rows : []).forEach((p) => {
+      const tag = p.ea_id || p.platform_gamertag || null;   // gamertag is the SITE name, not EA's
+      if (tag) map[String(p.discord_id)] = tag;
+    });
+    return map;
+  } catch (e) { return {}; }   // a roster without EA names beats no roster at all
+}
 
 /* ---------- view builders ---------- */
 // The private per-player picker (ephemeral): six position buttons showing what's open, plus Leave if
@@ -262,36 +315,44 @@ function pickerView(channelId, s, userId, renewedPos) {
     embeds: [{
       title: renewedPos ? "\uD83D\uDD04 Spot renewed" : "\uD83C\uDFD2 Pick your position",
       description: (renewedPos
-          ? `Thirty fresh minutes at **${POS_LABEL[renewedPos] || renewedPos}** — you're safe. Tap a different position to move there, or just dismiss this.`
+          ? `Thirty fresh minutes at **${POS_LABEL[renewedPos] || renewedPos}** — you're safe, and you keep your place in line. Tap a different position to move there, or just dismiss this.`
           : mine ? `You're in at **${POS_LABEL[mine.pos]}**. Tap a different position to move there, or **Leave** to drop.`
-                 : "Tap your position to jump in.") +
-        `\n\n**${(s.signups || []).length}/${FULL}** signed up — the number on each button is how many spots are left.`,
+                 : "Tap your position to jump in — sign-ups are unlimited.") +
+        `\n\n**${(s.signups || []).length}** signed up. A game forms as soon as **every position has two** — the first two at each spot play, everyone else stays in line for the next one. The number on each button is how many are waiting there.`,
       color: BRAND,
     }],
     components: [
-      { type: 1, components: POS.slice(0, 5).map((p) => ({ type: 2, style: 1, label: `${p.label} (${PER_POS - posCount(s, p.key)} left)`, custom_id: `lfg:join:${channelId}:${p.key}`, disabled: posCount(s, p.key) >= PER_POS })) },
+      { type: 1, components: POS.slice(0, 5).map((p) => ({ type: 2, style: 1, label: `${p.label} (${posCount(s, p.key)})`, custom_id: `lfg:join:${channelId}:${p.key}` })) },
       { type: 1, components: [
-        { type: 2, style: 1, label: `Goaltender (${PER_POS - posCount(s, "G")} left)`, custom_id: `lfg:join:${channelId}:G`, disabled: posCount(s, "G") >= PER_POS },
+        { type: 2, style: 1, label: `Goaltender (${posCount(s, "G")})`, custom_id: `lfg:join:${channelId}:G` },
         { type: 2, style: 2, label: "Leave", custom_id: `lfg:leave:${channelId}`, disabled: !mine },
       ] },
     ],
   };
 }
 // The public roster summary (no buttons) that lives in #pickup-games and gets bumped to the bottom.
-function summaryView(s) {
+function summaryView(s, ea) {
+  const need = POS.filter((p) => posCount(s, p.key) < PER_POS);
   const fields = POS.map((p) => {
-    const who = (s.signups || []).filter((x) => x.pos === p.key).map((x) => `<@${x.id}>`).join(", ");
-    return { name: `${p.label} (${posCount(s, p.key)}/${PER_POS})`, value: who || "_open_", inline: true };
+    const line = (s.signups || []).filter((x) => x.pos === p.key);
+    /* the first two at a position are the ones who'd play if the lobby formed right now — the
+       rest are shown as the queue behind them, so waiting players can see exactly where they sit */
+    const who = line.map((x, i) => `${i < PER_POS ? "**" : ""}${i + 1}. ${nameWithEa(x, ea)}${i < PER_POS ? "**" : ""}`).join("\n");
+    return { name: `${p.label} (${line.length})`, value: who || "_nobody yet_", inline: true };
   });
   return {
     embeds: [{
-      title: "🏒 Pickup Lobby — who's in",
-      description: `**${(s.signups || []).length}/${FULL}** signed up. Run **/join** to grab an open spot — first ${FULL} (2 per position) locks the lobby and moves to its own channel.`,
+      title: "🏒 Pickup queue — who's in",
+      description: `**${(s.signups || []).length}** signed up. Sign-ups are unlimited — run **/join** anytime.\n` +
+        (need.length
+          ? `A game forms once every position has two. Still needed: **${need.map((p) => `${p.label} ×${PER_POS - posCount(s, p.key)}`).join(", ")}**.`
+          : "Every position is covered — the next **/join** forms a lobby.") +
+        `\nThe first two at each position (**bold**) play; everyone else keeps their place in line for the next lobby.`,
       color: BRAND, fields,
     }],
   };
 }
-function draftView(lobby) {
+function draftView(lobby, ea) {
   const s = lobby.state;
   const pool = remainingPool(s);
   const capName = `<@${currentCaptain(s)}>`;
@@ -302,7 +363,7 @@ function draftView(lobby) {
   return {
     embeds: [{
       title: "🧢 Captains' draft",
-      description: `${capName} is on the clock — pick a player.\n\n**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}`,
+      description: `${capName} is on the clock — pick a player.\n\n**Home** (<@${s.captains[0]}>): ${teamNames(s, "A", ea)}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B", ea)}`,
       color: BRAND,
       footer: { text: `${pool.length} player${pool.length === 1 ? "" : "s"} left on the board` },
     }],
@@ -311,9 +372,9 @@ function draftView(lobby) {
 }
 /* The server is settled by VETO: Away first knocks out the server they don't want, then Home
    picks between the remaining two. One view, two stages, keyed on s.vetoed. */
-function serverView(lobby) {
+function serverView(lobby, ea) {
   const s = lobby.state;
-  const teams = `**Home**: ${teamNames(s, "A")}\n**Away**: ${teamNames(s, "B")}`;
+  const teams = `**Home**: ${teamNames(s, "A", ea)}\n**Away**: ${teamNames(s, "B", ea)}`;
   if (s.vetoed == null) {
     return {
       embeds: [{
@@ -335,14 +396,21 @@ function serverView(lobby) {
       : { type: 2, style: 1, label: sv, custom_id: `lfg:server:${lobby.id}:${i}` })) }],
   };
 }
-function doneView(lobby) {
+const STATS_HOWTO =
+  "📊 **After the game — entering stats**\n" +
+  "Import the box score at chelgamingleague.com/#/pickup-import: search your EASHL club, then pick the game.\n" +
+  "**Lagged out?** Tick the circle on **every session** you played — the first half plus each relaunch — and press " +
+  "**Import as one game**. They combine into a single full-length game: stats summed, score aggregated, so nobody " +
+  "loses a period's worth of numbers. (Staff can also enter it by club search at " + CLUB_SEARCH + ".)";
+
+function doneView(lobby, ea) {
   const s = lobby.state;
   return {
     embeds: [{
       title: "✅ Lobby ready — good luck out there",
-      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A")}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B")}\n\n**Server:** ${s.server}${s.vetoed != null ? ` (Away vetoed ${SERVERS[s.vetoed]})` : ""}\n**Private lobby code:** \`${s.code}\`\n\n📊 After the game, staff enter the box score by **club search** at ${CLUB_SEARCH} (players can also self-import at chelgamingleague.com/#/pickup-import).`,
+      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A", ea)}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B", ea)}\n\n**Server:** ${s.server}${s.vetoed != null ? ` (Away vetoed ${SERVERS[s.vetoed]})` : ""}\n**Private lobby code:** \`${s.code}\`\n\n${STATS_HOWTO}`,
       color: BRAND,
-      footer: { text: "Set a private match with this code on the chosen server." },
+      footer: { text: "Names in `code` are EA gamertags — search those in NHL, not the Discord names." },
     }],
     components: [],
   };
@@ -359,23 +427,15 @@ function applyJoin(lobby, userId, name, pos) {
   // and moved, if they named a different position and it has room.
   const mine = (s.signups || []).find((x) => x.id === userId);
   if (mine) {
-    // Renew unconditionally, even when the position they asked for is taken — someone racing their
-    // own clock must never lose their spot just because their preferred slot filled up meanwhile.
-    const blocked = mine.pos !== pos && posCount(s, pos) >= PER_POS ? POS_LABEL[pos] : null;
-    const moved = mine.pos !== pos && !blocked;
+    /* Renewal keeps your place in the queue: only the hold clock moves, never the array position
+       that decides who plays next. Moving position is always allowed now that nothing caps. */
+    const moved = mine.pos !== pos;
     if (moved) mine.pos = pos;
     mine.at = now; delete mine.warned;
-    return { status: "open", state: s, renewed: true, moved, blocked };
+    return { status: "open", state: s, renewed: true, moved, formed: readyToForm(s) ? selectTwelve(s.signups) : null };
   }
-  if (posCount(s, pos) >= PER_POS) return { error: `${POS_LABEL[pos]} is full — pick another spot.` };
   s.signups = (s.signups || []).concat([{ id: userId, name, pos, at: now }]);
-  if (s.signups.length >= FULL) {
-    lobby.status = "captains";
-    s.filledAt = new Date().toISOString();
-    s.captains = [];
-    return { status: "captains", state: s, filled: true };
-  }
-  return { status: "open", state: s };
+  return { status: "open", state: s, formed: readyToForm(s) ? selectTwelve(s.signups) : null };
 }
 function applyLeave(lobby, userId) {
   const s = lobby.state;
@@ -654,42 +714,62 @@ async function handleComponent(interaction) {
     if (out.error) return ephemeral(out.error);
     if (action === "join" || action === "leave") out.state.lastSignupAt = new Date().toISOString();
 
+    /* A game is ready: split the board. The twelve become their own lobby row, the queue keeps
+       everyone else. Done in one RPC under the same CAS the normal save uses. */
+    if (out.formed && BOT && guildId) {
+      const nowIso = new Date().toISOString();
+      const roomState = { signups: out.formed.chosen, captains: [], teams: { A: [], B: [] },
+        turn: null, server: null, code: null, filledAt: nowIso };
+      const boardState = { ...out.state, signups: out.formed.rest, lastSignupAt: nowIso };
+      const room = await sbFormLobby(lobby.id, lobby.updated_at, roomState, boardState);
+      if (!room) continue;   // CAS lost — re-read and retry
+      const iPlay = out.formed.chosen.some((x) => x.id === userId);
+      try {
+        const categoryId = await sbGetConfig("pickup_lobby_category_id");
+        const roomId = await launchLobbyRoom({ id: room.id, state: roomState }, guildId, categoryId);
+        await sbStashThread(room.id, roomId);   // await: /captain, the auto-captain sweep and the
+        // room cleanup ALL find the lobby by thread_id — losing this write strands the room.
+        /* the board message stays: it now shows the leftover queue, not a "full" card */
+        if (lobby.message_id) { try { await dApi("PATCH", `/channels/${lobby.channel_id}/messages/${lobby.message_id}`, { embeds: summaryView(boardState, await sbEaIds((boardState.signups || []).map((x) => x.id))).embeds }, 1600); } catch (e) {} }
+        return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby formed!",
+          description: iPlay
+            ? `You're in this one — head to <#${roomId}> to set captains and draft.`
+            : `A lobby just formed from the first two at each position. You're still signed up and **next in line** for the following one.`,
+          color: BRAND }], components: [] } });
+      } catch (e) {
+        console.error("lfg: lobby", room.id, "formed but room setup failed:", String(e.message || e));
+        return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby formed — 12 players",
+          description: "The room is being set up. Captains, run **/captain** in the new channel.", color: BRAND }], components: [] } });
+      }
+    }
+
     const saved = await sbSaveLobby(lobby.id, lobby.updated_at, out.state, out.status);
     if (!saved) continue;   // CAS lost — another click landed first; re-read and retry
 
-    // Signup actions: keep the public summary fresh + at the bottom; on the 12th, spin up the room.
+    // Signup actions: keep the public summary fresh + at the bottom.
     if (action === "join" || action === "leave") {
-      if (out.filled && BOT && guildId) {
-        try {
-          const categoryId = await sbGetConfig("pickup_lobby_category_id");
-          const roomId = await launchLobbyRoom({ id: lobby.id, state: out.state }, guildId, categoryId);
-          await sbStashThread(lobby.id, roomId);   // await: the fn freezes on response, and /captain,
-          // the auto-captain sweep and the room cleanup ALL find the lobby by thread_id — losing this
-          // write strands a filled lobby permanently and orphans its channel.
-          if (lobby.message_id) { try { await dApi("PATCH", `/channels/${lobby.channel_id}/messages/${lobby.message_id}`, { embeds: [fullSummaryEmbed(roomId)] }, 1400); } catch (e) {} }
-          return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby full!", description: `You're in — head to <#${roomId}> to set captains and draft.`, color: BRAND }], components: [] } });
-        } catch (e) {
-          // Loud in the Netlify log: if this was the thread_id stash, the room exists but no sweep
-          // can see it, and staff need to know rather than wonder why /captain says "no lobby here".
-          console.error("lfg: lobby", lobby.id, "filled but room setup failed:", String(e.message || e));
-          return respond({ type: UPDATE, data: { embeds: [{ title: "🔒 Lobby full — 12/12", description: "You're in! Captains, set up the draft in the lobby channel.", color: BRAND }], components: [] } });
-        }
-      }
       let newMsgId = lobby.message_id;
-      if (BOT) { try { newMsgId = await ensureSummary(lobby.channel_id, out.state, lobby.message_id); } catch (e) {} }
+      if (BOT) { try { newMsgId = await ensureSummary(lobby.channel_id, out.state, lobby.message_id, await sbEaIds((out.state.signups || []).map((x) => x.id))); } catch (e) {} }
       if (newMsgId && newMsgId !== lobby.message_id) await sbStashMessage(lobby.id, newMsgId);  // await: the fn freezes on response, so a fire-and-forget PATCH never lands
       const held = `Your spot is held for **30 minutes** — you'll get a ping in <#${lobby.channel_id}> before it lapses, and running **/join** again renews it.`;
       const confirm = action === "join"
         ? { title: out.renewed ? "🔄 Spot renewed" : "✅ You're in",
-            description: (out.blocked ? `${out.blocked} is full, so you're still at **${POS_LABEL[(out.state.signups.find((x) => x.id === userId) || {}).pos] || POS_LABEL[arg]}**. `
-                        : out.moved ? `Moved to **${POS_LABEL[arg]}**. `
+            description: (out.moved ? `Moved to **${POS_LABEL[arg]}**. `
                         : `${out.renewed ? "Renewed at" : "Signed up at"} **${POS_LABEL[arg]}**. `) + held, color: BRAND }
         : { title: "👋 You left the lobby", description: "Run /join again anytime to jump back in.", color: BRAND };
       return respond({ type: UPDATE, data: { embeds: [confirm], components: [] } });
     }
 
-    // Draft / server actions edit the draft message in the lobby channel.
-    return respond({ type: UPDATE, data: out.view });
+    /* Draft / server actions edit the draft message in the lobby channel. Re-render with EA
+       gamertags attached: the apply* functions stay pure + synchronous (they're unit-tested that
+       way), so the map is fetched here and the same builder is re-run from the new status. */
+    const roster = ((out.state && out.state.signups) || []).map((x) => x.id);
+    const ea = await sbEaIds(roster);
+    const rebuilt = out.status === "drafting" ? draftView({ ...lobby, state: out.state }, ea)
+      : out.status === "server" ? serverView({ ...lobby, state: out.state }, ea)
+      : out.status === "done" ? doneView({ ...lobby, state: out.state }, ea)
+      : out.view;
+    return respond({ type: UPDATE, data: rebuilt });
   }
   return ephemeral("The lobby was busy — try that again.");
 }
@@ -878,4 +958,5 @@ export const handler = async (event) => {
 // Exposed for local unit tests only; Netlify invokes the named handler export.
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
   applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, applyVeto, handleJoin, pickerView, handleComponent,
-  startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS };
+  startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS,
+  readyToForm, selectTwelve, nameWithEa, PER_POS };

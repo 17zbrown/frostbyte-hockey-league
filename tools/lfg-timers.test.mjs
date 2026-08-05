@@ -143,16 +143,23 @@ console.log("\n— /join renewal (the action the warning asks for)");
   const moved = I.applyJoin(lb, "u1", "U1", "RD");
   assert("re-joining at an open position moves them", moved.moved === true && moved.state.signups.find((x) => x.id === "u1").pos === "RD");
 
-  lb.state.signups.push(P("u3", 1, "LW"));                        // LW now full (2)
+  /* Sign-ups are unlimited now: a position that already has its two takes more players, who
+     queue behind them for the NEXT lobby. Renewal must never cost a player their place in line. */
+  lb.state.signups.push(P("u3", 1, "LW"));                        // LW already has its two
   lb.state.signups.find((x) => x.id === "u1").at = ago(29);
-  const blocked = I.applyJoin(lb, "u1", "U1", "LW");
-  const after = blocked.state.signups.find((x) => x.id === "u1");
-  assert("re-joining into a FULL position still renews rather than failing", !blocked.error && blocked.renewed === true && (Date.now() - Date.parse(after.at)) / MIN < 0.2);
-  assert("...and says which position was full", blocked.blocked === "Left Wing" && after.pos === "RD");
+  const moved2 = I.applyJoin(lb, "u1", "U1", "LW");
+  const after = moved2.state.signups.find((x) => x.id === "u1");
+  assert("re-joining renews the clock", !moved2.error && moved2.renewed === true && (Date.now() - Date.parse(after.at)) / MIN < 0.2);
+  assert("...and a stacked position still accepts the move", after.pos === "LW");
 
   const fresh = I.applyJoin(lb, "u9", "New", "G");
   assert("a new joiner is stamped with a clock", !!fresh.state.signups.find((x) => x.id === "u9").at);
-  assert("position quotas still bind newcomers", !!I.applyJoin(lb, "u10", "X", "LW").error);
+  const extra = I.applyJoin(lb, "u10", "X", "LW");
+  assert("a third player at a position is accepted, not refused", !extra.error && extra.state.signups.some((x) => x.id === "u10"));
+
+  const idxBefore = lb.state.signups.findIndex((x) => x.id === "u3");
+  I.applyJoin(lb, "u3", "U3", "LW");
+  assert("renewing does not move you back in line", lb.state.signups.findIndex((x) => x.id === "u3") === idxBefore);
 }
 
 console.log(`\n${ok ? "PASS — all assertions held" : "FAIL — see above"}`);
