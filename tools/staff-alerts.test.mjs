@@ -1,7 +1,7 @@
 // Instant staff-desk alerts. Run: node tools/staff-alerts.test.mjs
 //
 // Two failures here are worse than no alerts at all, and most of this file is about them:
-//   1. a complaint about staff conduct reaching a room the accused can read;
+//   1. the substance of a case travelling to Discord instead of just its heading;
 //   2. a club's private trade request leaving the club.
 // After that: the right room, one message per arrival however many paths try to send it, and a
 // 404 from Discord never counting as delivered.
@@ -12,12 +12,14 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 console.log("— the two things that must never happen");
 {
-  const office = route("action_requests", { id: "c1", type: "complaint", subject: "Commissioner or staff conduct" });
-  A("a complaint about the office reaches no department room", office.dept === null);
-  A("...and says why", office.suppressed === "office-conduct");
-  A("case is not defeated by capitalisation",
-    route("action_requests", { id: "c1", type: "complaint", subject: "COMMISSIONER OR STAFF CONDUCT" }).dept === null);
   A("a trade request never leaves the club", route("action_requests", { id: "c2", type: "trade_request" }) === null);
+  /* Commissioner ruling 2026-07-20: ALL officials see ALL filings — action_requests.ar_read has no
+     subject carve-out. An office-conduct complaint is therefore announced like any other; hiding
+     the announcement would conceal nothing and only slow the response. What protects it is the
+     authority rule (ar_update refuses the filer and the subject), not secrecy. */
+  const office = route("action_requests", { id: "c1", type: "complaint", subject: "Commissioner or staff conduct" });
+  A("an office-conduct complaint still reaches the officials", office.dept === "officiating");
+  A("...and is not silently suppressed", !office.suppressed);
 }
 
 console.log("\n— each arrival finds its own desk");
@@ -134,8 +136,8 @@ console.log("\n— suppressed arrivals cost nothing and post nothing");
 {
   reset();
   const S = createStaffAlerter(ENV);
-  const r = await S.announce("action_requests", { id: "c9", type: "complaint", subject: "Commissioner or staff conduct" });
-  A("nothing is posted", posts.length === 0 && r === "suppressed:office-conduct");
+  const r = await S.announce("action_requests", { id: "c9", type: "position_change" });
+  A("nothing is posted", posts.length === 0 && r === "suppressed:commissioner-only");
   A("...and no claim is burned", claimed.length === 0);
   A("...and no profile lookup was needed", S.sum.suppressed === 1);
   const t = await S.announce("action_requests", { id: "c10", type: "trade_request" });

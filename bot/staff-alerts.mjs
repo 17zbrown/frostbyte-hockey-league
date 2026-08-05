@@ -11,12 +11,18 @@
 // as a catch-up backstop for anything that landed while the bot was down.
 //
 // TWO RULES THIS FILE EXISTS TO ENFORCE:
-//  1. A case never reaches a room that its subject can read. A complaint about "Commissioner or
-//     staff conduct" is deliberately NOT announced anywhere — every department room is readable by
-//     staff, so announcing it hands the accused their own complaint. It stays on the site, where
-//     RLS already scopes it to the office.
+//  1. The SUBSTANCE of a case never travels. Only the heading it was filed under and a link to the
+//     desk go to Discord; staff open the case to read it. That holds for every case type.
 //  2. A club's private business never leaves the club. `trade_request` cases are routed to a
 //     club's own management, not to the league office, so they are dropped here.
+//
+// DELIBERATELY NOT A RULE: hiding "Commissioner or staff conduct" complaints. An earlier draft
+// suppressed those, which contradicted a standing commissioner ruling (2026-07-20) that ALL
+// officials see ALL filings — action_requests' ar_read policy carries no subject carve-out, so
+// every non-media staffer can already read them on the site. Suppressing the announcement would
+// have hidden nothing and only delayed the response. The protection that actually applies is on
+// AUTHORITY, not visibility: ar_update refuses a staffer who is the filer or the subject, so a
+// case involving someone is worked by someone else.
 
 /* Desk routes mirror CG.STAFF_DESKS — key is the department, value the hash route of its desk. */
 const DESK_PATH = {
@@ -36,10 +42,6 @@ const DEPT_LABEL = {
 };
 const SITE = "https://chelgamingleague.com/";
 
-/* Complaint subjects that implicate the league office itself. CG.COMPLAINT_SUBJECTS is the
-   authoritative list; only this one is a conflict, because every other subject is about a member
-   or a club and the officials' room is the right place to work it. */
-const OFFICE_CONDUCT = "commissioner or staff conduct";
 /* Discord moderation is Community's, not Officials'. */
 const DISCORD_SUBJECT = "discord behavior";
 
@@ -76,8 +78,6 @@ export function route(table, row, extra = {}) {
     /* a club's own management handles these — the league office is not a party to them */
     if (type === "trade_request") return null;
     if (type === "complaint") {
-      /* the accused must not read their own complaint: every department room is staff-readable */
-      if (subjLower === OFFICE_CONDUCT) return { dept: null, suppressed: "office-conduct" };
       const dept = subjLower === DISCORD_SUBJECT ? "community" : "officiating";
       return { dept, kind: "New complaint",
         line: subject ? `Filed under **${subject}**.` : "A complaint was filed.",
