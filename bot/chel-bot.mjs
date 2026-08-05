@@ -14,6 +14,7 @@
 import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
 import { createHandlers } from "./handlers.mjs";
 import { createIncidentNotifier } from "./incidents.mjs";
+import { createStaffAlerter } from "./staff-alerts.mjs";
 import { createClient } from "@supabase/supabase-js";
 
 const env = {
@@ -77,6 +78,14 @@ client.once(Events.ClientReady, (c) => {
   ready = true;
   console.log(`gateway-bot: connected as ${c.user.tag} — watching guild ${env.GUILD}`);
   H.beat().catch((e) => console.error("first heartbeat failed:", e.message));
+  /* Anything that arrived while this process was down was never delivered to anyone — Realtime
+     does not replay. Sweep on the way up, and every 10 minutes after, so a restart during a busy
+     evening does not quietly eat a complaint. The claim log makes a repeat impossible. */
+  const sweep = () => DESK.catchUp()
+    .then((r) => { if (r && (r.announced || r.seeded)) console.log(`desk catch-up: ${JSON.stringify(r)}`); })
+    .catch((e) => console.error("desk catch-up failed:", e.message));
+  sweep();
+  setInterval(sweep, 600_000);
 });
 client.on(Events.Error, (e) => console.error("gateway error:", e.message));
 /* Events.ShardError carries the real reason for a fatal close ("Used disallowed intents",
@@ -104,7 +113,14 @@ client.on(Events.ShardDisconnect, (event) => {
    argument. Supabase Realtime pushes the row the moment staff log it, and both clubs are told
    at the same instant, which is the point: no "my guy said one penalty". */
 const INC = createIncidentNotifier(env);
+const DESK = createStaffAlerter(env);
 let incidentsLive = false;
+let deskAlertsLive = false;
+/* Tables whose arrival is work for a department. game_incidents is on BOTH streams on purpose:
+   the clubs get the ruling, the Officials' desk gets told the case exists. Adding a table here is
+   the whole job — staff-alerts.mjs decides the room, or stays silent. */
+const DESK_TABLES = ["action_requests", "owner_applications", "staff_applications",
+  "management_applications", "ea_ingest_log", "staff_votes", "game_incidents"];
 if (env.SB_URL && env.SB_KEY) {
   const sb = createClient(env.SB_URL, env.SB_KEY, { auth: { persistSession: false } });
   sb.channel("game-incidents")
@@ -115,11 +131,37 @@ if (env.SB_URL && env.SB_KEY) {
       incidentsLive = status === "SUBSCRIBED";
       console.log(`game-incident rulings: ${status}`);
     });
+
+  /* ---- instant staff-desk alerts ----
+     A member files a complaint or an application and the owning department hears about it in its
+     own room within a second. The daily casework nudge stays on as the "still unresolved" chaser;
+     this is the arrival bell. discord-sync re-runs the same routing as a catch-up, and the shared
+     discord_post_log claim means only one of the two ever posts. */
+  const deskCh = sb.channel("staff-desk-alerts");
+  for (const table of DESK_TABLES) {
+    deskCh.on("postgres_changes", { event: "INSERT", schema: "public", table }, (payload) => {
+      DESK.announce(table, payload.new)
+        .then((r) => { if (r !== "skip") console.log(`desk alert ${table}/${payload.new && payload.new.id}: ${r}`); });
+    });
+  }
+  /* an EA import is INSERTed as pending and only later marked unmatched, so the update matters
+     more than the insert for that one table */
+  deskCh.on("postgres_changes", { event: "UPDATE", schema: "public", table: "ea_ingest_log" }, (payload) => {
+    const before = payload.old || {}, after = payload.new || {};
+    if (before.status === after.status) return;              // only the transition INTO unmatched
+    DESK.announce("ea_ingest_log", after)
+      .then((r) => { if (r !== "skip") console.log(`desk alert ea_ingest_log/${after.id}: ${r}`); });
+  });
+  deskCh.subscribe((status) => {
+    deskAlertsLive = status === "SUBSCRIBED";
+    console.log(`staff-desk alerts: ${status}`);
+  });
 }
 
 // The heartbeat is the watchdog's view of this process: rl_gateway-bot every minute, and the
 // per-run result alongside it. Stop beating and the automation_watchdog pages within ~25 min.
-setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced } })
+setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced,
+    deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed } })
   .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

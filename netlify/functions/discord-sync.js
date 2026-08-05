@@ -1298,6 +1298,22 @@ export default async (req) => {
     for (const d of STAFF_DEPARTMENTS) if (roleId[d.role.toLowerCase()]) dmap[d.key] = roleId[d.role.toLowerCase()];
     if (Object.keys(dmap).length) await sbUpsertCfg("discord_dept_role_ids", JSON.stringify(dmap));
   } catch (e) { sum.errors.push({ deptRoleIds: String(e.message || e) }); }
+  /* The department -> room map, the twin of discord_dept_role_ids above. The gateway bot's instant
+     desk alerts (bot/staff-alerts.mjs) resolve a room from this rather than searching the guild by
+     name, so a room renamed here is followed there on the next sweep. Matched under the Staff
+     category only — a public channel that happens to share the name must never be posted into. */
+  try {
+    const staffCat = guildChannels.find((c) => c.type === 4 && /^staff\b/i.test(c.name || ""));
+    const cmap = {};
+    if (staffCat) {
+      for (const d of STAFF_DEPARTMENTS) {
+        const ch = guildChannels.find((c) => c.name === d.channel && c.parent_id === staffCat.id);
+        if (ch && ch.id) cmap[d.key] = ch.id;
+      }
+    }
+    if (Object.keys(cmap).length) await sbUpsertCfg("discord_dept_channel_ids", JSON.stringify(cmap));
+    sum.deptChanMapped = Object.keys(cmap).length;
+  } catch (e) { sum.errors.push({ deptChannelIds: String(e.message || e) }); }
 
   // #trade-block and #free-agency self-heal to their intended audience if @everyone view ever
   // gets re-added. They are NOT the same audience: #trade-block is team management only, but
