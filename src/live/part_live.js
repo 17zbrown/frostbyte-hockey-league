@@ -3537,10 +3537,32 @@ CG.loadTrades = async function(){
   var r = await CG.sb.from("trades").select("*").eq("season_id", CG.SEASON.id).order("created_at",{ ascending:false });
   CG._trades = (r && r.data) || [];
 };
+/* ---- commissioner club preview ----------------------------------------------------------
+   A commissioner who runs no club can't reach Team HQ at all, which makes half the site
+   invisible to the person responsible for it. This lets them VIEW any club's front office
+   without being appointed to it — no roster row, no contract, no #mgmt-moves ping, nothing the
+   league can see. It is a lens, not a seat.
+
+   Deliberately cosmetic: every write is still gated in the database by is_commissioner() or
+   is_gm_of(), so this grants a commissioner nothing they did not already have, and grants a
+   non-commissioner nothing at all — CG.role() is read from a signed session, and a forged
+   local value would be refused by RLS on the first write. */
+CG.previewClub = function(){
+  if (CG.role() !== "commish") return null;
+  var code = (CG.store.get("prefs")||{}).previewClub || null;
+  return (code && CG.TEAM && CG.TEAM[code]) ? code : null;
+};
+CG.setPreviewClub = function(code){
+  var prefs = CG.store.get("prefs") || {};
+  if (code) prefs.previewClub = code; else delete prefs.previewClub;
+  CG.store.set("prefs", prefs);
+};
 CG.myManagedTeam = function(){
   var uid = (CG.auth.user && CG.auth.user.id) || ((CG.me()||{}).id);
-  if (!uid) return null;
-  return (CG.TEAMS||[]).find(function(t){ return t.owner===uid || t.gm===uid || t.agm===uid; }) || null;
+  var seat = uid ? (CG.TEAMS||[]).find(function(t){ return t.owner===uid || t.gm===uid || t.agm===uid; }) : null;
+  if (seat) return seat;                       /* a real seat always wins over a preview */
+  var pv = CG.previewClub();
+  return pv ? CG.TEAM[pv] : null;
 };
 /* live override: a manager with no roster spot (e.g. before the pre-season fills
    rosters) still runs THEIR club — never the alphabetical fallback */
@@ -3551,6 +3573,43 @@ CG.myClub = function(){
   if (t) return t.code;
   return (CG.TEAMS[0]||{}).code || null;
 };
+/* the hub nav asks managesClub() whether to show Team HQ at all */
+CG._origManagesClub = CG.managesClub;
+CG.managesClub = function(){
+  if (CG._origManagesClub && CG._origManagesClub()) return true;
+  return !!CG.previewClub();
+};
+
+/* The picker + a standing reminder that this is a real club. Rendered above every hub page for
+   commissioners only; picking "None" puts the nav back exactly as it was. */
+CG._origHubShell = CG.hubShell;
+CG.hubShell = function(section, inner){
+  if (CG.role() !== "commish") return CG._origHubShell(section, inner);
+  var pv = CG.previewClub();
+  var opts = (CG.TEAMS||[]).map(function(t){
+    return '<option value="'+esc(t.code)+'"'+(t.code===pv?' selected':'')+'>'+esc(t.name)+' ('+esc(t.code)+')</option>';
+  }).join("");
+  var bar = '<section class="sec-tight" style="padding-bottom:0"><div class="shell">'+
+    '<div class="note'+(pv?' red':'')+'" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+      '<b style="font-family:var(--f-disp)">'+(pv ? 'Viewing '+esc(CG.TEAM[pv].name)+'\u2019s front office' : 'Commissioner preview')+'</b>'+
+      '<span class="caption" style="flex:1;min-width:220px">'+
+        (pv ? 'You are seeing Team HQ as this club\u2019s management. This is the <b>real club</b> \u2014 anything you save here is a live change.'
+            : 'Pick a club to see its Team HQ without holding a seat on it. Nothing is written to the club.')+'</span>'+
+      '<select id="cmPreview" style="min-width:200px"><option value="">None \u2014 my own hub</option>'+opts+'</select>'+
+    '</div></div></section>';
+  return bar + CG._origHubShell(section, inner);
+};
+CG._pvHubAfter = CG.AFTER.hub;
+CG.AFTER.hub = function(param, qs){
+  var sel = document.getElementById("cmPreview");
+  if (sel) sel.addEventListener("change", function(){
+    CG.setPreviewClub(this.value || null);
+    CG.toast(this.value ? "Previewing "+this.value : "Preview off", "ok");
+    if (CG.router) CG.router();
+  });
+  if (CG._pvHubAfter) return CG._pvHubAfter(param, qs);
+};
+
 CG.incomingOffers = function(){
   var t = CG.myManagedTeam(); if (!t) return [];
   return CG._trades.filter(function(x){ return x.to_team_id===t.id && x.status==="proposed"; })
