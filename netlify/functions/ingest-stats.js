@@ -200,10 +200,27 @@ function mergeSegments(segments) {
 }
 
 // ---- Resolve an EA roster entry to one of our profiles (best effort) ----
+/* KEEP IN SYNC with fuzzyProfile in pickup-import.js — same squashed-pattern fallback, same
+   refuse-on-ambiguity rule. The exact matchers below die on a single space of drift between the
+   EA box-score name and whatever the player typed at signup; this catches the drift without ever
+   guessing between two candidates. */
+async function fuzzyProfile(gt) {
+  const toks = gt.split(/\s+/).filter(Boolean);
+  if (!toks.length) return null;
+  for (const pat of [toks.join("*"), `*${toks.join("*")}*`]) {
+    const q = encodeURIComponent(pat);
+    const rows = await sbGet(`profiles?or=(ea_id.ilike.${q},platform_gamertag.ilike.${q},gamertag.ilike.${q},discord_username.ilike.${q})&select=id&limit=2`);
+    const ids = [...new Set((rows || []).map((r) => r.id))];
+    if (ids.length === 1) return ids[0];
+    if (ids.length > 1) return null;   // ambiguous — a looser pattern can only get MORE ambiguous
+  }
+  return null;
+}
+
 async function resolveProfile(entry, seasonId, cache) {
   if (cache.has(entry.ea_player_id)) return cache.get(entry.ea_player_id);
   let pid = null;
-  const gt = (entry.gamertag || "").replace(/[%,()]/g, "").trim();
+  const gt = (entry.gamertag || "").replace(/[%,()*]/g, "").trim();
   if (gt) {
     // 1) prior link by EA persona id
     const prev = await sbGet(`game_stats?ea_player_id=eq.${encodeURIComponent(entry.ea_player_id)}&profile_id=not.is.null&select=profile_id&limit=1`);
@@ -212,6 +229,8 @@ async function resolveProfile(entry, seasonId, cache) {
     if (!pid) { const pr = await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(gt)}&select=id&limit=1`); if (pr[0]) pid = pr[0].id; }
     // 3) EA id captured at signup for this season
     if (!pid && seasonId) { const rg = await sbGet(`season_registrations?season_id=eq.${seasonId}&ea_id=ilike.${encodeURIComponent(gt)}&select=profile_id&limit=1`); if (rg[0]) pid = rg[0].profile_id; }
+    // 4) squashed-pattern fallback across every name field a player owns
+    if (!pid) pid = await fuzzyProfile(gt);
   }
   cache.set(entry.ea_player_id, pid);
   return pid;
@@ -231,7 +250,7 @@ async function logAttempt(norm, raw, status, reason, gameId) {
   } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); }
 }
 
-export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame };
+export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame, resolveProfile };
 
 // ---- Ingest ONE normalized match ----
 async function ingestOne(norm, raw, summary, batch) {

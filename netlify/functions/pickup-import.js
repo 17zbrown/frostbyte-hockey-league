@@ -200,10 +200,30 @@ function mergeMatches(norms) {
   };
 }
 // Best-effort EA player -> CGHL profile (prior pickup link, then site gamertag).
+/* The exact ea_id match dies on the smallest drift — a space ("Magsin EH" vs "MagsinEH"), a
+   variant spelling, an emoji-wrapped site gamertag, an EA id the player never filled in. Fall
+   back to a squashed-pattern search across every name field a player owns (* is PostgREST's
+   ilike wildcard): first the tokens joined by wildcards (spacing-insensitive), then wrapped in
+   wildcards (containment, for decorated gamertags). A pattern matching MORE than one profile is
+   treated as NO match — crediting the wrong person's stats is far worse than leaving a line
+   unlinked for staff to attach. KEEP IN SYNC with fuzzyProfile in ingest-stats.js. */
+async function fuzzyProfile(gt) {
+  const toks = gt.split(/\s+/).filter(Boolean);
+  if (!toks.length) return null;
+  for (const pat of [toks.join("*"), `*${toks.join("*")}*`]) {
+    const q = encodeURIComponent(pat);
+    const rows = await sbGet(`profiles?or=(ea_id.ilike.${q},platform_gamertag.ilike.${q},gamertag.ilike.${q},discord_username.ilike.${q})&select=id&limit=2`);
+    const ids = [...new Set((rows || []).map((r) => r.id))];
+    if (ids.length === 1) return ids[0];
+    if (ids.length > 1) return null;   // ambiguous — a looser pattern can only get MORE ambiguous
+  }
+  return null;
+}
+
 async function resolveProfile(entry, cache) {
   if (cache.has(entry.ea_player_id)) return cache.get(entry.ea_player_id);
   let pid = null;
-  const gt = (entry.gamertag || "").replace(/[%,()]/g, "").trim();
+  const gt = (entry.gamertag || "").replace(/[%,()*]/g, "").trim();
   const eid = encodeURIComponent(entry.ea_player_id);
   // prior EA-persona link, from pickups OR from league box scores (read-only; league data is untouched)
   let prev = await sbGet(`pickup_stats?ea_player_id=eq.${eid}&profile_id=not.is.null&select=profile_id&limit=1`);
@@ -212,10 +232,11 @@ async function resolveProfile(entry, cache) {
   // Match the EA gamertag from the box score to the EA ID the player entered on their profile
   // (profiles.ea_id) — NOT their site gamertag/display name.
   if (!pid && gt) { const pr = await sbGet(`profiles?ea_id=ilike.${encodeURIComponent(gt)}&select=id&limit=1`); if (pr[0]) pid = pr[0].id; }
+  if (!pid && gt) pid = await fuzzyProfile(gt);
   cache.set(entry.ea_player_id, pid); return pid;
 }
 
-export const _internals = { matchLobbyForImport, normalizeMatch, mapPos, mergeMatches };
+export const _internals = { matchLobbyForImport, normalizeMatch, mapPos, mergeMatches, resolveProfile };
 
 export const handler = async (event) => {
   // temp diag: is the residential proxy set, and does an EA call through it work?
