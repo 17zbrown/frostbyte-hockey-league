@@ -70,6 +70,18 @@
   to = "/"
   status = 404
   force = true
+# shared/ is backend source (role rules shared by discord-sync and the gateway bot) — bundled into
+# the function at build time, never something the public site should serve.
+[[redirects]]
+  from = "/shared/*"
+  to = "/"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/bot/*"
+  to = "/"
+  status = 404
+  force = true
 [[redirects]]
   from = "/server.js"
   to = "/"

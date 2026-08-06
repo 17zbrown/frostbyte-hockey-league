@@ -15,6 +15,7 @@ import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
 import { createHandlers } from "./handlers.mjs";
 import { createIncidentNotifier } from "./incidents.mjs";
 import { createStaffAlerter } from "./staff-alerts.mjs";
+import { createRoleSyncer } from "./role-sync.mjs";
 import { createClient } from "@supabase/supabase-js";
 
 const env = {
@@ -86,6 +87,13 @@ client.once(Events.ClientReady, (c) => {
     .catch((e) => console.error("desk catch-up failed:", e.message));
   sweep();
   setInterval(sweep, 600_000);
+  /* role queue replay: rows written while this process was down were never delivered — re-read
+     the recent window; the debounce dedupes and converged members cost one no-op each */
+  const roleSweep = () => RS.catchUp()
+    .then((r) => { if (r && r.replayed) console.log(`role-sync catch-up: replayed ${r.replayed}`); })
+    .catch((e) => console.error("role-sync catch-up failed:", e.message));
+  roleSweep();
+  setInterval(roleSweep, 600_000);
 });
 client.on(Events.Error, (e) => console.error("gateway error:", e.message));
 /* Events.ShardError carries the real reason for a fatal close ("Used disallowed intents",
@@ -114,8 +122,10 @@ client.on(Events.ShardDisconnect, (event) => {
    at the same instant, which is the point: no "my guy said one penalty". */
 const INC = createIncidentNotifier(env);
 const DESK = createStaffAlerter(env);
+const RS = createRoleSyncer(env);
 let incidentsLive = false;
 let deskAlertsLive = false;
+let roleSyncLive = false;
 /* Tables whose arrival is work for a department. game_incidents is on BOTH streams on purpose:
    the clubs get the ruling, the Officials' desk gets told the case exists. Adding a table here is
    the whole job — staff-alerts.mjs decides the room, or stays silent. */
@@ -156,12 +166,31 @@ if (env.SB_URL && env.SB_KEY) {
     deskAlertsLive = status === "SUBSCRIBED";
     console.log(`staff-desk alerts: ${status}`);
   });
+
+  /* ---- instant role sync ----
+     A signup, withdrawal, roster move, seat appointment, or role/department change reflects in
+     the member's Discord roles within seconds instead of on the next 2-minute sweep. Database
+     triggers decide who a change affects and write role_sync_queue; the bot listens to that ONE
+     table — its INSERT payloads always name the member, where raw DELETE events on RLS tables
+     arrive stripped to a bare id (realtime.apply_rls filters old rows to pkey even for the
+     service role). Same rules module as the sweep (shared/roles.mjs). The sweep remains the
+     backstop for everything the triggers can't see: new links, Discord-side edits, season flips. */
+  sb.channel("role-sync")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "role_sync_queue" }, (payload) => {
+      const row = payload.new || {};
+      RS.enqueue(row.profile_id, row.reason || "queue");
+    })
+    .subscribe((status) => {
+      roleSyncLive = status === "SUBSCRIBED";
+      console.log(`instant role sync: ${status}`);
+    });
 }
 
 // The heartbeat is the watchdog's view of this process: rl_gateway-bot every minute, and the
 // per-run result alongside it. Stop beating and the automation_watchdog pages within ~25 min.
 setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced,
-    deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed } })
+    deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed,
+    roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched } })
   .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

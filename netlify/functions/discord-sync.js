@@ -12,6 +12,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+/* The role rules are SHARED with the Oracle gateway bot (bot/role-sync.mjs), which applies the
+   same computation the moment a member's database row changes instead of on the next sweep. Both
+   sides importing one module is what stops the two processes from ever disagreeing about what a
+   member's roles should be — they can only disagree about when. */
+import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
+  desiredRolesFor, applyManagedRoles, managedRoleIds } from "../../shared/roles.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -655,18 +661,8 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
 
 // Staff departments — one Discord role + one private room per office lane, all under the Staff
 // category. Each room is visible to its department AND the commissioners (oversight), not to all
-// staff. `key` mirrors the site's CG.STAFF_DEPARTMENTS and profiles.departments, so picking a
-// department on the site grants the matching Discord role, which opens that department's room.
-const STAFF_DEPARTMENTS = [
-  { key: "applications", role: "Review Board", channel: "review-board", topic: "Review Board — the deciding vote on owner, GM, AGM, and staff applications." },
-  { key: "officiating",  role: "Officials",    channel: "officials",    topic: "Officials — game-night disputes, forfeits, and rule calls." },
-  { key: "operations",   role: "Operations",   channel: "operations",   topic: "Operations — scheduling, reschedules, game codes, and no-show follow-up." },
-  { key: "draft",        role: "Draft Room",   channel: "draft-room",   topic: "Draft Room — draft night and the free-agency bidding board." },
-  { key: "transactions", role: "Transactions", channel: "transactions-desk", alt: ["transactions"], topic: "Transactions — trades, waivers, and cap & contract compliance." },
-  { key: "community",    role: "Community",     channel: "community",    topic: "Community — Discord moderation, welcome, and onboarding." },
-  { key: "statistics",   role: "Statistics",   channel: "statistics",   topic: "Statistics — EA import accuracy and the record book." },
-  { key: "media",        role: "Media",         channel: "media",        topic: "Media — news, recaps, broadcast, and socials." },
-];
+// staff. The list itself lives in shared/roles.mjs (imported above) because the gateway bot's
+// instant role sync grants the same department roles and the two must never diverge.
 
 // Ensure the department roles (mentionable) and a private room per department under the Staff
 // category. Idempotent: creates only what's missing, never deletes. VIEW+SEND+READ_HISTORY=68608.
@@ -1249,8 +1245,7 @@ export default async (req) => {
   }
 
   // player position (current season) -> for position-based Discord roles
-  const POS_LABEL = { C: "Center", LW: "Left Wing", RW: "Right Wing", LD: "Left Defense", RD: "Right Defense", G: "Goalie" };
-  const POSITION_ROLES = ["Center", "Left Wing", "Right Wing", "Left Defense", "Right Defense", "Goalie"];
+  // POS_LABEL / POSITION_ROLES come from shared/roles.mjs (imported at top)
   const posOf = {};
   try {
     const seasons = await sbGet("seasons?select=id&order=number.desc&limit=1");
@@ -1538,7 +1533,7 @@ export default async (req) => {
   }
 
   // managed role ids = static roles + position roles (by name) + every team's role (by stored id)
-  const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager", "Commissioner", "Staff", "Free Agent", "Not Signed Up", ...POSITION_ROLES];
+  // MANAGED_STATIC comes from shared/roles.mjs (imported at top)
   // ensure the mentionable roles the automations depend on exist (created once, then reused):
   //  Staff (members ping the officials), the front-office roles (gate the Team Management rooms),
   //  and "Not Signed Up" (the daily sign-up reminder pings this one role).
@@ -1591,11 +1586,7 @@ export default async (req) => {
   /* club colours above the front-office seats, so a player's name shows their club */
   try { await ensureRoleOrder(guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ roleOrder: String(e.message || e) }); }
 
-  const managedIds = new Set();
-  for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) managedIds.add(roleId[n.toLowerCase()]);
-  for (const t of teams) if (t.discord_role_id) managedIds.add(t.discord_role_id);
-  // department roles are managed too, so they're added/removed as officials change their picks
-  for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) managedIds.add(rid); }
+  const managedIds = managedRoleIds(roleId, teams);
 
   // Current-season registration drives the three participation roles. `registered` is populated
   // year-round (not only while the window is open) so Player and Free Agent stay coherent all
@@ -1686,59 +1677,13 @@ export default async (req) => {
       const handle = mem.user && mem.user.username;
       if (handle && handle !== m.discord_username) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { discord_username: handle }); }
 
-      // (2) role sync — desired managed roles for this member.
-      // The three participation roles are mutually coherent, gated on current-season registration
-      // and roster status (previously Player was unconditional and Free Agent applied to anyone
-      // teamless, so an unregistered member wore Player + Free Agent + Not Signed Up at once):
-      //   Player      = registered for the season OR holding a roster spot
-      //   Free Agent  = registered but not yet on a roster (available to sign)
-      //   Not Signed Up (below) = linked but not registered while the window is open
-      const desired = new Set();
-      const isRegistered = registered.has(m.profile_id);
-      const onRoster = !!(m.team_id && teamRoleId[m.team_id]);
-      if ((isRegistered || onRoster) && roleId["player"]) desired.add(roleId["player"]);
-      if (onRoster) desired.add(teamRoleId[m.team_id]);
-      else if (isRegistered && roleId["free agent"]) desired.add(roleId["free agent"]);
-      const teamRole = mgmtRoleByProfile[m.profile_id];
-      if (teamRole === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
-      if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
-      if (teamRole === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
-      if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
-      // league officials: staff wear Staff; the commissioner is staff too.
-      // EXCEPTION (2026-08-05): media-only staff wear just their Media department role — no
-      // Staff role, so none of the staff rooms, pings, or oversight surfaces come with it.
-      // Reconciliation handles existing members: the Staff role is a managed role, so anyone
-      // it no longer belongs to loses it on the next sweep automatically.
-      const memberDepts = (deptByProfile[m.profile_id] || []);
-      const mediaDepts = memberDepts.map((k) => String(k || "").trim().toLowerCase()).filter((k) => k.length);
-      const mediaOnly = m.role === "staff" && mediaDepts.length > 0 && mediaDepts.every((k) => k === "media");
-      if ((m.role === "staff" || m.role === "commissioner") && !mediaOnly && roleId["staff"]) desired.add(roleId["staff"]);
-      // department roles the official signed up for on the site — these open the department rooms
-      if (m.role === "staff" || m.role === "commissioner") {
-        for (const key of memberDepts) {
-          const d = STAFF_DEPARTMENTS.find((x) => x.key === key);
-          const rid = d && roleId[d.role.toLowerCase()];
-          if (rid) desired.add(rid);
-        }
-      }
-      // "Not Signed Up" — a linked member who hasn't registered for the open season (the daily
-      // #season-signups reminder pings this role). Applies regardless of profile role, because
-      // staff and commissioners are allowed to play too (role-conflict rules) and should get the
-      // nudge. Cleared automatically once they register or the window closes, since it's a managed
-      // role reconciled to `desired` every run.
-      if (regOpen && !registered.has(m.profile_id) && roleId["not signed up"]) desired.add(roleId["not signed up"]);
-      // position role (Center / Left Wing / … / Goalie) from their current-season position
-      const posName = POS_LABEL[posOf[m.profile_id]];
-      if (posName && roleId[posName.toLowerCase()]) desired.add(roleId[posName.toLowerCase()]);
-
-      const current = new Set(mem.roles || []);
-      // keep all NON-managed roles, set the managed ones to `desired`
-      const next = [...current].filter((id) => !managedIds.has(id));
-      for (const id of desired) next.push(id);
-      const nextSet = new Set(next);
-      const changed = nextSet.size !== current.size || [...nextSet].some((id) => !current.has(id));
+      // (2) role sync — desired managed roles for this member. The rules live in
+      // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
+      const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
+        mgmtRoleByProfile, deptByProfile, posOf });
+      const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
       if (changed) {
-        const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: [...nextSet] });
+        const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
         if (!(res && res.__notfound)) sum.roleUpdated++;
       }
     } catch (e) {
@@ -1764,14 +1709,10 @@ export default async (req) => {
         sum.unlinkedSeen++;
         const desired = new Set();
         if (regOpen) desired.add(roleId["not signed up"]);
-        const current = new Set(mem.roles || []);
-        const next = [...current].filter((id) => !managedIds.has(id));
-        for (const id of desired) next.push(id);
-        const nextSet = new Set(next);
-        const changed = nextSet.size !== current.size || [...nextSet].some((id) => !current.has(id));
+        const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
         if (!changed) continue;
         try {
-          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${uid}`, { roles: [...nextSet] });
+          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${uid}`, { roles: next });
           if (!(res && res.__notfound)) sum.unlinkedTagged = (sum.unlinkedTagged || 0) + 1;
         } catch (e) {
           // the owner and anyone above the bot cannot be edited — count it rather than fail the run

@@ -31,8 +31,10 @@ after=$(as_owner git -C "$REPO" rev-parse HEAD)
 
 [ "$before" = "$after" ] && exit 0
 
-if as_owner git -C "$REPO" diff --quiet "$before" "$after" -- bot/; then
-  echo "chel-bot: repo updated $before -> $after (nothing under bot/ changed)"
+# shared/ carries the role rules the bot imports (shared/roles.mjs) — an edit there changes the
+# bot's behavior without touching bot/, so it must trigger the same restart.
+if as_owner git -C "$REPO" diff --quiet "$before" "$after" -- bot/ shared/; then
+  echo "chel-bot: repo updated $before -> $after (nothing under bot/ or shared/ changed)"
   exit 0
 fi
 

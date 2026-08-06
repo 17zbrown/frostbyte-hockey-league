@@ -80,7 +80,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/games")) return J([{ week: 3, home_team_id: "T1", away_team_id: "T2" }]);
   if (u.includes("/rest/v1/discord_post_log")) {
     if (m === "POST") { const ref = JSON.parse(opts.body).ref; if (claimStatus === 201) claimed.push(ref); return new Response("", { status: claimStatus }); }
-    if (m === "DELETE") { released.push(decodeURIComponent(u.split("ref=eq.")[1] || "")); return new Response("", { status: 204 }); }
+    if (m === "DELETE") { released.push(decodeURIComponent(u.split("ref=eq.")[1] || "")); return new Response(null, { status: 204 }); }
   }
   const mm = u.match(/channels\/([\w-]+)\/messages/);
   if (mm && m === "POST") {
