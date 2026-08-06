@@ -1046,7 +1046,7 @@ CG.viz = (function(){
     return '<div class="vz-bars' + (dense ? " vz-dense" : "") + '" style="--n:' + rows.length + '">' + rows.map(function(r, i){
       var on = r === pick;
       var tick = !dense || i === rows.length - 1 || (i % step === 0 && i < rows.length - 2);
-      return '<div class="vz-bar' + (on ? " on" : "") + '" style="--i:' + i + '" title="' + esc(r.k + ": " + num(r.v)) + '">' +
+      return '<div class="vz-bar' + (on ? " on" : "") + '" style="--i:' + i + '" data-tip="' + esc(r.tip || (r.k + " — " + num(r.v))) + '">' +
         ((!dense || on) ? '<span class="vz-bv">' + num(r.v) + '</span>' : '<span class="vz-bv vz-bv-off"></span>') +
         '<span class="vz-bt"><i style="height:' + Math.max(5, Math.round(100*r.v/max)) + '%"></i></span>' +
         '<span class="vz-bl">' + (tick ? esc(r.k) : "") + '</span></div>';
@@ -1069,7 +1069,8 @@ CG.viz = (function(){
       var pct = isFinite(r.cap) && r.cap > 0
         ? Math.min(100, Math.round(100*r.v/r.cap))
         : Math.max(6, Math.round(100*r.v/max));
-      return '<div class="vz-hb" style="--i:' + i + (r.c ? ';--hb:' + esc(r.c) : "") + '">' +
+      return '<div class="vz-hb" style="--i:' + i + (r.c ? ';--hb:' + esc(r.c) : "") + '"' +
+        ' data-tip="' + esc(r.tip || (r.k + " — " + (o.fmt ? o.fmt(r.v, r) : num(r.v)))) + '">' +
         '<span class="vz-hbt"><i style="width:' + pct + '%"></i>' +
           '<em>' + esc(r.k) + '</em></span>' +
         '<span class="vz-hbv">' + esc(o.fmt ? o.fmt(r.v, r) : num(r.v)) + '</span></div>';
@@ -1083,7 +1084,7 @@ CG.viz = (function(){
     if (!isFinite(val) || !isFinite(total) || total <= 0) return "";
     var pct = Math.max(0, Math.min(1, val/total));
     var R = 52, C = 2*Math.PI*R;
-    return '<div class="vz-donut">' +
+    return '<div class="vz-donut" data-tip="' + esc(o.tip || (num(val) + " of " + num(total) + " — " + Math.round(pct*100) + "%")) + '">' +
       '<svg viewBox="0 0 128 128" aria-hidden="true" focusable="false">' +
         '<circle class="vz-dtrack" cx="64" cy="64" r="' + R + '"/>' +
         '<circle class="vz-dfill" cx="64" cy="64" r="' + R + '"' +
@@ -1113,7 +1114,12 @@ CG.viz = (function(){
     var line = points.map(function(p,i){ return (i?"L":"M") + X(i).toFixed(1) + " " + Y(p.v).toFixed(1); }).join("");
     var fill = line + "L" + X(points.length-1).toFixed(1) + " " + (H-P) + "L" + X(0).toFixed(1) + " " + (H-P) + "Z";
     var dots = points.map(function(p,i){
-      return '<circle class="vz-dot" cx="' + X(i).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3" style="--i:' + i + '"/>';
+      /* the visible dot is 3px; the HIT target is 11px and invisible — a tooltip nobody can land
+         on is furniture. The pair sits in one <g> so hovering the hit ring swells the dot. */
+      var tip = p.tip || (p.k != null ? p.k + " — " + num(p.v) : null);
+      return '<g' + (tip ? ' data-tip="' + esc(tip) + '"' : "") + '>' +
+        '<circle class="vz-hit" cx="' + X(i).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="11"/>' +
+        '<circle class="vz-dot" cx="' + X(i).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3" style="--i:' + i + '"/></g>';
     }).join("");
     var uid = "vzg" + (area._n = (area._n||0) + 1);
     return '<div class="vz-area">' +
@@ -1165,7 +1171,7 @@ CG.viz = (function(){
       var tick = !dense || i === rows.length - 1 || (i % step === 0 && i < rows.length - 2);
       var lbl = (r.v > 0 ? "+" : "") + num(r.v);
       return '<div class="vz-db' + (r.v < 0 ? " neg" : r.v === 0 ? " zero" : "") + '" style="--i:' + i + '"' +
-        ' title="' + esc(r.k + ": " + lbl) + '">' +
+        ' data-tip="' + esc(r.tip || (r.k + " — " + lbl)) + '">' +
         ((!dense || r === big) ? '<span class="vz-bv">' + lbl + '</span>' : '<span class="vz-bv vz-bv-off"></span>') +
         '<span class="vz-dbt">' +
           '<i class="up' + (up ? "" : " nil") + '" style="height:' + up + '%"></i>' +
@@ -1193,7 +1199,7 @@ CG.viz = (function(){
       var t = c.v / max;
       var lvl = c.v === 0 ? 0 : t > .74 ? 4 : t > .49 ? 3 : t > .24 ? 2 : 1;
       return '<span class="vz-cell l' + lvl + '" style="--i:' + i + '"' +
-        ' title="' + esc(c.k + ": " + c.v) + '"></span>';
+        ' data-tip="' + esc(c.k + " — " + num(c.v)) + '"></span>';
     }).join("") + '</div>' +
     (o.legend ? legend(o.legend) : "") +
     (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
@@ -1201,6 +1207,53 @@ CG.viz = (function(){
 
   return { card:card, bars:bars, bars2:bars2, hbars:hbars, donut:donut, area:area,
            dbars:dbars, legend:legend, heat:heat };
+})();
+
+/* ---------------- chart tooltips ----------------
+   One floating card, one pair of DELEGATED listeners for the whole site — charts are static HTML
+   strings that get re-rendered wholesale, so anything bound per-mark would be lost on every
+   redraw. Any element carrying data-tip participates, wherever it renders. The card follows the
+   cursor, clamped to the viewport, and never intercepts the pointer (pointer-events:none). */
+(function(){
+  var tip = null;
+  function ensure(){
+    if (tip && document.body.contains(tip)) return tip;
+    tip = document.createElement("div");
+    tip.className = "vz-tip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    return tip;
+  }
+  function place(e){
+    var t = ensure(), pad = 12;
+    var w = t.offsetWidth, h = t.offsetHeight;
+    var x = e.clientX + pad, y = e.clientY - h - pad;
+    if (x + w > innerWidth - 6) x = e.clientX - w - pad;   // flip left at the right edge
+    if (y < 6) y = e.clientY + pad;                        // flip below near the top
+    t.style.left = Math.max(6, x) + "px";
+    t.style.top = Math.max(6, y) + "px";
+  }
+  document.addEventListener("mouseover", function(e){
+    var m = e.target && e.target.closest && e.target.closest("[data-tip]");
+    if (!m) return;
+    var t = ensure();
+    t.textContent = m.getAttribute("data-tip") || "";
+    t.classList.add("on");
+    place(e);
+  });
+  document.addEventListener("mousemove", function(e){
+    if (!tip || !tip.classList.contains("on")) return;
+    if (!(e.target && e.target.closest && e.target.closest("[data-tip]"))){ tip.classList.remove("on"); return; }
+    place(e);
+  });
+  document.addEventListener("mouseout", function(e){
+    if (!tip) return;
+    var m = e.target && e.target.closest && e.target.closest("[data-tip]");
+    if (m && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-tip]")))
+      tip.classList.remove("on");
+  });
+  /* a route change tears the old marks out from under the card — never strand it visible */
+  window.addEventListener("hashchange", function(){ if (tip) tip.classList.remove("on"); });
 })();
 
 /* ================================================================

@@ -157,6 +157,24 @@ console.log("\n— the rendered dashboard");
     CG.membershipStats() === '<div id="pop-stats-wrap"></div>');
 }
 
+console.log("\n— every mark explains itself on hover");
+{
+  CG._popStats = P;
+  const h = CG.membershipStats();
+  A("population points carry a dated tooltip with the join/leave breakdown",
+    /data-tip="[^"]*members \(\+\d+ joined/.test(h));
+  A("net bars break their number into joins and departures",
+    /data-tip="[^"]*net [+\u2212-]?\d+ \(\d+ joined, \d+ left\)/.test(h));
+  A("sign-up bars say what the number is", /data-tip="[^"]*sign-ups?"/.test(h));
+  A("the donut states its fraction", /vz-donut" data-tip="89 of /.test(h));
+  A("area hit targets are bigger than the dots", /vz-hit[^/]*r="11"/.test(h));
+  const boot = CG.bootScreen();
+  A("the boot screen exists as a pure function", boot.length > 0);
+  A("...the logo's own arc is the spinner", /bl-carc/.test(boot) && /bl-arc/.test(boot));
+  A("...and announces itself to screen readers", /role="status"/.test(boot));
+  CG._popStats = null;
+}
+
 console.log("\n— wired into the overview");
 {
   const src = fs.readFileSync(require("path").join(__dirname, "..", "src", "live", "part_live.js"), "utf8");

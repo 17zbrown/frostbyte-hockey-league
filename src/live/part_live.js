@@ -7152,9 +7152,10 @@ CG.overviewCharts = function(){
     var pts = [], run = 0, first = null, last = null;
     while (cur <= end){
       var key = cur.toISOString().slice(0,10);
-      run += (byDay[key]||0);
-      pts.push({ v: run });
+      var added = (byDay[key]||0);
+      run += added;
       var lbl = new Intl.DateTimeFormat("en-US",{ timeZone:"UTC", month:"short", day:"numeric" }).format(cur);
+      pts.push({ v: run, tip: lbl + " \u2014 " + run + " total" + (added ? " (+" + added + ")" : "") });
       if (first === null) first = lbl;
       last = lbl;
       cur = new Date(cur.getTime() + 864e5);
@@ -7341,7 +7342,8 @@ CG.membershipStats = function(){
 
   /* population line: level series, so the baseline is clipped and the fill is off (an area fill
      under a clipped axis overstates the change — the line makes no such claim) */
-  var popPts = B.map(function(b){ return { v: b.members }; });
+  var popPts = B.map(function(b){ return { v: b.members,
+    tip: b.label + " \u2014 " + b.members + " members (+" + b.joins + " joined, \u2212" + b.departs + " left)" }; });
   var caption = P.meta && P.meta.depart_log_since
     ? "Before " + P.meta.depart_log_since + " the curve is reconstructed from Discord join dates — early members who also left before that date are invisible to it."
     : null;
@@ -7353,16 +7355,19 @@ CG.membershipStats = function(){
 
   h += CG.viz.card({ title:"Net member gain / loss", sub:"Joins minus departures, by " + rangeName,
     value: (net30 > 0 ? "+" : "") + net30 + " / 30d",
-    body: CG.viz.dbars(B.map(function(b){ return { k:b.label, v:b.net }; }),
+    body: CG.viz.dbars(B.map(function(b){ return { k:b.label, v:b.net,
+      tip: b.label + " \u2014 net " + (b.net>0?"+":"") + b.net + " (" + b.joins + " joined, " + b.departs + " left)" }; }),
       { note: range === "d" ? "Departures are logged from " + ((P.meta && P.meta.depart_log_since) || "the departure log") + " on." : null }) });
 
   h += CG.viz.card({ title:"Season sign-ups", sub:"New registrations, by " + rangeName,
     value: P.signups_total, count:true,
-    body: CG.viz.bars(B.map(function(b){ return { k:b.label, v:b.signups }; })) });
+    body: CG.viz.bars(B.map(function(b){ return { k:b.label, v:b.signups,
+      tip: b.label + " \u2014 " + b.signups + " sign-up" + (b.signups===1?"":"s") }; })) });
 
   h += CG.viz.card({ title:"New site accounts", sub:"First sign-ins, by " + rangeName,
     value: sumBack("accounts",30) + " / 30d",
-    body: CG.viz.bars(B.map(function(b){ return { k:b.label, v:b.accounts }; })) });
+    body: CG.viz.bars(B.map(function(b){ return { k:b.label, v:b.accounts,
+      tip: b.label + " \u2014 " + b.accounts + " new account" + (b.accounts===1?"":"s") }; })) });
 
   /* conversion gauges: how much of the server is actually in the season */
   if (P.present){
@@ -9567,12 +9572,35 @@ CG._protoTradeAfter = CG.AFTER._tradehub;
 CG.AFTER._tradehub = function(qs){ if(CG.LIVE_MODE) return CG.AFTER._tradehubLive(qs); return CG._protoTradeAfter?CG._protoTradeAfter(qs):undefined; };
 
 /* ---------- async boot (replaces the sync CG.boot for the live build) ---------- */
+/* The boot screen. The league mark's own C-arc is a real arc, so it draws itself in while an
+   ember comet orbits the medallion — the logo is the spinner, not decoration next to one.
+   Pure function (no DOM) so the tests can assert it and the loader can be shown anywhere. */
+CG.bootScreen = function(){
+  return '<section class="sec"><div class="shell"><div class="bootload" role="status" aria-live="polite">'+
+    '<div class="bl-stage" aria-hidden="true">'+
+      '<svg class="bl-ring" viewBox="0 0 120 120">'+
+        '<defs><linearGradient id="blgrad" x1="0" y1="0" x2="1" y2="1">'+
+          '<stop offset="0%" stop-color="var(--em-2)"/>'+
+          '<stop offset="100%" stop-color="var(--em-4)"/></linearGradient></defs>'+
+        '<circle class="bl-track" cx="60" cy="60" r="54"/>'+
+        '<circle class="bl-arc" cx="60" cy="60" r="54"/>'+
+        '<circle class="bl-arc2" cx="60" cy="60" r="46"/>'+
+      '</svg>'+
+      '<div class="bl-mark">'+
+        '<svg width="58" height="58" viewBox="0 0 48 48" role="img" aria-label="Chel Gaming">'+
+          '<rect width="48" height="48" rx="11" fill="#0a0a0a"/>'+
+          '<path class="bl-carc" d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/>'+
+          '<path class="bl-cbar" d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/>'+
+        '</svg>'+
+      '</div>'+
+    '</div>'+
+    '<b class="bl-t">Loading the league<span class="bl-dots"><i>.</i><i>.</i><i>.</i></span></b>'+
+    '<p class="bl-sub">Pulling live clubs, rosters, and the schedule from the league database.</p>'+
+  '</div></div></section>';
+};
 CG.bootLive = async function(){
   var app = document.getElementById("app");
-  if (app) app.innerHTML =
-    '<section class="sec"><div class="shell"><div class="empty" style="padding:90px 20px">'+
-    '<div class="e-art">'+(CG.ic?CG.ic("db",22):"")+'</div><b>Loading the league…</b>'+
-    '<p>Pulling live teams, rosters, and the schedule from the league database.</p></div></div></section>';
+  if (app) app.innerHTML = CG.bootScreen();
   try {
     CG.lg = await CG.buildLiveLeague();
     /* surface Register in the nav while the open season is taking sign-ups */
