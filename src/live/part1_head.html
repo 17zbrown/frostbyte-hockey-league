@@ -602,6 +602,36 @@ html.rv-on [data-rv="words"]{opacity:1}          /* the words carry the entrance
 .vz-bl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;color:var(--steel);
   text-transform:uppercase;line-height:1}
 
+/* ---- dense bar charts (>16 columns): columns shrink instead of overflowing, tick labels thin
+   out, and the per-bar numbers give way to one selective label + a title per bar ---- */
+.vz-bars.vz-dense .vz-bar,.vz-dbars.vz-dense .vz-db{max-width:none;min-width:0}
+.vz-bars.vz-dense,.vz-dbars.vz-dense{gap:3px}
+.vz-dense .vz-bv-off{visibility:hidden}
+.vz-dense .vz-bl{min-height:12px;white-space:nowrap;overflow:visible;font-size:9.5px}
+
+/* ---- membership dashboard: momentum chips inside the KPI tiles ---- */
+.pop-delta{font-family:var(--f-mono);font-size:10.5px;font-weight:700;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.pop-delta.up{color:var(--green-ink)} .pop-delta.dn{color:var(--red-ink)} .pop-delta.zero{color:var(--steel)}
+
+/* ---- diverging bars: gains rise from a shared zero axis, losses hang below it ----
+   Direction is the primary encoding (up = gain, down = loss); green/red only reinforces it, so
+   the chart still reads under red-green color blindness. Same column proportions as .vz-bars. */
+.vz-dbars{display:flex;justify-content:space-between;gap:clamp(6px,1.4vw,16px);
+  height:clamp(168px,22vh,224px);padding:0 2px}
+.vz-db{display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;flex:1 1 0;max-width:44px}
+.vz-db .vz-bv{color:var(--green-ink)} .vz-db.neg .vz-bv{color:var(--red-ink)}
+.vz-db.zero .vz-bv{color:var(--steel)}
+.vz-dbt{width:100%;flex:1 1 auto;display:grid;grid-template-rows:1fr 1fr;position:relative}
+.vz-dbt::after{content:"";position:absolute;left:-2px;right:-2px;top:50%;height:1px;background:var(--line)}
+.vz-dbt>i{display:block;width:100%;border-radius:2px;background:var(--line-soft)}
+.vz-dbt>i.up{align-self:end;transform-origin:bottom;background:var(--green)}
+.vz-dbt>i.dn{align-self:start;transform-origin:top;background:var(--red)}
+.vz-dbt>i.nil{background:transparent}
+html.rv-on .vz[data-rv] .vz-dbt>i{transform:scaleY(0)}
+html.rv-on .vz[data-rv].rv-in .vz-dbt>i{transform:scaleY(1);
+  transition:transform .5s cubic-bezier(.22,.61,.36,1) calc(var(--i,0)*40ms)}
+
 /* ---- horizontal bars, label inside the bar ---- */
 .vz-hbars{display:flex;flex-direction:column;gap:6px}
 .vz-hb{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:11px}

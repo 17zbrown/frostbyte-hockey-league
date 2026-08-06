@@ -7242,6 +7242,152 @@ CG.overviewCharts = function(){
 /* ================================================================
    LIVE ADMIN: OVERVIEW — real league state, real action items
    ================================================================ */
+/* ================================================================
+   MEMBERSHIP ANALYTICS — the Control Center's population & sign-up
+   dashboard. One commissioner-guarded RPC (member_pop_stats) returns
+   the full ET daily series; everything below is client-side
+   aggregation, so the Daily / Weekly / Monthly toggle costs nothing.
+   ================================================================ */
+CG.loadPopStats = async function(){
+  if (!CG.sb || !CG.auth.user){ CG._popStats = null; return; }
+  if (CG._popStatsLoading) return;
+  CG._popStatsLoading = true;
+  try {
+    var r = await CG.sb.rpc("member_pop_stats");
+    CG._popStats = (r && !r.error) ? r.data : null;
+    if (r && r.error) console.error("member_pop_stats:", r.error.message || r.error);
+    if (/^#\/admin\/?$/.test(location.hash) && CG.router) CG.router();
+  } catch(e){ CG._popStats = null; console.error("member_pop_stats:", e); }
+  finally { CG._popStatsLoading = false; }
+};
+
+/* daily rows -> the buckets a range wants. Sums flow (joins/departs/signups/accounts); population
+   is a LEVEL, so a bucket carries its last day's members — summing a level is meaningless. */
+CG._popBuckets = function(days, range){
+  var fmtDay = function(ymd){ var d = new Date(ymd + "T12:00:00Z");
+    return new Intl.DateTimeFormat("en-US",{ timeZone:"UTC", month:"short", day:"numeric" }).format(d); };
+  var fmtMon = function(ym){ var d = new Date(ym + "-15T12:00:00Z");
+    return new Intl.DateTimeFormat("en-US",{ timeZone:"UTC", month:"short" }).format(d); };
+  var keyOf = range === "m"
+    ? function(r){ return r.d.slice(0,7); }
+    : range === "w"
+    ? function(r){ /* Monday of the row's ISO week, so a bucket is a real calendar week */
+        var dt = new Date(r.d + "T12:00:00Z");
+        var shift = (dt.getUTCDay() + 6) % 7;
+        dt = new Date(dt.getTime() - shift*864e5);
+        return dt.toISOString().slice(0,10); }
+    : function(r){ return r.d; };
+  var order = [], by = {};
+  (days || []).forEach(function(r){
+    var k = keyOf(r);
+    if (!by[k]){ by[k] = { k:k, joins:0, departs:0, signups:0, accounts:0, members:null }; order.push(k); }
+    by[k].joins += r.joins; by[k].departs += r.departs;
+    by[k].signups += r.signups; by[k].accounts += r.accounts;
+    by[k].members = r.members;             // rows arrive in date order, so last write wins
+  });
+  var keep = range === "d" ? 30 : range === "w" ? 12 : 24;
+  return order.slice(-keep).map(function(k){
+    var b = by[k];
+    b.label = range === "m" ? fmtMon(k) : fmtDay(k);
+    b.net = b.joins - b.departs;
+    return b;
+  });
+};
+
+CG.membershipStats = function(){
+  var P = CG._popStats;
+  if (!P || !P.days || !P.days.length){
+    return '<div id="pop-stats-wrap"></div>';   // loader re-renders the route when data lands
+  }
+  var days = P.days;
+  var range = CG.store.get("popRange") || "d";
+  if (["d","w","m"].indexOf(range) < 0) range = "d";
+  var B = CG._popBuckets(days, range);
+  var today = days[days.length - 1];
+
+  /* headline deltas straight off the daily series — the toggle never changes these */
+  var sumBack = function(field, n){
+    return days.slice(-n).reduce(function(s,r){ return s + r[field]; }, 0);
+  };
+  var net7 = sumBack("joins",7) - sumBack("departs",7);
+  var net30 = sumBack("joins",30) - sumBack("departs",30);
+  var signups7 = sumBack("signups",7);
+  var delta = function(n){
+    if (n > 0) return '<span class="pop-delta up">▲ +' + n + '</span>';
+    if (n < 0) return '<span class="pop-delta dn">▼ ' + n + '</span>';
+    return '<span class="pop-delta zero">— 0</span>';
+  };
+  var rangeName = { d:"day", w:"week", m:"month" }[range];
+  var rangeBtn = function(key, label){
+    var on = range === key;
+    return '<button type="button" class="chip' + (on ? " chip-chrome" : "") + '" data-poprange="' + key + '"' +
+      ' aria-pressed="' + on + '">' + label + '</button>';
+  };
+
+  var h = '<div id="pop-stats-wrap">';
+  h += '<div class="card-h" style="padding:0;border:0;margin-bottom:12px;display:flex;align-items:center;gap:10px">' +
+    '<h3 style="margin:0">Membership</h3>' +
+    '<span style="flex:1"></span>' +
+    '<span style="display:inline-flex;gap:6px">' +
+      rangeBtn("d","Daily") + rangeBtn("w","Weekly") + rangeBtn("m","Monthly") + '</span></div>';
+
+  /* the gauges: live counts with their momentum */
+  h += '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px">' +
+    '<div class="kpi"><b class="num">' + P.present + '</b><span>Discord members ' + delta(net7) + ' 7d</span></div>' +
+    '<div class="kpi' + (net30 < 0 ? " alert" : "") + '"><b class="num">' + (net30>0?"+":"") + net30 + '</b><span>net 30 days</span></div>' +
+    '<div class="kpi"><b class="num">' + P.signups_total + '</b><span>season sign-ups ' + delta(signups7) + ' 7d</span></div>' +
+    '<div class="kpi"><b class="num">' + today.accounts + '</b><span>site accounts today · ' + sumBack("accounts",30) + ' in 30d</span></div>' +
+  '</div>';
+
+  /* population line: level series, so the baseline is clipped and the fill is off (an area fill
+     under a clipped axis overstates the change — the line makes no such claim) */
+  var popPts = B.map(function(b){ return { v: b.members }; });
+  var caption = P.meta && P.meta.depart_log_since
+    ? "Before " + P.meta.depart_log_since + " the curve is reconstructed from Discord join dates — early members who also left before that date are invisible to it."
+    : null;
+  h += '<div class="grid g2" style="align-items:start;gap:12px;margin-bottom:20px">';
+  h += CG.viz.card({ title:"Member population", sub:"Discord members, by " + rangeName, wide:true,
+    value: P.present, count:true,
+    body: CG.viz.area(popPts, { zero:false, line:true, from: B[0] && B[0].label, to: B[B.length-1] && B[B.length-1].label }) +
+      (caption ? '<p class="vz-note">' + caption + '</p>' : "") });
+
+  h += CG.viz.card({ title:"Net member gain / loss", sub:"Joins minus departures, by " + rangeName,
+    value: (net30 > 0 ? "+" : "") + net30 + " / 30d",
+    body: CG.viz.dbars(B.map(function(b){ return { k:b.label, v:b.net }; }),
+      { note: range === "d" ? "Departures are logged from " + ((P.meta && P.meta.depart_log_since) || "the departure log") + " on." : null }) });
+
+  h += CG.viz.card({ title:"Season sign-ups", sub:"New registrations, by " + rangeName,
+    value: P.signups_total, count:true,
+    body: CG.viz.bars(B.map(function(b){ return { k:b.label, v:b.signups }; })) });
+
+  h += CG.viz.card({ title:"New site accounts", sub:"First sign-ins, by " + rangeName,
+    value: sumBack("accounts",30) + " / 30d",
+    body: CG.viz.bars(B.map(function(b){ return { k:b.label, v:b.accounts }; })) });
+
+  /* conversion gauges: how much of the server is actually in the season */
+  if (P.present){
+    h += CG.viz.card({ title:"Registered for the season", sub:"Of current Discord members",
+      body: CG.viz.donut(P.reg_present, P.present,
+        { label:"registered", note: P.reg_present + " of " + P.present + " members on the server hold a season registration." }) });
+    h += CG.viz.card({ title:"Linked to the site", sub:"Of current Discord members",
+      body: CG.viz.donut(P.linked_present, P.present,
+        { label:"linked", note: (P.present - P.linked_present) + " members have never signed in to the website." }) });
+  }
+  h += '</div></div>';
+  return h;
+};
+
+CG.AFTER._popStats = function(){
+  document.querySelectorAll("[data-poprange]").forEach(function(b){
+    b.addEventListener("click", function(){
+      CG.store.set("popRange", this.getAttribute("data-poprange"));
+      var w = document.getElementById("pop-stats-wrap");
+      if (w){ w.outerHTML = CG.membershipStats(); CG.AFTER._popStats();
+        CG.armReveals && CG.armReveals(document.getElementById("pop-stats-wrap")); }
+    });
+  });
+};
+
 CG.admOverviewLive = function(){
   var lg = CG.lg;
   var unlinked = (CG.TEAMS||[]).filter(function(t){ return !t.eaClubId; });
@@ -7258,6 +7404,7 @@ CG.admOverviewLive = function(){
     '<div class="kpi'+(openCases.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/complaints"><b class="num">'+openCases.length+'</b><span>open cases</span></div>'+
     '<div class="kpi'+(unlinked.length?" alert":"")+'" style="cursor:pointer" data-go="#/admin/eastats"><b class="num">'+((CG.TEAMS||[]).length-unlinked.length)+'/'+(CG.TEAMS||[]).length+'</b><span>clubs EA-linked</span></div>'+
     '<div class="kpi" style="cursor:pointer" data-go="#/admin/automations"><b class="num">'+(CG.AUTOMATIONS||[]).length+'</b><span>automations</span></div></div>';
+  h += CG.membershipStats();
   h += CG.overviewCharts();
   var actions = [];
   if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
@@ -8683,7 +8830,11 @@ CG.AFTER.admin = function(param, qs){
   if (param==="schedule"){ CG.AFTER._admScheduleLive(); CG.AFTER._admPlayoffs(); return; }
   if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
   if (param==="draft"){ CG.AFTER._admDraft(); return; }
-  if (param==="" || param==null){ return; }
+  if (param==="" || param==null){
+    CG.AFTER._popStats();
+    if (CG._popStats === undefined) CG.loadPopStats();   // first visit this session; re-renders on arrival
+    return;
+  }
   if (CG._origAdminAfter) CG._origAdminAfter(param, qs);
 };
 

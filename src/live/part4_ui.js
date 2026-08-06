@@ -1038,12 +1038,18 @@ CG.viz = (function(){
     var pick = o.markMin
       ? rows.reduce(function(b,r){ return r.v < b.v ? r : b; }, rows[0])
       : rows.reduce(function(b,r){ return r.v > b.v ? r : b; }, rows[0]);
-    return '<div class="vz-bars" style="--n:' + rows.length + '">' + rows.map(function(r, i){
+    /* Past ~16 columns a number on every bar is noise and fixed-width columns overflow the card:
+       dense mode drops the per-bar values (each bar keeps a title), thins the tick labels to
+       ~8 across the axis, and lets columns shrink. The emphasized max keeps its value — one
+       selective label, not thirty. */
+    var dense = rows.length > 16, step = Math.ceil(rows.length / 8);
+    return '<div class="vz-bars' + (dense ? " vz-dense" : "") + '" style="--n:' + rows.length + '">' + rows.map(function(r, i){
       var on = r === pick;
-      return '<div class="vz-bar' + (on ? " on" : "") + '" style="--i:' + i + '">' +
-        '<span class="vz-bv">' + num(r.v) + '</span>' +
+      var tick = !dense || i === rows.length - 1 || (i % step === 0 && i < rows.length - 2);
+      return '<div class="vz-bar' + (on ? " on" : "") + '" style="--i:' + i + '" title="' + esc(r.k + ": " + num(r.v)) + '">' +
+        ((!dense || on) ? '<span class="vz-bv">' + num(r.v) + '</span>' : '<span class="vz-bv vz-bv-off"></span>') +
         '<span class="vz-bt"><i style="height:' + Math.max(5, Math.round(100*r.v/max)) + '%"></i></span>' +
-        '<span class="vz-bl">' + esc(r.k) + '</span></div>';
+        '<span class="vz-bl">' + (tick ? esc(r.k) : "") + '</span></div>';
     }).join("") + '</div>' +
     (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
   }
@@ -1089,7 +1095,11 @@ CG.viz = (function(){
     (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
   }
 
-  /* Area line with a dot per point, the way the reference's gradient chart reads. */
+  /* Area line with a dot per point, the way the reference's gradient chart reads.
+     o.line:true suppresses the gradient fill — REQUIRED when o.zero:false clips the baseline:
+     an area's filled body claims "this much of the total", which is a lie once the y-axis
+     doesn't start at zero. A bare line makes no magnitude claim, so a clipped baseline is
+     honest there. */
   function area(points, o){
     o = o || {};
     points = (points || []).filter(function(p){ return p && isFinite(p.v); });
@@ -1108,10 +1118,11 @@ CG.viz = (function(){
     var uid = "vzg" + (area._n = (area._n||0) + 1);
     return '<div class="vz-area">' +
       '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true" focusable="false">' +
-        '<defs><linearGradient id="' + uid + '" x1="0" y1="0" x2="0" y2="1">' +
-          '<stop offset="0%" stop-color="var(--em-2)" stop-opacity=".5"/>' +
-          '<stop offset="100%" stop-color="var(--em-4)" stop-opacity="0"/></linearGradient></defs>' +
-        '<path class="vz-afill" d="' + fill + '" fill="url(#' + uid + ')"/>' +
+        (o.line ? "" :
+          '<defs><linearGradient id="' + uid + '" x1="0" y1="0" x2="0" y2="1">' +
+            '<stop offset="0%" stop-color="var(--em-2)" stop-opacity=".5"/>' +
+            '<stop offset="100%" stop-color="var(--em-4)" stop-opacity="0"/></linearGradient></defs>' +
+          '<path class="vz-afill" d="' + fill + '" fill="url(#' + uid + ')"/>') +
         '<path class="vz-aline rv-draw" d="' + line + '" fill="none"/>' + dots +
       '</svg>' +
       (o.from || o.to ? '<div class="vz-axis"><span>' + esc(o.from||"") + '</span><span>' + esc(o.to||"") + '</span></div>' : "") +
@@ -1134,6 +1145,34 @@ CG.viz = (function(){
           '<b style="height:' + Math.round(100 * (r.v ? sub/r.v : 0)) + '%"></b></i></span>' +
         '<span class="vz-bl">' + esc(r.k) + '</span></div>';
     }).join("") + '</div>' + (o.legend ? legend(o.legend) : "") +
+    (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
+  }
+
+  /* Diverging bars around a zero axis — net gain/loss per period. Direction carries the meaning
+     (up = gain, down = loss); green/red only reinforces it, so the polarity survives red-green
+     color blindness. Values are labeled with an explicit sign because a short bar next to a tall
+     one reads as "small", not as "negative". */
+  function dbars(rows, o){
+    o = o || {};
+    rows = (rows || []).filter(function(r){ return r && isFinite(r.v); });
+    if (rows.length < 2) return "";
+    var mag = rows.reduce(function(m,r){ return Math.max(m, Math.abs(r.v)); }, 0) || 1;
+    var dense = rows.length > 16, step = Math.ceil(rows.length / 8);
+    var big = rows.reduce(function(b,r){ return Math.abs(r.v) > Math.abs(b.v) ? r : b; }, rows[0]);
+    return '<div class="vz-dbars' + (dense ? " vz-dense" : "") + '" style="--n:' + rows.length + '">' + rows.map(function(r, i){
+      var up = r.v > 0 ? Math.max(4, Math.round(100*r.v/mag)) : 0;
+      var dn = r.v < 0 ? Math.max(4, Math.round(100*(-r.v)/mag)) : 0;
+      var tick = !dense || i === rows.length - 1 || (i % step === 0 && i < rows.length - 2);
+      var lbl = (r.v > 0 ? "+" : "") + num(r.v);
+      return '<div class="vz-db' + (r.v < 0 ? " neg" : r.v === 0 ? " zero" : "") + '" style="--i:' + i + '"' +
+        ' title="' + esc(r.k + ": " + lbl) + '">' +
+        ((!dense || r === big) ? '<span class="vz-bv">' + lbl + '</span>' : '<span class="vz-bv vz-bv-off"></span>') +
+        '<span class="vz-dbt">' +
+          '<i class="up' + (up ? "" : " nil") + '" style="height:' + up + '%"></i>' +
+          '<i class="dn' + (dn ? "" : " nil") + '" style="height:' + dn + '%"></i>' +
+        '</span>' +
+        '<span class="vz-bl">' + (tick ? esc(r.k) : "") + '</span></div>';
+    }).join("") + '</div>' +
     (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
   }
 
@@ -1161,7 +1200,7 @@ CG.viz = (function(){
   }
 
   return { card:card, bars:bars, bars2:bars2, hbars:hbars, donut:donut, area:area,
-           legend:legend, heat:heat };
+           dbars:dbars, legend:legend, heat:heat };
 })();
 
 /* ================================================================
