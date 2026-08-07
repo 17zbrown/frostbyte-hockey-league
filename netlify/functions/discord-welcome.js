@@ -67,7 +67,10 @@ async function markWelcomed(ids) {
   });
 }
 async function dApi(method, path, body) {
-  for (let attempt = 0; attempt < 4; attempt++) {
+  /* 6 attempts, not 4: with the exponential ladder below this rides out ~15s of Discord
+     unavailability instead of ~3.6s, which is the difference between absorbing a wobble and
+     paging a human about one. */
+  for (let attempt = 0; attempt < 6; attempt++) {
     const r = await fetch(`https://discord.com/api/v10${path}`, {
       method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -77,7 +80,16 @@ async function dApi(method, path, body) {
     // Discord's own 5xx is routine and transient — GET /members in particular throws one every
     // so often — and only 429 was being retried, so a single blip aborted the whole sweep and
     // reported itself as a fatal automation failure. Back off and try again instead.
-    if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
+    // EXPONENTIAL with jitter, not linear: the old 600/1200/1800ms ladder spent its whole budget
+    // in ~3.6s, which is shorter than a routine Discord wobble — it gave up and paged the
+    // commissioner for something that cleared on its own moments later (2026-08-07 22:30).
+    // Jitter matters because three functions share this token: identical ladders retry in
+    // lockstep and re-collide on exactly the tick the API is unhappy.
+    if (r.status >= 500) {
+      const back = Math.min(8000, 500 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400);
+      await new Promise((res) => setTimeout(res, back));
+      continue;
+    }
     if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
     const t = await r.text();
     return t ? JSON.parse(t) : null;
@@ -114,15 +126,47 @@ export default async () => {
   }
   if (await ranRecently("discord-welcome", 6)) return new Response("skipped: ran moments ago", { status: 200 });
 
-  const sum = { members: 0, new: 0, welcomed: 0, seeded: 0, errors: [] };
+  /* `errors` means the run FAILED at its job and the watchdog should page. `warnings` means it
+     degraded around something and still did the job — recorded honestly, but not an alert. Before
+     this split, recovering from a blip and being killed by one looked identical to the watchdog. */
+  const sum = { members: 0, new: 0, welcomed: 0, seeded: 0, errors: [], warnings: [] };
   try {
-    // Resolve #welcome (+ a few channels to link) by name; allow an app_config override.
-    const channels = await dApi("GET", `/guilds/${GUILD}/channels`);
-    const textByName = {};
-    for (const c of channels) if (c.type === 0) textByName[c.name] = c.id;
+    /* Resolve #welcome (+ a few channels to link) by name; allow an app_config override.
+
+       This lookup used to be able to kill the whole sweep. It is a NAME->ID resolution of
+       channels that essentially never change, yet a transient Discord 5xx on it aborted the run
+       and paged the commissioner (2026-08-07 22:30) — while the job it was about to do, greeting
+       new members, was in no way blocked. So: every success caches the ids, and a failure falls
+       back to that cache. Only a failure with no cache and no override can skip the run now. */
+    let textByName = null, chanResolved = false;
+    try {
+      const channels = await dApi("GET", `/guilds/${GUILD}/channels`);
+      textByName = {};
+      for (const c of channels) if (c.type === 0) textByName[c.name] = c.id;
+      chanResolved = true;
+      await cfgSet("discord_welcome_chan_cache", JSON.stringify({
+        welcome: textByName["welcome"] || null, rules: textByName["rules"] || null,
+        general: textByName["general-chat"] || null }));
+    } catch (e) {
+      sum.warnings.push({ channels: String(e.message || e), recovered: "using cached channel ids" });
+      try {
+        const cached = JSON.parse((await cfgGet("discord_welcome_chan_cache")) || "{}");
+        textByName = { welcome: cached.welcome, rules: cached.rules, "general-chat": cached.general };
+        chanResolved = !!cached.welcome;
+      } catch (e2) { textByName = {}; }
+    }
     const override = await cfgGet("discord_welcome_channel_id");
     const welcomeChan = override || textByName["welcome"];
-    if (!welcomeChan) { console.log("discord-welcome: no #welcome channel found — skipping"); return new Response("skipped: no #welcome", { status: 200 }); }
+    if (!welcomeChan) {
+      /* Two very different situations that used to look identical — and BOTH returned without
+         writing a run result at all, so a persistently broken sweep reported nothing and was
+         only ever caught by staleness:
+           - we read the guild fine and there simply is no #welcome  -> benign, nothing to do
+           - we could not read the guild at all and have no cache    -> we are blind: a failure */
+      if (chanResolved) sum.warnings.push({ welcome: "no #welcome channel in the guild — nothing to post into" });
+      else sum.errors.push({ fatal: "could not resolve the guild's channels and no cached ids — cannot greet anyone" });
+      throw new Error("__no_welcome_channel");
+    }
     const ch = { rules: textByName["rules"], general: textByName["general-chat"] };
 
     // Real, non-bot members currently in the guild.
@@ -170,14 +214,17 @@ export default async () => {
       }
     }
   } catch (e) {
-    sum.errors.push({ fatal: String(e.message || e) });
+    // the no-channel path already recorded the right thing (warning vs error) before rethrowing
+    if (String(e.message || e) !== "__no_welcome_channel") sum.errors.push({ fatal: String(e.message || e) });
   }
   console.log("discord-welcome:", JSON.stringify(sum));
   try {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "rl_discord-welcome_result", value: JSON.stringify({
         at: new Date().toISOString(), ok: (sum.errors || []).length === 0,
-        errCount: (sum.errors || []).length, lastError: sum.errors && sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
+        errCount: (sum.errors || []).length, lastError: sum.errors && sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null,
+        warnCount: (sum.warnings || []).length,
+        lastWarning: sum.warnings && sum.warnings[0] ? JSON.stringify(sum.warnings[0]).slice(0, 200) : null
       }), updated_at: new Date().toISOString() }) });
   } catch {}
   return new Response(JSON.stringify(sum), { status: 200, headers: { "content-type": "application/json" } });
