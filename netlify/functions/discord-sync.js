@@ -783,6 +783,82 @@ async function enforceMentionPolicy(guildRoles, sum) {
   }
 }
 
+/* ---- posting policy: links and images require a league role (Rule 1.3) ----
+   Ad bots join, post a link, and leave. The counter is that posting a LINK or an IMAGE requires
+   proof of being a real member — a role that only exists once you have signed in to the site and
+   registered — while reading and chatting stay open to everyone.
+
+   THE TRAP THIS GUARD EXISTS FOR: "Not Signed Up" is granted by THIS SWEEP to every unlinked human
+   within two minutes, ad accounts included. It carried EMBED_LINKS and ATTACH_FILES, so the gate
+   was decorative until those were stripped (2026-08-08). Any role that is handed out automatically
+   must never be a qualifying role — hence DENY below is enforced, not assumed.
+
+   CREATE_INSTANT_INVITE rides along: a drive-by account should not be able to mint invites. */
+const EMBED_LINKS = 1n << 14n;
+const ATTACH_FILES = 1n << 15n;
+const CREATE_INSTANT_INVITE = 1n << 0n;
+const POST_BITS = EMBED_LINKS | ATTACH_FILES;
+/* Roles that must NEVER carry the posting bits: @everyone (handled by id) and any role this sweep
+   grants automatically without the member proving anything. */
+const POST_DENY = new Set(["not signed up"]);
+/* Roles that must ALWAYS carry them: earning any of these means a real registration or a league
+   office seat. Club and position roles are added dynamically below — they are data, not names. */
+const POST_ALLOW_STATIC = ["player", "free agent", "commissioner", "staff", "owner",
+  "general manager", "assistant general manager"];
+
+async function enforcePostingPolicy(guildRoles, teams, sum) {
+  const allow = new Set(POST_ALLOW_STATIC);
+  for (const p of POSITION_ROLES) allow.add(p.toLowerCase());
+  for (const d of STAFF_DEPARTMENTS) allow.add(d.role.toLowerCase());
+  const clubRoleIds = new Set((teams || []).map((t) => t.discord_role_id).filter(Boolean));
+
+  for (const r of guildRoles || []) {
+    let perms;
+    try { perms = BigInt(r.permissions || 0); } catch (e) { continue; }
+    const name = String(r.name || "").toLowerCase();
+    const isEveryone = r.id === GUILD;
+    /* integration roles belong to their app and Discord refuses to PATCH them */
+    if (r.managed) continue;
+
+    if (isEveryone || POST_DENY.has(name)) {
+      /* @everyone also loses invite creation; a named auto-granted role keeps whatever else it has */
+      const strip = isEveryone ? (POST_BITS | CREATE_INSTANT_INVITE) : (POST_BITS | CREATE_INSTANT_INVITE);
+      if ((perms & strip) === 0n) continue;
+      const cleared = (perms & ~strip).toString();
+      try {
+        await dApi("PATCH", `/guilds/${GUILD}/roles/${r.id}`, { permissions: cleared });
+        sum.postingStripped = (sum.postingStripped || 0) + 1;
+        r.permissions = cleared;
+      } catch (e) { sum.errors.push({ postingPolicy: r.name, error: String(e.message || e) }); }
+      continue;
+    }
+
+    if (allow.has(name) || clubRoleIds.has(r.id)) {
+      if ((perms & POST_BITS) === POST_BITS) continue;
+      const granted = (perms | POST_BITS).toString();
+      try {
+        await dApi("PATCH", `/guilds/${GUILD}/roles/${r.id}`, { permissions: granted });
+        sum.postingGranted = (sum.postingGranted || 0) + 1;
+        r.permissions = granted;
+      } catch (e) { sum.errors.push({ postingPolicy: r.name, error: String(e.message || e) }); }
+    }
+  }
+}
+
+/* The server's own join gate. HIGH = a new account must be in the guild ten minutes before it can
+   post at all, which defeats the join-post-leave pattern outright. Raised by hand on 2026-08-08;
+   re-asserted here so it cannot be quietly lowered. Never LOWERS a stricter setting the
+   commissioner may have chosen (VERY HIGH = 4). */
+const MIN_VERIFICATION_LEVEL = 3;
+async function enforceVerificationLevel(guild, sum) {
+  const cur = guild && guild.verification_level;
+  if (typeof cur !== "number" || cur >= MIN_VERIFICATION_LEVEL) return;
+  try {
+    await dApi("PATCH", `/guilds/${GUILD}`, { verification_level: MIN_VERIFICATION_LEVEL });
+    sum.verificationRaised = `${cur} -> ${MIN_VERIFICATION_LEVEL}`;
+  } catch (e) { sum.errors.push({ verificationLevel: String(e.message || e) }); }
+}
+
 async function ensureRoleOrder(guildRoles, teams, roleId, sum) {
   const byId = new Map(guildRoles.map((r) => [r.id, r]));
   // @everyone shares the guild id and integration-managed roles can't be moved at all
@@ -1276,6 +1352,17 @@ export default async (req) => {
   try { await enforceMentionPolicy(guildRoles, sum); }
   catch (e) { sum.errors.push({ mentionPolicy: String(e.message || e) }); }
 
+  /* Anti-spam baseline, re-asserted every sweep for the same reason the mention policy is: a
+     permission changed by hand in the UI, or a role recreated from a template, silently reopens
+     the hole and nothing would say so. `teams` (line above) supplies the club role ids; both it
+     and `sum` are declared before this point — see the TDZ note above, that mistake cost a sweep. */
+  try { await enforcePostingPolicy(guildRoles, teams, sum); }
+  catch (e) { sum.errors.push({ postingPolicy: String(e.message || e) }); }
+  try {
+    const g0 = await dApi("GET", `/guilds/${GUILD}`);
+    if (g0 && !g0.__notfound) await enforceVerificationLevel(g0, sum);
+  } catch (e) { sum.errors.push({ verificationLevel: String(e.message || e) }); }
+
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
   // (its role + commissioners) instead of the category default (all staff).
@@ -1739,6 +1826,8 @@ export default async (req) => {
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
+        postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
+        verificationRaised: sum.verificationRaised || null,
         mentionStripped: sum.mentionStripped || 0,
         pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
@@ -1751,5 +1840,7 @@ export default async (req) => {
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
-export const _internals = { trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
+export const _internals = { enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
+  CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
+  trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };
