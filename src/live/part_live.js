@@ -4286,16 +4286,29 @@ CG.generateSchedule = function(stage){
     }
 
     var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
-    (function insertNext(idx){
-      if (idx>=chunks.length){
-        CG.toast(rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks","ok");
-        CG.reloadLeague(); return;
-      }
-      CG.sb.from("games").insert(chunks[idx]).then(function(rz){
-        if (rz.error){ CG.toast("Generation stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
-        insertNext(idx+1);
-      });
-    })(0);
+    /* The write goes out in chunks of 100, so a failure part-way leaves a PARTIAL schedule — which
+       is worse than none, because it looks like a schedule. Check the session before the first
+       chunk rather than discovering it on chunk four, and if RLS still bites mid-run, say what it
+       actually means instead of passing the Postgres string through. */
+    CG.assertCommissioner().then(function(){
+      (function insertNext(idx){
+        if (idx>=chunks.length){
+          CG.toast(rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks","ok");
+          CG.reloadLeague(); return;
+        }
+        CG.sb.from("games").insert(chunks[idx]).then(function(rz){
+          if (rz.error){
+            var m = String(rz.error.message||"");
+            CG.toast("Generation stopped after "+(idx*100)+" games: "+m+
+              (/row-level security/i.test(m)
+                ? " — this means your sign-in expired mid-write, not that anything is misconfigured. Sign out and back in, then clear the stage and regenerate so you don’t keep a partial schedule."
+                : ""),"err");
+            CG.reloadLeague(); return;
+          }
+          insertNext(idx+1);
+        });
+      })(0);
+    }).catch(function(e){ CG.toast("Nothing was generated — "+e.message,"err"); });
   });
 };
 CG.preseasonRelease = function(){
@@ -5088,8 +5101,15 @@ CG.UPLOAD_MIME = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/i;
 /* CSS.escape isn't in every browser this site still serves; the codes are [A-Z0-9] in practice,
    so quote-escaping is enough to keep the attribute selector well-formed either way */
 function cssQ(v){ return String(v==null?"":v).replace(/["\\]/g, "\\$&"); }
-CG.uploadArtwork = async function(file, slug, opts){
-  opts = opts || {};
+/* A privileged write is about to go out — check the session FIRST and say the true thing.
+   PostgREST does not reject an expired or missing session: it downgrades the request to `anon`, so
+   RLS denies it and the commissioner sees a raw Postgres string — "new row violates row-level
+   security policy for table games" — which reads like the league's permissions are broken when the
+   real answer is "sign in again". That exact message stopped a schedule generation once.
+   The DELETE case is worse: a blocked delete returns 0 rows and NO error, so the caller reports
+   success and the commissioner believes a schedule was cleared that is still there. */
+CG.assertCommissioner = async function(){
+  if (!CG.sb || !CG.sb.auth) throw new Error("not connected — reload the page and retry");
   var s = await CG.sb.auth.getSession();
   var session = s && s.data && s.data.session;
   if (!session){
@@ -5101,11 +5121,15 @@ CG.uploadArtwork = async function(file, slug, opts){
   if (isComm && isComm.error) throw new Error(isComm.error.message);
   if (!isComm.data){
     /* the token the server sees isn't a commissioner — one refresh, one recheck */
-    var rf2 = await CG.sb.auth.refreshSession();
-    session = (rf2 && rf2.data && rf2.data.session) || session;
+    await CG.sb.auth.refreshSession();
     isComm = await CG.sb.rpc("is_commissioner");
     if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
   }
+  return true;
+};
+CG.uploadArtwork = async function(file, slug, opts){
+  opts = opts || {};
+  await CG.assertCommissioner();
   var shrunk = await CG.shrinkImage(file, opts.cap || 384);
   var body = shrunk.blob, type = shrunk.type;
   var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
@@ -8085,10 +8109,22 @@ CG.clearSchedule = function(stage){
   CG.confirm("Clear the "+(stage==="preseason"?"pre-season":"regular-season")+" schedule?",
     mine.length+" games go, including their codes and server picks"+(played?" — and "+played+" finals WITH their box scores":"")+". This can’t be undone.",
     "Clear "+(stage==="preseason"?"pre-season":"schedule"), function(){
-    CG.sb.from("games").delete().eq("season_id", s.id).eq("stage", stage).then(function(r){
+    /* .select() is load-bearing: an RLS-blocked DELETE returns 0 rows and NO error, so without it
+       this reported "cleared" over a schedule that is still entirely there — and the commissioner
+       then regenerates on top of it. Count what actually went and say so. */
+    CG.assertCommissioner().then(function(){
+      return CG.sb.from("games").delete().eq("season_id", s.id).eq("stage", stage).select("id");
+    }).then(function(r){
       if (r.error){ CG.toast("Couldn’t clear: "+r.error.message,"err"); return; }
-      CG.toast((stage==="preseason"?"Pre-season":"Regular season")+" cleared","ok"); CG.reloadLeague();
-    });
+      var gone = (r.data||[]).length;
+      if (!gone && mine.length){
+        CG.toast("Nothing was cleared — the database refused the delete, so all "+mine.length+
+          " games are still there. Sign out and back in, then retry.","err");
+        CG.reloadLeague(); return;
+      }
+      CG.toast((stage==="preseason"?"Pre-season":"Regular season")+" cleared — "+gone+" games removed","ok");
+      CG.reloadLeague();
+    }).catch(function(e){ CG.toast("Nothing was cleared — "+e.message,"err"); });
   });
 };
 /* The generator anchors each stage on its configured date, but nothing re-checks that afterwards —
@@ -8787,8 +8823,16 @@ CG.clearPlayoffRound = function(round){
   CG.confirm("Clear this playoff round?",
     mine.length+" games go"+(played?", including "+played+" finals with their box scores":"")+". This can’t be undone.",
     "Clear round", function(){
-    CG.sb.from("games").delete().eq("season_id",s.id).eq("stage","playoff").eq("week",round).then(function(r){
+    /* same fail-loud rule as the schedule clear: a blocked DELETE is 0 rows and no error */
+    CG.assertCommissioner().then(function(){
+      return CG.sb.from("games").delete().eq("season_id",s.id).eq("stage","playoff").eq("week",round).select("id");
+    }).then(function(r){
       if(r.error){ CG.toast("Couldn’t clear: "+r.error.message,"err"); return; }
+      if(!(r.data||[]).length && mine.length){
+        CG.toast("Nothing was cleared — the database refused the delete, so all "+mine.length+
+          " games are still there. Sign out and back in, then retry.","err");
+        CG.reloadLeague(); return;
+      }
       if (round===1){
         /* clearing the quarter-finals unlocks the seeding again */
         var key="playoff_seeds_"+((s&&s.number)||1);
@@ -8799,7 +8843,7 @@ CG.clearPlayoffRound = function(round){
         return;
       }
       CG.toast("Round cleared","ok"); CG.reloadLeague();
-    });
+    }).catch(function(e){ CG.toast("Nothing was cleared — "+e.message,"err"); });
   });
 };
 
