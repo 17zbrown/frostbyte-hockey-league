@@ -395,6 +395,34 @@ async function syncClubIdentity(guildChannels, guildRoles, teams, sum) {
 // and PATCHed when a club's logo actually changes. A club that uploads a new logo makes the
 // bundled render stale — that is reported, not applied, so a role never shows a mark the site no
 // longer uses.
+/* A club's role icon, rendered LIVE from the logo the club uploaded on the site.
+
+   The old pipeline shipped hand-rendered PNGs in assets/role-icons/ keyed by a manifest, because
+   the site stores logos as WebP and Discord refuses WebP — decoding it inside the function would
+   have meant a native image dependency. That made every new club and every re-brand a manual
+   commit, and Montreal sat without an icon for days as a result.
+
+   Supabase's own image transformer removes the problem: request the object through
+   /storage/v1/render/image/... and it returns image/png, resized, with no dependency at all.
+   So the logo a commissioner uploads becomes the Discord role icon on the next sweep. */
+async function fetchClubLogoPng(logoUrl) {
+  if (!logoUrl) return null;
+  /* /object/public/<bucket>/<path>  ->  /render/image/public/<bucket>/<path> */
+  let url = logoUrl.includes("/storage/v1/object/public/")
+    ? logoUrl.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") +
+      (logoUrl.includes("?") ? "&" : "?") + "width=128&height=128&resize=contain"
+    : logoUrl;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`logo ${r.status}`);
+  const ct = (r.headers.get("content-type") || "").toLowerCase();
+  /* Discord accepts png/jpeg/gif only. The transformer answers png; a non-Supabase URL might not,
+     and silently PATCHing a WebP would fail per-role every sweep forever. */
+  if (!/^image\/(png|jpe?g|gif)/.test(ct)) throw new Error(`logo is ${ct || "unknown"}, not png/jpeg/gif`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > 240 * 1024) throw new Error(`logo is ${Math.round(buf.length/1024)}KB, over Discord's limit`);
+  return { data: `data:${ct.split(";")[0]};base64,${buf.toString("base64")}` };
+}
+
 function readRoleIcon(code) {
   const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
                  path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
@@ -489,11 +517,22 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
     const role = guildRoles.find((r) => r.id === rid);
     if (!role || role.managed) { snap.push(`${w.code}=no-role`); continue; }
     let img;
-    if (w.code === "GUILD") {
-      img = await fetchGuildIconPng(guildIcon);
-      if (img) img.src = w.src;                    // the hash IS the identity; never stale
-    } else {
-      img = readRoleIcon(w.code);
+    try {
+      if (w.code === "GUILD") {
+        img = await fetchGuildIconPng(guildIcon);
+        if (img) img.src = w.src;                  // the hash IS the identity; never stale
+      } else if (w.src && /^https?:/.test(w.src)) {
+        /* a club: render straight from the uploaded logo, so a new or re-branded club needs no
+           commit. `applied[rid]` is keyed on the logo URL, so this re-applies exactly when the
+           club changes its logo and never otherwise. */
+        img = await fetchClubLogoPng(w.src);
+      } else {
+        img = readRoleIcon(w.code);                // STAFF: fixed artwork shipped with the repo
+      }
+    } catch (e) {
+      snap.push(`${w.code}=logo-error`);
+      sum.errors.push({ roleIcon: w.code, error: String(e.message || e) });
+      continue;
     }
     if (!img) { snap.push(`${w.code}=no-image`); continue; }
     if (img.src && img.src !== w.src) { snap.push(`${w.code}=stale-render`); continue; }
@@ -1840,7 +1879,7 @@ export default async (req) => {
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
-export const _internals = { enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
+export const _internals = { fetchClubLogoPng, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };
