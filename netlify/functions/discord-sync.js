@@ -494,14 +494,44 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
     if (rows && rows[0] && rows[0].value) applied = JSON.parse(rows[0].value);
   } catch (e) { /* first run, or unreadable — treat as nothing applied */ }
 
-  const todo = Object.keys(want).filter((rid) => applied[rid] !== want[rid].src);
-  if (!todo.length) return;                         // nothing changed: read no files, call nothing
-
   const snap = [];
+  const todo = Object.keys(want).filter((rid) => applied[rid] !== want[rid].src);
+
+  /* The bot's own avatar, matched to the server icon. PATCH /users/@me is rate-limited far harder
+     than role edits (a couple of changes an hour), so this is gated on the icon hash and runs at
+     most once per change — never on a normal tick. A failure here is recorded and dropped: the
+     avatar is cosmetic and must not cost the sync its role work.
+
+     This is deliberately ABOVE the `todo` early return. It used to sit at the end of the function,
+     which made a failed avatar PATCH permanent: the failure leaves `applied.__botAvatar` unset but
+     the run still persists `applied`, so the next sweep finds `todo` empty, returns before ever
+     reaching the retry, and the bot keeps the wrong avatar until some unrelated icon changes. The
+     hash gate below is the intended "at most once per change" guard; `todo` was never meant to be a
+     second one. */
+  let avatarChanged = false;
+  if (guildIcon && applied.__botAvatar !== guildIcon) {
+    const av = await fetchGuildIconPng(guildIcon);
+    if (av) {
+      try {
+        await dApi("PATCH", "/users/@me", { avatar: av.data });
+        applied.__botAvatar = guildIcon;
+        avatarChanged = true;
+        snap.push("BOT=ok");
+      } catch (e) {
+        snap.push("BOT=error");
+        sum.errors.push({ botAvatar: String(e.message || e) });
+      }
+    }
+  }
+
+  /* nothing changed anywhere: read no files, call nothing. `avatarChanged` keeps a successful
+     avatar-only run from returning before its result is written down. */
+  if (!todo.length && !avatarChanged) return;
+
   /* One-shot diagnostic for the single remaining bundled file. If STAFF.png cannot be found, record
      WHERE the function actually looked and what is there, rather than reporting "no-image" forever
      with no way to tell whether the included_files glob, the path or the deploy is at fault. */
-  if (!readRoleIcon("STAFF")) {
+  if (todo.length && !readRoleIcon("STAFF")) {
     const probe = [];
     const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
                    path.join(HERE, ".."), path.join(HERE, "..", "..")].filter(Boolean);
@@ -543,23 +573,6 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
     } catch (e) {
       snap.push(`${w.code}=error`);
       sum.errors.push({ roleIcon: w.code, error: String(e.message || e) });
-    }
-  }
-  /* The bot's own avatar, matched to the server icon. PATCH /users/@me is rate-limited far harder
-     than role edits (a couple of changes an hour), so this is gated on the icon hash and runs at
-     most once per change — never on a normal tick. A failure here is recorded and dropped: the
-     avatar is cosmetic and must not cost the sync its role work. */
-  if (guildIcon && applied.__botAvatar !== guildIcon) {
-    const av = await fetchGuildIconPng(guildIcon);
-    if (av) {
-      try {
-        await dApi("PATCH", "/users/@me", { avatar: av.data });
-        applied.__botAvatar = guildIcon;
-        snap.push("BOT=ok");
-      } catch (e) {
-        snap.push("BOT=error");
-        sum.errors.push({ botAvatar: String(e.message || e) });
-      }
     }
   }
   try { await sbUpsertCfg("discord_role_icons_applied", JSON.stringify(applied)); } catch (e) { /* retried next run */ }
