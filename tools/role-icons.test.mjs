@@ -112,6 +112,12 @@ console.log("\n— STAFF still resolves off disk (the one thing still bundled)")
 
   const toml = fs.readFileSync(new URL("../netlify.toml", import.meta.url), "utf8");
   A("...and the bundler still ships the directory", /assets\/role-icons/.test(toml));
+
+  /* sum.roleIcons was incremented on every apply and then dropped from the result, so a sweep that
+     re-rendered an icon looked identical to one that did nothing. The per-role snap key carried the
+     detail, but the counter itself was write-only. */
+  const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  A("the icon counter actually reaches the sweep result", /roleIcons: sum\.roleIcons/.test(src));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

@@ -1863,6 +1863,7 @@ export default async (req) => {
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
+        roleIcons: sum.roleIcons || 0,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
         verificationRaised: sum.verificationRaised || null,
