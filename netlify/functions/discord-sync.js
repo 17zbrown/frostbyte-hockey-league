@@ -479,7 +479,7 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   /* Staff wears the referee jersey — fixed artwork in the repo rather than anything from the DB, so
      its "source" is a version marker. Bump this string to force a re-apply; it is the only copy. */
   const staffId = roleId["staff"];
-  if (staffId) want[staffId] = { code: "STAFF", src: "local:referee-jersey-v1" };
+  if (staffId) want[staffId] = { code: "STAFF", src: "local:referee-jersey-v2" };
 
   /* Commissioner wears the server's own icon. Taken live from the guild rather than shipped:
      Discord's CDN already serves it as PNG, so there is nothing to pre-render and nothing to keep
