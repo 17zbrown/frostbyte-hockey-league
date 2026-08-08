@@ -79,5 +79,40 @@ console.log("\n— the pipeline is genuinely live, not asset-backed");
     /applied\[rid\] = w\.src/.test(src) && /src: t\.logo_url/.test(src));
 }
 
+console.log("\n— the pre-rendered pipeline is fully gone, not just bypassed");
+{
+  const fs = await import("node:fs");
+  const dir = new URL("../assets/role-icons/", import.meta.url);
+  const left = fs.readdirSync(dir).filter((f) => !f.startsWith("."));
+  A("only the fixed STAFF artwork is still shipped", left.join(",") === "STAFF.png", left.join(","));
+  A("...so no club PNG can go stale against the site", !left.some((f) => /^(?!STAFF)[A-Z]{2,3}\.png$/.test(f)));
+
+  const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  A("the manifest is no longer read", !/manifest\.json/.test(src));
+  /* `stale-render` only existed because an image could be rendered from an older logo than the site
+     now serves. Nothing is pre-rendered, so that state is unreachable — dead branches that can never
+     fire are exactly the kind of thing a future reader trusts and reasons from. Matched on the
+     emitted marker and on `img.src`, so the prose above may still explain what was removed. */
+  A("the stale-render branch no longer emits", !/=stale-render/.test(src));
+  A("...and nothing compares a render's source any more", !/img\.src/.test(src));
+
+  /* The trap this cleanup removed: two copies of the version marker meant that following the
+     documented "bump to force a re-apply" instruction parked STAFF in stale-render forever. */
+  const markers = src.match(/local:referee-jersey-v\d+/g) || [];
+  A("the STAFF version marker exists exactly once", markers.length === 1, markers.join(","));
+}
+
+console.log("\n— STAFF still resolves off disk (the one thing still bundled)");
+{
+  const fs = await import("node:fs");
+  const staff = I.readRoleIcon("STAFF");
+  A("STAFF.png is found and read", !!staff && /^data:image\/png;base64,/.test(staff.data));
+  A("...carrying no manifest-derived src to compare against", !("src" in staff));
+  A("a club code no longer resolves to a shipped file", I.readRoleIcon("MTL") === null);
+
+  const toml = fs.readFileSync(new URL("../netlify.toml", import.meta.url), "utf8");
+  A("...and the bundler still ships the directory", /assets\/role-icons/.test(toml));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

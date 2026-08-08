@@ -381,20 +381,19 @@ async function syncClubIdentity(guildChannels, guildRoles, teams, sum) {
   try { await sbUpsertCfg("discord_club_identity", JSON.stringify(snapshot)); } catch (e) { /* observability only */ }
 }
 
-// Role icons — the club crest on the club role, the CGHL shield on Staff.
+// Role icons — the club crest on the club role, the referee jersey on Staff, the server icon on
+// Commissioner.
 //
 // Needs Boost Level 2; without it Discord rejects the PATCH, so the guild's feature list is checked
 // first and the run records WHY it skipped rather than failing silently. If the boosts lapse the
 // icons stay on the roles Discord-side and this simply stops reconciling them.
 //
-// The images are pre-rendered 128x128 PNGs bundled with the function. The site stores logos as
-// WebP, which Discord will not accept for a role icon, and decoding WebP at runtime would put a
-// native image dependency inside the function that manages every role, channel and nickname.
+// Every mark is now fetched at run time from its own source of truth: a club's from the logo on the
+// site, Commissioner's from the guild icon, Staff's from the one fixed PNG in the repo. Nothing is
+// pre-rendered, so "the shipped image no longer matches the site" is not a state that can exist.
 //
-// Idempotent by source URL: a small applied-map is compared each run and the PNGs are only read
-// and PATCHed when a club's logo actually changes. A club that uploads a new logo makes the
-// bundled render stale — that is reported, not applied, so a role never shows a mark the site no
-// longer uses.
+// Idempotent by source: an applied-map of roleId -> source is compared each run, and a role is only
+// fetched and PATCHed when its source actually changes. A normal tick does no image work at all.
 /* A club's role icon, rendered LIVE from the logo the club uploaded on the site.
 
    The old pipeline shipped hand-rendered PNGs in assets/role-icons/ keyed by a manifest, because
@@ -423,6 +422,12 @@ async function fetchClubLogoPng(logoUrl) {
   return { data: `data:${ct.split(";")[0]};base64,${buf.toString("base64")}` };
 }
 
+/* Fixed artwork shipped with the repo — Staff's referee jersey, and only that. Clubs used to come
+   from here too, keyed by a manifest that recorded which logo_url each PNG had been rendered from;
+   they now render live, and the manifest is gone with them. It was worse than redundant: the version
+   marker lived in two places (the `local:` string below and the manifest entry), so following the
+   manifest's own instruction to "bump the version to force a re-apply" made the two disagree and
+   parked the icon in `stale-render` permanently. The marker is a single string in this file now. */
 function readRoleIcon(code) {
   const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
                  path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
@@ -431,13 +436,9 @@ function readRoleIcon(code) {
        function candidate, so bundled assets have to sit outside it. */
     for (const rel of [["assets", "role-icons"], ["role-icons"]]) {
       try {
-        const dir = path.join(r, ...rel);
-        const img = path.join(dir, `${code}.png`);
+        const img = path.join(r, ...rel, `${code}.png`);
         if (!fs.existsSync(img)) continue;
-        const man = path.join(dir, "manifest.json");
-        const src = fs.existsSync(man)
-          ? (JSON.parse(fs.readFileSync(man, "utf8")).rendered || {})[code] : null;
-        return { data: "data:image/png;base64," + fs.readFileSync(img).toString("base64"), src };
+        return { data: "data:image/png;base64," + fs.readFileSync(img).toString("base64") };
       } catch (e) { /* try the next candidate root */ }
     }
   }
@@ -475,8 +476,8 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   for (const t of teams) {
     if (t.discord_role_id && t.logo_url) want[t.discord_role_id] = { code: t.code, src: t.logo_url };
   }
-  /* Staff wears the referee jersey — fixed artwork in the repo rather than anything from the DB,
-     so its "source" is a version marker. Bump it in the manifest to force a re-apply. */
+  /* Staff wears the referee jersey — fixed artwork in the repo rather than anything from the DB, so
+     its "source" is a version marker. Bump this string to force a re-apply; it is the only copy. */
   const staffId = roleId["staff"];
   if (staffId) want[staffId] = { code: "STAFF", src: "local:referee-jersey-v1" };
 
@@ -497,9 +498,9 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   if (!todo.length) return;                         // nothing changed: read no files, call nothing
 
   const snap = [];
-  /* One-shot diagnostic: if the bundled PNGs cannot be found, record WHERE the function actually
-     looked and what is there, rather than reporting "no-image" forever with no way to tell whether
-     the glob, the path or the deploy is at fault. */
+  /* One-shot diagnostic for the single remaining bundled file. If STAFF.png cannot be found, record
+     WHERE the function actually looked and what is there, rather than reporting "no-image" forever
+     with no way to tell whether the included_files glob, the path or the deploy is at fault. */
   if (!readRoleIcon("STAFF")) {
     const probe = [];
     const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
@@ -520,7 +521,6 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
     try {
       if (w.code === "GUILD") {
         img = await fetchGuildIconPng(guildIcon);
-        if (img) img.src = w.src;                  // the hash IS the identity; never stale
       } else if (w.src && /^https?:/.test(w.src)) {
         /* a club: render straight from the uploaded logo, so a new or re-branded club needs no
            commit. `applied[rid]` is keyed on the logo URL, so this re-applies exactly when the
@@ -535,7 +535,6 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
       continue;
     }
     if (!img) { snap.push(`${w.code}=no-image`); continue; }
-    if (img.src && img.src !== w.src) { snap.push(`${w.code}=stale-render`); continue; }
     try {
       await dApi("PATCH", `/guilds/${GUILD}/roles/${rid}`, { icon: img.data });
       applied[rid] = w.src;
@@ -1879,7 +1878,7 @@ export default async (req) => {
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
-export const _internals = { fetchClubLogoPng, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
+export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };

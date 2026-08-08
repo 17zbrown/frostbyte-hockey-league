@@ -14,12 +14,13 @@
 [functions]
   # part3_content.js: the rulebook lives in the site bundle and discord-scheduler mirrors it into
   # #rules, so it reads that same file at runtime — ONE source of truth instead of a second copy.
-  # assets/role-icons/: pre-rendered 128x128 PNGs of each club crest and the CGHL shield. They live
+  # assets/role-icons/: fixed role artwork that has no source on the site — just STAFF.png, the
+  # referee jersey. Club crests used to be pre-rendered here too, because Discord rejects the WebP
+  # the site stores; they now render live through Supabase's image transformer, which returns PNG
+  # and needs no decoding, so a new club or a re-brand reaches Discord without a commit. The glob
+  # stays broad so another fixed mark can be dropped in without editing this file. These live
   # OUTSIDE netlify/functions/, because Netlify scans every subdirectory of that folder as a
-  # function candidate — assets placed there are not shipped. Discord will not
-  # accept the WebP the site stores, and decoding WebP at runtime would mean a native image
-  # dependency inside the function that manages every role, channel and nickname. Rendered ahead of
-  # time and shipped with the code instead: versioned, reviewable, and nothing to decode at runtime.
+  # function candidate — assets placed there are not shipped.
   included_files = ["src/live/part3_content.js", "assets/role-icons/*", "assets/role-icons/**"]
 
 # The front-end calls /api/parse-screenshots; route that to the serverless function.
