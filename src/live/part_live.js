@@ -7893,6 +7893,12 @@ CG.HOLIDAYS = [
   { key:"new-years-eve",   name:"New Year's Eve",        where:"US & Canada", on:true,  rule:{ type:"fixed", m:12, d:31 } }
 ];
 CG.HOLIDAY_BY_KEY = CG.HOLIDAYS.reduce(function(m,h){ m[h.key]=h; return m; }, {});
+/* The weekday names of a season's slate, in order from the Wednesday anchor. One definition: the
+   night order was written out in two places, and this is the same family of drift as the
+   nights_per_week / NIGHTS_PER_WEEK mismatch that once gave a 4-night season 3 nights of dates. */
+CG.nightNames = function(season){
+  return ["Wed","Thu","Fri","Sat","Sun","Mon","Tue"].slice(0, CG.seasonShape(season || CG.SEASON || {}).nights);
+};
 /* Which of a season's game weeks each holiday would actually cost. A toggle whose holiday falls in
    the off-season removes nothing, and saying so up front stops the list reading as twenty decisions
    when it is really two or three. */
@@ -7905,13 +7911,27 @@ CG.holidayImpact = function(season){
      for the ones it would slide into as holidays push it later */
   var start = CG.etYMD(anchor), out = {};
   var wed = start; while (CG.dayOfWeek(wed)!==3) wed = CG.dayAdd(wed,1);
-  var horizon = (shape.weeks + CG.PRESEASON_WEEKS + CG.HOLIDAYS.length + 6);
+  /* The horizon is the season's ACTUAL footprint: the weeks it plays, plus the ones its own toggles
+     step over. It used to be `weeks + PRESEASON_WEEKS + HOLIDAYS.length + 6` — a fixed guess that
+     ran 36 weeks past the anchor, i.e. into the following May. Season 1 ends in December and the
+     card was therefore listing Easter 2027 and MLK Day 2027 under "Land inside this season" and
+     counting 8 weeks skipped when the true answer was 2. */
+  var plan = CG.gameNights(wed, shape.weeks + CG.PRESEASON_WEEKS, shape.nights, CG.seasonHolidayKeys(s));
+  var lastWed = plan.nights.length ? plan.nights[plan.nights.length-1].wed : wed;
+  var horizon = Math.round((Date.parse(lastWed+"T12:00:00Z") - Date.parse(wed+"T12:00:00Z")) / 604800000) + 1;
   for (var w=0; w<horizon; w++){
     var mon = CG.dayAdd(wed,-2);
     for (var i=0;i<7;i++){
       var day = CG.dayAdd(mon,i), year=+day.slice(0,4);
+      /* Does the league actually play on this holiday? The week's nights run from the Wednesday, so
+         `i-2` is the day's offset from it and 0..nights-1 are the nights on the slate. This is the
+         distinction the toggles could not previously show: skipping is always whole-week, so a
+         Monday holiday costs a full week of Wed/Thu/Fri games even though nobody would have been
+         away for it — worth knowing before you spend a week on it. */
+      var offset = i - 2, plays = offset >= 0 && offset < shape.nights;
       CG.HOLIDAYS.forEach(function(h){
-        if (CG.holidayDate(h.key, year) === day && !out[h.key]) out[h.key] = { date:day, week:wed };
+        if (CG.holidayDate(h.key, year) === day && !out[h.key])
+          out[h.key] = { date:day, week:wed, gameDay:plays };
       });
     }
     wed = CG.dayAdd(wed,7);
@@ -7927,15 +7947,23 @@ CG.holidayCard = function(){
   var impact = CG.holidayImpact(s);
   var live = CG.HOLIDAYS.filter(function(h){ return impact[h.key]; });
   var costs = live.filter(function(h){ return onMap[h.key]; });
+  var DAY_NAME = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   var row = function(h){
     var hit = impact[h.key], sel = !!onMap[h.key];
     var when = hit ? CG.fmtDate(CG.etISO(hit.date,"12:00")) : "outside this season";
+    /* Lead with the weekday: it is the whole question when deciding whether a smaller holiday is
+       worth a week. "Monday, Oct 12" answers it before you read anything else. */
+    var when2 = hit ? DAY_NAME[CG.dayOfWeek(hit.date)]+", "+when : when;
     return '<button type="button" class="gamecard" data-hol="'+h.key+'" aria-pressed="'+sel+'" '+
       'style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%'+(sel?";border-color:var(--chrome)":"")+'">'+
       '<span class="chip '+(sel?"chip-chrome":"")+'" style="font-size:9px;align-self:center">'+(sel?"SKIP":"PLAY")+'</span>'+
       '<span style="min-width:0"><b style="font-family:var(--f-disp)">'+esc(h.name)+'</b>'+
-        '<span class="caption" style="display:block">'+esc(h.where)+' · '+esc(when)+'</span></span>'+
-      (hit ? '<span class="caption" style="align-self:center;white-space:nowrap">week of '+esc(hit.week.slice(5))+'</span>' : '')+
+        '<span class="caption" style="display:block">'+esc(h.where)+' · '+esc(when2)+'</span></span>'+
+      (hit ? '<span style="align-self:center;text-align:right;white-space:nowrap">'+
+          '<span class="chip '+(hit.gameDay?"chip-warn":"")+'" style="font-size:9px'+(hit.gameDay?"":";opacity:.65")+'">'+
+            (hit.gameDay ? "FALLS ON A GAME NIGHT" : "no game that day")+'</span>'+
+          '<span class="caption" style="display:block;margin-top:3px">week of '+esc(hit.week.slice(5))+'</span>'+
+        '</span>' : '')+
     '</button>';
   };
   var section = function(title, list){
@@ -7946,6 +7974,7 @@ CG.holidayCard = function(){
       '<span class="chip'+(costs.length?" chip-warn":"")+'" id="holCount">'+costs.length+' week'+(costs.length===1?"":"s")+' skipped</span></div>'+
     '<div class="card-b">'+
       '<p class="caption" style="margin:0 0 4px;max-width:78ch">Turn a holiday on and the generator steps over the whole week it falls in, then carries on — the season keeps its full game count and simply ends a week later. Dates are for this season\'s calendar.</p>'+
+      '<p class="caption" style="margin:0 0 4px;max-width:78ch">The skip is always whole-week, so a holiday marked <b>no game that day</b> still costs you a full week of '+esc(CG.nightNames().join("/"))+' games — worth checking before you spend a week on one.</p>'+
       section("Land inside this season", live) +
       section("Elsewhere in the year", CG.HOLIDAYS.filter(function(h){ return !impact[h.key]; })) +
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">'+
@@ -8091,7 +8120,7 @@ CG.shapeMismatch = function(){
   });
   var counts = Object.keys(perClub).map(function(k){ return perClub[k]; });
   var actualPerClub = counts.length ? Math.max.apply(null, counts) : 0;
-  var wantDays = ["Wed","Thu","Fri","Sat","Sun","Mon","Tue"].slice(0, shape.nights);
+  var wantDays = CG.nightNames(s);
 
   var out = [];
   if (actualPerClub !== shape.perClub)
