@@ -6,7 +6,8 @@
   "description": "Chel Gaming Hockey League hub + free AI screenshot box-score import (Gemini → Groq fallback)",
   "engines": { "node": ">=18" },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node src/live/build.cjs index.html && for f in tools/*.test.mjs tools/*.test.cjs; do echo \"— $f\"; node \"$f\" || exit 1; done && echo 'ALL TESTS PASSED'"
   },
   "dependencies": {
     "undici": "^6.21.0"
