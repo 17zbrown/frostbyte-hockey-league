@@ -530,8 +530,15 @@ async function signupReminder(cfg, et, dry, errors) {
   const reg = new Set(regs.map((r) => r.profile_id));
   const remaining = members.filter((m) => !reg.has(m.id)).length;
   if (remaining === 0) return "everyone signed up";
+  /* The deadline no longer CLOSES registration (Rule 1.1 v2.8) — it is the draft-eligibility
+     cutoff. Losing this binding when that rule shipped is what silently killed this reminder for
+     four days: the template below still referenced it, so every run threw ReferenceError before
+     reaching the post. Keep the date in the copy, but say what it actually means. */
+  const deadline = s.signup_deadline_at || s.registration_deadline || null;
   const content = `⏰ **${s.name} sign-ups are open!** <@&${roleId}> — you haven't registered yet.\n` +
-    `Grab your spot${deadline ? ` before **${fmtDay(deadline)}**` : ""}: https://chelgamingleague.com/#/register`;
+    (deadline
+      ? `Sign up before **${fmtDay(deadline)}** to go into the draft — after that you can still join, you'll just be placed on a club: https://chelgamingleague.com/#/register`
+      : `Grab your spot: https://chelgamingleague.com/#/register`);
   if (dry) return { would_post: content, remaining };
   if (!(await claim("signup_reminder", et.ymd))) return "already posted today";
   const res = await postWebhook(url, content, { ping: true });
