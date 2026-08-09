@@ -1,26 +1,22 @@
-/* Rule 3.1's season-shape sentence, on BOTH published surfaces.
-   Run: node tools/rulebook-shape.test.mjs   (build index.html first)
+/* Rule 3.1's season-shape sentence. Run: node tools/rulebook-shape.test.mjs   (build index.html first)
 
-   The website reconciles Rule 3.1 against the live season at render time; the Discord #rules mirror
-   read the raw file and did not. So the site showed "eight (8) game-weeks ... 72 games per club"
-   while #rules published "six (6) ... fifty-four (54)" — two published surfaces disagreeing about
-   how long the season is, which is worse than either being stale on its own. Both now generate the
-   same sentence, and these assertions fail the moment the two copies drift. */
-process.env.SUPABASE_URL ||= "https://sb.invalid";
-process.env.SUPABASE_SERVICE_ROLE_KEY ||= "k";
-process.env.DISCORD_BOT_TOKEN ||= "t";
-process.env.DISCORD_GUILD_ID ||= "g";
+   Rule 3.1 states the season's shape in words, and that shape is a per-season setting, so
+   CG.rulebookShapeSync rewrites the sentence from the live season every time the rulebook renders.
+   Two things make that delicate enough to pin down:
 
+   1. The clause is delimited by its SECOND em-dash. v2.14 added a playoff sentence to the same
+      paragraph containing a third em-dash, so a greedy match would now swallow the binding text in
+      between and delete it. The stored source carried "six (6) game-weeks / fifty-four (54) games"
+      long after the league moved to eight and seventy-two — the rendered page was right, the
+      document behind it was not, and only the rewrite was hiding it.
+   2. It mutates the shared CG.CONTENT.rulebook in place, so a non-idempotent rewrite grows a
+      duplicate sentence on every render. That has happened before. */
 import fs from "node:fs";
 import vm from "node:vm";
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
-/* ---- the Netlify (Discord mirror) copy ---- */
-const sched = await import(new URL("../netlify/functions/discord-scheduler.js", import.meta.url).pathname);
-
-/* ---- the browser copy, out of the built bundle ---- */
 const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const scripts = [...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
 const noop = () => {};
@@ -75,79 +71,66 @@ const clauseOf = (rb) => {
   })));
   return found;
 };
-const freshRulebook = () => JSON.parse(JSON.stringify(CG.CONTENT.rulebook));
+const fresh = () => JSON.parse(JSON.stringify(CG.CONTENT.rulebook));
+const LIVE = { weeks: 8, nights_per_week: 3, night_slots: "21:00,21:35,22:10" };
 
-const SHAPES = [
-  { label: "the live season", weeks: 8, nights_per_week: 3, night_slots: "21:00,21:35,22:10" },
-  { label: "the old six-week shape", weeks: 6, nights_per_week: 3, night_slots: "21:00,21:35,22:10" },
-  { label: "four nights", weeks: 8, nights_per_week: 4, night_slots: "21:00,21:35,22:10" },
-  { label: "two slots a night", weeks: 10, nights_per_week: 3, night_slots: "21:00,21:35" },
-  { label: "a single night, single slot", weeks: 1, nights_per_week: 1, night_slots: "21:00" },
-];
-
-console.log("— the site and the Discord mirror generate the SAME sentence");
-for (const sh of SHAPES) {
-  CG.SEASON = { ...sh, id: "s" };
-  const site = clauseOf(CG.rulebookShapeSync(freshRulebook()));
-  const disc = clauseOf(sched.syncRulebookShape(freshRulebook(), sh));
-  A(`${sh.label}: identical`, site === disc, site === disc ? "" : `\n      site: ${site}\n      disc: ${disc}`);
-}
-
-console.log("\n— the numbers are the season's own, not baked in");
-{
-  CG.SEASON = { ...SHAPES[0], id: "s" };
-  const line = sched.rulebookShapeLine(sched.seasonShapeOf(SHAPES[0]));
-  A("eight weeks x three nights x three slots = 72", /eight \(8\) game-weeks/.test(line) && /for 72 games per club/.test(line), line);
-  const four = sched.rulebookShapeLine(sched.seasonShapeOf(SHAPES[2]));
-  A("four nights gives 96 and names Saturday", /for 96 games per club/.test(four) && /Saturday/.test(four), four);
-  const two = sched.rulebookShapeLine(sched.seasonShapeOf(SHAPES[3]));
-  A("two slots over ten weeks gives 60", /for 60 games per club/.test(two), two);
-  A("a one-night week reads in the singular", /one nights? a week, Wednesday, one games a night/.test(
-    sched.rulebookShapeLine(sched.seasonShapeOf(SHAPES[4]))));
-}
-
-console.log("\n— rewriting is idempotent on both (it once grew a duplicate per render)");
-for (const impl of [
-  { name: "site", run: (rb) => CG.rulebookShapeSync(rb) },
-  { name: "discord", run: (rb) => sched.syncRulebookShape(rb, SHAPES[0]) },
-]) {
-  CG.SEASON = { ...SHAPES[0], id: "s" };
-  const rb = freshRulebook();
-  const once = clauseOf(impl.run(rb));
-  const twice = clauseOf(impl.run(rb));
-  const thrice = clauseOf(impl.run(rb));
-  A(`${impl.name}: three passes leave the paragraph byte-identical`, once === twice && twice === thrice);
-  A(`${impl.name}: ...the opening sentence is not duplicated`,
-    (twice.match(/The CGHL regular season runs/g) || []).length === 1,
-    String((twice.match(/The CGHL regular season runs/g) || []).length));
-  /* The clause is delimited by the SECOND em-dash, and the paragraph legitimately holds a third in
-     the playoff sentence (v2.14). A greedy match would swallow everything up to it and delete the
-     binding text in between, so check the downstream sentences survived. */
-  A(`${impl.name}: ...and the rewrite stops at the second dash`,
-    /binding on all clubs/.test(twice) && /playoffs open the game week/.test(twice) &&
-    /does not shorten the season/.test(twice));
-}
-
-console.log("\n— the STORED text already matches, so a raw read is correct on its own");
+console.log("— the stored document states the live shape, without relying on the rewrite");
 {
   const stored = clauseOf(CG.CONTENT.rulebook);
-  const live = sched.rulebookShapeLine(sched.seasonShapeOf(SHAPES[0]));
-  A("part3_content.js states the live shape verbatim", stored.indexOf(live) === 0,
-    `\n      stored: ${stored.slice(0, 160)}\n      live  : ${live}`);
-  A("...and no longer claims six weeks", !/six \(6\) game-weeks/.test(stored));
-  A("...nor fifty-four games", !/fifty-four/.test(stored));
-  A("the holiday clause survives the rewrite (it sits past the second dash)",
-    /does not shorten the season/.test(clauseOf(sched.syncRulebookShape(freshRulebook(), SHAPES[0]))));
+  A("it is not the retired six-week claim", !/six \(6\) game-weeks/.test(stored));
+  A("...nor fifty-four games", !/fifty-four/.test(stored), stored.slice(0, 120));
+  A("it states eight game-weeks", /eight \(8\) game-weeks/.test(stored));
+  A("...and 72 games per club", /for 72 games per club/.test(stored));
+  CG.SEASON = { ...LIVE, id: "s" };
+  A("and the rewrite leaves it untouched, because it already agrees",
+    clauseOf(CG.rulebookShapeSync(fresh())) === stored);
 }
 
-console.log("\n— the mirror actually applies it before publishing");
+console.log("\n— the numbers come from the season, not the text");
 {
-  const src = fs.readFileSync(new URL("../netlify/functions/discord-scheduler.js", import.meta.url), "utf8");
-  A("rulesUpkeep syncs the shape before building the card",
-    /syncRulebookShape\(rb, seas\[0\]\)/.test(src) &&
-    src.indexOf("syncRulebookShape(rb, seas[0])") < src.indexOf("const card = buildRulesLink(rb)"));
-  A("...reading the season it publishes for", /seasons\?select=weeks,nights_per_week,night_slots/.test(src));
-  A("...and a failure is recorded, not silent", /rulesShape: String\(e\.message/.test(src));
+  const shapeFor = (o) => { CG.SEASON = { ...LIVE, ...o, id: "s" }; return clauseOf(CG.rulebookShapeSync(fresh())); };
+  A("six weeks reads six and 54", /six \(6\) game-weeks/.test(shapeFor({ weeks: 6 })) &&
+    /for 54 games per club/.test(shapeFor({ weeks: 6 })));
+  A("four nights reads four, names Saturday, and gives 96",
+    /four nights a week, Wednesday, Thursday, Friday and Saturday/.test(shapeFor({ nights_per_week: 4 })) &&
+    /for 96 games per club/.test(shapeFor({ nights_per_week: 4 })));
+  A("two slots a night halves the count",
+    /two games a night/.test(shapeFor({ night_slots: "21:00,21:35" })) &&
+    /for 48 games per club/.test(shapeFor({ night_slots: "21:00,21:35" })));
+}
+
+console.log("\n— the rewrite stops at the SECOND dash (v2.14 put a third in this paragraph)");
+{
+  CG.SEASON = { ...LIVE, weeks: 6, id: "s" };          // force an actual rewrite
+  const out = clauseOf(CG.rulebookShapeSync(fresh()));
+  A("the rewrite did happen", /six \(6\) game-weeks/.test(out));
+  A("the binding sentence after the clause survives", /binding on all clubs/.test(out));
+  A("...the holiday sentence survives", /does not shorten the season/.test(out));
+  A("...and the playoff sentence, which carries the third dash", /playoffs open the game week/.test(out));
+  A("the paragraph still holds all three dashes", (out.match(/—/g) || []).length === 3,
+    String((out.match(/—/g) || []).length));
+}
+
+console.log("\n— rewriting in place is idempotent (it once grew a duplicate per render)");
+{
+  CG.SEASON = { ...LIVE, weeks: 6, id: "s" };
+  const rb = fresh();
+  const a = clauseOf(CG.rulebookShapeSync(rb));
+  const b = clauseOf(CG.rulebookShapeSync(rb));
+  const c = clauseOf(CG.rulebookShapeSync(rb));
+  A("three passes leave the paragraph byte-identical", a === b && b === c);
+  A("...with the opening sentence appearing once", (c.match(/The CGHL regular season runs/g) || []).length === 1,
+    String((c.match(/The CGHL regular season runs/g) || []).length));
+}
+
+console.log("\n— nothing restates the season length as a literal any more");
+{
+  const live = fs.readFileSync(new URL("../src/live/part_live.js", import.meta.url), "utf8");
+  const hub  = fs.readFileSync(new URL("../src/live/part6_hub.js", import.meta.url), "utf8");
+  A("the Puck drop timeline reads the season", /"\+perClub\+" games, every stat imported/.test(live));
+  A("...and computes it from the shape", /var perClub = \(CG\.seasonShape \? CG\.seasonShape\(s\)\.perClub/.test(live));
+  A("the fallback constant matches the league's shape", /CG\.GAMES_PER_CLUB = 72;/.test(live));
+  A("clubSeasonGames no longer carries a second literal", !/\|\| 54;/.test(hub));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
