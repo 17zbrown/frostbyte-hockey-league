@@ -7846,8 +7846,13 @@ CG.AFTER._admHomepage = function(){
 /* round-robin schedule generator (ported from the classic site, verified in prod
    there): 3 ET slots a night, Wed/Thu/Fri, every club plays once per slot —
    3 a night, 9 a week. Regular season = GAMES_PER_CLUB slots; pre-season = 2 weeks.
-   Game weeks that touch Christmas, Canada Day, or US Independence Day are skipped. */
-CG.GAMES_PER_CLUB = 54;
+   Game weeks holding a holiday the season observes are skipped in full — which ones is a per-season
+   choice (seasons.skip_holidays), not the fixed Christmas/Canada Day/July 4 list this once had. */
+/* FALLBACK ONLY. The real figure is seasons.weeks x nights x slots, read through CG.seasonShape —
+   this is what a season with no `weeks` set falls back to. It said 54 (six weeks) long after the
+   league moved to eight, which is how the rulebook came to advertise a season length the schedule
+   had not used for some time. */
+CG.GAMES_PER_CLUB = 72;
 CG.PRESEASON_WEEKS = 2;
 CG.OFFSEASON_DARK_DAYS = 14;   /* 2 weeks of no on-ice activity — staff seat owners + management */
 CG.FA_WINDOW_DAYS = 7;         /* free agency runs a full week; puck drop waits for it to close */
@@ -8090,13 +8095,16 @@ CG.sameHolidaySet = function(a, b){
    ahead in both places. Steps auto-hide until their date is set. */
 CG.roadAheadCard = function(s, opts){
   s = s || CG.SEASON || {}; opts = opts || {};
+  /* read the season's real length rather than restating one — this line said "54 games" for as long
+     as the league had been playing 72, because a hard-coded figure has no way to notice */
+  var perClub = (CG.seasonShape ? CG.seasonShape(s).perClub : CG.GAMES_PER_CLUB);
   var steps = [
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
     [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
     [s.draft_at, "Draft night", "Clubs pick from the pool — every player who registered by the deadline is draft-eligible. Undrafted players go to free agency and rookie bidding."],
     [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
-    [s.starts_at, "Puck drop", "The regular season starts once free agency closes — 54 games, every stat imported automatically from EA."]
+    [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
   ].filter(function(st){ return st[0]; });
   if (!steps.length) return "";
   var nowT = CG.now(), nextIdx = steps.findIndex(function(st){ return Date.parse(st[0]) > nowT; });

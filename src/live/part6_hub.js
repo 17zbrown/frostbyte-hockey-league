@@ -751,7 +751,9 @@ CG.mgmtTag = function(role){ return role==="owner"?"Owner":role==="gm"?"GM":role
 CG.clubSeasonGames = function(club){
   var n = (CG.lg.schedule||[]).filter(function(g){
     return (g.stage||"regular")==="regular" && (g.home===club || g.away===club); }).length;
-  return n || CG.GAMES_PER_CLUB || 54;
+  /* derive from the season's own shape before falling back to the constant — a second hard-coded
+     54 here would drift from GAMES_PER_CLUB the moment either was updated alone */
+  return n || (CG.seasonShape ? CG.seasonShape().perClub : CG.GAMES_PER_CLUB);
 };
 
 CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||pos==="RD") ? "D" : "F"; };

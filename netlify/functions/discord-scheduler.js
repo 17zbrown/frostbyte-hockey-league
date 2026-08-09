@@ -141,6 +141,48 @@ export function readRulebook() {
   }
   return null;
 }
+/* Rule 3.1 states the season's shape in words, and that shape is a per-season setting. The SITE
+   reconciles the sentence against the live season at render time (CG.rulebookShapeSync), but this
+   mirror reads the raw file and had no such step — so #rules published "six (6) game-weeks /
+   fifty-four (54) games per club" while the website showed eight and seventy-two. Two published
+   surfaces disagreeing about the season length is worse than either being stale alone.
+   Kept byte-identical to the browser sentence; tools/rulebook-shape.test.cjs runs both and fails
+   if they ever diverge. */
+export function nightNames(n) {
+  const d = ["Wednesday","Thursday","Friday","Saturday","Sunday","Monday","Tuesday"]
+    .slice(0, Math.max(1, Math.min(7, n || 3)));
+  return d.length === 1 ? d[0] : d.slice(0, -1).join(", ") + " and " + d[d.length - 1];
+}
+export function seasonShapeOf(season) {
+  const s = season || {};
+  const slots = String(s.night_slots || "21:00,21:35,22:10").split(",")
+    .map((t) => t.trim()).filter((t) => /^\d{1,2}:\d{2}$/.test(t));
+  const perNight = slots.length || 3;
+  const nights = Math.max(1, Math.min(7, +s.nights_per_week || 3));
+  const weeks = Math.max(1, +s.weeks || 8);
+  return { weeks, nights, perNight, perClub: weeks * nights * perNight };
+}
+export function rulebookShapeLine(sh) {
+  const w = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve"];
+  const word = (n) => w[n] || String(n);
+  return "The CGHL regular season runs " + word(sh.weeks) + " (" + sh.weeks + ") game-weeks — " +
+    word(sh.nights) + " nights a week, " + nightNames(sh.nights) + ", " + word(sh.perNight) +
+    " games a night, for " + sh.perClub + " games per club —";
+}
+/* Same delimiters and same idempotence as the browser copy: the clause runs to the SECOND em-dash,
+   and the replacement contains both, so re-running it is a no-op rather than a duplicate. */
+export function syncRulebookShape(rb, season) {
+  if (!rb) return rb;
+  const line = rulebookShapeLine(seasonShapeOf(season));
+  const RE = /^The CGHL regular season runs [\s\S]*?—[\s\S]*?—/;
+  (rb.chapters || []).forEach((ch) => (ch.sections || []).forEach((sec) =>
+    (sec.paragraphs || []).forEach((t, i) => {
+      if (typeof t !== "string" || t.indexOf("The CGHL regular season runs") !== 0) return;
+      if (!RE.test(t)) return;
+      sec.paragraphs[i] = t.replace(RE, line);
+    })));
+  return rb;
+}
 /* Posting 16 messages back-to-back trips Discord's per-channel limit, so this honours Retry-After
    instead of dropping the tail of the rulebook. */
 async function rulesApi(method, p, body, tries = 5) {
@@ -195,6 +237,11 @@ async function rulesUpkeep(errors) {
   if (!BOT || !GUILD) { out.skipped = "no bot/guild"; return out; }
   const rb = readRulebook();
   if (!rb) { out.skipped = "rulebook not readable"; return out; }
+  /* reconcile Rule 3.1 against the live season before mirroring, exactly as the site does */
+  try {
+    const seas = await sbGet("seasons?select=weeks,nights_per_week,night_slots&order=number.desc&limit=1");
+    if (seas && seas[0]) syncRulebookShape(rb, seas[0]);
+  } catch (e) { errors.push({ rulesShape: String(e.message || e) }); }
 
   const card = buildRulesLink(rb);
   const hash = crypto.createHash("sha256").update(JSON.stringify(card)).digest("hex").slice(0, 32);
