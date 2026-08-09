@@ -4210,11 +4210,28 @@ CG.generateSchedule = function(stage){
   if ((CG.lg.schedule||[]).some(function(g){ return g.stage===stage; })){
     CG.toast("A "+(stage==="preseason"?"pre-season":"regular-season")+" schedule already exists — clear it first","err"); return; }
 
+  /* The ticks on screen are the commissioner's intent; the season row is what the generator builds
+     from. They are kept in step by saving on every tick, but if a save was refused the two can
+     still part — and generating then produces a schedule that skips the WRONG weeks and looks
+     perfectly fine. Refuse instead of guessing which one was meant. */
+  var ticked = CG.tickedHolidays();
+  var savedKeys = CG.seasonHolidayKeys(s);
+  if (ticked && !CG.sameHolidaySet(ticked, savedKeys)){
+    var nm = function(k){ return (CG.HOLIDAY_BY_KEY[k]||{}).name || k; };
+    var missing = ticked.filter(function(k){ return savedKeys.indexOf(k) < 0; }).map(nm);
+    var extra   = savedKeys.filter(function(k){ return ticked.indexOf(k) < 0; }).map(nm);
+    CG.toast("Your holiday choices haven’t saved, so nothing was generated. "+
+      (missing.length ? "Ticked but not saved: "+missing.join(", ")+". " : "")+
+      (extra.length ? "Still saved as skipped: "+extra.join(", ")+". " : "")+
+      "Hit “Save holidays”, then generate.","err");
+    return;
+  }
+
   var shape = CG.seasonShape(s);
   var perNight = shape.perNight;
   var slots = stage==="preseason" ? CG.PRESEASON_WEEKS*shape.nights*perNight : shape.perClub;
   var weeks = Math.ceil(slots/perNight/shape.nights);
-  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks, shape.nights, CG.seasonHolidayKeys(s));
+  var plan = CG.gameNights(CG.etYMD(anchorIso), weeks, shape.nights, savedKeys);
   if (!plan.nights.length){ CG.toast("Every candidate week is a holiday week — turn some off in Holidays","err"); return; }
   var skipNote = plan.skipped.length ? " Skipping "+plan.skipped.map(function(h){ return h.name+" (week of "+h.week+")"; }).join(", ")+"." : "";
 
@@ -4293,8 +4310,29 @@ CG.generateSchedule = function(stage){
     CG.assertCommissioner().then(function(){
       (function insertNext(idx){
         if (idx>=chunks.length){
-          CG.toast(rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks","ok");
-          CG.reloadLeague(); return;
+          var done = rows.length+" "+(stage==="preseason"?"pre-season ":"")+"games generated — "+slots+"/club over "+weeks+" weeks";
+          if (stage !== "regular"){ CG.toast(done,"ok"); CG.reloadLeague(); return; }
+          /* Playoffs ALWAYS open the game week after the last regular-season week. Pinning them to a
+             date picked before the schedule existed is how week 8 came to run Dec 9-11 against a
+             playoff start of Dec 9: a holiday skip moved the season a week later and nothing moved
+             the playoffs. Derive both from the weeks actually built, and route the playoff week
+             through gameNights so it steps over a holiday week of its own. */
+          var lastWk = plan.nights[plan.nights.length-1];
+          var poPlan = CG.gameNights(CG.dayAdd(lastWk.fri,1), 1, shape.nights, savedKeys);
+          var poWed  = poPlan.nights.length ? poPlan.nights[0].wed : CG.dayAdd(lastWk.wed,7);
+          CG.sb.from("seasons").update({
+            ends_at: CG.etISO(lastWk.fri,"23:59"),
+            playoffs_start_at: CG.etISO(poWed,"21:00")
+          }).eq("id", s.id).select("id").then(function(u){
+            if (u.error || !u.data || !u.data.length){
+              CG.toast(done+" — but the playoff date could NOT be updated"+(u.error?": "+u.error.message:"")+
+                ". Set Playoffs to "+poWed+" by hand in Seasons, or the season will run into them.","err");
+            } else {
+              CG.toast(done+". Season ends "+lastWk.fri+"; playoffs set to "+poWed+", the week after.","ok");
+            }
+            CG.reloadLeague();
+          });
+          return;
         }
         CG.sb.from("games").insert(chunks[idx]).then(function(rz){
           if (rz.error){
@@ -8024,6 +8062,29 @@ CG.seasonHolidayKeys = function(season){
   if (typeof v === "string"){ try { v = JSON.parse(v); } catch(e){ v = String(v).replace(/[{}"]/g,"").split(",").filter(Boolean); } }
   return Array.isArray(v) ? v.filter(function(k){ return CG.HOLIDAY_BY_KEY[k]; }) : CG.HOLIDAY_DEFAULTS.slice();
 };
+/* What is ticked on screen RIGHT NOW, or null when the Holidays card isn't rendered.
+   The toggles were DOM-only until "Save holidays" was pressed, while the generator read the saved
+   season row — so ticking a holiday and generating without saving quietly used the PREVIOUS set.
+   That is how a season was generated skipping the weeks of Nov 11 and Nov 25 while the commissioner
+   had ticked Canadian Thanksgiving instead. Queried fresh every call rather than closed over, so a
+   card that has been re-rendered or navigated away from returns null instead of a stale []. */
+CG.tickedHolidays = function(){
+  if (typeof document === "undefined" || !document.querySelectorAll) return null;
+  var els = document.querySelectorAll("[data-hol]");
+  if (!els.length) return null;
+  return [].slice.call(els)
+    .filter(function(b){ return b.getAttribute("aria-pressed") === "true"; })
+    .map(function(b){ return b.getAttribute("data-hol"); });
+};
+/* Same set, order and duplicates ignored. */
+CG.sameHolidaySet = function(a, b){
+  var A = {}, B = {}, k;
+  (a||[]).forEach(function(x){ A[x] = 1; });
+  (b||[]).forEach(function(x){ B[x] = 1; });
+  for (k in A) if (!B[k]) return false;
+  for (k in B) if (!A[k]) return false;
+  return true;
+};
 
 /* One timeline card, shared by the Register page and My Hub, so a member sees the same road
    ahead in both places. Steps auto-hide until their date is set. */
@@ -8180,7 +8241,9 @@ CG.scheduleIssues = function(){
   if (!s || !lg || !lg.schedule || !lg.schedule.length) return out;
   var day = function(v){ return v ? CG.etYMD(v) : null; };
   var pre = lg.schedule.filter(function(g){ return g.stage==="preseason"; }).sort(function(a,b){ return a.at-b.at; });
-  var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason"; }).sort(function(a,b){ return a.at-b.at; });
+  /* regular means REGULAR: lumping playoff games in here made "the season ends" read as the last
+     playoff game, which is precisely the comparison the playoff-overlap check needs to get right */
+  var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason" && g.stage!=="playoff"; }).sort(function(a,b){ return a.at-b.at; });
 
   if (pre.length && s.preseason_starts_at && day(pre[0].at) !== day(s.preseason_starts_at))
     out.push("Pre-season opens "+CG.fmtDate(day(pre[0].at))+" but Seasons says "+CG.fmtDate(day(s.preseason_starts_at))+".");
@@ -8190,6 +8253,24 @@ CG.scheduleIssues = function(){
     out.push("The season opens "+CG.fmtDate(day(reg[0].at))+" but Seasons says "+CG.fmtDate(day(s.starts_at))+".");
   if (pre.length && reg.length && pre[pre.length-1].at >= reg[0].at)
     out.push("Pre-season overlaps the regular season.");
+  /* Playoffs open the week after the last regular-season week — always. This is checked as well as
+     applied because the two can drift apart without anyone regenerating: edit a season date by
+     hand, or tick a holiday that moves the last week, and the playoff date silently no longer
+     follows. Season 1 sat with its last week on Dec 9-11 and playoffs starting Dec 9. */
+  if (reg.length && s.playoffs_start_at){
+    var lastReg = day(reg[reg.length-1].at), po = day(s.playoffs_start_at);
+    if (po <= lastReg)
+      out.push("Playoffs start "+CG.fmtDate(po)+" but the regular season runs to "+CG.fmtDate(lastReg)+
+        " — the season would run into its own playoffs.");
+    else {
+      /* the first game night on or after the last regular Friday + 1, honouring holidays */
+      var want = CG.gameNights(CG.dayAdd(lastReg,1), 1, CG.seasonShape(s).nights, CG.seasonHolidayKeys(s));
+      var wantWed = want.nights.length ? want.nights[0].wed : null;
+      if (wantWed && po !== wantWed)
+        out.push("Playoffs start "+CG.fmtDate(po)+", but the week after the regular season is "+
+          CG.fmtDate(wantWed)+". Regenerate the schedule, or set Playoffs to that date.");
+    }
+  }
   return out;
 };
 CG.admScheduleLive = function(){
@@ -8200,7 +8281,7 @@ CG.admScheduleLive = function(){
   var future = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px"><div><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+
     (lg.schedule.length ? future.length+' games to play. Move any game — the EA auto-import matches by clubs + date, so stats follow a rescheduled game automatically.'
-                        : 'No games yet. Generate the pre-season and the regular season from the dates in Seasons, then fine-tune any game time by hand. Weeks touching Christmas, Canada Day, or July 4 are skipped automatically.')+'</p></div>'+
+                        : 'No games yet. Generate the pre-season and the regular season from the dates in Seasons, then fine-tune any game time by hand. Weeks holding a holiday you have ticked in Holidays are skipped, and generating the regular season sets playoffs to the game week after the last one.')+'</p></div>'+
     '<span style="display:inline-flex;gap:8px;align-self:flex-start;flex-wrap:wrap">'+
     (pre.length ? '<button class="btn btn-ghost" id="preClear">Clear pre-season ('+pre.length+')</button>'
                 : '<button class="btn btn-ghost" id="preGen">'+CG.ic("plus",15)+'Generate pre-season</button>')+
@@ -8325,6 +8406,34 @@ CG.AFTER._admScheduleLive = function(){
         .filter(function(b){ return impact[b.getAttribute("data-hol")]; }).length;
       if(chip){ chip.textContent=n+" week"+(n===1?"":"s")+" skipped"; chip.className="chip"+(n?" chip-warn":""); }
     };
+    /* Ticking a holiday PERSISTS IT. It used to only paint the button, leaving the real choice in
+       the season row until "Save holidays" was pressed — and the generator reads the season row, so
+       tick-then-generate silently built the schedule from the previous set. One source of truth
+       now: the write happens on the tick, and CG.SEASON is updated in the same breath so a generate
+       fired a second later cannot read a stale list.
+       [] is stored as [], never null — "skip nothing" is a real choice and must not read back as
+       "never configured, use the defaults". */
+    var pending=null, inflight=false;
+    var persist=function(){
+      var keys = CG.tickedHolidays() || [];
+      inflight=true; save.disabled=true; save.textContent="Saving…";
+      return CG.assertCommissioner().then(function(){
+        return CG.sb.from("seasons").update({ skip_holidays: keys }).eq("id", CG.SEASON.id).select("id");
+      }).then(function(r){
+        if (r.error) throw new Error(r.error.message);
+        if (!r.data || !r.data.length) throw new Error("the database refused the write — commissioner only");
+        CG.SEASON.skip_holidays = keys.slice();
+        inflight=false; save.disabled=false; save.textContent="Saved";
+        setTimeout(function(){ if (save && save.textContent==="Saved") save.textContent="Save holidays"; }, 1600);
+        return keys;
+      }).catch(function(e){
+        inflight=false; save.disabled=false; save.textContent="Save holidays";
+        /* Loud, because the alternative is a commissioner who believes a holiday is set and finds
+           out at generation time that it never was. */
+        CG.toast("Holiday NOT saved — "+e.message+". Your tick is not in effect.","err");
+        throw e;
+      });
+    };
     document.querySelectorAll("[data-hol]").forEach(function(b){ b.addEventListener("click", function(){
       var on=this.getAttribute("aria-pressed")!=="true";
       this.setAttribute("aria-pressed", on?"true":"false");
@@ -8332,21 +8441,18 @@ CG.AFTER._admScheduleLive = function(){
       var c=this.querySelector(".chip");
       if(c){ c.classList.toggle("chip-chrome", on); c.textContent = on ? "SKIP" : "PLAY"; }
       recount();
+      /* coalesce a run of clicks into one write, but never leave the last one unwritten */
+      clearTimeout(pending);
+      pending=setTimeout(function(){ persist().catch(function(){}); }, 450);
     }); });
     save.addEventListener("click", function(){
-      var keys=[].slice.call(document.querySelectorAll('[data-hol][aria-pressed="true"]'))
-        .map(function(b){ return b.getAttribute("data-hol"); });
-      save.disabled=true;
-      /* [] is stored as [], never null — "skip nothing" is a real choice and must not be read back
-         as "never configured, use the defaults" */
-      CG.sb.from("seasons").update({ skip_holidays: keys }).eq("id", CG.SEASON.id).select("id").then(function(r){
-        save.disabled=false;
-        if (r.error){ CG.toast("Could not save: "+r.error.message,"err"); return; }
-        if (!r.data || !r.data.length){ CG.toast("Save was blocked — commissioner only","err"); return; }
+      clearTimeout(pending);
+      if (inflight) return;
+      persist().then(function(keys){
         var live=keys.filter(function(k){ return impact[k]; }).length;
         CG.toast("Holidays saved — "+(live?live+" week"+(live===1?"":"s")+" will be skipped":"no weeks skipped"),"ok");
         CG.reloadLeague();
-      });
+      }).catch(function(){});
     });
   })();
 
@@ -8503,7 +8609,7 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||15)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
-    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, 6 regular-season weeks, and playoffs the Wednesday after. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Weeks touching Christmas, Canada Day, or July 4 are skipped. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
+    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays, so the dates it writes are dates the generator can actually use. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
   document.getElementById("ssSpace").addEventListener("click", function(){
     /* Two ways in. Give the off-season start (the first midnight after last season's final
