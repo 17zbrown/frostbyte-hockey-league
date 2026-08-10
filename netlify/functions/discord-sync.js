@@ -912,23 +912,93 @@ async function enforcePostingPolicy(guildRoles, teams, sum) {
    recreates missing roles: a role rebuilt under a new id would silently drop out of a static
    exempt list and the rule would start blocking members again with nothing to say so. */
 const AUTOMOD_LINK_RULE = "Block invite links";
+const AUTOMOD_ADS_RULE = "Ad + scam keywords";
 const AUTOMOD_EXEMPT = ["commissioner", "staff", "player", "free agent", "owner",
   "general manager", "assistant general manager", "media"];
-async function enforceAutomodExemptions(roleId, sum) {
+/* #scouting-links is the recruitment board: club management post their club's Discord there and the
+   whole league browses it. Both keyword rules are exempted IN THAT CHANNEL — the invite rule for
+   obvious reasons, and the ad/scam rule because ordinary recruiting copy trips it ("dm me for",
+   "cheap boosting"). Only management can post there (enforcePostOnlyBoards), so exempting the
+   channel widens nothing: the audience that can write in it is already the narrowest on the server. */
+const AUTOMOD_EXEMPT_CHANNELS = { [AUTOMOD_LINK_RULE]: ["scouting-links"],
+  [AUTOMOD_ADS_RULE]: ["scouting-links"] };
+async function enforceAutomodExemptions(roleId, guildChannels, sum) {
   const want = AUTOMOD_EXEMPT.map((n) => roleId[n]).filter(Boolean);
   if (!want.length) return;                       // roles not provisioned yet — try next sweep
   const rules = await dApi("GET", `/guilds/${GUILD}/auto-moderation/rules`);
   if (!Array.isArray(rules)) return;
-  const rule = rules.find((r) => r && r.name === AUTOMOD_LINK_RULE);
-  if (!rule) { sum.automodMissing = AUTOMOD_LINK_RULE; return; }
-  const have = new Set(rule.exempt_roles || []);
-  const missing = want.filter((id) => !have.has(id));
-  if (!missing.length) return;                    // already correct: no write
-  try {
-    await dApi("PATCH", `/guilds/${GUILD}/auto-moderation/rules/${rule.id}`,
-      { exempt_roles: Array.from(new Set([...(rule.exempt_roles || []), ...want])) });
-    sum.automodExempted = missing.length;
-  } catch (e) { sum.errors.push({ automodExempt: String(e.message || e) }); }
+  const chanId = (name) => {
+    const c = (guildChannels || []).find((x) => x.name === name && x.type === 0);
+    return c && c.id;
+  };
+  for (const ruleName of [AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE]) {
+    const rule = rules.find((r) => r && r.name === ruleName);
+    if (!rule) { sum.automodMissing = (sum.automodMissing ? sum.automodMissing + "," : "") + ruleName; continue; }
+    const patch = {};
+    /* roles: only the link rule gates who may post a link at all. The ad/scam rule stays on for
+       everyone — it catches phrases no member needs, and narrowing it was never asked for. */
+    if (ruleName === AUTOMOD_LINK_RULE) {
+      const have = new Set(rule.exempt_roles || []);
+      const missingRoles = want.filter((id) => !have.has(id));
+      if (missingRoles.length) {
+        patch.exempt_roles = Array.from(new Set([...(rule.exempt_roles || []), ...want]));
+        sum.automodExempted = (sum.automodExempted || 0) + missingRoles.length;
+      }
+    }
+    const wantChans = (AUTOMOD_EXEMPT_CHANNELS[ruleName] || []).map(chanId).filter(Boolean);
+    const haveChans = new Set(rule.exempt_channels || []);
+    const missingChans = wantChans.filter((id) => !haveChans.has(id));
+    if (missingChans.length) {
+      patch.exempt_channels = Array.from(new Set([...(rule.exempt_channels || []), ...wantChans]));
+      sum.automodChannels = (sum.automodChannels || 0) + missingChans.length;
+    }
+    if (!Object.keys(patch).length) continue;     // already correct: no write
+    try {
+      await dApi("PATCH", `/guilds/${GUILD}/auto-moderation/rules/${rule.id}`, patch);
+    } catch (e) { sum.errors.push({ automodExempt: ruleName, error: String(e.message || e) }); }
+  }
+}
+
+/* Read-only boards: the whole league can see and read them, only the named roles may post.
+   #scouting-links is one — club management post their club's Discord for recruitment and everyone
+   else browses. Reconciled every sweep like every other permission here, because a channel whose
+   audience is set once by hand drifts the moment anyone edits it in the UI.
+   VIEW(1024)+READ_HISTORY(65536)=66560 allowed to @everyone, SEND(2048) denied;
+   SEND+EMBED_LINKS(16384)+ATTACH_FILES(32768)=51200 allowed to the posting roles. */
+const BOARD_EVERYONE_ALLOW = 66560n, BOARD_EVERYONE_DENY = 2048n, BOARD_POSTER_ALLOW = 51200n;
+const POST_ONLY_BOARDS = {
+  "scouting-links": ["owner", "general manager", "assistant general manager"],
+};
+async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
+  for (const cname of Object.keys(POST_ONLY_BOARDS)) {
+    const chan = (guildChannels || []).find((c) => c.name === cname && c.type === 0);
+    if (!chan) continue;                          // not created — nothing to enforce
+    const posters = POST_ONLY_BOARDS[cname].map((n) => roleId[n]).filter(Boolean);
+    if (!posters.length) continue;                // roles not provisioned yet
+    const ow = chan.permission_overwrites || [];
+    const has = (id, allow, deny) => {
+      const o = ow.find((x) => x.id === id);
+      if (!o) return false;
+      return (BigInt(o.allow || "0") & allow) === allow && (BigInt(o.deny || "0") & deny) === deny;
+    };
+    const everyoneOk = has(GUILD, BOARD_EVERYONE_ALLOW, BOARD_EVERYONE_DENY);
+    const postersOk = posters.every((rid) => has(rid, BOARD_POSTER_ALLOW, 0n));
+    if (everyoneOk && postersOk) continue;        // already correct: no write
+    /* keep any overwrite someone added deliberately (a muted member, a bot) — only the @everyone
+       and poster entries are ours to state */
+    const keep = ow.filter((o) => o.id !== GUILD && !posters.includes(o.id))
+      .map((o) => ({ id: o.id, type: o.type, allow: String(o.allow || "0"), deny: String(o.deny || "0") }));
+    const next = [
+      { id: GUILD, type: 0, allow: String(BOARD_EVERYONE_ALLOW), deny: String(BOARD_EVERYONE_DENY) },
+      ...posters.map((rid) => ({ id: rid, type: 0, allow: String(BOARD_POSTER_ALLOW), deny: "0" })),
+      ...keep,
+    ];
+    try {
+      await dApi("PATCH", `/channels/${chan.id}`, { permission_overwrites: next });
+      chan.permission_overwrites = next;
+      sum.boardsLocked = (sum.boardsLocked || 0) + 1;
+    } catch (e) { sum.errors.push({ postOnlyBoard: cname, error: String(e.message || e) }); }
+  }
 }
 
 /* The server's own join gate. HIGH = a new account must be in the guild ten minutes before it can
@@ -1448,10 +1518,14 @@ export default async (req) => {
     const g0 = await dApi("GET", `/guilds/${GUILD}`);
     if (g0 && !g0.__notfound) await enforceVerificationLevel(g0, sum);
   } catch (e) { sum.errors.push({ verificationLevel: String(e.message || e) }); }
-  /* Signed-up members may post links; the not-signed-up may not. Runs after `roleId` (line above)
-     and after `sum`, for the temporal-dead-zone reason noted on the mention policy. */
-  try { await enforceAutomodExemptions(roleId, sum); }
+  /* Signed-up members may post links; the not-signed-up may not. Runs after `roleId`,
+     `guildChannels` and `sum` (all declared above), for the temporal-dead-zone reason noted on the
+     mention policy. */
+  try { await enforceAutomodExemptions(roleId, guildChannels, sum); }
   catch (e) { sum.errors.push({ automodExempt: String(e.message || e) }); }
+  /* #scouting-links: the league reads, club management posts. */
+  try { await enforcePostOnlyBoards(guildChannels, roleId, sum); }
+  catch (e) { sum.errors.push({ postOnlyBoard: String(e.message || e) }); }
 
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
@@ -1916,7 +1990,8 @@ export default async (req) => {
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
-        automodExempted: sum.automodExempted || 0, automodMissing: sum.automodMissing || null,
+        automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
+        automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
         verificationRaised: sum.verificationRaised || null,
@@ -1933,7 +2008,9 @@ export default async (req) => {
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
 export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
-  enforceAutomodExemptions, AUTOMOD_EXEMPT, AUTOMOD_LINK_RULE,
+  enforceAutomodExemptions, AUTOMOD_EXEMPT, AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE,
+  AUTOMOD_EXEMPT_CHANNELS, enforcePostOnlyBoards, POST_ONLY_BOARDS,
+  BOARD_EVERYONE_ALLOW, BOARD_EVERYONE_DENY, BOARD_POSTER_ALLOW,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };
