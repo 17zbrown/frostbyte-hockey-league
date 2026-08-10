@@ -826,6 +826,13 @@ CG.loadManagerData = async function(){
       if (CG.SEASON && CG.SEASON.id){
         jobs.push(CG.sb.from("game_lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
           .then(function(lu){ (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.game_id]=row; }); }, function(){}));
+        /* Line creator: the club's saved combinations + which line each night dresses. RLS keeps
+           these management-only, so ordinary players get empty rows here and never see a plan. */
+        CG.lg._teamLines = {}; CG.lg._linePlan = {};
+        jobs.push(CG.sb.from("team_lines").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+          .then(function(tl){ (tl && !tl.error && tl.data || []).forEach(function(row){ CG.lg._teamLines[row.slot]=row; }); }, function(){}));
+        jobs.push(CG.sb.from("team_line_plan").select("night,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+          .then(function(tp){ (tp && !tp.error && tp.data || []).forEach(function(row){ CG.lg._linePlan[row.night]=row.slot; }); }, function(){}));
       }
     }
     await Promise.all(jobs);

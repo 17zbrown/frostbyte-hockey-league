@@ -1,0 +1,168 @@
+/* The line creator — franchise-mode line combinations + the night plan.
+   Run: node tools/line-creator.test.cjs   (build index.html first)
+
+   The invariant that matters most here is NOT visual: the creator is a planning surface, and the
+   only way a line reaches the ice is through set_game_lineup() — the same RPC the builder uses —
+   so the weekly caps, roster checks and the T-30 lock cannot be bypassed by planning around them.
+   These assertions pin that, plus the tab actually rendering for management and staying invisible
+   to everyone else. */
+const fs = require("fs"), vm = require("vm"), path = require("path");
+const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const src6 = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part6_hub.js"), "utf8");
+const scripts = [...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
+
+const noop = () => {};
+const el = () => new Proxy(function () {}, {
+  get(t, k) {
+    if (k === "style") return new Proxy({}, { get: () => "", set: () => true });
+    if (k === "classList") return { add: noop, remove: noop, toggle: noop, contains: () => false };
+    if (k === "querySelectorAll") return () => [];
+    if (k === "querySelector") return () => null;
+    if (k === "getAttribute") return () => null;
+    if (k === "getBoundingClientRect") return () => ({ top:0,left:0,width:0,height:0,bottom:0,right:0 });
+    if (k === "children" || k === "childNodes") return [];
+    if (k === "parentNode" || k === "parentElement") return null;
+    if (["textContent","innerHTML","value","id","className"].includes(k)) return "";
+    if (k === "length") return 0;
+    if (k === Symbol.toPrimitive || k === "toString") return () => "";
+    return el();
+  }, set: () => true, apply: () => el(),
+});
+const ctx = {
+  console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, JSON, Math, Date, Object, Array,
+  String, Number, Boolean, RegExp, Error, Map, Set, WeakMap, WeakSet, Symbol, Proxy, Reflect, Intl,
+  parseInt, parseFloat, isNaN, isFinite, encodeURIComponent, decodeURIComponent, encodeURI, decodeURI,
+  fetch: () => Promise.resolve({ ok:true, json:()=>Promise.resolve({}), text:()=>Promise.resolve("") }),
+  requestAnimationFrame: (f)=>setTimeout(f,0), cancelAnimationFrame: noop,
+  MutationObserver: class { observe(){} disconnect(){} takeRecords(){return[];} },
+  IntersectionObserver: class { observe(){} unobserve(){} disconnect(){} },
+  ResizeObserver: class { observe(){} unobserve(){} disconnect(){} },
+  performance:{ now:()=>0 }, localStorage:{ getItem:()=>null,setItem:noop,removeItem:noop },
+  sessionStorage:{ getItem:()=>null,setItem:noop,removeItem:noop },
+  navigator:{ userAgent:"node", language:"en-US" },
+  location:{ hash:"#/hub/lines", href:"https://x/", pathname:"/", search:"", origin:"https://x" },
+  history:{ pushState:noop, replaceState:noop },
+  matchMedia: () => ({ matches:false, addEventListener:noop, removeEventListener:noop, addListener:noop }),
+  getComputedStyle: () => new Proxy({}, { get: () => "" }),
+  document: el(), URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, Response, Request, Headers, Blob,
+  addEventListener:noop, removeEventListener:noop, dispatchEvent:noop, scrollTo:noop, alert:noop,
+  innerWidth:1280, innerHeight:800, scrollY:0, devicePixelRatio:1,
+  CustomEvent: class {}, Event: class {}, Element: class {}, HTMLElement: class {}, Node: class {}, SVGElement: class {},
+};
+ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx; ctx.top = ctx;
+vm.createContext(ctx);
+scripts.forEach((s) => { try { vm.runInContext(s, ctx, { timeout: 20000 }); } catch (e) { console.error("bundle threw:", e.message); process.exit(1); } });
+const CG = ctx.CG;
+
+let ok = true;
+const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
+
+/* ---- a VAN front-office seat with a 9-man roster and a Wed/Thu pair of games ---- */
+const NOW = Date.parse("2026-10-05T16:00:00-04:00");
+CG.now = () => NOW;
+CG.me = () => ({ id: "mgr1", team: "VAN", role: "owner" });
+CG.SEASON = { id: "s1", number: 1 };
+CG.LIVE_MODE = true;
+const P = (id, tag, pos, ovr) => ({ id, tag, pos, team: "VAN", depth: 1, squad: "pro" });
+const roster = [
+  P("p-c1","North","C"), P("p-c2","Quill","C"),
+  P("p-lw1","Harbor","LW"), P("p-rw1","Kestrel","RW"),
+  P("p-ld1","Granite","LD"), P("p-rd1","Mesa","RD"),
+  P("p-ld2","Birch","LD"), P("p-g1","Vault","G"), P("p-g2","Locker","G"),
+];
+const ratings = {}; roster.forEach((p, i) => { ratings[p.id] = { ovr: 80 + i }; });
+const wedGame = { id: "g-wed", home: "VAN", away: "BOS", at: Date.parse("2026-10-07T21:00:00-04:00"), status: "scheduled", stage: "regular", week: 1 };
+const thuGame = { id: "g-thu", home: "TOR", away: "VAN", at: Date.parse("2026-10-08T21:00:00-04:00"), status: "scheduled", stage: "regular", week: 1 };
+CG.lg = {
+  byTeam: { VAN: roster }, players: roster, ratings, suspensions: [],
+  schedule: [wedGame, thuGame], tonight: [],
+  _codeToId: { VAN: "tid-van" }, _lineups: {},
+  _teamLines: { 1: { slot:1, name:"Heavy Forecheck", lw:"p-lw1", center:"p-c1", rw:"p-rw1",
+                     ld:"p-ld1", rd:"p-rd1", goalie:"p-g1", updated_at: new Date(NOW).toISOString() } },
+  _linePlan: { wed: 1 },
+};
+CG.TEAM = { VAN:{name:"Canucks",color:"#00205b"}, BOS:{name:"Bruins",color:"#fcb514"}, TOR:{name:"Maple Leafs",color:"#00205b"} };
+CG.avFor = () => ({ nights: {} });
+
+console.log("— the tab renders the franchise-mode surface");
+{
+  const h = CG.hubLines({});
+  A("four line tabs", (h.match(/#\/hub\/lines\?line=/g) || []).length === 4);
+  A("the saved line's name is on its tab", /Heavy Forecheck/.test(h));
+  A("the rink renders all six slots",
+    ["LW","C","RW","LD","RD","G"].every((pos) => h.includes('data-slot="' + pos + '"')));
+  A("the saved players fill their slots", /North/.test(h) && /Vault/.test(h));
+  A("the roster bench renders every rostered player",
+    roster.every((p) => h.includes('data-bench="' + p.id + '"')));
+  A("placed players read IN on the bench", /chip-win/.test(h));
+  A("the line's average OVR is shown, sourced from real ratings", /OVR \d\d/.test(h));
+}
+
+console.log("\n— the night plan");
+{
+  const h = CG.hubLines({});
+  A("both game nights appear", /Wednesday/.test(h) && /Thursday/.test(h));
+  A("...each with its opponent", /vs Bruins/.test(h) && /vs Maple Leafs/.test(h));
+  A("Wednesday's select carries the plan", /<select class="lc-night" data-night="wed">[\s\S]*?value="1" selected/.test(h));
+  A("a planned night offers Dress", /lc-dress/.test(h) && /data-game="g-wed"/.test(h));
+  A("an unplanned night explains itself instead", /pick a line to enable dressing/.test(h));
+  A("an empty line slot is disabled in the select, not offered", /value="2" disabled/.test(h));
+}
+
+console.log("\n— an ordinary player sees nothing");
+{
+  CG.me = () => ({ id: "px", team: null, role: "player" });
+  const was = CG.lg.byTeam; CG.lg.byTeam = {};
+  A("no club = the management note", /belongs to team management/.test(CG.hubLines({})));
+  CG.lg.byTeam = was; CG.me = () => ({ id: "mgr1", team: "VAN", role: "owner" });
+  A("the route gates on lineup.build", /section==="lines"\) return CG\.can\("lineup\.build"\)/.test(src6));
+  A("RLS keeps plans management-only (comment pinned to the load)",
+    /management-only, so ordinary players get empty rows/.test(fs.readFileSync(path.join(__dirname,"..","src","live","part_live.js"),"utf8")));
+}
+
+console.log("\n— locks and caps cannot be planned around");
+{
+  A("dressing goes through set_game_lineup and nothing else",
+    /lc-dress[\s\S]{0,2400}CG\.sb\.rpc\("set_game_lineup"/.test(src6));
+  A("...with p_emergency false — the plan can never bypass the lock", /p_emergency:false/.test(src6));
+  A("no direct insert into game_lineups anywhere in the creator",
+    !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
+  A("a locked night shows the lock instead of a Dress button",
+    /lockd[\s\S]{0,300}Locked/.test(src6));
+  A("a refused dress surfaces the rule's own message", /The rules refused it: /.test(src6));
+  A("saving a line goes through set_team_line", /CG\.sb\.rpc\("set_team_line"/.test(src6));
+  A("planning a night goes through set_team_line_night", /CG\.sb\.rpc\("set_team_line_night"/.test(src6));
+  A("a blocked save can never toast success", /Save was blocked by the server/.test(src6));
+
+  /* a locked Wednesday: the Dress button must be replaced by the lock */
+  CG.now = () => wedGame.at - 10 * 60000;
+  const h = CG.hubLines({});
+  A("inside T-30 the planned night reads Locked", /Locked/.test(h) && !/data-game="g-wed"/.test(h));
+  CG.now = () => NOW;
+}
+
+console.log("\n— the plan meets the builder");
+{
+  A("the builder offers Fill from the planned line", /id="luFromPlan"/.test(src6));
+  A("...which replaces the draft rather than merging into it",
+    /state\.slots = \{\};[\s\S]{0,400}CG\.lineFromRow\(prow\)/.test(src6));
+  A("...validating each player on the way in", /var why = p \? validate\(p, pos\) : "no longer rostered"/.test(src6));
+  A("...naming anyone it had to skip", /Filled, except: /.test(src6));
+  A("fill is fill — submitting stays an explicit step", /review and submit/.test(src6));
+}
+
+console.log("\n— design-doc conformance (the bans that apply to markup)");
+{
+  const h = CG.hubLines({});
+  A("no emoji in headings", !/<h1[^>]*>[^<]*[\u{1F300}-\u{1FAFF}✨\u{1F680}]/u.test(h));
+  /* club crests legitimately carry their two real club colors as a gradient — that is the brand
+     system, used site-wide. The ban is decorative purple/blue/pink gradients on chrome. */
+  const outsideCrests = h.replace(/<svg[\s\S]*?<\/svg>/g, "");
+  A("no gradient outside the club crests", !/gradient/i.test(outsideCrests));
+  A("...and no banned purple in what remains", !/#(7c3aed|8b5cf6|a855f7|6366f1)/i.test(h));
+  A("type comes from the site's own display face", /var\(--f-disp\)/.test(h));
+  A("interactive slots are keyboard-reachable", /tabindex="0"/.test(h));
+}
+
+console.log(`\n${ok ? "PASS" : "FAIL"}`);
+process.exit(ok ? 0 : 1);
