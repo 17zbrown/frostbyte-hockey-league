@@ -896,6 +896,41 @@ async function enforcePostingPolicy(guildRoles, teams, sum) {
   }
 }
 
+/* AutoMod's "Block invite links" rule caught a club owner posting their own team's Discord with a
+   scouting note — the rule only exempted Commissioner and Staff, so every ordinary member was
+   blocked from sharing any invite link. The league's line is: anyone who has signed up may post
+   links; only the not-signed-up may not.
+
+   AutoMod has no deny-list — exempt_roles is the only lever, and it is capped at 20 while the guild
+   carries 33+ roles, so "exempt every role" is not available. These eight are instead the exact
+   cover: desiredRolesFor gives Player to everyone registered or rostered, management and league
+   office wear their own roles whether or not they play, and media-only staff wear just Media.
+   Measured against the live membership when this shipped: 105 members exempt, 102 still gated, and
+   all 102 of those carried "Not Signed Up" — nobody roleless, nobody stranded.
+
+   Reconciled every sweep BY NAME rather than left as hand-entered ids, because this sweep itself
+   recreates missing roles: a role rebuilt under a new id would silently drop out of a static
+   exempt list and the rule would start blocking members again with nothing to say so. */
+const AUTOMOD_LINK_RULE = "Block invite links";
+const AUTOMOD_EXEMPT = ["commissioner", "staff", "player", "free agent", "owner",
+  "general manager", "assistant general manager", "media"];
+async function enforceAutomodExemptions(roleId, sum) {
+  const want = AUTOMOD_EXEMPT.map((n) => roleId[n]).filter(Boolean);
+  if (!want.length) return;                       // roles not provisioned yet — try next sweep
+  const rules = await dApi("GET", `/guilds/${GUILD}/auto-moderation/rules`);
+  if (!Array.isArray(rules)) return;
+  const rule = rules.find((r) => r && r.name === AUTOMOD_LINK_RULE);
+  if (!rule) { sum.automodMissing = AUTOMOD_LINK_RULE; return; }
+  const have = new Set(rule.exempt_roles || []);
+  const missing = want.filter((id) => !have.has(id));
+  if (!missing.length) return;                    // already correct: no write
+  try {
+    await dApi("PATCH", `/guilds/${GUILD}/auto-moderation/rules/${rule.id}`,
+      { exempt_roles: Array.from(new Set([...(rule.exempt_roles || []), ...want])) });
+    sum.automodExempted = missing.length;
+  } catch (e) { sum.errors.push({ automodExempt: String(e.message || e) }); }
+}
+
 /* The server's own join gate. HIGH = a new account must be in the guild ten minutes before it can
    post at all, which defeats the join-post-leave pattern outright. Raised by hand on 2026-08-08;
    re-asserted here so it cannot be quietly lowered. Never LOWERS a stricter setting the
@@ -1413,6 +1448,10 @@ export default async (req) => {
     const g0 = await dApi("GET", `/guilds/${GUILD}`);
     if (g0 && !g0.__notfound) await enforceVerificationLevel(g0, sum);
   } catch (e) { sum.errors.push({ verificationLevel: String(e.message || e) }); }
+  /* Signed-up members may post links; the not-signed-up may not. Runs after `roleId` (line above)
+     and after `sum`, for the temporal-dead-zone reason noted on the mention policy. */
+  try { await enforceAutomodExemptions(roleId, sum); }
+  catch (e) { sum.errors.push({ automodExempt: String(e.message || e) }); }
 
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
@@ -1877,6 +1916,7 @@ export default async (req) => {
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
+        automodExempted: sum.automodExempted || 0, automodMissing: sum.automodMissing || null,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
         verificationRaised: sum.verificationRaised || null,
@@ -1893,6 +1933,7 @@ export default async (req) => {
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
 export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
+  enforceAutomodExemptions, AUTOMOD_EXEMPT, AUTOMOD_LINK_RULE,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };
