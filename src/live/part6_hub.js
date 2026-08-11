@@ -826,72 +826,81 @@ CG.hubLines = function(qs){
   /* hqClub(): a real seat, or the commissioner front-office preview — full access either way */
   var club = CG.hqClub();
   if (!club || !lg.byTeam[club]) return '<div class="note">This account doesn’t run a club — the line creator belongs to team management.</div>';
-  var cur = Math.max(1, Math.min(4, parseInt((qs&&qs.line)||CG._lcCur||1,10)||1));
-  CG._lcCur = cur;
-  var saved = (lg._teamLines||{})[cur];
-  var slots = (CG._lcDraft && CG._lcDraft[cur]) ? CG._lcDraft[cur] : CG.lineFromRow(saved);
-  var dirty = !!(CG._lcDraft && CG._lcDraft[cur]);
   var roster = lg.byTeam[club];
-  var assigned = Object.keys(slots).map(function(k){ return slots[k]; });
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
+  var slotsOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
+  var dirtyN = 0; [1,2,3,4].forEach(function(n){ if (CG._lcDraft && CG._lcDraft[n]) dirtyN++; });
+  /* which lines each player is on, for the roster board's L1..L4 chips */
+  var memb = {};
+  [1,2,3,4].forEach(function(n){ var sl=slotsOf(n); Object.keys(sl).forEach(function(pos){ (memb[sl[pos]]=memb[sl[pos]]||[]).push(n); }); });
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(CG.TEAM[club].name)+' · team HQ</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Line creator</h1>'+
-    '<p class="lede" style="margin-top:8px">Build up to four line combinations, then point each game night at one. Dressing still runs through the lineup builder’s rules — weekly limits, roster checks and the 30-minute lock all apply when a line hits the ice, not when you sketch it.</p></div>';
+    '<p class="lede" style="margin-top:8px">All four lines, whole roster. Drag a player from the roster onto any slot, or drag between slots to swap — then point each game night at a line. Dressing still runs through the lineup builder’s rules when a line hits the ice.</p></div>';
 
-  /* line switcher: four fixed slots, named by management */
-  var tabs = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+[1,2,3,4].map(function(n){
-    var row = (lg._teamLines||{})[n];
-    var label = (row && row.name) ? row.name : "Line "+n;
-    var on = n===cur;
-    var draft = CG._lcDraft && CG._lcDraft[n];
-    return '<a class="chip '+(on?"chip-chrome":"")+'" href="#/hub/lines?line='+n+'" aria-current="'+on+'" style="cursor:pointer">'+
-      esc(label)+(draft?" ·":"")+'</a>';
-  }).join("")+'</div>';
+  var bar = '<div class="note '+(dirtyN?"chr":"grn")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
+    '<b style="font-family:var(--f-disp)">'+(dirtyN?dirtyN+" line"+(dirtyN===1?"":"s")+" with unsaved changes":"All lines saved")+'</b>'+
+    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on more than one line — the weekly limits are checked when a lineup is actually dressed.</span>'+
+    '<span style="display:flex;gap:9px">'+
+    '<button class="btn btn-ghost btn-sm" id="lcRevert"'+(dirtyN?"":" disabled")+'>Revert</button>'+
+    '<button class="btn btn-chrome btn-sm" id="lcSaveAll"'+(dirtyN?"":" disabled")+'>Save changes</button></span></div>';
 
-  var ovr = CG.lineOvr(slots);
-  var nameVal = (CG._lcName && CG._lcName[cur] != null) ? CG._lcName[cur] : ((saved && saved.name) || "");
-  var bar = '<div class="note '+(dirty?"chr":(saved?"grn":""))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
-    '<label class="fld" style="margin:0;flex:0 1 260px"><span>Line name</span>'+
-    '<input id="lcName" maxlength="24" placeholder="Line '+cur+'" value="'+esc(nameVal)+'"></label>'+
-    (ovr?'<span class="chip" title="Average overall of the players placed">OVR '+ovr+'</span>':"")+
-    (saved && !dirty ? '<span class="caption">saved '+CG.fmtFull(Date.parse(saved.updated_at))+'</span>' : "")+
-    (dirty ? '<b style="font-family:var(--f-disp)">Unsaved changes</b>' : "")+
-    '<span style="margin-left:auto;display:flex;gap:9px">'+
-    '<button class="btn btn-ghost btn-sm" id="lcClear">Clear</button>'+
-    '<button class="btn btn-chrome btn-sm" id="lcSave">'+(saved?"Save changes":"Save line")+'</button></span></div>';
+  var POS = CG.LINE_SLOTS;                          /* LW C RW LD RD G */
+  var cells = '<div class="lc-gh"></div>'+POS.map(function(p){ return '<div class="lc-gh">'+CG.POS_NAME[p]+'</div>'; }).join("");
+  [1,2,3,4].forEach(function(n){
+    var sl = slotsOf(n), row = (lg._teamLines||{})[n];
+    var nameVal = (CG._lcName && CG._lcName[n] != null) ? CG._lcName[n] : ((row && row.name) || "");
+    var ovr = CG.lineOvr(sl);
+    var nights = Object.keys(lg._linePlan||{}).filter(function(k){ return (lg._linePlan||{})[k]===n; })
+      .map(function(k){ return (CG.NIGHT_LABEL[k]||k).slice(0,3); });
+    cells += '<div class="lc-gut">'+
+      '<input class="lc-nm" data-lname="'+n+'" maxlength="24" placeholder="Line '+n+'" value="'+esc(nameVal)+'" aria-label="Line '+n+' name">'+
+      '<span class="gm">'+(ovr?'<span class="chip" style="font-size:9px">OVR '+ovr+'</span>':"")+
+        (nights.length?'<span title="Nights this line dresses">'+nights.join(" · ")+'</span>':"")+
+        ((CG._lcDraft && CG._lcDraft[n])?'<span style="color:var(--chrome-deep);font-weight:700" title="Unsaved">●</span>':"")+'</span></div>';
+    POS.forEach(function(pos){
+      var pid = sl[pos], pl = pid && CG.playerById(lg, pid);
+      cells += '<div class="lc-slot'+(pl?" filled":"")+'" data-line="'+n+'" data-slot="'+pos+'" tabindex="0" role="button" '+
+        'aria-label="Line '+n+' '+CG.POS_NAME[pos]+(pl?" — "+esc(pl.tag):" — empty")+'" draggable="'+(!!pl)+'">'+
+        (pl ? '<span class="nm">'+esc(pl.tag)+'</span><span class="mt">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+'</span>'
+            : '<span class="mt">'+pos+'</span>')+'</div>';
+    });
+  });
+  var grid = '<div class="card" style="margin-bottom:18px"><div class="card-b lc-wrap"><div class="lc-grid">'+cells+'</div></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="lcMsg">Drag onto a filled slot to swap the two players. Drag a slot back onto the roster to clear it. Click works too — player, then slot.</span></div></div>';
 
-  var rink = '<div class="rink"><div class="rk-rows">'+
-    '<div class="rk-line">'+["LW","C","RW"].map(function(pos){ return CG.luSlot(pos, slots[pos], false); }).join("")+'</div>'+
-    '<div class="rk-line d2">'+["LD","RD"].map(function(pos){ return CG.luSlot(pos, slots[pos], false); }).join("")+'</div>'+
-    '<div class="rk-line g1">'+CG.luSlot("G", slots.G, false)+'</div>'+
-  '</div></div>';
-
-  var bench = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
-    '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p){
-      var used = assigned.indexOf(p.id)>=0;
-      var dis = suspended[p.id];
-      return '<div class="bp'+(used||dis?" dis":"")+'" data-bench="'+p.id+'" draggable="'+(!used&&!dis)+'" '+(dis?'title="Suspended (Rule 7.4)"':"")+'>'+
-        CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+
-        (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
-        '<span class="bp-meta">OVR '+lg.ratings[p.id].ovr+'</span></div>';
-    }).join("")+'</div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="lcMsg">Click a player, then a slot — or drag them on. A line may borrow a player from another line; the weekly limits are checked when a lineup is actually dressed.</span></div></div>';
+  /* the whole roster in the reference's position columns, every card draggable */
+  var byPos = {}; POS.forEach(function(p){ byPos[p]=[]; });
+  roster.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr)-(lg.ratings[a.id].ovr); })
+    .forEach(function(p){ (byPos[p.pos]||(byPos[p.pos]=[])).push(p); });
+  var board = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
+    '<div class="card-b"><div class="lc-board">'+POS.map(function(pos){
+      return '<div class="lc-col"><div class="lc-ch">'+CG.POS_NAME[pos]+'</div>'+
+        (byPos[pos]||[]).map(function(p){
+          var dis = suspended[p.id];
+          return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
+            (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
+            CG.crest(p.team,18)+'<b>'+esc(p.tag)+'</b>'+
+            (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
+            (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
+            '<span class="mono" style="font-size:9.5px;color:var(--steel)">'+lg.ratings[p.id].ovr+'</span></div>';
+        }).join("")+'</div>';
+    }).join("")+'</div></div></div>';
 
   /* the night plan: which saved line each game night dresses */
   var nights = CG.lineNights(club);
-  var plan = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Night plan</h3><span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span></div>'+
+  var plan = '<div class="card"><div class="card-h"><h3>Night plan</h3><span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span></div>'+
     (nights.length ? nights.map(function(n){
       var planned = (lg._linePlan||{})[n.key] || null;
       var prow = planned && (lg._teamLines||{})[planned];
       var g = n.game, opp = g.home===club ? g.away : g.home;
       var lockAt = g.at - 30*60000, lockd = CG.now() >= lockAt;
       var dressed = (lg._lineups||{})[club+":"+g.id];
-      var opts = '<option value="">— none —</option>'+[1,2,3,4].map(function(s){
-        var r = (lg._teamLines||{})[s];
-        return '<option value="'+s+'"'+(planned===s?" selected":"")+(r?"":' disabled')+'>'+
-          esc((r && r.name) ? r.name : "Line "+s)+(r?"":" (empty)")+'</option>';
+      var opts = '<option value="">— none —</option>'+[1,2,3,4].map(function(s2){
+        var r = (lg._teamLines||{})[s2];
+        return '<option value="'+s2+'"'+(planned===s2?" selected":"")+(r?"":' disabled')+'>'+
+          esc((r && r.name) ? r.name : "Line "+s2)+(r?"":" (empty)")+'</option>';
       }).join("");
       return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
         '<span style="flex:0 0 148px"><b style="font-family:var(--f-disp)">'+(CG.NIGHT_LABEL[n.key]||n.key)+'</b>'+
@@ -907,82 +916,139 @@ CG.hubLines = function(qs){
     }).join("") : '<div class="card-b"><span class="caption">No upcoming games — the plan fills in once the schedule does.</span></div>')+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Dress” submits the line through the lineup builder’s own checks — anything the rules refuse (weekly limits, suspensions, the lock) is refused here too, with the same message.</span></div></div>';
 
-  return h + tabs + bar +
-    '<div class="grid g5x7" style="align-items:start"><div>'+rink+plan+'</div>'+bench+'</div>';
+  return h + bar + grid + '<div class="grid g5x7" style="align-items:start">'+board+plan+'</div>';
 };
 CG.AFTER._lines = function(qs){
   var club = CG.hqClub(); if (!club || !CG.lg.byTeam[club]) return;
   var lg = CG.lg;
-  var cur = CG._lcCur || 1;
   var tid = (lg._codeToId||{})[club];
   var sel = null;
   function msg(t, bad){ var el=$("#lcMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
-  function draft(){
+  function draft(n){
     CG._lcDraft = CG._lcDraft||{};
-    if (!CG._lcDraft[cur]) CG._lcDraft[cur] = CG.lineFromRow((lg._teamLines||{})[cur]);
-    return CG._lcDraft[cur];
+    if (!CG._lcDraft[n]) CG._lcDraft[n] = CG.lineFromRow((lg._teamLines||{})[n]);
+    return CG._lcDraft[n];
   }
-  function place(pid, pos){
-    var p = CG.playerById(lg, pid); if (!p) return;
-    var grp = CG.posGroup(p.pos), want = pos==="G" ? "G" : (pos==="LD"||pos==="RD") ? "D" : "F";
-    if (grp !== want){ msg(p.tag+" is a "+CG.POS_NAME[p.pos]+" — the "+CG.POS_NAME[pos]+" slot needs a "+(want==="G"?"goaltender":want==="D"?"defenseman":"forward")+".", true); return; }
-    var d = draft();
-    Object.keys(d).forEach(function(k){ if (d[k]===pid) delete d[k]; });
+  function fits(pid, pos){
+    var p = CG.playerById(lg, pid); if (!p) return "no longer rostered";
+    /* Rule 2.1 groups, with the builder's training-camp exception: a camp player fills any slot */
+    if (p.squad!=="tc"){
+      var want = pos==="G" ? "G" : (pos==="LD"||pos==="RD") ? "D" : "F";
+      if (CG.posGroup(p.pos)!==want)
+        return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — "+CG.POS_NAME[pos]+" needs a "+(want==="G"?"goaltender":want==="D"?"defenseman":"forward")+".";
+    }
+    return null;
+  }
+  /* assign from the roster: the occupant falls off THIS line only; the player keeps his other lines */
+  function assignFromRoster(pid, line, pos){
+    var why = fits(pid, pos); if (why){ msg(why, true); return; }
+    var d = draft(line);
+    Object.keys(d).forEach(function(k){ if (d[k]===pid) delete d[k]; });   /* no dup within a line */
     d[pos] = pid;
     CG.router();
   }
-  document.querySelectorAll("[data-bench]").forEach(function(el){
-    var pid = el.getAttribute("data-bench");
+  /* slot -> slot: MOVE into an empty slot, SWAP with an occupant (both directions validated) */
+  function moveSlot(a, p1, b, p2){
+    if (a===b && p1===p2) return;
+    var da = draft(a), db = draft(b);
+    var X = da[p1]; if (!X) return;
+    var Y = db[p2] || null;
+    var whyX = fits(X, p2); if (whyX){ msg(whyX, true); return; }
+    if (Y){
+      var whyY = fits(Y, p1); if (whyY){ msg("Can’t swap: "+whyY, true); return; }
+      /* same object when a===b — delete the source FIRST, then write both ends */
+      delete da[p1]; db[p2] = X; draft(a)[p1] = Y;
+    } else {
+      delete da[p1]; db[p2] = X;
+    }
+    CG.router();
+  }
+  document.querySelectorAll("[data-rcard]").forEach(function(el){
+    var pid = el.getAttribute("data-rcard");
     el.addEventListener("click", function(){
       if (el.classList.contains("dis")) return;
-      sel = pid; msg("Now click the slot for "+((CG.playerById(lg,pid)||{}).tag||"them")+".");
-      document.querySelectorAll("[data-bench]").forEach(function(b){ b.style.outline=""; });
-      el.style.outline = "2px solid var(--chrome-deep)";
+      document.querySelectorAll("[data-rcard]").forEach(function(b){ b.classList.remove("sel"); });
+      if (sel && sel.pid===pid){ sel=null; msg("Selection cleared."); return; }
+      sel = { pid: pid }; el.classList.add("sel");
+      msg("Now click the slot for "+((CG.playerById(lg,pid)||{}).tag||"them")+" — any line, any matching position.");
     });
-    el.addEventListener("dragstart", function(ev){ try { ev.dataTransfer.setData("text/plain", pid); } catch(e){} });
+    el.addEventListener("dragstart", function(ev){
+      if (el.classList.contains("dis")){ ev.preventDefault(); return; }
+      try { ev.dataTransfer.setData("text/plain", "r:"+pid); } catch(e){}
+    });
   });
-  document.querySelectorAll("[data-slot]").forEach(function(el){
-    var pos = el.getAttribute("data-slot");
+  document.querySelectorAll(".lc-slot").forEach(function(el){
+    var line = parseInt(el.getAttribute("data-line"),10), pos = el.getAttribute("data-slot");
     el.addEventListener("click", function(){
-      var d = draft();
-      if (sel){ place(sel, pos); sel=null; return; }
+      if (sel){ assignFromRoster(sel.pid, line, pos); sel=null; return; }
+      var d = draft(line);
       if (d[pos]){ delete d[pos]; CG.router(); }
+    });
+    el.addEventListener("keydown", function(ev){ if (ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); el.click(); } });
+    el.addEventListener("dragstart", function(ev){
+      var d = (CG._lcDraft && CG._lcDraft[line]) ? CG._lcDraft[line] : CG.lineFromRow((lg._teamLines||{})[line]);
+      if (!d[pos]){ ev.preventDefault(); return; }
+      try { ev.dataTransfer.setData("text/plain", "s:"+line+":"+pos); } catch(e){}
     });
     el.addEventListener("dragover", function(ev){ ev.preventDefault(); el.classList.add("target"); });
     el.addEventListener("dragleave", function(){ el.classList.remove("target"); });
     el.addEventListener("drop", function(ev){
       ev.preventDefault(); el.classList.remove("target");
-      var pid = ""; try { pid = ev.dataTransfer.getData("text/plain"); } catch(e){}
-      if (pid) place(pid, pos);
+      var t = ""; try { t = ev.dataTransfer.getData("text/plain"); } catch(e){}
+      if (!t) return;
+      if (t.indexOf("r:")===0) assignFromRoster(t.slice(2), line, pos);
+      else if (t.indexOf("s:")===0){ var m = t.slice(2).split(":"); moveSlot(parseInt(m[0],10), m[1], line, pos); }
     });
   });
-  var nameEl = $("#lcName");
-  if (nameEl) nameEl.addEventListener("input", function(){
-    CG._lcName = CG._lcName||{}; CG._lcName[cur] = nameEl.value;
+  /* dropping a slot onto the roster board clears it */
+  document.querySelectorAll(".lc-board").forEach(function(bd){
+    bd.addEventListener("dragover", function(ev){ ev.preventDefault(); });
+    bd.addEventListener("drop", function(ev){
+      ev.preventDefault();
+      var t = ""; try { t = ev.dataTransfer.getData("text/plain"); } catch(e){}
+      if (t.indexOf("s:")===0){ var m = t.slice(2).split(":"); var d = draft(parseInt(m[0],10)); delete d[m[1]]; CG.router(); }
+    });
   });
-  var clr = $("#lcClear");
-  if (clr) clr.addEventListener("click", function(){
-    CG._lcDraft = CG._lcDraft||{}; CG._lcDraft[cur] = {}; CG.router();
+  document.querySelectorAll("[data-lname]").forEach(function(el){
+    var n = parseInt(el.getAttribute("data-lname"),10);
+    el.addEventListener("input", function(){
+      CG._lcName = CG._lcName||{}; CG._lcName[n] = el.value;
+      draft(n);                                    /* a rename is a change worth saving */
+    });
   });
-  var save = $("#lcSave");
-  if (save) save.addEventListener("click", function(){
+  var revert = $("#lcRevert");
+  if (revert) revert.addEventListener("click", function(){ CG._lcDraft = {}; CG._lcName = {}; CG.router(); });
+  var saveAll = $("#lcSaveAll");
+  if (saveAll) saveAll.addEventListener("click", function(){
     if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
-    var d = (CG._lcDraft && CG._lcDraft[cur]) || CG.lineFromRow((lg._teamLines||{})[cur]);
-    var name = (CG._lcName && CG._lcName[cur] != null) ? CG._lcName[cur] : (((lg._teamLines||{})[cur]||{}).name || "");
-    save.disabled = true;
-    CG.sb.rpc("set_team_line", { p_season:CG.SEASON.id, p_team:tid, p_slot:cur, p_name:name||null,
-      p_lw:d.LW||null, p_center:d.C||null, p_rw:d.RW||null, p_ld:d.LD||null, p_rd:d.RD||null, p_goalie:d.G||null
-    }).then(function(r){
-      save.disabled = false;
-      /* fail-loud: an RLS-blocked or refused write must never toast success */
-      if (r.error || !r.data){ CG.toast(r.error?("Couldn’t save: "+r.error.message):"Save was blocked by the server — refresh and retry","err"); return; }
-      var row = Array.isArray(r.data) ? r.data[0] : r.data;
-      lg._teamLines = lg._teamLines||{}; lg._teamLines[cur] = row;
-      if (CG._lcDraft) delete CG._lcDraft[cur];
-      if (CG._lcName) delete CG._lcName[cur];
-      CG.toast((row.name||("Line "+cur))+" saved","ok");
-      CG.router();
-    });
+    var dirty = Object.keys(CG._lcDraft||{}).map(Number);
+    if (!dirty.length) return;
+    saveAll.disabled = true;
+    var okN = 0, errs = [];
+    /* sequential, so one refusal names its line instead of four racing toasts */
+    (function next(i){
+      if (i>=dirty.length){
+        saveAll.disabled = false;
+        if (errs.length) CG.toast("Saved "+okN+", refused "+errs.length+": "+errs.join("; "),"err");
+        else CG.toast(okN+" line"+(okN===1?"":"s")+" saved","ok");
+        CG.router(); return;
+      }
+      var n = dirty[i], d = CG._lcDraft[n] || {};
+      var name = (CG._lcName && CG._lcName[n] != null) ? CG._lcName[n] : (((lg._teamLines||{})[n]||{}).name || "");
+      CG.sb.rpc("set_team_line", { p_season:CG.SEASON.id, p_team:tid, p_slot:n, p_name:name||null,
+        p_lw:d.LW||null, p_center:d.C||null, p_rw:d.RW||null, p_ld:d.LD||null, p_rd:d.RD||null, p_goalie:d.G||null
+      }).then(function(r){
+        /* fail-loud: an RLS-blocked or refused write must never count as saved */
+        if (r.error || !r.data){ errs.push("Line "+n+(r.error?" — "+r.error.message:"")); }
+        else {
+          var row = Array.isArray(r.data) ? r.data[0] : r.data;
+          lg._teamLines = lg._teamLines||{}; lg._teamLines[n] = row;
+          delete CG._lcDraft[n]; if (CG._lcName) delete CG._lcName[n];
+          okN++;
+        }
+        next(i+1);
+      });
+    })(0);
   });
   document.querySelectorAll(".lc-night").forEach(function(el){
     el.addEventListener("change", function(){

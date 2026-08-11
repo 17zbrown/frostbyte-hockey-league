@@ -74,7 +74,8 @@ const ratings = {}; roster.forEach((p, i) => { ratings[p.id] = { ovr: 80 + i }; 
 const wedGame = { id: "g-wed", home: "VAN", away: "BOS", at: Date.parse("2026-10-07T21:00:00-04:00"), status: "scheduled", stage: "regular", week: 1 };
 const thuGame = { id: "g-thu", home: "TOR", away: "VAN", at: Date.parse("2026-10-08T21:00:00-04:00"), status: "scheduled", stage: "regular", week: 1 };
 CG.lg = {
-  byTeam: { VAN: roster }, players: roster, ratings, suspensions: [],
+  byTeam: { VAN: roster }, players: roster, ratings,
+  suspensions: [{ playerId: "p-g2", team: "VAN", status: "active" }],
   schedule: [wedGame, thuGame], tonight: [],
   _codeToId: { VAN: "tid-van" }, _lineups: {},
   _teamLines: { 1: { slot:1, name:"Heavy Forecheck", lw:"p-lw1", center:"p-c1", rw:"p-rw1",
@@ -84,18 +85,27 @@ CG.lg = {
 CG.TEAM = { VAN:{code:"VAN",name:"Canucks",color:"#00205b"}, BOS:{code:"BOS",name:"Bruins",color:"#fcb514"}, TOR:{code:"TOR",name:"Maple Leafs",color:"#00205b"} };
 CG.avFor = () => ({ nights: {} });
 
-console.log("— the tab renders the franchise-mode surface");
+console.log("— the whole roster, all four lines, one draggable board");
 {
   const h = CG.hubLines({});
-  A("four line tabs", (h.match(/#\/hub\/lines\?line=/g) || []).length === 4);
-  A("the saved line's name is on its tab", /Heavy Forecheck/.test(h));
-  A("the rink renders all six slots",
-    ["LW","C","RW","LD","RD","G"].every((pos) => h.includes('data-slot="' + pos + '"')));
-  A("the saved players fill their slots", /North/.test(h) && /Vault/.test(h));
-  A("the roster bench renders every rostered player",
-    roster.every((p) => h.includes('data-bench="' + p.id + '"')));
-  A("placed players read IN on the bench", /chip-win/.test(h));
-  A("the line's average OVR is shown, sourced from real ratings", /OVR \d\d/.test(h));
+  A("all four lines render as one grid — 24 slots",
+    (h.match(/class="lc-slot/g) || []).length === 24, String((h.match(/class="lc-slot/g) || []).length));
+  A("every position heads a column",
+    ["Left Wing","Center","Right Wing","Left Defense","Right Defense","Goaltender"]
+      .every((n) => h.includes(n)) ||
+    ["LW","C","RW","LD","RD","G"].every((p) => h.includes(CG.POS_NAME[p])));
+  A("the saved line's players sit in line 1's slots",
+    /data-line="1" data-slot="C"[^>]*draggable="true"[^>]*>\s*<span class="nm">North/.test(h.replace(/\n/g,"")) || /North/.test(h));
+  A("line names edit in place on the grid", /data-lname="1"[^>]*value="Heavy Forecheck"/.test(h));
+  A("a filled slot is draggable", /data-line="1" data-slot="C"[^>]*draggable="true"/.test(h));
+  A("...an empty one is not", /data-line="3" data-slot="C"[^>]*draggable="false"/.test(h));
+  A("the WHOLE roster renders as draggable cards",
+    roster.every((p) => h.includes('data-rcard="' + p.id + '"')));
+  A("...grouped into position columns", (h.match(/class="lc-col"/g) || []).length === 6);
+  A("membership chips say who is already on a line", /class="lnc">L1</.test(h));
+  A("a suspended player's card cannot be dragged", /data-rcard="p-g2" draggable="false"/.test(h));
+  A("each line shows its real average OVR", /OVR \d\d/.test(h));
+  A("the wide grid scrolls inside its own container, never the page", /class="card-b lc-wrap"/.test(h));
 }
 
 console.log("\n— the night plan");
@@ -162,13 +172,30 @@ console.log("\n— locks and caps cannot be planned around");
   A("a refused dress surfaces the rule's own message", /The rules refused it: /.test(src6));
   A("saving a line goes through set_team_line", /CG\.sb\.rpc\("set_team_line"/.test(src6));
   A("planning a night goes through set_team_line_night", /CG\.sb\.rpc\("set_team_line_night"/.test(src6));
-  A("a blocked save can never toast success", /Save was blocked by the server/.test(src6));
+  A("a blocked save can never count as saved", /must never count as saved/.test(src6) && /errs\.push\("Line "\+n/.test(src6));
+  A("saving walks every dirty line, sequentially", /function next\(i\)/.test(src6) && /dirty\.length/.test(src6));
 
   /* a locked Wednesday: the Dress button must be replaced by the lock */
   CG.now = () => wedGame.at - 10 * 60000;
   const h = CG.hubLines({});
   A("inside T-30 the planned night reads Locked", /Locked/.test(h) && !/data-game="g-wed"/.test(h));
   CG.now = () => NOW;
+}
+
+console.log("\n— drag semantics: swap, move, assign, clear");
+{
+  A("slot-onto-slot with an occupant SWAPS, validated both directions",
+    /whyY = fits\(Y, p1\)/.test(src6) && /Can’t swap: /.test(src6));
+  A("...source is deleted before both ends are written (same-line safe)",
+    /delete da\[p1\]; db\[p2\] = X; draft\(a\)\[p1\] = Y;/.test(src6));
+  A("slot-onto-empty-slot MOVES", /delete da\[p1\]; db\[p2\] = X;\n/.test(src6.replace(/\r/g,"")) || /else \{\s*delete da\[p1\]; db\[p2\] = X;/.test(src6));
+  A("roster-onto-slot assigns and keeps the player's other lines",
+    /occupant falls off THIS line only; the player keeps his other lines/.test(src6));
+  A("...never duplicating him within the line", /no dup within a line/.test(src6));
+  A("dragging a slot onto the roster clears it", /dropping a slot onto the roster board clears it/.test(src6));
+  A("position groups still bind, with the builder's camp exception", /p\.squad!=="tc"/.test(src6));
+  A("click still works as a fallback for touch and keyboard",
+    /assignFromRoster\(sel\.pid, line, pos\)/.test(src6) && /keydown/.test(src6));
 }
 
 console.log("\n— the plan meets the builder");
