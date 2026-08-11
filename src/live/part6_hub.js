@@ -803,6 +803,14 @@ CG.lineFromRow = function(row){
   CG.LINE_SLOTS.forEach(function(pos){ var v = row[CG._lineCol[pos]]; if (v) s[pos] = v; });
   return s;
 };
+/* the reference's circular headshot: the player's real Discord avatar, or initials on ink.
+   Size in px; markup only — the circle itself is .lc-av in the stylesheet. */
+CG.lcAv = function(p, size){
+  var src = p && p.avatar && CG.safeAvatar ? CG.safeAvatar(p.avatar) : null;
+  return '<span class="lc-av" style="width:'+size+'px;height:'+size+'px">'+
+    (src ? '<img src="'+src+'" alt="" loading="lazy" decoding="async">'
+         : '<b>'+esc(String((p && p.tag) || "?").slice(0,2).toUpperCase())+'</b>')+'</span>';
+};
 /* average OVR of the players actually placed — real and sourced, or nothing at all */
 CG.lineOvr = function(slots){
   var vals = Object.keys(slots).map(function(k){ var r = CG.lg.ratings[slots[k]]; return r && r.ovr; })
@@ -863,7 +871,7 @@ CG.hubLines = function(qs){
       var pid = sl[pos], pl = pid && CG.playerById(lg, pid);
       cells += '<div class="lc-slot'+(pl?" filled":"")+'" data-line="'+n+'" data-slot="'+pos+'" tabindex="0" role="button" '+
         'aria-label="Line '+n+' '+CG.POS_NAME[pos]+(pl?" — "+esc(pl.tag):" — empty")+'" draggable="'+(!!pl)+'">'+
-        (pl ? '<span class="nm">'+esc(pl.tag)+'</span><span class="mt">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+'</span>'
+        (pl ? CG.lcAv(pl,26)+'<span class="nm">'+esc(pl.tag)+'</span><span class="mt">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+'</span>'
             : '<span class="mt">'+pos+'</span>')+'</div>';
     });
   });
@@ -881,10 +889,11 @@ CG.hubLines = function(qs){
           var dis = suspended[p.id];
           return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
             (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
-            CG.crest(p.team,18)+'<b>'+esc(p.tag)+'</b>'+
+            CG.lcAv(p,34)+
+            '<span class="two"><b>'+esc(p.tag)+'</b><span class="ps">'+CG.POS_NAME[p.pos]+'</span></span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
             (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
-            '<span class="mono" style="font-size:9.5px;color:var(--steel)">'+lg.ratings[p.id].ovr+'</span></div>';
+            '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
         }).join("")+'</div>';
     }).join("")+'</div></div></div>';
 
@@ -916,7 +925,7 @@ CG.hubLines = function(qs){
     }).join("") : '<div class="card-b"><span class="caption">No upcoming games — the plan fills in once the schedule does.</span></div>')+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Dress” submits the line through the lineup builder’s own checks — anything the rules refuse (weekly limits, suspensions, the lock) is refused here too, with the same message.</span></div></div>';
 
-  return h + bar + grid + '<div class="grid g5x7" style="align-items:start">'+board+plan+'</div>';
+  return '<div id="lcTab">' + h + bar + grid + '<div class="grid g5x7" style="align-items:start">'+board+plan+'</div></div>';
 };
 CG.AFTER._lines = function(qs){
   var club = CG.hqClub(); if (!club || !CG.lg.byTeam[club]) return;
@@ -924,6 +933,34 @@ CG.AFTER._lines = function(qs){
   var tid = (lg._codeToId||{})[club];
   var sel = null;
   function msg(t, bad){ var el=$("#lcMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
+  /* Repaint ONLY this tab, in place. Routing the whole page on every drag reset the scroll and made
+     each edit feel like a reload — the board swaps its own DOM and rebinds, and the viewport never
+     moves. Falls back to the router if the wrapper is somehow gone. */
+  function repaint(){
+    var host = document.getElementById("lcTab");
+    if (host){ host.outerHTML = CG.hubLines({}); CG.AFTER._lines({}); }
+    else if (CG.router) CG.router();
+  }
+  /* how many OTHER lines this goaltender already backstops (draft state, target line excluded) */
+  function gLines(pid, exceptLine){
+    var c = 0;
+    [1,2,3,4].forEach(function(n){
+      if (n===exceptLine) return;
+      var d = (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]);
+      if (d.G===pid) c++;
+    });
+    return c;
+  }
+  /* a club carries two goalies and a goalie's six-game week is two nights — two lines is the whole
+     goaltending week, so a third is always a mistake (mirrors set_team_line's own check) */
+  function goalieCapped(pid, pos, line){
+    if (pos!=="G") return null;
+    if (gLines(pid, line) >= 2){
+      var p = CG.playerById(lg, pid);
+      return (p?p.tag:"That goaltender")+" already backstops two lines — a goaltender covers at most two (Rule 5.2).";
+    }
+    return null;
+  }
   function draft(n){
     CG._lcDraft = CG._lcDraft||{};
     if (!CG._lcDraft[n]) CG._lcDraft[n] = CG.lineFromRow((lg._teamLines||{})[n]);
@@ -941,11 +978,12 @@ CG.AFTER._lines = function(qs){
   }
   /* assign from the roster: the occupant falls off THIS line only; the player keeps his other lines */
   function assignFromRoster(pid, line, pos){
-    var why = fits(pid, pos); if (why){ msg(why, true); return; }
+    var why = fits(pid, pos) || goalieCapped(pid, pos, line);
+    if (why){ msg(why, true); return; }
     var d = draft(line);
     Object.keys(d).forEach(function(k){ if (d[k]===pid) delete d[k]; });   /* no dup within a line */
     d[pos] = pid;
-    CG.router();
+    repaint();
   }
   /* slot -> slot: MOVE into an empty slot, SWAP with an occupant (both directions validated) */
   function moveSlot(a, p1, b, p2){
@@ -953,15 +991,16 @@ CG.AFTER._lines = function(qs){
     var da = draft(a), db = draft(b);
     var X = da[p1]; if (!X) return;
     var Y = db[p2] || null;
-    var whyX = fits(X, p2); if (whyX){ msg(whyX, true); return; }
+    var whyX = fits(X, p2) || goalieCapped(X, p2, b); if (whyX){ msg(whyX, true); return; }
     if (Y){
-      var whyY = fits(Y, p1); if (whyY){ msg("Can’t swap: "+whyY, true); return; }
+      var whyY = fits(Y, p1) || goalieCapped(Y, p1, a);
+      if (whyY){ msg("Can’t swap: "+whyY, true); return; }
       /* same object when a===b — delete the source FIRST, then write both ends */
       delete da[p1]; db[p2] = X; draft(a)[p1] = Y;
     } else {
       delete da[p1]; db[p2] = X;
     }
-    CG.router();
+    repaint();
   }
   document.querySelectorAll("[data-rcard]").forEach(function(el){
     var pid = el.getAttribute("data-rcard");
@@ -982,7 +1021,7 @@ CG.AFTER._lines = function(qs){
     el.addEventListener("click", function(){
       if (sel){ assignFromRoster(sel.pid, line, pos); sel=null; return; }
       var d = draft(line);
-      if (d[pos]){ delete d[pos]; CG.router(); }
+      if (d[pos]){ delete d[pos]; repaint(); }
     });
     el.addEventListener("keydown", function(ev){ if (ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); el.click(); } });
     el.addEventListener("dragstart", function(ev){
@@ -1006,7 +1045,7 @@ CG.AFTER._lines = function(qs){
     bd.addEventListener("drop", function(ev){
       ev.preventDefault();
       var t = ""; try { t = ev.dataTransfer.getData("text/plain"); } catch(e){}
-      if (t.indexOf("s:")===0){ var m = t.slice(2).split(":"); var d = draft(parseInt(m[0],10)); delete d[m[1]]; CG.router(); }
+      if (t.indexOf("s:")===0){ var m = t.slice(2).split(":"); var d = draft(parseInt(m[0],10)); delete d[m[1]]; repaint(); }
     });
   });
   document.querySelectorAll("[data-lname]").forEach(function(el){
@@ -1017,7 +1056,7 @@ CG.AFTER._lines = function(qs){
     });
   });
   var revert = $("#lcRevert");
-  if (revert) revert.addEventListener("click", function(){ CG._lcDraft = {}; CG._lcName = {}; CG.router(); });
+  if (revert) revert.addEventListener("click", function(){ CG._lcDraft = {}; CG._lcName = {}; repaint(); });
   var saveAll = $("#lcSaveAll");
   if (saveAll) saveAll.addEventListener("click", function(){
     if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
@@ -1031,7 +1070,7 @@ CG.AFTER._lines = function(qs){
         saveAll.disabled = false;
         if (errs.length) CG.toast("Saved "+okN+", refused "+errs.length+": "+errs.join("; "),"err");
         else CG.toast(okN+" line"+(okN===1?"":"s")+" saved","ok");
-        CG.router(); return;
+        repaint(); return;
       }
       var n = dirty[i], d = CG._lcDraft[n] || {};
       var name = (CG._lcName && CG._lcName[n] != null) ? CG._lcName[n] : (((lg._teamLines||{})[n]||{}).name || "");
@@ -1056,12 +1095,12 @@ CG.AFTER._lines = function(qs){
       var night = el.getAttribute("data-night");
       var slot = el.value ? parseInt(el.value,10) : null;
       CG.sb.rpc("set_team_line_night", { p_season:CG.SEASON.id, p_team:tid, p_night:night, p_slot:slot }).then(function(r){
-        if (r.error){ CG.toast("Couldn’t save the plan: "+r.error.message,"err"); CG.router(); return; }
+        if (r.error){ CG.toast("Couldn’t save the plan: "+r.error.message,"err"); repaint(); return; }
         lg._linePlan = lg._linePlan||{};
         if (slot) lg._linePlan[night] = slot; else delete lg._linePlan[night];
         CG.toast(slot ? ((CG.NIGHT_LABEL[night]||night)+" dresses "+((((lg._teamLines||{})[slot]||{}).name)||("Line "+slot)))
                       : ((CG.NIGHT_LABEL[night]||night)+" plan cleared"),"ok");
-        CG.router();
+        repaint();
       });
     });
   });
@@ -1086,7 +1125,7 @@ CG.AFTER._lines = function(qs){
           lg._lineups = lg._lineups||{}; lg._lineups[club+":"+gameId] = lrow;
           CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" vs "+((CG.TEAM[opp]||{}).name||opp)+" — adjust in the builder until the lock.","#/hub/lineup");
           CG.toast((row.name||("Line "+slot))+" dressed for "+CG.fmtDate(g.at),"ok");
-          CG.router();
+          repaint();
         });
       });
     });

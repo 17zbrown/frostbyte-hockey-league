@@ -1368,8 +1368,15 @@ CG.router = function(){
   (h.split("?")[1]||"").split("&").forEach(function(kv){ if(!kv)return; var p=kv.split("="); qs[decodeURIComponent(p[0])]=decodeURIComponent(p[1]||""); });
   var fn = CG.ROUTES[name] || CG.ROUTES._404;
   var app = $("#app");
+  /* Scroll to top ONLY on a real navigation. Many surfaces call router() as "repaint after a state
+     change" — assigning a lineup slot, saving a toggle, a realtime update — and yanking the page
+     back to the top on each of those made every edit feel like a reload. Same hash as the previous
+     render = a repaint: put the viewport back exactly where it was. */
+  var sameRoute = CG._lastRoutedHash === h;
+  var keepY = sameRoute ? (window.scrollY || 0) : 0;
+  CG._lastRoutedHash = h;
   app.innerHTML = '<div class="pg">'+fn(param, qs)+'</div>';
-  window.scrollTo({top:0, left:0, behavior:"instant"});
+  window.scrollTo({top:keepY, left:0, behavior:"instant"});
   CG.markActiveNav();
   /* a11y: every clickable data-go target is keyboard-reachable */
   $$("#app [data-go]").forEach(function(el){

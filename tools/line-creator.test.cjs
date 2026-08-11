@@ -221,5 +221,38 @@ console.log("\n— design-doc conformance (the bans that apply to markup)");
   A("interactive slots are keyboard-reachable", /tabindex="0"/.test(h));
 }
 
+console.log("\n— goaltending: two goalies, two lines each, never a third");
+{
+  A("the UI refuses a goalie's third line, in rule terms",
+    /function goalieCapped/.test(src6) && /already backstops two lines — a goaltender covers at most two \(Rule 5\.2\)/.test(src6));
+  A("...checked on assign", /fits\(pid, pos\) \|\| goalieCapped\(pid, pos, line\)/.test(src6));
+  A("...and on BOTH directions of a swap",
+    /fits\(X, p2\) \|\| goalieCapped\(X, p2, b\)/.test(src6) && /fits\(Y, p1\) \|\| goalieCapped\(Y, p1, a\)/.test(src6));
+  A("...counting draft state, target line excluded", /function gLines\(pid, exceptLine\)/.test(src6));
+}
+
+console.log("\n— edits repaint in place; the page never resets");
+{
+  A("the board swaps its own DOM instead of routing the page",
+    /function repaint\(\)/.test(src6) && /host\.outerHTML = CG\.hubLines\(\{\}\); CG\.AFTER\._lines\(\{\}\)/.test(src6));
+  A("...and no drag path routes the whole page any more",
+    !/CG\.router\(\);/.test(src6.slice(src6.indexOf("CG.AFTER._lines"), src6.indexOf("ROSTER — cap sheet"))
+      .replace(/else if \(CG\.router\) CG\.router\(\);/, "")));
+  const ui = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part4_ui.js"), "utf8");
+  A("site-wide: a same-route repaint keeps the scroll position",
+    /var sameRoute = CG\._lastRoutedHash === h;/.test(ui) && /window\.scrollTo\(\{top:keepY/.test(ui));
+  A("...while a real navigation still starts at the top", /var keepY = sameRoute \? \(window\.scrollY \|\| 0\) : 0;/.test(ui));
+}
+
+console.log("\n— the reference look: circular headshots with an initials fallback");
+{
+  const h = CG.hubLines({});
+  A("slots carry the avatar circle", /class="lc-av"/.test(h));
+  A("the fallback is initials, not a broken image", /<b>NO<\/b>|<b>[A-Z0-9]{2}<\/b>/.test(h));
+  A("roster cards stack name over position", /class="two"><b>/.test(h) && /class="ps">/.test(h));
+  A("real Discord avatars render when present",
+    /CG\.safeAvatar/.test(src6) && /loading="lazy"/.test(src6.slice(src6.indexOf("CG.lcAv"), src6.indexOf("CG.lcAv") + 600)));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);
