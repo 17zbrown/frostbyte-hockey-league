@@ -118,8 +118,9 @@ CG.hubNav = function(section){
     if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
     if (CG.LIVE_MODE && CG.can("lineup.build") && CG.hubGameStats) club.push(["gamestats","Game stats","chart"]);
-    if (CG.can("lineup.build")) club.push(["lineup","Lineup builder","grid"]);
-    if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["lines","Line creator","users"]);
+    /* ONE lineup surface: the board (#/hub/lines) replaced the per-game builder in the nav. The
+       old page stays routed but unlisted as the emergency call-up door (Rule 5.3). */
+    if (CG.can("lineup.build")) club.push(["lines","Lineup builder","grid"]);
     if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
     if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);
     if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubDraftLive) club.push(["draft","Draft","play"]);
@@ -187,7 +188,7 @@ CG.gmTasksCard = function(team){
   var tonightG = (lg.tonight||[]).find(function(g){ return g.home===team||g.away===team; });
   if (tonightG){
     var submitted = !!((lg._lineups||{})[team+":"+tonightG.id]);
-    rows += '<div class="titem"><span class="t-dot '+(submitted?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+(submitted?"submitted":"not submitted")+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lineup">Builder</a></div>';
+    rows += '<div class="titem"><span class="t-dot '+(submitted?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+(submitted?"submitted":"not submitted")+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lines">Builder</a></div>';
   }
   if (CG.WEEK8 && CG.WEEK8.open && CG.avFor){
     var noReply = (lg.byTeam[team]||[]).filter(function(p){ try { return CG.avFor(p.id).nights.n1.st==="nr"; } catch(e){ return false; } }).length;
@@ -568,13 +569,13 @@ CG.hubLineup = function(qs){
       }).join("")+'</span>'
     : "";
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Lineup builder'+nightSwitch+'</h1>'+
-    '<p class="lede" style="margin-top:8px">Click a bench player, then a slot — or drag them on. Six starters, one per position. Locks at '+CG.fmtTime(lockAt)+' (Rule 5.3); the opponent sees it 60 minutes before puck drop.</p></div>';
+    '<h1 class="h-sec" style="margin-top:8px">Per-game adjustments'+nightSwitch+'</h1>'+
+    '<p class="lede" style="margin-top:8px">One game, one lineup. Day-to-day lines live in the <a href="#/hub/lines" style="font-weight:700;border-bottom:2px solid var(--chrome)">Lineup builder</a> — this page adjusts a single night, and after the '+CG.fmtTime(lockAt)+' lock every change costs one in-game penalty (Rule 5.3).</p></div>';
   /* the night plan reaching the real game: when this night has a planned line, offer it as a
      one-click fill. Fill only — submitting stays an explicit second step. */
   var planSlot = (lg._linePlan||{})[CG.gameNight(game)];
   var planRow = planSlot && (lg._teamLines||{})[planSlot];
-  var editControls = (planRow ? '<button class="btn btn-ghost btn-sm" id="luFromPlan" data-plan-slot="'+planSlot+'" title="Fill the slots from the line planned for this night in the Line creator">Fill from '+esc(planRow.name||("Line "+planSlot))+'</button>' : "")+
+  var editControls = (planRow ? '<button class="btn btn-ghost btn-sm" id="luFromPlan" data-plan-slot="'+planSlot+'" title="Fill the slots from the line planned for this night in the Lineup builder">Fill from '+esc(planRow.name||("Line "+planSlot))+'</button>' : "")+
     '<button class="btn btn-ghost btn-sm" id="luAuto">Auto-fill best available</button>'+
     '<button class="btn btn-ghost btn-sm" id="luClear">Clear</button>'+
     '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(emergency?"Submit emergency call-up":(status==="submitted"?"Resubmit":"Submit lineup"))+'</button>';
@@ -745,7 +746,7 @@ CG.AFTER._lineup = function(){
     if (missing.length){ CG.toast("Fill every slot first — missing "+missing.join(", "), "err"); return; }
     var emg = pastLock;   /* submitting after the lock is, by definition, an emergency call-up */
     CG.confirm(emg?"Confirm emergency call-up?":"Submit this lineup?",
-      emg?"This game already locked. The swap is recorded against the club and the opponent already sees the locked lineup — only submit for a genuine no-show."
+      emg?"This game already locked. EACH player changed costs the club one in-game penalty, served in this game (Rule 5.3) — the opponent already sees the locked lineup, so change only who you must."
          :"Your six starters go to the league office and release to the opponent 60 minutes before puck drop. You can resubmit until the lock.",
       emg?"Submit emergency call-up":"Submit lineup", function(){
       save("Lineup submitted to the league office","submitted");
@@ -762,6 +763,7 @@ CG.AFTER._lineup = function(){
             if(r.error || !r.data){ CG.toast(r.error?("Couldn’t submit: "+r.error.message):"Submit was blocked by the server — refresh and retry","err"); return; }
             var row = Array.isArray(r.data) ? r.data[0] : r.data;
             CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[club+":"+game.id] = row;
+            if (row.penalties_owed > 0) CG.toast("This club now serves "+row.penalties_owed+" in-game penalt"+(row.penalties_owed===1?"y":"ies")+" in this game (Rule 5.3)","err");
             if (CG._luEmergency) delete CG._luEmergency[game.id];
           });
         }
@@ -838,14 +840,14 @@ CG.hubLines = function(qs){
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
   var slotsOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
-  var dirtyN = 0; [1,2,3,4].forEach(function(n){ if (CG._lcDraft && CG._lcDraft[n]) dirtyN++; });
+  var dirtyN = 0; [1,2,3].forEach(function(n){ if (CG._lcDraft && CG._lcDraft[n]) dirtyN++; });
   /* which lines each player is on, for the roster board's L1..L4 chips */
   var memb = {};
-  [1,2,3,4].forEach(function(n){ var sl=slotsOf(n); Object.keys(sl).forEach(function(pos){ (memb[sl[pos]]=memb[sl[pos]]||[]).push(n); }); });
+  [1,2,3].forEach(function(n){ var sl=slotsOf(n); Object.keys(sl).forEach(function(pos){ (memb[sl[pos]]=memb[sl[pos]]||[]).push(n); }); });
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(CG.TEAM[club].name)+' · team HQ</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Line creator</h1>'+
-    '<p class="lede" style="margin-top:8px">All four lines, whole roster. Drag a player from the roster onto any slot, or drag between slots to swap — then point each game night at a line. Dressing still runs through the lineup builder’s rules when a line hits the ice.</p></div>';
+    '<h1 class="h-sec" style="margin-top:8px">Lineup builder</h1>'+
+    '<p class="lede" style="margin-top:8px">Three lines — one per game night — and the whole roster. Drag a player onto any slot, or between slots to swap; point each night at a line, then dress the week in one click. Every dressing still runs through the league’s checks.</p></div>';
 
   var bar = '<div class="note '+(dirtyN?"chr":"grn")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">'+(dirtyN?dirtyN+" line"+(dirtyN===1?"":"s")+" with unsaved changes":"All lines saved")+'</b>'+
@@ -856,7 +858,7 @@ CG.hubLines = function(qs){
 
   var POS = CG.LINE_SLOTS;                          /* LW C RW LD RD G */
   var cells = '<div class="lc-gh"></div>'+POS.map(function(p){ return '<div class="lc-gh">'+CG.POS_NAME[p]+'</div>'; }).join("");
-  [1,2,3,4].forEach(function(n){
+  [1,2,3].forEach(function(n){
     var sl = slotsOf(n), row = (lg._teamLines||{})[n];
     var nameVal = (CG._lcName && CG._lcName[n] != null) ? CG._lcName[n] : ((row && row.name) || "");
     var ovr = CG.lineOvr(sl);
@@ -878,10 +880,13 @@ CG.hubLines = function(qs){
   var grid = '<div class="card" style="margin-bottom:18px"><div class="card-b lc-wrap"><div class="lc-grid">'+cells+'</div></div>'+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="lcMsg">Drag onto a filled slot to swap the two players. Drag a slot back onto the roster to clear it. Click works too — player, then slot.</span></div></div>';
 
-  /* the whole roster in the reference's position columns, every card draggable */
+  /* the whole roster in the reference's position columns, every card draggable. Training camp
+     gets its own strip below the columns: camp players fill ANY slot (Rule 2.1), so filing them
+     under one position would hide exactly the flexibility a short-handed club needs. */
   var byPos = {}; POS.forEach(function(p){ byPos[p]=[]; });
+  var camp = [];
   roster.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr)-(lg.ratings[a.id].ovr); })
-    .forEach(function(p){ (byPos[p.pos]||(byPos[p.pos]=[])).push(p); });
+    .forEach(function(p){ if (p.squad==="tc") camp.push(p); else (byPos[p.pos]||(byPos[p.pos]=[])).push(p); });
   var board = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
     '<div class="card-b"><div class="lc-board">'+POS.map(function(pos){
       return '<div class="lc-col"><div class="lc-ch">'+CG.POS_NAME[pos]+'</div>'+
@@ -895,18 +900,36 @@ CG.hubLines = function(qs){
             (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
             '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
         }).join("")+'</div>';
-    }).join("")+'</div></div></div>';
+    }).join("")+'</div>'+
+    (camp.length ? '<div class="lc-ch" style="margin-top:14px">Training camp — fills any position (Rule 2.1)</div>'+
+      '<div class="lc-board" style="margin-top:8px">'+camp.map(function(p){
+        var dis = suspended[p.id];
+        return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
+          (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', training camp">'+
+          CG.lcAv(p,34)+
+          '<span class="two"><b>'+esc(p.tag)+'</b><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span></span>'+
+          (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
+          (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
+          '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
+      }).join("")+'</div>' : "")+
+    '</div></div>';
 
   /* the night plan: which saved line each game night dresses */
   var nights = CG.lineNights(club);
-  var plan = '<div class="card"><div class="card-h"><h3>Night plan</h3><span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span></div>'+
+  var planReady = nights.filter(function(n){
+    var pl = (lg._linePlan||{})[n.key];
+    return pl && (lg._teamLines||{})[pl] && CG.now() < n.game.at - 30*60000;
+  }).length;
+  var plan = '<div class="card"><div class="card-h"><h3>Night plan</h3>'+
+    (planReady > 1 ? '<button class="btn btn-chrome btn-sm" id="lcDressWeek" title="Dress every planned night’s next game in one go">Dress the week ('+planReady+')</button>' : '<span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span>')+'</div>'+
     (nights.length ? nights.map(function(n){
       var planned = (lg._linePlan||{})[n.key] || null;
       var prow = planned && (lg._teamLines||{})[planned];
       var g = n.game, opp = g.home===club ? g.away : g.home;
       var lockAt = g.at - 30*60000, lockd = CG.now() >= lockAt;
       var dressed = (lg._lineups||{})[club+":"+g.id];
-      var opts = '<option value="">— none —</option>'+[1,2,3,4].map(function(s2){
+      var owed = dressed && dressed.penalties_owed > 0 ? dressed.penalties_owed : 0;
+      var opts = '<option value="">— none —</option>'+[1,2,3].map(function(s2){
         var r = (lg._teamLines||{})[s2];
         return '<option value="'+s2+'"'+(planned===s2?" selected":"")+(r?"":' disabled')+'>'+
           esc((r && r.name) ? r.name : "Line "+s2)+(r?"":" (empty)")+'</option>';
@@ -915,9 +938,11 @@ CG.hubLines = function(qs){
         '<span style="flex:0 0 148px"><b style="font-family:var(--f-disp)">'+(CG.NIGHT_LABEL[n.key]||n.key)+'</b>'+
           '<span class="caption" style="display:block">'+CG.fmtDate(g.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span></span>'+
         '<label class="fld" style="margin:0;flex:1 1 150px"><span>Dresses</span><select class="lc-night" data-night="'+n.key+'">'+opts+'</select></label>'+
+        (owed ? '<span class="chip chip-loss" style="font-size:9.5px" title="Post-lock changes cost one in-game penalty each (Rule 5.3)">serves '+owed+' penalt'+(owed===1?"y":"ies")+'</span>' : "")+
         (prow
           ? (lockd
-              ? '<span class="lock" title="This night’s next game locked at '+CG.fmtTime(lockAt)+'">'+CG.ic("lock",13)+'Locked</span>'
+              ? '<span class="lock" title="This night’s next game locked at '+CG.fmtTime(lockAt)+'">'+CG.ic("lock",13)+'Locked</span>'+
+                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?night='+n.key+'" title="Swap a player after the lock — one in-game penalty per change (Rule 5.3)">Emergency call-up</a>'
               : '<button class="btn btn-ghost btn-sm lc-dress" data-night="'+n.key+'" data-game="'+g.id+'" data-slot="'+planned+'" title="Submit this line as the lineup for '+esc(CG.fmtDate(g.at))+'">'+
                   (dressed?"Redress":"Dress")+" tonight’s game</button>")
           : '<span class="caption">pick a line to enable dressing</span>')+
@@ -944,7 +969,7 @@ CG.AFTER._lines = function(qs){
   /* how many OTHER lines this goaltender already backstops (draft state, target line excluded) */
   function gLines(pid, exceptLine){
     var c = 0;
-    [1,2,3,4].forEach(function(n){
+    [1,2,3].forEach(function(n){
       if (n===exceptLine) return;
       var d = (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]);
       if (d.G===pid) c++;
@@ -1104,6 +1129,48 @@ CG.AFTER._lines = function(qs){
       });
     });
   });
+  /* one night's dressing, shared by the per-night button and Dress-the-week */
+  function dressGame(gameId, slot, done){
+    var row = (lg._teamLines||{})[slot]; if (!row || !tid){ done("no line"); return; }
+    CG.sb.rpc("set_game_lineup", { p_game:gameId, p_team:tid,
+      p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null,
+      p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false
+    }).then(function(r){
+      if (r.error || !r.data){ done(r.error ? r.error.message : "blocked by the server"); return; }
+      var lrow = Array.isArray(r.data) ? r.data[0] : r.data;
+      lg._lineups = lg._lineups||{}; lg._lineups[club+":"+gameId] = lrow;
+      done(null);
+    });
+  }
+  var dressWeek = $("#lcDressWeek");
+  if (dressWeek) dressWeek.addEventListener("click", function(){
+    if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
+    var jobs = CG.lineNights(club).filter(function(n){
+      var pl = (lg._linePlan||{})[n.key];
+      return pl && (lg._teamLines||{})[pl] && CG.now() < n.game.at - 30*60000;
+    });
+    CG.confirm("Dress the week — "+jobs.length+" night"+(jobs.length===1?"":"s")+"?",
+      jobs.map(function(n){ var pl=(lg._linePlan||{})[n.key];
+        return (CG.NIGHT_LABEL[n.key]||n.key)+" — "+((((lg._teamLines||{})[pl]||{}).name)||("Line "+pl)); }).join(" · ")+
+      ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before its lock.",
+      "Dress the week", function(){
+      dressWeek.disabled = true;
+      var okN = 0, errs = [];
+      (function next(i){
+        if (i >= jobs.length){
+          dressWeek.disabled = false;
+          if (errs.length) CG.toast("Dressed "+okN+", refused: "+errs.join("; "),"err");
+          else CG.toast("Week dressed — "+okN+" night"+(okN===1?"":"s")+". Redress any night to adjust before its lock.","ok");
+          repaint(); return;
+        }
+        var n = jobs[i], pl = (lg._linePlan||{})[n.key];
+        dressGame(n.game.id, pl, function(err){
+          if (err) errs.push((CG.NIGHT_LABEL[n.key]||n.key)+" — "+err); else okN++;
+          next(i+1);
+        });
+      })(0);
+    });
+  });
   document.querySelectorAll(".lc-dress").forEach(function(el){
     el.addEventListener("click", function(){
       var gameId = el.getAttribute("data-game"), slot = parseInt(el.getAttribute("data-slot"),10);
@@ -1114,16 +1181,11 @@ CG.AFTER._lines = function(qs){
         "This submits the line as the real lineup vs "+esc((CG.TEAM[opp]||{}).name||opp)+", through the same checks as the builder — weekly limits, suspensions and the 30-minute lock included. You can still adjust it in the lineup builder until the lock.",
         "Dress this line", function(){
         el.disabled = true;
-        /* the ONLY write path — every rule the builder enforces, this enforces */
-        CG.sb.rpc("set_game_lineup", { p_game:gameId, p_team:tid,
-          p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null,
-          p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false
-        }).then(function(r){
+        /* dressGame is the ONLY write path here — the same one Dress-the-week walks */
+        dressGame(gameId, slot, function(err){
           el.disabled = false;
-          if (r.error || !r.data){ CG.toast(r.error?("The rules refused it: "+r.error.message):"Submit was blocked by the server — refresh and retry","err"); return; }
-          var lrow = Array.isArray(r.data) ? r.data[0] : r.data;
-          lg._lineups = lg._lineups||{}; lg._lineups[club+":"+gameId] = lrow;
-          CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" vs "+((CG.TEAM[opp]||{}).name||opp)+" — adjust in the builder until the lock.","#/hub/lineup");
+          if (err){ CG.toast("The rules refused it: "+err,"err"); return; }
+          CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" vs "+((CG.TEAM[opp]||{}).name||opp)+" — redress or adjust until the lock.","#/hub/lines");
           CG.toast((row.name||("Line "+slot))+" dressed for "+CG.fmtDate(g.at),"ok");
           repaint();
         });

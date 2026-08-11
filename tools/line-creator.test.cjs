@@ -69,6 +69,7 @@ const roster = [
   P("p-lw1","Harbor","LW"), P("p-rw1","Kestrel","RW"),
   P("p-ld1","Granite","LD"), P("p-rd1","Mesa","RD"),
   P("p-ld2","Birch","LD"), P("p-g1","Vault","G"), P("p-g2","Locker","G"),
+  { id:"p-tc1", tag:"Sprout", pos:"C", team:"VAN", depth:9, squad:"tc" },
 ];
 const ratings = {}; roster.forEach((p, i) => { ratings[p.id] = { ovr: 80 + i }; });
 const wedGame = { id: "g-wed", home: "VAN", away: "BOS", at: Date.parse("2026-10-07T21:00:00-04:00"), status: "scheduled", stage: "regular", week: 1 };
@@ -88,8 +89,9 @@ CG.avFor = () => ({ nights: {} });
 console.log("— the whole roster, all four lines, one draggable board");
 {
   const h = CG.hubLines({});
-  A("all four lines render as one grid — 24 slots",
-    (h.match(/class="lc-slot/g) || []).length === 24, String((h.match(/class="lc-slot/g) || []).length));
+  A("three lines render as one grid — 18 slots (one line per game night)",
+    (h.match(/class="lc-slot/g) || []).length === 18, String((h.match(/class="lc-slot/g) || []).length));
+  A("...and no fourth line exists anywhere", !/data-line="4"/.test(h) && !/Line 4/.test(h));
   A("every position heads a column",
     ["Left Wing","Center","Right Wing","Left Defense","Right Defense","Goaltender"]
       .every((n) => h.includes(n)) ||
@@ -99,6 +101,7 @@ console.log("— the whole roster, all four lines, one draggable board");
   A("line names edit in place on the grid", /data-lname="1"[^>]*value="Heavy Forecheck"/.test(h));
   A("a filled slot is draggable", /data-line="1" data-slot="C"[^>]*draggable="true"/.test(h));
   A("...an empty one is not", /data-line="3" data-slot="C"[^>]*draggable="false"/.test(h));
+  A("the page is THE Lineup builder now", /<h1[^>]*>Lineup builder</.test(h));
   A("the WHOLE roster renders as draggable cards",
     roster.every((p) => h.includes('data-rcard="' + p.id + '"')));
   A("...grouped into position columns", (h.match(/class="lc-col"/g) || []).length === 6);
@@ -142,7 +145,7 @@ console.log("\n— a commissioner with NO roster spot gets full front-office acc
   CG.setPreviewClub("VAN");
   A("hqClub resolves the previewed club", CG.hqClub() === "VAN", String(CG.hqClub()));
   const h = CG.hubLines({});
-  A("the line creator renders, not the lockout note", /Line creator/.test(h) && !/belongs to team management/.test(h));
+  A("the board renders, not the lockout note", /Lineup builder/.test(h) && !/belongs to team management/.test(h));
   A("...showing the previewed club's roster", /Roster — Canucks/.test(h));
   A("...and its night plan", /lc-night/.test(h));
   CG.setPreviewClub(null);
@@ -163,7 +166,8 @@ console.log("\n— switching the previewed club reloads its data");
 console.log("\n— locks and caps cannot be planned around");
 {
   A("dressing goes through set_game_lineup and nothing else",
-    /lc-dress[\s\S]{0,2400}CG\.sb\.rpc\("set_game_lineup"/.test(src6));
+    /function dressGame[\s\S]{0,400}CG\.sb\.rpc\("set_game_lineup"/.test(src6) &&
+    /dressGame\(gameId, slot, function\(err\)/.test(src6));
   A("...with p_emergency false — the plan can never bypass the lock", /p_emergency:false/.test(src6));
   A("no direct insert into game_lineups anywhere in the creator",
     !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
@@ -252,6 +256,26 @@ console.log("\n— the reference look: circular headshots with an initials fallb
   A("roster cards stack name over position", /class="two"><b>/.test(h) && /class="ps">/.test(h));
   A("real Discord avatars render when present",
     /CG\.safeAvatar/.test(src6) && /loading="lazy"/.test(src6.slice(src6.indexOf("CG.lcAv"), src6.indexOf("CG.lcAv") + 600)));
+}
+
+console.log("\n— training camp, the week button, and the penalty price");
+{
+  const h = CG.hubLines({});
+  A("camp players sit in their own strip, not a position column",
+    /Training camp — fills any position \(Rule 2\.1\)/.test(h) && /data-rcard="p-tc1"/.test(h));
+  A("...draggable like anyone else", /data-rcard="p-tc1" draggable="true"/.test(h));
+  A("camp cards say what they are", /Camp · Center/.test(h));
+  A("a locked night offers the emergency door, priced",
+    /#\/hub\/lineup\?night=/.test(src6) && /one in-game penalty per change \(Rule 5\.3\)/.test(src6));
+  A("dressed penalties surface as a chip", /serves '\+owed\+' penalt/.test(src6));
+  A("Dress the week exists and walks each planned night", /id="lcDressWeek"/.test(src6) && /function dressGame\(gameId, slot, done\)/.test(src6));
+  A("...through the same single write path", (src6.match(/CG\.sb\.rpc\("set_game_lineup"/g)||[]).length === 2);
+  A("...reporting refusals per night", /Dressed "\+okN\+", refused: /.test(src6));
+  A("the emergency confirm names the cost",
+    /EACH player changed costs the club one in-game penalty/.test(src6));
+  A("the old page is the unlisted per-game door",
+    /Per-game adjustments/.test(src6) && !/club\.push\(\["lineup"/.test(src6));
+  A("...and the nav's one entry is the board", /club\.push\(\["lines","Lineup builder"/.test(src6));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
