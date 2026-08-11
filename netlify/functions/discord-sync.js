@@ -850,8 +850,18 @@ const ATTACH_FILES = 1n << 15n;
 const CREATE_INSTANT_INVITE = 1n << 0n;
 const POST_BITS = EMBED_LINKS | ATTACH_FILES;
 /* Roles that must NEVER carry the posting bits: @everyone (handled by id) and any role this sweep
-   grants automatically without the member proving anything. */
+   grants automatically without the member proving anything.
+
+   GIF CARVE-OUT (2026-08-10): "Not Signed Up" KEEPS EMBED_LINKS. Discord has no GIF permission —
+   the picker just posts a tenor.com link and the animation is that link's embed — so GIFs cannot be
+   allowed without the embed bit. The links this bit would otherwise reopen are closed one layer up:
+   the "Links require registration" AutoMod rule blocks any URL from a non-exempt member outright,
+   with tenor/giphy on its allow-list. Net: unregistered members get the GIF picker, and every other
+   link they try is now refused as a MESSAGE (stronger than before, when it posted as plain text).
+   ATTACH_FILES and invite creation stay stripped — the picker needs neither. */
 const POST_DENY = new Set(["not signed up"]);
+const DENY_STRIP_NAMED = ATTACH_FILES | CREATE_INSTANT_INVITE;   /* named deny roles: keep EMBED */
+const DENY_GRANT_NAMED = EMBED_LINKS;                            /* the GIF picker needs the bit ON */
 /* Roles that must ALWAYS carry them: earning any of these means a real registration or a league
    office seat. Club and position roles are added dynamically below — they are data, not names. */
 const POST_ALLOW_STATIC = ["player", "free agent", "commissioner", "staff", "owner",
@@ -872,10 +882,14 @@ async function enforcePostingPolicy(guildRoles, teams, sum) {
     if (r.managed) continue;
 
     if (isEveryone || POST_DENY.has(name)) {
-      /* @everyone also loses invite creation; a named auto-granted role keeps whatever else it has */
-      const strip = isEveryone ? (POST_BITS | CREATE_INSTANT_INVITE) : (POST_BITS | CREATE_INSTANT_INVITE);
-      if ((perms & strip) === 0n) continue;
-      const cleared = (perms & ~strip).toString();
+      /* @everyone loses everything; a NAMED deny role (Not Signed Up) keeps EMBED_LINKS for the
+         GIF picker — the AutoMod URL gate is what keeps that bit from reopening links — and is
+         GRANTED it if missing, or the picker stays dark for every unregistered member. */
+      const strip = isEveryone ? (POST_BITS | CREATE_INSTANT_INVITE) : DENY_STRIP_NAMED;
+      const grant = isEveryone ? 0n : DENY_GRANT_NAMED;
+      const next = (perms & ~strip) | grant;
+      if (next === perms) continue;
+      const cleared = next.toString();
       try {
         await dApi("PATCH", `/guilds/${GUILD}/roles/${r.id}`, { permissions: cleared });
         sum.postingStripped = (sum.postingStripped || 0) + 1;
@@ -913,6 +927,14 @@ async function enforcePostingPolicy(guildRoles, teams, sum) {
    exempt list and the rule would start blocking members again with nothing to say so. */
 const AUTOMOD_LINK_RULE = "Block invite links";
 const AUTOMOD_ADS_RULE = "Ad + scam keywords";
+/* The other half of the GIF carve-out: with EMBED_LINKS back on "Not Signed Up", THIS rule is what
+   keeps links registration-gated. Any schemed or www. URL from a non-exempt member blocks the whole
+   message; tenor/giphy (the GIF picker's own output) ride the allow-list. Content matching, not a
+   permission — a spam gate, not a security boundary — but the message-level block is stronger than
+   the old embed-strip, which still let links post as plain text. */
+const AUTOMOD_URL_RULE = "Links require registration";
+const AUTOMOD_URL_REGEX = "(https?://|www\\.)[^\\s]+";
+const AUTOMOD_URL_ALLOW = ["*tenor.com/*", "*giphy.com/*"];
 const AUTOMOD_EXEMPT = ["commissioner", "staff", "player", "free agent", "owner",
   "general manager", "assistant general manager", "media"];
 /* #scouting-links is the recruitment board: club management post their club's Discord there and the
@@ -931,18 +953,51 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum) {
     const c = (guildChannels || []).find((x) => x.name === name && x.type === 0);
     return c && c.id;
   };
-  for (const ruleName of [AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE]) {
+  /* The URL gate is CREATED here if absent — it is this sweep's own rule, unlike the two
+     hand-created ones, so "missing" is a state to fix rather than report. The alert channel is
+     inherited from the invite rule so all automod alerts land in one place. */
+  const urlRule = rules.find((r) => r && r.name === AUTOMOD_URL_RULE);
+  if (!urlRule) {
+    const inviteRule = rules.find((r) => r && r.name === AUTOMOD_LINK_RULE);
+    const alertAction = (inviteRule && (inviteRule.actions || []).find((a) => a.type === 2)) || null;
+    try {
+      const created = await dApi("POST", `/guilds/${GUILD}/auto-moderation/rules`, {
+        name: AUTOMOD_URL_RULE, event_type: 1, trigger_type: 1, enabled: true,
+        trigger_metadata: { regex_patterns: [AUTOMOD_URL_REGEX], allow_list: AUTOMOD_URL_ALLOW },
+        actions: [{ type: 1 }].concat(alertAction ? [alertAction] : []),
+        exempt_roles: want,
+      });
+      if (created && created.id) { rules.push(created); sum.automodCreated = AUTOMOD_URL_RULE; }
+    } catch (e) { sum.errors.push({ automodCreate: AUTOMOD_URL_RULE, error: String(e.message || e) }); }
+  }
+
+  for (const ruleName of [AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE, AUTOMOD_URL_RULE]) {
     const rule = rules.find((r) => r && r.name === ruleName);
     if (!rule) { sum.automodMissing = (sum.automodMissing ? sum.automodMissing + "," : "") + ruleName; continue; }
     const patch = {};
-    /* roles: only the link rule gates who may post a link at all. The ad/scam rule stays on for
-       everyone — it catches phrases no member needs, and narrowing it was never asked for. */
-    if (ruleName === AUTOMOD_LINK_RULE) {
+    /* roles: the link rule and the URL gate both gate who may post a link at all. The ad/scam rule
+       stays on for everyone — it catches phrases no member needs. */
+    if (ruleName === AUTOMOD_LINK_RULE || ruleName === AUTOMOD_URL_RULE) {
       const have = new Set(rule.exempt_roles || []);
       const missingRoles = want.filter((id) => !have.has(id));
       if (missingRoles.length) {
         patch.exempt_roles = Array.from(new Set([...(rule.exempt_roles || []), ...want]));
         sum.automodExempted = (sum.automodExempted || 0) + missingRoles.length;
+      }
+    }
+    /* the URL gate's GIF allow-list is add-only, like every other reconciliation here — a hand-
+       added allowance survives, a hand-REMOVED tenor/giphy heals back (or the picker breaks) */
+    if (ruleName === AUTOMOD_URL_RULE) {
+      const md = rule.trigger_metadata || {};
+      const haveAllow = new Set(md.allow_list || []);
+      const missingAllow = AUTOMOD_URL_ALLOW.filter((a) => !haveAllow.has(a));
+      const haveRegex = new Set(md.regex_patterns || []);
+      if (missingAllow.length || !haveRegex.has(AUTOMOD_URL_REGEX)) {
+        patch.trigger_metadata = {
+          regex_patterns: Array.from(new Set([...(md.regex_patterns || []), AUTOMOD_URL_REGEX])),
+          allow_list: Array.from(new Set([...(md.allow_list || []), ...AUTOMOD_URL_ALLOW])),
+        };
+        sum.automodGifAllow = (sum.automodGifAllow || 0) + missingAllow.length;
       }
     }
     const wantChans = (AUTOMOD_EXEMPT_CHANNELS[ruleName] || []).map(chanId).filter(Boolean);
@@ -1991,6 +2046,7 @@ export default async (req) => {
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
         automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
+        automodCreated: sum.automodCreated || null, automodGifAllow: sum.automodGifAllow || 0,
         automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
@@ -2009,6 +2065,7 @@ export default async (req) => {
    fake exodus — so it is tested directly rather than only through the whole sync. */
 export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
   enforceAutomodExemptions, AUTOMOD_EXEMPT, AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE,
+  AUTOMOD_URL_RULE, AUTOMOD_URL_REGEX, AUTOMOD_URL_ALLOW, DENY_STRIP_NAMED, DENY_GRANT_NAMED,
   AUTOMOD_EXEMPT_CHANNELS, enforcePostOnlyBoards, POST_ONLY_BOARDS,
   BOARD_EVERYONE_ALLOW, BOARD_EVERYONE_DENY, BOARD_POSTER_ALLOW,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,

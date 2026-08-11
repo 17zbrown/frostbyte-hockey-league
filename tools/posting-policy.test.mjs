@@ -39,18 +39,28 @@ const TEAMS = [{ discord_role_id: "r-Canucks" }, { discord_role_id: "r-Bruins" }
 const hit = (n) => patched.find((p) => p.id === "r-" + n);
 const permOf = (n) => { const h = hit(n); return h ? BigInt(h.perms) : null; };
 
-console.log("— the trap: an auto-granted role must never qualify");
+console.log("— the trap: an auto-granted role must never qualify (GIF carve-out: embed stays)");
 {
   patched = [];
   const roles = [role("Not Signed Up", FULL)];
   await I.enforcePostingPolicy(roles, TEAMS, { errors: [] });
-  A("Not Signed Up is stripped", !!hit("Not Signed Up"));
-  A("...of embed", (permOf("Not Signed Up") & EMBED) === 0n);
-  A("...of attach", (permOf("Not Signed Up") & ATTACH) === 0n);
+  A("Not Signed Up is patched", !!hit("Not Signed Up"));
+  /* the GIF picker is a tenor link + embed, so EMBED survives; the AutoMod URL gate
+     ("Links require registration") is what keeps that bit from reopening links */
+  A("...KEEPING embed for the GIF picker", (permOf("Not Signed Up") & EMBED) === EMBED);
+  A("...stripped of attach", (permOf("Not Signed Up") & ATTACH) === 0n);
   A("...and of invite creation", (permOf("Not Signed Up") & INVITE) === 0n);
   A("...while its other permissions survive", (permOf("Not Signed Up") & ~POST & ~INVITE) === (FULL & ~POST & ~INVITE));
   A("it is not in the allow-list by name", !I.POST_ALLOW_STATIC.includes("not signed up"));
   A("...it is explicitly in the DENY list", I.POST_DENY.has("not signed up"));
+
+  patched = [];
+  const bare = [role("Not Signed Up", FULL & ~EMBED & ~ATTACH & ~INVITE)];
+  await I.enforcePostingPolicy(bare, TEAMS, { errors: [] });
+  A("a bare Not Signed Up is GRANTED embed, or the picker stays dark",
+    !!hit("Not Signed Up") && (permOf("Not Signed Up") & EMBED) === EMBED);
+  A("...without gaining attach or invites",
+    (permOf("Not Signed Up") & (ATTACH | INVITE)) === 0n);
 }
 
 console.log("\n— @everyone loses posting rights and invite creation");
@@ -81,7 +91,8 @@ console.log("\n— it is idempotent, and leaves everything else alone");
 {
   patched = [];
   const sum = { errors: [] };
-  await I.enforcePostingPolicy([role("Player", FULL), role("Not Signed Up", BARE)], TEAMS, sum);
+  /* correct NSU state is now: embed ON, attach/invite OFF */
+  await I.enforcePostingPolicy([role("Player", FULL), role("Not Signed Up", BARE | EMBED)], TEAMS, sum);
   A("an already-correct server needs no writes", patched.length === 0);
   A("...and reports nothing changed", !sum.postingStripped && !sum.postingGranted);
 
