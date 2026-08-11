@@ -934,7 +934,12 @@ const AUTOMOD_ADS_RULE = "Ad + scam keywords";
    the old embed-strip, which still let links post as plain text. */
 const AUTOMOD_URL_RULE = "Links require registration";
 const AUTOMOD_URL_REGEX = "(https?://|www\\.)[^\\s]+";
-const AUTOMOD_URL_ALLOW = ["*tenor.com/*", "*giphy.com/*"];
+/* Every host Discord's GIF picker posts from. Klipy is the one that bit us: Discord has been
+   moving picker results from Tenor to Klipy, so a member's GIF arrived as klipy.com/gifs/... and
+   the gate blocked it (#bot-logs 2026-08-11, matched_content shows the exact URL). When a GIF is
+   ever blocked again, read that alert first — it names the provider to add here; the reconciler
+   pushes additions to the live rule within one sweep. */
+const AUTOMOD_URL_ALLOW = ["*tenor.com/*", "*giphy.com/*", "*klipy.com/*"];
 const AUTOMOD_EXEMPT = ["commissioner", "staff", "player", "free agent", "owner",
   "general manager", "assistant general manager", "media"];
 /* #scouting-links is the recruitment board: club management post their club's Discord there and the

@@ -134,8 +134,12 @@ console.log("\n— the URL gate: created by the sweep, GIFs allow-listed, self-h
   A("...alerting where the invite rule alerts",
     (c.actions || []).some((a) => a.type === 2 && a.metadata && a.metadata.channel_id === "chan-logs"));
   A("...with the URL regex", ((c.trigger_metadata || {}).regex_patterns || []).includes(I.AUTOMOD_URL_REGEX));
-  A("...tenor and giphy allow-listed from birth",
+  A("...every GIF provider allow-listed from birth",
     I.AUTOMOD_URL_ALLOW.every((a) => ((c.trigger_metadata || {}).allow_list || []).includes(a)));
+  /* Klipy is pinned by name: Discord moved picker results from Tenor to Klipy, and a member's GIF
+     was blocked as klipy.com/gifs/... before it was listed (#bot-logs 2026-08-11) */
+  A("...including Klipy, the provider that got a member's GIF blocked",
+    I.AUTOMOD_URL_ALLOW.includes("*klipy.com/*"));
   A("...and the eight signed-up roles exempt from birth",
     I.AUTOMOD_EXEMPT.every((n) => (c.exempt_roles || []).includes(ROLE[n])));
   A("Not Signed Up is NOT exempt from the gate", !(c.exempt_roles || []).includes(ROLE["not signed up"]));
