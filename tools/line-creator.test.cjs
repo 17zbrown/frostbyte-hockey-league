@@ -81,7 +81,7 @@ CG.lg = {
                      ld:"p-ld1", rd:"p-rd1", goalie:"p-g1", updated_at: new Date(NOW).toISOString() } },
   _linePlan: { wed: 1 },
 };
-CG.TEAM = { VAN:{name:"Canucks",color:"#00205b"}, BOS:{name:"Bruins",color:"#fcb514"}, TOR:{name:"Maple Leafs",color:"#00205b"} };
+CG.TEAM = { VAN:{code:"VAN",name:"Canucks",color:"#00205b"}, BOS:{code:"BOS",name:"Bruins",color:"#fcb514"}, TOR:{code:"TOR",name:"Maple Leafs",color:"#00205b"} };
 CG.avFor = () => ({ nights: {} });
 
 console.log("— the tab renders the franchise-mode surface");
@@ -118,6 +118,36 @@ console.log("\n— an ordinary player sees nothing");
   A("the route gates on lineup.build", /section==="lines"\) return CG\.can\("lineup\.build"\)/.test(src6));
   A("RLS keeps plans management-only (comment pinned to the load)",
     /management-only, so ordinary players get empty rows/.test(fs.readFileSync(path.join(__dirname,"..","src","live","part_live.js"),"utf8")));
+}
+
+console.log("\n— a commissioner with NO roster spot gets full front-office access via the preview");
+{
+  /* the exact seat that used to be locked out: role commish, me() = null (they don't play),
+     no management seat on any club — only the front-office preview pointing at VAN */
+  const wasMe = CG.me, wasAuth = CG.auth, wasStore = CG.store, wasTeams = CG.TEAMS;
+  CG.me = () => null;
+  CG.auth = { role: "commish", user: { id: "commish-uid" } };
+  CG.TEAMS = [{ code: "VAN", name: "Canucks", owner: "someone-else", gm: null, agm: null }];
+  CG.store = { _d: {}, get: (k) => CG.store._d[k], set: (k, v) => { CG.store._d[k] = v; } };
+  CG.setPreviewClub("VAN");
+  A("hqClub resolves the previewed club", CG.hqClub() === "VAN", String(CG.hqClub()));
+  const h = CG.hubLines({});
+  A("the line creator renders, not the lockout note", /Line creator/.test(h) && !/belongs to team management/.test(h));
+  A("...showing the previewed club's roster", /Roster — Canucks/.test(h));
+  A("...and its night plan", /lc-night/.test(h));
+  CG.setPreviewClub(null);
+  A("preview off = locked out again (no seat, no roster row)",
+    /belongs to team management/.test(CG.hubLines({})));
+  CG.me = wasMe; CG.auth = wasAuth; CG.store = wasStore; CG.TEAMS = wasTeams;
+}
+
+console.log("\n— switching the previewed club reloads its data");
+{
+  const live = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_live.js"), "utf8");
+  A("the picker reloads manager data before re-rendering",
+    /setPreviewClub\(this\.value \|\| null\);[\s\S]{0,600}CG\.loadManagerData\(\)\.then\(done, done\)/.test(live));
+  A("the club-keyed loads follow myClub(), which honors the preview",
+    /var myCode = CG\.myClub && CG\.myClub\(\), myTid = \(CG\.lg\._codeToId\|\|\{\}\)\[myCode\]/.test(live));
 }
 
 console.log("\n— locks and caps cannot be planned around");

@@ -454,19 +454,30 @@ CG.nightAvKey = function(game){
   var n = ((CG.WEEK8 && CG.WEEK8.nights) || []).find(function(x){ return Math.abs(x.at - game.at) < 6*3600000; });
   return n ? n.key : null;
 };
+/* The club this Team HQ session operates AS. A real seat (me.team / a management seat) wins;
+   otherwise the commissioner's front-office preview supplies it. This is what lets a commissioner
+   open any club's builder and line creator with full access — the DB side already allows it
+   (is_commissioner() passes every management RPC); the frontend just used to key everything off
+   me.team, which a commissioner without a roster spot doesn't have. */
+CG.hqClub = function(){
+  var t = CG.myManagedTeam && CG.myManagedTeam();
+  if (t && t.code) return t.code;
+  var me = CG.me();
+  return (me && me.team) || null;
+};
 /* the lineup builder's target game — honors #/hub/lineup?night=<wed|thu|fri|...>, else tonight/next */
 CG.lineupGameFor = function(me){
-  var lg = CG.lg;
+  var lg = CG.lg, club = CG.hqClub() || (me && me.team);
   var m = (location.hash.split("?")[1]||"").match(/night=([a-z]{3})/);
   var want = m ? m[1] : null;
-  var mine = function(g){ return (g.home===me.team||g.away===me.team) && g.status!=="final"; };
+  var mine = function(g){ return (g.home===club||g.away===club) && g.status!=="final"; };
   if (want){
     var g2 = lg.schedule.filter(mine).filter(function(g){ return g.at>CG.now()-3*3600000 && CG.gameNight(g)===want; })
       .sort(function(a,b){ return a.at-b.at; })[0];
     if (g2) return g2;
   }
-  return lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; })
-    || lg.schedule.filter(function(g){ return (g.home===me.team||g.away===me.team) && g.at>CG.now(); })
+  return lg.tonight.find(function(g){ return g.home===club||g.away===club; })
+    || lg.schedule.filter(function(g){ return (g.home===club||g.away===club) && g.at>CG.now(); })
         .sort(function(a,b){ return a.at-b.at; })[0];
 };
 /* one game's server-pick controls (compact, used by the Schedule desk).
@@ -474,7 +485,7 @@ CG.lineupGameFor = function(me){
    until then, and picks freeze for the whole night at that moment. */
 CG.serverVetoControls = function(game, me, lockAt){
   var mine = (CG.lg._vetoes||{})[game.id] || {};
-  var home = game.home===me.team;
+  var home = game.home===(CG.hqClub() || (me && me.team));
   function opts(sel){ return '<option value="">— pick —</option>'+CG.SERVERS.map(function(s){ return '<option value="'+esc(s)+'"'+(s===sel?" selected":"")+'>'+esc(s)+'</option>'; }).join(""); }
   if (CG.now() >= lockAt){
     var srv = (CG.lg._servers||{})[game.id];
@@ -491,13 +502,13 @@ CG.serverVetoControls = function(game, me, lockAt){
     '<label class="fld" style="margin:0"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label></div>';
 };
 CG.saveVeto = function(gameId, changedSel){
-  var me = CG.me(); if(!me) return;
-  var tid = (CG.lg._codeToId||{})[me.team]; if(!tid){ CG.toast("This seat has no club","err"); return; }
+  var club = CG.hqClub(); if(!club) return;
+  var tid = (CG.lg._codeToId||{})[club]; if(!tid){ CG.toast("This seat has no club","err"); return; }
   var body = changedSel.closest(".card-b");
   function val(f){ var el=body.querySelector('.srv-sel[data-veto-field="'+f+'"]'); return el&&el.value?el.value:null; }
   var g = CG.lg.schedule.find(function(x){ return x.id===gameId; })||{};
   var rec = { game_id:gameId, team_id:tid, updated_by:(CG.auth&&CG.auth.user?CG.auth.user.id:null), updated_at:new Date().toISOString() };
-  if (g.home===me.team){
+  if (g.home===club){
     var p1=val("pref1"), p2=val("pref2");
     if(p1&&p2&&p1===p2){ CG.toast("1st and 2nd choices must differ","err"); changedSel.value=""; return; }
     rec.pref1=p1; rec.pref2=p2;
@@ -509,19 +520,24 @@ CG.saveVeto = function(gameId, changedSel){
   CG.sb.from("game_vetoes").upsert(rec,{onConflict:"game_id,team_id"}).then(function(r){
     if(r.error){ CG.toast(/lock/i.test(r.error.message||"")?"Picks are locked":"Couldn’t save: "+r.error.message,"err"); return; }
     CG.lg._vetoes = CG.lg._vetoes||{}; CG.lg._vetoes[gameId] = Object.assign({}, CG.lg._vetoes[gameId]||{}, rec);
-    CG.toast(g.home===me.team?"1st & 2nd choices saved":"Veto & preferred saved","ok");
+    CG.toast(g.home===club?"1st & 2nd choices saved":"Veto & preferred saved","ok");
   });
 };
 
 CG.hubLineup = function(qs){
   var me = CG.me(), lg = CG.lg;
-  if (!me || !CG.lg.byTeam[me.team]) return '<div class="note">This account doesn’t run a club — the lineup builder belongs to team management.</div>';
+  /* the club this session operates AS — a real seat, or the commissioner front-office preview.
+     Keyed off hqClub() rather than the viewer's own roster row, so a commissioner with no roster
+     spot can run any club's builder with full access; the DB has always allowed it
+     (is_commissioner() passes set_game_lineup), only this guard was in the way. */
+  var club = CG.hqClub();
+  if (!club || !CG.lg.byTeam[club]) return '<div class="note">This account doesn’t run a club — the lineup builder belongs to team management.</div>';
   var game = CG.lineupGameFor(me);
   if (!game) return '<div class="empty"><b>No upcoming game</b><p>The schedule is complete — nothing to build.</p></div>';
-  var opp = game.home===me.team ? game.away : game.home;
-  var key = game.id+":"+me.team;
+  var opp = game.home===club ? game.away : game.home;
+  var key = game.id+":"+club;
   var saved = (CG.store.get("lineups")||{})[key];
-  var dbLu = (CG.lg._lineups||{})[me.team+":"+game.id];
+  var dbLu = (CG.lg._lineups||{})[club+":"+game.id];
   var lockAt = game.at - 30*60000;
   var rawLocked = CG.now() >= lockAt;
   /* Emergency call-up: once a game locks, management can still swap a player after the deadline.
@@ -531,14 +547,14 @@ CG.hubLineup = function(qs){
   var status = saved ? saved.status : (dbLu ? "submitted" : "draft");
   var slots = saved ? saved.slots
     : (dbLu ? { LW:dbLu.lw||null, C:dbLu.center||null, RW:dbLu.rw||null, LD:dbLu.ld||null, RD:dbLu.rd||null, G:dbLu.goalie||null } : {});
-  var roster = lg.byTeam[me.team];
+  var roster = lg.byTeam[club];
   var suspended = {};
-  lg.suspensions.forEach(function(s){ if (s.team===me.team && s.status!=="served") suspended[s.playerId]=true; });
+  lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
   var assigned = Object.values(slots);
   /* Night switcher, built from the nights this club actually has upcoming rather than a fixed pair,
      so it follows the schedule instead of having to be edited whenever the week changes shape. */
   var upcoming = lg.schedule.filter(function(g){
-    return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000;
+    return (g.home===club||g.away===club) && g.status!=="final" && g.at>CG.now()-3*3600000;
   }).sort(function(a,b){ return a.at-b.at; });
   var nightsSeen = [], seenNight = {};
   upcoming.forEach(function(g){ var k = CG.gameNight(g); if (!seenNight[k]){ seenNight[k]=1; nightsSeen.push(k); } });
@@ -576,7 +592,7 @@ CG.hubLineup = function(qs){
     '<div class="rk-line d2">'+["LD","RD"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
     '<div class="rk-line g1">'+CG.luSlot("G", slots.G, locked)+'</div>'+
   '</div></div>';
-  var bench = '<div class="card"><div class="card-h"><h3>Bench — '+esc(CG.TEAM[me.team].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
+  var bench = '<div class="card"><div class="card-h"><h3>Bench — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
     '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p){
       var av = CG.avFor(p.id);
       var avKey = CG.nightAvKey(game);   /* the availability answer for THIS game's night, not always Wednesday's */
@@ -606,13 +622,14 @@ CG.luSlot = function(pos, pid, locked){
       :'<div class="sl-sub" style="margin-top:14px">Empty — assign from the bench</div>')+'</div>';
 };
 CG.AFTER._lineup = function(){
-  var me = CG.me(); if (!me) return;
+  var me = CG.me(), club = CG.hqClub();
+  if (!club) return;
   var lg = CG.lg;
   var game = CG.lineupGameFor(me);
   if (!game) return;
-  var key = game.id+":"+me.team;
+  var key = game.id+":"+club;
   var store = CG.store.get("lineups")||{};
-  var _dbLu = (CG.lg._lineups||{})[me.team+":"+game.id];
+  var _dbLu = (CG.lg._lineups||{})[club+":"+game.id];
   var state = store[key] || (_dbLu
     ? { slots:{ LW:_dbLu.lw||undefined, C:_dbLu.center||undefined, RW:_dbLu.rw||undefined, LD:_dbLu.ld||undefined, RD:_dbLu.rd||undefined, G:_dbLu.goalie||undefined }, status:"submitted", rev:[] }
     : { slots:{}, status:"draft", rev:[] });
@@ -704,7 +721,7 @@ CG.AFTER._lineup = function(){
     ["LW","C","RW","LD","RD","G"].forEach(function(pos){
       /* group-based eligibility (matches the DB); camp players are eligible anywhere
          but sort last so auto-fill spends a pro player before a camp player's cap */
-      var pick = lg.byTeam[me.team].filter(function(p){ return p.squad==="tc" || CG.posGroup(p.pos)===CG.posGroup(pos); })
+      var pick = lg.byTeam[club].filter(function(p){ return p.squad==="tc" || CG.posGroup(p.pos)===CG.posGroup(pos); })
         .sort(function(a,b){
           var ac=a.squad==="tc"?1:0, bc=b.squad==="tc"?1:0;
           return ac-bc || lg.ratings[b.id].ovr-lg.ratings[a.id].ovr;
@@ -736,7 +753,7 @@ CG.AFTER._lineup = function(){
          p_emergency is set, which only club management can do (Rule 5.3) — the lock is enforced in
          the database, so no client can bypass it. */
       if (CG.LIVE_MODE && CG.sb){
-        var tid = (CG.lg._codeToId||{})[me.team];
+        var tid = (CG.lg._codeToId||{})[club];
         if (tid){
           CG.sb.rpc("set_game_lineup", { p_game:game.id, p_team:tid,
             p_center:state.slots.C||null, p_lw:state.slots.LW||null, p_rw:state.slots.RW||null,
@@ -744,12 +761,12 @@ CG.AFTER._lineup = function(){
             p_emergency:emg }).then(function(r){
             if(r.error || !r.data){ CG.toast(r.error?("Couldn’t submit: "+r.error.message):"Submit was blocked by the server — refresh and retry","err"); return; }
             var row = Array.isArray(r.data) ? r.data[0] : r.data;
-            CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[me.team+":"+game.id] = row;
+            CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[club+":"+game.id] = row;
             if (CG._luEmergency) delete CG._luEmergency[game.id];
           });
         }
       }
-      CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===me.team?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
+      CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
       CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
       CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
       CG.renderChrome();
@@ -794,10 +811,10 @@ CG.lineOvr = function(slots){
   return Math.round(vals.reduce(function(a,b){ return a+b; },0) / vals.length);
 };
 /* the club's upcoming nights, each with its planned line and next game */
-CG.lineNights = function(me){
+CG.lineNights = function(club){
   var seen = {}, out = [];
   (CG.lg.schedule||[]).filter(function(g){
-    return (g.home===me.team||g.away===me.team) && g.status!=="final" && g.at>CG.now()-3*3600000;
+    return (g.home===club||g.away===club) && g.status!=="final" && g.at>CG.now()-3*3600000;
   }).sort(function(a,b){ return a.at-b.at; }).forEach(function(g){
     var k = CG.gameNight(g);
     if (!seen[k]){ seen[k] = { key:k, game:g }; out.push(seen[k]); }
@@ -805,19 +822,21 @@ CG.lineNights = function(me){
   return out;
 };
 CG.hubLines = function(qs){
-  var me = CG.me(), lg = CG.lg;
-  if (!me || !lg.byTeam[me.team]) return '<div class="note">This account doesn’t run a club — the line creator belongs to team management.</div>';
+  var lg = CG.lg;
+  /* hqClub(): a real seat, or the commissioner front-office preview — full access either way */
+  var club = CG.hqClub();
+  if (!club || !lg.byTeam[club]) return '<div class="note">This account doesn’t run a club — the line creator belongs to team management.</div>';
   var cur = Math.max(1, Math.min(4, parseInt((qs&&qs.line)||CG._lcCur||1,10)||1));
   CG._lcCur = cur;
   var saved = (lg._teamLines||{})[cur];
   var slots = (CG._lcDraft && CG._lcDraft[cur]) ? CG._lcDraft[cur] : CG.lineFromRow(saved);
   var dirty = !!(CG._lcDraft && CG._lcDraft[cur]);
-  var roster = lg.byTeam[me.team];
+  var roster = lg.byTeam[club];
   var assigned = Object.keys(slots).map(function(k){ return slots[k]; });
   var suspended = {};
-  lg.suspensions.forEach(function(s){ if (s.team===me.team && s.status!=="served") suspended[s.playerId]=true; });
+  lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
 
-  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(CG.TEAM[me.team].name)+' · team HQ</span>'+
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(CG.TEAM[club].name)+' · team HQ</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Line creator</h1>'+
     '<p class="lede" style="margin-top:8px">Build up to four line combinations, then point each game night at one. Dressing still runs through the lineup builder’s rules — weekly limits, roster checks and the 30-minute lock all apply when a line hits the ice, not when you sketch it.</p></div>';
 
@@ -849,7 +868,7 @@ CG.hubLines = function(qs){
     '<div class="rk-line g1">'+CG.luSlot("G", slots.G, false)+'</div>'+
   '</div></div>';
 
-  var bench = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[me.team].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
+  var bench = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
     '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p){
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
@@ -861,14 +880,14 @@ CG.hubLines = function(qs){
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="lcMsg">Click a player, then a slot — or drag them on. A line may borrow a player from another line; the weekly limits are checked when a lineup is actually dressed.</span></div></div>';
 
   /* the night plan: which saved line each game night dresses */
-  var nights = CG.lineNights(me);
+  var nights = CG.lineNights(club);
   var plan = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Night plan</h3><span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span></div>'+
     (nights.length ? nights.map(function(n){
       var planned = (lg._linePlan||{})[n.key] || null;
       var prow = planned && (lg._teamLines||{})[planned];
-      var g = n.game, opp = g.home===me.team ? g.away : g.home;
+      var g = n.game, opp = g.home===club ? g.away : g.home;
       var lockAt = g.at - 30*60000, lockd = CG.now() >= lockAt;
-      var dressed = (lg._lineups||{})[me.team+":"+g.id];
+      var dressed = (lg._lineups||{})[club+":"+g.id];
       var opts = '<option value="">— none —</option>'+[1,2,3,4].map(function(s){
         var r = (lg._teamLines||{})[s];
         return '<option value="'+s+'"'+(planned===s?" selected":"")+(r?"":' disabled')+'>'+
@@ -892,10 +911,10 @@ CG.hubLines = function(qs){
     '<div class="grid g5x7" style="align-items:start"><div>'+rink+plan+'</div>'+bench+'</div>';
 };
 CG.AFTER._lines = function(qs){
-  var me = CG.me(); if (!me || !CG.lg.byTeam[me.team]) return;
+  var club = CG.hqClub(); if (!club || !CG.lg.byTeam[club]) return;
   var lg = CG.lg;
   var cur = CG._lcCur || 1;
-  var tid = (lg._codeToId||{})[me.team];
+  var tid = (lg._codeToId||{})[club];
   var sel = null;
   function msg(t, bad){ var el=$("#lcMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
   function draft(){
@@ -985,7 +1004,7 @@ CG.AFTER._lines = function(qs){
       var gameId = el.getAttribute("data-game"), slot = parseInt(el.getAttribute("data-slot"),10);
       var row = (lg._teamLines||{})[slot]; if (!row || !tid) return;
       var g = (lg.schedule||[]).find(function(x){ return x.id===gameId; }) || {};
-      var opp = g.home===me.team ? g.away : g.home;
+      var opp = g.home===club ? g.away : g.home;
       CG.confirm("Dress "+esc(row.name||("Line "+slot))+" for "+esc(CG.fmtDate(g.at))+"?",
         "This submits the line as the real lineup vs "+esc((CG.TEAM[opp]||{}).name||opp)+", through the same checks as the builder — weekly limits, suspensions and the 30-minute lock included. You can still adjust it in the lineup builder until the lock.",
         "Dress this line", function(){
@@ -998,7 +1017,7 @@ CG.AFTER._lines = function(qs){
           el.disabled = false;
           if (r.error || !r.data){ CG.toast(r.error?("The rules refused it: "+r.error.message):"Submit was blocked by the server — refresh and retry","err"); return; }
           var lrow = Array.isArray(r.data) ? r.data[0] : r.data;
-          lg._lineups = lg._lineups||{}; lg._lineups[me.team+":"+gameId] = lrow;
+          lg._lineups = lg._lineups||{}; lg._lineups[club+":"+gameId] = lrow;
           CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" vs "+((CG.TEAM[opp]||{}).name||opp)+" — adjust in the builder until the lock.","#/hub/lineup");
           CG.toast((row.name||("Line "+slot))+" dressed for "+CG.fmtDate(g.at),"ok");
           CG.router();

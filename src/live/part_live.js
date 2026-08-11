@@ -3721,8 +3721,11 @@ CG.AFTER.hub = function(param, qs){
   var sel = document.getElementById("cmPreview");
   if (sel) sel.addEventListener("change", function(){
     CG.setPreviewClub(this.value || null);
-    CG.toast(this.value ? "Previewing "+this.value : "Preview off", "ok");
-    if (CG.router) CG.router();
+    var v = this.value;
+    /* the club-keyed loads (trades, vetoes, lineups, saved lines, night plan) were fetched for the
+       PREVIOUS club — without a reload the new club's front office renders the old club's data */
+    var done = function(){ CG.toast(v ? "Viewing "+v+"’s front office" : "Preview off", "ok"); if (CG.router) CG.router(); };
+    if (CG.loadManagerData) CG.loadManagerData().then(done, done); else done();
   });
   if (CG._pvHubAfter) return CG._pvHubAfter(param, qs);
 };
@@ -9090,7 +9093,9 @@ CG.AFTER._admAudit = function(){
 CG.hubScheduleLive = function(){
   var me = CG.me(), lg = CG.lg;
   var club = CG.myClub(), t = CG.TEAM[club];
-  if (!me || !t) return '<div class="note">This account doesn’t run a club — the schedule desk belongs to club management.</div>';
+  /* `me` is only handed to serverVetoControls, which resolves the club itself — requiring a roster
+     row here locked out a commissioner previewing a club's front office (they may not play at all) */
+  if (!t) return '<div class="note">This account doesn’t run a club — the schedule desk belongs to club management.</div>';
   var upcoming = lg.schedule.filter(function(g){ return (g.home===club||g.away===club) && g.status!=="final"; })
     .sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · game operations</span>'+
