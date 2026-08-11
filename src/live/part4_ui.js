@@ -1362,6 +1362,23 @@ CG.router = function(){
      navigation swap the page underneath while leaving the overlay open on top of it. */
   if (CG.closeMobileNav) CG.closeMobileNav();
   var h = location.hash || "#/home";
+  /* OAuth returns land HERE with a bare fragment (#error=... or #access_token=...) that is not a
+     route, and this router used to 404 it — which swallowed Supabase's error message entirely. A
+     member whose second Discord account failed to sign in (same email as their first) saw a 404,
+     went back, and found their OLD cached session still active: "it keeps logging my old Discord
+     in". Route both shapes to the sign-in page instead — errors surface there, successes show a
+     completing state until onAuthStateChange lands the session. */
+  if (/^#(error|access_token|provider_token|code)=/.test(h) || h.indexOf("error_description=") >= 0){
+    var frag = new URLSearchParams(h.slice(1));
+    if (frag.get("error") || frag.get("error_description")){
+      CG._oauthErr = { code: frag.get("error_code") || frag.get("error") || "sign_in_failed",
+                       desc: frag.get("error_description") || "Discord sign-in did not complete." };
+    } else {
+      CG._oauthPending = true;   /* success fragment: supabase-js is consuming it right now */
+    }
+    try { history.replaceState(null, "", location.pathname + "#/signin"); } catch(e){}
+    h = "#/signin";
+  }
   var parts = h.replace(/^#\//,"").split("?")[0].split("/");
   var name = parts[0]||"home", param = parts.slice(1).join("/")||null;
   var qs = {};

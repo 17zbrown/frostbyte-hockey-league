@@ -671,6 +671,32 @@ CG.computeRole = function(profile){
   if (profile.role === "staff") return "staff";
   return "member";
 };
+/* What the profile's Discord fields SHOULD be, given who just signed in — or null when nothing
+   needs to change. handle_new_user writes discord_id once, at first-ever sign-in, and nothing
+   refreshed it after that: a member who moved to a new Discord account (or linked one) kept their
+   OLD id on file, so the guild sweep decorated the old account forever. The freshest identity —
+   by last_sign_in_at — is the one the member is actually using.
+   Pure decision, separated from the write so it can be tested. */
+CG.discordIdentityPatch = function(user, profile){
+  if (!user || !profile) return null;
+  var ids = (user.identities || []).filter(function(i){ return i.provider === "discord"; });
+  if (!ids.length) return null;
+  var cur = ids.slice().sort(function(a,b){
+    return Date.parse(b.last_sign_in_at||0) - Date.parse(a.last_sign_in_at||0); })[0];
+  var d = cur.identity_data || {};
+  var newId = d.provider_id || d.sub || cur.id || null;
+  if (!newId) return null;
+  var newName = d.custom_claims && d.custom_claims.global_name || d.full_name || d.name ||
+                d.user_name || d.preferred_username || null;
+  var patch = {};
+  if (String(profile.discord_id||"") !== String(newId)) patch.discord_id = String(newId);
+  if (newName && profile.discord_username !== newName) patch.discord_username = newName;
+  /* avatar follows the new account too — but never clobber a custom (supabase-hosted) picture */
+  var av = d.avatar_url || null;
+  var replaceable = !profile.avatar_url || /^https:\/\/(cdn|media)\.discordapp\./.test(String(profile.avatar_url));
+  if (av && replaceable && profile.avatar_url !== av) patch.avatar_url = av;
+  return Object.keys(patch).length ? patch : null;
+};
 CG.applySession = async function(session){
   CG.auth.user = session ? session.user : null;
   if (CG.auth.user){
@@ -687,6 +713,21 @@ CG.applySession = async function(session){
     ]);
     CG.auth.profile = mine[0]; CG.auth.registration = mine[1];
     CG.auth.staffApp = mine[2]; CG.auth.ownerApp = mine[3];
+    /* keep the profile's Discord fields matched to the account actually signed in — this is what
+       moves a member's league identity to their NEW Discord after a link or account switch */
+    var idPatch = CG.discordIdentityPatch(CG.auth.user, CG.auth.profile);
+    if (idPatch){
+      try {
+        var pr = await CG.sb.from("profiles").update(idPatch).eq("id", uid).select("id");
+        if (pr && !pr.error && pr.data && pr.data.length){
+          Object.assign(CG.auth.profile, idPatch);
+          if (CG.pingDiscordSync) CG.pingDiscordSync();   /* guild follows within seconds */
+          if (idPatch.discord_id) CG.toast("Your new Discord account is now linked — Discord roles follow in a couple of minutes","ok");
+        } else if (pr && (pr.error || !(pr.data||[]).length)){
+          console.warn("discord identity refresh blocked", pr.error && pr.error.message);
+        }
+      } catch(e){ console.warn("discord identity refresh failed", e); }
+    }
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
@@ -1254,23 +1295,68 @@ CG.enforceBan = function(){
 
 /* --- real sign-in page (replaces the demo seat picker) --- */
 CG.ROUTES.signin = function(){
+  /* an OAuth error bounced back from Discord/Supabase — say it, in their words, instead of the 404
+     this used to become. The commonest cause is a member's NEW Discord account sharing the email of
+     the one already on file, so that case gets the fix spelled out. */
+  var errNote = "";
+  if (CG._oauthErr){
+    var d = CG._oauthErr.desc || "";
+    var identityClash = /already (registered|linked|exists)|identity.*another user|email.*(exists|registered|in use)/i.test(d);
+    errNote = '<div class="note red" style="text-align:left;margin:0 auto 20px;max-width:560px">'+
+      '<b style="font-family:var(--f-disp)">Discord sign-in didn’t complete</b>'+
+      '<p class="small" style="margin-top:6px">'+esc(d)+'</p>'+
+      (identityClash
+        ? '<p class="small" style="margin-top:8px"><b>Switched Discord accounts?</b> Your league account is attached to your old Discord. Sign in with the OLD account once, come back to this page, and use “Link a new Discord account” — your history, roster spot and stats all carry over.</p>'
+        : "")+'</div>';
+  }
+  if (CG._oauthPending && !(CG.auth && CG.auth.profile)){
+    return '<section class="sec"><div class="shell" style="max-width:620px;text-align:center">'+
+      '<span class="eyebrow chr">One moment</span><h1 class="h-page" style="margin-top:10px">Completing sign-in…</h1>'+
+      '<p class="lede" style="margin:12px auto">Finishing up with Discord. This page refreshes itself.</p></div></section>';
+  }
   if (CG.auth && CG.auth.profile){
     var p = CG.auth.profile;
-    return '<section class="sec"><div class="shell" style="max-width:620px;text-align:center">'+
+    return '<section class="sec"><div class="shell" style="max-width:620px;text-align:center">'+errNote+
       '<span class="eyebrow chr">Account</span><h1 class="h-page" style="margin-top:10px">You’re signed in</h1>'+
       '<p class="lede" style="margin:12px auto 22px">Signed in as <b>'+esc(p.gamertag||p.display_name||"member")+'</b>'+(p.role?' · '+esc(p.role):'')+'.</p>'+
       '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'+
         '<a class="btn btn-chrome" href="#/hub">'+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
-        '<button class="btn btn-ghost" onclick="CG.signOut()">Sign out</button></div></div></section>';
+        '<button class="btn btn-ghost" onclick="CG.signOut()">Sign out</button></div>'+
+      '<div class="card" style="margin-top:26px;text-align:left"><div class="card-h"><h3>Switched to a new Discord account?</h3></div>'+
+        '<div class="card-b"><p class="small" style="color:var(--steel)">Link it here and your league account follows you — history, roster spot, stats, everything. Your name and roles in the league Discord update within a couple of minutes.</p>'+
+        '<button class="btn btn-ghost btn-sm" id="dcLink" style="margin-top:12px">'+CG.DISCORD_GLYPH+'Link a new Discord account</button>'+
+        '<p class="caption" id="dcLinkMsg" style="margin-top:8px">Discord opens in this browser — make sure it’s signed into the NEW account there (use “Not you?” on Discord’s page if it shows the old one).</p></div></div></div></section>';
   }
-  return '<section class="sec"><div class="shell" style="max-width:640px;text-align:center">'+
+  return '<section class="sec"><div class="shell" style="max-width:640px;text-align:center">'+errNote+
     '<span class="eyebrow chr">One account for everything</span>'+
     '<h1 class="h-page" style="margin-top:10px">Sign in with Discord</h1>'+
     '<p class="lede" style="margin:12px auto 22px">Your Discord account is your league account — sign in once and you’re in. Not in the Chel Gaming server yet? We’ll send you the invite right after you sign in.</p>'+
     '<button class="btn btn-lg" id="dcSignIn" style="background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
-    '<p class="caption" style="margin-top:12px">Signs you in with your Discord identity. Discord also shares your email — the league never uses or displays it.</p></div></section>';
+    '<p class="caption" style="margin-top:12px">Signs you in with your Discord identity. Discord also shares your email — the league never uses or displays it.</p>'+
+    '<p class="caption" style="margin-top:6px">Discord keeps choosing the wrong account? This browser is signed into that account at discord.com — hit “Not you?” on Discord’s page, or log out at discord.com first.</p></div></section>';
 };
-CG.AFTER.signin = function(){ var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); }); };
+CG.AFTER.signin = function(){
+  /* the error is shown once, then cleared, so it can't haunt later visits to this page */
+  var hadErr = !!CG._oauthErr; CG._oauthErr = null;
+  var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); });
+  var lk = document.getElementById("dcLink");
+  if (lk) lk.addEventListener("click", function(){
+    if (!CG.sb || !CG.sb.auth || !CG.sb.auth.linkIdentity){ CG.toast("Not connected — reload and retry","err"); return; }
+    lk.disabled = true;
+    try { localStorage.setItem("cg_return", JSON.stringify({ h:"#/signin", at:Date.now() })); } catch(e){}
+    CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } })
+      .then(function(r){
+        if (r && r.error){
+          lk.disabled = false;
+          var m = document.getElementById("dcLinkMsg");
+          /* fail-loud, verbatim: "manual linking disabled" here means the Supabase project setting
+             (Authentication → Sign-in methods → "Allow manual linking") needs turning on */
+          if (m){ m.textContent = "Couldn’t start the link: "+r.error.message; m.style.color = "var(--red)"; }
+        }
+      });
+  });
+  if (hadErr && CG.renderChrome) CG.renderChrome();
+};
 
 /* ================================================================
    PICKUP STATS IMPORTER — search an EASHL club, pick a club_private
