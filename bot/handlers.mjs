@@ -139,6 +139,21 @@ export function createHandlers(env, opts = {}) {
   async function onMemberAdd(m) {
     try {
       if (!m || !m.id || m.bot) { sum.skipped++; return "skip"; }
+      /* Presence first, before any greeting gate: the census sweep is minutes away, and the
+         site's departure rule (remove_departed_signups) reads guild_members — a rejoin has to
+         flip present=true instantly so nobody's sign-up is withdrawn while they are standing in
+         the server. Linked to the profile when we know it, since the rule judges presence
+         across a profile's accounts. Best-effort: a failure here must never block the welcome. */
+      try {
+        const links = await sbGet(`discord_links?discord_id=eq.${encodeURIComponent(m.id)}&select=profile_id`);
+        const row = { discord_id: String(m.id), username: m.username || m.globalName || null,
+          display_name: m.nick || m.globalName || null, is_bot: false,
+          joined_guild_at: m.joinedAt || new Date().toISOString(),
+          last_seen: new Date().toISOString(), present: true };
+        if (links[0] && links[0].profile_id) row.profile_id = links[0].profile_id;
+        await sbPost("guild_members?on_conflict=discord_id", [row], "resolution=merge-duplicates,return=minimal");
+        sum.presenceMarked = (sum.presenceMarked || 0) + 1;
+      } catch (e) { recordError(`presence ${m.id}`, e); }
       // Community membership screening: greet only once they're through the gate.
       // The pending->false transition arrives as a member update (see onMemberUpdate).
       if (m.pending) { sum.skipped++; return "pending"; }

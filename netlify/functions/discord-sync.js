@@ -251,15 +251,29 @@ async function removeDepartedSignups(sum) {
   sum.signupsRemoved = removed.map((r) => r.gamertag || r.profile_id);
   const chId = sum.__departChanId;
   if (!chId) return;
-  try {
-    await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
-      title: "📋 Sign-up" + (removed.length === 1 ? "" : "s") + " withdrawn",
-      description: sum.signupsRemoved.map((n) => "• **" + n + "**").join("\n") +
-        "\n\nOut of the server for over " + SIGNUP_REMOVAL_GRACE_HOURS + " hours while still on the " +
-        "sign-up board — the registration was archived and removed from the pool, and the member " +
-        "was told on the site how to come back. Re-registering after a rejoin counts as a fresh sign-up.",
-      color: 0xC2410C, timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
-  } catch (e) { sum.errors.push({ signupRemovalPost: String(e.message || e) }); }
+  /* Discord caps an embed description at 4096 chars, and the big batches land exactly when the
+     record matters most (first tick against a backlog). Chunk the names so no batch size can
+     400 the whole announcement away; each chunk posts independently. */
+  const blurb = "\n\nOut of the server for over " + SIGNUP_REMOVAL_GRACE_HOURS + " hours while still on the " +
+    "sign-up board — the registration was archived and removed from the pool, and the member " +
+    "was told on the site how to come back. Re-registering after a rejoin counts as a fresh sign-up.";
+  const chunks = [];
+  let cur = [], len = 0;
+  for (const n of sum.signupsRemoved) {
+    const line = "• **" + n + "**";
+    if (cur.length && len + line.length + blurb.length + 64 > 4096) { chunks.push(cur); cur = []; len = 0; }
+    cur.push(line); len += line.length + 1;
+  }
+  if (cur.length) chunks.push(cur);
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
+        title: "📋 Sign-up" + (sum.signupsRemoved.length === 1 ? "" : "s") + " withdrawn" +
+          (chunks.length > 1 ? " (" + (i + 1) + "/" + chunks.length + ")" : ""),
+        description: chunks[i].join("\n") + (i === chunks.length - 1 ? blurb : ""),
+        color: 0xC2410C, timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
+    } catch (e) { sum.errors.push({ signupRemovalPost: String(e.message || e) }); }
+  }
 }
 
 async function sbUpsertCfg(key, value) {
@@ -1546,6 +1560,12 @@ export default async (req) => {
   // collapse rapid repeat invocations (spam / abuse); scheduled runs are 5 min apart so this never blocks them
   if (await ranRecently("discord-sync", 6)) return new Response("skipped: ran moments ago", { status: 200 });
 
+  /* Everything below runs inside one try: ranRecently already stamped the heartbeat, so a throw
+     from any of the early loads would otherwise leave a fresh heartbeat next to a stale ok:true
+     result — the Automations panel would show green forever while nothing ran. The catch writes
+     a failing result where the panel reads it. */
+  try {
+
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username");
   // staff department picks (site) -> department Discord roles for the officials who chose them
   const deptByProfile = {};
@@ -1984,6 +2004,15 @@ export default async (req) => {
   try { await trackDepartures(memberById, memberListOk, links, teams, sum); }
   catch (e) { sum.errors.push({ departures: String(e.message || e) }); }
 
+  /* Sign-ups whose owner has been out of the server past the grace window are withdrawn.
+     Deliberately RIGHT after the census lands: the role passes below can take minutes of
+     rate-limited Discord calls, and a member whose grace expires this tick but who rejoins
+     during that stretch should not be caught by a stale read. Candidates were flagged whole
+     ticks ago (the grace is measured in hours), so this never needs the passes below to run
+     first. */
+  try { await removeDepartedSignups(sum); }
+  catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
+
   for (const m of links) {
     if (!m.discord_id) continue;
     try {
@@ -2062,11 +2091,6 @@ export default async (req) => {
     }
   } catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
 
-  /* (2c) sign-ups whose owner has been out of the server past the grace window are withdrawn.
-     Runs after the presence passes so this tick's in_guild flags are already settled. */
-  try { await removeDepartedSignups(sum); }
-  catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
-
   // (3) resolve the server for any game whose 30-min pick-lock has passed (auto-fills the match card)
   try {
     const rr = await fetch(`${SB_URL}/rest/v1/rpc/resolve_due_servers`, { method: "POST", headers: sbHead(), body: "{}" });
@@ -2098,6 +2122,18 @@ export default async (req) => {
       }), updated_at: new Date().toISOString() }) });
   } catch {}
   return new Response(JSON.stringify(sum), { status: 200, headers: { "content-type": "application/json" } });
+
+  } catch (e) {
+    // the heartbeat is already stamped — record the failure or the panel lies green
+    try {
+      await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ key: "rl_discord-sync_result", value: JSON.stringify({
+          at: new Date().toISOString(), ok: false, errCount: 1,
+          lastError: String(e.message || e).slice(0, 200)
+        }), updated_at: new Date().toISOString() }) });
+    } catch {}
+    return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 500, headers: { "content-type": "application/json" } });
+  }
 };
 
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose

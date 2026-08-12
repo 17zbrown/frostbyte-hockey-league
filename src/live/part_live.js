@@ -4123,6 +4123,9 @@ CG.admPreseason = function(){
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (returning veteran) or <b>Undrafted FA</b> (first-year → rookie bidding). There is no games-played minimum — every registrant is draft-eligible. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
+  /* sign-ups withdrawn automatically (left the Discord — Rule 1.1). Filled async from the
+     archive; the card stays hidden when there is nothing to show. */
+  h+='<div class="card" style="margin-top:18px;display:none" id="psWithdrawn"><div class="card-h"><h3>Withdrawn sign-ups</h3><span class="chip">left the Discord · Rule 1.1</span></div><div class="card-b" id="psWithdrawnB"></div></div>';
   /* per-club roster ledger — expand a club to see and remove its players (capacity stays visible while assigning) */
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
     '<div class="card-b club-led">'+
@@ -4237,6 +4240,24 @@ CG.AFTER._preseason = function(){
   document.querySelectorAll("[data-reg-remove]").forEach(function(b){ b.addEventListener("click", function(){
     CG.removeFromRoster(this.getAttribute("data-reg-remove"), this.getAttribute("data-club"), this.getAttribute("data-name"), this.getAttribute("data-mgmt")==="1");
   }); });
+  /* the archive behind Rule 1.1's automatic withdrawal — RLS shows it to the office only */
+  CG.sb.from("season_registration_removals").select("gamertag,removed_at,reason,registration")
+    .order("removed_at",{ascending:false}).limit(100).then(function(r){
+    var rows=(r&&r.data)||[];
+    if((r&&r.error)||!rows.length) return;                      /* nothing to show, card stays hidden */
+    var card=document.getElementById("psWithdrawn"), body=document.getElementById("psWithdrawnB");
+    if(!card||!body) return;
+    var d=function(v){ var t=v?Date.parse(v):NaN; return isNaN(t)?"—":CG.fmtFull(t); };
+    body.innerHTML='<div class="tblwrap"><table class="tbl compact"><caption class="sr">Withdrawn sign-ups</caption><thead><tr>'+
+      '<th class="tleft">Player</th><th>Signed up</th><th>Withdrawn</th><th class="tleft">Why</th></tr></thead><tbody>'+
+      rows.map(function(x){ var reg=x.registration||{};
+        return '<tr><td class="tleft"><span class="nm">'+esc(x.gamertag||"—")+'</span></td>'+
+          '<td class="tnum">'+d(reg.created_at)+'</td><td class="tnum">'+d(x.removed_at)+'</td>'+
+          '<td class="tleft"><span class="caption">'+(x.reason==="left_discord"?"left the Discord (automatic, Rule 1.1)":esc(x.reason||"—"))+'</span></td></tr>'; }).join("")+
+      '</tbody></table></div>'+
+      '<p class="caption" style="margin-top:10px">Withdrawn automatically after a day out of the server. The full registration is archived with its original sign-up date, so the office can restore one that was removed in error; otherwise the member simply rejoins and signs up again.</p>';
+    card.style.display="";
+  });
 };
 CG.removeFromRoster = function(profileId, club, name, isMgmt){
   CG.confirm("Remove "+(name||"this player")+(club?" from "+club:"")+"?",
@@ -7759,6 +7780,9 @@ CG.AFTER._admAutomations = function(){
       tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
       var res = results[a.key];
       var failed = res && res.ok === false;
+      /* the departure rule's visible pulse: how many sign-ups the last sweep withdrew */
+      if (a.key === "discord-sync" && res && res.signupsRemoved > 0 && tsEl)
+        tsEl.textContent += " · withdrew " + res.signupsRemoved + " sign-up" + (res.signupsRemoved === 1 ? "" : "s");
       var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
       if (failed){
         stEl.textContent = "Failing";
