@@ -152,6 +152,14 @@ console.log("\n— the profile follows the FRESHEST Discord identity");
   p = CG.discordIdentityPatch(user([]), { discord_id: "111" });
   A("no discord identity = no patch", p === null);
 
+  /* the league office can PIN a profile to a Discord account the user has never signed in with —
+     the three-account tangle: site login uses account A, the server has account B. A pinned id
+     belongs to none of the user's identities and must survive every refresh. */
+  p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "999-pinned-by-office", discord_username: "server-account" });
+  A("an office-pinned foreign discord_id is never reverted", p === null);
+  p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "222", discord_username: "old-name" });
+  A("...but an id the user owns still refreshes normally", p && p.discord_username === "new-name");
+
   const live = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_live.js"), "utf8");
   A("applySession applies the patch fail-loud (checks rows came back)",
     /update\(idPatch\)\.eq\("id", uid\)\.select\("id"\)/.test(live));

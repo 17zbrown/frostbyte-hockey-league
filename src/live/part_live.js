@@ -686,6 +686,13 @@ CG.discordIdentityPatch = function(user, profile){
   var d = cur.identity_data || {};
   var newId = d.provider_id || d.sub || cur.id || null;
   if (!newId) return null;
+  /* A discord_id that belongs to NONE of this user's identities was pinned by the league office —
+     e.g. a member whose in-server Discord differs from the one their site login uses (three-account
+     tangles are real). A pin is an override, not staleness: leave it. The moment the pinned account
+     is linked or signs in it becomes an identity and normal refresh resumes. */
+  var knownIds = ids.map(function(i){
+    var dd = i.identity_data || {}; return String(dd.provider_id || dd.sub || i.id || ""); });
+  if (profile.discord_id && knownIds.indexOf(String(profile.discord_id)) < 0) return null;
   var newName = d.custom_claims && d.custom_claims.global_name || d.full_name || d.name ||
                 d.user_name || d.preferred_username || null;
   var patch = {};
