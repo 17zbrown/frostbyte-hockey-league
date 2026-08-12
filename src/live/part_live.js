@@ -2039,7 +2039,7 @@ CG.ROUTES.register = function(){
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
-    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1). By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
 };

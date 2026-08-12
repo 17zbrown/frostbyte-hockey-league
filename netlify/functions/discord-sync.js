@@ -233,6 +233,35 @@ async function announceDepartures(gone, profByDiscord, codeByTeam, registered, s
   }
 }
 
+/* ---- a sign-up does not survive leaving the server ---------------------------------------
+   Registering requires being in the Discord (require_guild_membership blocks the INSERT), so the
+   list has to hold the same way on the way out. The removal itself is one SECURITY DEFINER RPC:
+   pending sign-ups only (never a drafted player's), archived to season_registration_removals
+   before deletion, and the member gets a site notification whose click is the server invite.
+   The grace window exists for the same reason trackDepartures has its census guards — a
+   kick-and-rejoin or a bad read must never cost anyone their sign-up date. */
+const SIGNUP_REMOVAL_GRACE_HOURS = 24;
+async function removeDepartedSignups(sum) {
+  let removed = [];
+  try {
+    removed = (await sbPost("rpc/remove_departed_signups",
+      { p_grace_hours: SIGNUP_REMOVAL_GRACE_HOURS }, "return=representation")) || [];
+  } catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); return; }
+  if (!removed.length) return;
+  sum.signupsRemoved = removed.map((r) => r.gamertag || r.profile_id);
+  const chId = sum.__departChanId;
+  if (!chId) return;
+  try {
+    await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
+      title: "📋 Sign-up" + (removed.length === 1 ? "" : "s") + " withdrawn",
+      description: sum.signupsRemoved.map((n) => "• **" + n + "**").join("\n") +
+        "\n\nOut of the server for over " + SIGNUP_REMOVAL_GRACE_HOURS + " hours while still on the " +
+        "sign-up board — the registration was archived and removed from the pool, and the member " +
+        "was told on the site how to come back. Re-registering after a rejoin counts as a fresh sign-up.",
+      color: 0xC2410C, timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
+  } catch (e) { sum.errors.push({ signupRemovalPost: String(e.message || e) }); }
+}
+
 async function sbUpsertCfg(key, value) {
   await rfetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ key, value: String(value), updated_at: new Date().toISOString() }) });
@@ -2033,6 +2062,11 @@ export default async (req) => {
     }
   } catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
 
+  /* (2c) sign-ups whose owner has been out of the server past the grace window are withdrawn.
+     Runs after the presence passes so this tick's in_guild flags are already settled. */
+  try { await removeDepartedSignups(sum); }
+  catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
+
   // (3) resolve the server for any game whose 30-min pick-lock has passed (auto-fills the match card)
   try {
     const rr = await fetch(`${SB_URL}/rest/v1/rpc/resolve_due_servers`, { method: "POST", headers: sbHead(), body: "{}" });
@@ -2048,6 +2082,7 @@ export default async (req) => {
         unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
+        signupsRemoved: (sum.signupsRemoved || []).length,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
         automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
@@ -2075,4 +2110,5 @@ export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy
   BOARD_EVERYONE_ALLOW, BOARD_EVERYONE_DENY, BOARD_POSTER_ALLOW,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
+  removeDepartedSignups, SIGNUP_REMOVAL_GRACE_HOURS,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };
