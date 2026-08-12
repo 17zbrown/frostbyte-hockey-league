@@ -2692,6 +2692,7 @@ CG.ROUTES.staffapply = function(){
   var app = CG.auth.staffApp;
   var statusNote = app
     ? (app.status==="pending" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Application received.</b> The league office reviews staff applications — you’ll get a notification either way. You can update yours below.</div>'
+      : app.status==="waitlisted" ? '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re on the staff waitlist.</b> Every seat is filled right now — the moment one opens, the longest-waiting application is appointed automatically, and you’ll be notified the second it’s you.</div>'
       : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply.</div>' : "")
     : "";
   var v = function(k){ return app ? esc(app[k]||"") : ""; };
@@ -2699,7 +2700,7 @@ CG.ROUTES.staffapply = function(){
   var chat = app && app.id ? CG.appChatSection("staff", app.id, {office:false}) : "";
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+chat+
     '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
-      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
+      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":app.status==="waitlisted"?"chip-chrome":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
     '<div class="fld"><span>Departments * <span class="caption">(pick up to 2)</span></span><p class="caption" style="margin:2px 0 8px">Name the two departments you’d work — the league office assigns duties from here. Two keeps an application honest about where you’ll actually spend your time.</p>'+
       '<div class="stack" style="gap:8px">'+CG.STAFF_DEPARTMENTS.map(function(d){
         var on = pickedDepts.indexOf(d[0])>=0;
@@ -6819,7 +6820,11 @@ CG.appBallotSection = function(type, a, decided){
       '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
         '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
-        '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button></div></div>';
+        '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button>'+
+        (a.status==="waitlisted"
+          ? '<span class="chip chip-chrome btn-sm" style="align-self:center">On the waitlist</span>'
+          : '<button class="btn btn-ghost btn-sm" data-app-waitlist="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" title="No open spot right now — queue them. When a seat opens they are appointed automatically, in waitlist order.">Waitlist</button>')+
+        '</div></div>';
   }
 
   h += '<p class="caption" style="margin-top:12px">'+(decided
@@ -6919,6 +6924,19 @@ CG.AFTER._applicationDetail = function(){
       var d = r.data || {};
       CG.toast(d.message || (club ? "Club chosen" : "Choice cleared"), d.ok === false ? "err" : "ok");
       CG.reloadLeague();   /* a placement changes the club list, not just this row */
+    });
+  }); });
+  /* waitlist — no spot now; auto-appointed when one opens, in waitlist order */
+  document.querySelectorAll("[data-app-waitlist]").forEach(function(b){ b.addEventListener("click", function(){
+    var t = this.getAttribute("data-vt"), id = this.getAttribute("data-vid");
+    CG.confirm("Put this application on the waitlist?",
+      "No spot is filled now. The moment a "+(t==="owner"?"club owner seat opens (an owner resigns or is not renewed)":"staff seat opens")+", the oldest waitlisted application is appointed automatically — the applicant and the commissioners are notified. Waitlist order is first on, first served.",
+      "Waitlist", function(){
+      CG.sb.rpc("waitlist_application", { p_type:t, p_id:id }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t waitlist: "+r.error.message,"err"); return; }
+        CG.toast("Waitlisted — they’ll be appointed automatically when a spot opens","ok");
+        CG.reloadLeague();
+      });
     });
   }); });
   /* commissioner override — decide immediately, bypassing the reviewer vote */
