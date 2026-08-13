@@ -137,8 +137,11 @@ console.log("\n— the sweep wiring and the places the rule is told to humans");
   const content = readFileSync(new URL("../src/live/part3_content.js", import.meta.url), "utf8");
   A("Rule 1.1 carries the automatic-withdrawal rule",
     /A registered player who leaves the league Discord before being placed on a club has their sign-up withdrawn automatically/.test(content));
-  A("...and the rulebook changelog leads with v2.21",
-    /"changelog":\[\{"version":"2\.21"/.test(content));
+  /* pinned by CONTENT, not by version number — the changelog head moves with every rulebook bump,
+     and this assertion is about the rule being documented, not about which release carried it */
+  A("...and the rulebook changelog documents the automatic withdrawal",
+    /"changelog":\[/.test(content) &&
+    /leaves the league Discord has their pending sign-up withdrawn automatically/.test(content));
   A("the season-walkthrough chapter mentions it where self-withdrawal is described",
     /leaving the league Discord does the same thing automatically after a day's grace \(Rule 1\.1\)/.test(content));
 }

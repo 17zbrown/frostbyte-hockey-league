@@ -1315,7 +1315,7 @@ CG.hubRoster = function(qs){
       '<div><b class="num" style="font-size:22px">9</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
       '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
       '<div><b class="num" style="font-size:22px">4</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
-    '<p class="caption" style="margin-top:12px">There is no games-played minimum, weekly or seasonal (Rule 5.2). In the playoffs no skater may appear in more than four games of a single series; goaltenders are exempt and can play all seven if needed (Rule 8.3).</p></div></div>';
+    '<p class="caption" style="margin-top:12px">Weekly caps are the limit, not a minimum (Rule 5.2). In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
   h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+

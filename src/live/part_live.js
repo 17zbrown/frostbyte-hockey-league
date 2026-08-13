@@ -429,8 +429,9 @@ CG.buildLiveLeague = async function(){
   var priorSeason={};
   roster.forEach(function(rs){ if(seasonId && rs.season_id!==seasonId) priorSeason[rs.profile_id]=true; });
   lg.preGp=preGp; lg.careerGp=careerGp;
-  /* veteran = drafted before, rostered a prior season, or 5+ career games. Since rulebook v2.7
-     this is DISPLAY-ONLY (a badge) — eligibility no longer reads it; there is no games minimum. */
+  /* veteran = drafted before, rostered a prior season, or 5+ career games. Rulebook v2.22 makes
+     this load-bearing again: a veteran is a RETURNING player and is exempt from the pre-season
+     appearance requirement (Rule 2.8). */
   lg.isVeteran = function(pid){ return !!(draftedEver[pid] || priorSeason[pid] || (careerGp[pid]||0)>=5); };
   /* returning (FREE-AGENCY track, Rule 2.2) = actually been in the league before (drafted or
      rostered a prior season). This is what separates open free agency (returning players) from
@@ -3080,7 +3081,7 @@ CG.draftPickModalLive = function(pickId, forCode){
   CG.modal("Draft a player"+(forCode?" — "+esc(forCode):""),
     '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
     '<div id="modPickList" style="max-height:320px;overflow:auto">'+rows("")+'</div>'+
-    '<p class="caption" style="margin-top:10px">Every registered player is draft-eligible — there is no games-played requirement (Rule 2.8).</p>',
+    '<p class="caption" style="margin-top:10px">A randomly assigned player needs five pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button>');
   function wire(){
     document.querySelectorAll("[data-modpick]").forEach(function(b){ b.addEventListener("click", function(){
@@ -3315,7 +3316,10 @@ CG.admDraftLive = function(){
   var hasPicks = picks.length>0;
   var cur = CG.draftCurPick();
   var pool = lg.draftPool||[];
-  var eligible = pool;   /* v2.7: no games minimum — the whole pool is draft-eligible */
+  /* Rule 2.8 (v2.22): a randomly assigned player who is not a returning player needs five
+     pre-season appearances. The DB is the authority (is_draft_eligible, enforced inside
+     draft_make_pick); this mirrors it so the desk shows the same pool the pick will accept. */
+  var eligible = pool.filter(function(r){ return CG.isDraftEligible(r.profile_id); });
   var made = picks.filter(function(p){ return p.used; }).length;
   var running = st && (st.status==="live"||st.status==="paused");
   var sn = st ? st.season_number : ((CG.SEASON&&CG.SEASON.number)||1);
@@ -4010,8 +4014,19 @@ CG.AFTER.messages = function(param){
                    draft pool — this is what most "10 free agents" actually are). NOT a free agent.
    · Free agent  — POST-draft returning veteran, unrostered, signable in open free agency (Rule 2.2).
    · Undrafted FA — POST-draft first-year who went undrafted → rookie bidding board (Rule 2.2).
-                    (v2.7: there is no games minimum, so the old Draft-ineligible class is gone.)
+                    (v2.22: Rule 2.8 restored the five-game pre-season requirement, so an unmet one shows as its own state.)
    · Declined / Not signed up — kept out of assignment / no registration. */
+/* Rule 2.8 (v2.22): the pre-season appearance requirement, mirrored from the database's
+   is_draft_eligible() so the site never offers a player the draft would refuse. A returning
+   player (drafted before, rostered a prior season, or 5+ career games) is exempt; everyone else
+   needs five pre-season appearances. Management never reaches this test — they hold a roster
+   spot, so they are out of the pool entirely. */
+CG.PRESEASON_MIN_GP = 5;
+CG.isDraftEligible = function(pid){
+  var lg = CG.lg || {};
+  if (lg.isVeteran && lg.isVeteran(pid)) return true;
+  return ((((lg.preGp||{})[pid])||{}).gp || 0) >= CG.PRESEASON_MIN_GP;
+};
 CG.poolState = function(pid){
   var lg=CG.lg||{};
   var seat=(CG.TEAMS||[]).some(function(t){ return t.owner===pid || t.gm===pid || t.agm===pid; });
@@ -4022,6 +4037,11 @@ CG.poolState = function(pid){
   if (reg.status==="declined") return { key:"declined", label:"Declined", chip:"chip-loss" };
   if ((CG.contractHeldIds?CG.contractHeldIds():{})[pid]) return { key:"under_contract", label:"Under contract", chip:"chip-win" };
   var draftDone=!!(lg.draftState && String(lg.draftState.status)==="complete");
+  /* v2.22: a player who has not met the pre-season requirement is not in the draft (Rule 2.8).
+     He still plays — Rule 2.2 places him on a club automatically — so this is a distinct state,
+     not a dead end. */
+  if (!draftDone && !CG.isDraftEligible(pid))
+    return { key:"needs_preseason", label:"Needs pre-season games", chip:"chip-warn" };
   if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
   if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
   return { key:"undrafted_fa", label:"Undrafted FA", chip:"chip-warn" };   /* v2.7: no minimum, no ineligible class */
@@ -4057,7 +4077,7 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. Every registered player is draft-eligible — there is no games-played minimum. Free agency runs a full week; puck drop waits for it to close.</p></div>'
+      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs five pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Free agency runs a full week; puck drop waits for it to close.</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions (pool + dl are defined once near the top of this function) */
@@ -4097,7 +4117,8 @@ CG.admPreseason = function(){
                 : seatHolder?'<span class="chip chip-chrome" style="font-size:9px">Management — exempt</span>'
                 : late?'<span class="chip chip-warn">Late — random-assigned</span>'
                 : lg.isVeteran(r.profile_id)?'<span class="chip">Veteran</span>'
-                : '<span class="chip chip-win">Draft-eligible</span>';   /* v2.7: no games minimum */
+                : !CG.isDraftEligible(r.profile_id)?'<span class="chip chip-warn" title="Rule 2.8: five pre-season appearances, or a returning player">Needs pre-season games ('+(pre.gp||0)+'/5)</span>'
+                : '<span class="chip chip-win">Draft-eligible</span>';   /* v2.22: Rule 2.8 */
         /* status uses the lifecycle classifier: rostered/mgmt keep their combined badge; every
            unrostered registrant gets its true state (Signed up / Free agent / Undrafted FA / …) */
         var ps=CG.poolState(r.profile_id);
@@ -4121,7 +4142,7 @@ CG.admPreseason = function(){
           '<td class="tright reg-act">'+actions+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (returning veteran) or <b>Undrafted FA</b> (first-year → rookie bidding). There is no games-played minimum — every registrant is draft-eligible. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (returning veteran) or <b>Undrafted FA</b> (first-year → rookie bidding). A randomly assigned player needs five pre-season appearances to reach the draft (Rule 2.8); returning players are exempt, and anyone short is placed on a club automatically instead. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   /* sign-ups withdrawn automatically (left the Discord — Rule 1.1). Filled async from the
      archive; the card stays hidden when there is nothing to show. */
@@ -4505,7 +4526,7 @@ CG.distributeRookies = function(){
   });
   if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
   CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
-    "Retired by rulebook v2.7 — with no games-played minimum, every registrant is draft-eligible and this job is a stamped no-op. "+
+    "Currently a stamped no-op. Rulebook v2.22 restored the five-game pre-season requirement (Rule 2.8), so this job's placement role is under review by the league office. "+
     "Running it is harmless and simply re-verifies that nothing needs placing.",
     "Distribute rookies", function(){
     CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
@@ -7691,7 +7712,7 @@ CG.AUTOMATIONS = [
   { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
   { key:"lfg-timers",       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
   { key:"gateway-bot",      name:"Gateway bot (always on)",   every:"Continuously, from its own server", desc:"A live Discord connection — welcomes and departure logs land in about a second instead of on the next sweep. The sweeps above stay on as its safety net, so “never ran” here just means the bot’s server isn’t set up yet.", noRun:true },
-  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"Retired by rulebook v2.7 — with no games-played minimum, no registrant is ever draft-ineligible. Kept as a stamped no-op so the watchdog sees a healthy heartbeat.", rpc:"distribute_unproven_rookies" },
+  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"A stamped no-op today. Rulebook v2.22 restored the five-game pre-season requirement (Rule 2.8), so whether this job places short-of-five players again is a league-office decision.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
   { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
@@ -8903,14 +8924,24 @@ CG.AFTER._admSeasons = function(){
    pick the series length. Clinches + series conclusion are DB triggers; this
    panel is where a human sets each round's matchups.
    ================================================================ */
+/* Rule 8.1 (v2.22): the top FOUR clubs in each division qualify, an eight-club field, seeded
+   1..4 inside their own division. The returned order is division-major — [E1,E2,E3,E4,W1..W4] —
+   and the bracket generator relies on that grouping to keep each division's rounds together. */
+CG.PLAYOFF_PER_DIV = 4;
 CG.playoffSeeds = function(){
   var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
-  var winners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
-  winners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
-  var rest = [];
-  DIVS.forEach(function(dv){ CG.standings(CG.lg,dv).slice(1,3).forEach(function(r){ rest.push(r); }); });
-  rest.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
-  return winners.concat(rest).slice(0,6);
+  var out = [];
+  DIVS.forEach(function(dv){
+    CG.standings(CG.lg,dv).slice(0,CG.PLAYOFF_PER_DIV).forEach(function(r,i){
+      out.push(Object.assign({}, r, { div:dv, divSeed:i+1 }));
+    });
+  });
+  return out;
+};
+/* how many clubs the bracket needs — every division must be able to field its four */
+CG.playoffFieldSize = function(){
+  var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
+  return DIVS.length * CG.PLAYOFF_PER_DIV;
 };
 CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 3; };
 /* seeds are FROZEN when the quarter-finals are generated — later rounds must
@@ -8918,7 +8949,7 @@ CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format
    regular-season final would otherwise rewrite the bracket mid-playoffs) */
 CG.frozenSeeds = function(){
   var v = CG._siteCfg && CG._siteCfg["playoff_seeds_"+((CG.SEASON&&CG.SEASON.number)||1)];
-  return (Array.isArray(v) && v.length===6) ? v : null;
+  return (Array.isArray(v) && v.length===CG.playoffFieldSize()) ? v : null;
 };
 CG.admPlayoffsLive = function(){
   var lg = CG.lg, s = CG.SEASON||{};
@@ -9012,8 +9043,8 @@ CG.generatePlayoffRound = function(round){
        auto-ingested later would silently re-seed a bracket already in play */
     var regLeft=(CG.lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final"; }).length;
     if (regLeft){ CG.toast(regLeft+" regular-season game"+(regLeft===1?"":"s")+" still unplayed — finish or clear them before seeding the bracket","err"); return; }
-    var live=CG.playoffSeeds();
-    if (live.length<6){ CG.toast("Need six seeds to build a bracket","err"); return; }
+    var live=CG.playoffSeeds(), need=CG.playoffFieldSize();
+    if (live.length<need){ CG.toast("Need "+need+" seeds to build a bracket — every division must have at least "+CG.PLAYOFF_PER_DIV+" clubs","err"); return; }
     seedCodes=live.map(function(r){ return r.code; });
     freezeAfter=true;
   } else {
@@ -9023,17 +9054,30 @@ CG.generatePlayoffRound = function(round){
   }
   var seedRank={}; seedCodes.forEach(function(c,i){ seedRank[c]=i+1; });
   var matchups=[]; /* [[homeCode, awayCode], ...] higher seed = home */
+  /* Rule 8.1 (v2.22): each division plays its own bracket. Round 1 is 1v4 and 2v3 inside every
+     division, round 2 is the division final, round 3 is the two division champions. seedCodes is
+     division-major in blocks of PLAYOFF_PER_DIV, so the blocks are the divisions. */
+  var per = CG.PLAYOFF_PER_DIV;
+  var divOf = function(code){ return (CG.TEAM[code]||{}).div || "?"; };
   if (round===1){
-    matchups=[[seedCodes[2],seedCodes[5]],[seedCodes[3],seedCodes[4]]];
+    matchups=[];
+    for (var b=0; b+per-1 < seedCodes.length; b+=per){
+      matchups.push([seedCodes[b],   seedCodes[b+3]]);   /* 1 v 4 */
+      matchups.push([seedCodes[b+1], seedCodes[b+2]]);   /* 2 v 3 */
+    }
   } else if (round===2){
     var qf=CG.seriesWinners(1);
-    if (qf.length<2){ CG.toast("Both quarter-finals must finish first","err"); return; }
-    qf.sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
-    /* seed 1 draws the lowest surviving seed, seed 2 the highest */
-    matchups=[[seedCodes[0], qf[qf.length-1].code],[seedCodes[1], qf[0].code]];
+    if (qf.length < seedCodes.length/2){ CG.toast("Every division semi-final must finish first","err"); return; }
+    /* pair the two survivors within each division, higher seed at home */
+    var byDiv={};
+    qf.forEach(function(r){ (byDiv[divOf(r.code)]=byDiv[divOf(r.code)]||[]).push(r); });
+    matchups=Object.keys(byDiv).sort().map(function(dv){
+      var pair=byDiv[dv].sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
+      return pair.length>1 ? [pair[0].code, pair[1].code] : null;
+    }).filter(Boolean);
   } else {
     var sf=CG.seriesWinners(2);
-    if (sf.length<2){ CG.toast("Both semi-finals must finish first","err"); return; }
+    if (sf.length<2){ CG.toast("Both division finals must finish first","err"); return; }
     sf.sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
     matchups=[[sf[0].code, sf[1].code]];
   }
@@ -9056,7 +9100,7 @@ CG.generatePlayoffRound = function(round){
         scheduled_at:CG.etISO(day, CG.NIGHT_SLOTS[gi%CG.NIGHT_SLOTS.length]||"21:00"), status:"scheduled" });
     }
   });
-  var rn = round===1?"quarter-finals":round===2?"semi-finals":"final";
+  var rn = round===1?"division semi-finals":round===2?"division finals":"final";
   CG.confirm("Generate the "+rn+"?",
     matchups.map(function(m){ return m[0]+" vs "+m[1]; }).join(" · ")+" — best of "+bestOf+", "+rows.length+" games."+
     (freezeAfter?" Seeding locks in with this bracket.":"")+" Unneeded games disappear once a series is decided.",
@@ -9675,7 +9719,7 @@ CG.hubFreeAgents = function(){
               ((!canSign)?' title="Signing opens with free agency"':full?' title="Your roster is full"':'')+'>Sign</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every registered player is draft-eligible — there is no games-played minimum (Rule 5.2, v2.7). Signing is enforced server-side: the window, eligibility, and your roster space are all checked again on the click.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Draft eligibility needs five pre-season appearances unless the player is returning (Rule 2.8, v2.22); a player who misses it still plays, placed on a club under Rule 2.2. Signing is enforced server-side: the window, eligibility, and your roster space are all checked again on the click.</span></div>'
     :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Unsigned, draft-eligible players land here after the draft. Check back once free agency opens.</p></div></div>')+'</div>';
 
   /* ---- Rookie bidding board (Rule 2.2): $750K start, $250K increments, 12h resets per bid ---- */

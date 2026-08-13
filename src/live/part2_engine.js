@@ -599,13 +599,16 @@ CG.h2hPoints = function(lg, codes){
 CG.standings = function(lg, div){
   var rows = CG.TEAMS.filter(function(t){ return !div || t.div===div; })
     .map(function(t){ return Object.assign({team:t}, lg.teams[t.code]); });
-  var pct = function(r){ return r.gp ? (r.pts / (r.gp * 2)) : 0; };
-  /* group by points percentage first, then order within each tied group by Rule 8.2 */
-  rows.sort(function(a, b){ return pct(b) - pct(a); });
+  /* Rule 8.1 (v2.22): clubs are ordered by TOTAL POINTS EARNED. The table is deliberately not
+     adjusted for games in hand — a club that has played more games may stand higher on points
+     alone, and the club beneath it holds the chance to pass it by playing what it is owed.
+     Ties in points are then broken by Rule 8.2. */
+  var pts = function(r){ return r.pts || 0; };
+  rows.sort(function(a, b){ return pts(b) - pts(a); });
   var out = [], i = 0;
   while (i < rows.length){
     var j = i + 1;
-    while (j < rows.length && Math.abs(pct(rows[j]) - pct(rows[i])) < 1e-9) j++;
+    while (j < rows.length && pts(rows[j]) === pts(rows[i])) j++;
     var grp = rows.slice(i, j);
     if (grp.length > 1){
       var h2h = CG.h2hPoints(lg, grp.map(function(r){ return r.code; }));
