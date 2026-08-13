@@ -5304,16 +5304,22 @@ CG.assertCommissioner = async function(){
   var isComm = await CG.sb.rpc("is_commissioner");
   if (isComm && isComm.error) throw new Error(isComm.error.message);
   if (!isComm.data){
-    /* the token the server sees isn't a commissioner — one refresh, one recheck */
-    await CG.sb.auth.refreshSession();
+    /* the token the server sees isn't a commissioner — one refresh, one recheck. Keep the
+       refreshed session: the old one is what the server just rejected. */
+    var rf2 = await CG.sb.auth.refreshSession();
+    if (rf2 && rf2.data && rf2.data.session) session = rf2.data.session;
     isComm = await CG.sb.rpc("is_commissioner");
     if (!isComm.data) throw new Error("this session isn’t being recognized as commissioner — sign out and back in, then retry");
   }
-  return true;
+  /* Returns the LIVE session, not just true: callers that go around supabase-js and hand-roll a
+     fetch (the storage uploads) need this exact access token, and reaching for a `session` they
+     never bound is how club logo upload died with "session is not defined". */
+  return session;
 };
 CG.uploadArtwork = async function(file, slug, opts){
   opts = opts || {};
-  await CG.assertCommissioner();
+  /* the session comes back from the guard — see the note on its return value */
+  var session = await CG.assertCommissioner();
   var shrunk = await CG.shrinkImage(file, opts.cap || 384);
   var body = shrunk.blob, type = shrunk.type;
   var ext = shrunk.ext || ((file.name.split(".").pop()||"png").toLowerCase().replace(/[^a-z0-9]/g,"")) || "png";
@@ -5536,7 +5542,13 @@ CG.teamForm = function(t){
       chain.then(function(){
         btn.disabled=false;
         if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast(isNew?name+" added to the league":"Club saved","ok");
+        /* the sweep renders the club's Discord role icon from logo_url and re-applies it exactly
+           when that URL changes, so a new crest should land in the server now rather than on
+           whatever tick comes next. Same for the gradient role colors. */
+        var logoChanged = !t || (t.logo||null) !== (rec.logo_url||null);
+        CG.toast(isNew ? name+" added to the league"
+                       : "Club saved"+(logoChanged ? " — Discord role icon updating" : ""), "ok");
+        if (CG.pingDiscordSync) CG.pingDiscordSync();
         CG.reloadLeague();
       }).catch(function(e){
         btn.disabled=false;
