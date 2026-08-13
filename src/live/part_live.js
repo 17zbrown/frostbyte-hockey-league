@@ -5557,10 +5557,34 @@ CG.removeTeam = function(teamId, name){
       CG.toast("Can’t remove "+name+" — it has "+(spots?spots+" rostered player"+(spots===1?"":"s"):"")+(spots&&games?" and ":"")+(games?games+" scheduled game"+(games===1?"":"s"):"")+". Reassign those first.","err");
       return;
     }
-    CG.confirm("Remove "+esc(name)+"?","The club comes off the site everywhere. This can’t be undone.","Remove club", function(){
-      CG.sb.from("teams").delete().eq("id",teamId).then(function(r){
+    CG.confirm("Remove "+esc(name)+"?","The club comes off the site everywhere, and its Discord role and room are deleted on the next sweep. This can’t be undone.","Remove club", function(){
+      /* Capture the Discord objects BEFORE the row goes: once the club is deleted there is
+         nothing left that knows which role and channel belonged to it, and they would sit in the
+         server forever. discord-sync reaps whatever is queued here and clears the key. */
+      var queueReap = function(){
+        /* read the ids from the row itself, not from CG.TEAMS — the client mapping drops them */
+        return CG.sb.from("teams").select("discord_role_id,discord_channel_id").eq("id",teamId).maybeSingle()
+          .then(function(t){
+            var role = t && t.data && t.data.discord_role_id, chan = t && t.data && t.data.discord_channel_id;
+            if (!role && !chan) return null;
+            return CG.sb.from("app_config").select("value").eq("key","discord_reap").maybeSingle().then(function(g){
+              var cur = { roles:[], channels:[] };
+              try { if (g && g.data && g.data.value) cur = JSON.parse(g.data.value) || cur; } catch(e){}
+              if (role) cur.roles = (cur.roles||[]).concat([String(role)]);
+              if (chan) cur.channels = (cur.channels||[]).concat([String(chan)]);
+              return CG.sb.from("app_config").upsert({ key:"discord_reap", value:JSON.stringify(cur),
+                updated_at:new Date().toISOString() }, { onConflict:"key" }).select("key");
+            });
+          });
+      };
+      queueReap().then(function(q){
+        if (q && q.error) CG.toast("Queued removal, but the Discord cleanup didn’t queue: "+q.error.message,"err");
+        return CG.sb.from("teams").delete().eq("id",teamId).select("id");
+      }).then(function(r){
         if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
-        CG.toast(name+" removed","ok");
+        if(!r.data || !r.data.length){ CG.toast("Couldn’t remove "+name+" — the delete was refused.","err"); return; }
+        CG.toast(name+" removed — Discord role and room clear within a couple of minutes","ok");
+        if (CG.pingDiscordSync) CG.pingDiscordSync();
         CG.reloadLeague();
       });
     });
