@@ -1341,6 +1341,11 @@ CG.ROUTES.signin = function(){
     '<p class="lede" style="margin:12px auto 22px">Your Discord account is your league account — sign in once and you’re in. Not in the Chel Gaming server yet? We’ll send you the invite right after you sign in.</p>'+
     '<button class="btn btn-lg" id="dcSignIn" style="background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Sign in with Discord</button>'+
     '<p class="caption" style="margin-top:12px">Signs you in with your Discord identity. Discord also shares your email — the league never uses or displays it.</p>'+
+    /* Discord refuses to authorize ANY app for an account with no verified email — the request
+       carries the email scope (Supabase adds it, we only ask for identify), and Discord will not
+       grant it. The member sees Discord's own "You need a verified e-mail or phone number" page and
+       never reaches us, so this is the only place we can warn them. A phone is NOT required. */
+    '<p class="caption" style="margin-top:6px">Seeing <b>“You need a verified e-mail or phone number”</b> on Discord’s page? That’s Discord, not the league: it won’t authorize any app until your Discord account has a verified email. Open Discord → User Settings → My Account → verify your email, then come back and sign in. You do <b>not</b> need a phone number.</p>'+
     '<p class="caption" style="margin-top:6px">Discord keeps choosing the wrong account? This browser is signed into that account at discord.com — hit “Not you?” on Discord’s page, or log out at discord.com first.</p></div></section>';
 };
 CG.AFTER.signin = function(){
