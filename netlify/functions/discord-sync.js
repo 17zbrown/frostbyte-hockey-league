@@ -1897,7 +1897,7 @@ export default async (req) => {
   // ensure the mentionable roles the automations depend on exist (created once, then reused):
   //  Staff (members ping the officials), the front-office roles (gate the Team Management rooms),
   //  and "Not Signed Up" (the daily sign-up reminder pings this one role).
-  const ENSURE_ROLES = [["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["Not Signed Up", true]];
+  const ENSURE_ROLES = [["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["CGHL Management", true], ["Not Signed Up", true]];
   for (const [name, mentionable] of ENSURE_ROLES) {
     if (roleId[name.toLowerCase()]) continue;
     try {
@@ -1911,6 +1911,9 @@ export default async (req) => {
   //   [name, mentionable, hoist]
   const ROLE_PROPS = [
     ["Owner", true, true], ["General Manager", true, true], ["Assistant General Manager", true, false],
+    /* the whole front office in one handle — mentionable so the league office can reach every
+       Owner, GM and AGM at once; not hoisted, because the three seat roles already head the list */
+    ["CGHL Management", true, false],
     ["Staff", true, true], ["Commissioner", true, true], ["Not Signed Up", true, false],
   ];
   for (const [name, mentionable, hoist] of ROLE_PROPS) {

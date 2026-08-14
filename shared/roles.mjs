@@ -32,7 +32,7 @@ export const POSITION_ROLES = ["Center", "Left Wing", "Right Wing", "Left Defens
    never grandfathered: lose the reason, lose the role. Club and department roles are added by
    managedRoleIds() because their ids are data, not names. */
 export const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager",
-  "Commissioner", "Staff", "Free Agent", "Not Signed Up", ...POSITION_ROLES];
+  "CGHL Management", "Commissioner", "Staff", "Free Agent", "Not Signed Up", ...POSITION_ROLES];
 
 export function managedRoleIds(roleId, teams) {
   const ids = new Set();
@@ -71,6 +71,11 @@ export function desiredRolesFor(m, ctx) {
   if (teamRole === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
   if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);
   if (teamRole === "agm" && roleId["assistant general manager"]) desired.add(roleId["assistant general manager"]);
+  /* One handle for a club's whole front office, so the league office can reach every Owner, GM and
+     AGM in a single ping instead of three. It rides on the SAME seat check as the three roles
+     above, so it is granted and revoked with the seat and can never drift out of step with them. */
+  if ((teamRole === "owner" || teamRole === "gm" || teamRole === "agm") && roleId["cghl management"])
+    desired.add(roleId["cghl management"]);
   if (m.role === "commissioner" && roleId["commissioner"]) desired.add(roleId["commissioner"]);
   // league officials: staff wear Staff; the commissioner is staff too.
   // EXCEPTION (2026-08-05): media-only staff wear just their Media department role — no Staff

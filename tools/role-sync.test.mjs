@@ -241,5 +241,33 @@ console.log("\n— the queue replay never floods and always prunes");
   A("old rows are purged", purged === 1);
 }
 
+/* ---- CGHL Management: one handle for a club's whole front office (2026-08-13) ---------------
+   The league office wanted to reach every Owner, GM and AGM in one ping. It rides on the same
+   seat check as the three individual roles, so it cannot drift out of step with them: gain a
+   seat, gain the role; lose the seat, lose the role. */
+{
+  const rid = { "owner":"R_OWN", "general manager":"R_GM", "assistant general manager":"R_AGM",
+                "cghl management":"R_MGMT", "player":"R_PLAYER" };
+  const base = { roleId: rid, teamRoleId: {}, registered: new Set(), regOpen: false,
+                 mgmtRoleByProfile: {}, deptByProfile: {}, posOf: {} };
+  const rolesFor = (seat) => {
+    const ctx = { ...base, mgmtRoleByProfile: seat ? { p1: seat } : {} };
+    return desiredRolesFor({ profile_id: "p1", role: "member", team_id: null }, ctx);
+  };
+  A("an Owner gets CGHL Management", rolesFor("owner").has("R_MGMT"));
+  A("a GM gets it too", rolesFor("gm").has("R_MGMT"));
+  A("an AGM gets it too", rolesFor("agm").has("R_MGMT"));
+  A("...alongside their own seat role, not instead of it",
+    rolesFor("owner").has("R_OWN") && rolesFor("gm").has("R_GM") && rolesFor("agm").has("R_AGM"));
+  A("a member with no seat does NOT get it", !rolesFor(null).has("R_MGMT"));
+  A("...and losing the seat revokes it, because it is reconciled like every managed role",
+    MANAGED_STATIC.includes("CGHL Management"));
+
+  const sync = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  A("the sweep creates the role if it is missing", /\["CGHL Management", true\]/.test(sync));
+  A("...and keeps it mentionable, so the ping actually works",
+    /\["CGHL Management", true, false\]/.test(sync));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);
