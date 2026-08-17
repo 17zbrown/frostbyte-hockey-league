@@ -56,11 +56,14 @@ console.log("\n— the code agrees with the rulebook");
 {
   A("standings sort on total points, not percentage",
     /clubs are ordered by TOTAL POINTS EARNED/i.test(engine) && !/group by points percentage first/.test(engine));
-  A("the playoff field is four per division", /CG\.PLAYOFF_PER_DIV = 4/.test(live));
-  A("...the bracket needs a full field before it will build", /Need \"\+need\+\" seeds to build a bracket/.test(live));
+  /* the field size became a Control Center setting; Rule 8.1's "top four" is now the DEFAULT,
+     and the bracket shape is derived from it rather than hardcoded (see playoff-shape.test.cjs) */
+  A("the rulebook's four-per-division is the shipped default", /CG\.PLAYOFF_PER_DIV_DEFAULT = 4/.test(live));
+  A("...the qualifier count is read as a setting", /CG\.playoffPerDiv = function/.test(live));
+  A("...the bracket needs a full field before it will build", /Need \"\+need\+\" seeds/.test(live));
   A("...frozen seeds are validated against that field size", /v\.length===CG\.playoffFieldSize\(\)/.test(live));
-  A("...round 1 is 1v4 and 2v3 inside each division", /seedCodes\[b\],\s+seedCodes\[b\+3\]/.test(live));
-  A("...and the rounds are named for a divisional bracket", /division semi-finals.*division finals.*final/.test(live));
+  A("...round 1 is derived per division, not hardcoded to four", /CG\.playoffRound1\(seedCodes\.slice/.test(live));
+  A("...and the round names are derived too", /CG\.playoffRoundName = function/.test(live));
   A("the pre-season requirement is mirrored client-side", /CG\.PRESEASON_MIN_GP = 5/.test(live));
   A("...the draft desk filters the pool by it", /pool\.filter\(function\(r\)\{ return CG\.isDraftEligible\(r\.profile_id\); \}\)/.test(live));
   A("...and says the DB is the authority", /is_draft_eligible, enforced inside/.test(live));
@@ -75,7 +78,7 @@ console.log("\n— the code agrees with the rulebook");
 console.log("\n— the bundle still boots with these changes in it");
 {
   A("index.html contains the new eligibility helper", /CG\.isDraftEligible = function/.test(html));
-  A("...and the divisional playoff constant", /CG\.PLAYOFF_PER_DIV = 4/.test(html));
+  A("...and the divisional playoff default", /CG\.PLAYOFF_PER_DIV_DEFAULT = 4/.test(html));
   const scripts = [...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
   A("every inline script parses", scripts.every((s) => { try { new vm.Script(s); return true; } catch { return false; } }));
 }

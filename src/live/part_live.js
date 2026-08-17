@@ -8968,21 +8968,76 @@ CG.AFTER._admSeasons = function(){
 /* Rule 8.1 (v2.22): the top FOUR clubs in each division qualify, an eight-club field, seeded
    1..4 inside their own division. The returned order is division-major — [E1,E2,E3,E4,W1..W4] —
    and the bracket generator relies on that grouping to keep each division's rounds together. */
-CG.PLAYOFF_PER_DIV = 4;
+/* How many clubs qualify from each division. Set in the Control Center (Playoffs → Qualifiers),
+   stored beside the series length in site_config.playoff_format, and stated as law in Rule 8.1 —
+   the panel says so, because changing this without amending the rulebook puts the two out of
+   step. Default 4 if unset or nonsense. */
+CG.PLAYOFF_PER_DIV_DEFAULT = 4;
+CG.playoffDivisions = function(){
+  return CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
+};
+CG.playoffPerDiv = function(){
+  var v = parseInt((CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.perDiv), 10);
+  return (v >= 1 && v <= 8) ? v : CG.PLAYOFF_PER_DIV_DEFAULT;
+};
 CG.playoffSeeds = function(){
-  var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
-  var out = [];
-  DIVS.forEach(function(dv){
-    CG.standings(CG.lg,dv).slice(0,CG.PLAYOFF_PER_DIV).forEach(function(r,i){
+  var per = CG.playoffPerDiv(), out = [];
+  CG.playoffDivisions().forEach(function(dv){
+    CG.standings(CG.lg,dv).slice(0,per).forEach(function(r,i){
       out.push(Object.assign({}, r, { div:dv, divSeed:i+1 }));
     });
   });
   return out;
 };
-/* how many clubs the bracket needs — every division must be able to field its four */
-CG.playoffFieldSize = function(){
-  var DIVS = CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
-  return DIVS.length * CG.PLAYOFF_PER_DIV;
+/* how many clubs the bracket needs — every division must be able to field its qualifiers */
+CG.playoffFieldSize = function(){ return CG.playoffDivisions().length * CG.playoffPerDiv(); };
+
+/* Round 1 inside ONE division, seeded best-to-worst. When the qualifier count is a power of two
+   everybody plays (1vN, 2v(N-1), …). When it is not, the bracket opens with a play-in among the
+   lowest seeds and the top seeds sit out that round — six qualifiers give 3v6 and 4v5 with seeds
+   1 and 2 waiting, which is the shape this league used before it went divisional. Byes only ever
+   happen in round 1; from round 2 on the survivor count is always a power of two. */
+CG.playoffRound1 = function(divSeeds){
+  var n = (divSeeds || []).length;
+  if (!n) return { pairs: [], byes: [] };
+  var P = 1; while (P * 2 <= n) P *= 2;
+  var games = (n === P) ? Math.floor(n / 2) : (n - P);
+  var byeCount = n - 2 * games;
+  var byes = divSeeds.slice(0, byeCount), pairs = [];
+  for (var g = 0; g < games; g++) pairs.push([divSeeds[byeCount + g], divSeeds[n - 1 - g]]);
+  return { pairs: pairs, byes: byes };
+};
+/* total rounds: enough to crown a division champion, plus the final between the two of them */
+CG.playoffRounds = function(){
+  var per = CG.playoffPerDiv();
+  return 1 + Math.ceil(Math.log(per) / Math.LN2 - 1e-9);
+};
+/* plain-English shape of round 1, built from the same function that generates it, so the panel
+   can never describe a bracket the generator would not produce */
+CG.playoffBracketBlurb = function(){
+  var per = CG.playoffPerDiv();
+  var seedNums = []; for (var i=1;i<=per;i++) seedNums.push(i);
+  var r1 = CG.playoffRound1(seedNums);
+  var pairs = r1.pairs.map(function(p){ return p[0]+"v"+p[1]; }).join(" · ");
+  var byes = r1.byes.length ? " Seed"+(r1.byes.length>1?"s ":" ")+r1.byes.join(" and ")+
+    (r1.byes.length>1?" sit out":" sits out")+" round 1." : "";
+  return "Top "+per+" in each division. Inside a division: "+(pairs||"no opening series")+"."+byes+
+    " The two division champions meet in the final.";
+};
+CG.playoffRoundBlurb = function(round){
+  var K = CG.playoffRounds();
+  if (round >= K) return "the two division champions";
+  if (round === 1) return CG.playoffBracketBlurb();
+  return "the survivors inside each division, reseeded best against worst";
+};
+CG.playoffRoundName = function(round){
+  var K = CG.playoffRounds();
+  if (round >= K) return "Final";
+  var back = K - round;                       /* 1 = division final, 2 = division semi-finals … */
+  return back === 1 ? "Division finals"
+       : back === 2 ? "Division semi-finals"
+       : back === 3 ? "Division quarter-finals"
+       : "Division round " + round;
 };
 CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 3; };
 /* seeds are FROZEN when the quarter-finals are generated — later rounds must
@@ -8996,7 +9051,7 @@ CG.admPlayoffsLive = function(){
   var lg = CG.lg, s = CG.SEASON||{};
   var pog = (lg.playoffGames||[]);
   var bestOf = CG.playoffBestOf();
-  var rounds = { 1:[], 2:[], 3:[] };
+  var rounds = {}; for (var _r=1; _r<=CG.playoffRounds(); _r++) rounds[_r]=[];
   pog.forEach(function(g){ (rounds[g.week||1]=rounds[g.week||1]||[]).push(g); });
   var frozen = CG.frozenSeeds();
   var seeds = frozen
@@ -9017,18 +9072,34 @@ CG.admPlayoffsLive = function(){
     '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series. '+
     (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round.')+'</p></div></div>';
 
+  /* how many clubs qualify per division — same lock as the series length, because the bracket
+     shape is derived from it and a live series must not be stranded mid-round */
+  var per = CG.playoffPerDiv();
+  var minDiv = Math.min.apply(null, CG.playoffDivisions().map(function(dv){
+    return (CG.TEAMS||[]).filter(function(t){ return t.div===dv; }).length; }).concat([99]));
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Qualifiers</h3><span class="chip">Top '+per+' per division</span></div><div class="card-b">'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[1,2,3,4,5,6].map(function(n){
+      var tooBig = n>minDiv;
+      return '<button class="btn '+(n===per?"btn-chrome":"btn-ghost")+' btn-sm" data-perdiv="'+n+'"'+((poLive||tooBig)?" disabled":"")+
+        (tooBig?' title="A division only has '+minDiv+' clubs"':'')+'>Top '+n+'</button>'; }).join("")+'</div>'+
+    '<p class="caption" style="margin-top:10px">'+esc(CG.playoffBracketBlurb())+' That is a '+CG.playoffFieldSize()+'-club field over '+CG.playoffRounds()+' round'+(CG.playoffRounds()===1?"":"s")+'.</p>'+
+    '<p class="caption" style="margin-top:6px"><b>This is published law.</b> Rule 8.1 states the number, so change it here and amend the rulebook to match. '+
+    (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round; seeds freeze when round 1 is built.')+'</p></div></div>';
+
   /* seeds */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(frozen?"Seeding — locked at the quarter-finals":"Seeding — from the final table")+'</h3><span class="chip">'+(frozen?"locked in":regLeft?regLeft+" regular games left":"regular season complete")+'</span></div><div class="card-b">';
-  if (seeds.length===6){
+  if (seeds.length===CG.playoffFieldSize()){
     h += '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">'+
       seeds.map(function(r,i){ return '<div style="display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:var(--r-s);padding:8px 11px">'+
         '<b class="num" style="width:16px">'+(i+1)+'</b>'+CG.crest(r.code,20)+'<b class="mono" style="font-size:12px">'+esc(r.code)+'</b><span class="caption num" style="margin-left:auto">'+r.pts+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:10px">Seeds 1–2 (division winners) get a quarter-final bye. 3v6 and 4v5 open the bracket.</p>';
-  } else { h += '<p class="caption">Need at least six clubs across the divisions to seed a bracket.</p>'; }
+      '<p class="caption" style="margin-top:10px">'+esc(CG.playoffBracketBlurb())+'</p>';
+  } else { h += '<p class="caption">Every division needs at least '+CG.playoffPerDiv()+' clubs to seed a bracket. Right now '+
+    CG.playoffDivisions().map(function(dv){ return dv+' has '+(CG.TEAMS||[]).filter(function(t){ return t.div===dv; }).length; }).join(', ')+'.</p>'; }
   h += '</div></div>';
 
   /* rounds */
-  var roundMeta = [[1,"Quarter-finals","3v6 · 4v5"],[2,"Semi-finals","seed 1 vs lowest survivor · seed 2 vs highest"],[3,"Final","the two semi-final winners"]];
+  var roundMeta = [];
+  for (var rr=1; rr<=CG.playoffRounds(); rr++) roundMeta.push([rr, CG.playoffRoundName(rr), CG.playoffRoundBlurb(rr)]);
   roundMeta.forEach(function(rm){
     var rd=rm[0], list=rounds[rd]||[];
     var pairs = {};
@@ -9043,7 +9114,7 @@ CG.admPlayoffsLive = function(){
         '<div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-po-clear="'+rd+'">Clear this round</button></div>';
     } else {
       h += '<p class="caption" style="margin-bottom:12px">'+rm[2]+'. '+
-        (rd===1?'Generates 3v6 and 4v5 from the seeds above.':rd===2?'Generates once both quarter-finals are decided (seeds 1 and 2 enter here).':'Generates once both semi-finals are decided.')+'</p>'+
+        (rd===1?'Generates from the seeds above.':'Generates once '+CG.playoffRoundName(rd-1).toLowerCase()+' are decided.')+'</p>'+
         '<button class="btn btn-chrome btn-sm" data-po-gen="'+rd+'">'+CG.ic("plus",14)+'Generate '+rm[1].toLowerCase()+'</button>';
     }
     h += '</div></div>';
@@ -9051,11 +9122,25 @@ CG.admPlayoffsLive = function(){
   return h;
 };
 CG.AFTER._admPlayoffs = function(){
+  document.querySelectorAll("[data-perdiv]").forEach(function(b){ b.addEventListener("click", function(){
+    var n=parseInt(this.getAttribute("data-perdiv"),10);
+    var cur=(CG._siteCfg && CG._siteCfg.playoff_format) || {};
+    var next=Object.assign({}, cur, { perDiv:n });
+    CG.sb.from("site_config").upsert({ key:"playoff_format", value:next },{ onConflict:"key" }).select("key").then(function(r){
+      if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      CG._siteCfg.playoff_format=next;
+      CG.toast("Top "+n+" per division — a "+CG.playoffFieldSize()+"-club field. Update Rule 8.1 to match.","ok");
+      CG.router();
+    });
+  }); });
   document.querySelectorAll("[data-bestof]").forEach(function(b){ b.addEventListener("click", function(){
     var n=parseInt(this.getAttribute("data-bestof"),10);
-    CG.sb.from("site_config").upsert({ key:"playoff_format", value:{ bestOf:n } },{ onConflict:"key" }).then(function(r){
+    /* merge, never replace — writing {bestOf} alone silently reset the qualifier count */
+    var cur0=(CG._siteCfg && CG._siteCfg.playoff_format) || {};
+    var merged=Object.assign({}, cur0, { bestOf:n });
+    CG.sb.from("site_config").upsert({ key:"playoff_format", value:merged },{ onConflict:"key" }).select("key").then(function(r){
       if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      CG._siteCfg.playoff_format={ bestOf:n }; CG.toast("Series length set to best of "+n,"ok"); CG.router();
+      CG._siteCfg.playoff_format=merged; CG.toast("Series length set to best of "+n,"ok"); CG.router();
     });
   }); });
   document.querySelectorAll("[data-po-gen]").forEach(function(b){ b.addEventListener("click", function(){ CG.generatePlayoffRound(parseInt(this.getAttribute("data-po-gen"),10)); }); });
@@ -9085,7 +9170,7 @@ CG.generatePlayoffRound = function(round){
     var regLeft=(CG.lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final"; }).length;
     if (regLeft){ CG.toast(regLeft+" regular-season game"+(regLeft===1?"":"s")+" still unplayed — finish or clear them before seeding the bracket","err"); return; }
     var live=CG.playoffSeeds(), need=CG.playoffFieldSize();
-    if (live.length<need){ CG.toast("Need "+need+" seeds to build a bracket — every division must have at least "+CG.PLAYOFF_PER_DIV+" clubs","err"); return; }
+    if (live.length<need){ CG.toast("Need "+need+" seeds — every division must hold at least "+CG.playoffPerDiv()+" clubs to fill the bracket","err"); return; }
     seedCodes=live.map(function(r){ return r.code; });
     freezeAfter=true;
   } else {
@@ -9095,32 +9180,42 @@ CG.generatePlayoffRound = function(round){
   }
   var seedRank={}; seedCodes.forEach(function(c,i){ seedRank[c]=i+1; });
   var matchups=[]; /* [[homeCode, awayCode], ...] higher seed = home */
-  /* Rule 8.1 (v2.22): each division plays its own bracket. Round 1 is 1v4 and 2v3 inside every
-     division, round 2 is the division final, round 3 is the two division champions. seedCodes is
-     division-major in blocks of PLAYOFF_PER_DIV, so the blocks are the divisions. */
-  var per = CG.PLAYOFF_PER_DIV;
+  /* Rule 8.1: each division plays its own bracket to a champion, then the two champions meet.
+     seedCodes is division-major in blocks of `per`, so the blocks ARE the divisions. Everything
+     below is derived from the qualifier setting rather than assuming a shape. */
+  var per = CG.playoffPerDiv(), K = CG.playoffRounds();
   var divOf = function(code){ return (CG.TEAM[code]||{}).div || "?"; };
-  if (round===1){
-    matchups=[];
-    for (var b=0; b+per-1 < seedCodes.length; b+=per){
-      matchups.push([seedCodes[b],   seedCodes[b+3]]);   /* 1 v 4 */
-      matchups.push([seedCodes[b+1], seedCodes[b+2]]);   /* 2 v 3 */
+  var bySeed = function(a,b){ return (seedRank[a]||99)-(seedRank[b]||99); };
+  /* the clubs that sat out round 1 — a pure function of the seeds, so nothing has to be stored */
+  var round1Byes = function(){
+    var out=[];
+    for (var b=0; b+per<=seedCodes.length; b+=per) out = out.concat(CG.playoffRound1(seedCodes.slice(b,b+per)).byes);
+    return out;
+  };
+  if (round === K){
+    /* the final: the two division champions, i.e. whoever won the last divisional round */
+    var champs = CG.seriesWinners(K-1).map(function(r){ return r.code; });
+    if (champs.length < 2){ CG.toast("Both division finals must finish first","err"); return; }
+    champs.sort(bySeed);
+    matchups = [[champs[0], champs[1]]];
+  } else if (round === 1){
+    matchups = [];
+    for (var b2=0; b2+per<=seedCodes.length; b2+=per){
+      CG.playoffRound1(seedCodes.slice(b2,b2+per)).pairs.forEach(function(p){ matchups.push(p); });
     }
-  } else if (round===2){
-    var qf=CG.seriesWinners(1);
-    if (qf.length < seedCodes.length/2){ CG.toast("Every division semi-final must finish first","err"); return; }
-    /* pair the two survivors within each division, higher seed at home */
-    var byDiv={};
-    qf.forEach(function(r){ (byDiv[divOf(r.code)]=byDiv[divOf(r.code)]||[]).push(r); });
-    matchups=Object.keys(byDiv).sort().map(function(dv){
-      var pair=byDiv[dv].sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
-      return pair.length>1 ? [pair[0].code, pair[1].code] : null;
-    }).filter(Boolean);
   } else {
-    var sf=CG.seriesWinners(2);
-    if (sf.length<2){ CG.toast("Both division finals must finish first","err"); return; }
-    sf.sort(function(a,b){ return (seedRank[a.code]||9)-(seedRank[b.code]||9); });
-    matchups=[[sf[0].code, sf[1].code]];
+    /* a later divisional round: whoever won the previous one, plus anyone who had a round-1 bye */
+    var adv = CG.seriesWinners(round-1).map(function(r){ return r.code; });
+    if (round === 2) adv = adv.concat(round1Byes());
+    var byDiv = {};
+    adv.forEach(function(code){ (byDiv[divOf(code)] = byDiv[divOf(code)] || []).push(code); });
+    matchups = [];
+    Object.keys(byDiv).sort().forEach(function(dv){
+      var line = byDiv[dv].slice().sort(bySeed);
+      /* best vs worst, working inwards — standard reseeding inside the division */
+      for (var i=0; i*2 < line.length-1; i++) matchups.push([line[i], line[line.length-1-i]]);
+    });
+    if (!matchups.length){ CG.toast("The previous round has to finish first","err"); return; }
   }
   /* schedule the series: best-of-N nights, higher seed hosts odd games, on the
      Wed/Thu/Fri cadence from playoffs_start_at (or the day after the last game) */
@@ -9141,7 +9236,7 @@ CG.generatePlayoffRound = function(round){
         scheduled_at:CG.etISO(day, CG.NIGHT_SLOTS[gi%CG.NIGHT_SLOTS.length]||"21:00"), status:"scheduled" });
     }
   });
-  var rn = round===1?"division semi-finals":round===2?"division finals":"final";
+  var rn = CG.playoffRoundName(round).toLowerCase();
   CG.confirm("Generate the "+rn+"?",
     matchups.map(function(m){ return m[0]+" vs "+m[1]; }).join(" · ")+" — best of "+bestOf+", "+rows.length+" games."+
     (freezeAfter?" Seeding locks in with this bracket.":"")+" Unneeded games disappear once a series is decided.",
