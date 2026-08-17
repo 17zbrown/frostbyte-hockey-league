@@ -907,7 +907,7 @@ html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);
    land over paler water, one mid-tone coastline doing the drawing), dark stays the broadcast
    look. Nothing here is a hard-coded hex, so the map can never end up a dark slab on a light
    page. */
-.na-wrap{position:relative;min-height:clamp(440px,66vh,740px);overflow:hidden;
+.na-wrap{--pin:54px;position:relative;min-height:clamp(440px,66vh,740px);overflow:hidden;
   background:radial-gradient(125% 95% at 50% 0%,var(--map-sea-1) 0%,var(--map-sea-2) 72%)}
 .na-plot{position:absolute;inset:0}
 .na-svg{position:absolute;inset:0;width:100%;height:100%;display:block;
@@ -931,7 +931,7 @@ html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);
   transition:transform .32s var(--ease-spring),filter .3s ease,opacity .5s ease}
 .na-pin:hover,.na-pin:focus-visible{z-index:3;outline:none;transform:translate(-50%,-50%) scale(1.22)}
 /* crest alone — no disc, no plate, no three-letter tag */
-.na-pin .crest,.na-pin img,.na-pin svg{width:var(--pin,54px);height:var(--pin,54px);object-fit:contain;
+.na-pin .crest,.na-pin img,.na-pin svg{width:var(--pin);height:var(--pin);object-fit:contain;
   position:relative;filter:drop-shadow(0 3px 7px rgba(0,0,0,.42));
   transition:filter .3s ease,transform .32s var(--ease-spring)}
 /* the glow is the CLUB's colour, set per pin from the team record — Boston glows gold, Carolina
@@ -994,7 +994,7 @@ html.rv-on .na-wrap.pins-in .na-pin{opacity:1;transform:translate(-50%,-50%) sca
   /* the crest shrinks but the tap target does not: 3px of padding keeps the hit area at 44px,
      which is the floor for a control this important — the crests ARE the navigation here */
   .na-pin{padding:3px}
-  .na-pin .crest,.na-pin img,.na-pin svg{--pin:38px}
+  .na-wrap{--pin:38px}
   .na-cap{padding:14px 16px 16px}
   .na-cap-s{display:none}
   /* a horizontal slide on a full-width card pokes off the edge of a phone; rise instead */

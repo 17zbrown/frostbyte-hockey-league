@@ -456,6 +456,10 @@ CG.naMapView = function(box, padB){
    are 47 map-units apart while the crests are 40px wide, so the Great Lakes clubs land on each
    other at any sane zoom — nudge them apart afterwards, capped so a pin never wanders off the city
    it marks. */
+/* the smallest a crest may shrink to before it stops being recognisable — below this the map
+   would be tidy and useless, so a genuinely impossible layout keeps the floor and lets the clamp
+   above do what it can */
+CG.NA_PIN_MIN = 26;
 CG.naMapLayout = function(){
   var wrap = document.querySelector(".na-pins");
   if (!wrap) return;
@@ -468,6 +472,10 @@ CG.naMapLayout = function(){
   var svg = plot.querySelector(".na-svg");
   var card = plot.parentNode;
   var cap = card && card.querySelector(".na-cap");
+  /* Start every pass from the stylesheet's size. Without this the shrink at the bottom feeds the
+     next measurement and the crests ratchet smaller on each resize until they vanish. */
+  card.style.removeProperty("--pin");
+  var base = parseFloat(getComputedStyle(card).getPropertyValue("--pin")) || 54;
   /* the caption only competes for space where it overlays the plot — below the map (as on a phone)
      its rect never meets a pin and this settles on the first pass */
   var v, padB = 58;
@@ -502,31 +510,91 @@ CG.naMapLayout = function(){
     return { el:el, x:cx, y:cy, ox:cx, oy:cy, w:r.width, h:r.height,
              bx:parseFloat(el.style.left), by:parseFloat(el.style.top) };
   });
-  var CAP = 26;                                   /* px — beyond this the pin would lie about where the club is */
-  for (var it = 0; it < 60; it++){
+  var size = CG.naSeparate(p, box, base);
+  p.forEach(function(q){
+    q.el.style.left = q.fx.toFixed(1) + "px";
+    q.el.style.top  = q.fy.toFixed(1) + "px";
+  });
+  if (size !== base) card.style.setProperty("--pin", size + "px");
+};
+
+/* Separate the pins, keep them inside the frame, and return the crest size that clears everything.
+   Pure geometry on purpose: it takes measured rects and returns numbers, so the invariant the map
+   actually has to hold — nothing clipped, nothing overlapping, at ANY box shape — is testable
+   without a browser (tools/na-map.test.cjs sweeps phone through ultrawide).
+
+   `p` items are {x,y,ox,oy,w,h,bx,by} in plot pixels and come back with fx,fy set. */
+CG.NA_NUDGE_CAP = 26;                             /* px — further and the pin lies about its city */
+CG.NA_PIN_GAP = 3;                                /* px of air demanded between two crests */
+CG.naSeparate = function(p, box, base){
+  var GAP = CG.NA_PIN_GAP, i, j;
+  /* Normally a pin may drift only NA_NUDGE_CAP from its city. If even the smallest legible crest
+     still collides at that budget — a hero squashed to a letterbox strip, where latitude has
+     almost no room — let the pins travel further rather than sit on top of each other. Accuracy
+     is worth more than tidiness right up until the map stops being readable at all. */
+  var attempt, out;
+  for (attempt = 1; attempt <= 3; attempt++){
+    out = CG.naSeparateAt(p, box, base, CG.NA_NUDGE_CAP * attempt);
+    if (out > CG.NA_PIN_MIN) return out;          /* room to spare — the ordinary case */
+    if (attempt === 3) return out;                /* nothing more to give; floor it and move on */
+  }
+  return out;
+};
+CG.naSeparateAt = function(p, box, base, CAP){
+  var GAP = CG.NA_PIN_GAP, i, j;
+  /* every pass starts from the true position, so a wider cap is a fresh attempt, not a drift */
+  p.forEach(function(q){ q.x = q.ox; q.y = q.oy; });
+  /* The old thresholds asked for 86% of a crest across and 72% down, which is a licence to overlap
+     by the remainder: Seattle sat 14px inside Vancouver on a monitor and six pairs touched on a
+     phone, all of it "passing". A crest occupies a SQUARE box, so separation is Chebyshev, not
+     Euclidean — two pins can be 56px apart on the diagonal and still overlap by 6px. */
+  for (var it = 0; it < 80; it++){
     var moved = false;
-    for (var i = 0; i < p.length; i++){
-      for (var j = i + 1; j < p.length; j++){
+    for (i = 0; i < p.length; i++){
+      for (j = i + 1; j < p.length; j++){
         var a = p[i], b = p[j];
         var dx = b.x - a.x, dy = b.y - a.y;
-        var needX = (a.w + b.w) / 2 * 0.86, needY = (a.h + b.h) / 2 * 0.72;
-        if (Math.abs(dx) >= needX || Math.abs(dy) >= needY) continue;
-        var d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        var push = (needY - Math.abs(dy)) / 2 + 0.6;
-        var ux = dx / d, uy = dy / d;
-        a.x -= ux * push; a.y -= uy * push;
-        b.x += ux * push; b.y += uy * push;
+        var need = (a.w + b.w) / 2 + GAP;
+        var ax = Math.abs(dx), ay = Math.abs(dy);
+        if (ax >= need || ay >= need) continue;
+        /* The minimum translation that parts the boxes — but measured against the room each axis
+           actually has, not in raw pixels. Seattle and Vancouver differ almost purely in latitude,
+           so the cheaper push is always vertical; in a letterbox hero that is precisely the axis
+           with nowhere to go, and the clamp then squashes them back together. Dividing by the box
+           dimension sends them sideways when the map is wide and short, which is where the room is. */
+        if ((need - ax) / Math.max(1, box.width) <= (need - ay) / Math.max(1, box.height)){
+          var hx = (need - ax) / 2, sx = dx < 0 ? -1 : 1;
+          a.x -= sx * hx; b.x += sx * hx;
+        } else {
+          var hy = (need - ay) / 2, sy = dy < 0 ? -1 : 1;
+          a.y -= sy * hy; b.y += sy * hy;
+        }
         moved = true;
       }
     }
     if (!moved) break;
   }
+  /* Commit within the cap, then clamp inside the plot. The clamp is what actually guarantees
+     nothing clips — it holds whatever the fit and the nudges worked out to. */
   p.forEach(function(q){
     var dx = Math.max(-CAP, Math.min(CAP, q.x - q.ox));
     var dy = Math.max(-CAP, Math.min(CAP, q.y - q.oy));
-    q.el.style.left = (q.bx + dx).toFixed(1) + "px";
-    q.el.style.top  = (q.by + dy).toFixed(1) + "px";
+    var half = q.w / 2 + 1;
+    q.fx = Math.max(half, Math.min(box.width - half, q.bx + dx));
+    q.fy = Math.max(half, Math.min(box.height - half, q.by + dy));
   });
+  /* Last resort, and the reason this holds on every screen: if the tightest pair still overlaps
+     after nudging and clamping — a short, wide hero squeezes latitude, so Seattle and Vancouver are
+     always the pair under pressure — shrink every crest until it doesn't. Pins are centred, so
+     resizing moves nobody off their city; it only sets how much map each logo covers. */
+  var minD = Infinity;
+  for (i = 0; i < p.length; i++){
+    for (j = i + 1; j < p.length; j++){
+      minD = Math.min(minD, Math.max(Math.abs(p[j].fx - p[i].fx), Math.abs(p[j].fy - p[i].fy)));
+    }
+  }
+  if (!isFinite(minD)) return base;
+  return Math.max(CG.NA_PIN_MIN, Math.min(base, Math.floor(minD - GAP)));
 };
 CG.naMap = function(){
   var m = CG.NA_MAP, n = (CG.TEAMS || []).filter(function(t){ return m.at[t.code]; }).length;
