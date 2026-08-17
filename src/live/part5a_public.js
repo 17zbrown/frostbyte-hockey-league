@@ -460,6 +460,14 @@ CG.naMapView = function(box, padB){
    would be tidy and useless, so a genuinely impossible layout keeps the floor and lets the clamp
    above do what it can */
 CG.NA_PIN_MIN = 26;
+/* the crest size the map WANTS at a given plot size, before collisions get a say */
+CG.NA_PIN_SPAN = 15;                              /* plot geometric mean per crest pixel */
+CG.NA_PIN_FLOOR = 40;                             /* small screens: still a comfortable tap target */
+CG.NA_PIN_CEIL = 104;                             /* past this a crest stops being a map marker */
+CG.naPinBase = function(box){
+  var mean = Math.sqrt(Math.max(1, box.width) * Math.max(1, box.height));
+  return Math.round(Math.max(CG.NA_PIN_FLOOR, Math.min(CG.NA_PIN_CEIL, mean / CG.NA_PIN_SPAN)));
+};
 CG.naMapLayout = function(){
   var wrap = document.querySelector(".na-pins");
   if (!wrap) return;
@@ -472,10 +480,12 @@ CG.naMapLayout = function(){
   var svg = plot.querySelector(".na-svg");
   var card = plot.parentNode;
   var cap = card && card.querySelector(".na-cap");
-  /* Start every pass from the stylesheet's size. Without this the shrink at the bottom feeds the
-     next measurement and the crests ratchet smaller on each resize until they vanish. */
+  /* Size the crests to the MAP, not to a breakpoint. A fixed 54px read fine on a laptop and like
+     specks on a 1960px monitor — 2.7% of the map's width. Scaling by the plot's geometric mean
+     keeps a crest the same visual weight at every size, and the shrink pass below still pulls it
+     in wherever clubs are packed too tightly to wear it. */
   card.style.removeProperty("--pin");
-  var base = parseFloat(getComputedStyle(card).getPropertyValue("--pin")) || 54;
+  var base = CG.naPinBase(box);
   /* the caption only competes for space where it overlays the plot — below the map (as on a phone)
      its rect never meets a pin and this settles on the first pass */
   var v, padB = 58;
@@ -507,7 +517,9 @@ CG.naMapLayout = function(){
   var p = pins.map(function(el){
     var r = el.getBoundingClientRect();
     var cx = r.left - box.left + r.width / 2, cy = r.top - box.top + r.height / 2;
-    return { el:el, x:cx, y:cy, ox:cx, oy:cy, w:r.width, h:r.height,
+    /* the size we are ABOUT to apply, not the one currently painted — separation is being
+       solved for the crest the map is going to wear */
+    return { el:el, x:cx, y:cy, ox:cx, oy:cy, w:base, h:base,
              bx:parseFloat(el.style.left), by:parseFloat(el.style.top) };
   });
   var size = CG.naSeparate(p, box, base);
@@ -515,7 +527,7 @@ CG.naMapLayout = function(){
     q.el.style.left = q.fx.toFixed(1) + "px";
     q.el.style.top  = q.fy.toFixed(1) + "px";
   });
-  if (size !== base) card.style.setProperty("--pin", size + "px");
+  card.style.setProperty("--pin", size + "px");
 };
 
 /* Separate the pins, keep them inside the frame, and return the crest size that clears everything.
@@ -534,7 +546,12 @@ CG.naSeparate = function(p, box, base){
      is worth more than tidiness right up until the map stops being readable at all. */
   var attempt, out;
   for (attempt = 1; attempt <= 3; attempt++){
-    out = CG.naSeparateAt(p, box, base, CG.NA_NUDGE_CAP * attempt);
+    /* How far a pin may drift from its city. 26px is a lot on a phone-sized map and very little
+       on a wall-sized one, so the budget scales with both the crest and the plot: precision costs
+       less when the whole continent is 390px wide, and a big crest needs more room to clear its
+       neighbour. */
+    var budget = Math.max(CG.NA_NUDGE_CAP, base * 0.5, Math.min(box.width, box.height) * 0.10);
+    out = CG.naSeparateAt(p, box, base, budget * attempt);
     if (out > CG.NA_PIN_MIN) return out;          /* room to spare — the ordinary case */
     if (attempt === 3) return out;                /* nothing more to give; floor it and move on */
   }

@@ -25,11 +25,12 @@ vm.createContext(ctx);
   const map = src.match(/CG\.NA_MAP = \{[\s\S]*?\n\};/);
   if (!map) { A("located CG.NA_MAP", false); process.exit(1); }
   vm.runInContext(map[0], ctx);
-  for (const decl of [/CG\.NA_PIN_MIN = \d+;/, /CG\.NA_NUDGE_CAP = \d+;/, /CG\.NA_PIN_GAP = \d+;/]) {
+  for (const decl of [/CG\.NA_PIN_MIN = \d+;/, /CG\.NA_NUDGE_CAP = \d+;/, /CG\.NA_PIN_GAP = \d+;/,
+                      /CG\.NA_PIN_SPAN = \d+;/, /CG\.NA_PIN_FLOOR = \d+;/, /CG\.NA_PIN_CEIL = \d+;/]) {
     const m = src.match(decl); if (!m) { A("located " + decl, false); process.exit(1); }
     vm.runInContext(m[0], ctx);
   }
-  for (const fn of ["naMapView", "naSeparateAt", "naSeparate"]) {
+  for (const fn of ["naPinBase", "naMapView", "naSeparateAt", "naSeparate"]) {
     const m = src.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n\\};"));
     if (!m) { A("located CG." + fn, false); process.exit(1); }
     vm.runInContext(m[0], ctx);
@@ -43,8 +44,9 @@ CG.TEAMS = CLUBS.map((c) => ({ code: c }));
 
 /* Reproduce what the browser does: fit the window, place each pin at its mapped centre, then hand
    the measured rects to naSeparate exactly as naMapLayout does. */
-function layout(boxW, boxH, base) {
+function layout(boxW, boxH) {
   const box = { width: boxW, height: boxH };
+  const base = CG.naPinBase(box);
   const v = CG.naMapView(box, 58);
   const m = CG.NA_MAP;
   const p = CLUBS.map((code) => {
@@ -57,8 +59,8 @@ function layout(boxW, boxH, base) {
   return { p, size, box };
 }
 
-function audit(boxW, boxH, base) {
-  const { p, size, box } = layout(boxW, boxH, base);
+function audit(boxW, boxH) {
+  const { p, size, box } = layout(boxW, boxH);
   const half = size / 2;
   const clipped = p.filter((q) => q.fx - half < -0.5 || q.fy - half < -0.5 ||
                                   q.fx + half > box.width + 0.5 || q.fy + half > box.height + 0.5)
@@ -81,10 +83,8 @@ console.log("— every window shape a member might open the site in");
     ["tall narrow", 380, 1200], ["near square", 700, 700],
   ];
   for (const [label, w, h] of SHAPES) {
-    /* the stylesheet's crest size at that width: 38px under the phone breakpoint, else 54 */
-    const base = w <= 560 ? 38 : 54;
     const boxH = Math.max(240, Math.round(h * 0.66));
-    const r = audit(w, boxH, base);
+    const r = audit(w, boxH);
     A(`${label} (${w}x${boxH}) — nothing clipped`, r.clipped.length === 0, r.clipped.join(","));
     A(`  …nothing overlapping`, r.overlaps.length === 0, r.overlaps.slice(0, 4).join(" "));
     A(`  …crest stays legible (>=${CG.NA_PIN_MIN}px)`, r.size >= CG.NA_PIN_MIN, `${r.size}px`);
@@ -95,21 +95,31 @@ console.log("\n— the pair that always fails first");
 {
   /* Seattle and Vancouver are 0.05% apart in longitude; if any pair is going to collide it is
      these two, so pin them explicitly rather than trusting the sweep to have covered it */
-  const { p, size } = layout(1440, 594, 54);
+  const { p, size } = layout(1440, 594);
   const sea = p.find((q) => q.code === "SEA"), van = p.find((q) => q.code === "VAN");
   const sep = Math.max(Math.abs(sea.fx - van.fx), Math.abs(sea.fy - van.fy));
   A("Seattle clears Vancouver", sep >= size, `${sep.toFixed(1)}px apart, ${size}px crests`);
-  const { p: p2, size: s2 } = layout(390, 346, 38);
+  const { p: p2, size: s2 } = layout(390, 346);
   const sea2 = p2.find((q) => q.code === "SEA"), van2 = p2.find((q) => q.code === "VAN");
   const sep2 = Math.max(Math.abs(sea2.fx - van2.fx), Math.abs(sea2.fy - van2.fy));
   A("...on a phone too", sep2 >= s2, `${sep2.toFixed(1)}px apart, ${s2}px crests`);
 }
 
-console.log("\n— the shrink is a last resort, not the usual answer");
+console.log("\n— crests are sized to the map, not to a breakpoint");
 {
-  A("a roomy desktop keeps full-size crests", audit(1920, 713, 54).size === 54);
-  A("a cramped phone shrinks rather than overlap", audit(320, 288, 38).size < 38);
-  A("...but never below the legibility floor", audit(280, 200, 38).size >= CG.NA_PIN_MIN);
+  /* the complaint that started this: 54px read as a speck on a 1960px monitor, 2.7% of the map */
+  const wide = audit(1960, 660), laptop = audit(1440, 594), small = audit(1024, 507);
+  A("a big monitor gets a big crest", wide.size >= 70, `${wide.size}px`);
+  A("...and it still reads as a marker, not a billboard", wide.size <= CG.NA_PIN_CEIL);
+  A("a laptop sits between", laptop.size > small.size && laptop.size < wide.size,
+    `${small.size} < ${laptop.size} < ${wide.size}`);
+  A("crest keeps a steady share of the map across sizes",
+    Math.abs(wide.size / 1960 - laptop.size / 1440) < 0.01,
+    `${(wide.size/1960*100).toFixed(2)}% vs ${(laptop.size/1440*100).toFixed(2)}%`);
+  A("bigger plot never means a smaller crest",
+    audit(2560, 900).size >= wide.size && wide.size >= laptop.size);
+  A("a cramped phone shrinks rather than overlap", audit(320, 288).size < CG.NA_PIN_FLOOR);
+  A("...but never below the legibility floor", audit(280, 200).size >= CG.NA_PIN_MIN);
 }
 
 console.log("\n— separation is measured on boxes, not circles");
