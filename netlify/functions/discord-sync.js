@@ -677,7 +677,9 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
   // exists, it's RENAMED in place (keeping its position, history, and id) instead of a duplicate being
   // made — this is how #lfg was migrated to #pickup-games without the sweep recreating the old name.
   async function ensurePublicText(name, parentId, topic, oldNames) {
-    if (!parentId) return;
+    /* returns the channel in every successful path — callers that need to hang a webhook off it
+       (the draft feed) must be able to find it whether it existed, was renamed, or was created */
+    if (!parentId) return null;
     const existing = guildChannels.find((c) => c.type === 0 && c.name === name);
     if (existing) {
       // keep the topic current on an already-present channel (e.g. the /lfg -> /join wording) without recreating it
@@ -685,22 +687,33 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
         try { await dApi("PATCH", `/channels/${existing.id}`, { topic }); existing.topic = topic; sum.communityChansRetopic = (sum.communityChansRetopic || 0) + 1; }
         catch (e) { sum.errors.push({ communityChanTopic: name, error: String(e.message || e) }); }
       }
-      return;
+      return existing;
     }
     const prev = (oldNames && oldNames.length)
       ? guildChannels.find((c) => c.type === 0 && oldNames.includes(c.name)) : null;
     if (prev) {
       try { await dApi("PATCH", `/channels/${prev.id}`, { name, topic }); prev.name = name;
-        sum.communityChansRenamed = (sum.communityChansRenamed || 0) + 1; return;
+        sum.communityChansRenamed = (sum.communityChansRenamed || 0) + 1; return prev;
       } catch (e) { sum.errors.push({ communityChanRename: name, error: String(e.message || e) }); }
     }
     try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name, type: 0, parent_id: parentId, topic });
-      guildChannels.push(ch); sum.communityChansCreated = (sum.communityChansCreated || 0) + 1;
+      guildChannels.push(ch); sum.communityChansCreated = (sum.communityChansCreated || 0) + 1; return ch;
     } catch (e) { sum.errors.push({ communityChan: name, error: String(e.message || e) }); }
+    return null;
   }
   // #pickup-games (formerly #lfg) — the /join pickup lobbies live here.
   await ensurePublicText("pickup-games", generalCat && generalCat.id, "Pickup games — run /join to line up 6s and scrims. Call your position and go.", ["lfg"]);
-  await ensurePublicText("draft-hub", gamesCat && gamesCat.id, "Watch the CGHL entry draft live and talk picks — the draft itself runs on the site.");
+  const draftHub = await ensurePublicText("draft-hub", gamesCat && gamesCat.id, "Watch the CGHL entry draft live and talk picks — the draft itself runs on the site.");
+  /* the per-pick feed: a DB trigger posts every selection through this webhook the moment it
+     lands (notify_discord_draft_pick). Maintained here the same way the mgmt-moves hook is. */
+  if (draftHub && draftHub.id) {
+    try {
+      const hooks = await dApi("GET", `/channels/${draftHub.id}/webhooks`);
+      let hook = Array.isArray(hooks) ? hooks.find((h) => h.name === "CGHL Draft" && h.token) : null;
+      if (!hook) hook = await dApi("POST", `/channels/${draftHub.id}/webhooks`, { name: "CGHL Draft" });
+      if (hook && hook.id && hook.token) { await sbUpsertCfg("discord_draft_webhook", `https://discord.com/api/webhooks/${hook.id}/${hook.token}`); sum.draftHook = 1; }
+    } catch (e) { sum.errors.push({ draftHook: String(e.message || e) }); }
+  }
 
   // "Pickup Lobbies" category — each filled /join lobby gets its own channel here (created by the
   // interactions endpoint on fill, removed by the sweep below). Stash its id so that endpoint finds it.

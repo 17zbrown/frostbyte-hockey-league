@@ -781,7 +781,7 @@ CG.roadModule = function(pre){
     rows = [
       ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff", "#/register"],
       ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
-      ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/schedule"],
+      ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/draft"],
       ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
     ].filter(function(x){ return x[1]; }).map(function(st, i){
       var past = Date.parse(st[1]) < nowMs;
@@ -1145,6 +1145,9 @@ CG.ROUTES.home = function(){
         leadCard("Goaltending", gs, function(p){ var s=lg.pstats[p.id]; return [(s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,""), s.w+"-"+s.l+"-"+s.otl]; })+
       '</div></div></section>';
   }
+  /* DEADLINE DAY — silent outside its window (CG.deadlineBand returns "" when far out or unset) */
+  html += CG.deadlineBand();
+
   /* NEWS */
   if (CG.modOn("news") && !pre && (C.articles||[]).length){
     /* the band dereferenced arts[0] with no guard — an empty newsroom took the whole front page
@@ -1235,7 +1238,79 @@ CG.newsCard = function(a, lead, feature){
     '<h3>'+esc(a.title)+'</h3>'+(showExcerpt?'<p>'+esc(a.excerpt)+'</p>':"")+
     '<span class="nc-meta">'+CG.fmtDate(a.dateIso)+' · '+esc(a.author.split("—")[0].trim())+'</span></div></article>';
 };
+/* The movement deadline as a timestamp: midnight ET at the end of the Friday of the deadline
+   week — the client-side mirror of the database's movement_deadline_at(), computed from the same
+   inputs (the deadline week's last regular-season game). Null when the schedule isn't generated,
+   in which case nothing renders — the module can never show a made-up date. */
+CG.movementDeadlineTs = function(){
+  var s = CG.SEASON||{}, wk = s.trade_deadline_week;
+  if (!wk || !CG.lg || !(CG.lg.schedule||[]).length) return null;
+  var last = 0;
+  CG.lg.schedule.forEach(function(g){
+    if (g.stage==="regular" && g.week===wk && g.at > last) last = g.at;
+  });
+  if (!last) return null;
+  /* the ET calendar day of that game, plus one day, at 00:00 ET */
+  return Date.parse(CG.etISO(CG.dayAdd(CG.etYMD(new Date(last).toISOString()), 1), "00:00"));
+};
+
+/* The deadline-day module: quiet until a week out, a live countdown after that, and on the final
+   day the transaction wire runs right under it. Manufactured drama from a rule the league already
+   has — and honest silence when the schedule doesn't exist yet. */
+CG.deadlineBand = function(){
+  var ts = CG.movementDeadlineTs();
+  if (!ts) return "";
+  var now = CG.now(), left = ts - now;
+  var DAY = 86400000;
+  if (left <= -2*DAY || left > 7*DAY) return "";     /* out of the window either side */
+  var frozen = left <= 0;
+  var finalDay = !frozen && left <= DAY;
+  /* through the move-type whitelist, like every other transaction surface — registrations and
+     Discord joins are member activity, not deadline-day moves */
+  var txToday = CG.teamMoves(CG.lg.liveTransactions).filter(function(tx){ return (now - tx.at) < DAY; }).slice(0, 8);
+  var inner;
+  if (frozen){
+    inner = '<b style="font-family:var(--f-disp);font-size:17px">Rosters are frozen.</b>'+
+      '<p class="caption" style="margin-top:6px">The movement deadline has passed — signings, trades and releases are closed through the playoffs (Rule 2.4).</p>';
+  } else {
+    inner = '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'+
+      '<div><b style="font-family:var(--f-disp);font-size:17px">'+(finalDay?"Deadline day.":"The trade deadline is coming.")+'</b>'+
+      '<p class="caption" style="margin-top:4px">Signings, trades and releases close at midnight ET'+(finalDay?" tonight":"")+' (Rule 2.4).</p></div>'+
+      '<b id="dlClock" data-ends="'+ts+'" class="num" style="margin-left:auto;font-family:var(--f-mono);font-size:clamp(22px,3vw,30px);font-weight:800">--:--:--</b></div>';
+  }
+  var wire = (finalDay || frozen) && txToday.length
+    ? '<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">'+
+      '<span class="eyebrow" style="display:block;margin-bottom:8px">The wire — last 24 hours</span>'+
+      txToday.map(function(tx){ return '<p class="small" style="color:var(--steel);margin:4px 0">'+CG.txText(tx.text)+'</p>'; }).join("")+'</div>'
+    : "";
+  return '<section class="sec-tight" id="dlBand"><div class="shell"><div class="card" data-rv="up"><div class="card-b">'+inner+wire+'</div></div></div></section>';
+};
+
 CG.AFTER.home = function(){
+  /* deadline countdown — textContent only, so the tick never repaints the page (seamless rule) */
+  var dl = document.getElementById("dlClock");
+  if (dl && !CG._dlTimer){
+    var tick = function(){
+      var el = document.getElementById("dlClock");
+      if (!el){ clearInterval(CG._dlTimer); CG._dlTimer = null; return; }
+      var left = (+el.getAttribute("data-ends")) - CG.now();
+      if (left <= 0){
+        /* the deadline just passed under an open page: stop the timer and repaint the band in
+           place — deadlineBand() now renders its frozen state — instead of pinning 00:00:00
+           under copy that still claims moves are open */
+        clearInterval(CG._dlTimer); CG._dlTimer = null;
+        var band = document.getElementById("dlBand");
+        if (band) band.outerHTML = CG.deadlineBand();
+        return;
+      }
+      var d = Math.floor(left/86400000), hh = Math.floor(left%86400000/3600000),
+          mm = Math.floor(left%3600000/60000), ss = Math.floor(left%60000/1000);
+      var p2 = function(n){ return (n<10?"0":"")+n; };
+      el.textContent = (d? d+"d " : "") + p2(hh)+":"+p2(mm)+":"+p2(ss);
+    };
+    tick();
+    CG._dlTimer = setInterval(tick, 1000);
+  }
   /* the map frames itself from its container, so it has to be laid out once the hero has a real
      size — and again whenever that size changes, which moves both the window and the pixel gap
      between cities. Run it straight off the event rather than deferring into rAF: the whole pass is

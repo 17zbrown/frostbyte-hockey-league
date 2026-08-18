@@ -800,6 +800,7 @@ CG.carousel = function(rootSel, slides, opts){
 CG.searchIndex = function(){
   var lg = CG.lg, ix = [];
   ix.push({ cat:"Pages", label:"Brand & identity", sub:"Logos, color, type, and voice", route:"#/brand", key:"brand identity logo logos color colour typography font voice guidelines press kit" });
+  ix.push({ cat:"Pages", label:"The draft room", sub:"Watch every pick live on draft night", route:"#/draft", key:"draft room draft night picks live board watch spectate" });
   lg.players.forEach(function(p){
     ix.push({ cat:"Players", label:p.tag, sub:CG.TEAM[p.team].name+" · "+p.pos, route:CG.playerRoute(p), key:p.tag.toLowerCase() });
   });

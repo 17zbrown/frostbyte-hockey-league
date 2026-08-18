@@ -1311,6 +1311,34 @@ CG.hubRoster = function(qs){
       'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). '+
       'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';
   }
+  /* Road to 5 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'
+     draft eligibility — management is OBLIGED to spread ice time so everyone can reach five games.
+     The card only exists while that duty is live (random assignees present, draft not complete). */
+  if (CG.roadToFive){
+    var r5 = CG.roadToFive(lg, club);
+    var draftDone5 = !!(lg.draftState && String(lg.draftState.status)==="complete");
+    if (r5.length && !draftDone5){
+      var short5 = r5.filter(function(r){ return !r.done; });
+      var exempt5 = r5.filter(function(r){ return r.exempt; }).length;
+      h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to 5 — draft eligibility</h3>'+
+        (short5.length ? '<span class="chip chip-warn">'+short5.length+' still short</span>'
+                       : '<span class="chip chip-win">everyone covered</span>')+'</div><div class="card-b">'+
+        (short5.length ? '<div class="stack" style="gap:9px">'+short5.map(function(r){
+            var pct = Math.round(Math.min(1, r.gp/5)*100);
+            var danger = !r.reachable;
+            return '<div style="display:flex;align-items:center;gap:12px">'+
+              '<span style="flex:0 0 140px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b style="font-size:13px">'+esc(r.tag)+'</b> <small class="caption">'+esc(r.pos||"")+'</small></span>'+
+              '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+pct+'%;background:'+(danger?"var(--red)":"var(--chrome)")+'"></i></span>'+
+              '<span class="num" style="flex:0 0 44px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / 5</span>'+
+              (danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach 5</span>':'<span class="caption">needs '+r.need+'</span>')+
+            '</div>';
+          }).join("")+'</div>'
+          : '<p class="small" style="color:var(--steel)">Every randomly assigned player has five pre-season games or an exemption — the whole group enters the draft.</p>')+
+        '<p class="caption" style="margin-top:12px">Rule 2.8: a randomly assigned player needs five pre-season appearances to stay draft-eligible, and management must spread ice time so everyone can get there. '+
+        (exempt5?exempt5+' returning player'+(exempt5===1?' is':'s are')+' exempt. ':'')+
+        'The club has '+((r5[0]&&r5[0].clubGamesLeft)||0)+' pre-season game'+(((r5[0]&&r5[0].clubGamesLeft)||0)===1?'':'s')+' left.</p></div></div>';
+    }
+  }
   /* v2.7: the 30% playoff floor is abolished — every rostered player is playoff-eligible. The
      card now states the caps that DO exist rather than a floor that doesn't. */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+

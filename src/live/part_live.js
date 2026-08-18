@@ -615,7 +615,8 @@ CG.buildLiveLeague = async function(){
 
   /* real transaction log */
   lg.liveTransactions = transactions.map(function(tx){
-    return { type:tx.type, text:tx.description||"", dateIso:(tx.occurred_at||"").slice(0,10) };
+    return { type:tx.type, text:tx.description||"", dateIso:(tx.occurred_at||"").slice(0,10),
+             at: Date.parse(tx.occurred_at||"")||0 };   /* the deadline-day wire filters on this */
   });
 
   /* real newsroom — replace the prototype's simulated articles */
@@ -783,16 +784,77 @@ CG.teardownDMs = function(){
   if(CG._dm.channel){ try{ CG.sb.removeChannel(CG._dm.channel); }catch(e){} CG._dm.channel=null; }
 };
 /* re-map the draft board/pool with the same maps the adapter built */
+/* ---- Road to 5 (Rule 2.8): who still needs pre-season games to stay draft-eligible ----
+   Pure: takes the league object, returns classified rows, so Team HQ, Pre-season Central and the
+   tests all read the SAME arithmetic. A player is exempt when returning (drafted before, prior
+   roster, or 5+ career games — mirrors is_draft_eligible in the DB); everyone else needs
+   PRESEASON_MIN_GP appearances, and "reachable" is honest about how many club games remain. */
+CG.roadToFive = function(lg, clubCode){
+  var out = [];
+  if (!lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
+  var min = CG.PRESEASON_MIN_GP || 5;
+  var clubGamesLeft = (lg.schedule||[]).filter(function(g){
+    return g.stage==="preseason" && g.status!=="final" && (g.home===clubCode || g.away===clubCode);
+  }).length;
+  (lg.byTeam[clubCode]||[]).forEach(function(pl){
+    if (pl.origin !== "preseason_random") return;      /* only the randomly assigned are gated */
+    var exempt = !!(lg.isVeteran && lg.isVeteran(pl.id));
+    var gp = ((lg.preGp||{})[pl.id]||{}).gp || 0;
+    var need = Math.max(0, min - gp);
+    out.push({ pid:pl.id, tag:pl.tag, pos:pl.pos, gp:gp, need:need, exempt:exempt,
+               done: exempt || need===0,
+               reachable: exempt || need <= clubGamesLeft,
+               clubGamesLeft: clubGamesLeft });
+  });
+  /* the players in danger first, most-behind at the top */
+  return out.sort(function(a,b){ return (a.done?1:0)-(b.done?1:0) || (b.need-a.need) || String(a.tag).localeCompare(String(b.tag)); });
+};
+
+/* ---- Get-set-up checklist: the steps between "signed in" and "in the player pool" ---- */
+CG.setupChecklist = function(profile, registration, regOpen){
+  var p = profile || {};
+  var items = [
+    { key:"discord", label:"In the league Discord", done: !!p.in_guild,
+      cta:"Join the Discord", href:(CG.discordJoinLink && CG.discordJoinLink()) || null, ext:true },
+    { key:"ea", label:"EA ID on file", done: !!p.ea_id, cta:"Add EA ID", act:"ea" },
+    { key:"register", label:"Registered for the season", done: !!registration,
+      cta: regOpen ? "Register to play" : null, href: regOpen ? "#/register" : null }
+  ];
+  var doneN = items.filter(function(i){ return i.done; }).length;
+  return { items:items, done:doneN, total:items.length, complete:doneN===items.length };
+};
+
+/* ---- Board coverage: can the auto-pick always draft from YOUR list? ---- */
+/* remainingPicks === null means the pick order hasn't been generated yet — a distinct "pre"
+   level, so "no picks left" can never show while the picks simply don't exist. */
+CG.boardCoverage = function(boardIds, pool, remainingPicks){
+  var inPool = {}; (pool||[]).forEach(function(pr){ inPool[pr.profileId] = true; });
+  var available = (boardIds||[]).filter(function(id){ return inPool[id]; }).length;
+  var level = remainingPicks==null ? "pre"
+    : remainingPicks<=0 ? "done"
+    : available >= remainingPicks + 3 ? "ok"          /* a cushion: others draft your targets too */
+    : available >= remainingPicks ? "thin"
+    : "short";
+  return { available:available, remaining:remainingPicks, level:level };
+};
+
 CG.mapDraftData = function(lg, draftPicks, registrations){
   var idToCode = lg._idToCode||{}, profName = lg._profName||{}, rostered = lg._rosteredIds||{};
   lg.draftPicks = (draftPicks||[]).map(function(p){
     return { id:p.id, season:p.season_number, round:p.round, overall:p.overall_pick, skipped:!!p.skipped,
       ownerCode: idToCode[p.current_team_id]||null, origCode: idToCode[p.original_team_id]||null,
-      playerId:p.player_id, playerName: p.player_id?(profName[p.player_id]||"a player"):null, used:!!p.used };
+      playerId:p.player_id, playerName: p.player_id?(profName[p.player_id]||"a player"):null, used:!!p.used,
+      pickedAt: p.picked_at||null };
   });
   var poolSeason = (CG.SEASON && CG.SEASON.id) || null;
   var held = CG.contractHeldIds();
-  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && !held[r.profile_id] && (!r.season_id || r.season_id===poolSeason); })
+  /* Players already taken this draft leave the pool immediately. _rosteredIds is built once at
+     boot and never refreshed mid-draft, so without this the pool (and board coverage, the pick
+     modals, the prospect counts) would count drafted players as available all night. */
+  var curSn = (CG.SEASON && CG.SEASON.number) || 1;
+  var picked = {};
+  lg.draftPicks.forEach(function(p){ if (p.used && p.playerId && p.season===curSn) picked[p.playerId] = true; });
+  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && !held[r.profile_id] && !picked[r.profile_id] && (!r.season_id || r.season_id===poolSeason); })
     .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(r.scout_ovr==null?null:r.scout_ovr), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
     .sort(function(a,b){ return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr); });
   lg.registrationsCount = (registrations||[]).length;
@@ -804,7 +866,7 @@ CG.loadManagerData = async function(){
   if (role!=="mgmt" && role!=="commish" && role!=="staff") return;
   try {
     var q = await Promise.all([
-      CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped").order("season_number").order("round"),
+      CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("season_number").order("round"),
       CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,note,created_at, profiles(gamertag,ea_id,platform,jersey_number)"),
       CG.sb.from("draft_state").select("*")
     ]);
@@ -1176,6 +1238,21 @@ CG._wrapHubDashboard = function(){
     var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+CG.fmtFull(CG.now())+'</span>'+
       '<h1 class="h-page" style="margin-top:8px">Welcome, '+esc(p.gamertag||p.display_name||"skater")+'.</h1>'+
       '<p class="lede" style="margin-top:10px">You’re signed in — here’s where you stand on the way to a roster spot.</p></div>';
+    /* Get set up: the three things between "signed in" and "in the player pool", as one glance.
+       Complete = the card stays out of the way entirely. */
+    var cl = CG.setupChecklist(p, reg, !!s.registration_open);
+    if (!cl.complete){
+      h += '<div class="card" style="margin-bottom:18px;border-color:var(--chrome)"><div class="card-h"><h3>Get set up</h3>'+
+        '<span class="chip chip-warn">'+cl.done+' of '+cl.total+' done</span></div><div class="card-b">'+
+        '<div class="stack" style="gap:10px">'+cl.items.map(function(it){
+          var mark = it.done ? '<span style="color:var(--grn);font-weight:800">✓</span>' : '<span style="color:var(--steel)">○</span>';
+          var cta = it.done ? "" :
+            it.act==="ea" ? '<button class="btn btn-chrome btn-sm" id="clEaBtn" style="margin-left:auto">'+esc(it.cta)+'</button>' :
+            it.href && it.cta ? '<a class="btn btn-chrome btn-sm" style="margin-left:auto" href="'+esc(it.href)+'"'+(it.ext?' target="_blank" rel="noopener"':'')+'>'+esc(it.cta)+'</a>' : "";
+          return '<div style="display:flex;align-items:center;gap:12px">'+mark+'<span style="flex:1;'+(it.done?'color:var(--steel)':'font-weight:600')+'">'+esc(it.label)+'</span>'+cta+'</div>';
+        }).join("")+'</div>'+
+        '<p class="caption" style="margin-top:12px">All three and you’re in the pool: randomly assigned for the pre-season, then the draft. Leaving the Discord withdraws a pending sign-up (Rule 1.1).</p></div></div>';
+    }
     /* 1 · registration status */
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
       (reg?'<span class="chip chip-win">Registered</span>':(s.registration_open?'<span class="chip chip-warn">Not registered</span>':'<span class="chip">Closed</span>'))+'</div><div class="card-b">'+
@@ -2815,12 +2892,19 @@ CG.decideStaffApp = function(id, approve, name){
    ================================================================ */
 CG.ROUTES.draft = function(){
   var lg = CG.lg, role = CG.role();
-  var head = CG.pageHead("The draft room","Draft board","Clubs draft their own picks on the clock; the commissioner runs the room — pause, skip, or reverse. The board updates live for everyone.");
-  if (role!=="mgmt" && role!=="commish" && role!=="staff"){
-    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
-      '<div class="e-art">'+CG.ic("lock",22)+'</div><b>Managers only</b><p>The draft board and prospect pool are visible to club management and the league office.</p></div></div></div>';
-  }
+  /* Spectator mode: draft night is a league event, not a private meeting. Members and guests get
+     the live clock, the pick ticker, and the full board — the pieces that make it watchable —
+     while the prospect pool with the commissioner's scout ratings stays management-only. */
+  var spectate = (role!=="mgmt" && role!=="commish" && role!=="staff");
+  var head = CG.pageHead("The draft room","Draft board", spectate
+    ? "Watch the CGHL entry draft live — every pick lands here the moment it's made, and in #draft-hub on the Discord."
+    : "Clubs draft their own picks on the clock; the commissioner runs the room — pause, skip, or reverse. The board updates live for everyone.");
   var picks = lg.draftPicks||[];
+  if (spectate && !picks.length && !CG._spectatorDraftTried){
+    /* first visit before the spectator data has loaded — AFTER.draft fetches it and re-renders */
+    return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
+      '<div class="e-art">'+CG.ic("play",22)+'</div><b>Loading the draft room…</b><p>Pulling the live board.</p></div></div></div>';
+  }
   if (!picks.length){
     return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div class="card"><div class="empty" style="padding:60px 20px">'+
       '<div class="e-art">'+CG.ic("users",22)+'</div><b>No draft has been set up yet</b><p>When the commissioner builds the board, the picks, prospect pool, and live results appear here.</p></div></div></div>';
@@ -2864,7 +2948,9 @@ CG.ROUTES.draft = function(){
       '<button class="btn btn-chrome" data-draft-start>'+CG.ic("play",14)+'Start live draft</button>'+
       '<span class="caption" style="flex:1;min-width:200px">Assigns the snake order and puts the first club on the clock. Clubs draft their own picks; you run the clock and can pause, skip, or reverse.</span></div></div>';
   } else {
-    clockBox = '<div class="note chr" style="margin-bottom:18px">The draft hasn’t started yet. When the commissioner opens it, your club’s picks go on the clock right here.</div>';
+    /* spectators (and staff) have no club — don't talk to them about "your club's picks" */
+    clockBox = '<div class="note chr" style="margin-bottom:18px">The draft hasn’t started yet. When the commissioner opens it, '+
+      (spectate || role==="staff" ? 'the first pick goes' : 'your club’s picks go')+' on the clock right here.</div>';
   }
 
   var summary = '<div class="grid g3" style="margin-bottom:20px">'+
@@ -2872,6 +2958,20 @@ CG.ROUTES.draft = function(){
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+pool.length+'</b><span>prospects available</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px'+(isMgr&&myOpen.length?';color:var(--chrome-deep)':'')+'">'+(isMgr?myOpen.length:(total-made-skips))+'</b><span>'+(isMgr?"your picks left":"picks remaining")+'</span></div></div>';
 
+  /* the ticker: the last few selections, newest first — the heartbeat of a live draft.
+     Recency is picked_at, not overall_pick: a make-up pick (skipped, used later) is the newest
+     selection in the room even though its number is low. Legacy rows fall back to overall. */
+  var recent = cur.filter(function(p){ return p.used; }).sort(function(a,b){
+    return (Date.parse(b.pickedAt||"")||0)-(Date.parse(a.pickedAt||"")||0) || (b.overall||0)-(a.overall||0);
+  }).slice(0,6);
+  var ticker = recent.length ? '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Latest picks</h3>'+
+    '<span class="chip">'+made+' made</span></div><div class="card-b" style="padding-top:6px">'+
+    recent.map(function(p){
+      return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(p.overall||"—")+'</span>'+
+        CG.crest(p.ownerCode,26)+'<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.playerName||"a player")+'</b>'+
+        '<small style="display:block" class="caption">R'+p.round+' · '+esc((CG.TEAM[p.ownerCode]||{}).name||p.ownerCode||"—")+'</small></span>'+
+        '</div>';
+    }).join("")+'</div></div>' : "";
   var showAdmin = isComm && dstatus!=="setup";
   var board = '<div class="card"><div class="card-h"><h3>Season '+maxSn+' board</h3><span class="chip">'+made+' / '+total+'</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>Draft board</caption><thead><tr><th>Pick</th><th>Rd</th><th class="tleft">Club</th><th class="tleft">Result</th>'+(showAdmin?'<th class="tright">Admin</th>':'')+'</tr></thead><tbody>'+
@@ -2902,13 +3002,25 @@ CG.ROUTES.draft = function(){
       }).join("")+'</div>'
       : '<div class="card-b"><p class="caption">No prospects available yet — the pool fills from season registrations that haven’t been assigned to a club.</p></div>')+'</div>';
 
-  return head + '<div class="shell" style="padding-bottom:48px">'+clockBox+summary+
+  if (spectate){
+    /* no registrations data (and no scout intel) for spectators — the pool card becomes a
+       simple picks-remaining note */
+    var leftN = total-made-skips;
+    poolCard = '<div class="card"><div class="card-h"><h3>The night at a glance</h3></div><div class="card-b">'+
+      '<p class="small" style="color:var(--steel);line-height:1.65">'+(leftN===1?'1 pick remains':leftN+' picks remain')+' on the board. '+
+      'Every selection appears here live and posts to <b>#draft-hub</b> on the Discord. '+
+      'Prospect scouting stays inside the clubs — what you see is what the league sees.</p></div></div>';
+  }
+  return head + '<div class="shell" style="padding-bottom:48px">'+clockBox+ticker+summary+
     '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
 CG._draftSeason = function(){ return (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number) || 1; };
-CG.refreshDraft = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){
-  if(location.hash.indexOf("/draft")>=0){ if(CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else CG.router(); }
-}); };
+CG.refreshDraft = function(){ if(!CG.sb) return;
+  var role = CG.auth.role;
+  var load = (role==="mgmt"||role==="commish"||role==="staff") ? CG.loadManagerData() : CG.loadSpectatorDraft();
+  load.then(function(){
+    if(location.hash.indexOf("/draft")>=0){ if(CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else CG.router(); }
+  }); };
 CG.draftStart = function(){
   var el=document.getElementById("draftSecs"), secs=el?(parseInt(el.value,10)||120):120, sn=CG._draftSeason();
   CG.confirm("Start the live draft?","This assigns the snake order and puts the first club on the clock. Clubs draft their own picks; you run the clock.","Start draft", function(){
@@ -2951,25 +3063,56 @@ CG.startDraftClock = function(){
   if(CG._draftClockTimer){ clearInterval(CG._draftClockTimer); CG._draftClockTimer=null; }
   var el0=document.getElementById("draftClock"); if(!el0) return;
   var status=el0.getAttribute("data-status"), ends=el0.getAttribute("data-ends"), remaining=el0.getAttribute("data-remaining"), sn=parseInt(el0.getAttribute("data-season"),10);
+  /* the clock renders for everyone, but only browsers authorized for draft_auto_advance fire it —
+     otherwise every spectator and signed-out guest hammers the RPC every ~2s once a clock expires */
+  var r=(CG.auth&&CG.auth.role)||"guest", canAdvance = (r==="mgmt"||r==="commish"||r==="staff");
   function fmt(s){ s=Math.max(0,Math.floor(s)); return Math.floor(s/60)+":"+("0"+(s%60)).slice(-2); }
   function tick(){
     var el=document.getElementById("draftClock"); if(!el){ clearInterval(CG._draftClockTimer); CG._draftClockTimer=null; return; }
     if(status==="paused"){ el.textContent = remaining!==""? fmt(parseInt(remaining,10)) : "--:--"; el.style.color="var(--steel)"; return; }
     var left=(Date.parse(ends)-Date.now())/1000;
     if(left<=0){ el.textContent="0:00"; el.style.color="var(--red)";
-      if(!CG._draftAdvancing){ CG._draftAdvancing=true; CG.sb.rpc("draft_auto_advance",{ p_season_number:sn }).then(function(){ setTimeout(function(){ CG._draftAdvancing=false; },1500); }).catch(function(){ CG._draftAdvancing=false; }); }
+      if(canAdvance && !CG._draftAdvancing){ CG._draftAdvancing=true; CG.sb.rpc("draft_auto_advance",{ p_season_number:sn }).then(function(){ setTimeout(function(){ CG._draftAdvancing=false; },1500); }).catch(function(){ CG._draftAdvancing=false; }); }
     } else { el.textContent=fmt(left); el.style.color = left<15?"var(--red)":""; }
   }
   tick(); CG._draftClockTimer=setInterval(tick,1000);
 };
 CG._draftChannel=null;
+/* Spectator draft data: draft_picks and draft_state are publicly readable (the draft is a public
+   event), but loadManagerData is role-gated — so members and guests watching the room load the
+   two public tables directly. Names resolve through _profName, which the public build carries. */
+CG.loadSpectatorDraft = async function(){
+  if (!CG.sb || !CG.lg) return;
+  try {
+    var q = await Promise.all([
+      CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("overall_pick"),
+      CG.sb.from("draft_state").select("*")
+    ]);
+    if (q[0] && !q[0].error) CG.mapDraftData(CG.lg, q[0].data||[], CG.lg._registrationsRaw||[]);
+    var states = (q[1]&&!q[1].error&&q[1].data)||[];
+    var curSn = (CG.SEASON && CG.SEASON.number) || 1;
+    CG.lg.draftState = states.find(function(st){ return st.season_number===curSn; }) || null;
+  } catch(e){}
+};
 CG.subscribeDraft = function(){
   if(CG._draftChannel || !CG.sb) return;
   CG._draftChannel = CG.sb.channel("draft-live")
     .on("postgres_changes",{ event:"*", schema:"public", table:"draft_state" }, function(){ CG.refreshDraft(); })
     .on("postgres_changes",{ event:"*", schema:"public", table:"draft_picks" }, function(){ CG.refreshDraft(); })
-    .subscribe();
+    .subscribe(function(status){
+      /* a dead socket must not look like a live one: drop the channel so the next visit to the
+         room resubscribes instead of silently rendering a stale board all night */
+      if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"||status==="CLOSED"){
+        var ch=CG._draftChannel; CG._draftChannel=null;
+        if(ch){ try{ CG.sb.removeChannel(ch); }catch(e){} }
+      }
+    });
 };
+/* spectator draft data is fetched once per VISIT, not once per session: leaving the room clears
+   the latch so a return during draft night refetches instead of trusting a maybe-dead socket */
+window.addEventListener("hashchange", function(){
+  if (location.hash.indexOf("/draft") < 0) CG._spectatorDraftTried = false;
+});
 
 /* ================================================================
    DRAFT DESK (Team HQ) + DRAFT MANAGER (Control Center)
@@ -3120,11 +3263,32 @@ CG.hubDraftLive = function(){
   var mySkipped = myPicks.filter(function(p){ return p.skipped && !p.used; });
   var picksUntil = (nextMine && cur) ? picks.filter(function(p){ return !p.used && !p.skipped && p.overall>=cur.overall && p.overall<nextMine.overall; }).length : null;
   var unlocked = pool.length>0 || (CG.SEASON && CG.SEASON.preseason_starts_at && Date.parse(CG.SEASON.preseason_starts_at)<=CG.now());
+  /* Board coverage: the auto-pick drafts from YOUR board when your clock expires — a board thinner
+     than your remaining picks means the league eventually drafts best-available-overall for you.
+     Counted against the players still actually available, since rivals draft your targets too. */
+  var remainingMine = myPicks.filter(function(pk){ return !pk.used && !pk.skipped; }).length;
+  /* no pick order yet → coverage can't be graded; null keeps "no picks left" honest */
+  var cov = CG.boardCoverage(board, pool, picks.length ? remainingMine : null);
+  var covTxt = cov.available+' ranked for '+cov.remaining+' pick'+(cov.remaining===1?'':'s');
+  var covChip = cov.level==="pre" ? '<span class="chip">'+cov.available+' ranked — pick order not set</span>'
+    : cov.level==="done" ? '<span class="chip">no picks left</span>'
+    : cov.level==="ok"   ? '<span class="chip chip-win">covered — '+covTxt+'</span>'
+    : cov.level==="thin" ? '<span class="chip chip-warn">thin — '+covTxt+'</span>'
+    : '<span class="chip chip-loss">short — '+covTxt+'</span>';
+  var covNote = cov.level==="pre"
+    ? 'Coverage grades against your pick count once the commissioner generates the draft order — until then, just keep ranking.'
+    : cov.level==="short"
+    ? 'If your clock runs out past your board, the league drafts best-available <b>overall</b> — rank more players.'
+    : cov.level==="thin"
+    ? 'Enough for your picks with nothing to spare — other clubs draft your targets too. A few extra names is cheap insurance.'
+    : 'If your clock ever runs out, the auto-pick takes the best player still available <b>from this list</b>.';
   var draftAt = CG.SEASON && CG.SEASON.draft_at ? Date.parse(CG.SEASON.draft_at) : null;
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · the war room</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Draft desk</h1>'+
     '<p class="lede" style="margin-top:8px">Build your board before the night, then let it work for you: if your clock ever runs out, the league drafts the best available player <b>from your board</b> automatically.</p></div>';
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Board coverage</h3>'+covChip+'</div>'+
+    '<div class="card-b"><p class="caption">'+covNote+'</p></div></div>';
 
   /* status strip */
   h += '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">'+
@@ -3553,6 +3717,16 @@ CG.AFTER._admDraft = function(){
   }); });
 };
 CG.AFTER.draft = function(){
+  var role = CG.role();
+  if (role!=="mgmt" && role!=="commish" && role!=="staff"){
+    if (!CG._spectatorDraftTried){
+      CG._spectatorDraftTried = true;
+      CG.loadSpectatorDraft().then(function(){ if (location.hash.indexOf("/draft")>=0) CG.router(); });
+    }
+    CG.startDraftClock();
+    CG.subscribeDraft();
+    return;                                        /* no manager controls to wire */
+  }
   document.querySelectorAll("[data-makepick]").forEach(function(b){ b.addEventListener("click", function(){ CG.draftMakePick(this.getAttribute("data-makepick")); }); });
   document.querySelectorAll("[data-reversepick]").forEach(function(b){ b.addEventListener("click", function(){ CG.draftReverse(this.getAttribute("data-reversepick")); }); });
   var s=document.querySelector("[data-draft-start]"); if(s) s.addEventListener("click", CG.draftStart);
@@ -4151,6 +4325,38 @@ CG.admPreseason = function(){
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (returning veteran) or <b>Undrafted FA</b> (first-year → rookie bidding). A randomly assigned player needs five pre-season appearances to reach the draft (Rule 2.8); returning players are exempt, and anyone short is placed on a club automatically instead. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
+  /* Road to 5 (Rule 2.8): the office's obligation-tracker — which clubs are leaving randomly
+     assigned players short of draft eligibility. Only alive while the pre-season is deciding it. */
+  var draftDone = !!(lg.draftState && String(lg.draftState.status)==="complete");
+  if (!draftDone && randomN > 0){
+    var atRisk = [];
+    CG.TEAMS.forEach(function(t){
+      var r5rows = CG.roadToFive(lg, t.code);
+      if (!r5rows.length) return;
+      var short5 = r5rows.filter(function(r){ return !r.done; });
+      var stuck5 = short5.filter(function(r){ return !r.reachable; });
+      atRisk.push({ code:t.code, total:r5rows.length, short:short5.length, stuck:stuck5.length,
+                    names: short5.slice(0,4).map(function(r){ return r.tag+" ("+r.gp+"/5)"; }).join(", ") });
+    });
+    atRisk.sort(function(a,b){ return (b.stuck-a.stuck) || (b.short-a.short); });
+    var anyShort = atRisk.some(function(c){ return c.short>0; });
+    var nShort = atRisk.reduce(function(n,c){ return n+c.short; },0);
+    h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Road to 5 — draft eligibility</h3>'+
+      (anyShort?'<span class="chip chip-warn">'+nShort+' player'+(nShort===1?'':'s')+' short</span>'
+               :'<span class="chip chip-win">everyone eligible or exempt</span>')+'</div>'+
+      (anyShort
+        ? '<div class="tblwrap"><table class="tbl compact"><caption class="sr">Players short of five pre-season games, by club</caption>'+
+          '<thead><tr><th class="tleft">Club</th><th>Assigned</th><th>Short of 5</th><th>Can’t reach 5</th><th class="tleft">Who</th></tr></thead><tbody>'+
+          atRisk.filter(function(c){ return c.short>0; }).map(function(c){
+            return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(c.code,18)+'<span class="mono" style="font-size:11px">'+esc(c.code)+'</span></span></td>'+
+              '<td class="tnum">'+c.total+'</td><td class="tnum">'+c.short+'</td>'+
+              '<td class="tnum">'+(c.stuck?'<b style="color:var(--red)">'+c.stuck+'</b>':'0')+'</td>'+
+              '<td class="tleft caption">'+esc(c.names)+(c.short>4?'…':'')+'</td></tr>';
+          }).join("")+'</tbody></table></div>'
+        : '')+
+      '<div class="card-b"'+(anyShort?' style="border-top:1px solid var(--line)"':'')+'><span class="caption">Rule 2.8 obliges management to spread pre-season ice time so every randomly assigned player can reach five games. '+
+      '“Can’t reach 5” means the club has fewer pre-season games left than the player still needs — those need attention now.</span></div></div>';
+  }
   /* sign-ups withdrawn automatically (left the Discord — Rule 1.1). Filled async from the
      archive; the card stays hidden when there is nothing to show. */
   h+='<div class="card" style="margin-top:18px;display:none" id="psWithdrawn"><div class="card-h"><h3>Withdrawn sign-ups</h3><span class="chip">left the Discord · Rule 1.1</span></div><div class="card-b" id="psWithdrawnB"></div></div>';
@@ -9772,6 +9978,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="management"){ CG.AFTER._management(); return; }
   if (param==="gamestats"){ if (CG.AFTER._hubGameStats) CG.AFTER._hubGameStats(qs); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
+  var clEa=document.getElementById("clEaBtn"); if(clEa) clEa.addEventListener("click", CG.promptEaId);   /* the Get-set-up checklist's EA button */
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   var sl=document.getElementById("sSaveLive");
   if (sl) sl.addEventListener("click", function(){
