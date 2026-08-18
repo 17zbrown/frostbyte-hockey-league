@@ -1328,7 +1328,7 @@ CG.ROUTES.signin = function(){
       '<span class="eyebrow chr">Account</span><h1 class="h-page" style="margin-top:10px">You’re signed in</h1>'+
       '<p class="lede" style="margin:12px auto 22px">Signed in as <b>'+esc(p.gamertag||p.display_name||"member")+'</b>'+(p.role?' · '+esc(p.role):'')+'.</p>'+
       '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'+
-        '<a class="btn btn-chrome" href="#/hub">'+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
+        '<a class="btn btn-chrome" href="'+(CG.role()==="commish"?"#/admin":"#/hub")+'">'+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
         '<button class="btn btn-ghost" onclick="CG.signOut()">Sign out</button></div>'+
       '<div class="card" style="margin-top:26px;text-align:left"><div class="card-h"><h3>Switched to a new Discord account?</h3></div>'+
         '<div class="card-b"><p class="small" style="color:var(--steel)">Link it here and your league account follows you — history, roster spot, stats, everything. Your name and roles in the league Discord update within a couple of minutes.</p>'+
@@ -3241,7 +3241,7 @@ CG.hubDraftLive = function(){
     [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the league auto-drafts your top available board player — never a player you didn’t rank, unless your board runs dry."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
      ["Skipped picks aren’t lost","If a pick gets skipped, it stays yours — use it any time before the draft ends from the Make-up card."],
-     ["Eligibility","Every player who registered by the deadline is draft-eligible — the rulebook has no games-played requirement (Rule 2.8). Late registrants are placed on clubs automatically until the movement deadline."]
+     ["Eligibility","Registered by the deadline and, for randomly assigned first-years, at least 5 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of five still plays — placed on a club under Rule 2.2."]
     ].map(function(kv){ return '<div><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">'+kv[0]+'</b><p class="small" style="color:var(--steel);line-height:1.6">'+kv[1]+'</p></div>'; }).join("")+
     '</div></div></div>';
   return h;
@@ -3819,19 +3819,20 @@ CG.hubShell = function(section, inner){
     '</div></div></section>';
   return bar + CG._origHubShell(section, inner);
 };
-CG._pvHubAfter = CG.AFTER.hub;
-CG.AFTER.hub = function(param, qs){
-  var sel = document.getElementById("cmPreview");
-  if (sel) sel.addEventListener("change", function(){
-    CG.setPreviewClub(this.value || null);
-    var v = this.value;
-    /* the club-keyed loads (trades, vetoes, lineups, saved lines, night plan) were fetched for the
-       PREVIOUS club — without a reload the new club's front office renders the old club's data */
-    var done = function(){ CG.toast(v ? "Viewing "+v+"’s front office" : "Preview off", "ok"); if (CG.router) CG.router(); };
-    if (CG.loadManagerData) CG.loadManagerData().then(done, done); else done();
-  });
-  if (CG._pvHubAfter) return CG._pvHubAfter(param, qs);
-};
+/* The preview picker is bound ONCE, at the document, not per render: the AFTER.hub chain has
+   half a dozen wrappers whose early-return branches (messages, the desks, the draft board, the
+   free-agent board…) never reached a per-render binder — so the picker rendered on every hub page
+   but only actually worked on some, which read as randomly broken. A delegated listener cannot be
+   skipped by a branch that forgot to chain. */
+document.addEventListener("change", function(e){
+  if (!e.target || e.target.id !== "cmPreview") return;
+  var v = e.target.value;
+  CG.setPreviewClub(v || null);
+  /* the club-keyed loads (trades, vetoes, lineups, saved lines, night plan) were fetched for the
+     PREVIOUS club — without a reload the new club's front office renders the old club's data */
+  var done = function(){ CG.toast(v ? "Viewing "+v+"’s front office" : "Preview off", "ok"); if (CG.router) CG.router(); };
+  if (CG.loadManagerData) CG.loadManagerData().then(done, done); else done();
+});
 
 CG.incomingOffers = function(){
   var t = CG.myManagedTeam(); if (!t) return [];
@@ -3893,8 +3894,9 @@ CG.setOnBlock = function(pid, on){
   var p = CG.playerById(CG.lg, pid); if (!p) return;
   p.onBlock = !!on; /* optimistic — the row below is the truth */
   CG.sb.from("roster_spots").update({ on_block: !!on })
-    .eq("season_id", CG.SEASON.id).eq("profile_id", pid).then(function(r){
-      if (r.error){ p.onBlock = !on; CG.toast("Couldn’t update the block: "+r.error.message,"err"); CG.router(); }
+    .eq("season_id", CG.SEASON.id).eq("profile_id", pid).select("id").then(function(r){
+      var refused = r.error || !r.data || !r.data.length;   /* 0 rows + no error = RLS refusal */
+      if (refused){ p.onBlock = !on; CG.toast("Couldn’t update the block"+(r.error?": "+r.error.message:" — no roster row was changed"),"err"); CG.router(); }
     });
 };
 
@@ -6377,16 +6379,16 @@ CG.wireStaffExtras = function(){
       CG.toast("Import dismissed — not a league game","ok"); CG.refreshStaffExtras();
     }); }); });
   document.querySelectorAll("[data-task-claim]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).then(function(r){
-      if(r.error){ CG.toast("Couldn’t claim","err"); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
+    CG.sb.from("staff_tasks").update({ assignee:CG.auth.user.id }).eq("id",this.getAttribute("data-task-claim")).select("id").then(function(r){
+      if(r.error||!r.data||!r.data.length){ CG.toast("Couldn’t claim — it may have just been taken or removed","err"); CG.refreshStaffExtras(); return; } CG.toast("Task claimed","ok"); CG.refreshStaffExtras(); }); }); });
   document.querySelectorAll("[data-task-done]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.sb.from("staff_tasks").update({ status:"done", completed_at:new Date().toISOString() }).eq("id",this.getAttribute("data-task-done")).then(function(r){
-      if(r.error){ CG.toast("Couldn’t update","err"); return; } CG.toast("Task done","ok"); CG.refreshStaffExtras(); }); }); });
+    CG.sb.from("staff_tasks").update({ status:"done", completed_at:new Date().toISOString() }).eq("id",this.getAttribute("data-task-done")).select("id").then(function(r){
+      if(r.error||!r.data||!r.data.length){ CG.toast("Couldn’t update — the task may have been removed","err"); CG.refreshStaffExtras(); return; } CG.toast("Task done","ok"); CG.refreshStaffExtras(); }); }); });
   document.querySelectorAll("[data-task-del]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-task-del");
     CG.confirm("Delete this task?","It’s removed for the whole staff.","Delete", function(){
-      CG.sb.from("staff_tasks").delete().eq("id",id).then(function(r){
-        if(r.error){ CG.toast("Couldn’t delete","err"); return; } CG.toast("Task deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
+      CG.sb.from("staff_tasks").delete().eq("id",id).select("id").then(function(r){
+        if(r.error||!r.data||!r.data.length){ CG.toast("Couldn’t delete — it may already be gone","err"); CG.refreshStaffExtras(); return; } CG.toast("Task deleted","ok"); CG.refreshStaffExtras(); }); }); }); });
   document.querySelectorAll("[data-staff-edit]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-staff-edit"), entry=((CG._staffExtras&&CG._staffExtras.directory)||[]).find(function(x){ return x.id===id; });
     if(entry) CG.staffProfileEditModal(entry); }); });
@@ -6812,6 +6814,7 @@ CG.AFTER._roster = function(){
       return;
     }
     var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
+    var grp = CG.posGroup(me.pos);   /* was referenced but never declared — the click threw before the modal opened */
     CG.modal("Swap "+esc(me.tag),
       '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
       ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
@@ -7950,8 +7953,9 @@ CG.AFTER._admNewsLive = function(){
   document.querySelectorAll("[data-news-del]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-news-del"), title=this.getAttribute("data-title");
     CG.confirm("Delete “"+esc(title)+"”?","It comes off the site immediately. The Discord post (if any) stays.","Delete story", function(){
-      CG.sb.from("news").delete().eq("id",id).then(function(r){
+      CG.sb.from("news").delete().eq("id",id).select("id").then(function(r){
         if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        if(!r.data||!r.data.length){ CG.toast("Nothing was deleted — the story may already be gone, or the delete was refused","err"); return; }
         CG.toast("Story deleted","ok"); CG.reloadLeague();
       });
     });
@@ -9298,9 +9302,14 @@ CG.ROUTES.admin = function(param, qs){
   /* Overall ratings was a read-only table of the same rows the public players page renders with
      filters and search on top. Retired rather than merged; the page it duplicated is one link away. */
   if (param==="ratings" || param==="players"){
-    try { history.replaceState(null,"","#/players"); } catch(e){}
-    /* players() reads qs.team/qs.pos straight off its second argument, so it must be handed one */
-    return CG.ROUTES.players ? CG.ROUTES.players(null, qs||{}) : CG.ROUTES._404();
+    /* a REAL redirect, not an inline render: the old replaceState+render served the players page
+       under the "admin" route name, so AFTER.admin ran instead of AFTER.players — the filters and
+       search were never wired and the prototype admin AFTER threw on missing elements. Setting the
+       hash re-enters the router under the right name and wires the page properly. */
+    var fwd = [];
+    Object.keys(qs||{}).forEach(function(k){ fwd.push(encodeURIComponent(k)+"="+encodeURIComponent(qs[k])); });
+    setTimeout(function(){ location.hash = "#/players" + (fwd.length ? "?"+fwd.join("&") : ""); }, 0);
+    return '<div class="shell" style="padding:60px 0"><p class="caption">Taking you to the players page…</p></div>';
   }
   if (CG.ADMIN_ALIAS[param]){
     var to = CG.ADMIN_ALIAS[param];
@@ -9336,6 +9345,11 @@ CG.ROUTES.admin = function(param, qs){
 };
 CG._origAdminAfter = CG.AFTER.admin;
 CG.AFTER.admin = function(param, qs){
+  /* The route function maps aliases in ITS local scope, but the router hands AFTER the ORIGINAL
+     param — so #/admin/teams rendered the clubs page and then wired nothing: every button dead
+     until the next navigation. Map here too, so render and wiring can never disagree. */
+  if (CG.ADMIN_ALIAS[param]) param = CG.ADMIN_ALIAS[param];
+  if (param==="ratings" || param==="players") return;   /* redirecting to #/players — nothing to wire */
   if (param==="preseason"){ CG.AFTER._preseason(); return; }
   if (param==="users"){ CG.AFTER._admUsers(); return; }
   if (param==="clubs"){ CG.AFTER._admTeams(); CG.AFTER._admLeagues(); return; }
@@ -9756,6 +9770,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="archive"){ CG.AFTER._ticketArchive(); return; }
   if (param==="statsmgr"){ CG.AFTER._statsMgr(qs); return; }
   if (param==="management"){ CG.AFTER._management(); return; }
+  if (param==="gamestats"){ if (CG.AFTER._hubGameStats) CG.AFTER._hubGameStats(qs); return; }
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   var sl=document.getElementById("sSaveLive");
@@ -9805,8 +9820,9 @@ CG.hubSettings = function(){
    ================================================================ */
 CG.hubFreeAgents = function(){
   var lg=CG.lg, s=CG.SEASON||{};
-  var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
-  var t=(CG.TEAMS||[]).find(function(x){ return uid && (x.owner===uid||x.gm===uid||x.agm===uid); });
+  /* seat else commissioner preview — the one Team HQ page that resolved the club from the raw
+     seat lookup and therefore ignored the preview every other tab honors */
+  var t=CG.myManagedTeam();
   if (!t) return '<div class="note">This account doesn’t run a club — the free-agent board belongs to club management.</div>';
   var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;
   var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
@@ -10056,8 +10072,10 @@ CG.proposeTrade = function(){
   });
 };
 CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error) CG.toast("Couldn’t accept: "+r.error.message,"err"); else { CG.toast("Trade accepted!","ok"); CG.refreshTrades(); } }); }); };
-CG.declineTrade = function(id){ CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); };
-CG.cancelTrade = function(id){ CG.sb.from("trades").update({ status:"cancelled", updated_at:new Date().toISOString() }).eq("id",id).then(function(r){ if(r.error) CG.toast("Couldn’t withdraw: "+r.error.message,"err"); else { CG.toast("Offer withdrawn","ok"); CG.refreshTrades(); } }); };
+/* .select() on both: an RLS-refused update returns 0 rows and NO error, and the old success toast
+   told a manager an offer was declined that the other club still saw live (the false-success class). */
+CG.declineTrade = function(id){ CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t decline — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); };
+CG.cancelTrade = function(id){ CG.sb.from("trades").update({ status:"cancelled", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t withdraw: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t withdraw — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer withdrawn","ok"); CG.refreshTrades(); } }); };
 CG.counterTrade = function(id){
   var tr=(CG.lg._myTrades||[]).find(function(x){ return x.id===id; }); if(!tr) return;
   CG._liveTrade={ partner:CG.lg._idToCode[tr.from_team_id], offP:(tr.requested_profile_ids||[]).slice(), reqP:(tr.offered_profile_ids||[]).slice(), offK:(tr.requested_pick_ids||[]).slice(), reqK:(tr.offered_pick_ids||[]).slice(), ret:{} };

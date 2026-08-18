@@ -245,8 +245,10 @@ CG.deskOfficials = function(){
   var upcoming = (lg.schedule||[]).filter(function(g){ return g.status!=="final"; })
     .sort(function(a,b){ return a.at-b.at; });
   var ruled = (lg.schedule||[]).filter(function(g){ return g.status==="final" && (g.forfeit_team_id || g.voided); });
-  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active" && s.mode!=="warning"; });
-  var warns = (lg.suspensions||[]).filter(function(s){ return s.status==="active" && s.mode==="warning"; });
+  var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
+  /* warnings are split OUT of lg.suspensions at the loader (lg.warnings) — filtering suspensions
+     for mode==="warning" found nothing, so the desk showed zero warnings however many existed */
+  var warns = (lg.warnings||[]).filter(function(s){ return s.status==="active"; });
   var open = (lg._actionReqs||[]).filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
 
   var h = CG.deskHead("Officiating · game nights", "Officials’ desk",

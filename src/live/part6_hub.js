@@ -534,7 +534,12 @@ CG.hubLineup = function(qs){
   var club = CG.hqClub();
   if (!club || !CG.lg.byTeam[club]) return '<div class="note">This account doesn’t run a club — the lineup builder belongs to team management.</div>';
   var game = CG.lineupGameFor(me);
-  if (!game) return '<div class="empty"><b>No upcoming game</b><p>The schedule is complete — nothing to build.</p></div>';
+  if (!game){
+    var anyGames = (CG.lg.schedule||[]).length > 0;
+    return '<div class="empty"><b>No upcoming game</b><p>'+(anyGames
+      ? 'The schedule is complete — nothing to build.'
+      : 'No games on the calendar yet — this desk wakes up when the schedule is published.')+'</p></div>';
+  }
   var opp = game.home===club ? game.away : game.home;
   var key = game.id+":"+club;
   var saved = (CG.store.get("lineups")||{})[key];
@@ -1222,7 +1227,7 @@ function squadMovesLeft(p){ return 3 - (p.squadMoves||0); }
 function squadRoom(club, p){
   var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
   if (p.squad==="tc"){
-    var grp = CG.posGroup(p.pos), cap = grp==="G"?2:grp==="D"?4:6;
+    var grp = CG.posGroup(p.pos), cap = grp==="G"?2:grp==="D"?6:9;   /* the 17-man shape: 9 F, 6 D, 2 G (Rule 2.1) */
     return roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp; }).length < cap;
   }
   return roster.filter(function(x){ return x.squad==="tc"; }).length < 3;
@@ -1301,9 +1306,9 @@ CG.hubRoster = function(qs){
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp</span></div><div class="card-b">'+
       '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("centers",posN("C"),CG.ROSTER_QUOTA.C)+meter("left wings",posN("LW"),CG.ROSTER_QUOTA.LW)+
       meter("right wings",posN("RW"),CG.ROSTER_QUOTA.RW)+meter("left D",posN("LD"),CG.ROSTER_QUOTA.LD)+meter("right D",posN("RD"),CG.ROSTER_QUOTA.RD)+
-      meter("goaltenders",posN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,null)+'</div>'+
-      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp has no size limit. '+
-      'Camp players may dress in up to 3 games a week at any position; active players play their own position, up to 6 games a week (goaltenders up to 9). '+
+      meter("goaltenders",posN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+'</div>'+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp holds up to 3 players. '+
+      'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). '+
       'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';
   }
   /* v2.7: the 30% playoff floor is abolished — every rostered player is playoff-eligible. The
@@ -1311,10 +1316,10 @@ CG.hubRoster = function(qs){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
     '<span class="chip chip-win">every rostered player is playoff-eligible</span></div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
-      '<div><b class="num" style="font-size:22px">6</b><span class="caption" style="display:block">games a week — active players</span></div>'+
-      '<div><b class="num" style="font-size:22px">9</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
+      '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
+      '<div><b class="num" style="font-size:22px">6</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
       '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
-      '<div><b class="num" style="font-size:22px">4</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
+      '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
     '<p class="caption" style="margin-top:12px">Weekly caps are the limit, not a minimum (Rule 5.2). In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
   h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+

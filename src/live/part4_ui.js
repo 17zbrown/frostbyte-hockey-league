@@ -707,7 +707,9 @@ CG.renderChrome = function(){
     (CG.role()==="guest" ? '<a href="#/signin">Sign in</a>' :
       (CG.LIVE_MODE?'<a href="#/hub/messages">Messages</a>':"")+
       (CG.discordJoinLink&&CG.discordJoinLink()?'<a href="'+esc(CG.discordJoinLink())+'" target="_blank" rel="noopener">Join the Discord <span style="color:var(--chrome)">→</span></a>':"")+
-      '<a href="#/hub/notifications">Notifications</a><a href="#/hub/settings">Settings</a><a href="#/signin">Switch role</a>');
+      '<a href="#/hub/notifications">Notifications</a><a href="#/hub/settings">Settings</a>'+
+      (CG.LIVE_MODE ? (CG.role()==="commish"?'<a href="#/admin">Control Center</a>':"")+'<a href="#/signin">Account</a>'
+                    : '<a href="#/signin">Switch role</a>'));
   /* footer */
   $("#sitefoot").innerHTML = '<div class="shell">'+
     '<div class="ft-top">'+
@@ -1385,6 +1387,17 @@ CG.router = function(){
   (h.split("?")[1]||"").split("&").forEach(function(kv){ if(!kv)return; var p=kv.split("="); qs[decodeURIComponent(p[0])]=decodeURIComponent(p[1]||""); });
   var fn = CG.ROUTES[name] || CG.ROUTES._404;
   var app = $("#app");
+  /* THE LOAD-RACE GUARD. On a fresh page load the auth listener can route before buildLiveLeague
+     has assigned CG.lg, and every data-hungry page throws its own flavour of "reading X of
+     undefined" — a member who bookmarks #/hub/draft opens a broken page with console errors. One
+     guard here covers every route forever: paint the boot screen and let the boot's own completion
+     re-route. (bootLive always calls router again once the league is built.) */
+  if (CG.LIVE_MODE && !CG.lg && CG.bootScreen && name !== "signin"){
+    /* signin is exempt: OAuth errors land on a fresh page as bare fragments and MUST surface
+       immediately — that page renders from the fragment alone and needs no league data. */
+    app.innerHTML = CG.bootScreen();
+    return;
+  }
   /* Scroll to top ONLY on a real navigation. Many surfaces call router() as "repaint after a state
      change" — assigning a lineup slot, saving a toggle, a realtime update — and yanking the page
      back to the top on each of those made every edit feel like a reload. Same hash as the previous
@@ -1423,6 +1436,24 @@ CG.router = function(){
   app.focus({preventScroll:true});
 };
 
+/* Discord avatar URLs rot: members change their avatar and the old hash 404s forever (38 broken
+   discs on the users table the day this was written). One capture-phase listener heals every
+   avatar the site will ever render — no per-page fixes, no sweep dependency: the failed image
+   becomes a quiet initial disc that reads as designed rather than broken. */
+document.addEventListener("error", function(e){
+  var img = e.target;
+  if (!img || img.tagName !== "IMG" || img.__avFell) return;
+  if (!/cdn\.discordapp\.com|media\.discordapp\.net/.test(img.src || "")) return;
+  img.__avFell = true;
+  var label = img.alt || (img.closest("[aria-label]") ? img.closest("[aria-label]").getAttribute("aria-label") : "") ||
+    (img.closest("a,tr,div") ? (img.closest("a,tr,div").textContent || "").trim() : "");
+  var ch = (label.trim()[0] || "?").toUpperCase();
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">' +
+    '<circle cx="20" cy="20" r="20" fill="%232A3340"/>' +
+    '<text x="20" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="%238899A6">' + ch + '</text></svg>';
+  img.src = "data:image/svg+xml;utf8," + svg;
+}, true);
+
 /* ---------- global event wiring ---------- */
 document.addEventListener("keydown", function(e){
   if (e.key==="Escape") CG.closeDashPop();
@@ -1449,7 +1480,7 @@ document.addEventListener("click", function(e){
     CG.drawer("Account", '<div class="pop-h" style="padding:0 0 14px"><span class="avatar">'+CG.avatarHtml()+'</span>'+
       '<div><b style="display:block">'+esc(p.tag||"Guest")+'</b><span class="caption">'+esc(p.who)+'</span></div></div>'+
       '<div class="stack" style="gap:4px">'+
-      '<a class="pop-item" href="#/hub" data-close-nav>'+CG.ic("home",16)+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
+      '<a class="pop-item" href="'+(CG.role()==="commish"?"#/admin":"#/hub")+'" data-close-nav>'+CG.ic("home",16)+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
       (CG.me()?'<a class="pop-item" href="'+CG.playerRoute(CG.me())+'" data-close-nav>'+CG.ic("user",16)+'My player profile</a>':"")+
       (CG.LIVE_MODE?'<a class="pop-item" href="#/hub/messages" data-close-nav>'+CG.ic("msg",16)+'Messages'+
         (CG.dmUnreadTotal&&CG.dmUnreadTotal()?'<span class="hs-n" style="margin-left:auto">'+CG.dmUnreadTotal()+'</span>':"")+'</a>':"")+
@@ -1457,13 +1488,20 @@ document.addEventListener("click", function(e){
       '<a class="pop-item" href="#/hub/notifications" data-close-nav>'+CG.ic("bell",16)+'Notifications</a>'+
       '<a class="pop-item" href="#/hub/settings" data-close-nav>'+CG.ic("gear",16)+'Settings</a>'+
       '<div class="pop-sep"></div>'+
-      '<a class="pop-item" href="#/signin" data-close-nav>'+CG.ic("out",16)+'Sign out</a>'+
+      '<a class="pop-item" href="#/signin" data-close-nav data-signout>'+CG.ic("out",16)+'Sign out</a>'+
       '</div>');
     return;
   }
   if (e.target.closest("#burger")){ $("#mobilenav").classList.add("open"); $("#mobilenav").setAttribute("aria-hidden","false"); var fl=$("#mobilenav a"); if (fl) fl.focus(); return; }
   if (e.target.closest("[data-mn-close]")){ CG.closeMobileNav(); return; }
   if (e.target.closest("#mobilenav a")){ CG.closeMobileNav(); return; }
+  if (e.target.closest("[data-signout]")){
+    /* the drawer item SAID Sign out but only navigated to #/signin, where the still-signed-in
+       page greeted the member by name — on a shared machine that is a real problem */
+    CG.closeOverlay();
+    if (CG.signOut) CG.signOut();
+    return;
+  }
   if (e.target.closest("[data-close-nav]")){ CG.closeOverlay(); return; }
   if (e.target.closest("[data-close]")){ CG.closeOverlay(); return; }
   var nf = e.target.closest("[data-notif]");

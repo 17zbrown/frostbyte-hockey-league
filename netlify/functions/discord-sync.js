@@ -1573,7 +1573,8 @@ export default async (req) => {
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
   // current in_guild per profile, so we only write when it changes
   const inGuildById = {};
-  for (const p of await sbGet("profiles?select=id,in_guild")) inGuildById[p.id] = p.in_guild;
+  const avatarById = {};
+  for (const p of await sbGet("profiles?select=id,in_guild,avatar_url")) { inGuildById[p.id] = p.in_guild; avatarById[p.id] = p.avatar_url; }
   const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
   const teams = await sbGet("teams?select=id,code,name,color,color2,logo_url,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
@@ -2048,6 +2049,18 @@ export default async (req) => {
       // (1b) store the Discord @handle so the commissioner directory can show it
       const handle = mem.user && mem.user.username;
       if (handle && handle !== m.discord_username) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { discord_username: handle }); }
+      // (1c) avatar freshness — Discord avatar hashes rot when a member changes theirs, and the
+      // stale URL 404s forever (the users table showed 38 broken discs). Keep the stored URL
+      // current for everyone in the guild. A custom (supabase-hosted) avatar is the member's own
+      // upload and is never touched — the same rule discordIdentityPatch applies at sign-in.
+      const wantAv = mem.user && mem.user.avatar
+        ? `https://cdn.discordapp.com/avatars/${m.discord_id}/${mem.user.avatar}.png?size=128` : null;
+      const curAv = avatarById[m.profile_id] || null;
+      if (wantAv && curAv !== wantAv && (!curAv || /cdn\.discordapp\.com|media\.discordapp\.net/.test(curAv))) {
+        await sbPatch(`profiles?id=eq.${m.profile_id}`, { avatar_url: wantAv });
+        avatarById[m.profile_id] = wantAv;
+        sum.avatarsFreshened = (sum.avatarsFreshened || 0) + 1;
+      }
 
       // (2) role sync — desired managed roles for this member. The rules live in
       // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.

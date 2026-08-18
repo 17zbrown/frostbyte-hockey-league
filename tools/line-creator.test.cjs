@@ -157,8 +157,12 @@ console.log("\n— a commissioner with NO roster spot gets full front-office acc
 console.log("\n— switching the previewed club reloads its data");
 {
   const live = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_live.js"), "utf8");
+  /* the binding moved to a document-level delegated listener (the per-render binder was skipped
+     by AFTER-chain branches that never chained, leaving the picker dead on half the hub pages) */
+  A("the picker is bound once, at the document, so no page can render it dead",
+    /document\.addEventListener\("change", function\(e\)\{\s*\n\s*if \(!e\.target \|\| e\.target\.id !== "cmPreview"\) return;/.test(live));
   A("the picker reloads manager data before re-rendering",
-    /setPreviewClub\(this\.value \|\| null\);[\s\S]{0,600}CG\.loadManagerData\(\)\.then\(done, done\)/.test(live));
+    /CG\.setPreviewClub\(v \|\| null\);[\s\S]{0,600}CG\.loadManagerData\(\)\.then\(done, done\)/.test(live));
   A("the club-keyed loads follow myClub(), which honors the preview",
     /var myCode = CG\.myClub && CG\.myClub\(\), myTid = \(CG\.lg\._codeToId\|\|\{\}\)\[myCode\]/.test(live));
 }

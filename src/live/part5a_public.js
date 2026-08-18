@@ -70,7 +70,8 @@ CG.standRows = function(div, opts){
   opts = opts||{};
   var rows = CG.standings(CG.lg, div);
   return rows.map(function(r, i){
-    var cut = opts.cutline && i===2;  /* top 3 per division qualify (Rule 8.1) */
+    var per = CG.playoffPerDiv ? CG.playoffPerDiv() : 4;
+    var cut = opts.cutline && i===per-1;  /* the playoff cutline follows the qualifier setting (Rule 8.1) */
     return '<tr class="rowlink'+(cut?" cutline":"")+'" style="--tc:'+r.team.color+'" data-go="#/team/'+r.code+'">'+
       '<td><span class="rankn num">'+(i+1)+'</span></td>'+
       '<td class="tleft"><span class="teamcell">'+CG.crest(r.code,26)+'<span><span class="nm">'+esc(r.team.name)+'</span><small>'+r.team.div+' Division</small></span></span></td>'+
@@ -275,7 +276,7 @@ CG.seasonTimeline = function(){
     [s.starts_at, "Regular season",
       "Wednesday, Thursday and Friday nights, three games a night, every point counting toward the playoff race."],
     [s.playoffs_start_at, "Playoffs",
-      "Top three per division qualify. Best-of series all the way to the championship."]
+      "Top "+(CG.playoffPerDiv?CG.playoffPerDiv():4)+" per division qualify. Best-of series all the way to the championship."]
   ];
   /* live week counter for the regular-season stop: the week we're actually in, as a fraction.
      Time-based (next game night's week) with played-games as a floor, so a postponed early
@@ -874,8 +875,9 @@ CG.standingsLadder = function(dv, pre){
   var peak = scored.reduce(function(m, r){ return Math.max(m, r.val || 0); }, 0) || 1;
   if (!pre) scored.sort(function(a,b){ return (b.pts||0) - (a.pts||0); });
 
-  /* three qualify per division — the cutline sits under the third lane */
-  var CUT = 3;
+  /* the cutline sits under the last qualifying lane — driven by the playoff setting, which is
+     league law (Rule 8.1), so the front page can never disagree with the bracket again */
+  var CUT = CG.playoffPerDiv ? CG.playoffPerDiv() : 4;
   return '<div class="ladder" data-rv="up">' + scored.map(function(r, i){
     var pct = Math.max(4, Math.round(100 * (r.val || 0) / peak));
     return '<a class="lane' + (i < CUT ? " in" : "") + '" href="#/team/' + esc(r.t.code) + '"' +
@@ -890,7 +892,7 @@ CG.standingsLadder = function(dv, pre){
   }).join("") +
   '<p class="caption lane-note">' + (pre
       ? "No games played. Track shows roster spots filled; number is the pre-season seed."
-      : "Top three per division qualify. The line marks the cutoff.") + '</p></div>';
+      : "Top " + (CG.playoffPerDiv ? CG.playoffPerDiv() : 4) + " per division qualify. The line marks the cutoff.") + '</p></div>';
 };
 
 /* ================================================================
@@ -1093,7 +1095,7 @@ CG.ROUTES.home = function(){
       '<div class="grid g2">'+
         (CG.DIVISIONS||["East","West"]).map(function(dv){
           return '<div class="ladderwrap"><div class="ladder-h" data-rv="slide"><h3>'+esc(dv)+' Division</h3>'+
-            '<span class="chip">Top 3 qualify</span></div>'+CG.standingsLadder(dv, pre)+'</div>';
+            '<span class="chip">Top '+(CG.playoffPerDiv?CG.playoffPerDiv():4)+' qualify</span></div>'+CG.standingsLadder(dv, pre)+'</div>';
         }).join("")+
       '</div>'+
       '<div class="grid g2" style="margin-top:18px;align-items:start">'+
@@ -1144,8 +1146,10 @@ CG.ROUTES.home = function(){
       '</div></div></section>';
   }
   /* NEWS */
-  if (CG.modOn("news") && !pre){
-    var arts = C.articles.slice().sort(function(a,b){ return b.dateIso.localeCompare(a.dateIso); });
+  if (CG.modOn("news") && !pre && (C.articles||[]).length){
+    /* the band dereferenced arts[0] with no guard — an empty newsroom took the whole front page
+       down with a TypeError instead of simply omitting the section */
+    var arts = C.articles.slice().sort(function(a,b){ return String(b.dateIso||"").localeCompare(String(a.dateIso||"")); });
     var leadA = arts[0], rest = arts.slice(1,4);
     html += '<section class="sec"><div class="shell">'+
       '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Off the wire</span><h2 class="h-sec">Every story, in full</h2></div>'+
@@ -1191,7 +1195,7 @@ CG.ROUTES.home = function(){
       [s0.free_agency_opens_at, "Free agency opens", "One week for clubs to sign the remaining free agents."],
       [s0.free_agency_closes_at, "Free agency closes", "Rosters settle — puck drop is the Wednesday after."],
       [s0.starts_at, "Puck drop", "The regular season begins."],
-      [s0.playoffs_start_at, "Playoffs begin", "Top three per division qualify."]
+      [s0.playoffs_start_at, "Playoffs begin", "Top "+(CG.playoffPerDiv?CG.playoffPerDiv():4)+" per division qualify — a divisional bracket to the final."],
     ].filter(function(m){ return m[0] && Date.parse(m[0]) > CG.now(); }).slice(0,2);
     if (mile.length){
       html += '<section class="sec-tight"><div class="shell"><div class="grid g3" data-rv="up">'+
@@ -1216,7 +1220,8 @@ CG.ROUTES.home = function(){
   return html;
 };
 CG.newsCard = function(a, lead, feature){
-  var t0 = a.relatedTeams[0] && CG.TEAMS.find(function(t){ return t.name===a.relatedTeams[0]; });
+  var rel = (a && a.relatedTeams) || [];
+  var t0 = rel[0] && CG.TEAMS.find(function(t){ return t.name===rel[0]; });
   var showExcerpt = lead || feature;
   var art = '<svg viewBox="0 0 400 150" preserveAspectRatio="xMidYMid slice" aria-hidden="true">'+
     '<rect width="400" height="150" fill="#101519"/>'+
@@ -1559,24 +1564,23 @@ CG.playoffBracket = function(){
     var poAt = CG.SEASON && CG.SEASON.playoffs_start_at ? Date.parse(CG.SEASON.playoffs_start_at) : null;
     return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff format</h3>'+
       '<span class="chip">Seeded once games are played</span></div><div class="card-b">'+
-      '<p class="small" style="color:var(--steel);line-height:1.65">Top three in each division qualify — six clubs, three rounds. '+
-      'Division winners take seeds 1 and 2 and skip the quarter-finals; the other four seed by points percentage, '+
-      'with ties broken by head-to-head, regulation wins, then goal differential (Rule 8.1, Rule 8.2). '+
+      '<p class="small" style="color:var(--steel);line-height:1.65">'+
+      esc(CG.playoffBracketBlurb ? CG.playoffBracketBlurb() : "Top 4 in each division qualify.")+
+      ' Clubs are seeded inside their own division by total points, with ties broken by head-to-head, '+
+      'regulation wins, then goal differential (Rule 8.1, Rule 8.2). '+
       'The bracket appears here as soon as there are results to seed it.</p>'+
       '<span class="caption" style="display:block;margin-top:10px">'+
       (poAt ? 'Playoffs begin '+CG.fmtDay(poAt)+'.' : 'Playoff dates are set with the season schedule.')+'</span></div></div>';
   }
-  var pWinners = DIVS.map(function(dv){ return CG.standings(CG.lg,dv)[0]; }).filter(Boolean);
-  pWinners.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
-  var pRest = [];
-  DIVS.forEach(function(dv){ CG.standings(CG.lg,dv).slice(1,3).forEach(function(r){ pRest.push(r); }); });
-  pRest.sort(function(a,b){ return b.pts-a.pts||b.w-a.w||b.diff-a.diff||b.gf-a.gf; });
-  var seeds = pWinners.concat(pRest).slice(0,6);
-  if (seeds.length!==6) return "";
+  /* division-major seeds from the same function the real bracket generator uses, so the
+     projection can never show a shape the postseason will not actually take (Rule 8.1 v2.22) */
+  var per = CG.playoffPerDiv ? CG.playoffPerDiv() : 4;
+  var seeds = CG.playoffSeeds ? CG.playoffSeeds() : [];
+  if (!seeds.length || seeds.length !== (CG.playoffFieldSize ? CG.playoffFieldSize() : per*2)) return "";
   var played = (CG.lg.results||[]).length;
   var anyClinch = seeds.some(function(r){ return isClinched(r.code); });
-  var seedRow = function(i){ var r=seeds[i], lock=isClinched(r.code);
-    return '<div style="display:flex;align-items:center;gap:9px;min-width:0"><span class="rk num" style="width:18px;flex-shrink:0">'+(i+1)+'</span>'+CG.crest(r.code,22)+
+  var seedRowOf = function(r, n){ var lock=isClinched(r.code);
+    return '<div style="display:flex;align-items:center;gap:9px;min-width:0"><span class="rk num" style="width:18px;flex-shrink:0">'+n+'</span>'+CG.crest(r.code,22)+
       '<b class="mono" style="font-size:12px">'+esc(r.code)+'</b>'+
       (lock?'<span title="Clinched a playoff spot" style="color:var(--chrome);display:inline-flex;align-items:center">'+CG.LOCK_ICON+'</span>':"")+
       '<span class="caption num" style="margin-left:auto">'+r.pts+' pts</span></div>'; };
@@ -1584,20 +1588,27 @@ CG.playoffBracket = function(){
     return '<div style="display:flex;align-items:center;gap:9px"><span class="rk num" style="width:18px;flex-shrink:0">—</span><span class="caption">'+txt+'</span></div>'; };
   var matchCard = function(a,b){
     return '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:11px 13px;display:flex;flex-direction:column;gap:8px">'+a+b+'</div>'; };
+  /* round 1 inside each division, straight from the generator's own pairing function */
+  var r1cols = DIVS.map(function(dv, d){
+    var block = seeds.slice(d*per, (d+1)*per);
+    var shape = CG.playoffRound1 ? CG.playoffRound1(block.map(function(_,i){ return i; })) : { pairs:[[0,3],[1,2]], byes:[] };
+    var cards = shape.pairs.map(function(pr){ return matchCard(seedRowOf(block[pr[0]], pr[0]+1), seedRowOf(block[pr[1]], pr[1]+1)); }).join("");
+    var byeNote = shape.byes.length ? '<p class="caption" style="margin-top:10px">Seed'+(shape.byes.length>1?"s":"")+' '+
+      shape.byes.map(function(b){ return b+1; }).join(" and ")+' sit'+(shape.byes.length>1?"":"s")+' out round 1.</p>' : "";
+    return '<div><span class="eyebrow" style="display:block;margin-bottom:10px">'+esc(dv)+' — round 1</span>'+
+      '<div class="stack" style="gap:10px">'+cards+'</div>'+byeNote+'</div>';
+  }).join("");
   return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Projected playoff bracket</h3>'+
     '<span class="chip">'+(played?'If the season ended today':'Before puck drop — seeded by the table below')+'</span></div>'+
     '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+
-    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Quarter-finals</span><div class="stack" style="gap:10px">'+
-      matchCard(seedRow(2),seedRow(5))+matchCard(seedRow(3),seedRow(4))+
-      '</div><p class="caption" style="margin-top:10px">Division winners — seeds 1 and 2 — skip straight to the semi-finals.</p></div>'+
-    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Semi-finals</span><div class="stack" style="gap:10px">'+
-      matchCard(seedRow(0),tbdRow("Lowest seed through"))+
-      matchCard(seedRow(1),tbdRow("Highest seed through"))+'</div></div>'+
-    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Final</span>'+
-      '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><b style="font-family:var(--f-disp)">Semi-final winners</b>'+
-      '<p class="caption" style="margin-top:6px">One series for the cup.</p></div></div>'+
+    r1cols+
+    '<div><span class="eyebrow" style="display:block;margin-bottom:10px">Division finals → the Final</span>'+
+      '<div class="stack" style="gap:10px">'+
+      DIVS.map(function(dv){ return matchCard(tbdRow(esc(dv)+" survivors meet"), tbdRow("Winner takes the division")); }).join("")+
+      '<div style="border:1px solid var(--line);border-radius:var(--r-s);padding:16px 14px;text-align:center"><b style="font-family:var(--f-disp)">The two division champions</b>'+
+      '<p class="caption" style="margin-top:6px">One series for the cup.</p></div></div></div>'+
     '</div>'+
-    '<p class="caption" style="margin-top:14px">Top three per division qualify; division winners take the top seeds and the rest seed by points (Rule 8.1). The projection re-sorts after every final'+
+    '<p class="caption" style="margin-top:14px">Top '+per+' per division qualify, seeded one through '+per+' inside their own division (Rule 8.1). The projection re-sorts after every final'+
     (anyClinch?'. '+CG.LOCK_ICON.replace('width="12" height="12"','width="11" height="11"')+' marks a club that has mathematically clinched a spot.':'.')+'</p></div></div>';
 };
 
@@ -1610,7 +1621,7 @@ CG.ROUTES.standings = function(param, qs){
   var views = [["division","Divisions"],["league","League"],["wildcard","Playoff picture"]];
   if (hasPre) views.push(["preseason","Pre-season"]);
   var head = CG.pageHead(eyebrow,"League standings",
-    "Two points for a win, one for an overtime loss. Top three per division qualify — the dashed line is the cut (Rule 8.1). Ties break by head-to-head record, then regulation wins, then goal differential (Rule 8.2).",
+    "Two points for a win, one for an overtime loss. Top "+(CG.playoffPerDiv?CG.playoffPerDiv():4)+" per division qualify — the dashed line is the cut (Rule 8.1). Ties break by head-to-head record, then regulation wins, then goal differential (Rule 8.2).",
     '<div style="display:flex;gap:9px;align-items:flex-end;flex-wrap:wrap">'+
       '<div class="seg" role="group" aria-label="Standings view">'+views.map(function(v){
         return '<button data-view="'+v[0]+'" class="'+(view===v[0]?"on":"")+'">'+v[1]+'</button>'; }).join("")+'</div>'+
@@ -1637,36 +1648,37 @@ CG.ROUTES.standings = function(param, qs){
        tie rendered as a verdict. Show the field and the rule that will decide it. */
     body = '<div class="grid g2">'+
       DIVS.map(function(dv){
-        return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+
+        return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top '+(CG.playoffPerDiv?CG.playoffPerDiv():4)+' qualify</span></div>'+
           CG.divisionField(dv)+CG.fieldNote()+'</div>';
       }).join("")+
     '</div><p class="note" style="margin-top:16px">Nobody is in or out yet — every club sits at 0-0-0. '+
-    'Three clubs per division qualify; division winners take the top seeds and the rest seed by points (Rule 8.1). '+
+    'Top '+(CG.playoffPerDiv?CG.playoffPerDiv():4)+' per division qualify, seeded one through '+(CG.playoffPerDiv?CG.playoffPerDiv():4)+' inside their own division (Rule 8.1). '+
     'This page splits into the field and the chasers after the first game night.</p>';
   } else if (view==="wildcard"){
     var byDiv = DIVS.map(function(dv){ return { name:dv, rows:CG.standings(CG.lg,dv) }; });
     body = '<div class="grid g2">'+
       '<div class="card"><div class="card-h"><h3>In the field today</h3><span class="chip chip-win">Qualified pace</span></div>'+
         byDiv.map(function(d){
-          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+esc(d.name)+'</span></div>'+d.rows.slice(0,3).map(function(r,i){
+          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+esc(d.name)+'</span></div>'+d.rows.slice(0,(CG.playoffPerDiv?CG.playoffPerDiv():4)).map(function(r,i){
             return '<div class="leaderrow" data-go="#/team/'+r.code+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(r.code,30)+
               '<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(r.team.name)+'</b></span><span class="val"><b class="num">'+r.pts+'</b><span>PTS</span></span></div>';
           }).join("");
         }).join("")+'</div>'+
       '<div class="card"><div class="card-h"><h3>On the outside</h3><span class="chip chip-loss">Below the cut</span></div>'+
         byDiv.map(function(d){
-          var third = d.rows[2];
-          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+esc(d.name)+'</span></div>'+d.rows.slice(3).map(function(r,i){
-            return '<div class="leaderrow" data-go="#/team/'+r.code+'"><span class="rk num">'+(i+4)+'</span>'+CG.crest(r.code,30)+
-              '<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(r.team.name)+'</b><small class="caption" style="display:block">'+(third?(third.pts-r.pts)+' pts back of the line':'')+'</small></span>'+
+          var per2 = (CG.playoffPerDiv?CG.playoffPerDiv():4);
+          var lastIn = d.rows[per2-1];
+          return '<div style="padding:10px 18px 4px"><span class="eyebrow">'+esc(d.name)+'</span></div>'+d.rows.slice(per2).map(function(r,i){
+            return '<div class="leaderrow" data-go="#/team/'+r.code+'"><span class="rk num">'+(i+per2+1)+'</span>'+CG.crest(r.code,30)+
+              '<span><b style="font-family:var(--f-disp);font-size:14px">'+esc(r.team.name)+'</b><small class="caption" style="display:block">'+(lastIn?(lastIn.pts-r.pts)+' pts back of the line':'')+'</small></span>'+
               '<span class="val"><b class="num">'+r.pts+'</b><span>PTS</span></span></div>';
           }).join("");
         }).join("")+'</div>'+
-    '</div><p class="note" style="margin-top:16px">Playoff seeding: division winners take the top seeds; remaining qualifiers seed by points (Rule 8.1).</p>';
+    '</div><p class="note" style="margin-top:16px">Playoff seeding: clubs are seeded one through '+(CG.playoffPerDiv?CG.playoffPerDiv():4)+' inside their own division by total points (Rule 8.1).</p>';
   } else {
     body = '<div class="grid g2">'+
       DIVS.map(function(dv){
-        return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top 3 qualify</span></div>'+CG.standTable(dv,{full:true,cutline:true,compact:true,srCaption:true,caption:esc(dv)+" Division standings"})+'</div>';
+        return '<div class="card"><div class="card-h"><h3>'+esc(dv)+' Division</h3><span class="chip">Top '+(CG.playoffPerDiv?CG.playoffPerDiv():4)+' qualify</span></div>'+CG.standTable(dv,{full:true,cutline:true,compact:true,srCaption:true,caption:esc(dv)+" Division standings"})+'</div>';
       }).join("")+
     '</div>';
   }
