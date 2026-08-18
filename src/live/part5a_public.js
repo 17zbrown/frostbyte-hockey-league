@@ -397,7 +397,7 @@ CG.naMapPins = function(){
    leave a px margin for the crest disc and its label, and hand that rect to the SVG as its viewBox.
    The pins are then placed from that same rect, so the path and the markers can never disagree —
    and every club stays in frame at every size, because the frame is derived from the clubs. */
-CG.naMapView = function(box, padB){
+CG.naMapView = function(box, padB, grow){
   var m = CG.NA_MAP, xs = [], ys = [];
   (CG.TEAMS || []).forEach(function(t){
     var at = m.at[t.code];
@@ -412,6 +412,14 @@ CG.naMapView = function(box, padB){
   var MIN_W = 260, MIN_H = MIN_W * m.h / m.w;
   if (x1 - x0 < MIN_W){ var mx0 = (x0 + x1) / 2; x0 = mx0 - MIN_W / 2; x1 = mx0 + MIN_W / 2; }
   if (y1 - y0 < MIN_H){ var my0 = (y0 + y1) / 2; y0 = my0 - MIN_H / 2; y1 = my0 + MIN_H / 2; }
+  /* Show the continent the clubs sit ON, not just the clubs. Framed tight to the pins the map read
+     as a cluster of crests floating over a cropped middle of North America — the Maritimes, most
+     of Canada and all of Mexico fell outside the frame. Growing the box before the fit puts the
+     geography back. It costs crest size, because zooming out brings every pin closer together and
+     a crest can never be wider than the gap to its nearest neighbour. */
+  var g = (grow == null ? CG.NA_VIEW_GROW : grow);
+  var gx = (x1 - x0) * g / 2, gy = (y1 - y0) * g / 2;
+  x0 -= gx; x1 += gx; y0 -= gy; y1 += gy;
 
   /* Breathing room around the outermost pins: half a crest either side, and more below, where each
      pin carries its code and the caption sits over the bottom-left corner. Capped as a fraction of
@@ -459,7 +467,18 @@ CG.naMapView = function(box, padB){
 /* the smallest a crest may shrink to before it stops being recognisable — below this the map
    would be tidy and useless, so a genuinely impossible layout keeps the floor and lets the clamp
    above do what it can */
+/* How far past the clubs the frame reaches, as a fraction of the club bounding box: 0 frames the
+   pins alone, higher shows more of the continent around them. This is a CEILING, not a fixed
+   value. Zooming out drags every pin closer together, and with pins fixed on their real cities the
+   only thing left to give is crest size — so a phone cannot show the whole continent AND twelve
+   legible logos at once. naMapGrow picks the most geography each screen can actually afford. */
+CG.NA_VIEW_GROW = 0.5;   /* past this the whole drawn map is already in frame */
+/* px: geography wins down to here. Set just above the floor because the brief was explicit —
+   show the continent, keep every logo on its own city, hide none of it. Raise this to buy
+   bigger crests back at the cost of a tighter, more cropped frame. */
+CG.NA_GROW_KEEP = 38;
 CG.NA_PIN_MIN = 26;
+CG.NA_PIN_GAP = 3;                                /* px of air demanded between two crests */
 /* the crest size the map WANTS at a given plot size, before collisions get a say */
 CG.NA_PIN_SPAN = 15;                              /* plot geometric mean per crest pixel */
 CG.NA_PIN_FLOOR = 40;                             /* small screens: still a comfortable tap target */
@@ -488,9 +507,9 @@ CG.naMapLayout = function(){
   var base = CG.naPinBase(box);
   /* the caption only competes for space where it overlays the plot — below the map (as on a phone)
      its rect never meets a pin and this settles on the first pass */
-  var v, padB = 58;
+  var v, padB = 58, grow = CG.naMapGrow(box, padB, base);
   var place = function(){
-    v = CG.naMapView(box, padB);
+    v = CG.naMapView(box, padB, grow);
     pins.forEach(function(el){
       var mx = parseFloat(el.getAttribute("data-mx")) / 100 * m.w;
       var my = parseFloat(el.getAttribute("data-my")) / 100 * m.h;
@@ -512,107 +531,143 @@ CG.naMapLayout = function(){
     if (next > box.height * 0.45) break;
     padB = next;
   }
+  /* the caption pass may have changed padB, which moves every pin — re-pick the framing against
+     the settled padding rather than the guess it started from */
+  var settled = CG.naMapGrow(box, padB, base);
+  if (settled !== grow){ grow = settled; place(); }
   if (svg) svg.setAttribute("viewBox", v.x.toFixed(1) + " " + v.y.toFixed(1) + " " + v.w.toFixed(1) + " " + v.h.toFixed(1));
   if (pins.length < 2) return;
   var p = pins.map(function(el){
-    var r = el.getBoundingClientRect();
-    var cx = r.left - box.left + r.width / 2, cy = r.top - box.top + r.height / 2;
-    /* the size we are ABOUT to apply, not the one currently painted — separation is being
-       solved for the crest the map is going to wear */
-    return { el:el, x:cx, y:cy, ox:cx, oy:cy, w:base, h:base,
-             bx:parseFloat(el.style.left), by:parseFloat(el.style.top) };
+    /* the placed centre, straight from the style the fit just wrote — no rect measurement, so a
+       crest mid-transition or mid-reveal cannot skew the arithmetic */
+    return { el:el, bx:parseFloat(el.style.left), by:parseFloat(el.style.top) };
   });
-  var size = CG.naSeparate(p, box, base);
+  /* Pins sit on their real cities. That is the whole point of a map, and at every desktop and
+     tablet size the framing search has already guaranteed the logos clear each other there. A
+     phone cannot have both: twelve clubs at true positions inside 390px fit about a 9px crest, so
+     rather than ship something unreadable, the pins are allowed to drift just far enough to wear a
+     legible one. The cap keeps that drift small, and it is zero everywhere it is not needed. */
+  var raw = CG.naCrestRaw(p);
+  if (raw < Math.max(CG.NA_PIN_USABLE, CG.NA_PIN_MIN)){
+    var target = Math.max(CG.NA_PIN_MIN, Math.min(base, CG.NA_PIN_USABLE));
+    CG.naNudge(p, box, target + CG.NA_PIN_GAP, Math.max(12, base * 0.6), base / 2 + 1);
+  }
+  /* Clamp into the frame BEFORE sizing. Clamping can push two pins back together — that is how a
+     letterbox hero put Seattle back inside Vancouver — so the crest has to be measured against
+     where the pins finally are, not where they were before the frame had its say. Clamping with
+     the largest crest we might use keeps the result valid for the smaller one we end up with. */
+  var edge = base / 2 + 1;
   p.forEach(function(q){
-    q.el.style.left = q.fx.toFixed(1) + "px";
-    q.el.style.top  = q.fy.toFixed(1) + "px";
+    q.bx = Math.max(edge, Math.min(box.width - edge, q.bx));
+    q.by = Math.max(edge, Math.min(box.height - edge, q.by));
+  });
+  var size = CG.naCrestFit(p, base);
+  p.forEach(function(q){
+    q.el.style.left = q.bx.toFixed(1) + "px";
+    q.el.style.top  = q.by.toFixed(1) + "px";
   });
   card.style.setProperty("--pin", size + "px");
 };
 
-/* Separate the pins, keep them inside the frame, and return the crest size that clears everything.
-   Pure geometry on purpose: it takes measured rects and returns numbers, so the invariant the map
-   actually has to hold — nothing clipped, nothing overlapping, at ANY box shape — is testable
-   without a browser (tools/na-map.test.cjs sweeps phone through ultrawide).
+/* The largest crest, up to `base`, that leaves air between every pair of clubs AT THEIR REAL
+   POSITIONS. Nothing is nudged: pins sit on their own cities, so the only lever left is how big
+   the logos are. Seattle and Vancouver share a longitude and are always the binding pair.
 
-   `p` items are {x,y,ox,oy,w,h,bx,by} in plot pixels and come back with fx,fy set. */
-CG.NA_NUDGE_CAP = 26;                             /* px — further and the pin lies about its city */
-CG.NA_PIN_GAP = 3;                                /* px of air demanded between two crests */
-CG.naSeparate = function(p, box, base){
-  var GAP = CG.NA_PIN_GAP, i, j;
-  /* Normally a pin may drift only NA_NUDGE_CAP from its city. If even the smallest legible crest
-     still collides at that budget — a hero squashed to a letterbox strip, where latitude has
-     almost no room — let the pins travel further rather than sit on top of each other. Accuracy
-     is worth more than tidiness right up until the map stops being readable at all. */
-  var attempt, out;
-  for (attempt = 1; attempt <= 3; attempt++){
-    /* How far a pin may drift from its city. 26px is a lot on a phone-sized map and very little
-       on a wall-sized one, so the budget scales with both the crest and the plot: precision costs
-       less when the whole continent is 390px wide, and a big crest needs more room to clear its
-       neighbour. */
-    var budget = Math.max(CG.NA_NUDGE_CAP, base * 0.5, Math.min(box.width, box.height) * 0.10);
-    out = CG.naSeparateAt(p, box, base, budget * attempt);
-    if (out > CG.NA_PIN_MIN) return out;          /* room to spare — the ordinary case */
-    if (attempt === 3) return out;                /* nothing more to give; floor it and move on */
+   Chebyshev, not Euclidean — a crest fills a square box, so two pins 56px apart on the diagonal
+   still overlap. Pure geometry, so tools/na-map.test.cjs can sweep every window shape. */
+/* Pick the framing. Walk out from the widest view toward the tightest and stop at the first one
+   whose crests still read at NA_GROW_KEEP of what the screen wants. On a monitor that lands on the
+   full ceiling — the whole continent — and on a phone it pulls in until twelve logos can sit on
+   their own cities without touching. Pure geometry: no DOM, so the test can sweep it. */
+CG.naMapGrow = function(box, padB, base){
+  /* The crest size we refuse to go below in exchange for geography. Deliberately NOT a fraction of
+     `base` — base is what a roomy screen would like, and anchoring to it made big monitors demand
+     huge crests and therefore a tight, cropped frame, which is the opposite of the ask. */
+  var keep = Math.max(CG.NA_PIN_MIN, Math.min(CG.NA_GROW_KEEP, Math.round(base * 0.45)));
+  var best = 0, bestSize = -1;
+  for (var g = CG.NA_VIEW_GROW; g >= -0.001; g -= 0.05){
+    var grow = Math.max(0, g);
+    /* RAW, not the floored size: a floored 26 means the logos would overlap, and the search must
+       not treat that as success */
+    var size = Math.min(base, CG.naCrestRaw(CG.naPinPoints(box, padB, grow)));
+    /* >= not >: the loop runs wide-to-tight, so on a tie the TIGHTER frame wins */
+    if (size >= bestSize){ bestSize = size; best = grow; }
+    if (size >= keep) return grow;                /* widest framing that still reads */
   }
+  return best;
+};
+/* where every club lands, in plot pixels, for a given framing */
+CG.naPinPoints = function(box, padB, grow){
+  var m = CG.NA_MAP, v = CG.naMapView(box, padB, grow), out = [];
+  (CG.TEAMS || []).forEach(function(t){
+    var at = m.at[t.code];
+    if (!at) return;
+    out.push({ code:t.code, bx:(at[0] / 100 * m.w - v.x) * v.sx, by:(at[1] / 100 * m.h - v.y) * v.sy });
+  });
   return out;
 };
-CG.naSeparateAt = function(p, box, base, CAP){
-  var GAP = CG.NA_PIN_GAP, i, j;
-  /* every pass starts from the true position, so a wider cap is a fresh attempt, not a drift */
-  p.forEach(function(q){ q.x = q.ox; q.y = q.oy; });
-  /* The old thresholds asked for 86% of a crest across and 72% down, which is a licence to overlap
-     by the remainder: Seattle sat 14px inside Vancouver on a monitor and six pairs touched on a
-     phone, all of it "passing". A crest occupies a SQUARE box, so separation is Chebyshev, not
-     Euclidean — two pins can be 56px apart on the diagonal and still overlap by 6px. */
-  for (var it = 0; it < 80; it++){
+/* Below this a crest has stopped being a logo, and honouring true positions costs more than it
+   buys. Desktop and tablet never reach it; a 390px phone fits about 9px at true positions, so it
+   does. */
+CG.NA_PIN_USABLE = 26;   /* must never sit below NA_PIN_MIN: a raw fit between the two would skip
+                            the nudge and then get floored back up, overlapping by the difference */
+/* Nudge pins apart, but only as far as `cap` and only when asked. Returns nothing; mutates bx/by.
+   Chebyshev, minimum-translation, pushing along whichever axis has the room — the same geometry
+   the map used before pins were pinned to their cities, kept for the one case that needs it. */
+CG.naNudge = function(p, box, target, cap, edge){
+  var i, j, it;
+  for (i = 0; i < p.length; i++){ p[i].tx = p[i].bx; p[i].ty = p[i].by; }
+  for (it = 0; it < 80; it++){
     var moved = false;
     for (i = 0; i < p.length; i++){
       for (j = i + 1; j < p.length; j++){
         var a = p[i], b = p[j];
-        var dx = b.x - a.x, dy = b.y - a.y;
-        var need = (a.w + b.w) / 2 + GAP;
+        var dx = b.tx - a.tx, dy = b.ty - a.ty;
         var ax = Math.abs(dx), ay = Math.abs(dy);
-        if (ax >= need || ay >= need) continue;
-        /* The minimum translation that parts the boxes — but measured against the room each axis
-           actually has, not in raw pixels. Seattle and Vancouver differ almost purely in latitude,
-           so the cheaper push is always vertical; in a letterbox hero that is precisely the axis
-           with nowhere to go, and the clamp then squashes them back together. Dividing by the box
-           dimension sends them sideways when the map is wide and short, which is where the room is. */
-        if ((need - ax) / Math.max(1, box.width) <= (need - ay) / Math.max(1, box.height)){
-          var hx = (need - ax) / 2, sx = dx < 0 ? -1 : 1;
-          a.x -= sx * hx; b.x += sx * hx;
+        if (ax >= target || ay >= target) continue;
+        if ((target - ax) / Math.max(1, box.width) <= (target - ay) / Math.max(1, box.height)){
+          var hx = (target - ax) / 2, sx = dx < 0 ? -1 : 1;
+          a.tx -= sx * hx; b.tx += sx * hx;
         } else {
-          var hy = (need - ay) / 2, sy = dy < 0 ? -1 : 1;
-          a.y -= sy * hy; b.y += sy * hy;
+          var hy = (target - ay) / 2, sy = dy < 0 ? -1 : 1;
+          a.ty -= sy * hy; b.ty += sy * hy;
         }
         moved = true;
       }
     }
+    /* Keep the solver inside the frame on every pass. Pushed freely, two stacked pins fly past the
+       top edge and the final clamp drops them both back onto it — which is exactly how a letterbox
+       hero put Seattle back on top of Vancouver. Clamping here instead means the next pass sees
+       there is no vertical room and spreads them sideways, where there is. */
+    if (edge != null){
+      for (i = 0; i < p.length; i++){
+        p[i].tx = Math.max(edge, Math.min(box.width - edge, p[i].tx));
+        p[i].ty = Math.max(edge, Math.min(box.height - edge, p[i].ty));
+      }
+    }
     if (!moved) break;
   }
-  /* Commit within the cap, then clamp inside the plot. The clamp is what actually guarantees
-     nothing clips — it holds whatever the fit and the nudges worked out to. */
   p.forEach(function(q){
-    var dx = Math.max(-CAP, Math.min(CAP, q.x - q.ox));
-    var dy = Math.max(-CAP, Math.min(CAP, q.y - q.oy));
-    var half = q.w / 2 + 1;
-    q.fx = Math.max(half, Math.min(box.width - half, q.bx + dx));
-    q.fy = Math.max(half, Math.min(box.height - half, q.by + dy));
+    q.bx += Math.max(-cap, Math.min(cap, q.tx - q.bx));
+    q.by += Math.max(-cap, Math.min(cap, q.ty - q.by));
   });
-  /* Last resort, and the reason this holds on every screen: if the tightest pair still overlaps
-     after nudging and clamping — a short, wide hero squeezes latitude, so Seattle and Vancouver are
-     always the pair under pressure — shrink every crest until it doesn't. Pins are centred, so
-     resizing moves nobody off their city; it only sets how much map each logo covers. */
-  var minD = Infinity;
+};
+CG.naCrestRaw = function(p){
+  var minD = Infinity, i, j;
   for (i = 0; i < p.length; i++){
     for (j = i + 1; j < p.length; j++){
-      minD = Math.min(minD, Math.max(Math.abs(p[j].fx - p[i].fx), Math.abs(p[j].fy - p[i].fy)));
+      minD = Math.min(minD, Math.max(Math.abs(p[j].bx - p[i].bx), Math.abs(p[j].by - p[i].by)));
     }
   }
-  if (!isFinite(minD)) return base;
-  return Math.max(CG.NA_PIN_MIN, Math.min(base, Math.floor(minD - GAP)));
+  return isFinite(minD) ? Math.floor(minD - CG.NA_PIN_GAP) : Infinity;
 };
+CG.naCrestFit = function(p, base){
+  /* the raw fit is what the geography allows; the floor is a legibility backstop. They are kept
+     apart because the framing search has to tell "26px genuinely fits" from "nothing fits and we
+     floored it" — conflating the two made every cramped screen pick the widest frame and overlap. */
+  return Math.max(CG.NA_PIN_MIN, Math.min(base, CG.naCrestRaw(p)));
+};
+
 CG.naMap = function(){
   var m = CG.NA_MAP, n = (CG.TEAMS || []).filter(function(t){ return m.at[t.code]; }).length;
   return '<div class="na-wrap">' +
