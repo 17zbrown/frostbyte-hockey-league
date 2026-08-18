@@ -4230,7 +4230,7 @@ CG.poolState = function(pid){
 CG.admPreseason = function(){
   var lg=CG.lg, s=CG.SEASON||{};
   var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[], sapps=lg._staffApps||[];
-  var rosterMax=s.roster_max||15, rosteredIds=lg._rosteredIds||{};
+  var rosterMax=s.roster_max||17, rosteredIds=lg._rosteredIds||{};
   var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
   var pendingApps=apps.filter(function(a){ return a.status==="pending"; }).length;
   var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
@@ -4515,14 +4515,15 @@ CG.preseasonRandomAssign = function(){
   var rosteredIds=lg._rosteredIds||{};
   var pool=(lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined"; });
   if (!pool.length){ CG.toast("Everyone registered is already on a club","err"); return; }
-  var rosterMax=s.roster_max||15;
+  var rosterMax=s.roster_max||17;
   CG.confirm("Randomly assign "+pool.length+" players for the pre-season?",
     "Every unrostered registration is spread evenly across the "+CG.TEAMS.length+" clubs (management counts toward the split, clubs cap at "+rosterMax+"). "+
     "They are released back to the draft pool automatically when the final pre-season game ends.",
     "Assign randomly", function(){
     var counts={}, used={};
     CG.TEAMS.forEach(function(t){
-      counts[t.code]=(lg.byTeam[t.code]||[]).length;
+      /* active-roster spots only — camp is carried beyond the seventeen (Rule 2.1) */
+      counts[t.code]=(lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }).length;
       used[t.code]={}; (lg.byTeam[t.code]||[]).forEach(function(p){ if(p.jersey) used[t.code][p.jersey]=1; });
     });
     var rows=[], regIds=[], skipped=0;
@@ -6842,7 +6843,11 @@ CG.teamOverviewCard = function(mt){
   var rec=(lg.teams&&lg.teams[code])||{w:0,l:0,otl:0};
   var pr=(lg.powerRankings||[]).find(function(p){ return p.team===code; })||{rank:0};
   var prN=(lg.powerRankings||[]).length;
-  var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).length, rosterMax=CG.ROSTER_MAX||15;
+  /* Rule 2.1: training-camp players are carried BEYOND the seventeen active spots, so they
+     never count against the active roster. */
+  var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).filter(function(p){ return p.squad!=="tc"; }).length,
+      campN=(lg.byTeam&&lg.byTeam[code]||[]).filter(function(p){ return p.squad==="tc"; }).length,
+      rosterMax=CG.ROSTER_MAX||17;
   var pay=(CG.teamPayroll?CG.teamPayroll(lg,code):0), cap=CG.CAP||60000000;
   var payPct=cap?Math.min(100,Math.round(pay/cap*100)):0, over=pay>cap;
   var played=(rec.w+rec.l+rec.otl)>0||lg.prManual;
@@ -9113,7 +9118,7 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?3000000:s.owner_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?3000000:s.gm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?3000000:s.agm_salary))/1e6)+'"></label>'+
-    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||15)+'"></label>'+
+    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||17)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
     '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays, so the dates it writes are dates the generator can actually use. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
@@ -10121,7 +10126,10 @@ CG.hubFreeAgents = function(){
     : nowMs < faO ? '<span class="chip chip-warn">Opens '+CG.fmtFull(faO)+'</span>'
     : (faC && nowMs < faC) ? '<span class="chip chip-live"><span class="live-dot"></span>Window open — closes '+CG.fmtFull(faC)+'</span>'
     : '<span class="chip chip-win">Window closed — free agents stay signable</span>';
-  var rosterN=(lg.byTeam[t.code]||[]).length, rosterMax=s.roster_max||15;
+  /* Rule 2.1: camp players are carried beyond the seventeen active spots, so they never
+     consume one — counting them here disabled the Sign button three players early. */
+  var rosterN=(lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }).length,
+      rosterMax=s.roster_max||17;
   var rosteredIds=lg._rosteredIds||{}, faHeld=CG.contractHeldIds();
   /* Two tracks (Rule 2.2): RETURNING players (drafted/rostered before) sign through open free agency
      here; undrafted FIRST-years are won on the bidding

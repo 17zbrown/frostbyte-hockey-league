@@ -1828,7 +1828,7 @@ CG.ROUTES.teams = function(){
       '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
     '</div>' : "";
   var head = CG.pageHead("The clubs","One trophy. Every club chasing it.",
-    "Every club runs a real room — front office, "+(CG.ROSTER_MAX||15)+"-player roster, and a rivalry waiting to happen.", tierBadge);
+    "Every club runs a real room — front office, "+(CG.ROSTER_MAX||17)+"-player roster, and a rivalry waiting to happen.", tierBadge);
   var pr = {}; lg.powerRankings.forEach(function(p){ pr[p.team]=p.rank; });
   var preT = CG.isPreseason();
   var cards = CG.TEAMS.map(function(t){
