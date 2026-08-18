@@ -24,7 +24,10 @@ const sec = (id) => {
 
 console.log("— the rulebook says what the announcement says");
 {
-  A("changelog leads with v2.22", rb.changelog[0].version === "2.22");
+  /* presence, not position: a later version legitimately takes the top slot, and this file is
+     here to prove v2.22's rules are recorded — not to pin the newest release forever */
+  A("the changelog records v2.22", rb.changelog.some((c) => c.version === "2.22"));
+  A("...and the newest entry sits first", rb.changelog[0].version >= "2.22", rb.changelog[0].version);
   A("Rule 2.8 carries the five-game pre-season requirement",
     /at least five \(5\) pre-season games to remain draft-eligible/.test(sec("2.8")));
   A("...with returning players and management exempt",

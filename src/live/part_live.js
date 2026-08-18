@@ -6896,9 +6896,13 @@ CG.mgmtSeatsTable = function(m){
       :holder?'<span class="chip chip-win chip-xs">Confirmed</span>'
       :required?'<span class="chip chip-xs" style="color:var(--amber-ink);border-color:var(--amber-ink)">Vacant — required</span>'
       :'<span class="chip chip-xs">Vacant — optional</span>';
+    /* A filled seat cannot be nominated over: the approval is refused (Rule 2.6). Offering
+       "Replace" here promised something the league office will not do, so a held seat says
+       who has to clear it instead of handing the owner a dead button. */
     var action=owner?'<span class="caption">—</span>'
       :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
-      :m.isOwner?'<button class="btn '+(required&&!holder?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">'+(holder?"Replace":"Nominate")+'</button>'
+      :holder?'<span class="caption">Seat held — a commissioner vacates it</span>'
+      :m.isOwner?'<button class="btn '+(required?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">Nominate</button>'
       :'<span class="caption">—</span>';
     return '<tr>'+
       '<td class="tleft"><span class="chip chip-chrome chip-xs">'+esc(label.toUpperCase())+'</span></td>'+
@@ -6931,9 +6935,12 @@ CG.hubManagement = function(){
     h+=CG.appChatSection("management", a.id, {office:false});
   });
   h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
-    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract or on league staff — they don’t have to be on your roster. "
+    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract, on league staff, or holding a seat at another club — they don’t have to be on your roster. "
                : "Only the club owner can nominate a GM or AGM. ")+
-    "The league office’s reviewers vote; on approval the nominee is set automatically, and if denied nothing changes. A GM is required before your first regular-season game; an AGM is optional.</div>";
+    "The league office’s reviewers vote; on approval the nominee is seated automatically, and if denied nothing changes. "+
+    "Each seat holds one person (Rule 2.6): to change a sitting GM or AGM, ask the league office to vacate the seat first — "+
+    "an approval into a seat that is still held is refused and nothing moves. "+
+    "A GM is required before your first regular-season game; an AGM is optional.</div>";
   return h;
 };
 CG.AFTER._management = function(){
@@ -7126,6 +7133,64 @@ CG.appBallotSection = function(type, a, decided){
       : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
   return h + '</div></div>';
 };
+/* ---- Seat conflicts on a GM/AGM nomination (Rule 2.6) ------------------------------------
+   A club holds one Owner, one General Manager, one Assistant GM. Nothing used to check that at
+   the moment of approval, so approving a second nomination for a filled seat overwrote it: the
+   club read as having two of a position, and the manager who lost the seat was never told.
+   The database now refuses that write. This is the same question asked BEFORE the ballot, so a
+   reviewer sees the conflict instead of casting a vote that cannot be honored.
+   Everything is derived from the club's current seats — the warning clears itself the moment
+   the office vacates the seat, and no state has to be kept in step. */
+CG.seatConflict = function(app, lg){
+  lg = lg || CG.lg || {};
+  if (!app || (app.role!=="gm" && app.role!=="agm")) return null;
+  /* only a live nomination can be acted on — a decided one is history, and re-deriving a verdict
+     for it mistakes "seated, then legitimately replaced later" for "never seated" */
+  if (app.status && app.status!=="pending") return null;
+  var code = (lg._idToCode||{})[app.team_id];
+  var t = (code && CG.TEAM) ? CG.TEAM[code] : null;
+  if (!t) return null;
+  var names = lg._profName||{}, nominee = app.nominee_id;
+  var who = function(id){ return (id && names[id]) || "a member"; };
+  var nomName = (app.nominee && app.nominee.gamertag) || who(nominee);
+  var label = app.role==="gm" ? "General Manager" : "Assistant GM";
+  var art   = /^[aeiou]/i.test(label) ? "an" : "a";      /* "an Assistant GM", "a General Manager" */
+  var seat  = app.role==="gm" ? "GM" : "AGM";
+  var club  = t.name || code;
+  var holder = app.role==="gm" ? t.gm : t.agm;
+
+  /* 1 · the vote carried and the appointment could not be applied. Recorded by the approval RPC
+     rather than re-derived, so acting on the advice (vacating the seat) cannot make the
+     outstanding work vanish before anyone finishes it. */
+  if (app.seat_block) return { kind:"heldup", chip:"approved · not seated", text:String(app.seat_block) };
+
+  /* 2 · somebody else already holds the seat */
+  if (holder && holder!==nominee) return { kind:"filled", chip:seat+" seat filled",
+    text:"The "+label+" seat at "+club+" is held by "+who(holder)+". A club holds "+art+" "+label+
+         " (Rule 2.6), so approving this will not seat "+nomName+" — a commissioner vacates the seat first." };
+
+  /* 3 · a seat they already hold would be emptied by seating them here — at this club or another */
+  if (nominee){
+    var mine = t.owner===nominee ? "Owner"
+             : (app.role!=="gm"  && t.gm===nominee)  ? "General Manager"
+             : (app.role!=="agm" && t.agm===nominee) ? "Assistant GM" : null;
+    var other = mine ? null : (CG.TEAMS||[]).find(function(x){
+      return x.id && x.id!==app.team_id && (x.owner===nominee || x.gm===nominee || x.agm===nominee); });
+    if (mine || other){
+      var atClub = mine ? club : (other.name || other.code);
+      var post   = mine || (other.owner===nominee ? "Owner" : other.gm===nominee ? "General Manager" : "Assistant GM");
+      return { kind:"holds-seat", chip:"holds another seat",
+        text: nomName+" is already the "+post+" of "+atClub+". One person holds one club seat (Rule 2.6), so that "+
+              "seat has to be vacated before this appointment can be approved." };
+    }
+  }
+  /* 4 · rival nominations for the same seat — only one can take it */
+  var rivals = (lg._mgmtApps||[]).filter(function(x){
+    return x.id!==app.id && x.status==="pending" && x.team_id===app.team_id && x.role===app.role; });
+  if (rivals.length) return { kind:"contested", chip:(rivals.length+1)+" nominations",
+    text: club+" have "+(rivals.length+1)+" nominations pending for the same "+label+" seat. Only one can take it — decide them together." };
+  return null;
+};
 CG.hubApplicationDetail = function(id, type){
   var review = CG.role()==="commish" || CG.role()==="staff";
   var back = '<a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>';
@@ -7191,6 +7256,19 @@ CG.hubApplicationDetail = function(id, type){
     (a.pitch?'<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><span class="caption" style="display:block;margin-bottom:6px">'+(isMgmt?"The owner’s case":"Their pitch")+'</span><p class="small" style="color:var(--ink-3);white-space:pre-wrap;line-height:1.6">'+esc(a.pitch)+'</p></div>':"")+
     '</div></div>';
 
+  /* A GM/AGM seat is one per club (Rule 2.6). Say so ABOVE the ballot: the approval is refused
+     server-side if the seat is taken, and a reviewer should know that before voting, not after. */
+  if (isMgmt){
+    var sc = CG.seatConflict(a, CG.lg);
+    if (sc) h += '<div class="note '+(sc.kind==="contested"?"chr":"red")+'" style="margin-bottom:18px">'+
+      '<b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+
+      (sc.kind==="heldup" ? "Approved by the vote, waiting on the seat"
+        : sc.kind==="filled" ? "That seat is already filled"
+        : sc.kind==="holds-seat" ? "They already hold a club seat"
+        : "More than one nomination for this seat")+'</b>'+esc(sc.text)+
+      (sc.kind==="heldup" ? '<p class="caption" style="margin-top:8px">The nomination is still open. Clear the obstacle, then approve it again below and it will be applied.</p>' : "")+
+      '</div>';
+  }
   /* which club they're getting is decided before the vote lands — the approval acts on it */
   if (isOwner) h += CG.ownerAppClubPicker(a);
   /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
@@ -7410,7 +7488,11 @@ CG.hubStaffDesk = function(){
         : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
     }
     var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
-    var tally = (vb.length ? '<span class="chip chip-xs" title="Reviewer vote so far">'+vy+' approve · '+vn+' deny</span>' : "")
+    /* a nomination into a seat that is already held can't be honored — flag it in the queue so a
+       reviewer sees it before casting the vote that decides it (Rule 2.6) */
+    var sc = isMgmt ? CG.seatConflict(a, lg) : null;
+    var tally = (sc ? '<span class="chip chip-warn chip-xs" title="'+esc(sc.text)+'">'+esc(sc.chip)+'</span>' : "")
+      + (vb.length ? '<span class="chip chip-xs" title="Reviewer vote so far">'+vy+' approve · '+vn+' deny</span>' : "")
       + (revCount ? '<span class="caption">'+vb.length+'/'+revCount+' voted</span>' : "");
     return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
       'aria-label="Open '+esc(chipLabel)+' application: '+esc(title)+'" '+

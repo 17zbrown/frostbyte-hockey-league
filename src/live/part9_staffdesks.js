@@ -177,6 +177,9 @@ CG.deskReviewBoard = function(){
     var vb = ballots(type, a);
     var yes = vb.filter(function(v){ return v.vote==="approve"; }).length;
     var waiting = !votedByMe(type, a);
+    /* a club holds one Owner, one GM, one AGM (Rule 2.6). The approval is refused server-side
+       when the seat is already held, so say so here — before the deciding ballot, not after. */
+    var seatWarn = (isMgmt && CG.seatConflict) ? CG.seatConflict(a, lg) : null;
     return '<div class="card-b row-go" data-go="#/hub/application?id='+a.id+'&amp;type='+type+'" role="link" tabindex="0" '+
       'aria-label="Open '+esc(chip)+' application: '+esc(title)+'" '+
       'style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
@@ -188,10 +191,34 @@ CG.deskReviewBoard = function(){
       (isOwner ? (a.awarded_club
         ? '<span class="chip chip-chrome chip-xs">'+esc(a.awarded_club)+'</span>'
         : '<span class="chip chip-warn chip-xs">no club chosen</span>') : "")+
+      (seatWarn ? '<span class="chip chip-warn chip-xs" title="'+esc(seatWarn.text)+'">'+esc(seatWarn.chip)+'</span>' : "")+
       (waiting ? '<span class="chip chip-warn chip-xs">your ballot</span>' : '<span class="chip chip-win chip-xs">you voted</span>')+
       '<span class="caption">'+yes+' approve · '+(vb.length-yes)+' deny · '+vb.length+'/'+reviewers.length+'</span>'+
       '<span class="caption">'+(a.created_at?CG.fmtDay(Date.parse(a.created_at)):"")+'</span>'+
       '<span class="caption" aria-hidden="true">→</span></div>';
+  }
+
+  /* A seat that is already held cannot be appointed into (Rule 2.6) — the approval is refused
+     server-side. Lead with it: a reviewer who skims the queue should not spend a deciding ballot
+     on a nomination that cannot be honored. */
+  var blocked = pendM.map(function(a){ return CG.seatConflict ? CG.seatConflict(a, lg) : null; })
+                     .filter(function(c){ return c && c.kind!=="contested"; });
+  if (blocked.length){
+    /* the two causes have different remedies, so the banner names whichever are actually present
+       rather than giving one blanket instruction that is wrong for half of them */
+    var nSeat = blocked.filter(function(c){ return c.kind==="filled"; }).length;
+    var nHold = blocked.filter(function(c){ return c.kind==="holds-seat"; }).length;
+    var nWait = blocked.filter(function(c){ return c.kind==="heldup"; }).length;
+    var lines = [];
+    if (nSeat) lines.push("<b>"+nSeat+"</b> into a seat the club has already filled — that seat is vacated first.");
+    if (nHold) lines.push("<b>"+nHold+"</b> whose nominee already holds a club seat — they leave that post first.");
+    if (nWait) lines.push("<b>"+nWait+"</b> the reviewers already approved, still waiting on the seat to clear.");
+    h += '<div class="note red" style="margin-bottom:18px">'+
+      '<b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+blocked.length+
+      ' nomination'+(blocked.length===1?"":"s")+' cannot be seated as things stand</b>'+
+      'A club holds one Owner, one General Manager and one Assistant GM (Rule 2.6), so approving these changes '+
+      'nothing until the way is clear: '+lines.join(" ")+
+      ' Only a commissioner can vacate a seat; the decision open to the board is to hold or to deny. Each one is flagged below.</div>';
   }
 
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>On the board</h3>'+
