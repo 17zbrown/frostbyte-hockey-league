@@ -288,7 +288,11 @@ CG.teamPayroll = function(lg, code){
      state in the browser. In the pure-Node engine test there is no store, so
      nothing is waived and this reduces to the raw contract sum. */
   var waived = (typeof CG!=="undefined" && CG.store && CG.store.get) ? (CG.store.get("waived")||{}) : {};
-  return lg.byTeam[code].reduce(function(s,p){ return s + (waived[p.id] ? 0 : (p.salary||0)); }, 0);
+  /* Training-camp salaries are off the cap (Rule 2.1) — camp sits outside the seventeen active
+     spots and outside the payroll with it. */
+  return lg.byTeam[code].reduce(function(s,p){
+    return s + ((waived[p.id] || p.squad==="tc") ? 0 : (p.salary||0));
+  }, 0);
 };
 CG.capSpace = function(lg, code){ return CG.CAP - CG.teamPayroll(lg, code); };
 

@@ -23,6 +23,7 @@ const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const live = R("src/live/part_live.js");
 const hub = R("src/live/part6_hub.js");
 const pub = R("src/live/part5a_public.js");
+const engine = R("src/live/part2_engine.js");
 const content = R("src/live/part3_content.js");
 
 let ok = true;
@@ -69,6 +70,46 @@ console.log("\n— the reason each fix exists is written down where the next rea
   A("the dashboard counter cites the rule", /training-camp players are carried BEYOND the seventeen/.test(live));
   A("the free-agency desk explains the Sign button", /disabled the Sign button three players early/.test(live));
   A("the random assigner says why it filters", /active-roster spots only — camp is carried beyond the seventeen/.test(live));
+}
+
+console.log("\n— training-camp salaries are off the cap (Rule 2.5, commissioner ruling 2026-08-18)");
+{
+  A("the client payroll skips camp players",
+    /\(waived\[p\.id\] \|\| p\.squad==="tc"\) \? 0 : \(p\.salary\|\|0\)/.test(engine));
+  A("...and says why", /Training-camp salaries are off the cap/.test(engine));
+
+  /* drive it: the same club, with and without a camp player carrying a big number */
+  const vm = require("vm");
+  const ctx = { console, Math, Object, Array, String, Number, JSON };
+  ctx.window = ctx; ctx.globalThis = ctx; ctx.CG = { CAP: 40000000 };
+  vm.createContext(ctx);
+  const m = engine.match(/CG\.teamPayroll = function[\s\S]*?\n\};/);
+  if (!m) { A("located CG.teamPayroll", false); process.exit(1); }
+  vm.runInContext(m[0], ctx);
+  const lg = { byTeam: { NYI: [
+    { id: "a", salary: 3000000 },                    /* squad undefined = active */
+    { id: "b", salary: 2000000, squad: "pro" },
+    { id: "c", salary: 9000000, squad: "tc" },       /* camp: must not count */
+  ] } };
+  A("an active roster of $3M + $2M with a $9M camp player reads $5M",
+    ctx.CG.teamPayroll(lg, "NYI") === 5000000, String(ctx.CG.teamPayroll(lg, "NYI")));
+  lg.byTeam.NYI[2].squad = "pro";                    /* call him up */
+  A("...and $14M once that player is called up",
+    ctx.CG.teamPayroll(lg, "NYI") === 14000000, String(ctx.CG.teamPayroll(lg, "NYI")));
+}
+
+console.log("\n— the rulebook carries the cap ruling too");
+{
+  const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
+  const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
+  A("Rule 2.5 says a camp salary is not part of the payroll",
+    /training-camp player's salary is not part of that payroll/.test(sec("2.5")));
+  A("...and that it starts counting on call-up",
+    /begins to count only when he is called up to the active roster/.test(sec("2.5")));
+  A("Rule 2.1 repeats it where camp is defined",
+    /Their salaries do not count against the club's salary cap \(Rule 2\.5\)/.test(sec("2.1")));
+  A("the changelog records v2.24",
+    rb.changelog.some((c) => c.version === "2.24" && /does not count against the salary cap/.test(c.summary)));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
