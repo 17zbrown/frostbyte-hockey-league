@@ -32,7 +32,8 @@ export const POSITION_ROLES = ["Center", "Left Wing", "Right Wing", "Left Defens
    never grandfathered: lose the reason, lose the role. Club and department roles are added by
    managedRoleIds() because their ids are data, not names. */
 export const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager",
-  "CGHL Management", "Commissioner", "Staff", "Free Agent", "Not Signed Up", ...POSITION_ROLES];
+  "CGHL Management", "Commissioner", "Staff", "Free Agent", "Restricted Free Agent", "Rookie",
+  "Not Signed Up", ...POSITION_ROLES];
 
 export function managedRoleIds(roleId, teams) {
   const ids = new Set();
@@ -57,16 +58,31 @@ export function managedRoleIds(roleId, teams) {
    The three participation roles are mutually coherent, gated on current-season registration and
    roster status:
      Player        = registered for the season OR holding a roster spot
-     Free Agent    = registered but not yet on a roster (available to sign)
-     Not Signed Up = linked but not registered while the window is open */
+     Free Agent    = registered, not on a roster, and free to sign anywhere
+     Restricted FA = registered, not on a roster, but his former club still holds his rights
+     Not Signed Up = linked but not registered while the window is open
+
+   Rights follow SERVICE, the way the NHL's do (Rule 2.2). A player who has never held a roster
+   spot is unrestricted — that is everyone in Season 1, because the league has no history yet.
+   Once he has played for a club, his rights stay with that club when the contract ends, until he
+   has accrued enough off-seasons; after that he is unrestricted for good. `rfa` carries the set of
+   profile ids currently in that middle state, computed by the sweep — this file only reads it, so
+   the accrual rule lives in exactly one place. Rookie is orthogonal to all of it: it says how long
+   you have been here, not who holds your rights, so a rookie can be rostered. */
 export function desiredRolesFor(m, ctx) {
   const { roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf } = ctx;
+  const rfa = ctx.rfa || new Set();
+  const rookies = ctx.rookies || new Set();
   const desired = new Set();
   const isRegistered = registered.has(m.profile_id);
   const onRoster = !!(m.team_id && teamRoleId[m.team_id]);
   if ((isRegistered || onRoster) && roleId["player"]) desired.add(roleId["player"]);
   if (onRoster) desired.add(teamRoleId[m.team_id]);
+  else if (isRegistered && rfa.has(m.profile_id) && roleId["restricted free agent"]) desired.add(roleId["restricted free agent"]);
   else if (isRegistered && roleId["free agent"]) desired.add(roleId["free agent"]);
+  /* Rookie rides alongside the rest: it is a length-of-service badge, not a rights class, so it
+     sits happily on a rostered player and on a free agent alike. */
+  if ((isRegistered || onRoster) && rookies.has(m.profile_id) && roleId["rookie"]) desired.add(roleId["rookie"]);
   const teamRole = mgmtRoleByProfile[m.profile_id];
   if (teamRole === "owner" && roleId["owner"]) desired.add(roleId["owner"]);
   if (teamRole === "gm" && roleId["general manager"]) desired.add(roleId["general manager"]);

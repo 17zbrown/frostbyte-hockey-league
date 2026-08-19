@@ -1611,6 +1611,52 @@ export default async (req) => {
     }
   } catch (e) { /* positions optional */ }
 
+  /* Rights classes (Rule 2.2), the NHL's model: service earns freedom.
+       · never held a roster spot        -> unrestricted Free Agent. That is EVERYONE in Season 1,
+                                            because the league has no history to accrue against.
+       · has played, contract now over,
+         fewer than N off-seasons served -> Restricted Free Agent: his former club holds his rights.
+       · N or more off-seasons served    -> unrestricted for good.
+     N is app_config.rfa_offseasons (default 4) so the office can move the line without a deploy.
+     Service counts DISTINCT PRIOR seasons with a roster spot — the current season is excluded,
+     because you accrue an off-season by finishing a season, not by starting one.
+     Rookie is a separate question (how new are you), not a rights class, so it is computed here
+     too but applied independently: no prior-season roster spot and no pick in an EARLIER draft. */
+  const rfa = new Set(), rookies = new Set();
+  try {
+    const seasonsAll = await sbGet("seasons?select=id,number&order=number.desc");
+    const curSeason = seasonsAll[0] || null;
+    const curId = curSeason && curSeason.id, curNum = (curSeason && curSeason.number) || 1;
+    const cfgRows = await sbGet("app_config?key=eq.rfa_offseasons&select=value");
+    const RFA_YEARS = Math.max(1, parseInt((cfgRows[0] && cfgRows[0].value) || "4", 10) || 4);
+
+    const priorSeasons = {};          // profile_id -> Set of prior season ids held
+    for (const r of await sbGet("roster_spots?select=profile_id,season_id")) {
+      if (!r.profile_id || !r.season_id || r.season_id === curId) continue;
+      (priorSeasons[r.profile_id] = priorSeasons[r.profile_id] || new Set()).add(r.season_id);
+    }
+    const draftedBefore = new Set();
+    for (const d of await sbGet("draft_picks?select=player_id,season_number")) {
+      if (d.player_id && (d.season_number || 0) < curNum) draftedBefore.add(d.player_id);
+    }
+    // who is on a roster right now, and whose contract still runs — neither is a free agent
+    const onRosterNow = new Set();
+    if (curId) for (const r of await sbGet(`roster_spots?season_id=eq.${curId}&select=profile_id`)) onRosterNow.add(r.profile_id);
+    const underContract = new Set();
+    for (const c of await sbGet(`contracts?status=eq.active&select=profile_id,is_manager,start_season,end_season`)) {
+      if (c.is_manager) continue;
+      if ((c.start_season || 1) <= curNum && (c.end_season || 1) >= curNum) underContract.add(c.profile_id);
+    }
+    for (const pid of Object.keys(priorSeasons)) {
+      if (onRosterNow.has(pid) || underContract.has(pid)) continue;   // not a free agent at all
+      if (priorSeasons[pid].size < RFA_YEARS) rfa.add(pid);           // rights still held
+    }
+    for (const p of await sbGet("profiles?select=id")) {
+      if (!priorSeasons[p.id] && !draftedBefore.has(p.id)) rookies.add(p.id);
+    }
+    sum.rights = { rfa: rfa.size, rookies: rookies.size, rfaYears: RFA_YEARS };
+  } catch (e) { sum.errors.push({ rights: String(e.message || e) }); }
+
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
@@ -1911,7 +1957,7 @@ export default async (req) => {
   // ensure the mentionable roles the automations depend on exist (created once, then reused):
   //  Staff (members ping the officials), the front-office roles (gate the Team Management rooms),
   //  and "Not Signed Up" (the daily sign-up reminder pings this one role).
-  const ENSURE_ROLES = [["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["CGHL Management", true], ["Not Signed Up", true]];
+  const ENSURE_ROLES = [["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["CGHL Management", true], ["Not Signed Up", true], ["Restricted Free Agent", true], ["Rookie", true]];
   for (const [name, mentionable] of ENSURE_ROLES) {
     if (roleId[name.toLowerCase()]) continue;
     try {
@@ -1929,6 +1975,9 @@ export default async (req) => {
        Owner, GM and AGM at once; not hoisted, because the three seat roles already head the list */
     ["CGHL Management", true, false],
     ["Staff", true, true], ["Commissioner", true, true], ["Not Signed Up", true, false],
+    /* the two rights classes sit beside Free Agent, and Rookie beside them — mentionable so the
+       office can address a class at once, unhoisted so they do not crowd the seat roles */
+    ["Restricted Free Agent", true, false], ["Rookie", true, false],
   ];
   for (const [name, mentionable, hoist] of ROLE_PROPS) {
     const rid = roleId[name.toLowerCase()];
@@ -2078,7 +2127,7 @@ export default async (req) => {
       // (2) role sync — desired managed roles for this member. The rules live in
       // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
       const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
-        mgmtRoleByProfile, deptByProfile, posOf });
+        mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies });
       const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
       if (changed) {
         const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });

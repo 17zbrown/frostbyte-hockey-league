@@ -436,8 +436,15 @@ CG.buildLiveLeague = async function(){
   });
   var draftedEver={};
   draftPicks.forEach(function(p){ if(p.player_id) draftedEver[p.player_id]=true; });
-  var priorSeason={};
-  roster.forEach(function(rs){ if(seasonId && rs.season_id!==seasonId) priorSeason[rs.profile_id]=true; });
+  var priorSeason={}, serviceSeasons={};
+  roster.forEach(function(rs){
+    if(!seasonId || rs.season_id===seasonId) return;
+    priorSeason[rs.profile_id]=true;
+    (serviceSeasons[rs.profile_id]=serviceSeasons[rs.profile_id]||{})[rs.season_id]=1;
+  });
+  /* off-seasons accrued = DISTINCT prior seasons on a roster. You earn one by finishing a season,
+     so the current season never counts. Drives the restricted/unrestricted split (Rule 2.2). */
+  lg.serviceSeasons = function(pid){ return Object.keys(serviceSeasons[pid]||{}).length; };
   lg.preGp=preGp; lg.careerGp=careerGp;
   /* veteran = drafted before, rostered a prior season, or 5+ career games. Rulebook v2.22 makes
      this load-bearing again: a veteran is a RETURNING player and is exempt from the pre-season
@@ -4288,8 +4295,22 @@ CG.poolState = function(pid){
   if (!draftDone && !CG.isDraftEligible(pid))
     return { key:"needs_preseason", label:"Needs pre-season games", chip:"chip-warn" };
   if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
+  /* Rule 2.2 rights classes, on the NHL's model. A player who has never finished a season for a
+     club is unrestricted — that is everyone while the league is new. Once he has served, his old
+     club holds his rights when the contract ends, until he has accrued CG.rfaOffseasons() of
+     them. Only then is he unrestricted for good. */
+  var served = lg.serviceSeasons ? lg.serviceSeasons(pid) : 0;
+  if (served > 0 && served < CG.rfaOffseasons())
+    return { key:"rfa", label:"Restricted free agent", chip:"chip-warn" };
   if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
   return { key:"undrafted_fa", label:"Undrafted FA", chip:"chip-warn" };   /* v2.7: no minimum, no ineligible class */
+};
+/* how many off-seasons of service a player must accrue before his rights stop being held.
+   A setting, so the office can move the line without a deploy (Rule 2.2). */
+CG.RFA_OFFSEASONS_DEFAULT = 4;
+CG.rfaOffseasons = function(){
+  var v = parseInt((CG._siteCfg && CG._siteCfg.rfa_offseasons) || "", 10);
+  return (v && v > 0 && v < 30) ? v : CG.RFA_OFFSEASONS_DEFAULT;
 };
 CG.admPreseason = function(){
   var lg=CG.lg, s=CG.SEASON||{};
