@@ -2266,14 +2266,14 @@ CG.ROUTES.player = function(pid, qs){
        so they keep the numeric pre-season card without the misleading shape. */
     var playerViz = (isEmpty || archived || (s.gp||0)<1) ? "" : (isG
       ? '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
-          '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(s), null, p.tag)+'</div>'+
+          '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(s), CG.leagueDNA(lg, true, null, p.id), p.tag, "Average goaltender")+'</div>'+
           '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
             CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
             CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
             CG.vizGauge(s.qs||0, Math.max(s.gp,1), ""+(s.qs||0), "Quality starts","var(--steel)")+
           '</div></div></div>'
       : '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
-          '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), null, p.tag)+'</div>'+
+          '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), CG.leagueDNA(lg, false, CG.posGroup && CG.posGroup(p.pos), p.id), p.tag, "Average of other "+(CG.posGroupLabel && CG.posGroup ? CG.posGroupLabel(CG.posGroup(p.pos)) : "players"))+'</div>'+
           '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
             CG.vizGauge(s.shots?(s.g/s.shots*100):0,20,(s.shots?Math.round(s.g/s.shots*100):0)+"%","Shooting %")+
             CG.vizGauge(s.p||0, Math.max(s.gp*3,1), ((s.p||0)/Math.max(1,s.gp)).toFixed(2), "Pts / GP","var(--steel)")+
@@ -2397,6 +2397,35 @@ CG.vizRadar = function(axes, me, cmp, meLabel, cmpLabel){
   g+=shape(me,"color-mix(in srgb,var(--viz-accent) 20%,transparent)","var(--viz-accent)",true);
   var legend = '<div class="vlegend"><span><i style="background:var(--viz-accent)"></i>'+esc(meLabel||"This player")+'</span>'+(cmp?'<span><i style="background:var(--steel)"></i>'+esc(cmpLabel||"League avg")+'</span>':'')+'</div>';
   return '<svg class="vradar" viewBox="0 0 300 244" role="img" aria-label="Attribute radar">'+g+'</svg>'+legend;
+};
+/* The league's own shape at a position, so a radar can say "you vs the field" instead of floating
+   in the abstract. vizRadar has always accepted a comparison series; every call site passed null,
+   so the feature was built and never switched on. Averaging the resulting DNA vectors (rather than
+   the raw stats) keeps each axis on the same 0-100 scale the player's own shape uses. */
+CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
+  if (!lg || !lg.pstats) return null;
+  var fn = isGoalie ? CG.goalieDNA : CG.skaterDNA;
+  if (!fn) return null;
+  var sums = null, n = 0;
+  (lg.players||[]).forEach(function(pl){
+    if (exceptId && pl.id === exceptId) return;      /* "you vs the field" must not include you */
+    var isG = pl.pos === "G";
+    if (isG !== !!isGoalie) return;
+    if (posGroup && !isGoalie && CG.posGroup && CG.posGroup(pl.pos) !== posGroup) return;
+    var st = lg.pstats[pl.id];
+    if (!st || (st.gp||0) < 1) return;
+    var v = fn(st); if (!v || !v.length) return;
+    if (!sums) sums = v.map(function(){ return 0; });
+    v.forEach(function(x, i){ sums[i] += x; });
+    n++;
+  });
+  /* below this a single outlier IS the "average", which is worse than drawing no comparison */
+  if (!n || n < 5) return null;
+  return sums.map(function(x){ return Math.round(x/n); });
+};
+/* the human name for a position group, for the radar legend — "F" meant nothing to a reader */
+CG.posGroupLabel = function(grp){
+  return grp === "G" ? "goaltenders" : grp === "D" ? "defensemen" : "forwards";
 };
 /* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
 CG.skaterDNA = function(s){

@@ -352,8 +352,57 @@ async function ingestOne(norm, raw, summary, batch) {
     "return=minimal");
 
   const linked = rows.filter((r) => r.profile_id).length;
+  // Your night: every linked player gets their own line back, with a link to the box score.
+  // The stats used to land in silence — nobody was ever told they had three points.
+  // postGameRecaps replaces this game's recaps rather than appending, so re-imports are safe.
+  await postGameRecaps(game, rows, homeScore, awayScore, summary).catch((e) =>
+    console.warn("recap notifications failed (the import itself is unaffected):", String(e && e.message || e)));
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: game.id, score: `${homeScore}-${awayScore}`, players: rows.length, linked });
   await logAttempt(norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id);
+}
+
+// ---- "Your night": one notification per linked player, carrying their own stat line ----
+//
+// Deliberately best-effort: a failure here must never fail the import, because the box score is
+// the thing that matters and it is already written by the time we get here. Notifications are
+// batched into one insert so a full 12-player game is a single request.
+async function postGameRecaps(game, rows, homeScore, awayScore, summary) {
+  const linked = rows.filter((r) => r.profile_id);
+  if (!linked.length) return;
+  // Replace, never append. A lag-out arrives as two EA matches: the first sitting flips the game
+  // final on a PARTIAL score and would leave every player holding "Lost 2-3 — 1 point" for a game
+  // that merged into a 5-4 win with a hat trick. Clearing this game's recaps first means the
+  // merge simply reissues the truth, and a re-import can never announce the night twice.
+  await sbSend("DELETE", `notifications?type=eq.stat&link_view=eq.game&link_param=eq.${game.id}`);
+  const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,name,code`);
+  const nameOf = (id) => (teams.find((t) => t.id === id) || {}).name || "your club";
+  const notes = linked.map((r) => {
+    const mine   = r.team_id === game.home_team_id ? homeScore : awayScore;
+    const theirs = r.team_id === game.home_team_id ? awayScore : homeScore;
+    const oppId  = r.team_id === game.home_team_id ? game.away_team_id : game.home_team_id;
+    const won    = mine > theirs;
+    const isG    = !!r.is_goalie || r.position === "G";
+    let line;
+    if (isG) {
+      const sa = r.shots_against || 0, sv = r.saves || 0;
+      line = `${sv} save${sv === 1 ? "" : "s"} on ${sa}` + (r.shutout ? " — shutout." : ".");
+    } else {
+      const g = r.goals || 0, a = r.assists || 0, pts = g + a;
+      line = pts
+        ? `${g}G ${a}A — ${pts} point${pts === 1 ? "" : "s"}.`
+        : `${r.shots || 0} shot${(r.shots || 0) === 1 ? "" : "s"}, ${r.hits || 0} hit${(r.hits || 0) === 1 ? "" : "s"}.`;
+    }
+    return {
+      profile_id: r.profile_id,
+      type: "stat",
+      title: `${won ? "Won" : "Lost"} ${mine}-${theirs} vs ${nameOf(oppId)}`,
+      body: `${line} Tap to see the full box score.`,
+      link_view: "game",
+      link_param: game.id,
+    };
+  });
+  await sbSend("POST", "notifications", notes, "return=minimal");
+  if (summary) (summary.recaps = summary.recaps || []).push({ game_id: game.id, sent: notes.length });
 }
 
 // ---- A resume segment: merge it into the final game it continues ----
@@ -472,6 +521,11 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB) {
     { home_score: homeClub.score, away_score: awayClub.score, went_ot: !!merged.went_ot,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
+
+  // the first sitting already told everyone they lost 2-3; reissue from the merged truth
+  await postGameRecaps({ id: cand.id, home_team_id: cand.home_team_id, away_team_id: cand.away_team_id },
+    rows, homeClub.score, awayClub.score, summary).catch((e) =>
+    console.warn("recap re-issue failed (the merge itself is unaffected):", String(e && e.message || e)));
 
   await logAttempt(norm, raw, "merged",
     `second sitting of a disconnected game — merged into ${cand.ea_match_id} (${priors.length + 1} sittings, ${totalLen}s)`, cand.id);

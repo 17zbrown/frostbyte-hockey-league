@@ -14,7 +14,7 @@ CG.ROUTES.awards = function(param, qs){
       '<a class="btn btn-chrome" style="margin-top:18px" href="#/schedule">Opening schedule</a></div></div></div>';
   }
   var tabs = '<div class="shell"><div class="tabs" role="tablist">'+
-    [["stars","Three Stars"],["potw","Players of the Week"],["season","Season awards"]].map(function(x){
+    [["stars","Three Stars"],["board","Stars board"],["potw","Players of the Week"],["season","Season awards"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding:22px 0 40px">';
   if (tab==="stars"){
@@ -31,6 +31,35 @@ CG.ROUTES.awards = function(param, qs){
             '<span class="caption" style="display:block">'+(b.goalie? (b.sv||0)+" saves"+(b.so?", shutout":"") : (b.g||0)+"G "+(b.a||0)+"A")+'</span></div></div></div>';
         }).join("")+'</div><p class="caption" style="margin-top:14px">Picked automatically from the night’s box scores.</p></div></div>';
     }).join("") : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No Three Stars yet</b><p>Stars are named automatically after every completed game night.</p></div></div>';
+  }
+  if (tab==="board"){
+    /* Three stars are picked after every game and then never seen again. This is the season
+       ledger: 3 points for a first star, 2 for a second, 1 for a third — the same weighting
+       broadcast leagues use, so the order reads the way people expect. */
+    var tally = {};
+    (lg.results||[]).forEach(function(r){
+      (r.stars||[]).forEach(function(st, i){
+        var pl = CG.playerById(lg, st.pid); if (!pl) return;
+        var t = tally[st.pid] || (tally[st.pid] = { p:pl, first:0, second:0, third:0, pts:0 });
+        if (i===0){ t.first++; t.pts += 3; } else if (i===1){ t.second++; t.pts += 2; } else { t.third++; t.pts += 1; }
+      });
+    });
+    var board = Object.keys(tally).map(function(k){ return tally[k]; })
+      .sort(function(a,b){ return b.pts-a.pts || b.first-a.first || a.p.tag.localeCompare(b.p.tag); });
+    body += board.length
+      ? '<div class="card"><div class="card-h"><h3>Stars board</h3><span class="chip">'+board.length+' named</span></div>'+
+        '<div class="tblwrap"><table class="tbl keepcols"><caption>Three-star points, all season</caption><thead><tr>'+
+        '<th>#</th><th class="tleft">Player</th><th class="tleft">Club</th><th>1st</th><th>2nd</th><th>3rd</th><th>Pts</th>'+
+        '</tr></thead><tbody>'+board.map(function(t, i){
+          return '<tr class="rowlink" data-go="'+CG.playerRoute(t.p)+'">'+
+            '<td class="tnum">'+(i+1)+'</td>'+
+            '<td class="tleft"><span class="playercell"><span class="nm">'+esc(t.p.tag)+'</span></span></td>'+
+            '<td class="tleft"><span class="teamcell">'+CG.crest(t.p.team,18)+'<span class="mono" style="font-size:11px">'+esc(t.p.team)+'</span></span></td>'+
+            '<td class="tnum">'+t.first+'</td><td class="tnum">'+t.second+'</td><td class="tnum">'+t.third+'</td>'+
+            '<td class="tnum"><b>'+t.pts+'</b></td></tr>';
+        }).join("")+'</tbody></table></div>'+
+        '<div class="card-b"><p class="caption">A first star is worth 3, a second 2, a third 1. Picked automatically from each night\u2019s box scores.</p></div></div>'
+      : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No stars named yet</b><p>The board fills in as game nights are played.</p></div></div>';
   }
   if (tab==="potw"){
     var weeks = lg.potw.slice().reverse().filter(function(w){ return CG.playerById(lg,w.skater) && CG.playerById(lg,w.goalie); });

@@ -259,7 +259,11 @@ export default async (req) => {
   if (!forceRun && await ranRecently("discord-scheduler", 60)) return json({ skipped: "ran moments ago" });
   // Delivery failures land in sum.errors rather than throwing, so a dead standings webhook can't
   // take the game reminders down with it. Both feed the ok/errCount record the Automations chip reads.
-  const now = new Date(), et = etParts(now), sum = { errors: [] };
+  // `unconfigured` is deliberately SEPARATE from `errors`: a feed nobody has set up yet must be
+// visible without paging the watchdog forever, but it must not read as healthy silence either.
+// These four used to return a bare string, so an unset webhook left errors empty and the result
+// row said ok:true while a public feed was dark.
+  const now = new Date(), et = etParts(now), sum = { errors: [], unconfigured: [] };
   try {
     /* mirror the rulebook into #rules — a no-op on every tick until the published version changes */
     try { sum.rules = await rulesUpkeep(sum.errors); } catch (e) { sum.errors.push(`rules: ${String(e.message || e)}`); }
@@ -273,22 +277,23 @@ export default async (req) => {
     const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code&order=scheduled_at`);
 
     // (A) weekly schedule — Tuesday 5:00-5:09pm ET
-    if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors);
+    if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors, sum.unconfigured);
     // (B) standings — Friday 11pm ET through Saturday 2am ET, once the week's games are all final
-    if ((et.wd === 5 && et.hr >= 23) || (et.wd === 6 && et.hr < 2)) sum.standings = await weeklyStandings(games, teamById, cfg, sum.errors);
+    if ((et.wd === 5 && et.hr >= 23) || (et.wd === 6 && et.hr < 2)) sum.standings = await weeklyStandings(games, teamById, cfg, sum.errors, sum.unconfigured);
     // (C) team reminders — ~30 min before a club's first game of the night
     sum.reminders = await gameReminders(games, teamById, now, sum.errors);
     // (D) casework nudge — daily 12pm ET: @ reviewers who still owe an application vote, and staff
     //     sitting on a claimed case. (E) sign-up reminder — daily 6pm ET: ping the "Not Signed Up" role.
-    if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors);
-    if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors);
+    if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors, sum.unconfigured);
+    if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors, sum.unconfigured);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
   const errs = (sum.error ? [sum.error] : []).concat(sum.errors);
   try {
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "rl_discord-scheduler_result", value: JSON.stringify({
-        at: new Date().toISOString(), ok: errs.length === 0, errCount: errs.length, lastError: errs[0] ? String(errs[0]).slice(0, 200) : null
+        at: new Date().toISOString(), ok: errs.length === 0, errCount: errs.length, lastError: errs[0] ? String(errs[0]).slice(0, 200) : null,
+        unconfigured: sum.unconfigured, unconfiguredCount: sum.unconfigured.length
       }), updated_at: new Date().toISOString() }) });
   } catch {}
   return json(sum);
@@ -362,12 +367,12 @@ function pickFeatured(weekGames, allGames, teamById) {
   return top;
 }
 
-async function weeklySchedule(games, teamById, cfg, errors) {
+async function weeklySchedule(games, teamById, cfg, errors, unconfigured) {
   const nowMs = Date.now();
   const wk = games.filter((g) => g.status !== "final" && new Date(g.scheduled_at).getTime() < nowMs + 6 * 864e5 && new Date(g.scheduled_at).getTime() > nowMs - 3600e3);
   if (!wk.length) return "no upcoming games this week";
   const url = cfg.discord_schedule_webhook || cfg.discord_default_webhook;
-  if (!url) return "no schedule webhook configured"; // checked before claim() so the slot isn't burned
+  if (!url) { unconfigured.push("weekly schedule (discord_schedule_webhook)"); return "no schedule webhook configured"; } // checked before claim() so the slot isn't burned
   const ref = "sched-" + etParts(new Date(wk[0].scheduled_at)).ymd;
   if (!(await claim("weekly_schedule", ref))) return "already posted";
   const tag = (id) => teamTag(teamById, id);
@@ -394,13 +399,13 @@ async function weeklySchedule(games, teamById, cfg, errors) {
   return `posted ${wk.length} games`;
 }
 
-async function weeklyStandings(games, teamById, cfg, errors) {
+async function weeklyStandings(games, teamById, cfg, errors, unconfigured) {
   const nowMs = Date.now();
   const wk = games.filter((g) => { const t = new Date(g.scheduled_at).getTime(); return t > nowMs - 5 * 864e5 && t <= nowMs; });
   if (!wk.length) return "no games this week";
   if (wk.some((g) => g.status !== "final")) return "week not complete yet"; // re-checks next tick
   const url = cfg.discord_standings_webhook || cfg.discord_default_webhook;
-  if (!url) return "no standings webhook configured"; // checked before claim() so the slot isn't burned
+  if (!url) { unconfigured.push("weekly standings (discord_standings_webhook)"); return "no standings webhook configured"; } // checked before claim() so the slot isn't burned
   const anchor = wk.reduce((m, g) => (g.scheduled_at > m ? g.scheduled_at : m), wk[0].scheduled_at);
   const ref = "standings-" + etParts(new Date(anchor)).ymd; // stable across the Fri-night / Sat-early window
   if (!(await claim("weekly_standings", ref))) return "already posted";
@@ -470,9 +475,9 @@ async function gameReminders(games, teamById, now, errors) {
 
 // (D) Daily nudge to #staff-casework: for every pending application, @ the reviewers who still owe a
 // vote; for every claimed-but-unresolved case, @ the assignee. Posts only when something's outstanding.
-async function caseworkNudge(cfg, teamById, et, dry, errors) {
+async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   const url = cfg.discord_staff_casework_webhook || cfg.discord_default_webhook;
-  if (!url) return "no casework webhook";
+  if (!url) { unconfigured.push("casework nudge (discord_staff_casework_webhook)"); return "no casework webhook"; }
   const [profs, links, oa, sa, ma, ballots, cases] = await Promise.all([
     sbGet("profiles?select=id,role,departments,gamertag"),
     sbGet("discord_links?select=profile_id,discord_id"),
@@ -515,10 +520,10 @@ async function caseworkNudge(cfg, teamById, et, dry, errors) {
 
 // (E) Daily #season-signups reminder while registration is open: one clean ping of the bot-maintained
 // "Not Signed Up" role (discord-sync keeps its membership current). Skips when nobody's left.
-async function signupReminder(cfg, et, dry, errors) {
+async function signupReminder(cfg, et, dry, errors, unconfigured) {
   const url = cfg.discord_signup_webhook || cfg.discord_default_webhook;
   const roleId = cfg.discord_not_signed_up_role_id;
-  if (!url) return "no signup webhook";
+  if (!url) { unconfigured.push("sign-up reminder (discord_signup_webhook)"); return "no signup webhook"; }
   if (!roleId) return "not-signed-up role not provisioned yet";
   const s = (await sbGet("seasons?select=id,name,registration_open,signup_deadline_at,registration_deadline&registration_open=is.true&order=number.desc&limit=1"))[0];
   if (!s) return "registration closed";   /* Rule 1.1 (v2.8): open until the next season's opens */

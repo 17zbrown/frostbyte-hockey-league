@@ -256,7 +256,10 @@ CG.buildLiveLeague = async function(){
         team: team.code, pos: pos, depth: depth[dk],
         jersey: rs.jersey_number || p.jersey_number || 0,
         platform: p.platform || "—",
-        arch: "Two-Way", shoots: "L", rookie: false, joined: "Season 1",
+        /* rookie is stamped in a second pass below, once lg.isReturning exists — it was hardcoded
+           false here, which made the "R" chip and the Rookie-of-the-Year race permanently empty.
+           arch/shoots are still placeholders: they need real profile columns (not yet built). */
+        arch: "Two-Way", shoots: "L", joined: "Season 1",
         twitch: p.twitch || null, twitchLive: !!p.live,
         overall: p.overall || 70,
         eaId: p.ea_id || "", avatar: p.avatar_url || null,
@@ -392,9 +395,12 @@ CG.buildLiveLeague = async function(){
   /* playoff series (the schedule above is already this season only), plus the
      public clinch list so the projected bracket can lock in confirmed clubs */
   var playoffGames = schedule.filter(function(g){ return g.stage==="playoff"; });
-  var clinched = (CG._siteCfg && CG._siteCfg["clinched_"+((season&&season.number)||1)]) || [];
+  /* clinch used to come from a hand-typed site_config list nobody maintained, so the lock icon
+     never appeared. It is computed from the table now (CG.clinchedCodes), with the old config
+     list still honoured as a manual override if a commissioner ever sets one. */
+  var clinchedCfg = (CG._siteCfg && CG._siteCfg["clinched_"+((season&&season.number)||1)]) || [];
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
-             allResults:results, playoffGames:playoffGames, clinched:clinched,
+             allResults:results, playoffGames:playoffGames, clinched:clinchedCfg,
              suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true };
   if (preResults.length){
     CG.SEASON.completedWeeks = preWeeksDone;
@@ -410,6 +416,10 @@ CG.buildLiveLeague = async function(){
   } else {
     CG.aggregate(lg, {});
   }
+  /* clinch is computed from the finished table, so it can only be resolved once aggregate has
+     produced lg.teams. A commissioner-set override in site_config still wins if one exists. */
+  lg.race = CG.raceMath(lg);
+  if (!clinchedCfg.length) lg.clinched = CG.clinchedCodes(lg);
 
   /* draft-eligibility bookkeeping: pre-season games played this cycle, career
      games across every season, and who has already been through a draft */
@@ -437,6 +447,21 @@ CG.buildLiveLeague = async function(){
      rostered a prior season). This is what separates open free agency (returning players) from
      rookie bidding (undrafted FIRST-years). */
   lg.isReturning = function(pid){ return !!(draftedEver[pid] || priorSeason[pid]); };
+  /* A rookie is simply a player who has NOT been here before. This was hardcoded false on every
+     roster row (see the player mapper above), so the "R" chip, the rookie filter on #/players and
+     the Rookie-of-the-Year race were all permanently empty. isReturning is only defined here, so
+     the flag is stamped in a second pass rather than inline. */
+  /* NOT isReturning: draftedEver spans every season (the boot query is unfiltered), so being
+     taken in THIS season's draft would mark a genuine first-year as a returning player. Since
+     CGHL rebuilds every roster through the draft each season, that inverted the flag — the whole
+     Season 1 class would have lost its R the morning after draft night. A rookie has no
+     prior-season roster spot and no pick in an EARLIER draft. */
+  var curSnR = (season && season.number) || 1;
+  var draftedBefore = {};
+  (draftPicks||[]).forEach(function(p){
+    if (p.player_id && (p.season_number||0) < curSnR) draftedBefore[p.player_id] = true;
+  });
+  players.forEach(function(p){ p.rookie = !(draftedBefore[p.id] || priorSeason[p.id]); });
 
   /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
      from the box above via CG.aggregate; these power the advanced leaders + profiles) */
@@ -740,6 +765,7 @@ CG.applySession = async function(session){
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
+  CG.loadMyLineups();          /* every role — a player needs to know if he is dressed */
   await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
   /* real notifications: load + realtime subscribe on sign-in, tear down on sign-out */
   if (CG.auth.user){ CG.loadNotifs().then(function(){ if(CG.renderChrome)CG.renderChrome(); }); }
@@ -1002,6 +1028,8 @@ CG.notifRoute = function(view, param){
   var appUrl  = isQs ? "#/hub/application?" + p : null;
   switch (view){
     case "team":         return p ? "#/team/"+encodeURIComponent(p) : "#/teams";
+    /* a post-game recap: the box score for the game the player just skated in */
+    case "game":         return p ? "#/matchup/"+encodeURIComponent(p) : "#/schedule";
     case "draft":        return "#/hub/draft";
     case "manager":      return "#/hub";
     case "transactions": return "#/home";
@@ -1035,7 +1063,7 @@ CG.notifRoute = function(view, param){
   }
 };
 CG.notifIcon = function(type){
-  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", app_message:"msg", request:"flag" }[type] || "bell";
+  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", app_message:"msg", request:"flag", stat:"chart" }[type] || "bell";
 };
 /* staff/commish backlog summary from the DB (open cases, apps, unmatched EA imports, finals
    missing box scores, active suspensions). Powers the Staff Desk "Needs attention" card and
@@ -1194,6 +1222,53 @@ CG.loadMatchupLineups = function(g){
       /* re-render only if the user is still looking at this matchup */
       if (location.hash.indexOf("#/matchup/"+g.id)===0 && CG.router) CG.router();
     });
+};
+/* A plain player never loaded a lineup at all. loadManagerData early-returns for anyone who is
+   not mgmt/commish/staff, and _pubLineups is only filled by loadMatchupLineups (which runs on a
+   matchup page), so on the hub plannedLineup returned all-nulls and tonightCard told a player who
+   was STARTING "You're a scratch tonight". game_lineups is anon-readable, so fetch the player's
+   own club's upcoming fixtures straight into the cache plannedLineup already reads first. */
+CG._myLineupsAt = 0;
+CG.loadMyLineups = function(){
+  if (!CG.sb || !CG.lg || !CG.auth.user) return Promise.resolve();
+  var me = CG.me && CG.me(); if (!me || !me.team) return Promise.resolve();
+  var tid = (CG.lg._codeToId||{})[me.team]; if (!tid) return Promise.resolve();
+  /* The window has to cover everything lg.tonight can show, or a late game falls outside it and
+     reads as "not posted" all evening. tonight spans roughly half a day either side. */
+  var from = CG.now() - 12*3600000;
+  var mine = (CG.lg.schedule||[]).filter(function(g){
+    return (g.home===me.team || g.away===me.team) && g.status!=="final" && g.at >= from;
+  }).sort(function(a,b){ return a.at-b.at; }).slice(0,6);
+  if (!mine.length) return Promise.resolve();
+  CG._myLineupsAt = CG.now();
+  return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie")
+    .eq("team_id", tid).in("game_id", mine.map(function(g){ return g.id; }))
+    .then(function(r){
+      if (r && r.error) return;                     /* leave it UNKNOWN rather than assert a scratch */
+      /* re-seed from scratch each pass: a cached "no lineup yet" MUST be able to become a real
+         lineup once the GM posts it, which a write-once cache could never do */
+      mine.forEach(function(g){ CG._pubLineups[me.team+":"+g.id] = null; });
+      ((r&&r.data)||[]).forEach(function(row){ CG._pubLineups[me.team+":"+row.game_id] = row; });
+      if (/^#\/hub/.test(location.hash) && CG.rerenderKeepScroll) CG.rerenderKeepScroll();
+    }, function(){});
+};
+/* Has the club actually POSTED a lineup for this game? Only a real row counts. The three states
+   this separates are the whole point: no row means "not posted yet", a row you are absent from
+   means "not dressed", and no fetch at all means we do not know — which is what made the old
+   scratch notice a lie. */
+CG.lineupPosted = function(g, code){
+  if (!g || !code) return false;
+  var saved = (CG.store.get("lineups")||{})[g.id+":"+code];
+  if (saved && saved.status!=="draft") return true;
+  if (CG._pubLineups[code+":"+g.id]) return true;
+  return !!(CG.lg && CG.lg._lineups && CG.lg._lineups[code+":"+g.id]);
+};
+/* the hub is where the game-night card lives, so re-check on arrival (throttled) rather than
+   trusting whatever was cached at sign-in — lineups are posted right up to the T-30 lock */
+var _hubAfterLineups = CG.AFTER.hub;
+CG.AFTER.hub = function(param, qs){
+  if (_hubAfterLineups) _hubAfterLineups(param, qs);
+  if (CG.now() - (CG._myLineupsAt||0) > 60000) CG.loadMyLineups();
 };
 var _matchupAfterProto = CG.AFTER.matchup;
 CG.AFTER.matchup = function(param, qs){
@@ -8146,6 +8221,13 @@ CG.AFTER._admAutomations = function(){
         stEl.textContent = "Failing";
         stEl.className = "chip chip-loss";
         stEl.title = res.lastError ? String(res.lastError).slice(0,180) : "last run reported errors";
+      } else if (res && res.unconfiguredCount > 0){
+        /* the job ran fine, but a feed it is meant to publish has no webhook — dark, not broken.
+           Without this it painted green and a public feed could stay silent all season. */
+        stEl.textContent = "Feed unset";
+        stEl.className = "chip chip-warn";
+        stEl.title = "Ran without error, but nothing is configured for: " +
+          (res.unconfigured || []).join("; ");
       } else {
         stEl.textContent = fresh ? "Running" : "Check";
         stEl.className = "chip "+(fresh?"chip-win":"chip-warn");

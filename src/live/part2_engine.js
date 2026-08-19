@@ -583,21 +583,88 @@ CG.aggregate = function(lg, overrides){
 
 /* ---------- convenience selectors ---------- */
 CG.playerById = function(lg,id){ return lg.players.find(function(p){ return p.id===id; }); };
-/* Rule 8.1: clubs are ordered by POINTS PERCENTAGE, not raw points, so a club with games in hand
-   compares fairly — which is the exact case the rule cites. Rule 8.2 breaks ties in a fixed order:
-   head-to-head between the tied clubs, then regulation wins, then goal differential, then goals
-   scored. Head-to-head is a mini-table among everyone tied, not a pairwise field, so it is
-   computed per tied group rather than inside the comparator. */
+/* Rule 8.1 (v2.22): clubs are ordered by TOTAL POINTS EARNED — games in hand are allowed to
+   distort the table. Rule 8.2 breaks ties in a fixed order: head-to-head between the tied clubs,
+   then regulation wins, then goal differential, then goals scored. Head-to-head is a mini-table
+   among everyone tied, not a pairwise field, so it is computed per tied group rather than inside
+   the comparator.
+
+   This read r.homeScore / r.awayScore, which the live league object does not carry — a result row
+   is { home, away, score:{CODE:goals}, ot, forfeit, … } (see the mapper in part_live.js). Both
+   were therefore undefined, every row hit the null guard, and the whole tiebreaker returned zeros:
+   head-to-head silently decided nothing. It now reads r.score and honours a forfeit the same way
+   the season table does — a forfeit is a regulation result, so it never awards the OT point. */
 CG.h2hPoints = function(lg, codes){
   var set = {}, out = {};
   codes.forEach(function(c){ set[c] = 1; out[c] = 0; });
   (lg.results || []).forEach(function(r){
-    if (!set[r.home] || !set[r.away]) return;
-    var hs = r.homeScore, as = r.awayScore;
+    if (!set[r.home] || !set[r.away] || !r.score) return;
+    var hs = r.score[r.home], as = r.score[r.away];
     if (hs == null || as == null) return;
-    if (hs > as){ out[r.home] += 2; if (r.ot) out[r.away] += 1; }
-    else        { out[r.away] += 2; if (r.ot) out[r.home] += 1; }
+    /* scored per club exactly the way the season table does (see the standings builder), so this
+       tiebreaker can never disagree with the points it is breaking a tie on. An equal score with
+       no forfeit is a loss for both sides rather than a win handed to the away club. */
+    var ff = r.forfeit || null;
+    [[r.home, hs, as], [r.away, as, hs]].forEach(function(x){
+      var code = x[0], mine = x[1], theirs = x[2];
+      var won = ff ? (ff !== code) : (mine > theirs);
+      if (won) out[code] += 2;
+      else if (!ff && r.ot && mine === theirs - 1) out[code] += 1;   /* the overtime loser's point */
+    });
   });
+  return out;
+};
+/* ---- The race: clinched, eliminated, magic number ----------------------------------------
+   The site used to read a HAND-TYPED list of clinched clubs out of site_config
+   ("clinched_<season>"), which nobody ever maintained — so the lock icon never appeared and the
+   projected bracket never locked anyone in. This computes it instead, from the same points the
+   table is sorted on (Rule 8.1: total points) against the qualifier count (Rule 8.1: top four per
+   division, a Control Center setting).
+
+   Both verdicts are deliberately CONSERVATIVE, because a wrong one is a broken promise:
+     · clinched  — claimed only when the club is in even if every club that can still reach its
+                   point total finishes above it on tiebreakers.
+     · eliminated — claimed only when enough rivals are ALREADY strictly above the club's ceiling,
+                   so no tiebreaker could rescue it.
+   A club that is neither carries a magic number: points still needed to be certain. */
+CG.raceMath = function(lg){
+  var out = {}, perDiv = (CG.playoffPerDiv ? CG.playoffPerDiv() : 4);
+  var sched = lg.schedule || [];
+  CG.TEAMS.forEach(function(t){
+    var rec = (lg.teams||{})[t.code] || { w:0,l:0,otl:0 };
+    var pts = rec.w*2 + (rec.otl||0);
+    var played = (rec.w||0) + (rec.l||0) + (rec.otl||0);
+    var left = sched.filter(function(g){
+      return g.stage==="regular" && g.status!=="final" && (g.home===t.code || g.away===t.code);
+    }).length;
+    out[t.code] = { code:t.code, div:t.div, pts:pts, gp:played, left:left, max:pts + left*2 };
+  });
+  CG.TEAMS.forEach(function(t){
+    var me = out[t.code];
+    var rivals = CG.TEAMS.filter(function(x){ return x.div===t.div && x.code!==t.code; })
+                         .map(function(x){ return out[x.code]; });
+    /* anyone who can still REACH my total is a threat — a tie can be lost on tiebreakers */
+    var threats = rivals.filter(function(r){ return r.max >= me.pts; }).length;
+    me.clinched = threats <= perDiv - 1;
+    /* only certain when rivals are already STRICTLY past my ceiling */
+    var above = rivals.filter(function(r){ return r.pts > me.max; }).length;
+    me.eliminated = above >= perDiv;
+    /* magic number: the smallest points gain that makes `clinched` true, capped by what's left */
+    me.magic = null;
+    if (!me.clinched && !me.eliminated){
+      for (var add = 1; add <= me.left*2; add += 1){   /* an OT point is worth 1, so start at 1 */
+        var hyp = me.pts + add;
+        var stillThreat = rivals.filter(function(r){ return r.max >= hyp; }).length;
+        if (stillThreat <= perDiv - 1){ me.magic = add; break; }
+      }
+    }
+  });
+  return out;
+};
+/* the codes that have mathematically clinched — replaces the dead hand-typed config list */
+CG.clinchedCodes = function(lg){
+  var r = CG.raceMath(lg), out = [];
+  Object.keys(r).forEach(function(c){ if (r[c].clinched) out.push(c); });
   return out;
 };
 CG.standings = function(lg, div){
