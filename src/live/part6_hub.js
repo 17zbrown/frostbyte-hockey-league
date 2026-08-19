@@ -216,8 +216,7 @@ CG.hubDashboard = function(){
     var av = CG.availGet(me.id);
     var tonight = lg.tonight.find(function(g){ return g.home===me.team||g.away===me.team; });
     var inLineup = tonight && Object.values(CG.plannedLineup(tonight, me.team)).indexOf(me.id)>=0;
-    /* only a POSTED lineup can make someone a scratch — see CG.lineupPosted */
-    var lineupPosted = tonight && CG.lineupPosted ? CG.lineupPosted(tonight, me.team) : false;
+
     /* a manager who is also rostered gets the full club-overview console; a plain player gets the compact card */
     if (CG.managesClub && CG.managesClub() && CG.teamOverviewCard && CG.myManagedTeam && CG.myManagedTeam()){
       cards.push(CG.teamOverviewCard(CG.myManagedTeam()));
@@ -243,7 +242,7 @@ CG.hubDashboard = function(){
         '<div class="card-b"><p class="small" style="color:var(--steel)">No game week is scheduled yet. Availability opens each week once the schedule is posted — you’ll get a notification.</p></div></div>');
     }
     if (lg.tonight.length){
-      cards.push(CG.tonightCard(me, tonight, inLineup, lineupPosted));
+      cards.push(CG.tonightCard(me, tonight, inLineup));
     }
     if (lg.pstats[me.id].gp){
       var last3 = lg.glog[me.id].slice(-3).reverse();
@@ -296,7 +295,7 @@ CG.hubDashboard = function(){
 
 /* Tonight's slate — every game clickable through to its matchup center
    (line matchup, server/lobby settings, and the private game code). */
-CG.tonightCard = function(me, myGame, inLineup, lineupPosted){
+CG.tonightCard = function(me, myGame, inLineup){
   var lg = CG.lg;
   var rows = lg.tonight.slice().sort(function(a,b){ return a.at-b.at; }).map(function(g){
     var mine = me && (g.home===me.team||g.away===me.team);
@@ -309,12 +308,15 @@ CG.tonightCard = function(me, myGame, inLineup, lineupPosted){
       '<span class="nf-t" style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">'+CG.fmtTime(g.at)+
         '<span class="chip" style="font-size:9px;padding:1px 7px">Matchup ›</span></span></div>';
   }).join("");
-  var note = myGame
-    ? '<div class="card-b" style="border-top:1px solid var(--line)"><p class="small" style="color:var(--steel)">'+(inLineup
-        ? "You’re in the confirmed lineup at "+CG.POS_NAME[me.pos]+". Your private game code goes live at "+CG.fmtTime(myGame.at-30*60000)+" — open the matchup to grab it."
-        : lineupPosted
-        ? "You’re not in tonight’s lineup — stay ready for a late swap. Tap your game to see the confirmed lines and lobby settings."
-        : "Your club hasn’t posted tonight’s lineup yet. It locks at "+CG.fmtTime(myGame.at-30*60000)+" — open the matchup then to see the lines and your lobby code.")+'</p></div>'
+  /* Only ever tell a player they ARE playing. A club that has not posted its lineup, a fetch that
+     failed, and a genuine healthy scratch are indistinguishable to the reader and all three read
+     as bad news, so none of them get a message — the card just falls back to the slate. This also
+     means the only claim the card makes is a positive one taken from a real lineup row, which is
+     why it can no longer be wrong. */
+  var note = (myGame && inLineup)
+    ? '<div class="card-b" style="border-top:1px solid var(--line)"><p class="small" style="color:var(--steel)">'+
+      "You’re in the confirmed lineup at "+CG.POS_NAME[me.pos]+". Your private game code goes live at "+
+      CG.fmtTime(myGame.at-30*60000)+" — open the matchup to grab it."+'</p></div>'
     : '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Tap any game for confirmed lines, server settings, and the private lobby code (Rule 4.2).</span></div>';
   return '<div class="card" style="grid-column:1/-1"><div class="card-h"><h3>Tonight’s slate</h3>'+
     '<span class="chip chip-live"><span class="live-dot"></span>'+lg.tonight.length+' game'+(lg.tonight.length===1?"":"s")+'</span></div>'+

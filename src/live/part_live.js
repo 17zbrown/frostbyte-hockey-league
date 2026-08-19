@@ -1252,17 +1252,6 @@ CG.loadMyLineups = function(){
       if (/^#\/hub/.test(location.hash) && CG.rerenderKeepScroll) CG.rerenderKeepScroll();
     }, function(){});
 };
-/* Has the club actually POSTED a lineup for this game? Only a real row counts. The three states
-   this separates are the whole point: no row means "not posted yet", a row you are absent from
-   means "not dressed", and no fetch at all means we do not know — which is what made the old
-   scratch notice a lie. */
-CG.lineupPosted = function(g, code){
-  if (!g || !code) return false;
-  var saved = (CG.store.get("lineups")||{})[g.id+":"+code];
-  if (saved && saved.status!=="draft") return true;
-  if (CG._pubLineups[code+":"+g.id]) return true;
-  return !!(CG.lg && CG.lg._lineups && CG.lg._lineups[code+":"+g.id]);
-};
 /* the hub is where the game-night card lives, so re-check on arrival (throttled) rather than
    trusting whatever was cached at sign-in — lineups are posted right up to the T-30 lock */
 var _hubAfterLineups = CG.AFTER.hub;

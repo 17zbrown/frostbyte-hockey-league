@@ -28,40 +28,51 @@ const grab = (src, name) => {
   return m[0];
 };
 
-console.log("— a player is never told he is a scratch when nobody asked the question");
+console.log("— a player is told only when he IS playing, never when he is not");
 {
-  /* loadManagerData early-returns for non-management, so lg._lineups was never populated for a
-     player; plannedLineup returned all-nulls and tonightCard printed "You're a scratch tonight"
-     to someone in the starting six. It would have fired first on Sept 16. */
-  A("the old unconditional scratch copy is gone", !/scratch tonight/.test(hub));
+  /* Two rounds got us here. First: loadManagerData early-returns for non-management, so
+     lg._lineups was never populated for a player, plannedLineup returned all-nulls, and
+     tonightCard printed "You're a scratch tonight" to someone in the starting six. Then the
+     commissioner's call — drop the not-playing message entirely. The card now makes exactly ONE
+     claim, a positive one read off a real lineup row, so there is no longer a wrong thing for it
+     to say: an unposted lineup, a failed fetch and a genuine scratch all render the same neutral
+     slate note. */
+  A("nothing tells a player he is sitting", !/scratch tonight/.test(hub.replace(/\/\*[\s\S]*?\*\//g, "")) &&
+    !/not in tonight’s lineup/.test(hub) && !/hasn’t posted tonight’s lineup/.test(hub));
+  A("the card only speaks when the player is dressed", /var note = \(myGame && inLineup\)/.test(hub));
+  A("...and otherwise falls back to the plain slate note", /Tap any game for confirmed lines/.test(hub));
   A("a player loads his own club's lineups", /CG\.loadMyLineups = function/.test(live));
   A("...through the anon-readable game_lineups table", /loadMyLineups[\s\S]{0,900}from\("game_lineups"\)/.test(live));
   A("...for every signed-in role, not just management",
     /CG\.loadMyLineups\(\);\s+\/\* every role/.test(live));
   A("...and a failed fetch leaves the answer UNKNOWN rather than asserting a scratch",
     /if \(r && r\.error\) return;\s+\/\* leave it UNKNOWN/.test(live));
-  A("there is a tri-state: dressed / not dressed / not posted yet",
-    /CG\.lineupPosted = function/.test(live) && /hasn’t posted tonight’s lineup yet/.test(hub));
-  A("...and the card is told which it is", /CG\.tonightCard\(me, tonight, inLineup, lineupPosted\)/.test(hub));
-  A("...keyed on a lineup actually EXISTING, not merely on having fetched",
-    /if \(CG\._pubLineups\[code\+":"\+g\.id\]\) return true;/.test(live));
+  A("the now-pointless posted/not-posted helper is gone rather than left dangling",
+    !/CG\.lineupPosted = function/.test(live));
+  A("...and the card takes only what it uses", /CG\.tonightCard\(me, tonight, inLineup\)/.test(hub));
   A("a cached 'none yet' can become a real lineup — the cache is re-seeded each pass",
     /mine\.forEach\(function\(g\)\{ CG\._pubLineups\[me\.team\+":"\+g\.id\] = null; \}\);/.test(live));
   A("...and the hub re-checks on arrival, throttled", /CG\.now\(\) - \(CG\._myLineupsAt\|\|0\) > 60000/.test(live));
   A("the fetch window covers everything tonight can show", /var from = CG\.now\(\) - 12\*3600000;/.test(live));
 
+  /* plannedLineup is still what decides "dressed", and it must only ever say yes off a real row */
   const ctx = { console, Math, Object, Array, String, Number, JSON };
   ctx.window = ctx; ctx.globalThis = ctx;
   ctx.CG = { _pubLineups: {}, store: { get: () => ({}) }, lg: { _lineups: {} } };
   vm.createContext(ctx);
-  vm.runInContext(grab(live, "lineupPosted"), ctx);
+  vm.runInContext(grab(live, "plannedLineup"), ctx);
   const g = { id: "g1" };
-  A("an unfetched lineup is not 'posted'", ctx.CG.lineupPosted(g, "NYI") === false);
+  const dressed = (slots, id) => Object.values(slots).indexOf(id) >= 0;
+  A("nothing fetched -> not dressed, so the card stays silent",
+    dressed(ctx.CG.plannedLineup(g, "NYI"), "p1") === false);
   ctx.CG._pubLineups["NYI:g1"] = null;          /* fetched, no lineup exists */
-  A("a fetched-but-absent lineup is still not 'posted' — the 'not posted yet' state",
-    ctx.CG.lineupPosted(g, "NYI") === false);
-  ctx.CG._pubLineups["BOS:g1"] = { center: "p1" };
-  A("a real lineup row IS posted", ctx.CG.lineupPosted(g, "BOS") === true);
+  A("no lineup posted -> still not dressed, still silent",
+    dressed(ctx.CG.plannedLineup(g, "NYI"), "p1") === false);
+  ctx.CG._pubLineups["BOS:g1"] = { center: "p1", lw: null, rw: null, ld: null, rd: null, goalie: null };
+  A("a real row naming the player IS dressed — the one case that speaks",
+    dressed(ctx.CG.plannedLineup(g, "BOS"), "p1") === true);
+  A("...and a real row NOT naming him stays silent",
+    dressed(ctx.CG.plannedLineup(g, "BOS"), "p9") === false);
 }
 
 console.log("\n— head-to-head actually breaks ties now");
