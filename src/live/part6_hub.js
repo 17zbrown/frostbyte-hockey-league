@@ -225,7 +225,10 @@ CG.hubDashboard = function(){
         '<div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(me.team,44)+
         '<div><b style="font-family:var(--f-disp);font-size:17px">'+esc(t.name)+'</b>'+
         '<span class="caption" style="display:block">'+lg.teams[me.team].w+"-"+lg.teams[me.team].l+"-"+lg.teams[me.team].otl+' · '+t.div+' Division'+(r==="mgmt"?" · You are the GM":"")+'</span></div>'+
-        '<span class="ovrbox" style="margin-left:auto" title="My overall">'+lg.ratings[me.id].ovr+'</span></div></div>');
+        '<span style="margin-left:auto;text-align:center">'+
+          '<span class="ovrbox" title="'+esc((CG.ovrNote?CG.ovrNote(me.id,"title"):"")||"My overall")+'">'+lg.ratings[me.id].ovr+'</span>'+
+          (CG.ovrNote?CG.ovrNote(me.id):"")+
+        '</span></div></div>');
     }
     /* Availability only carries urgency when a game week is actually open. Pre-season (no
        scheduled week) shows a calm "opens when the schedule posts" state instead of a red

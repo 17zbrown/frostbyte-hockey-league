@@ -1925,7 +1925,9 @@ CG.ROUTES.team = function(code, qs){
           (p.mgmt?' <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">'+(p.mgmt==="owner"?"OWNER":p.mgmt==="gm"?"GM":"AGM")+'</span>':"")+'</span></td>'+
           '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
           '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px">'+line+'</td>'+
-          (archived?"":'<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td>')+'</tr>';
+          (archived?"":'<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px"'+
+            (CG.ovrProgress(p.id).provisional?' title="'+esc(CG.ovrNote(p.id,"title"))+'"':'')+'>'+lg.ratings[p.id].ovr+
+            (CG.ovrProgress(p.id).provisional?'<span style="opacity:.75">*</span>':'')+'</span></td>')+'</tr>';
       }).join("")+
       (roster.length ? "" : CG.emptyRow(archived?5:6, "No players on this roster yet",
         "Clubs fill up at the draft and in free agency. Signings show here the moment they’re made."))+
@@ -2052,7 +2054,7 @@ CG.ROUTES.players = function(param, qs){
   var nRostered = lg.players.length;
   var head = CG.pageHead("Player directory","Every skater. Every tendy.",
     esc((nRostered+unrostered.length)+" players — "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
-      "Overalls are the league's scouting baseline; games, points, and save percentage come straight from EA box scores."));
+      "Overalls open at 70 and settle onto a player's real rating over his first five games; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
     '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+
@@ -2084,7 +2086,9 @@ CG.ROUTES.players = function(param, qs){
         (p.rookie?'<span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+'</span></td>'+
       '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
       '<td class="tnum">'+s.gp+'</td><td class="tleft tnum" style="font-size:12px">'+stat+'</td>'+
-      '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
+      '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px"'+
+        (CG.ovrProgress(p.id).provisional?' title="'+esc(CG.ovrNote(p.id,"title"))+'"':'')+'>'+lg.ratings[p.id].ovr+
+        (CG.ovrProgress(p.id).provisional?'<span style="opacity:.75">*</span>':'')+'</span></td></tr>';
   }).join("");
   rows += freeList.map(function(u){
     /* the league mark stands in for a club crest until they have one */
@@ -2096,7 +2100,8 @@ CG.ROUTES.players = function(param, qs){
   }).join("");
   var shown = list.length + freeList.length;
   var body = shown
-    ? '<div class="card"><div class="card-h"><h3>'+shown+' players</h3><span class="chip">Sorted by overall</span></div>'+
+    ? '<div class="card"><div class="card-h"><h3>'+shown+' players</h3><span class="chip">Sorted by overall</span>'+
+      '<span class="caption" style="margin-left:auto">* still settling — fewer than '+CG.OVR_SETTLE_GP+' games</span></div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     : '<div class="empty"><div class="e-art">'+CG.ic("user",22)+'</div><b>No players match</b><p>Loosen the filters — everyone who has signed in to the site lives in this directory.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
@@ -2177,10 +2182,13 @@ CG.ROUTES.player = function(pid, qs){
             : '<span class="chip chip-loss">Suspended</span>') : "")+
           (canSeeAvail?'<span class="chip '+(CG.availGet(p.id)?"chip-win":"chip-warn")+'">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
-      /* OVR is the staff scouting number on the profile — the live adapter sets it from
-         profiles.overall for every player, played games or not. It is never derived from results. */
-      '<div class="hero-ovr" style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
-        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink)">Overall · scouted</span></div></div>'+
+      /* OVR comes from profiles.overall, which the database recomputes after every final
+         (compute_overall). It OPENS at 70 and blends onto the real rating across five games, so
+         until then the badge is shown with how far along it is rather than bare — see CG.ovrNote. */
+      '<div class="hero-ovr" style="text-align:center" title="'+esc(CG.ovrNote(p.id,"title"))+'">'+
+        '<span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
+        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink)">Overall</span>'+
+        CG.ovrNote(p.id)+'</div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
       (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>'
@@ -2208,13 +2216,13 @@ CG.ROUTES.player = function(pid, qs){
       : (anyGp===0
         ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
           '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
-          'The '+r.ovr+' overall is the staff scouting number from registration; production, defense, and discipline bars '+
+          'The '+r.ovr+' overall is recomputed after every final; it opens at 70 and settles onto the real rating across five games. Production, defense, and discipline bars '+
           'appear here once box scores exist.</p></div></div>'
         : '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
         Object.keys(r.parts).map(function(k){
           return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+r.parts[k]+'%"></span></span><span class="rb-v num">'+r.parts[k]+'</span></div>';
         }).join("")+
-        '<p class="caption" style="margin-top:10px">Bars are a weighted blend of recorded stats, regressed toward league average under small samples; the weights are commissioner-configurable. The overall itself is the staff scouting number.</p>'+
+        '<p class="caption" style="margin-top:10px">Bars are a weighted blend of recorded stats, regressed toward league average under small samples; the weights are commissioner-configurable. The overall is computed from the same box scores, opening at 70 and settling over five games.</p>'+
       '</div></div>');
     var scout = archived
       ? p.tag+" finished the preseason with "+(p.pos==="G"
@@ -2259,7 +2267,7 @@ CG.ROUTES.player = function(pid, qs){
           '<h3 style="font-family:var(--f-disp);font-weight:800;font-size:clamp(22px,3.4vw,30px);color:#fff;line-height:1.04;letter-spacing:-.01em;text-transform:none;margin:8px 0 0">Yet to take a shift</h3>'+
         '</div></div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
-        '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. The '+r.ovr+' overall is the staff scouting number from registration.</p></div></div>';
+        '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. Every overall opens at 70 and settles onto the real rating over five games, so '+esc(p.tag)+'’s '+r.ovr+' will move as soon as there are games behind it.</p></div></div>';
     /* Stat Lab viz for players with a REGULAR-SEASON game sample: skater DNA radar + efficiency
        gauges (goalies get goaltending gauges). Gated on s.gp (season only) — a player with just
        pre-season games has an all-zero season line, which would collapse the radar to its floor,
@@ -2426,6 +2434,28 @@ CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
 /* the human name for a position group, for the radar legend — "F" meant nothing to a reader */
 CG.posGroupLabel = function(grp){
   return grp === "G" ? "goaltenders" : grp === "D" ? "defensemen" : "forwards";
+};
+/* How settled is a player's overall? The database blends it toward the real computed rating over
+   the first five games — overall_breakdown() returns exactly
+       70 * (1 - gp/5)  +  computed * (gp/5)
+   and flags provisional while gp < 5. Until then the number leans on the 70 everyone opens at, so
+   showing it bare invites the reader to treat a placeholder as a scouting verdict. We keep the
+   number (it is real, and it moves) and say how far along it is. Counted over every final game,
+   the same way the database counts it. */
+CG.OVR_SETTLE_GP = 5;
+CG.ovrProgress = function(pid){
+  var gp = ((CG.lg && CG.lg.careerGp) || {})[pid] || 0;
+  var need = Math.max(0, CG.OVR_SETTLE_GP - gp);
+  return { gp: gp, need: need, provisional: need > 0 };
+};
+/* the heads-up itself. `style` picks how loud it is for the surface it sits on. */
+CG.ovrNote = function(pid, style){
+  var pr = CG.ovrProgress(pid);
+  if (!pr.provisional) return "";
+  var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games";
+  if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + txt + '</span>';
+  if (style === "title") return "Provisional — " + txt + " played. Overalls open at 70 and settle onto the real rating over five games.";
+  return '<span class="caption" style="display:block;margin-top:4px;color:var(--on-ink)">Provisional · ' + txt + '</span>';
 };
 /* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
 CG.skaterDNA = function(s){

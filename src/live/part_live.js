@@ -9135,7 +9135,7 @@ CG.admRatingsLive = function(){
         '<td class="tnum">'+p.pos+'</td><td class="tleft">'+esc(CG.TEAM[p.team].code)+'</td><td>'+(s?s.gp:0)+'</td>'+
         '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 (provisional until 5 games). The formula lives in the database (compute_overall) — the site never hand-edits a rating, so every number stays defensible.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 and blend onto their computed rating across their first five games (overall_breakdown returns a provisional flag until then). The formula lives in the database (compute_overall) and reruns after every final. A commissioner CAN override a single rating from Users &amp; roles; nothing else hand-edits one.</span></div></div>';
 };
 
 /* ================================================================
