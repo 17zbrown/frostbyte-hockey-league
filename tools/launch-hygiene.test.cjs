@@ -18,17 +18,25 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 console.log("— nothing in the repo root is served that shouldn't be");
 {
-  /* publish = "." serves the whole root, so this is blocked at the edge instead */
+  /* publish = "." serves the whole root, so these are blocked at the edge.
+     THE TRAP: Netlify treats `*` only as a TRAILING splat (/dir/*), never as an extension glob.
+     A "/*.txt" rule silently matches nothing. It was written that way first; the config read
+     correctly, this test passed, and the owners' briefing stayed downloadable until a live curl
+     caught it. So the assertions below check for EXACT paths and actively reject the glob form —
+     a test that only proves a rule exists is worthless if the rule cannot fire. */
+  const rule = (p) => new RegExp('from = "' + p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"[\\s\\S]{0,90}status = 404');
   A("the abandoned WNBA mockup is gone from the repo",
     !fs.existsSync(path.join(__dirname, "..", "mockup-wnba.html")));
-  A("preview.html — a full second copy of the live app — is blocked",
-    /from = "\/preview\.html"[\s\S]{0,80}status = 404/.test(toml));
-  A("root .txt is blocked, so the owners' briefing is not downloadable",
-    /from = "\/\*\.txt"[\s\S]{0,80}status = 404/.test(toml));
-  A("...and root .md too", /from = "\/\*\.md"[\s\S]{0,80}status = 404/.test(toml));
-  A("robots.txt survives, carved out ABOVE the wildcard (Netlify takes the first match)",
-    toml.indexOf('from = "/robots.txt"') < toml.indexOf('from = "/*.txt"') &&
-    /from = "\/robots\.txt"[\s\S]{0,90}status = 200/.test(toml));
+  A("preview.html — a full second copy of the live app — is blocked by exact path",
+    rule("/preview.html").test(toml));
+  A("the owners' briefing is blocked by exact path (.txt)",
+    rule("/CGHL-Season1-Owners-Briefing-DISCORD.txt").test(toml));
+  A("...and the .md alongside it", rule("/CGHL-Season1-Owners-Briefing.md").test(toml));
+  A("no extension-glob rules, which Netlify silently ignores",
+    !/from = "\/\*\.\w+"/.test(toml));
+  A("robots.txt and sitemap.xml are not blocked by anything",
+    !/from = "\/robots\.txt"[\s\S]{0,90}status = 404/.test(toml) &&
+    !/from = "\/sitemap\.xml"[\s\S]{0,90}status = 404/.test(toml));
 }
 
 console.log("\n— no invented people or invented facts");
