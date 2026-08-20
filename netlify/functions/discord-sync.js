@@ -1611,6 +1611,24 @@ export default async (req) => {
     }
   } catch (e) { /* positions optional */ }
 
+
+  // guild roles + channels (id -> current name) for auto-rename + id-based assignment
+  const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
+  const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
+  const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
+  const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
+  const roleId = {};
+  for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
+  const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
+  const chanNameById = Object.fromEntries(guildChannels.map((c) => [c.id, c.name]));
+
+  const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0,
+    staffChecked: 0, staffLocked: 0, staffMissing: 0, errors: [] };
+
+  /* MUST stay below the `sum` declaration above. This block reports into sum.rights and its catch
+     writes sum.errors, so sitting even one line higher puts `sum` in the temporal dead zone and the
+     ReferenceError throws from both the body AND the catch — taking the entire sweep down, exactly
+     as the @everyone call did once before. Roles, welcomes, departures and channel locks all stop. */
   /* Rights classes (Rule 2.2), the NHL's model: service earns freedom.
        · never held a roster spot        -> unrestricted Free Agent. That is EVERYONE in Season 1,
                                             because the league has no history to accrue against.
@@ -1656,19 +1674,6 @@ export default async (req) => {
     }
     sum.rights = { rfa: rfa.size, rookies: rookies.size, rfaYears: RFA_YEARS };
   } catch (e) { sum.errors.push({ rights: String(e.message || e) }); }
-
-  // guild roles + channels (id -> current name) for auto-rename + id-based assignment
-  const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
-  const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
-  const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
-  const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
-  const roleId = {};
-  for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
-  const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
-  const chanNameById = Object.fromEntries(guildChannels.map((c) => [c.id, c.name]));
-
-  const sum = { checked: 0, renamed: 0, roleUpdated: 0, roleRenamed: 0, chanRenamed: 0, notInServer: 0,
-    staffChecked: 0, staffLocked: 0, staffMissing: 0, errors: [] };
 
   /* @everyone/@here stays with the league office — re-checked every sweep, not just once.
      Must run AFTER `sum` exists: this call sat nine lines above the declaration for one deploy,
