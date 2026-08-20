@@ -57,12 +57,18 @@ console.log("\n— no invented people or invented facts");
   A("...it states the real origin instead", /p\.origin==="draft" \? "Drafted by "/.test(pub));
 }
 
-console.log("\n— the league is described accurately");
+console.log("\n— the league is described without a number that will age");
 {
-  A("the meta description says twelve clubs", /twelve clubs/.test(head));
-  A("...and nowhere still says eight", !/eight clubs/.test(head));
-  const n = (head.match(/twelve clubs/g) || []).length;
-  A("every link-preview surface was updated together", n >= 4, n + " places");
+  /* These tags said "eight clubs across two divisions" while the league ran twelve — wrong in
+     every link preview and search result. Rather than correct the number, the count and the
+     division split came out entirely: a club is added or a division is renamed and the metadata
+     has nothing to drift against. */
+  A("no club count survives in the head", !/eight clubs|twelve clubs|\d+ clubs/.test(head));
+  A("...and no division count either", !/two divisions/.test(head));
+  A("the description still says what the league IS",
+    /A competitive 6v6 EA Sports NHL league playing a full season/.test(head));
+  A("the social cards still carry a description", /og:description[\s\S]{0,140}competitive 6v6/.test(head));
+  A("...and the image alts still name the league", /og:image:alt[\s\S]{0,90}Chel Gaming Hockey League/.test(head));
 }
 
 console.log("\n— the masthead points at rooms people are actually in");
