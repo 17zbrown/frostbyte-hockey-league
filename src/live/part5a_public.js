@@ -2359,7 +2359,15 @@ CG.ROUTES.player = function(pid, qs){
           '<p>'+esc(w.skater===p.id?blurb.skaterBlurb||"":blurb.goalieBlurb||"")+'</p></span></div>';
       }).join("")+'</div>':"")+
       (sus?'<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+esc(sus.reason)+' — '+sus.games+' games, '+sus.status+'. Issued '+CG.fmtDate(sus.issued)+' by '+esc(sus.decidedBy)+'. <a href="#/rulebook?rule=7.4" style="font-weight:700;border-bottom:2px solid var(--chrome)">Rule 7.4 →</a></div>':"")+
-      '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Team history</h3></div><div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("users",15)+'</span><span><b>'+esc(t.name)+'</b><p>Signed '+esc(p.joined)+' · Season 1 original roster</p></span></div></div>';
+      /* `joined` was a hardcoded "Season 1" on every player and nobody is an "original roster"
+         member of a season that has not started — so say only what is actually known: the club
+         he is on right now, and how he got there (origin is real, set at placement). */
+      '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Team history</h3></div><div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("users",15)+'</span><span><b>'+esc(t.name)+'</b><p>'+
+        (p.origin==="draft" ? "Drafted by "+esc(t.name)
+         : p.origin==="free_agency" ? "Signed as a free agent"
+         : p.origin==="rookie_bid" ? "Won in rookie bidding"
+         : p.origin==="preseason_random" ? "Assigned for the pre-season"
+         : "On the "+esc(t.name)+" roster")+'</p></span></div></div>';
   }
   if (tab==="pickup"){
     body += '<div id="pickupTab"><p class="caption">Loading pickup stats…</p></div>';

@@ -548,8 +548,12 @@ CG.unreadCount = function(){
 /* ---------- chrome: demo bar, ticker, masthead, footer ---------- */
 /* top-level links stay for the everyday pages; everything else lives in two
    grouped dropdowns so the bar keeps breathing room as sections grow */
+/* Forums came out of the primary nav 2026-08-19: five boards, four threads and ZERO posts in the
+   site's whole life, against 255 people talking daily in Discord. A top-level slot advertising an
+   empty room reads as an abandoned league. The ROUTE stays, so every existing link still resolves
+   and nothing 404s — it is simply no longer one of the four things the masthead points at. */
 CG.NAV = [
-  ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"],["Forums","#/forums"]
+  ["Home","#/home"],["Schedule","#/schedule"],["Standings","#/standings"]
 ];
 CG.NAV_GROUPS = [
   ["Clubs & Players", [

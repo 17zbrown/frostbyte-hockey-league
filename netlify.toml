@@ -8,6 +8,41 @@
   publish = "."
   functions = "netlify/functions"
 
+# `publish = "."` serves the WHOLE repo root, which quietly made three things public that were
+# never meant to be: preview.html (a full second copy of the live app, rebuilt every deploy and
+# reachable by anyone who guesses the name), the internal owners' briefing with its paste
+# instructions, and an abandoned homepage mockup. The mockup is deleted; the other two still need
+# to EXIST — preview.html is a design build we open locally, and the briefing is a working
+# document — so they are blocked at the edge rather than removed from the repo.
+# Anything added to the root later that is a .md or .txt is blocked by the same rule, so this
+# cannot silently regress the next time a note is dropped beside the code.
+[[redirects]]
+  from = "/preview.html"
+  to = "/index.html"
+  status = 404
+  force = true
+
+# robots.txt is a real, live file and must survive the blanket .txt rule below. Netlify takes the
+# FIRST matching redirect, so this carve-out has to stay above it — 200 with force=false means
+# "serve the actual file", not a redirect.
+[[redirects]]
+  from = "/robots.txt"
+  to = "/robots.txt"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/*.txt"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/*.md"
+  to = "/index.html"
+  status = 404
+  force = true
+
 # The rulebook lives in the site bundle (CG.CONTENT.rulebook in part3_content.js). discord-scheduler
 # mirrors it into #rules, so it needs to read that same file at runtime — bundling it keeps ONE
 # source of truth instead of a second copy that could drift from the published rules.
