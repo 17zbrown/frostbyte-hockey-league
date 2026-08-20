@@ -117,6 +117,9 @@ function etParts(d = new Date()) {
   const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday];
   return { wd, hr: (+p.hour) % 24, mi: +p.minute, ymd: `${p.year}-${p.month}-${p.day}` };
 }
+/* A stable day index off the ET CALENDAR date. Not Date.now()/86400000 — that drifts by an hour
+   twice a year and would let a window open early or late around a DST change. */
+const etDayNum = (ymd) => { const [y, m, d] = ymd.split("-").map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); };
 const fmtTime = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso)) + " ET";
 const fmtDay = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
 
@@ -521,6 +524,7 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
 // (E) Daily #season-signups reminder while registration is open: one clean ping of the bot-maintained
 // "Not Signed Up" role (discord-sync keeps its membership current). Skips when nobody's left.
 async function signupReminder(cfg, et, dry, errors, unconfigured) {
+  const EVERY = Math.max(1, parseInt(cfg.signup_reminder_days || "3", 10) || 3);
   const url = cfg.discord_signup_webhook || cfg.discord_default_webhook;
   const roleId = cfg.discord_not_signed_up_role_id;
   if (!url) { unconfigured.push("sign-up reminder (discord_signup_webhook)"); return "no signup webhook"; }
@@ -543,11 +547,17 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
     (deadline
       ? `Sign up before **${fmtDay(deadline)}** to go into the draft — after that you can still join, you'll just be placed on a club: https://chelgamingleague.com/#/register`
       : `Grab your spot: https://chelgamingleague.com/#/register`);
-  if (dry) return { would_post: content, remaining };
-  if (!(await claim("signup_reminder", et.ymd))) return "already posted today";
+  if (dry) return { would_post: content, remaining, everyDays: EVERY };
+  /* Every N days rather than daily (commissioner's call, 2026-08-19: 3). The claim is keyed on the
+     WINDOW, not the date, which matters — keying on et.ymd would post once per day, and gating on
+     `dayNum % N === 0` would skip the whole window whenever the 18:00 tick was missed on the one
+     firing day. With a window key the first successful run inside each window posts and the rest
+     are refused, so a missed tick simply catches up the next evening. */
+  const windowRef = `w${EVERY}-${Math.floor(etDayNum(et.ymd) / EVERY)}`;
+  if (!(await claim("signup_reminder", windowRef))) return `already posted this ${EVERY}-day window`;
   const res = await postWebhook(url, content, { ping: true });
-  if (!res.ok) { errors.push(`signup reminder: ${res.error}`); if (!res.ambiguous) await release("signup_reminder", et.ymd); return `post failed: ${res.error}`; }
-  return `pinged the not-signed-up role (${remaining} remaining)`;
+  if (!res.ok) { errors.push(`signup reminder: ${res.error}`); if (!res.ambiguous) await release("signup_reminder", windowRef); return `post failed: ${res.error}`; }
+  return `pinged the not-signed-up role (${remaining} remaining, every ${EVERY} days)`;
 }
 
 function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } }); }
