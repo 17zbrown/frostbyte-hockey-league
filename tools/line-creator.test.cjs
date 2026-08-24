@@ -117,7 +117,7 @@ console.log("\n— the night plan");
   A("both game nights appear", /Wednesday/.test(h) && /Thursday/.test(h));
   A("...each with its opponent", /vs Bruins/.test(h) && /vs Maple Leafs/.test(h));
   A("Wednesday's select carries the plan", /<select class="lc-night" data-night="wed">[\s\S]*?value="1" selected/.test(h));
-  A("a planned night offers Dress", /lc-dress/.test(h) && /data-game="g-wed"/.test(h));
+  A("a planned night offers Dress for all its games", /lc-dress" data-night="wed" data-slot=/.test(h));
   A("an unplanned night explains itself instead", /pick a line to enable dressing/.test(h));
   A("an empty line slot is disabled in the select, not offered", /value="2" disabled/.test(h));
 }
@@ -171,13 +171,13 @@ console.log("\n— locks and caps cannot be planned around");
 {
   A("dressing goes through set_game_lineup and nothing else",
     /function dressGame[\s\S]{0,400}CG\.sb\.rpc\("set_game_lineup"/.test(src6) &&
-    /dressGame\(gameId, slot, function\(err\)/.test(src6));
+    /function dressNight\(nightKey, slot, done\)[\s\S]{0,500}dressGame\(games\[i\]\.id, slot/.test(src6));
   A("...with p_emergency false — the plan can never bypass the lock", /p_emergency:false/.test(src6));
   A("no direct insert into game_lineups anywhere in the creator",
     !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
   A("a locked night shows the lock instead of a Dress button",
-    /lockd[\s\S]{0,300}Locked/.test(src6));
-  A("a refused dress surfaces the rule's own message", /The rules refused it: /.test(src6));
+    /open\.length[\s\S]{0,500}Locked/.test(src6));
+  A("a refused dress surfaces the rule's own message", /the rules refused: /.test(src6));
   A("saving a line goes through set_team_line", /CG\.sb\.rpc\("set_team_line"/.test(src6));
   A("planning a night goes through set_team_line_night", /CG\.sb\.rpc\("set_team_line_night"/.test(src6));
   A("a blocked save can never count as saved", /must never count as saved/.test(src6) && /errs\.push\("Line "\+n/.test(src6));
@@ -186,7 +186,7 @@ console.log("\n— locks and caps cannot be planned around");
   /* a locked Wednesday: the Dress button must be replaced by the lock */
   CG.now = () => wedGame.at - 10 * 60000;
   const h = CG.hubLines({});
-  A("inside T-30 the planned night reads Locked", /Locked/.test(h) && !/data-game="g-wed"/.test(h));
+  A("inside T-30 the planned night reads Locked", /Locked/.test(h) && !/lc-dress/.test(h));
   CG.now = () => NOW;
 }
 
@@ -270,11 +270,11 @@ console.log("\n— training camp, the week button, and the penalty price");
   A("...draggable like anyone else", /data-rcard="p-tc1" draggable="true"/.test(h));
   A("camp cards say what they are", /Camp · Center/.test(h));
   A("a locked night offers the emergency door, priced",
-    /#\/hub\/lineup\?night=/.test(src6) && /one in-game penalty per change \(Rule 5\.3\)/.test(src6));
+    /#\/hub\/lineup\?game='\+games\[games\.length-1\]\.id/.test(src6) && /one in-game penalty per change \(Rule 5\.3\)/.test(src6));
   A("dressed penalties surface as a chip", /serves '\+owed\+' penalt/.test(src6));
-  A("Dress the week exists and walks each planned night", /id="lcDressWeek"/.test(src6) && /function dressGame\(gameId, slot, done\)/.test(src6));
+  A("Dress the week exists and walks each planned night", /id="lcDressWeek"/.test(src6) && /dressNight\(n\.key, pl, function\(err, dressed\)/.test(src6));
   A("...through the same single write path", (src6.match(/CG\.sb\.rpc\("set_game_lineup"/g)||[]).length === 2);
-  A("...reporting refusals per night", /Dressed "\+okN\+", refused: /.test(src6));
+  A("...reporting refusals, counting games", /Dressed "\+okN\+" game/.test(src6));
   A("the emergency confirm names the cost",
     /EACH player changed costs the club one in-game penalty/.test(src6));
   A("the old page is the unlisted per-game door",

@@ -185,10 +185,14 @@ CG.ROUTES.hub = function(param, qs){
    table (not localStorage), the real incoming-trade count, and a GM-vacancy nudge. */
 CG.gmTasksCard = function(team){
   var lg = CG.lg, rows = "";
-  var tonightG = (lg.tonight||[]).find(function(g){ return g.home===team||g.away===team; });
-  if (tonightG){
-    var submitted = !!((lg._lineups||{})[team+":"+tonightG.id]);
-    rows += '<div class="titem"><span class="t-dot '+(submitted?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineup — <b>'+(submitted?"submitted":"not submitted")+'</b>. Locks '+CG.fmtTime(tonightG.at-30*60000)+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lines">Builder</a></div>';
+  var tonightGs = (lg.tonight||[]).filter(function(g){ return g.home===team||g.away===team; }).sort(function(a,b){ return a.at-b.at; });
+  if (tonightGs.length){
+    /* count ALL of tonight's games, not just the first — three a night, each its own lineup */
+    var subN = tonightGs.filter(function(g){ return (lg._lineups||{})[team+":"+g.id]; }).length;
+    var allIn = subN === tonightGs.length;
+    var nextLock = tonightGs.filter(function(g){ return !((lg._lineups||{})[team+":"+g.id]); })[0];
+    rows += '<div class="titem"><span class="t-dot '+(allIn?"grn":"red")+'"></span><span style="flex:1">Tonight’s lineups — <b>'+subN+' / '+tonightGs.length+' submitted</b>'+
+      (nextLock?'. Next locks '+CG.fmtTime(nextLock.at-30*60000):'')+' (Rule 5.3).</span><a class="btn btn-ghost btn-sm" href="#/hub/lines">Builder</a></div>';
   }
   if (CG.WEEK8 && CG.WEEK8.open && CG.avFor){
     var noReply = (lg.byTeam[team]||[]).filter(function(p){ try { return CG.avFor(p.id).nights.n1.st==="nr"; } catch(e){ return false; } }).length;
@@ -478,9 +482,18 @@ CG.hqClub = function(){
 /* the lineup builder's target game — honors #/hub/lineup?night=<wed|thu|fri|...>, else tonight/next */
 CG.lineupGameFor = function(me){
   var lg = CG.lg, club = CG.hqClub() || (me && me.team);
-  var m = (location.hash.split("?")[1]||"").match(/night=([a-z]{3})/);
-  var want = m ? m[1] : null;
+  var qs = location.hash.split("?")[1]||"";
   var mine = function(g){ return (g.home===club||g.away===club) && g.status!=="final"; };
+  /* ?game=<id> targets one specific game. With three games a night at 21:00/21:35/22:10, games 2
+     and 3 lock (T-30) before game 1 finals, so "earliest unplayed of the night" could never reach
+     them — every game must be addressable directly. */
+  var gm = qs.match(/game=([0-9a-f-]{8,})/i);
+  if (gm){
+    var gById = lg.schedule.filter(mine).find(function(g){ return g.id===gm[1]; });
+    if (gById) return gById;
+  }
+  var m = qs.match(/night=([a-z]{3})/);
+  var want = m ? m[1] : null;
   if (want){
     var g2 = lg.schedule.filter(mine).filter(function(g){ return g.at>CG.now()-3*3600000 && CG.gameNight(g)===want; })
       .sort(function(a,b){ return a.at-b.at; })[0];
@@ -489,6 +502,18 @@ CG.lineupGameFor = function(me){
   return lg.tonight.find(function(g){ return g.home===club||g.away===club; })
     || lg.schedule.filter(function(g){ return (g.home===club||g.away===club) && g.at>CG.now(); })
         .sort(function(a,b){ return a.at-b.at; })[0];
+};
+/* Every upcoming (non-final) game for a club, soonest first — the unit the lineup surfaces now
+   iterate. A night has up to three; each locks on its own puck drop. */
+CG.clubUpcomingGames = function(club, limit){
+  var out = (CG.lg.schedule||[]).filter(function(g){
+    return (g.home===club||g.away===club) && g.status!=="final" && g.at>CG.now()-3*3600000;
+  }).sort(function(a,b){ return a.at-b.at; });
+  return limit ? out.slice(0, limit) : out;
+};
+/* All of one night's upcoming games for a club (dressing a night covers every game in it). */
+CG.nightGames = function(club, nightKey){
+  return CG.clubUpcomingGames(club).filter(function(g){ return CG.gameNight(g)===nightKey; });
 };
 /* one game's server-pick controls (compact, used by the Schedule desk).
    `lockAt` is 30 min before the NIGHT'S FIRST puck drop — servers stay unset
@@ -566,22 +591,24 @@ CG.hubLineup = function(qs){
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
   var assigned = Object.values(slots);
-  /* Night switcher, built from the nights this club actually has upcoming rather than a fixed pair,
-     so it follows the schedule instead of having to be edited whenever the week changes shape. */
-  var upcoming = lg.schedule.filter(function(g){
-    return (g.home===club||g.away===club) && g.status!=="final" && g.at>CG.now()-3*3600000;
-  }).sort(function(a,b){ return a.at-b.at; });
-  var nightsSeen = [], seenNight = {};
-  upcoming.forEach(function(g){ var k = CG.gameNight(g); if (!seenNight[k]){ seenNight[k]=1; nightsSeen.push(k); } });
-  var curNight = CG.gameNight(game);
-  var nightSwitch = nightsSeen.length > 1
+  /* Per-GAME switcher: one chip per upcoming game, not per night. Three games a night each lock on
+     their own puck drop, so a manager must be able to jump straight to game 2 or 3 — the old
+     per-night switcher only ever reached the first game of a night. Each chip shows its slot time
+     and whether a lineup is in, submitted, or locked. */
+  var upcoming = CG.clubUpcomingGames(club, 9);
+  var gameSwitch = upcoming.length > 1
     ? '<span style="display:inline-flex;gap:6px;margin-left:12px;vertical-align:middle;flex-wrap:wrap">'+
-      nightsSeen.map(function(k){
-        var on = curNight===k;
-        return '<a class="chip '+(on?"chip-chrome":"")+'" href="#/hub/lineup?night='+k+'" aria-current="'+on+'" style="cursor:pointer">'+
-          (CG.NIGHT_LABEL[k]||k)+'</a>';
+      upcoming.map(function(g){
+        var on = g.id===game.id;
+        var gLock = CG.now() >= g.at - 30*60000;
+        var gIn = !!((lg._lineups||{})[club+":"+g.id]);
+        var mark = gIn ? " ✓" : gLock ? " ·" : "";
+        return '<a class="chip '+(on?"chip-chrome":"")+(gLock&&!gIn?" chip-warn":"")+'" href="#/hub/lineup?game='+g.id+'" aria-current="'+on+'" '+
+          'title="'+esc(CG.fmtFull(g.at))+(gIn?" — submitted":gLock?" — locked":"")+'" style="cursor:pointer">'+
+          (CG.NIGHT_LABEL[CG.gameNight(g)]||CG.gameNight(g))+' '+CG.fmtTime(g.at)+mark+'</a>';
       }).join("")+'</span>'
     : "";
+  var nightSwitch = gameSwitch;
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Per-game adjustments'+nightSwitch+'</h1>'+
     '<p class="lede" style="margin-top:8px">One game, one lineup. Day-to-day lines live in the <a href="#/hub/lines" style="font-weight:700;border-bottom:2px solid var(--chrome)">Lineup builder</a> — this page adjusts a single night, and after the '+CG.fmtTime(lockAt)+' lock every change costs one in-game penalty (Rule 5.3).</p></div>';
@@ -935,14 +962,16 @@ CG.hubLines = function(qs){
     return pl && (lg._teamLines||{})[pl] && CG.now() < n.game.at - 30*60000;
   }).length;
   var plan = '<div class="card"><div class="card-h"><h3>Night plan</h3>'+
-    (planReady > 1 ? '<button class="btn btn-chrome btn-sm" id="lcDressWeek" title="Dress every planned night’s next game in one go">Dress the week ('+planReady+')</button>' : '<span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span>')+'</div>'+
+    (planReady > 1 ? '<button class="btn btn-chrome btn-sm" id="lcDressWeek" title="Dress every game of every planned night in one go">Dress the week ('+planReady+')</button>' : '<span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span>')+'</div>'+
     (nights.length ? nights.map(function(n){
       var planned = (lg._linePlan||{})[n.key] || null;
       var prow = planned && (lg._teamLines||{})[planned];
+      /* a night is EVERY game in it, not just the first — the whole point of the fix */
+      var games = CG.nightGames(club, n.key);
       var g = n.game, opp = g.home===club ? g.away : g.home;
-      var lockAt = g.at - 30*60000, lockd = CG.now() >= lockAt;
-      var dressed = (lg._lineups||{})[club+":"+g.id];
-      var owed = dressed && dressed.penalties_owed > 0 ? dressed.penalties_owed : 0;
+      var open = games.filter(function(x){ return CG.now() < x.at - 30*60000; });   // still dressable
+      var dressedN = games.filter(function(x){ return (lg._lineups||{})[club+":"+x.id]; }).length;
+      var owed = games.reduce(function(a,x){ var d=(lg._lineups||{})[club+":"+x.id]; return a + (d && d.penalties_owed>0 ? d.penalties_owed : 0); }, 0);
       var opts = '<option value="">— none —</option>'+[1,2,3].map(function(s2){
         var r = (lg._teamLines||{})[s2];
         return '<option value="'+s2+'"'+(planned===s2?" selected":"")+(r?"":' disabled')+'>'+
@@ -950,19 +979,20 @@ CG.hubLines = function(qs){
       }).join("");
       return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
         '<span style="flex:0 0 148px"><b style="font-family:var(--f-disp)">'+(CG.NIGHT_LABEL[n.key]||n.key)+'</b>'+
-          '<span class="caption" style="display:block">'+CG.fmtDate(g.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span></span>'+
+          '<span class="caption" style="display:block">'+CG.fmtDate(g.at)+' · '+games.length+' game'+(games.length===1?"":"s")+' · vs '+esc(CG.TEAM[opp].name)+(games.length>1?" +":"")+'</span></span>'+
         '<label class="fld" style="margin:0;flex:1 1 150px"><span>Dresses</span><select class="lc-night" data-night="'+n.key+'">'+opts+'</select></label>'+
+        (dressedN ? '<span class="chip chip-xs" title="Games with a submitted lineup">'+dressedN+' / '+games.length+' dressed</span>' : "")+
         (owed ? '<span class="chip chip-loss" style="font-size:9.5px" title="Post-lock changes cost one in-game penalty each (Rule 5.3)">serves '+owed+' penalt'+(owed===1?"y":"ies")+'</span>' : "")+
         (prow
-          ? (lockd
-              ? '<span class="lock" title="This night’s next game locked at '+CG.fmtTime(lockAt)+'">'+CG.ic("lock",13)+'Locked</span>'+
-                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?night='+n.key+'" title="Swap a player after the lock — one in-game penalty per change (Rule 5.3)">Emergency call-up</a>'
-              : '<button class="btn btn-ghost btn-sm lc-dress" data-night="'+n.key+'" data-game="'+g.id+'" data-slot="'+planned+'" title="Submit this line as the lineup for '+esc(CG.fmtDate(g.at))+'">'+
-                  (dressed?"Redress":"Dress")+" tonight’s game</button>")
+          ? (open.length
+              ? '<button class="btn btn-ghost btn-sm lc-dress" data-night="'+n.key+'" data-slot="'+planned+'" title="Submit this line for every not-yet-locked game of '+esc(CG.fmtDate(g.at))+'">'+
+                  (dressedN?"Redress":"Dress")+' '+open.length+' game'+(open.length===1?"":"s")+'</button>'
+              : '<span class="lock" title="Every game this night has locked">'+CG.ic("lock",13)+'Locked</span>'+
+                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Swap a player after the lock — one in-game penalty per change (Rule 5.3)">Emergency call-up</a>')
           : '<span class="caption">pick a line to enable dressing</span>')+
       '</div>';
     }).join("") : '<div class="card-b"><span class="caption">No upcoming games — the plan fills in once the schedule does.</span></div>')+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Dress” submits the line through the lineup builder’s own checks — anything the rules refuse (weekly limits, suspensions, the lock) is refused here too, with the same message.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Dress” submits the line for every game of the night through the lineup builder’s own checks — anything the rules refuse (weekly limits, suspensions, the lock) is refused too, with the same message. Adjust any single game in the <a href="#/hub/lineup" style="font-weight:700;border-bottom:2px solid var(--chrome)">per-game builder</a>.</span></div></div>';
 
   return '<div id="lcTab">' + h + bar + grid + '<div class="grid g5x7" style="align-items:start">'+board+plan+'</div></div>';
 };
@@ -1156,12 +1186,27 @@ CG.AFTER._lines = function(qs){
       done(null);
     });
   }
+  /* dress EVERY not-yet-locked game of a night with one line, in sequence. This is the fix: a
+     night has up to three games and each must get its own lineup row, or games 2 and 3 go
+     undressed. Refusals are collected per game and reported; the rest still land. */
+  function dressNight(nightKey, slot, done){
+    var games = CG.nightGames(club, nightKey).filter(function(g){ return CG.now() < g.at - 30*60000; });
+    if (!games.length){ done("every game this night has locked", 0); return; }
+    var okN = 0, errs = [];
+    (function next(i){
+      if (i >= games.length){ done(errs.length ? errs.join("; ") : null, okN); return; }
+      dressGame(games[i].id, slot, function(err){
+        if (err) errs.push(CG.fmtTime(games[i].at)+" — "+err); else okN++;
+        next(i+1);
+      });
+    })(0);
+  }
   var dressWeek = $("#lcDressWeek");
   if (dressWeek) dressWeek.addEventListener("click", function(){
     if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
     var jobs = CG.lineNights(club).filter(function(n){
       var pl = (lg._linePlan||{})[n.key];
-      return pl && (lg._teamLines||{})[pl] && CG.now() < n.game.at - 30*60000;
+      return pl && (lg._teamLines||{})[pl] && CG.nightGames(club, n.key).some(function(g){ return CG.now() < g.at - 30*60000; });
     });
     CG.confirm("Dress the week — "+jobs.length+" night"+(jobs.length===1?"":"s")+"?",
       jobs.map(function(n){ var pl=(lg._linePlan||{})[n.key];
@@ -1173,13 +1218,14 @@ CG.AFTER._lines = function(qs){
       (function next(i){
         if (i >= jobs.length){
           dressWeek.disabled = false;
-          if (errs.length) CG.toast("Dressed "+okN+", refused: "+errs.join("; "),"err");
-          else CG.toast("Week dressed — "+okN+" night"+(okN===1?"":"s")+". Redress any night to adjust before its lock.","ok");
+          if (errs.length) CG.toast("Dressed "+okN+" game"+(okN===1?"":"s")+", refused: "+errs.join("; "),"err");
+          else CG.toast("Week dressed — "+okN+" game"+(okN===1?"":"s")+". Adjust any single game in the per-game builder before its lock.","ok");
           repaint(); return;
         }
         var n = jobs[i], pl = (lg._linePlan||{})[n.key];
-        dressGame(n.game.id, pl, function(err){
-          if (err) errs.push((CG.NIGHT_LABEL[n.key]||n.key)+" — "+err); else okN++;
+        dressNight(n.key, pl, function(err, dressed){
+          if (err) errs.push((CG.NIGHT_LABEL[n.key]||n.key)+" — "+err);
+          okN += dressed;
           next(i+1);
         });
       })(0);
@@ -1187,20 +1233,19 @@ CG.AFTER._lines = function(qs){
   });
   document.querySelectorAll(".lc-dress").forEach(function(el){
     el.addEventListener("click", function(){
-      var gameId = el.getAttribute("data-game"), slot = parseInt(el.getAttribute("data-slot"),10);
+      var night = el.getAttribute("data-night"), slot = parseInt(el.getAttribute("data-slot"),10);
       var row = (lg._teamLines||{})[slot]; if (!row || !tid) return;
-      var g = (lg.schedule||[]).find(function(x){ return x.id===gameId; }) || {};
-      var opp = g.home===club ? g.away : g.home;
-      CG.confirm("Dress "+esc(row.name||("Line "+slot))+" for "+esc(CG.fmtDate(g.at))+"?",
-        "This submits the line as the real lineup vs "+esc((CG.TEAM[opp]||{}).name||opp)+", through the same checks as the builder — weekly limits, suspensions and the 30-minute lock included. You can still adjust it in the lineup builder until the lock.",
-        "Dress this line", function(){
+      var games = CG.nightGames(club, night), open = games.filter(function(g){ return CG.now() < g.at - 30*60000; });
+      var g0 = games[0] || {}, opp = g0.home===club ? g0.away : g0.home;
+      CG.confirm("Dress "+esc(row.name||("Line "+slot))+" for all "+open.length+" game"+(open.length===1?"":"s")+" "+esc(CG.NIGHT_LABEL[night]||night)+"?",
+        "This submits the line as the real lineup for every not-yet-locked game that night vs "+esc((CG.TEAM[opp]||{}).name||opp)+" and others, through the same checks as the builder — weekly limits, suspensions and each game’s 30-minute lock included. Fine-tune any single game in the per-game builder until it locks.",
+        "Dress the night", function(){
         el.disabled = true;
-        /* dressGame is the ONLY write path here — the same one Dress-the-week walks */
-        dressGame(gameId, slot, function(err){
+        dressNight(night, slot, function(err, okN){
           el.disabled = false;
-          if (err){ CG.toast("The rules refused it: "+err,"err"); return; }
-          CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" vs "+((CG.TEAM[opp]||{}).name||opp)+" — redress or adjust until the lock.","#/hub/lines");
-          CG.toast((row.name||("Line "+slot))+" dressed for "+CG.fmtDate(g.at),"ok");
+          if (err){ CG.toast((okN?("Dressed "+okN+"; "):"")+"the rules refused: "+err,"err"); repaint(); return; }
+          CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" — "+okN+" game"+(okN===1?"":"s")+" "+(CG.NIGHT_LABEL[night]||night)+". Adjust any single game until its lock.","#/hub/lines");
+          CG.toast((row.name||("Line "+slot))+" dressed for "+okN+" game"+(okN===1?"":"s"),"ok");
           repaint();
         });
       });
