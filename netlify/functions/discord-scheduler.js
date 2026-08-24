@@ -177,8 +177,8 @@ const rulesPace = () => new Promise((s) => setTimeout(s, 400));   // stay under 
 export function buildRulesLink(rb) {
   const cur = (rb.changelog || [])[0] || {};
   const toc = (rb.chapters || []).map((c) => `**${c.num}.** ${c.title}`).join("\n");
-  const when = cur.dateIso
-    ? new Date(cur.dateIso + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })
+  const when = (cur.dateIso || cur.date)
+    ? new Date((cur.dateIso || cur.date) + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })
     : null;
   return {
     embeds: [{
@@ -271,13 +271,13 @@ export default async (req) => {
     /* mirror the rulebook into #rules — a no-op on every tick until the published version changes */
     try { sum.rules = await rulesUpkeep(sum.errors); } catch (e) { sum.errors.push(`rules: ${String(e.message || e)}`); }
 
-    const seasons = await sbGet("seasons?select=id,number&order=number.desc&limit=1");
-    const season = seasons[0];
+    const active = await sbGet("seasons?select=id,number&status=eq.active&order=number.desc&limit=1");
+    const season = active[0] || (await sbGet("seasons?select=id,number&status=neq.complete&order=number.desc&limit=1"))[0];
     if (!season) return json({ skipped: "no season" });
     const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id,discord_role_id");
     const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
     const cfg = Object.fromEntries((await sbGet("app_config?select=key,value")).map((c) => [c.key, c.value]));
-    const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code&order=scheduled_at`);
+    const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,stage,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code,forfeit_team_id,voided&order=scheduled_at`);
 
     // (A) weekly schedule — Tuesday 5:00-5:09pm ET
     if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors, sum.unconfigured);
@@ -306,11 +306,16 @@ function computeStandings(games, teamById) {
   const t = {};
   for (const id in teamById) t[id] = { id, name: teamById[id].name, division: teamById[id].division, gp: 0, w: 0, l: 0, otl: 0, gf: 0, ga: 0, pts: 0 };
   for (const g of games) {
-    if (g.status !== "final") continue;
+    if (g.status !== "final" || g.voided) continue;
+    if ((g.stage || "regular") !== "regular") continue;   // pre-season + playoffs keep their own tables
     const h = t[g.home_team_id], a = t[g.away_team_id]; if (!h || !a) continue;
     const hs = g.home_score || 0, as = g.away_score || 0;
     h.gp++; a.gp++; h.gf += hs; h.ga += as; a.gf += as; a.ga += hs;
-    if (hs > as) { h.w++; h.pts += 2; if (g.went_ot) { a.otl++; a.pts += 1; } else a.l++; }
+    if (g.forfeit_team_id) {
+      // a forfeit is a regulation result (Rule 8.2): winner is the club that did NOT forfeit, no OT point
+      const hw = g.forfeit_team_id !== g.home_team_id;
+      if (hw) { h.w++; h.pts += 2; a.l++; } else { a.w++; a.pts += 2; h.l++; }
+    } else if (hs > as) { h.w++; h.pts += 2; if (g.went_ot) { a.otl++; a.pts += 1; } else a.l++; }
     else if (as > hs) { a.w++; a.pts += 2; if (g.went_ot) { h.otl++; h.pts += 1; } else h.l++; }
   }
   return t;
@@ -479,7 +484,7 @@ async function gameReminders(games, teamById, now, errors) {
 // (D) Daily nudge to #staff-casework: for every pending application, @ the reviewers who still owe a
 // vote; for every claimed-but-unresolved case, @ the assignee. Posts only when something's outstanding.
 async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
-  const url = cfg.discord_staff_casework_webhook || cfg.discord_default_webhook;
+  const url = cfg.discord_staff_casework_webhook || cfg.discord_staff_webhook;   // staff channels only — NEVER the public default
   if (!url) { unconfigured.push("casework nudge (discord_staff_casework_webhook)"); return "no casework webhook"; }
   const [profs, links, oa, sa, ma, ballots, cases] = await Promise.all([
     sbGet("profiles?select=id,role,departments,gamertag"),
@@ -544,7 +549,7 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
      reaching the post. Keep the date in the copy, but say what it actually means. */
   const deadline = s.signup_deadline_at || s.registration_deadline || null;
   const content = `⏰ **${s.name} sign-ups are open!** <@&${roleId}> — you haven't registered yet.\n` +
-    (deadline
+    ((deadline && new Date(deadline).getTime() > Date.now())
       ? `Sign up before **${fmtDay(deadline)}** to go into the draft — after that you can still join, you'll just be placed on a club: https://chelgamingleague.com/#/register`
       : `Grab your spot: https://chelgamingleague.com/#/register`);
   if (dry) return { would_post: content, remaining, everyDays: EVERY };
