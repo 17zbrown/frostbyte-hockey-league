@@ -62,5 +62,18 @@ console.log("\n— the old single-game-per-night resolution is gone from the wri
   A("the tasks tile counts all of tonight's games", /subN \+ ' \/ ' \+ tonightGs\.length \+ ' submitted'/.test(src) || /subN\+' \/ '\+tonightGs\.length/.test(src));
 }
 
+console.log("\n— the whole-night checkbox and its submit path");
+{
+  A("the builder renders a whole-night checkbox when the night has >1 game",
+    /id="luWholeNight"/.test(src) && /whole night \('\+nightGs\.length\+' games\)/.test(src));
+  A("...only pre-lock, never in emergency mode", /if \(emergency \|\| nightGs\.length < 2\) return "";/.test(src));
+  A("checked, the submit targets every not-yet-locked game of the night",
+    /wholeNight[\s\S]{0,120}CG\.nightGames\(club, CG\.gameNight\(game\)\)\.filter\(function\(g\)\{ return CG\.now\(\) < g\.at - 30\*60000; \}\)/.test(src));
+  A("...submitting the current game as emergency if it is, the rest normally",
+    /p_emergency:\(g\.id===game\.id\?emg:false\)/.test(src));
+  A("...and reports per-game refusals without aborting the batch", /errs\.push\(CG\.fmtTime\(g\.at\)/.test(src));
+  A("the reveal copy says T-30, not 60 minutes", !/60 minutes before puck drop/.test(src) && /release to the opponent when the lineup locks, 30 minutes/.test(src));
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

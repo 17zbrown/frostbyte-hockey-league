@@ -619,6 +619,15 @@ CG.hubLineup = function(qs){
   var editControls = (planRow ? '<button class="btn btn-ghost btn-sm" id="luFromPlan" data-plan-slot="'+planSlot+'" title="Fill the slots from the line planned for this night in the Lineup builder">Fill from '+esc(planRow.name||("Line "+planSlot))+'</button>' : "")+
     '<button class="btn btn-ghost btn-sm" id="luAuto">Auto-fill best available</button>'+
     '<button class="btn btn-ghost btn-sm" id="luClear">Clear</button>'+
+    (function(){
+      /* "Set for the whole night" — one submit dresses every not-yet-locked game of this night with
+         the same six. Pre-lock only; each game still runs the weekly-cap + suspension checks. */
+      var nightGs = CG.nightGames(club, CG.gameNight(game));
+      if (emergency || nightGs.length < 2) return "";
+      return '<label class="chk" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" '+
+        'title="Submit these six for all '+nightGs.length+' of tonight\u2019s games at once">'+
+        '<input type="checkbox" id="luWholeNight"> whole night ('+nightGs.length+' games)</label>';
+    })()+
     '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(emergency?"Submit emergency call-up":(status==="submitted"?"Resubmit":"Submit lineup"))+'</button>';
   var bar = '<div class="note '+(emergency?"red":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">Status: '+(emergency?"Emergency call-up":(rawLocked?"Locked":status))+'</b>'+
@@ -788,7 +797,7 @@ CG.AFTER._lineup = function(){
     var emg = pastLock;   /* submitting after the lock is, by definition, an emergency call-up */
     CG.confirm(emg?"Confirm emergency call-up?":"Submit this lineup?",
       emg?"This game already locked. EACH player changed costs the club one in-game penalty, served in this game (Rule 5.3) — the opponent already sees the locked lineup, so change only who you must."
-         :"Your six starters go to the league office and release to the opponent 60 minutes before puck drop. You can resubmit until the lock.",
+         :"Your six starters go to the league office and release to the opponent when the lineup locks, 30 minutes before puck drop. You can resubmit until the lock.",
       emg?"Submit emergency call-up":"Submit lineup", function(){
       save("Lineup submitted to the league office","submitted");
       /* Persist through the server-enforced lock. set_game_lineup() rejects post-lock edits unless
@@ -797,16 +806,32 @@ CG.AFTER._lineup = function(){
       if (CG.LIVE_MODE && CG.sb){
         var tid = (CG.lg._codeToId||{})[club];
         if (tid){
-          CG.sb.rpc("set_game_lineup", { p_game:game.id, p_team:tid,
-            p_center:state.slots.C||null, p_lw:state.slots.LW||null, p_rw:state.slots.RW||null,
-            p_ld:state.slots.LD||null, p_rd:state.slots.RD||null, p_goalie:state.slots.G||null,
-            p_emergency:emg }).then(function(r){
-            if(r.error || !r.data){ CG.toast(r.error?("Couldn’t submit: "+r.error.message):"Submit was blocked by the server — refresh and retry","err"); return; }
-            var row = Array.isArray(r.data) ? r.data[0] : r.data;
-            CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[club+":"+game.id] = row;
-            if (row.penalties_owed > 0) CG.toast("This club now serves "+row.penalties_owed+" in-game penalt"+(row.penalties_owed===1?"y":"ies")+" in this game (Rule 5.3)","err");
-            if (CG._luEmergency) delete CG._luEmergency[game.id];
-          });
+          var slots6 = { p_center:state.slots.C||null, p_lw:state.slots.LW||null, p_rw:state.slots.RW||null,
+                         p_ld:state.slots.LD||null, p_rd:state.slots.RD||null, p_goalie:state.slots.G||null };
+          /* the checkbox: submit to every not-yet-locked game of this night, not just this one.
+             Emergency mode is inherently one game, so the checkbox is never shown there. */
+          var wholeNight = !emg && !!(document.getElementById("luWholeNight") && document.getElementById("luWholeNight").checked);
+          var targets = wholeNight
+            ? CG.nightGames(club, CG.gameNight(game)).filter(function(g){ return CG.now() < g.at - 30*60000; })
+            : [game];
+          if (!targets.some(function(g){ return g.id===game.id; })) targets.unshift(game);
+          var okN = 0, errs = [];
+          (function next(i){
+            if (i >= targets.length){
+              if (errs.length) CG.toast((okN?("Dressed "+okN+"; "):"")+"refused: "+errs.join("; "),"err");
+              else if (wholeNight) CG.toast("Submitted for all "+okN+" game"+(okN===1?"":"s")+" tonight","ok");
+              if (CG._luEmergency) delete CG._luEmergency[game.id];
+              return;
+            }
+            var g = targets[i];
+            CG.sb.rpc("set_game_lineup", Object.assign({ p_game:g.id, p_team:tid, p_emergency:(g.id===game.id?emg:false) }, slots6)).then(function(r){
+              if(r.error || !r.data){ errs.push(CG.fmtTime(g.at)+" — "+(r.error?r.error.message:"blocked by the server")); next(i+1); return; }
+              var row = Array.isArray(r.data) ? r.data[0] : r.data;
+              CG.lg._lineups = CG.lg._lineups||{}; CG.lg._lineups[club+":"+g.id] = row;
+              if (g.id===game.id && row.penalties_owed > 0) CG.toast("This club now serves "+row.penalties_owed+" in-game penalt"+(row.penalties_owed===1?"y":"ies")+" in this game (Rule 5.3)","err");
+              okN++; next(i+1);
+            });
+          })(0);
         }
       }
       CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
