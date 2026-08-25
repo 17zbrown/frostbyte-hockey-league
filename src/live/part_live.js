@@ -3033,7 +3033,7 @@ CG.ROUTES.draft = function(){
     clockBox = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Start the draft</h3><span class="chip">Season '+maxSn+' · '+total+' picks</span></div><div class="card-b" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">'+
       '<label class="fld" style="max-width:170px;margin-bottom:0"><span>Seconds per pick</span><input type="number" id="draftSecs" value="120" min="15" max="600"></label>'+
       '<button class="btn btn-chrome" data-draft-start>'+CG.ic("play",14)+'Start live draft</button>'+
-      '<span class="caption" style="flex:1;min-width:200px">Assigns the snake order and puts the first club on the clock. Clubs draft their own picks; you run the clock and can pause, skip, or reverse.</span></div></div>';
+      '<span class="caption" style="flex:1;min-width:200px">Puts the first club on the clock — the order was locked when the board was generated and holds every round. Clubs draft their own picks; you run the clock and can pause, skip, or reverse.</span></div></div>';
   } else {
     /* spectators (and staff) have no club — don't talk to them about "your club's picks" */
     clockBox = '<div class="note chr" style="margin-bottom:18px">The draft hasn’t started yet. When the commissioner opens it, '+
@@ -3110,7 +3110,7 @@ CG.refreshDraft = function(){ if(!CG.sb) return;
   }); };
 CG.draftStart = function(){
   var el=document.getElementById("draftSecs"), secs=el?(parseInt(el.value,10)||120):120, sn=CG._draftSeason();
-  CG.confirm("Start the live draft?","This assigns the snake order and puts the first club on the clock. Clubs draft their own picks; you run the clock.","Start draft", function(){
+  CG.confirm("Start the live draft?","This puts the first club on the clock — the order was locked when the board was generated and holds every round. Clubs draft their own picks; you run the clock.","Start draft", function(){
     CG.sb.rpc("start_draft",{ p_season_number:sn, p_pick_seconds:secs }).then(function(r){
       if(r.error) CG.toast("Couldn’t start: "+r.error.message,"err"); else { CG.toast("The draft is live","ok"); CG.refreshDraft(); }
     });
@@ -3208,11 +3208,20 @@ window.addEventListener("hashchange", function(){
    from the Control Center. Both update live over the draft channel.
    ================================================================ */
 CG.DRAFT_STYLES = [
-  ["reverse_standings","Reverse pre-season standings","Worst pre-season record picks first — the classic worst-to-first order, computed from the standings."],
-  ["lottery","Weighted lottery","Every club can win pick one, but the worst record holds the most tickets (8·7·6…1). The drawn order is published."],
-  ["random","Pure random","A straight shuffle — every club has equal odds at every slot."],
+  ["nhl_lottery","NHL draft lottery","The real thing: clubs that missed last season\u2019s playoffs draw weighted odds for the top two picks (weakest club, most tickets), the rest follow in reverse standings, and playoff clubs pick after in reverse order of finish \u2014 champion last. An expansion club with no record from that season draws as if it finished last, and a first season with no history falls back to a pure random draw."],
+  ["reverse_standings","Reverse pre-season standings","Worst pre-season record picks first \u2014 the classic worst-to-first order, computed from the standings."],
+  ["lottery","Weighted lottery","Every club can win pick one, but the worst record holds the most tickets (8\u00b77\u00b76\u20261). The drawn order is published."],
+  ["random","Pure random","A straight shuffle \u2014 every club has equal odds at every slot."],
   ["manual","Manual order","You arrange the clubs yourself; the board builds from your order."]
 ];
+/* The style a generated board was ACTUALLY built with — order_meta.fallback wins over
+   order_meta.style (Season 1's nhl_lottery falls back to a pure random draw). */
+CG.dStyleName = function(meta){
+  var eff = (meta&&meta.fallback)||(meta&&meta.style);
+  return (CG.DRAFT_STYLES.find(function(s){return s[0]===eff;})||["","the commissioner’s order"])[1];
+};
+/* Lowercase a style name mid-sentence — but leave acronym-led names (NHL…) alone. */
+CG.dStyleInSentence = function(n){ return /^[A-Z]{2,}/.test(n) ? n : n.charAt(0).toLowerCase()+n.slice(1); };
 CG.fmtClockS = function(s){ s = Math.max(0, s|0); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
 CG.draftPicksCur = function(){
   /* always the CURRENT season's board — same key the commissioner controls use */
@@ -3408,6 +3417,16 @@ CG.hubDraftLive = function(){
       '<button class="btn '+(tp?"btn-ghost":"btn-chrome")+'" data-openpick="'+cur.id+'">Choose from the pool</button></span></div></div>';
   }
 
+  /* Mid-draft trading is league policy, the way the real NHL runs its floor: picks (and players)
+     can change hands right up until a pick is used. The board and the clock follow the pick's
+     CURRENT owner automatically over the realtime channel, so a deal lands the moment it is
+     accepted — no refresh, no commissioner step. */
+  if (live){
+    h += '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("swap",15)+
+      '<span style="flex:1"><b style="font-family:var(--f-disp)">Trading is open all night.</b> Deal picks — including the one on the clock — or players from the '+
+      '<a href="#/hub/tradehub" style="font-weight:700;border-bottom:2px solid var(--chrome)">Trade Hub</a>. A traded pick belongs to its new club the moment the other side accepts.</span></div>';
+  }
+
   /* make-up picks (skipped but recoverable) */
   if (mySkipped.length && live){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Make-up picks</h3><span class="chip chip-warn">'+mySkipped.length+' waiting</span></div>'+
@@ -3468,7 +3487,7 @@ CG.hubDraftLive = function(){
     var rounds = {};
     picks.forEach(function(p){ (rounds[p.round]=rounds[p.round]||[]).push(p); });
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The draft, pick by pick</h3>'+
-      (st&&st.order_meta?'<span class="chip">'+esc((CG.DRAFT_STYLES.find(function(s){return s[0]===st.order_meta.style;})||["","order set"])[1])+'</span>':"")+'</div>'+
+      (st&&st.order_meta?'<span class="chip">'+esc(CG.dStyleName(st.order_meta))+'</span>':"")+'</div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>Every pick, live</caption>'+
       '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th class="tleft">Status</th></tr></thead><tbody>'+
       Object.keys(rounds).sort(function(a,b){return a-b;}).map(function(rn){
@@ -3600,10 +3619,10 @@ CG.admDraftLive = function(){
   if (!running && canSetup){
     var meta = st && st.order_meta;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
-      (meta?'<span class="chip chip-win">order set — '+esc((CG.DRAFT_STYLES.find(function(s){return s[0]===meta.style;})||["","custom"])[1])+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
+      (meta?'<span class="chip chip-win">'+(meta.fallback?'order set — random draw (no prior season)':'order set — '+esc(CG.dStyleName(meta)))+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
       '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
       CG.DRAFT_STYLES.map(function(s){
-        var on = s[0]===(CG._dStyle||"reverse_standings");
+        var on = s[0]===(CG._dStyle||(meta&&meta.style)||"nhl_lottery");
         return '<label class="'+(on?"on":"")+'" data-dstyle="'+s[0]+'" style="flex-direction:column;align-items:flex-start;gap:3px">'+
           '<input type="radio" name="dStyle"'+(on?" checked":"")+'><b>'+s[1]+'</b>'+
           '<span class="caption" style="text-transform:none;letter-spacing:0">'+s[2]+'</span></label>';
@@ -3615,7 +3634,7 @@ CG.admDraftLive = function(){
       (meta?'<button class="btn btn-ghost" id="dAnnounce">Announce the order</button>':"")+
       '</div>'+
       (hasPicks?'<p class="caption" style="margin-top:10px">Regenerating replaces every pick — it’s blocked once any pick has been made (reverse them first). '+picks.length+' picks exist now.</p>'
-               :'<p class="caption" style="margin-top:10px">Ten rounds, snake order (1→8, then 8→1). The pick order publishes to the clubs the moment you generate.</p>')+
+               :'<p class="caption" style="margin-top:10px">Ten rounds, the same order every round (like the NHL — never a snake). The pick order publishes to the clubs the moment you generate.</p>')+
       (meta&&meta.codes?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">'+meta.codes.map(function(c,i){ return '<span class="chip'+(i===0?" chip-chrome":"")+'" style="font-size:10px">'+(i+1)+' · '+esc(c)+'</span>'; }).join("")+'</div>':"")+
       '</div></div>';
   }
@@ -3687,7 +3706,7 @@ CG.AFTER._admDraft = function(){
   CG.subscribeDraft(); CG._armDraftTick();
   var st = CG.lg.draftState;
   var sn = st ? st.season_number : ((CG.SEASON&&CG.SEASON.number)||1);
-  var style = CG._dStyle || "reverse_standings";
+  var style = CG._dStyle || (st && st.order_meta && st.order_meta.style) || "nhl_lottery";
   CG._manualOrder = CG._manualOrder && CG._manualOrder.length===(CG.TEAMS||[]).length
     ? CG._manualOrder : (CG.TEAMS||[]).map(function(t){ return t.code; });
   function renderManual(){
@@ -3725,7 +3744,7 @@ CG.AFTER._admDraft = function(){
     var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===style;})||["","?"])[1];
     var manualIds = style==="manual" ? CG._manualOrder.map(function(c){ return (CG.lg._codeToId||{})[c]; }) : null;
     CG.confirm("Generate the draft board?",
-      rounds+" rounds, snake order, "+styleName.toLowerCase()+". This replaces the existing board — every club sees the new order immediately.",
+      rounds+" rounds, the same order every round, "+CG.dStyleInSentence(styleName)+". This replaces the existing board — every club sees the new order immediately.",
       "Generate the board", function(){
       CG.sb.rpc("generate_draft_board",{ p_season_number: sn, p_rounds: rounds, p_style: style, p_manual: manualIds }).then(function(r){
         if(r.error){ CG.toast(r.error.message,"err"); return; }
@@ -3740,11 +3759,12 @@ CG.AFTER._admDraft = function(){
     var meta = (CG.lg.draftState||{}).order_meta||{};
     var codes = meta.codes||[];
     if (!codes.length){ CG.toast("Generate the board first","err"); return; }
-    var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===meta.style;})||["","the commissioner's order"])[1];
+    var decided = meta.fallback ? "a random draw — with no prior season to weight a lottery, every club had equal odds"
+      : CG.dStyleInSentence(CG.dStyleName(meta));
     CG.confirm("Announce the draft order?","Publishes a newsroom story with the round-one order — it posts to Discord automatically.","Publish it", function(){
-      var body = "The Season "+sn+" draft order is set — decided by "+styleName.toLowerCase()+".\n\n"+
+      var body = "The Season "+sn+" draft order is set — decided by "+decided+".\n\n"+
         codes.map(function(c,i){ return (i+1)+". "+((CG.TEAM[c]||{}).name||c); }).join("\n")+
-        "\n\nRounds snake, so round two runs in reverse. "+(meta.rounds||10)+" rounds on the night.";
+        "\n\nThe order holds for every round \u2014 no snake. "+(meta.rounds||10)+" rounds on the night, and clubs can trade picks right through the draft.";
       CG.sb.from("news").insert({ season_id: CG.SEASON.id, category:"League News", title:"The draft order is set",
         author:"CGHL Wire", published_at:new Date().toISOString(), body: body }).then(function(r){
         if(r.error){ CG.toast("Couldn’t publish: "+r.error.message,"err"); return; }
@@ -10395,7 +10415,12 @@ CG.liveTrade = function(){ if(!CG._liveTrade) CG._liveTrade={partner:null,offP:[
 CG.tPlayer = function(pid){ return (CG.lg.players||[]).find(function(p){ return p.id===pid; }); };
 CG.tPick = function(kid){ return (CG.lg.draftPicks||[]).find(function(p){ return p.id===kid; }); };
 CG.tRoster = function(code){ return (CG.lg.byTeam[code]||[]).filter(function(p){ return !p.mgmt; }); };
-CG.tPicks = function(code){ return (CG.lg.draftPicks||[]).filter(function(p){ return p.ownerCode===code && !p.used && !p.skipped; }); };
+CG.tPicks = function(code){
+  /* Skipped make-up picks stay tradeable (Rule 2.8, and accept_trade allows them); scope to the
+     current draft's season the same way draftPicksCur does. */
+  var dsn = (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number);
+  return (CG.lg.draftPicks||[]).filter(function(p){ return p.ownerCode===code && !p.used && (!dsn || p.season===dsn); });
+};
 CG.pickLabel = function(k){ return k?("’"+String(k.season).slice(-2)+" R"+k.round+(k.origCode&&k.origCode!==k.ownerCode?" (via "+k.origCode+")":"")):"pick"; };
 CG.refreshTrades = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){ if(location.hash.indexOf("/tradehub")>=0 && CG.router) CG.router(); }); };
 CG.hubTradeHubLive = function(qs){
@@ -10406,7 +10431,7 @@ CG.hubTradeHubLive = function(qs){
   var others=Object.keys(CG.TEAM).filter(function(c){ return c!==club; }).sort();
   function items(pids,kids){
     var out=(pids||[]).map(function(pid){ var p=CG.tPlayer(pid); return '<div style="margin-top:6px"><span class="playercell">'+(p?CG.crest(p.team,18):"")+'<span class="nm">'+esc(p?p.tag:"a player")+'</span>'+(p?'<small style="color:var(--steel)">'+p.pos+' · '+CG.fmtMoney(p.salary)+'</small>':"")+'</span></div>'; });
-    (kids||[]).forEach(function(kid){ out.push('<div class="caption" style="margin-top:6px">'+esc(CG.pickLabel(CG.tPick(kid)))+' pick</div>'); });
+    (kids||[]).forEach(function(kid){ var kk=CG.tPick(kid); out.push('<div class="caption" style="margin-top:6px">'+(kk?esc(CG.pickLabel(kk))+' pick':'<span class="chip chip-warn" style="font-size:9px">pick no longer available</span>')+'</div>'); });
     return out.length?out.join(""):'<span class="caption">—</span>';
   }
   var h='<div style="margin-bottom:18px"><span class="eyebrow chr">'+esc(t.name)+' · club management</span>'+
@@ -10441,7 +10466,7 @@ CG.hubTradeHubLive = function(qs){
   }
   function sideList(pids,kids,sk){
     var body=(pids||[]).map(function(pid){ var p=CG.tPlayer(pid); return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="playercell">'+(p?CG.crest(p.team,18):"")+'<span class="nm">'+esc(p?p.tag:"?")+'</span><small style="color:var(--steel)">'+(p?p.pos+" · "+CG.fmtMoney(p.salary):"")+'</small></span><button class="chip" data-trade-rm="'+sk+'p:'+pid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
-    body+=(kids||[]).map(function(kid){ return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="caption">'+esc(CG.pickLabel(CG.tPick(kid)))+' pick</span><button class="chip" data-trade-rm="'+sk+'k:'+kid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
+    body+=(kids||[]).map(function(kid){ var kk=CG.tPick(kid); return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'+(kk?'<span class="caption">'+esc(CG.pickLabel(kk))+' pick</span>':'<span class="chip chip-warn" style="font-size:9px">pick no longer available</span>')+'<button class="chip" data-trade-rm="'+sk+'k:'+kid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
     return body||'<p class="caption" style="margin-top:8px">Nothing added yet.</p>';
   }
   var partnerName=d.partner?(CG.TEAM[d.partner]||{}).name:"Partner";
