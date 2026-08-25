@@ -62,5 +62,17 @@ console.log("\n— the ops reschedule prefill shows the time in ET");
     !/var hm = \(\("0"\+d\.getHours\(\)\)/.test(desk));
 }
 
+console.log("\n— the owner-application deadline is enforced, not just displayed");
+{
+  A("the route computes a deadline-closed state from the season", /var deadlineClosed = !!\(s\.owner_app_deadline && Date\.parse\(s\.owner_app_deadline\) <= CG\.now\(\)\);/.test(live));
+  A("...shows a closed notice", /Owner applications closed on/.test(live));
+  A("...disables the submit button when closed", /\(lockedFromOwning\|\|deadlineClosed\)\?" disabled"/.test(live));
+  A("...and submitOwnerApp bails before writing after the deadline",
+    /_s\.owner_app_deadline && Date\.parse\(_s\.owner_app_deadline\) <= CG\.now\(\)\)\{ CG\.toast\("Owner applications closed/.test(live));
+  /* the REAL gate is the DB trigger guard_owner_app_deadline (BEFORE INSERT/UPDATE), verified by a
+     rolled-back rehearsal: a member is refused after the deadline, allowed before, may still
+     withdraw, and the commissioner decision path bypasses. The client checks above are courtesy. */
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

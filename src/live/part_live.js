@@ -2720,6 +2720,16 @@ CG.ROUTES.owner = function(){
   /* Rule 2.7 — the league office and a club's front office aren't held at once, except that staff
      whose ONLY department is Media may run a club (Media rules on nothing). */
   var r = CG.role(), lockedFromOwning = (r==="commish" || (r==="staff" && !CG.isMediaOnlyStaff()));
+  /* the owner-application window (seasons.owner_app_deadline) is now enforced in the database;
+     mirror it here so a member sees the closed state instead of hitting the wall on submit. An
+     applicant who already has one in can still withdraw, but not edit, after the close. */
+  var s = CG.SEASON || {};
+  var deadlineClosed = !!(s.owner_app_deadline && Date.parse(s.owner_app_deadline) <= CG.now());
+  var closedNote = (deadlineClosed && !lockedFromOwning)
+    ? '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
+      '<span style="flex:1">Owner applications closed on <b>'+CG.fmtFull(Date.parse(s.owner_app_deadline))+'</b>. '+
+      (CG.auth.ownerApp ? 'Your application stays with the commissioners for review — you can still withdraw it below.' : 'The window to apply to own a club has passed for this season.')+'</span></div>'
+    : "";
   var conflictNote = lockedFromOwning
     ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
       '<span style="flex:1">'+(r==="commish"
@@ -2731,7 +2741,7 @@ CG.ROUTES.owner = function(){
         '<span style="flex:1">You’re on <b>Media</b> only, which is the one staff department that may also run a club (Rule 2.7). Take on a second department and you’d have to give the club seat up.</span></div>'
       : "");
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
-  statusCard = conflictNote + statusCard;
+  statusCard = conflictNote + closedNote + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
@@ -2743,7 +2753,7 @@ CG.ROUTES.owner = function(){
         '<label class="fld"><span style="font-size:11px">3rd choice</span><select id="ow-fr3">'+CG.franchiseOptions(a.franchise_3)+'</select></label>'+
       '</div></div>'+
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
-    '<button class="btn btn-chrome" id="ow-submit"'+(lockedFromOwning?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
+    '<button class="btn btn-chrome" id="ow-submit"'+((lockedFromOwning||deadlineClosed)?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
   '</div></div>';
   /* once they've applied, a chat with the league office sits between the status and the form */
   var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false}) : "";
@@ -2758,6 +2768,8 @@ CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   var r0=CG.role();
   if(r0==="commish"||r0==="staff"){ CG.toast((r0==="commish"?"Commissioners":"Staff")+" can’t own or manage a club — you can still play as a member","err"); return; }
+  var _s=CG.SEASON||{};
+  if(_s.owner_app_deadline && Date.parse(_s.owner_app_deadline) <= CG.now()){ CG.toast("Owner applications closed on "+CG.fmtFull(Date.parse(_s.owner_app_deadline)),"err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   function sv(id){ var el=document.getElementById(id); return el?(el.value||"").trim()||null:null; }
   var ea=v("ow-ea"), pitch=v("ow-pitch");
