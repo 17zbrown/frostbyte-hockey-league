@@ -20,6 +20,7 @@ const roleId = {
   owner: "R_OWNER", "general manager": "R_GM", "assistant general manager": "R_AGM",
   center: "R_C", "left wing": "R_LW", goalie: "R_G",
   "review board": "R_DEPT_APPS", media: "R_DEPT_MEDIA", statistics: "R_DEPT_STATS",
+  "free agent": "R_FA", "restricted free agent": "R_RFA", rookie: "R_ROOKIE",
 };
 const teamRoleId = { T1: "R_CLUB_MTL" };
 const base = { roleId, teamRoleId, registered: new Set(), regOpen: false,
@@ -267,6 +268,26 @@ console.log("\n— the queue replay never floods and always prunes");
   A("the sweep creates the role if it is missing", /\["CGHL Management", true\]/.test(sync));
   A("...and keeps it mentionable, so the ping actually works",
     /\["CGHL Management", true, false\]/.test(sync));
+}
+
+console.log("\n— rights classes ride on the ctx sets (the bot must pass these or roles flap)");
+{
+  const reg = new Set(["p1"]);
+  const rfa = want({ profile_id: "p1", role: "member", team_id: null }, { registered: reg, rfa: new Set(["p1"]) });
+  A("an RFA wears Restricted Free Agent, not Free Agent", rfa.has("R_RFA") && !rfa.has("R_FA"));
+  const fa = want({ profile_id: "p1", role: "member", team_id: null }, { registered: reg });
+  A("with no rfa set, an unrostered registrant is a plain Free Agent", fa.has("R_FA") && !fa.has("R_RFA"));
+  const rk = want({ profile_id: "p1", role: "member", team_id: null }, { registered: reg, rookies: new Set(["p1"]) });
+  A("a rookie wears Rookie alongside Free Agent", rk.has("R_ROOKIE") && rk.has("R_FA"));
+  A("omitting the sets grants neither — which is exactly why the bot had to compute them",
+    !fa.has("R_ROOKIE") && !fa.has("R_RFA"));
+
+  const botSrc = fs.readFileSync(new URL("../bot/role-sync.mjs", import.meta.url), "utf8");
+  A("the bot computes rookie/RFA for the profile", /isRookie = priorSeasons\.size === 0 && !draftedBefore/.test(botSrc) &&
+    /isRfa = priorSeasons\.size > 0 && priorSeasons\.size < C\.rfaYears/.test(botSrc));
+  A("...and passes them into desiredRolesFor", /rfa: isRfa \? new Set\(\[profileId\]\) : new Set\(\)/.test(botSrc) &&
+    /rookies: isRookie \? new Set\(\[profileId\]\) : new Set\(\)/.test(botSrc));
+  A("...reading the same rfa_offseasons threshold the site uses", /app_config\?key=eq\.rfa_offseasons/.test(botSrc));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

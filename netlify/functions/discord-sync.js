@@ -729,14 +729,26 @@ async function ensureCommunityChannels(guildChannels, teams, roleId, sum) {
   // Sweep spent pickup-lobby channels: any lobby marked closed (staff hit Delete), or untouched for
   // 12h, has its channel (thread_id) removed and the marker cleared. Idempotent; a 404 is fine.
   try {
-    const rooms = await sbGet("lfg_lobbies?thread_id=not.is.null&select=id,thread_id,status,updated_at&order=updated_at.asc&limit=100");
     const now = Date.now();
+    const rooms = await sbGet("lfg_lobbies?thread_id=not.is.null&select=id,thread_id,status,updated_at&order=updated_at.asc&limit=100");
     for (const lo of (rooms || [])) {
       const stale = lo.status === "closed" || (now - Date.parse(lo.updated_at) > 12 * 3600 * 1000);
       if (!stale) continue;
       try { await dApi("DELETE", `/channels/${lo.thread_id}`); } catch (e) { /* already gone */ }
-      await sbPatch(`lfg_lobbies?id=eq.${lo.id}`, { thread_id: null });
+      /* Reaping a lobby MUST also close it. The one-game-at-a-time gate blocks any player whose
+         lobby is still in an active state (captains/drafting/server/done); clearing only thread_id
+         left all 12 players permanently unable to queue again. Close it so they are released. */
+      await sbPatch(`lfg_lobbies?id=eq.${lo.id}`, { thread_id: null, status: "closed", updated_at: new Date().toISOString() });
       sum.pickupRoomsSwept = (sum.pickupRoomsSwept || 0) + 1;
+    }
+    // Stuck lobbies that NEVER got a channel: a formed lobby whose room-creation failed keeps
+    // thread_id null forever, so the reaper above never saw it and its 12 players stayed locked
+    // out with no room at all. Close any active-state, channel-less lobby older than 12h.
+    const orphans = await sbGet("lfg_lobbies?thread_id=is.null&status=in.(captains,drafting,server,done)&select=id,updated_at&order=updated_at.asc&limit=100");
+    for (const lo of (orphans || [])) {
+      if (now - Date.parse(lo.updated_at) <= 12 * 3600 * 1000) continue;
+      await sbPatch(`lfg_lobbies?id=eq.${lo.id}`, { status: "closed", updated_at: new Date().toISOString() });
+      sum.pickupOrphansClosed = (sum.pickupOrphansClosed || 0) + 1;
     }
   } catch (e) { sum.errors.push({ pickupSweep: String(e.message || e) }); }
 

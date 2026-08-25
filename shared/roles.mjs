@@ -76,10 +76,14 @@ export function desiredRolesFor(m, ctx) {
   const desired = new Set();
   const isRegistered = registered.has(m.profile_id);
   const onRoster = !!(m.team_id && teamRoleId[m.team_id]);
+  /* A club seat holder is MANAGEMENT, not a free agent, even while registered and unrostered
+     pre-draft — matching the site's own taxonomy (CG.poolState returns "Management", never a
+     free-agent class, for a seat holder). Their Owner/GM/AGM role below is their standing. */
+  const holdsSeat = !!mgmtRoleByProfile[m.profile_id];
   if ((isRegistered || onRoster) && roleId["player"]) desired.add(roleId["player"]);
   if (onRoster) desired.add(teamRoleId[m.team_id]);
-  else if (isRegistered && rfa.has(m.profile_id) && roleId["restricted free agent"]) desired.add(roleId["restricted free agent"]);
-  else if (isRegistered && roleId["free agent"]) desired.add(roleId["free agent"]);
+  else if (isRegistered && !holdsSeat && rfa.has(m.profile_id) && roleId["restricted free agent"]) desired.add(roleId["restricted free agent"]);
+  else if (isRegistered && !holdsSeat && roleId["free agent"]) desired.add(roleId["free agent"]);
   /* Rookie rides alongside the rest: it is a length-of-service badge, not a rights class, so it
      sits happily on a rostered player and on a free agent alike. */
   if ((isRegistered || onRoster) && rookies.has(m.profile_id) && roleId["rookie"]) desired.add(roleId["rookie"]);

@@ -61,9 +61,10 @@ export function createRoleSyncer(env, opts = {}) {
   let slow = null, slowAt = 0;
   async function slowCtx() {
     if (slow && Date.now() - slowAt < 60_000) return slow;
-    const [guildRoles, seasons] = await Promise.all([
+    const [guildRoles, seasons, rfaCfg] = await Promise.all([
       dApi("GET", `/guilds/${GUILD}/roles`),
-      sbGet("seasons?select=id,registration_open&order=number.desc&limit=5"),
+      sbGet("seasons?select=id,number,registration_open&order=number.desc&limit=5"),
+      sbGet("app_config?key=eq.rfa_offseasons&select=value"),
     ]);
     if (!Array.isArray(guildRoles)) throw new Error("guild roles unavailable");
     const roleId = {};
@@ -72,7 +73,8 @@ export function createRoleSyncer(env, opts = {}) {
        Signed Up; the LATEST season drives positions */
     const regSeason = (seasons || []).find((s) => s.registration_open) || (seasons || [])[0] || null;
     const posSeason = (seasons || [])[0] || null;
-    slow = { roleId, regSeason, posSeason, regOpen: !!(regSeason && regSeason.registration_open) };
+    const rfaYears = Math.max(1, parseInt((rfaCfg && rfaCfg[0] && rfaCfg[0].value) || "4", 10) || 4);
+    slow = { roleId, regSeason, posSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears };
     slowAt = Date.now();
     return slow;
   }
@@ -130,6 +132,24 @@ export function createRoleSyncer(env, opts = {}) {
         if (t.agm_profile_id === profileId) seat = "agm";
       }
 
+      /* Rights classes (Rule 2.2) — same rule the sweep applies, computed for this one profile:
+         rookie = never on a prior-season roster and no earlier draft pick; RFA = has prior service
+         but under the threshold, and not currently rostered or under contract. Omitting these made
+         the bot strip Rookie/RFA every sync while the sweep re-granted them. */
+      let isRookie = false, isRfa = false;
+      const curId = C.posSeason && C.posSeason.id, curNum = (C.posSeason && C.posSeason.number) || 1;
+      if (curId) {
+        const allSpots = await sbGet(`roster_spots?profile_id=eq.${encodeURIComponent(profileId)}&select=season_id`);
+        const priorSeasons = new Set((allSpots || []).filter((r) => r.season_id && r.season_id !== curId).map((r) => r.season_id));
+        const onRosterNow = (allSpots || []).some((r) => r.season_id === curId);
+        const dp = await sbGet(`draft_picks?player_id=eq.${encodeURIComponent(profileId)}&select=season_number`);
+        const draftedBefore = (dp || []).some((d) => (d.season_number || 0) < curNum);
+        const cts = await sbGet(`contracts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=is_manager,start_season,end_season`);
+        const underContract = (cts || []).some((c) => !c.is_manager && (c.start_season || 1) <= curNum && (c.end_season || 1) >= curNum);
+        isRookie = priorSeasons.size === 0 && !draftedBefore;
+        isRfa = priorSeasons.size > 0 && priorSeasons.size < C.rfaYears && !onRosterNow && !underContract;
+      }
+
       const mem = await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
       if (!mem || mem.__notfound) { sum.skipped++; return "not-in-guild"; }
 
@@ -140,6 +160,8 @@ export function createRoleSyncer(env, opts = {}) {
         mgmtRoleByProfile: seat ? { [profileId]: seat } : {},
         deptByProfile: (p.role === "staff" || p.role === "commissioner") ? { [profileId]: p.departments || [] } : {},
         posOf: pos ? { [profileId]: pos } : {},
+        rfa: isRfa ? new Set([profileId]) : new Set(),
+        rookies: isRookie ? new Set([profileId]) : new Set(),
       });
       const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
       if (!changed) { sum.noop++; return "no-op"; }

@@ -91,7 +91,9 @@ console.log("\n— the Discord side grants from the same rule");
   A("...and reconciles their properties", /\["Restricted Free Agent", true, false\], \["Rookie", true, false\]/.test(roles) ||
     /\["Restricted Free Agent", true, false\], \["Rookie", true, false\]/.test(sync));
   A("a restricted player gets RFA instead of Free Agent, never both",
-    /rfa\.has\(m\.profile_id\) && roleId\["restricted free agent"\]\) desired\.add\(roleId\["restricted free agent"\]\);\s*\n\s*else if \(isRegistered && roleId\["free agent"\]\)/.test(roles));
+    /!holdsSeat && rfa\.has\(m\.profile_id\) && roleId\["restricted free agent"\]\) desired\.add\(roleId\["restricted free agent"\]\);\s*\n\s*else if \(isRegistered && !holdsSeat && roleId\["free agent"\]\)/.test(roles));
+  A("...and a club-seat holder is never a free agent of any class (matches the site taxonomy)",
+    /const holdsSeat = !!mgmtRoleByProfile\[m\.profile_id\];/.test(roles));
   A("Rookie rides alongside, since it is service length and not a rights class",
     /rookies\.has\(m\.profile_id\) && roleId\["rookie"\]/.test(roles));
   A("the sweep computes service from DISTINCT PRIOR seasons, excluding the current one",
