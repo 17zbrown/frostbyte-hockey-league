@@ -9433,7 +9433,7 @@ CG.playoffRoundName = function(round){
        : back === 3 ? "Division quarter-finals"
        : "Division round " + round;
 };
-CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 3; };
+CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 7; };
 /* seeds are FROZEN when the quarter-finals are generated — later rounds must
    never re-derive them from a table that can still move (a late-ingested
    regular-season final would otherwise rewrite the bracket mid-playoffs) */
@@ -9463,7 +9463,7 @@ CG.admPlayoffsLive = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Series length</h3><span class="chip">Best of '+bestOf+'</span></div><div class="card-b">'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[3,5,7].map(function(n){
       return '<button class="btn '+(n===bestOf?"btn-chrome":"btn-ghost")+' btn-sm" data-bestof="'+n+'"'+(poLive?" disabled":"")+'>Best of '+n+'</button>'; }).join("")+'</div>'+
-    '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series. '+
+    '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series, and each series runs inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday, higher seed home Wednesday and Friday (Rule 8.3). '+
     (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round.')+'</p></div></div>';
 
   /* how many clubs qualify per division — same lock as the series length, because the bracket
@@ -9611,23 +9611,33 @@ CG.generatePlayoffRound = function(round){
     });
     if (!matchups.length){ CG.toast("The previous round has to finish first","err"); return; }
   }
-  /* schedule the series: best-of-N nights, higher seed hosts odd games, on the
-     Wed/Thu/Fri cadence from playoffs_start_at (or the day after the last game) */
+  /* Schedule the series 2-2-3 inside ONE game week (Rule 8.3): two games Wednesday, two Thursday,
+     up to three Friday. The higher seed (m[0]) hosts the Wednesday and Friday games; the lower seed
+     hosts Thursday. All seven slots are laid down now; trg_conclude_series deletes the ones a 4-win
+     series never reaches. The three nights come from the season's own game-night set, so a holiday
+     week is stepped over the same way the regular schedule steps over it. */
   var anchor = s.playoffs_start_at ? CG.etYMD(s.playoffs_start_at) : CG.etYMD(new Date(CG.now()+2*86400000).toISOString());
   var priorPlayoff = (CG.lg.playoffGames||[]);
   if (priorPlayoff.length){ var last=priorPlayoff.reduce(function(m,g){ return Math.max(m,g.at); },0); anchor=CG.dayAdd(CG.etYMD(new Date(last).toISOString()),2); }
   var shpP = CG.seasonShape(s);
-  var plan=CG.gameNights(anchor, Math.ceil(bestOf/2)+1, shpP.nights, CG.seasonHolidayKeys(s));
-  var nights=[]; plan.nights.forEach(function(n){ n.days.forEach(function(d){ nights.push(d); }); });
+  var plan=CG.gameNights(anchor, 3, shpP.nights, CG.seasonHolidayKeys(s));
+  var wk=[]; plan.nights.forEach(function(n){ n.days.forEach(function(d){ wk.push(d); }); });   /* [Wed, Thu, Fri] */
+  /* 2-2-3: at most 2 on night 1, 2 on night 2, the remainder on night 3. Generalizes for any
+     best-of-N, but for the league's best-of-seven it is exactly 2 / 2 / 3. */
+  var perNight=[Math.min(2,bestOf), Math.min(2,Math.max(0,bestOf-2)), Math.max(0,bestOf-4)];
+  var hostHigher=[true,false,true];   /* higher seed home Wed + Fri, lower seed home Thu */
   var rows=[];
   matchups.forEach(function(m){
-    for (var gi=0; gi<bestOf; gi++){
-      var day=nights[gi]||CG.dayAdd(nights[nights.length-1]||anchor, (gi+1)*2);
-      var host = gi%2===0 ? m[0] : m[1];   /* 2-2-1-1-1 is fine at this scale: alternate */
-      var away = host===m[0] ? m[1] : m[0];
-      rows.push({ season_id:s.id, week:round, stage:"playoff",
-        home_team_id:(CG.lg._codeToId||{})[host], away_team_id:(CG.lg._codeToId||{})[away],
-        scheduled_at:CG.etISO(day, CG.NIGHT_SLOTS[gi%CG.NIGHT_SLOTS.length]||"21:00"), status:"scheduled" });
+    var gi=0;
+    for (var ni=0; ni<3; ni++){
+      for (var k=0; k<perNight[ni] && gi<bestOf; k++, gi++){
+        var host = hostHigher[ni] ? m[0] : m[1];
+        var away = host===m[0] ? m[1] : m[0];
+        var day = wk[ni] || CG.dayAdd(wk[wk.length-1]||anchor, (ni+1)*2);
+        rows.push({ season_id:s.id, week:round, stage:"playoff",
+          home_team_id:(CG.lg._codeToId||{})[host], away_team_id:(CG.lg._codeToId||{})[away],
+          scheduled_at:CG.etISO(day, CG.NIGHT_SLOTS[k]||"21:00"), status:"scheduled" });
+      }
     }
   });
   var rn = CG.playoffRoundName(round).toLowerCase();
