@@ -284,7 +284,10 @@ async function ingestOne(norm, raw, summary, batch) {
   // midnight ET (or spills into OT) reports the *next* ET day while the fixture stays on game
   // night — exact-day matching would silently drop those box scores, so widen the window.
   const or = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
-  const gamesAll = await sbGet(`games?${or}&ea_match_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id`);
+  // Only auto-attach to a genuinely open fixture: scheduled, not voided, not forfeit-ruled. Without
+  // these filters an EA payload could mark a voided game final again, or overwrite a staff forfeit
+  // ruling's score with the played numbers while leaving the ruling in place (Rule 3.2 / 4.3).
+  const gamesAll = await sbGet(`games?${or}&ea_match_id=is.null&status=eq.scheduled&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id`);
   // A match cannot belong to a fixture that had not started when the match ENDED (codes go out at
   // T-30). Without this, a stray payload could mark a future game final with someone else's score.
   const matchEndMs = (norm.ts || 0) * 1000;

@@ -449,7 +449,10 @@ CG.opsReschedulePrompt = function(id){
   if (!g){ CG.toast("That game isn’t on the schedule any more","err"); return; }
   var d = new Date(g.at);
   var ymd = CG.etYMD(g.at);
-  var hm = (("0"+d.getHours()).slice(-2))+":"+(("0"+d.getMinutes()).slice(-2));
+  /* the time must be shown in ET too — d.getHours() is the VIEWER's local hour, so a staffer
+     outside Eastern would see (and, if they touched only the date, submit) a time shifted by their
+     offset while the field is labeled ET. */
+  var hm = new Intl.DateTimeFormat("en-GB", { timeZone:"America/New_York", hour:"2-digit", minute:"2-digit", hour12:false }).format(d);
   CG.modal("Reschedule — "+esc(g.away)+" @ "+esc(g.home),
     '<p class="caption" style="margin-bottom:12px">Currently <b>'+CG.fmtFull(g.at)+'</b>. Times are Eastern.</p>'+
     '<label class="fld"><span>New date</span><input id="rsD" type="date" value="'+esc(ymd)+'"></label>'+

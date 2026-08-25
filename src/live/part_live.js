@@ -579,7 +579,7 @@ CG.buildLiveLeague = async function(){
     var dlDay = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(dl);
     CG.WEEK8 = { key:(avStage==="preseason"?"pre":avStage==="playoff"?"po":"w")+avWk,
       label:(avStage==="preseason"?"Pre-season week ":avStage==="playoff"?"Playoff week ":"Week ")+avWk,
-      deadline: Date.parse(dlDay+"T20:00:00-04:00"),
+      deadline: Date.parse(CG.etISO(dlDay, "20:00")),   /* 8pm ET, correct across EDT/EST */
       nights: nights.map(function(at, i){ return { key:"n"+(i+1), at:at }; }), open:true };
   } else {
     /* No unplayed games — off-season, or before a schedule exists. Without this the prototype
@@ -1329,9 +1329,13 @@ CG._wrapHubDashboard = function(){
       (reg?'<span class="chip chip-win">Registered</span>':(s.registration_open?'<span class="chip chip-warn">Not registered</span>':'<span class="chip">Closed</span>'))+'</div><div class="card-b">'+
       (reg
         ? '<p class="small" style="color:var(--steel)">You’re in the '+esc(CG.seasonTag())+' pool as a <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"skater")+'</b>. '+
-          (s.registration_deadline && Date.parse(s.registration_deadline)>CG.now()
-            ? 'You made the eligibility window — you’ll be randomly assigned for the pre-season and enter the draft.'
-            : 'You’ll be placed on a club automatically — watch your notifications.')+'</p>'+
+          (
+            /* what matters is when they REGISTERED versus the deadline, not whether the deadline
+               has since passed — otherwise an on-time registrant's card flips to "placed
+               automatically" the instant the deadline arrives. */
+            (!s.registration_deadline || (reg.created_at && Date.parse(reg.created_at) <= Date.parse(s.registration_deadline)))
+            ? 'You registered in time — you’ll be randomly assigned for the pre-season, then enter the draft.'
+            : 'You registered after the sign-up deadline, so you’ll be placed on a club automatically — watch your notifications.')+'</p>'+
           (!p.ea_id?'<div class="note red" style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">Your <b>EA ID</b> is missing — stats can’t link to you without it.</span><button class="btn btn-ghost btn-sm" id="hubEaBtn">Add EA ID</button></div>':"")
         : (s.registration_open
             ? '<p class="small" style="color:var(--steel)">Registration is open'+(s.registration_deadline?' — register by <b>'+CG.fmtFull(Date.parse(s.registration_deadline))+'</b> to be draft-eligible. Join later and you still play; you’re placed on a club automatically.':'.')+'</p>'+
@@ -3209,11 +3213,12 @@ CG.draftCurPick = function(){
   return CG.draftPicksCur().find(function(p){ return p.overall===st.current_overall && !p.used && !p.skipped; }) || null;
 };
 CG.eligOf = function(pid){
-  /* Rulebook v2.7 abolished every minimum-games rule: registering by the deadline is the whole
-     test, so ok is always true. vet/gp survive for display only. */
+  /* Rule 2.8 (v2.22): draft-eligible = a returning player OR five pre-season appearances. `ok`
+     mirrors CG.isDraftEligible, the same predicate the DB enforces in draft_make_pick, so the
+     board and auto-pick can never offer a player the server will refuse on the clock. */
   var vet = CG.lg.isVeteran && CG.lg.isVeteran(pid);
   var gp = ((CG.lg.preGp||{})[pid]||{}).gp||0;
-  return { vet:vet, gp:gp, ok: true };
+  return { vet:vet, gp:gp, ok: CG.isDraftEligible ? CG.isDraftEligible(pid) : true };
 };
 CG.eligChipD = function(pid){
   var e = CG.eligOf(pid);
@@ -8698,7 +8703,7 @@ CG.roadAheadCard = function(s, opts){
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
     [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
-    [s.draft_at, "Draft night", "Clubs pick from the pool — every player who registered by the deadline is draft-eligible. Undrafted players go to free agency and rookie bidding."],
+    [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with five pre-season appearances (Rule 2.8). Undrafted players go to free agency and rookie bidding."],
     [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
     [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
   ].filter(function(st){ return st[0]; });

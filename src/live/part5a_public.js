@@ -2249,7 +2249,7 @@ CG.ROUTES.player = function(pid, qs){
       (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
            : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
         .map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating. Every registered player is draft-eligible — there is no games-played requirement.</p></div></div>' : '';
+      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating. A returning player is draft-eligible on registration; a first-year needs five pre-season appearances to enter the draft (Rule 2.8), and is placed on a club automatically otherwise.</p></div></div>' : '';
     /* Empty-state cleanup: a first-year (or just-signed) player with no games at any stage gets a
        single broadcast "fresh sheet" panel instead of a wall of twelve zeroes. The pristine-ice
        still (Higgsfield soul_location) carries the moment; the rating breakdown is dropped as
