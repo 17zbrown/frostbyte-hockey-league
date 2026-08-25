@@ -9182,7 +9182,7 @@ CG.seasonForm = function(id){
   var isNew = !s;
   var maxN = (CG._seasonsRaw||[]).reduce(function(m,x){ return Math.max(m, x.number||0); }, 0);
   s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:true,
-             salary_cap:60000000, roster_max:15, trade_deadline_week:6, moves_lock_override:"auto" };
+             salary_cap:40000000, roster_max:17, trade_deadline_week:6, moves_lock_override:"auto" };
   function dt(v){ /* ISO -> datetime-local in ET */
     if (!v) return "";
     var p = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date(v));
@@ -9206,8 +9206,8 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Season starts (ET)</span><input type="datetime-local" id="ssStarts" value="'+dt(s.starts_at)+'"></label>'+
     '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
     '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
-    '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||60000000)/1e6)+'"></label>'+
-    '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?3000000:s.owner_salary))/1e6)+'"></label>'+
+    '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||40000000)/1e6)+'"></label>'+
+    '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?0:s.owner_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?3000000:s.gm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?3000000:s.agm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||17)+'"></label>'+
@@ -9271,7 +9271,7 @@ CG.seasonForm = function(id){
     var clash=(CG._seasonsRaw||[]).find(function(x){ return x.number===num && (!id || x.id!==id); });
     if(clash){ CG.toast("Number "+num+" is already "+(clash.name||"another season"),"err"); return; }
     function iso(elId){ var v=document.getElementById(elId).value; return v ? CG.etISO(v.slice(0,10), v.slice(11,16)) : null; }
-    var cap=Math.round(parseFloat(document.getElementById("ssCap").value||"60")*1e6);
+    var cap=Math.round(parseFloat(document.getElementById("ssCap").value||"40")*1e6);
     var rec={ name:name, number:num, status:document.getElementById("ssStatus").value,
       registration_open: document.getElementById("ssRegOpen").value==="1",
       starts_at:iso("ssStarts"), ends_at:iso("ssEnds"), registration_deadline:iso("ssRegDl"),
@@ -9279,10 +9279,10 @@ CG.seasonForm = function(id){
       owner_app_deadline:iso("ssOwnDl"), draft_at:iso("ssDraft"),
       preseason_starts_at:iso("ssPre"), free_agency_opens_at:iso("ssFaOpen"),
       free_agency_closes_at:iso("ssFaClose"), playoffs_start_at:iso("ssPlayoffs"),
-      salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||15,
+      salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||17,
       /* fixed management salaries — Owner/GM/AGM roster spots and contracts are pinned to
          these three numbers by the database (protect_manager_spot) */
-      owner_salary:Math.round(parseFloat(document.getElementById("ssOwnSal").value||"3")*1e6),
+      owner_salary:Math.round(parseFloat(document.getElementById("ssOwnSal").value||"0")*1e6),
       gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"3")*1e6),
       agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"3")*1e6),
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
