@@ -738,7 +738,7 @@ CG.discordIdentityPatch = function(user, profile){
   if (av && replaceable && profile.avatar_url !== av) patch.avatar_url = av;
   return Object.keys(patch).length ? patch : null;
 };
-CG.applySession = async function(session){
+CG.applySession = async function(session, quiet){
   CG.auth.user = session ? session.user : null;
   if (CG.auth.user){
     var uid = CG.auth.user.id, sidA = ((CG.regSeason && CG.regSeason()) || CG.SEASON || {}).id || null;
@@ -762,12 +762,16 @@ CG.applySession = async function(session){
         var pr = await CG.sb.from("profiles").update(idPatch).eq("id", uid).select("id");
         if (pr && !pr.error && pr.data && pr.data.length){
           Object.assign(CG.auth.profile, idPatch);
+          CG._idPatchFailedFp = null;
           if (CG.pingDiscordSync) CG.pingDiscordSync();   /* guild follows within seconds */
           if (idPatch.discord_id) CG.toast("Your new Discord account is now linked — Discord roles follow in a couple of minutes","ok");
         } else if (pr && (pr.error || !(pr.data||[]).length)){
+          /* remembered so the auth handler stops forcing loud re-runs for a patch that
+             will just be refused again on the next event */
+          CG._idPatchFailedFp = JSON.stringify(idPatch);
           console.warn("discord identity refresh blocked", pr.error && pr.error.message);
         }
-      } catch(e){ console.warn("discord identity refresh failed", e); }
+      } catch(e){ CG._idPatchFailedFp = JSON.stringify(idPatch); console.warn("discord identity refresh failed", e); }
     }
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
@@ -778,7 +782,7 @@ CG.applySession = async function(session){
   if (CG.auth.user){ CG.loadNotifs().then(function(){ if(CG.renderChrome)CG.renderChrome(); }); }
   else { CG._notifs = null; if (CG._notifChannel){ try{ CG.sb.removeChannel(CG._notifChannel); }catch(e){} CG._notifChannel = null; } }
   /* direct messages: load + subscribe on sign-in, tear down on sign-out */
-  if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
+  if (CG.auth.user){ CG.loadDMs().then(function(){ CG.subscribeDMs(); if(CG.renderChrome)CG.renderChrome(); if(!quiet&&location.hash.indexOf("/messages")>=0&&CG.router)CG.router(); }); }
   else { CG.teardownDMs && CG.teardownDMs(); }
   /* Application chat + GM/AGM nominations. buildLiveLeague also loads these, but its load is
      gated on CG.auth.user — which is still null while the page boots, since the session is
@@ -801,14 +805,16 @@ CG.applySession = async function(session){
   }
   else { CG.teardownAppMessages && CG.teardownAppMessages(); }
   /* complaints & requests (league office) — RLS returns what this user may see */
-  if (CG.auth.user){ CG.loadActionRequests().then(function(){ CG.rerenderIfShowingCases(); }); CG.subscribeActions(); }
+  if (CG.auth.user){ CG.loadActionRequests().then(function(){ if(!quiet) CG.rerenderIfShowingCases(); }); CG.subscribeActions(); }
   else { if (CG.lg){ CG.lg._actionReqs=[]; CG.lg._actionMsgs={}; } CG.teardownActions && CG.teardownActions(); }
   /* staff/commish: the "needs attention" backlog + the Staff Desk data cards */
   if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); CG.loadStaffExtras(); }
   else { CG._staffAttention = null; CG._staffExtras = null; }
   CG.enforceBan();
-  CG._va = null;                        /* any fresh session ends a stale preview */
-  if (CG.renderViewAsBar) CG.renderViewAsBar();
+  if (!quiet){
+    CG._va = null;                      /* any fresh session ends a stale preview */
+    if (CG.renderViewAsBar) CG.renderViewAsBar();
+  }
 };
 CG.teardownDMs = function(){
   CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false; CG._dm.compose=false;
@@ -1005,9 +1011,66 @@ CG.initAuth = async function(){
   if (!CG.sb || !CG.sb.auth) return;
   try {
     var s = await CG.sb.auth.getSession();
-    await CG.applySession(s && s.data ? s.data.session : null);
+    var boot = s && s.data ? s.data.session : null;
+    CG._authUid = boot && boot.user ? boot.user.id : null;
+    await CG.applySession(boot);
+    /* Supabase fires auth events in BURSTS — INITIAL_SESSION on subscribe, SIGNED_IN plus
+       TOKEN_REFRESHED around a login, and SIGNED_IN again every time the tab regains focus.
+       Each event used to run the full applySession pipeline (a dozen loads) and a whole-page
+       re-render, concurrently — the visible shaking on every sign-in and sign-out. Two guards:
+       1) IDENTITY DEDUPE — an event for the user already applied changes nothing user-visible
+          (a fresh token repaints nothing), so only the in-memory user object refreshes. The one
+          same-user event that DOES matter — a newly linked Discord account, which applySession
+          must patch onto the profile — falls through to the full run.
+       2) LATEST-WINS SERIALIZER — an identity change landing while a run is in flight queues
+          ONE follow-up with the newest session instead of interleaving loads and repaints.
+       The hourly TOKEN_REFRESHED still re-runs the pipeline QUIETLY (loadAppMessages and
+       friends were designed around that refresh keeping an idle tab's data current) — it just
+       no longer yanks the page with a full re-render. */
+    var run = function(sess, quiet){
+      if (CG._authApplying){
+        /* newest session wins; the repaint intent is the loudest of everything queued */
+        CG._authNext = { sess: sess, quiet: (CG._authNext ? CG._authNext.quiet : true) && quiet };
+        return;
+      }
+      CG._authApplying = true;
+      CG.applySession(sess, quiet).catch(function(e){ console.warn("applySession failed", e); }).then(function(){
+        CG._authApplying = false;
+        if (!quiet){
+          /* a throwing repaint must never strand the queued session below */
+          try { if (CG.renderChrome) CG.renderChrome(); if (CG.router) CG.router(); }
+          catch(e){ console.warn("auth repaint failed", e); }
+        }
+        var nx = CG._authNext; CG._authNext = null;
+        if (nx) run(nx.sess, nx.quiet);
+      });
+    };
     CG.sb.auth.onAuthStateChange(function(_e, sess){
-      CG.applySession(sess).then(function(){ if (CG.renderChrome) CG.renderChrome(); if (CG.router) CG.router(); });
+      var uid = sess && sess.user ? sess.user.id : null;
+      /* a session landing (or a real sign-out) resolves any OAuth round-trip still marked
+         pending — without this the sign-in page's "completing" state could outlive the very
+         session it was waiting for */
+      if (sess || _e === "SIGNED_OUT") CG._oauthPending = false;
+      if (uid === CG._authUid){
+        if (uid) CG.auth.user = sess.user;
+        /* "same uid" only counts as applied when the apply actually LANDED — a profile that
+           never loaded (flaky fetch right after the OAuth redirect maps to null in
+           applySession) must keep re-running loud, or the sign-in page would sit on
+           "this page refreshes itself" forever. */
+        var incomplete = uid && !(CG.auth && CG.auth.profile);
+        var patch = uid && !incomplete && CG.discordIdentityPatch ? CG.discordIdentityPatch(sess.user, CG.auth.profile) : null;
+        /* a patch whose WRITE was refused (RLS) recomputes identically forever — without this
+           fingerprint it would force a loud full run on every tab refocus: the shake, back */
+        if (patch && JSON.stringify(patch) === CG._idPatchFailedFp) patch = null;
+        if (!incomplete && !patch){
+          /* the in-flight run is already fetching this data — don't queue a second pipeline */
+          if (_e === "TOKEN_REFRESHED" && uid && !CG._authApplying) run(sess, true);
+          return;
+        }
+      }
+      CG._authUid = uid;
+      CG._idPatchFailedFp = null;   /* a different identity starts clean */
+      run(sess, false);
     });
   } catch(e){ console.warn("auth init failed", e); }
 };
@@ -1503,6 +1566,16 @@ CG.ROUTES.signin = function(){
 CG.AFTER.signin = function(){
   /* the error is shown once, then cleared, so it can't haunt later visits to this page */
   var hadErr = !!CG._oauthErr; CG._oauthErr = null;
+  /* an abandoned OAuth round-trip (user bailed at Discord, then came back) would leave the
+     "Completing sign-in…" screen up forever — if no session lands, fall back to the button */
+  if (CG._oauthPending && !(CG.auth && CG.auth.profile)){
+    setTimeout(function(){
+      if (CG._oauthPending && !(CG.auth && CG.auth.profile)){
+        CG._oauthPending = false;
+        if (location.hash.indexOf("#/signin")===0 && CG.router) CG.router();
+      }
+    }, 15000);
+  }
   var b = document.getElementById("dcSignIn"); if (b) b.addEventListener("click", function(){ CG.signIn(); });
   var lk = document.getElementById("dcLink");
   if (lk) lk.addEventListener("click", function(){
