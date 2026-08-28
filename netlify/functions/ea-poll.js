@@ -97,7 +97,15 @@ export default async () => {
     for (const c of clubs) {
       try {
         const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${c}`;
-        const r = await uFetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, dispatcher });
+        /* full fingerprint, KEPT IN SYNC with eaFetch in ingest-stats.js/pickup-import.js —
+           and no title-pinned referer, so nothing here needs touching when a new NHL ships */
+        const r = await uFetch(url, { headers: {
+          "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+          "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
+          "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+          "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+          "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
+        }, dispatcher });
         if (!r.ok) { clubErrors.push(`club ${c}: EA ${r.status}`); console.error(`ea-poll club ${c}: EA ${r.status}${r.status === 403 ? " (IP blocked — needs residential HTTPS_PROXY)" : ""}`); continue; }
         const data = await r.json();
         if (Array.isArray(data)) for (const m of data) if (m && m.matchId) byId.set(String(m.matchId), m);

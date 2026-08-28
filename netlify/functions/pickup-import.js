@@ -250,6 +250,63 @@ export const handler = async (event) => {
     catch (e) { out.eaTest = String(e.message || e); }
     return reply(out);
   }
+  /* Release-day readiness probe (built for the NHL 27 launch, useful every year):
+     GET ?diag=ea27check&club=<name>   — searches EA for the club, pulls its recent private
+     matches through the production transport (residential proxy), and checks the response
+     against EVERY field the ingest parsers read. "contract.ok" true = the pipeline's
+     assumptions hold on whatever title EA is serving. Optional &clubId= skips the search. */
+  if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag === "ea27check") {
+    const qp = event.queryStringParameters || {};
+    const out = { platform: PLATFORM };
+    try {
+      let clubId = String(qp.clubId || "").trim(), clubName = null;
+      if (!clubId) {
+        const name = String(qp.club || "").trim();
+        if (!name) return reply({ error: "pass &club=<EA club name> (or &clubId=)" }, 400);
+        const d = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);
+        const list = Array.isArray(d)
+          ? d.map((c) => ({ clubId: String(c.clubId || c.clubInfo?.clubId || ""), name: c.name || c.clubInfo?.name }))
+          : Object.entries(d || {}).map(([cid, c]) => ({ clubId: String((c && c.clubId) || cid), name: (c && (c.name || (c.clubInfo && c.clubInfo.name))) || null }));
+        const found = list.filter((c) => c.clubId && c.name);
+        out.search = { count: found.length, first: found[0] || null };
+        if (!found.length) return reply(out);
+        clubId = found[0].clubId; clubName = found[0].name;
+      }
+      const raw = await eaClubMatches(clubId);
+      const matches = Array.isArray(raw) ? raw : [];
+      out.matches = { clubId, clubName, count: matches.length };
+      const m = matches[0];
+      if (m) {
+        const missing = [];
+        if (!m.matchId) missing.push("matchId");
+        if (!m.timestamp) missing.push("timestamp");
+        const cids = Object.keys(m.clubs || {});
+        if (cids.length !== 2) missing.push(`clubs (2 sides, saw ${cids.length})`);
+        const c0 = (m.clubs || {})[cids[0]] || {};
+        if (c0.score == null) missing.push("clubs.score");
+        if (!(c0.details && c0.details.name)) missing.push("clubs.details.name");
+        const roster = (m.players && m.players[cids[0]]) || {};
+        const p0 = Object.values(roster)[0];
+        if (!p0) missing.push("players roster");
+        else {
+          for (const f of ["position","playername","toiseconds","skgoals","skassists","skshots","skhits","skpim",
+                           "skplusmin","sktakeaways","skgiveaways","skfow","skfol","skppg","skshg","skgwg","skbs",
+                           "skinterceptions","skpasses","skpassattempts","skshotattempts","skpossession",
+                           "skpenaltiesdrawn","skdeflections","sksaucerpasses"])
+            if (p0[f] === undefined) missing.push(f);
+          const goalie = Object.values(m.players[cids[0]] || {}).concat(Object.values(m.players[cids[1]] || {}))
+            .find((p) => String(p.position || "").toLowerCase().includes("goalie"));
+          if (goalie) for (const f of ["glsaves","glshots","glga"]) { if (goalie[f] === undefined) missing.push(f); }
+          else out.matches.note = "no goalie in the sampled match — gl* fields unchecked";
+        }
+        out.contract = { ok: missing.length === 0, missing, matchId: String(m.matchId || "?"),
+          playedAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null };
+      } else {
+        out.contract = { ok: null, note: "club has no recent private matches — EA only keeps the last few; re-run after this club plays" };
+      }
+    } catch (e) { out.error = String(e.message || e); }
+    return reply(out);
+  }
   if (event.httpMethod !== "POST") return reply({ error: "POST only" }, 405);
   if (!SB_URL || !SB_KEY) return reply({ error: "server not configured" }, 500);
   const h = event.headers || {};
