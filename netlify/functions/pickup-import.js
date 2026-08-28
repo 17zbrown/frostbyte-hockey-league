@@ -257,13 +257,16 @@ export const handler = async (event) => {
      assumptions hold on whatever title EA is serving. Optional &clubId= skips the search. */
   if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag === "ea27check") {
     const qp = event.queryStringParameters || {};
-    const out = { platform: PLATFORM };
+    /* &platform= override: if a new title changes the platform pool token, this finds the
+       working one without a deploy (e.g. platform=common-gen6) */
+    const PLAT = String(qp.platform || PLATFORM).replace(/[^a-z0-9-]/gi, "");
+    const out = { platform: PLAT };
     try {
       let clubId = String(qp.clubId || "").trim(), clubName = null;
       if (!clubId) {
         const name = String(qp.club || "").trim();
         if (!name) return reply({ error: "pass &club=<EA club name> (or &clubId=)" }, 400);
-        const d = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);
+        const d = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLAT}&clubName=${encodeURIComponent(name)}`);
         const list = Array.isArray(d)
           ? d.map((c) => ({ clubId: String(c.clubId || c.clubInfo?.clubId || ""), name: c.name || c.clubInfo?.name }))
           : Object.entries(d || {}).map(([cid, c]) => ({ clubId: String((c && c.clubId) || cid), name: (c && (c.name || (c.clubInfo && c.clubInfo.name))) || null }));
@@ -272,7 +275,7 @@ export const handler = async (event) => {
         if (!found.length) return reply(out);
         clubId = found[0].clubId; clubName = found[0].name;
       }
-      const raw = await eaClubMatches(clubId);
+      const raw = await eaFetch(`https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLAT}&clubIds=${encodeURIComponent(clubId)}`);
       const matches = Array.isArray(raw) ? raw : [];
       out.matches = { clubId, clubName, count: matches.length };
       const m = matches[0];
