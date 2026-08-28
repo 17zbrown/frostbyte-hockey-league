@@ -57,6 +57,37 @@ async function recordResult(key, obj) {
   } catch {}
 }
 
+/* --- NHL 27 pre-launch canary (self-disabling) ---
+   EA drained the club registry when the backend flipped to the NHL 27 environment
+   (observed 2026-08-28: clubs/search returns {} for every name; title rollovers reset all
+   club ids). While NO club is linked, check every ~6h whether the registry is serving clubs
+   again — the moment a common-word search returns results, ping #league-staff ONCE:
+   that is the signal that clubs can be created in-game and linked in Control Center.
+   One-shot via the ea27_canary_alerted flag; linking any club stops the canary entirely. */
+async function nhl27Canary(dispatcher, uFetch) {
+  if (!SB_SVC) return;
+  const h = { apikey: SB_SVC, Authorization: `Bearer ${SB_SVC}`, "Content-Type": "application/json" };
+  try {
+    const fl = await (await fetch(`${SB_URL}/rest/v1/app_config?key=eq.ea27_canary_alerted&select=value`, { headers: h })).json();
+    if (fl && fl[0] && fl[0].value) return;
+    if (await ranRecently("ea27-canary", 6 * 3600)) return;
+    const r = await uFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=hockey`, {
+      headers: { "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com" },
+      dispatcher, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return;                       /* API down/blocked — just try again next window */
+    const data = await r.json();
+    const n = Array.isArray(data) ? data.length : Object.keys(data || {}).length;
+    if (!n) return;                          /* registry still empty — keep waiting */
+    const wh = await (await fetch(`${SB_URL}/rest/v1/app_config?key=eq.discord_staff_webhook&select=value`, { headers: h })).json();
+    const hook = wh && wh[0] && wh[0].value;
+    if (hook) await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "**EA's club registry is live again** — clubs/search is returning NHL 27 clubs (" + n + " for \"hockey\"). Clubs can now be created in-game and their EA ids linked in Control Center \u2192 Clubs / Team HQ. The stats auto-import starts working as soon as clubs are linked.\n\nContract check first: https://chelgamingleague.com/api/pickup-import?diag=ea27check&club=<your club name>", username: "CGHL Automations" }) });
+    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...h, Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: "ea27_canary_alerted", value: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+    console.log("ea-poll: NHL 27 canary fired — registry live, staff alerted");
+  } catch (e) { console.warn("ea-poll canary:", String(e && e.message || e)); }
+}
+
 export default async () => {
   if (!SB_URL || !SB_KEY || !INGEST_KEY) {
     console.log("ea-poll: missing env (need SUPABASE_URL/ANON_KEY + INGEST_KEY) — skipping");
@@ -64,6 +95,13 @@ export default async () => {
   }
   if (await ranRecently("ea-poll", 90)) return json({ skipped: "ran moments ago" });
   try {
+    /* the canary runs OUTSIDE the game-window gate: pre-launch there are no games, and the
+       whole point is to hear the registry come back on whatever day EA flips it on */
+    {
+      const { ProxyAgent, fetch: uFetch } = await import("undici");
+      const noClubs = !(await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id&limit=1`)).length;
+      if (noClubs) await nhl27Canary(PROXY ? new ProxyAgent(PROXY) : undefined, uFetch);
+    }
     // Only poll during the league's game window: Wed 6pm ET -> Sat 2am ET (continuous, every week).
     // Enforced in America/New_York so it stays correct across daylight saving (a fixed-UTC cron can't).
     if (!inGameWindow()) {
@@ -106,7 +144,18 @@ export default async () => {
           "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
           "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
         }, dispatcher });
-        if (!r.ok) { clubErrors.push(`club ${c}: EA ${r.status}`); console.error(`ea-poll club ${c}: EA ${r.status}${r.status === 403 ? " (IP blocked — needs residential HTTPS_PROXY)" : ""}`); continue; }
+        if (!r.ok) {
+          /* three distinct failure classes, so the Automations chip says what actually broke:
+             a stale club id (title rollover reset it), an Akamai block, or a transient EA error.
+             None of them may ever read as "0 new games". */
+          const body = await r.text().catch(() => "");
+          const msg = /CLUBS_ERR_INVALID_CLUB_ID/i.test(body)
+            ? `club ${c}: EA says this club id no longer exists — an NHL title rollover resets every club id. Re-link the club's EA id (Team HQ \u2192 Club game stats, or Control Center \u2192 Clubs).`
+            : (r.status === 403 || /Access Denied|edgesuite/i.test(body))
+              ? `club ${c}: EA blocked the request (Akamai 403) — rotating residential proxy should retry next run`
+              : `club ${c}: EA ${r.status} (transient?)`;
+          clubErrors.push(msg); console.error("ea-poll " + msg); continue;
+        }
         const data = await r.json();
         if (Array.isArray(data)) for (const m of data) if (m && m.matchId) byId.set(String(m.matchId), m);
       } catch (e) { clubErrors.push(`club ${c}: ${e.message}`); console.error(`ea-poll club ${c}: ${e.message}`); }
