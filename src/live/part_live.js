@@ -3231,8 +3231,25 @@ CG.startDraftClock = function(){
     var el=document.getElementById("draftClock"); if(!el){ clearInterval(CG._draftClockTimer); CG._draftClockTimer=null; return; }
     if(status==="paused"){ el.textContent = remaining!==""? fmt(parseInt(remaining,10)) : "--:--"; el.style.color="var(--steel)"; return; }
     var left=(Date.parse(ends)-Date.now())/1000;
+    CG._draftHeartbeat();
     if(left<=0){ el.textContent="0:00"; el.style.color="var(--red)";
-      if(canAdvance && !CG._draftAdvancing){ CG._draftAdvancing=true; CG.sb.rpc("draft_auto_advance",{ p_season_number:sn }).then(function(){ setTimeout(function(){ CG._draftAdvancing=false; },1500); }).catch(function(){ CG._draftAdvancing=false; }); }
+      /* A stalled clock must be visible, and a failing RPC must not be hammered: back off
+         (1.5s, 3s, 6s, 12s ... to 60s) and say so on the desk after a few failures. */
+      if(canAdvance && !CG._draftAdvancing && CG.now() >= (CG._draftAdvanceAfter||0)){
+        CG._draftAdvancing=true;
+        CG.sb.rpc("draft_auto_advance",{ p_season_number:sn }).then(function(r){
+          if (r && r.error) throw new Error(r.error.message);
+          CG._draftAdvanceFails = 0; CG._draftAdvanceAfter = 0;
+          setTimeout(function(){ CG._draftAdvancing=false; },1500);
+        }).catch(function(e){
+          CG._draftAdvancing=false;
+          CG._draftAdvanceFails = (CG._draftAdvanceFails||0) + 1;
+          CG._draftAdvanceAfter = CG.now() + Math.min(60000, 1500 * Math.pow(2, CG._draftAdvanceFails-1));
+          console.error("draft_auto_advance failed", e);
+          if (CG._draftAdvanceFails === 3 && CG.toast)
+            CG.toast("The draft clock can't advance itself \u2014 a commissioner should skip the pick manually.","err");
+        });
+      }
     } else { el.textContent=fmt(left); el.style.color = left<15?"var(--red)":""; }
   }
   tick(); CG._draftClockTimer=setInterval(tick,1000);
@@ -3253,6 +3270,17 @@ CG.loadSpectatorDraft = async function(){
     var curSn = (CG.SEASON && CG.SEASON.number) || 1;
     CG.lg.draftState = states.find(function(st){ return st.season_number===curSn; }) || null;
   } catch(e){}
+};
+/* Draft night runs for hours on one open page. A dropped socket used to null the channel and
+   stop there — the board froze at the last pick received, the clock counted down from a stale
+   value, and nobody was told. The tick loops now re-arm the channel, and a slow heartbeat
+   refreshes the board even if realtime never comes back. */
+CG._draftHeartbeat = function(){
+  var st = CG.lg && CG.lg.draftState;
+  if (!st || (st.status !== "live" && st.status !== "paused")) return;
+  if (!CG._draftChannel) CG.subscribeDraft();
+  var last = CG._draftBeatAt || 0;
+  if (CG.now() - last > 20000){ CG._draftBeatAt = CG.now(); CG.refreshDraft(); }
 };
 CG.subscribeDraft = function(){
   if(CG._draftChannel || !CG.sb) return;
@@ -4402,7 +4430,12 @@ CG.poolState = function(pid){
   /* v2.22: a player who has not met the pre-season requirement is not in the draft (Rule 2.8).
      He still plays — Rule 2.2 places him on a club automatically — so this is a distinct state,
      not a dead end. */
-  if (!draftDone && !CG.isDraftEligible(pid))
+  /* Only a warning once there are games he could actually have played. Before the pre-season
+     opens, nobody can have appearances, so this branch labelled EVERY sign-up in the league
+     "Needs pre-season games" on the public players page. */
+  var _preOpen = CG.SEASON && CG.SEASON.preseason_starts_at
+    && Date.parse(CG.SEASON.preseason_starts_at) <= CG.now();
+  if (!draftDone && _preOpen && !CG.isDraftEligible(pid))
     return { key:"needs_preseason", label:"Needs pre-season games", chip:"chip-warn" };
   if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
   /* Rule 2.2 rights classes, on the NHL's model. A player who has never finished a season for a
@@ -5450,9 +5483,17 @@ CG.saveEAClub = function(teamId, code){
   var eaId=(idEl.value||"").trim(), eaName=(nameEl.value||"").trim();
   if (eaId && !/^\d+$/.test(eaId)){ CG.toast("EA club id should be numbers only","err"); return; }
   var btn=document.querySelector('[data-ea-save="'+teamId+'"]'); if(btn){ btn.disabled=true; btn.textContent="Saving…"; }
-  CG.sb.from("teams").update({ ea_club_id: eaId||null, ea_club_name: eaName||null }).eq("id",teamId).then(function(r){
+  CG.sb.from("teams").update({ ea_club_id: eaId||null, ea_club_name: eaName||null }).eq("id",teamId).select("id").then(function(r){
     if(btn){ btn.disabled=false; btn.textContent="Save"; }
     if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+    /* An RLS-blocked UPDATE returns zero rows and NO error. Without this check the desk toasted
+       "EA link saved", painted the club as linked, and the poller then had nothing to poll —
+       the stats pipeline would look configured and import nothing all season. */
+    if(!(r.data||[]).length){
+      CG.toast("That didn’t save — the database refused the write. Sign in as a commissioner and try again.","err");
+      if(CG.reloadLeague) CG.reloadLeague(); else CG.router();
+      return;
+    }
     var t=CG.TEAM[code]; if(t){ t.eaClubId=eaId||null; t.eaClub=eaName||null; }
     CG.toast(code+" EA link saved","ok"); CG.router();
   });
@@ -10346,14 +10387,22 @@ CG.hubFreeAgents = function(){
   /* Two tracks (Rule 2.2): RETURNING players (drafted/rostered before) sign through open free agency
      here; undrafted FIRST-years are won on the bidding
      board. isReturning (not isVeteran) is the split — 5 pre-season games alone don't make a veteran. */
-  var pool=(lg._registrationsRaw||[]).filter(function(r){
-    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
-      lg.isReturning(r.profile_id);
-  }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  var faFree=function(r){
+    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" &&
+      !rosteredIds[r.profile_id] && !faHeld[r.profile_id];
+  };
+  var byOvr=function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); };
   var bidPool=(lg._registrationsRaw||[]).filter(function(r){
-    return (!r.season_id || r.season_id===s.id) && r.status!=="declined" && !rosteredIds[r.profile_id] && !faHeld[r.profile_id] &&
-      !lg.isReturning(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) >= 5;
-  }).sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+    return faFree(r) && !lg.isReturning(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) >= 5;
+  }).sort(byOvr);
+  /* The open board is the COMPLEMENT of the bidding board, not "returning players only".
+     Filtering on isReturning left every undrafted first-year with fewer than five pre-season
+     games on NEITHER board — in Season 1, where nobody is returning, that is most of the league:
+     unrostered, unsignable, invisible to every club with holes to fill. */
+  var inBid={}; bidPool.forEach(function(r){ inBid[r.profile_id]=true; });
+  var pool=(lg._registrationsRaw||[]).filter(function(r){
+    return faFree(r) && !inBid[r.profile_id];
+  }).sort(byOvr);
   var aucById = {}; (lg._rookieAuctions||[]).forEach(function(a){ aucById[a.profile_id]=a; });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+

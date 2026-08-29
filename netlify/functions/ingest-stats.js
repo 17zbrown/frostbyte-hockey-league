@@ -221,14 +221,28 @@ async function resolveProfile(entry, seasonId, cache) {
   if (cache.has(entry.ea_player_id)) return cache.get(entry.ea_player_id);
   let pid = null;
   const gt = (entry.gamertag || "").replace(/[%,()*]/g, "").trim();
+  /* `_` is a single-character WILDCARD in LIKE/ILIKE, and gamertags are full of underscores:
+     "Dangle_47" matched "DangleX47" just as happily. These two steps are meant to be EXACT
+     matches, so escape the metacharacters and refuse when two people match rather than taking
+     whichever row the database happened to return first — a stat line welded to the wrong human
+     is nearly impossible to spot later. */
+  const likeSafe = (v) => v.replace(/([\\%_])/g, "\\$1");
   if (gt) {
     // 1) prior link by EA persona id
     const prev = await sbGet(`game_stats?ea_player_id=eq.${encodeURIComponent(entry.ea_player_id)}&profile_id=not.is.null&select=profile_id&limit=1`);
     if (prev[0]) pid = prev[0].profile_id;
-    // 2) site gamertag
-    if (!pid) { const pr = await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(gt)}&select=id&limit=1`); if (pr[0]) pid = pr[0].id; }
-    // 3) EA id captured at signup for this season
-    if (!pid && seasonId) { const rg = await sbGet(`season_registrations?season_id=eq.${seasonId}&ea_id=ilike.${encodeURIComponent(gt)}&select=profile_id&limit=1`); if (rg[0]) pid = rg[0].profile_id; }
+    // 2) site gamertag — exact, and never a guess between two people
+    if (!pid) {
+      const pr = await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`);
+      const ids = [...new Set((pr || []).map((r) => r.id))];
+      if (ids.length === 1) pid = ids[0];
+    }
+    // 3) EA id captured at signup for this season — same rule
+    if (!pid && seasonId) {
+      const rg = await sbGet(`season_registrations?season_id=eq.${seasonId}&ea_id=ilike.${encodeURIComponent(likeSafe(gt))}&select=profile_id&limit=2`);
+      const ids = [...new Set((rg || []).map((r) => r.profile_id))];
+      if (ids.length === 1) pid = ids[0];
+    }
     // 4) squashed-pattern fallback across every name field a player owns
     if (!pid) pid = await fuzzyProfile(gt);
   }

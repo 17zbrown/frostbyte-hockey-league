@@ -1594,7 +1594,10 @@ CG.playoffBracket = function(){
 
   /* ----- LIVE postseason: real series grouped by round (week) ----- */
   if (live){
-    var bestOf = (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 3;
+    /* ONE definition of the series length for the whole site. This used to default to 3 while
+       CG.playoffBestOf defaulted to 7, so the public bracket crowned a champion after two wins. */
+    var bestOf = CG.playoffBestOf ? CG.playoffBestOf()
+      : ((CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 7);
     var need = Math.floor(bestOf/2)+1;
     /* collapse each round's games into series keyed by the club pair */
     var seriesByRound = {1:{},2:{},3:{}};

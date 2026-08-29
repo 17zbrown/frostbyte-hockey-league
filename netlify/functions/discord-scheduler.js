@@ -83,18 +83,51 @@ async function postWithRetry(url, headers, payload) {
 // a table, which trains people to mute the exact channels that later carry game reminders. The
 // role pills still RENDER with parse:[], they just don't notify. Pass { ping: true } only when the
 // post is genuinely FOR the people it names.
+/* Discord caps a message at 2000 characters. Split on line boundaries so nothing is lost; a
+   single line longer than the cap is the only thing ever truncated. */
+function splitForDiscord(text) {
+  const chunks = [];
+  let buf = "";
+  for (const line of String(text == null ? "" : text).split("\n")) {
+    const piece = line.length > 1990 ? line.slice(0, 1990) : line;
+    if ((buf + "\n" + piece).length > 1990) { if (buf) chunks.push(buf); buf = piece; }
+    else buf = buf ? buf + "\n" + piece : piece;
+  }
+  if (buf) chunks.push(buf);
+  return chunks;
+}
 async function postWebhook(url, content, opts = {}) {
   if (!url) return { ok: false, status: 0, error: "no webhook url" };
-  return postWithRetry(url, { "Content-Type": "application/json" },
-    { content: content.slice(0, 1990), allowed_mentions: opts.ping ? { parse: ["users", "roles"] } : { parse: [] } });
+  /* Discord caps a message at 2000 characters. Silently slicing meant the weekly schedule lost
+     its last ~20 games AND the whole Featured Matchups block while the job reported success.
+     Split on line boundaries and post every part; the first part decides ok/failed. */
+  const text = String(content == null ? "" : content);
+  const mentions = opts.ping ? { parse: ["users", "roles"] } : { parse: [] };
+  if (text.length <= 1990) {
+    return postWithRetry(url, { "Content-Type": "application/json" }, { content: text, allowed_mentions: mentions });
+  }
+  const chunks = splitForDiscord(text);
+  let first = null;
+  for (const c of chunks) {
+    const r = await postWithRetry(url, { "Content-Type": "application/json" }, { content: c, allowed_mentions: mentions });
+    if (!first) first = r;
+    if (!r.ok) break;      /* stop rather than spray half a schedule at a broken webhook */
+  }
+  return first || { ok: false, status: 0, error: "nothing to post" };
 }
 // Game reminders go to a club's own private room and are addressed to that club — this ping is
 // the whole point of the message, so it keeps parse:["roles"].
 async function postChannel(channelId, content) {
   if (!BOT || !channelId) return { ok: false, status: 0, error: BOT ? "no channel id" : "no bot token" };
-  return postWithRetry(`https://discord.com/api/v10/channels/${channelId}/messages`,
-    { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-    { content: content.slice(0, 1990), allowed_mentions: { parse: ["users", "roles"] } });
+  const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+  const head = { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" };
+  let first = null;
+  for (const c of splitForDiscord(content)) {
+    const r = await postWithRetry(url, head, { content: c, allowed_mentions: { parse: ["users", "roles"] } });
+    if (!first) first = r;
+    if (!r.ok) break;
+  }
+  return first || { ok: false, status: 0, error: "nothing to post" };
 }
 // This endpoint is publicly HTTP-invocable; debounce anonymous floods (posts are already dedup'd by claim()).
 async function ranRecently(key, sec) {

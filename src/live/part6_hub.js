@@ -511,9 +511,19 @@ CG.clubUpcomingGames = function(club, limit){
   }).sort(function(a,b){ return a.at-b.at; });
   return limit ? out.slice(0, limit) : out;
 };
-/* All of one night's upcoming games for a club (dressing a night covers every game in it). */
+/* All of ONE night's upcoming games for a club (dressing a night covers every game in it).
+   nightKey is a weekday ("wed"), and matching on the weekday alone returned every Wednesday
+   left in the season — so "whole night" dressed ~45 games stretching into December instead of
+   tonight's three. Anchor on the ET calendar date of the NEXT game that falls on that weekday. */
+CG.etDay = function(at){
+  try { return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(at)); }
+  catch(e){ return String(at); }
+};
 CG.nightGames = function(club, nightKey){
-  return CG.clubUpcomingGames(club).filter(function(g){ return CG.gameNight(g)===nightKey; });
+  var all = CG.clubUpcomingGames(club).filter(function(g){ return CG.gameNight(g)===nightKey; });
+  if (!all.length) return all;
+  var day = CG.etDay(all[0].at);          /* soonest-first, so [0] is the night in question */
+  return all.filter(function(g){ return CG.etDay(g.at)===day; });
 };
 /* one game's server-pick controls (compact, used by the Schedule desk).
    `lockAt` is 30 min before the NIGHT'S FIRST puck drop — servers stay unset
@@ -799,7 +809,10 @@ CG.AFTER._lineup = function(){
       emg?"This game already locked. EACH player changed costs the club one in-game penalty, served in this game (Rule 5.3) — the opponent already sees the locked lineup, so change only who you must."
          :"Your six starters go to the league office and release to the opponent when the lineup locks, 30 minutes before puck drop. You can resubmit until the lock.",
       emg?"Submit emergency call-up":"Submit lineup", function(){
-      save("Lineup submitted to the league office","submitted");
+      /* Do NOT claim it is submitted yet — the server may refuse (lock, suspension, roster
+         shape). Keep the slots, leave the status alone, and only report success below when the
+         RPC actually answers. A refused write used to leave a permanent green "submitted". */
+      save(emg?"Emergency call-up sent…":"Sending lineup…");
       /* Persist through the server-enforced lock. set_game_lineup() rejects post-lock edits unless
          p_emergency is set, which only club management can do (Rule 5.3) — the lock is enforced in
          the database, so no client can bypass it. */
@@ -818,9 +831,18 @@ CG.AFTER._lineup = function(){
           var okN = 0, errs = [];
           (function next(i){
             if (i >= targets.length){
+              if (okN){
+                /* only now is it true */
+                save(emg?"Emergency call-up submitted":"Lineup submitted to the league office","submitted");
+                CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted",
+                  "vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
+                CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
+              }
               if (errs.length) CG.toast((okN?("Dressed "+okN+"; "):"")+"refused: "+errs.join("; "),"err");
               else if (wholeNight) CG.toast("Submitted for all "+okN+" game"+(okN===1?"":"s")+" tonight","ok");
+              else CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
               if (CG._luEmergency) delete CG._luEmergency[game.id];
+              CG.renderChrome();
               return;
             }
             var g = targets[i];
@@ -834,10 +856,15 @@ CG.AFTER._lineup = function(){
           })(0);
         }
       }
-      CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
-      CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
-      CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
-      CG.renderChrome();
+      /* success is reported from the RPC callback above — in demo mode (no Supabase) there is
+         no server to answer, so report it here instead */
+      if (!(CG.LIVE_MODE && CG.sb)){
+        save(emg?"Emergency call-up submitted":"Lineup submitted to the league office","submitted");
+        CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
+        CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
+        CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
+        CG.renderChrome();
+      }
     });
   });
   var emBtn = $("#luEmergency");

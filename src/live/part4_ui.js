@@ -1411,7 +1411,20 @@ CG.router = function(){
   var sameRoute = CG._lastRoutedHash === h;
   var keepY = sameRoute ? (window.scrollY || 0) : 0;
   CG._lastRoutedHash = h;
-  app.innerHTML = '<div class="pg">'+fn(param, qs)+'</div>';
+  /* A route that throws must not leave the previous page on screen pretending to be this one —
+     the reader would act on a stale page. Render an honest error card instead. */
+  var _html;
+  try { _html = fn(param, qs); }
+  catch(e){
+    console.error("route "+name+" failed", e);
+    _html = '<section class="sec"><div class="shell"><div class="empty" style="padding:64px 20px">'+
+      '<div class="e-art">!</div><b>This page hit an error</b>'+
+      '<p>The rest of the site still works. If it keeps happening, tell the league office'+
+      ' \u2014 the details are in the browser console.</p>'+
+      '<button class="btn btn-ghost" style="margin-top:14px" onclick="location.reload()">Reload</button>'+
+      '</div></div></section>';
+  }
+  app.innerHTML = '<div class="pg">'+_html+'</div>';
   window.scrollTo({top:keepY, left:0, behavior:"instant"});
   CG.markActiveNav();
   /* a11y: every clickable data-go target is keyboard-reachable */

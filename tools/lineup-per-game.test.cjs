@@ -12,12 +12,12 @@ const src = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part6_hub
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
-const ctx = { console, Math, Object, Array, String, Number, JSON, Date };
+const ctx = { console, Math, Object, Array, String, Number, JSON, Date, Intl };
 ctx.window = ctx; ctx.globalThis = ctx;
 const NOW = Date.parse("2026-09-16T18:00:00-04:00");   // 6pm ET on the first pre-season night
 ctx.CG = { now: () => NOW, gameNight: (g) => g.night, hqClub: () => "TOR", me: () => ({ team: "TOR" }) };
 vm.createContext(ctx);
-for (const fn of ["lineupGameFor", "clubUpcomingGames", "nightGames"]) {
+for (const fn of ["lineupGameFor", "clubUpcomingGames", "etDay", "nightGames"]) {
   const m = src.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n\\};"));
   if (!m) { A("located CG." + fn, false); process.exit(1); }
   vm.runInContext(m[0], ctx);
@@ -28,7 +28,11 @@ const wed1 = { id: "11111111-1111-4111-8111-111111111111", home: "TOR", away: "B
 const wed2 = { id: "22222222-2222-4222-8222-222222222222", home: "MTL", away: "TOR", night: "wed", status: "scheduled", at: Date.parse("2026-09-16T21:35:00-04:00") };
 const wed3 = { id: "33333333-3333-4333-8333-333333333333", home: "TOR", away: "PIT", night: "wed", status: "scheduled", at: Date.parse("2026-09-16T22:10:00-04:00") };
 const thu1 = { id: "44444444-4444-4444-8444-444444444444", home: "TOR", away: "SEA", night: "thu", status: "scheduled", at: Date.parse("2026-09-17T21:00:00-04:00") };
-ctx.CG.lg = { schedule: [wed1, wed2, wed3, thu1], tonight: [wed1, wed2, wed3] };
+/* NEXT week's Wednesday: "whole night" used to match on the weekday alone and swept these in too,
+   dressing games weeks away — the checkbox reported "3 games" and wrote ~45. */
+const wedNext1 = { id: "55555555-5555-4555-8555-555555555555", home: "TOR", away: "VAN", night: "wed", status: "scheduled", at: Date.parse("2026-09-23T21:00:00-04:00") };
+const wedNext2 = { id: "66666666-6666-4666-8666-666666666666", home: "PIT", away: "TOR", night: "wed", status: "scheduled", at: Date.parse("2026-09-23T21:35:00-04:00") };
+ctx.CG.lg = { schedule: [wed1, wed2, wed3, thu1, wedNext1, wedNext2], tonight: [wed1, wed2, wed3] };
 
 function hashTo(qs) { ctx.location = { hash: "#/hub/lineup" + (qs ? "?" + qs : "") }; }
 
@@ -45,10 +49,12 @@ console.log("\n— the night is all its games, not one");
 {
   const wed = ctx.CG.nightGames("TOR", "wed");
   A("Wednesday has all three TOR games", wed.length === 3, wed.map((g) => g.id).join(","));
+  A("...and ONLY tonight's — not next Wednesday's as well",
+    !wed.some((g) => g.id.startsWith("55555555") || g.id.startsWith("66666666")));
   A("...in slot order", wed[0].id === "11111111-1111-4111-8111-111111111111" && wed[2].id === "33333333-3333-4333-8333-333333333333");
   A("Thursday has one", ctx.CG.nightGames("TOR", "thu").length === 1);
   const up = ctx.CG.clubUpcomingGames("TOR");
-  A("all four upcoming games are seen", up.length === 4);
+  A("all six upcoming games are seen", up.length === 6);
   A("...capped when asked", ctx.CG.clubUpcomingGames("TOR", 2).length === 2);
 }
 
