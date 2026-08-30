@@ -25,7 +25,8 @@ console.log("— draft night survives a long, lossy evening");
   A("a dropped realtime channel re-arms from the clock tick", /CG\._draftHeartbeat\(\);/.test(live));
   A("...and the heartbeat re-subscribes when the channel is gone",
     /if \(!CG\._draftChannel\) CG\.subscribeDraft\(\);/.test(live));
-  A("...and refreshes the board even if realtime never returns", /CG\._draftBeatAt = CG\.now\(\); CG\.refreshDraft\(\);/.test(live));
+  A("...and refreshes the board even if realtime never returns",
+    /CG\._draftBeatAt = CG\.now\(\);\s*\n\s*CG\.refreshDraftLite\(\)\.then\(CG\.repaintDraft\);/.test(live));
   A("auto-advance backs off instead of retrying every 1.5s forever", /CG\._draftAdvanceAfter = CG\.now\(\) \+ Math\.min\(60000/.test(live));
   A("...and a persistently stalled clock tells the room", /can't advance itself/.test(live));
   A("...and its failures are no longer swallowed", /console\.error\("draft_auto_advance failed", e\)/.test(live));

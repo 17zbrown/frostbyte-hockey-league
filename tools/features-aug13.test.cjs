@@ -214,8 +214,12 @@ console.log("\n— the adversarial review's confirmed findings stay fixed");
   /* 4 · the ticker orders by when the pick was made, not its number */
   A("the ticker sorts on pickedAt with overall as the legacy fallback",
     /Date\.parse\(b\.pickedAt\|\|""\)\|\|0\)-\(Date\.parse\(a\.pickedAt\|\|""\)\|\|0\) \|\| \(b\.overall\|\|0\)-\(a\.overall\|\|0\)/.test(live));
-  A("both draft selects fetch picked_at",
-    (live.match(/from\("draft_picks"\)\.select\("[^"]*picked_at/g) || []).length === 2);
+  /* three now: the manager reload, the spectator load, and the realtime reconcile refetch */
+  A("every draft select fetches picked_at",
+    (live.match(/from\("draft_picks"\)\.select\(/g) || []).length ===
+    (live.match(/from\("draft_picks"\)\.select\("[^"]*picked_at/g) || []).length);
+  A("...and there are three of them",
+    (live.match(/from\("draft_picks"\)\.select\("[^"]*picked_at/g) || []).length === 3);
 
   /* 5 · spectator hardening */
   A("only draft-running roles fire the auto-advance RPC",

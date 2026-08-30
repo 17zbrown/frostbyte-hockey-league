@@ -677,7 +677,10 @@ CG.buildLiveLeague = async function(){
      before, that was only set in the post-auth manager reload, so guests and members always
      saw an undefined board (every directory chip read "Not signed up") */
   lg._registrationsRaw = registrations;
-  CG.mapDraftData(lg, draftPicks, registrations);
+  /* the RAW board is kept alongside the mapped one so a realtime pick can be patched straight
+     in without a refetch — see CG.applyDraftRow */
+  lg._draftPicksRaw = draftPicks || [];
+  CG.mapDraftData(lg, lg._draftPicksRaw, registrations);
 
   CG.LIVE.loaded = true;
   return lg;
@@ -912,7 +915,8 @@ CG.loadManagerData = async function(){
     var regs = (q[1]&&!q[1].error&&q[1].data)||[];
     CG.lg._registrationsRaw = regs;
     if ((q[0]&&!q[0].error) || (q[1]&&!q[1].error)){
-      CG.mapDraftData(CG.lg, (q[0]&&!q[0].error&&q[0].data)||[], regs);
+      if (q[0]&&!q[0].error) CG.lg._draftPicksRaw = q[0].data||[];
+      CG.mapDraftData(CG.lg, CG.lg._draftPicksRaw||[], regs);
     }
     var states = (q[2]&&!q[2].error&&q[2].data)||[];
     /* the current draft is the CURRENT SEASON's — never keyed off stray pick rows, so
@@ -3265,12 +3269,79 @@ CG.loadSpectatorDraft = async function(){
       CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("overall_pick"),
       CG.sb.from("draft_state").select("*")
     ]);
-    if (q[0] && !q[0].error) CG.mapDraftData(CG.lg, q[0].data||[], CG.lg._registrationsRaw||[]);
+    if (q[0] && !q[0].error){ CG.lg._draftPicksRaw = q[0].data||[]; CG.mapDraftData(CG.lg, CG.lg._draftPicksRaw, CG.lg._registrationsRaw||[]); }
     var states = (q[1]&&!q[1].error&&q[1].data)||[];
     var curSn = (CG.SEASON && CG.SEASON.number) || 1;
     CG.lg.draftState = states.find(function(st){ return st.season_number===curSn; }) || null;
   } catch(e){}
 };
+/* ---- INSTANT pick propagation ----
+   A pick has to appear on every other club's board the moment it is made. Two things stood in
+   the way. The realtime handler called loadManagerData — FIFTEEN queries (owner applications,
+   staff ballots, application messages, game vetoes, a resolve_game_server RPC per upcoming
+   game) of which exactly two concern the draft — so every pick made every manager in the league
+   run all of it at once, and the update landed only after the slowest round trip. And nothing
+   used the event payload, so even a one-column change cost a network trip.
+   Now the payload IS the update: the changed row is patched into the raw board and re-mapped in
+   memory (zero network, sub-frame), the room repaints immediately, and a coalesced draft-only
+   refetch reconciles shortly after in case the event was partial — a cascade of auto-skips, or
+   a DELETE, whose payload carries only the primary key. */
+CG.applyDraftRow = function(row){
+  if (!row || !row.id || !CG.lg || !CG.lg._draftPicksRaw) return false;
+  var raw = CG.lg._draftPicksRaw, i = -1;
+  for (var k = 0; k < raw.length; k++){ if (raw[k].id === row.id){ i = k; break; } }
+  if (i >= 0) raw[i] = row; else raw.push(row);
+  CG.mapDraftData(CG.lg, raw, CG.lg._registrationsRaw||[]);
+  return true;
+};
+CG.applyDraftState = function(row){
+  if (!row || !CG.lg) return false;
+  if (row.season_number !== ((CG.SEASON && CG.SEASON.number) || 1)) return false;
+  CG.lg.draftState = row;
+  return true;
+};
+/* Repaint the room without stealing what anyone is doing: never redraw under an open dialog,
+   and carry the focused field's text and caret across the rebuild (seamless-interaction rule). */
+CG.repaintDraft = function(){
+  if (location.hash.indexOf("/draft") < 0) return;
+  var ov = document.getElementById("overlay-root");
+  if (ov && ov.innerHTML.trim()) return;
+  var a = document.activeElement, id = a && a.id;
+  var isField = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
+  var val = isField ? a.value : null, ss = isField ? a.selectionStart : null, se = isField ? a.selectionEnd : null;
+  if (CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else CG.router();
+  if (isField && id){
+    var n = document.getElementById(id);
+    if (n){ n.value = val; try { n.focus(); n.setSelectionRange(ss, se); } catch(e){} }
+  }
+};
+/* The two tables the draft room actually shows — nothing else. Single-flight, so a burst of
+   picks can never stack refetches on top of each other. */
+CG._draftLiteInFlight = null;
+CG.refreshDraftLite = function(){
+  if (!CG.sb || !CG.lg) return Promise.resolve();
+  if (CG._draftLiteInFlight) return CG._draftLiteInFlight;
+  CG._draftLiteInFlight = Promise.all([
+    CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("overall_pick"),
+    CG.sb.from("draft_state").select("*")
+  ]).then(function(q){
+    if (q[0] && !q[0].error){ CG.lg._draftPicksRaw = q[0].data||[]; CG.mapDraftData(CG.lg, CG.lg._draftPicksRaw, CG.lg._registrationsRaw||[]); }
+    if (q[1] && !q[1].error){
+      var curSn = (CG.SEASON && CG.SEASON.number) || 1;
+      CG.lg.draftState = (q[1].data||[]).find(function(st){ return st.season_number===curSn; }) || null;
+    }
+  }).catch(function(){}).then(function(){ CG._draftLiteInFlight = null; });
+  return CG._draftLiteInFlight;
+};
+CG._draftReconcileT = null;
+CG.reconcileDraftSoon = function(){
+  if (CG._draftReconcileT) return;                 /* a burst collapses into one refetch */
+  CG._draftReconcileT = setTimeout(function(){
+    CG._draftReconcileT = null;
+    CG.refreshDraftLite().then(CG.repaintDraft);
+  }, 700);
+};
+
 /* Draft night runs for hours on one open page. A dropped socket used to null the channel and
    stop there — the board froze at the last pick received, the clock counted down from a stale
    value, and nobody was told. The tick loops now re-arm the channel, and a slow heartbeat
@@ -3279,14 +3350,27 @@ CG._draftHeartbeat = function(){
   var st = CG.lg && CG.lg.draftState;
   if (!st || (st.status !== "live" && st.status !== "paused")) return;
   if (!CG._draftChannel) CG.subscribeDraft();
+  /* Realtime carries the room; this only covers a socket that died quietly. It costs two
+     queries, so it can run often without the 15-query weight the old path had. */
   var last = CG._draftBeatAt || 0;
-  if (CG.now() - last > 20000){ CG._draftBeatAt = CG.now(); CG.refreshDraft(); }
+  if (CG.now() - last > 10000){
+    CG._draftBeatAt = CG.now();
+    CG.refreshDraftLite().then(CG.repaintDraft);
+  }
 };
 CG.subscribeDraft = function(){
   if(CG._draftChannel || !CG.sb) return;
   CG._draftChannel = CG.sb.channel("draft-live")
-    .on("postgres_changes",{ event:"*", schema:"public", table:"draft_state" }, function(){ CG.refreshDraft(); })
-    .on("postgres_changes",{ event:"*", schema:"public", table:"draft_picks" }, function(){ CG.refreshDraft(); })
+    .on("postgres_changes",{ event:"*", schema:"public", table:"draft_state" }, function(p){
+      if (CG.applyDraftState(p && p.new)) CG.repaintDraft();
+      CG.reconcileDraftSoon();
+    })
+    .on("postgres_changes",{ event:"*", schema:"public", table:"draft_picks" }, function(p){
+      /* a DELETE payload carries only the primary key (replica identity default), so it cannot
+         be applied in place — the reconcile below picks it up */
+      if (p && p.eventType !== "DELETE" && CG.applyDraftRow(p.new)) CG.repaintDraft();
+      CG.reconcileDraftSoon();
+    })
     .subscribe(function(status){
       /* a dead socket must not look like a live one: drop the channel so the next visit to the
          room resubscribes instead of silently rendering a stale board all night */
