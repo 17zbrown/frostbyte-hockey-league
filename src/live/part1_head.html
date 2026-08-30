@@ -323,6 +323,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
    hidden until the funnel toggle in the last header cell switches it on, so tables stay
    clean by default and mobile isn't paying for a row of inputs it didn't ask for. */
 .tbl-fbtn{background:none;border:0;cursor:pointer;color:var(--steel);padding:2px 4px;margin-left:6px;font-size:11px;line-height:1;vertical-align:1px}
+/* the funnel was a 15x15 hit area — under the 44px touch minimum, and every table has one */
+@media (pointer:coarse){.tbl-fbtn{padding:12px;margin-left:2px;font-size:14px}}
 .tbl-fbtn:hover,.tbl-fbtn.on{color:var(--chrome-deep)}
 .tbl tr.tbl-filter th{padding:4px 6px;border-bottom:1px solid var(--line);background:var(--ice)}
 .tbl tr.tbl-filter input{width:100%;min-width:52px;padding:5px 7px;font:inherit;font-size:11.5px;border:1px solid var(--line);background:var(--paper);border-radius:0}

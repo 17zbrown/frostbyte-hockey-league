@@ -2824,6 +2824,7 @@ CG.AFTER.pickup = function(id){
 
 /* ---------- STATS CENTRAL ---------- */
 CG.ROUTES.stats = function(param, qs){
+  var _partial = (CG.statsPartialNote ? CG.statsPartialNote() : "");
   var lg = CG.lg;
   var tab = qs.tab||"skaters", minGp = qs.min===undefined? 3 : +qs.min, fTeam = qs.team||"";
   /* an empty table has two very different causes, and the reader can only act on one of them */
@@ -2915,7 +2916,7 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+r.hw+'">'+r.hw+"-"+r.hl+'</td><td data-v="'+r.aw+'">'+r.aw+"-"+r.al+'</td>'+
         '<td data-v="'+(r.ptsPct*100).toFixed(0)+'">'+(r.ptsPct*100).toFixed(0)+'%</td></tr>'; }).join("")+'</tbody></table>';
   }
-  return head + tabs + '<div class="card"><div class="tblwrap">'+table+'</div></div>'+
+  return head + _partial + tabs + '<div class="card"><div class="tblwrap">'+table+'</div></div>'+
     '<p class="caption" style="margin:14px 0 40px">Definitions: P/GP points per game · S% shooting percentage · TK takeaways · GV giveaways · GWG game-winning goals · FO% faceoff win rate · QS quality starts (≥.885 SV% in a start) · TOI/GP time on ice per game · Pass% pass completion · SAT shot attempts · INT interceptions · PD penalties drawn · OFF/DEF/TP EA offense / defense / team-play ratings · Brk% breakaway save rate. Everything is auto-imported from EA box scores — metrics the data can’t support aren’t shown.</p></div>';
 };
 CG.AFTER.stats = function(param, qs){

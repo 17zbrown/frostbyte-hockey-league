@@ -73,23 +73,50 @@ CG.LIVE = { loaded:false, error:null };
    grows past that (game_stats ~12 rows/final crosses it around week 3) must be paged, or box
    scores, season totals, leaders, and the career/eligibility counts quietly undercount.
    Returns a Supabase-shaped {data,error} so callers are unchanged. */
+/* Reads a whole table past PostgREST's 1000-row ceiling. Pages are fetched CONCURRENTLY: the old
+   loop awaited each page before asking for the next, so a table crossing N pages cost N round
+   trips in series — game_stats alone reaches ~7 pages by December, adding seconds to every page
+   load. One count, then every page at once. */
 CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
-  var page=1000, from=0, out=[], asc = ascending!==false;
+  var page=1000, asc = ascending!==false;
+  var build = function(){
+    var qb = CG.sb.from(table).select(sel||"*");
+    if (filterFn) qb = filterFn(qb);
+    if (orderCol) qb = qb.order(orderCol,{ ascending:asc });
+    return qb;
+  };
   try {
-    while (true){
-      var qb = CG.sb.from(table).select(sel||"*");
-      if (filterFn) qb = filterFn(qb);
-      if (orderCol) qb = qb.order(orderCol,{ ascending:asc });
-      var r = await qb.range(from, from+page-1);
-      if (r.error) return { data: out.length?out:null, error: r.error };
-      var rows = r.data||[];
-      out = out.concat(rows);
-      if (rows.length < page) break;
-      from += page;
-      if (from > 500000) break;   /* hard safety valve */
+    var first = await build().range(0, page-1);
+    if (first.error) return { data:null, error:first.error };
+    var rows = first.data||[];
+    if (rows.length < page) return { data: rows, error: null };
+
+    var cq = CG.sb.from(table).select(sel||"*", { count:"exact", head:true });
+    if (filterFn) cq = filterFn(cq);
+    var cr = await cq;
+    var total = (cr && !cr.error && typeof cr.count === "number") ? cr.count : null;
+    if (total == null){
+      /* count refused — walk it serially rather than silently losing rows */
+      var from = page, out = rows.slice();
+      while (true){
+        var r = await build().range(from, from+page-1);
+        if (r.error) return { data: out, error: r.error };
+        var rr = r.data||[];
+        out = out.concat(rr);
+        if (rr.length < page || from > 500000) break;
+        from += page;
+      }
+      return { data: out, error: null };
     }
+    var reqs = [];
+    for (var start = page; start < total; start += page) reqs.push(build().range(start, start+page-1));
+    var pages = await Promise.all(reqs);
+    for (var i=0; i<pages.length; i++){
+      if (pages[i].error) return { data: rows, error: pages[i].error };
+      rows = rows.concat(pages[i].data||[]);
+    }
+    return { data: rows, error: null };
   } catch(e){ return { data:null, error:e }; }
-  return { data: out, error: null };
 };
 
 /* Columns of `profiles` the public league load may read. Deliberately excludes the identity
@@ -102,6 +129,7 @@ CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,tw
 
 CG.buildLiveLeague = async function(){
   var sb = CG.sb;
+  CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
   if (!sb) throw new Error("Supabase client unavailable");
   var q = await Promise.all([
     sb.from("teams").select("*"),
@@ -141,6 +169,10 @@ CG.buildLiveLeague = async function(){
     CG.sbAll("suspensions","*","created_at",false),
     CG.sbAll("awards","*","week")
   ]);
+  if (q[12] && q[12].error){
+    CG.LIVE.partial.game_stats = String((q[12].error && q[12].error.message) || q[12].error);
+    console.warn("game_stats failed to load — stats shown will be incomplete", q[12].error);
+  }
   /* first 9 are public-readable and required; draft_picks (9) is manager-gated by
      RLS and fails for guests — optional here, reloaded after auth for managers.
      season_registrations (10) now arrives via the public registration_pool RPC so
@@ -175,6 +207,8 @@ CG.buildLiveLeague = async function(){
       _inSeason = function(r){ return !!(season && r && r.season_id === season.id); },
       draftPicks=(q[9]&&!q[9].error&&q[9].data)||[], registrations=(q[10]&&!q[10].error&&q[10].data)||[],
       leaguesRaw=(q[11]&&!q[11].error&&q[11].data)||[],
+      /* If the box-score load failed, say so. Coercing it to [] rendered every stat surface as
+         a confident row of zeros, and left draft night looking at an empty eligible pool. */
       gameStatsRows=(q[12]&&!q[12].error&&q[12].data)||[],
       flagsRaw=(q[13]&&!q[13].error&&q[13].data)||[],
       siteCfgRaw=(q[14]&&!q[14].error&&q[14].data)||[],
@@ -3572,9 +3606,14 @@ CG._draftHeartbeat = function(){
   /* Realtime carries the room; this only covers a socket that died quietly. It costs two
      queries, so it can run often without the 15-query weight the old path had. */
   var last = CG._draftBeatAt || 0;
-  if (CG.now() - last > 10000){
-    CG._draftBeatAt = CG.now();
-    CG.refreshDraftLite().then(CG.repaintDraft);
+  /* Stamp when the beat SETTLES, not when it starts. repaintDraft re-runs the router, which
+     re-arms the clock and ticks again synchronously — with a start-stamp, a reply slower than the
+     interval turned this safety poll into a continuous refetch loop on every open draft tab. */
+  if (!CG._draftBeating && CG.now() - last > 10000){
+    CG._draftBeating = true;
+    CG.refreshDraftLite().then(CG.repaintDraft).catch(function(){}).then(function(){
+      CG._draftBeating = false; CG._draftBeatAt = CG.now();
+    });
   }
 };
 CG.subscribeDraft = function(){
@@ -5918,9 +5957,13 @@ CG.liveReload = function(){
 CG.subscribeLeague = function(){
   if (!CG.sb || CG._leagueChannel) return;
   try {
+    /* ONLY games. Every ingest path writes game_stats (a DELETE plus a 12-row POST, which fires
+       up to a dozen realtime events) and THEN patches games to final — so the games event already
+       means "this game's results are in", and it arrives once instead of a dozen times.
+       Subscribing to game_stats too made every connected tab, guests included, rebuild the whole
+       league a dozen times per game. */
     CG._leagueChannel = CG.sb.channel("league-live")
-      .on("postgres_changes",{ event:"*", schema:"public", table:"games" },      function(){ CG.liveReload(); })
-      .on("postgres_changes",{ event:"*", schema:"public", table:"game_stats" }, function(){ CG.liveReload(); })
+      .on("postgres_changes",{ event:"*", schema:"public", table:"games" }, function(){ CG.liveReload(); })
       .subscribe();
   } catch(e){}
 };
@@ -6321,7 +6364,12 @@ CG.removeTeam = function(teamId, name){
     CG.sb.from("roster_spots").select("id",{count:"exact",head:true}).eq("team_id",teamId),
     CG.sb.from("games").select("id",{count:"exact",head:true}).or("home_team_id.eq."+teamId+",away_team_id.eq."+teamId)
   ]).then(function(rs){
-    var spots=(rs[0]&&rs[0].count)||0, games=(rs[1]&&rs[1].count)||0;
+    var spots=CG.safeCount(rs[0]), games=CG.safeCount(rs[1]);
+    if (spots==null || games==null){
+      /* an unreadable count must never read as "nothing to lose" — fail closed */
+      CG.toast("Couldn’t check what "+name+" still holds — not removing it. Try again.","err");
+      return;
+    }
     if (spots||games){
       CG.toast("Can’t remove "+name+" — it has "+(spots?spots+" rostered player"+(spots===1?"":"s"):"")+(spots&&games?" and ":"")+(games?games+" scheduled game"+(games===1?"":"s"):"")+". Reassign those first.","err");
       return;
@@ -9764,6 +9812,22 @@ CG.seasonForm = function(id){
     });
   });
 };
+/* A head-count that FAILS resolves as {count:null, error:…} — and `(rs[0]&&rs[0].count)||0` turned
+   that into a confident "0". The two most destructive confirmations in the app then showed every
+   deterrent reading zero. Counts fail CLOSED. */
+/* Stats surfaces must never present a degraded load as real numbers. */
+CG.statsPartialNote = function(){
+  var why = CG.LIVE && CG.LIVE.partial && CG.LIVE.partial.game_stats;
+  if (!why) return "";
+  return '<div class="note red" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+
+    (CG.ic?CG.ic("flag",16):"")+'<span><b style="font-family:var(--f-disp)">Box scores didn\u2019t load.</b> '+
+    'Every figure on this page is incomplete \u2014 treat it as unavailable, not as zero. '+
+    '<button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="CG.reloadLeague()">Retry</button></span></div>';
+};
+CG.safeCount = function(resp){
+  if (!resp || resp.error || typeof resp.count !== "number") return null;
+  return resp.count;
+};
 CG.deleteSeason = function(id, name){
   /* show exactly what goes with it, then require the name typed back */
   Promise.all([
@@ -9771,7 +9835,11 @@ CG.deleteSeason = function(id, name){
     CG.sb.from("roster_spots").select("id",{count:"exact",head:true}).eq("season_id",id),
     CG.sb.from("season_registrations").select("id",{count:"exact",head:true}).eq("season_id",id)
   ]).then(function(rs){
-    var games=(rs[0]&&rs[0].count)||0, spots=(rs[1]&&rs[1].count)||0, regs=(rs[2]&&rs[2].count)||0;
+    var games=CG.safeCount(rs[0]), spots=CG.safeCount(rs[1]), regs=CG.safeCount(rs[2]);
+    if (games==null || spots==null || regs==null){
+      CG.toast("Couldn’t read what this season contains — not opening the delete dialog. Try again.","err");
+      return;
+    }
     CG.modal("Delete "+esc(name)+"?",
       '<div class="note red" style="margin:0 0 14px"><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">This deletes the season and everything scheduled inside it:</b>'+
       games+' game'+(games===1?"":"s")+' (and their box scores) · '+spots+' roster spot'+(spots===1?"":"s")+' · '+regs+' registration'+(regs===1?"":"s")+'. Player accounts, clubs, and news are kept. This cannot be undone.</div>'+
@@ -11101,10 +11169,23 @@ CG.bootLive = async function(){
     ];
   } catch(e){
     CG.LIVE.error = String(e && e.message || e);
+    /* Render the CHROME first: without it the member is left on a blank page with one sentence
+       and no nav, and navigating away swapped the message for a spinner that never resolved. */
+    try { if (CG.renderChrome) CG.renderChrome(); } catch(_e){}
     if (app) app.innerHTML =
-      '<section class="sec"><div class="shell"><div class="empty" style="padding:80px 20px">'+
-      '<div class="e-art">'+(CG.ic?CG.ic("flag",22):"")+'</div><b>Couldn’t load live data</b>'+
-      '<p>'+(typeof esc==="function"?esc(CG.LIVE.error):"Something went wrong loading the league.")+'</p></div></div></section>';
+      '<section class="sec"><div class="shell"><div class="empty" style="padding:72px 20px">'+
+      '<div class="e-art">'+(CG.ic?CG.ic("flag",22):"")+'</div><b>The league didn’t load</b>'+
+      '<p>This is almost always a dropped connection. Your account and data are fine.</p>'+
+      '<button class="btn btn-chrome" style="margin-top:16px" id="bootRetry">Try again</button>'+
+      '<p class="caption" style="margin-top:14px">'+(typeof esc==="function"?esc(CG.LIVE.error):"")+'</p>'+
+      '</div></div></section>';
+    var rb = document.getElementById("bootRetry");
+    if (rb) rb.addEventListener("click", function(){ rb.disabled = true; CG.bootLive(); });
+    /* and come back by itself when the network does */
+    if (!CG._bootOnlineArmed){
+      CG._bootOnlineArmed = true;
+      window.addEventListener("online", function(){ if (CG.LIVE && CG.LIVE.error) CG.bootLive(); });
+    }
     return;
   }
   CG.renderChrome();
