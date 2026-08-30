@@ -524,9 +524,10 @@ CG.deskTransactions = function(){
 
   h += '<div id="txBody"><p class="caption">Loading trades…</p></div>';
 
-  h += CG.deskCeiling("This desk reads. Accepting or declining a trade is the receiving club’s call, and the cap check "+
-    "runs inside the database on every accept — a trade that would put either club over is refused before it lands. "+
-    "If something here needs undoing, open a case: reversing a completed trade is a commissioner action.");
+  h += CG.deskCeiling("The league has no say in a trade as it is made: two clubs agreeing is enough, and the cap check "+
+    "runs inside the database on every accept — a deal that would put either club over is refused before it lands. "+
+    "Afterwards this desk may send a completed trade back if it isn’t a natural hockey deal (Rule 2.4). Reversing "+
+    "returns every player and pick to its original club and tells both clubs why, in your words.");
   return h;
 };
 
@@ -566,7 +567,10 @@ CG.AFTER._deskTransactions = function(){
         '<span style="flex:1;min-width:200px"><span class="caption">'+who(t.offered_profile_ids)+
           (np?' + '+np+' pick'+(np>1?"s":""):"")+' <b>for</b> '+who(t.requested_profile_ids)+
           (nq?' + '+nq+' pick'+(nq>1?"s":""):"")+'</span></span>'+
-        '<span class="caption">'+(t.created_at?CG.fmtDay(Date.parse(t.created_at)):"")+'</span></div>';
+        '<span class="caption">'+(t.created_at?CG.fmtDay(Date.parse(t.created_at)):"")+'</span>'+
+        (t.status==="accepted"
+          ? '<button class="btn btn-ghost btn-sm" data-tx-reverse="'+t.id+'" data-pair="'+esc(f+" / "+to)+'">Send back</button>'
+          : "")+'</div>';
     }
 
     var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Trades on the table</h3>'+
@@ -590,6 +594,29 @@ CG.AFTER._deskTransactions = function(){
       }).join("") : CG.deskEmpty("Nothing logged yet."))+'</div>';
 
     body.innerHTML = h;
+
+    /* Rule 2.4: a completed trade the department judges un-natural goes back. The database
+       refuses if a player or pick in it has since moved on, so a half-undone trade is impossible. */
+    body.querySelectorAll("[data-tx-reverse]").forEach(function(b){ b.addEventListener("click", function(){
+      var id=this.getAttribute("data-tx-reverse"), pair=this.getAttribute("data-pair");
+      CG.modal("Send the "+esc(pair)+" trade back?",
+        '<p class="small" style="color:var(--steel)">Every player and pick returns to the club that had it. Both clubs are notified with your reason, and the reversal is posted to the league transaction log.</p>'+
+        '<label class="fld" style="margin-top:12px"><span>Reason (both clubs see this)</span>'+
+        '<input id="txRevWhy" placeholder="e.g. Lopsided giveaway between allied clubs — not a natural deal."></label>',
+        '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="txRevGo">Reverse the trade</button>');
+      document.getElementById("txRevGo").addEventListener("click", function(){
+        var why=(document.getElementById("txRevWhy")||{}).value||"";
+        if (why.trim().length < 10){ CG.toast("Give a reason — both clubs are told what it says","err"); return; }
+        var btn=this; btn.disabled=true;
+        CG.sb.rpc("reverse_trade",{ p_trade:id, p_reason:why.trim() }).then(function(r){
+          btn.disabled=false;
+          if(r.error){ CG.toast(r.error.message,"err"); return; }
+          if(CG.closeOverlay) CG.closeOverlay();
+          CG.toast("Trade reversed — both clubs have been told","ok");
+          if (CG.reloadLeague) CG.reloadLeague(); else CG.AFTER._deskTransactions();
+        });
+      });
+    }); });
   });
 };
 
