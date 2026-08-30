@@ -197,8 +197,8 @@ export function createRoleSyncer(env, opts = {}) {
      the old per-profile setTimeout fired them all simultaneously — a self-inflicted rate limit
      against the very API that has no retry budget to spare. */
   const pending = new Map();   // profileId -> { timer, reason }
-  const queue = [];            // profileIds waiting for the worker
-  const queued = new Set();
+  const queue = [];            // jobs waiting for the worker
+  const queued = new Map();    // profileId -> the job already in the queue
   let draining = false;
   async function drain() {
     if (draining) return;
@@ -223,9 +223,21 @@ export function createRoleSyncer(env, opts = {}) {
     if (prev) clearTimeout(prev.timer);
     const timer = setTimeout(() => {
       pending.delete(profileId);
-      if (queued.has(profileId)) return;      /* already waiting its turn */
-      queued.add(profileId);
-      queue.push({ profileId, reason, onDone });
+      /* Already waiting its turn: MERGE into that job rather than dropping this one — the
+         caller's onDone is a delivery contract, and silently discarding it left callers waiting
+         on a callback that would never fire. */
+      const existing = queued.get(profileId);
+      if (existing) {
+        existing.reason = reason;
+        if (onDone) {
+          const prev = existing.onDone;
+          existing.onDone = prev ? function(r){ prev(r); onDone(r); } : onDone;
+        }
+        return;
+      }
+      const job = { profileId, reason, onDone };
+      queued.set(profileId, job);
+      queue.push(job);
       drain();
     }, DEBOUNCE_MS);
     pending.set(profileId, { timer, reason });

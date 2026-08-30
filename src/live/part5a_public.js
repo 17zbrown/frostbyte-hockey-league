@@ -1515,13 +1515,19 @@ CG.ROUTES.schedule = function(param, qs){
      card for every one of the season's 540 games — megabytes of DOM on a phone, with the game the
      reader actually wanted buried in it. "All weeks" is still one selection away in the filter.
      Computed from the raw schedule here because the grouping below is itself filtered by fWeek. */
-  var fWeek = qs.week;
+  var fWeek = qs.week, fStage = qs.stage || "";
   if (fWeek === undefined){
-    var _soon = Infinity, _wk = null;
+    /* Week numbers RESTART per stage — pre-season week 1, regular week 1 and playoff week 1 all
+       exist — so the default has to carry the stage too, or "this week" shows three different
+       weeks stacked together. */
+    var _soon = Infinity, _wk = null, _st = "";
     (lg.schedule||[]).forEach(function(g){
-      if (g.status!=="final" && g.at >= CG.now()-6*3600000 && g.at < _soon){ _soon = g.at; _wk = g.week; }
+      if (g.status!=="final" && g.at >= CG.now()-6*3600000 && g.at < _soon){
+        _soon = g.at; _wk = g.week; _st = g.stage || "regular";
+      }
     });
     fWeek = _wk == null ? "" : String(_wk);
+    if (_wk != null) fStage = _st;
   }
   var head = CG.pageHead(esc(CG.seasonTag())+" · schedule","Schedule & results","Every night, every final. All times Eastern. Game codes and lineups live on each matchup page.");
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
@@ -1546,6 +1552,7 @@ CG.ROUTES.schedule = function(param, qs){
   lg.schedule.forEach(function(g){
     if (fTeam && g.home!==fTeam && g.away!==fTeam) return;
     if (fWeek && g.week!=+fWeek) return;
+    if (fStage && (g.stage||"regular")!==fStage) return;
     var done = (lg.allResults||lg.results).some(function(r){ return r.id===g.id; });
     if (fState==="final" && !done) return;
     if (fState==="upcoming" && done) return;

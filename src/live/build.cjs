@@ -57,7 +57,7 @@ head = head.replace(
   `crossorigin="anonymous" onerror="(function(s){s.onerror=null;var f=document.createElement('script');` +
   `f.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPABASE_JS}';` +
   `f.integrity='${SUPABASE_SRI}';f.crossOrigin='anonymous';` +
-  `f.onload=function(){try{if(window.CG&&CG.bootLive)CG.bootLive();}catch(e){}};` +
+  `f.onload=function(){try{if(window.CG&&CG.ensureSb&&CG.ensureSb()&&CG.bootLive)CG.bootLive();}catch(e){}};` +
   `document.head.appendChild(f);})(this)"></script>\n<script>`
 );
 

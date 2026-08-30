@@ -25,7 +25,7 @@ console.log("— the boot's heaviest load is bounded");
   A("game_stats is scoped to one season", /return _hintUsed \? qb\.eq\("season_id", _hintUsed\) : qb;/.test(live));
   A("...from a hint that survives across visits", /localStorage\.getItem\("cg_season_id"\)/.test(live));
   A("...written back after every boot", /localStorage\.setItem\("cg_season_id", CG\.SEASON\.id\)/.test(live));
-  A("...unscoped rather than wrong when there is no hint", /slower but never wrong/.test(live));
+  A("...unscoped rather than wrong when there is no hint", /means "no hint": load unscoped/.test(live));
   A("a stale hint self-corrects exactly once", /CG\._seasonHintFixed = true;/.test(live));
   /* part2_engine seeds a prototype CG.SEASON={id:"S1"} that is still in place during boot —
      scoping on it matched nothing and forced a second full league build on EVERY cold load */
@@ -37,7 +37,11 @@ console.log("— the boot's heaviest load is bounded");
 console.log("— silent truncation can't hide the newest rows");
 {
   A("DMs load newest-first with an explicit cap", /direct_messages[\s\S]{0,180}ascending:false\}\)\.limit\(900\)/.test(live));
-  A("...then restore chronological order", /r\.data = r\.data\.slice\(\)\.sort\(function\(a,b\)\{ return Date\.parse\(a\.created_at\)-Date\.parse\(b\.created_at\); \}\)/.test(live));
+  A("...then restore chronological order", /r\.data = r\.data\.slice\(\)\.sort\(CG\._byCreatedAsc\)/.test(live));
+  /* ISO strings compare exactly; Date.parse truncates to whole ms and left same-ms messages
+     in the server's descending order */
+  A("...with an exact, tie-broken comparator", /CG\._byCreatedAsc = function\(a,b\)/.test(live) && /a\.created_at < b\.created_at \? -1 : 1/.test(live));
+  A("...shared by all three re-sorts", (live.match(/CG\._byCreatedAsc/g)||[]).length === 4);
   A("case messages too", /action_messages[\s\S]{0,120}ascending:false\}\)\.limit\(900\)/.test(live));
   A("...re-sorted for the thread", /fetched newest-first so the silent 1000-row cap drops the OLDEST/.test(live));
   A("application chat too", /application_messages[\s\S]{0,320}ascending:false\}\)\.limit\(900\)/.test(live));
@@ -60,7 +64,10 @@ console.log("— member writes can't report a success the server refused");
 
 console.log("— draft night, both rooms");
 {
-  A("the Team HQ tick recovers a dead socket too", /if \(CG\._draftHeartbeat\) CG\._draftHeartbeat\(\);/.test(live));
+  /* it re-arms the channel and refreshes DATA, but must NOT repaint: this panel holds the
+     commissioner's controls and a 10s repaint would fight whatever they are doing */
+  A("the Team HQ tick recovers a dead socket too", /if \(CG\._draftChannel === null && CG\.subscribeDraft\) CG\.subscribeDraft\(\);/.test(live));
+  A("...without repainting the Draft manager under the operator", !/CG\._draftHeartbeat\(\);\n    var st = CG\.lg\.draftState/.test(live));
   A("...only privileged browsers advance the clock", /if \(role!=="mgmt" && role!=="commish" && role!=="staff"\) return;/.test(live));
   A("...with backoff", /CG\._drAdvanceAfter = Date\.now\(\) \+ Math\.min\(60000/.test(live));
   A("...and it no longer swallows the error", /console\.error\("draft_auto_advance failed", err\)/.test(live));
@@ -70,7 +77,10 @@ console.log("— the app doesn't depend on someone else's CDN");
 {
   A("supabase-js is served from our own origin", /src="\/vendor\/supabase-js-\$\{SUPABASE_JS\}\.min\.js"/.test(build));
   A("...with the CDN kept only as a fallback", /onerror=[\s\S]{0,200}cdn\.jsdelivr\.net/.test(build));
-  A("...that re-runs the boot it rescued", /if\(window\.CG&&CG\.bootLive\)CG\.bootLive\(\)/.test(build));
+  A("...that rebuilds the client and re-runs the boot it rescued",
+    /if\(window\.CG&&CG\.ensureSb&&CG\.ensureSb\(\)&&CG\.bootLive\)CG\.bootLive\(\)/.test(build));
+  /* the client used to be created once at parse time, which made the fallback inert */
+  A("...and the client can actually be created later", /CG\.ensureSb = function\(\)\{/.test(live) && /CG\.sb = null;/.test(live));
   A("...and the vendored file exists", fs.existsSync(path.join(__dirname, "..", "vendor", "supabase-js-2.110.7.min.js")));
   A("...matching the pinned integrity hash",
     require("crypto").createHash("sha384").update(fs.readFileSync(path.join(__dirname,"..","vendor","supabase-js-2.110.7.min.js"))).digest("base64")
@@ -94,8 +104,13 @@ console.log("— the Discord bot survives 200 members");
   A("...and drains serially instead of firing 500 timers at once", /async function drain\(\)/.test(roleSync) && /while \(queue\.length\)/.test(roleSync));
   A("incident rulings retry", /rate-limited after retries/.test(incidents));
   A("...claim so a retry can't double-post", /kind: "incident", ref/.test(incidents));
-  A("...release the claim on a provable failure", /if \(_ref\) await release\(_ref\);/.test(incidents));
-  A("...and a catch-up re-sends what was missed", /async function catchUp\(minutes = 60\)/.test(incidents) && /INC\.catchUp\(\)/.test(botMain));
+  A("...release only the destination that failed", (incidents.match(/await release\(_ref \+ ":" \+/g)||[]).length === 2);
+  A("...and a catch-up re-sends what was missed", /async function catchUp\(minutes = 24 \* 60\)/.test(incidents) && /INC\.catchUp\(\)/.test(botMain));
+  /* review round 2: the claim is per DESTINATION, so a half-delivered ruling retries only the
+     club that missed it instead of re-sending to the one that already had it */
+  A("...claimed per destination, not per ruling", /claim\(_ref \+ ":" \+ mine\.discord_channel_id\)/.test(incidents) && /claim\(_ref \+ ":" \+ other\.discord_channel_id\)/.test(incidents));
+  A("...and an idless row can't collapse every ruling onto one ref", /row\.game_id, row\.team_id, row\.kind/.test(incidents));
+  A("role-sync merges a repeat enqueue instead of dropping its callback", /existing\.onDone = prev \? function\(r\)\{ prev\(r\); onDone\(r\); \} : onDone;/.test(roleSync));
 }
 
 console.log("— nothing public burns metered resources");
@@ -108,7 +123,10 @@ console.log("— nothing public burns metered resources");
 
 console.log("— the operator can see what needs them");
 {
-  A("automations grade against their own cadence", /var fresh = mins < \(a\.staleAfterMin \|\| 30\);/.test(live));
+  A("automations grade against their own cadence", /var fresh = mins < \(_stale \|\| 30\);/.test(live));
+  /* a dead ea-poll used to read green for a whole game night on a flat 24h threshold */
+  A("...and ea-poll is graded strictly inside the game window",
+    /CG\.inGameWindowET\(\) \? 20 : 1440/.test(live) && /CG\.inGameWindowET = function\(\)/.test(live));
   A("...daily and weekly jobs included", /staleAfterMin:2160/.test(live) && /staleAfterMin:11520/.test(live));
   A("there is a league-wide lineup readiness view", /CG\.renderLineupReadiness = function\(\)/.test(live));
   A("...that says how long each club has left", /'m left'/.test(live));

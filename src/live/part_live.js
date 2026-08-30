@@ -9,9 +9,18 @@
 CG.LIVE_MODE = true;
 CG.SB_URL = "https://bzbuyclwdhmhdzujxeqd.supabase.co";
 CG.SB_KEY = "sb_publishable_9OVgiNJSCSKKp0NfnCwbBQ_W1rcrK3Z";
-CG.sb = (window.supabase && window.supabase.createClient)
-  ? window.supabase.createClient(CG.SB_URL, CG.SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } })
-  : null;
+CG.sb = null;
+/* Creates the client the first time the library is actually present, and installs the role-RPC
+   wrapper with it. This has to be re-runnable: the library is loaded from our own origin with a
+   CDN fallback, and the fallback lands AFTER this file has parsed — latching CG.sb to null here
+   made that fallback inert, so the "the app survives a CDN outage" guarantee was not real. */
+CG.ensureSb = function(){
+  if (CG.sb) return CG.sb;
+  if (!(window.supabase && window.supabase.createClient)) return null;
+  CG.sb = window.supabase.createClient(CG.SB_URL, CG.SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } });
+  if (CG._installRoleRpcWrapper) CG._installRoleRpcWrapper();
+  return CG.sb;
+};
 
 /* ------------------------------------------------------------------ *
  * Instant Discord role sync.
@@ -34,7 +43,9 @@ CG.ROLE_RPCS = ("set_member_role set_team_manager set_staff_profile sign_free_ag
   "apply_application_decision override_application_decision decide_staff_application "+
   "decide_owner_application auto_assign_latecomers distribute_unproven_rookies start_next_season"
 ).split(" ").reduce(function(m,k){ m[k]=1; return m; }, {});
-if (CG.sb && typeof CG.sb.rpc === "function"){
+CG._installRoleRpcWrapper = function(){
+  if (!CG.sb || typeof CG.sb.rpc !== "function" || CG.sb._roleRpcWrapped) return;
+  CG.sb._roleRpcWrapped = true;
   var _sbRpc = CG.sb.rpc.bind(CG.sb);
   CG.sb.rpc = function(name, args, opts){
     var b = _sbRpc(name, args, opts);
@@ -51,7 +62,8 @@ if (CG.sb && typeof CG.sb.rpc === "function"){
     }
     return b;
   };
-}
+};
+CG.ensureSb();     /* normal path: the library is already here */
 
 /* real wall clock (the prototype used a frozen demo clock) */
 CG._loadEpoch = Date.now();
@@ -185,18 +197,20 @@ CG.buildLiveLeague = async function(){
        lines per game), and unscoped it would carry every season ever played forever — Season 2
        starting at Season 1's final row count. season_id is filled by trg_game_stats_season.
        The filter is skipped when the season isn't known yet so nothing silently disappears. */
-    /* Scoped to the season being viewed. game_stats is the largest thing this boot loads (~12
-       lines per game), and unscoped it carries every season ever played — Season 2 would start at
-       Season 1's final row count and grow from there. season_id is filled by trg_game_stats_season.
-       CG.SEASON isn't resolved until this batch RESOLVES, so the id comes from a hint stored on the
-       previous visit; with no hint we load unscoped, which is slower but never wrong. */
+    /* Scoped to the season being viewed — see CG._seasonHint above for why the id comes from a
+       stored hint and what happens without one. Career totals do NOT come from this load; they
+       come from the career_games_played aggregate below. */
     CG.sbAll("game_stats","*","id",true, function(qb){
       return _hintUsed ? qb.eq("season_id", _hintUsed) : qb;
     }),
     sb.from("feature_flags").select("key,enabled"),
     sb.from("site_config").select("key,value"),
     CG.sbAll("suspensions","*","created_at",false),
-    CG.sbAll("awards","*","week")
+    CG.sbAll("awards","*","week"),
+    /* Career games, ACROSS ALL SEASONS, as ~200 aggregate rows. The box-score load above is
+       scoped to one season, so counting career games from it would report 0 for every returning
+       player — and the OVR surfaces would call a settled rating "provisional" league-wide. */
+    CG.sb.rpc("career_games_played")
   ]);
   if (q[12] && q[12].error){
     CG.LIVE.partial.game_stats = String((q[12].error && q[12].error.message) || q[12].error);
@@ -350,7 +364,8 @@ CG.buildLiveLeague = async function(){
   /* ---- schedule + results ----
      Scoped to the CURRENT season: standings, stats, eligibility floors, and the
      playoff bracket must never blend a past season's games into this one.
-     (career games still span every season via game_stats below.) */
+     (career games still span every season — via the career_games_played aggregate, since the
+     game_stats load below is scoped to one season.) */
   var schedule = games.filter(function(g){ return !seasonId || g.season_id===seasonId; }).map(function(g){
     return { id:g.id, week:g.week||1, stage:g.stage||"regular",
       home:id2code[g.home_team_id], away:id2code[g.away_team_id],
@@ -497,9 +512,14 @@ CG.buildLiveLeague = async function(){
   var preFinalIds={};
   schedule.forEach(function(g){ if(g.stage==="preseason" && g.status==="final") preFinalIds[g.id]=1; });
   var preGp={}, careerGp={};
+  /* careerGp spans EVERY season and comes from the aggregate RPC; gameStatsRows is this season
+     only. If the RPC is unavailable, fall back to counting what we did load — undercounts a
+     returning player rather than inventing a number. */
+  var careerRows = (q[17] && !q[17].error && q[17].data) || null;
+  if (careerRows) careerRows.forEach(function(r){ if (r.profile_id) careerGp[r.profile_id] = +r.gp || 0; });
   gameStatsRows.forEach(function(r){
     if (!r.profile_id) return;
-    careerGp[r.profile_id]=(careerGp[r.profile_id]||0)+1;
+    if (!careerRows) careerGp[r.profile_id]=(careerGp[r.profile_id]||0)+1;
     if (preFinalIds[r.game_id]){
       var pgo=preGp[r.profile_id]=preGp[r.profile_id]||{gp:0,g:0,a:0};
       pgo.gp++; pgo.g+=(+r.goals||0); pgo.a+=(+r.assists||0);
@@ -1158,7 +1178,13 @@ CG.initAuth = async function(){
         if (nx) run(nx.sess, nx.quiet);
       });
     };
-    CG.sb.auth.onAuthStateChange(function(_e, sess){
+    /* bootLive can run more than once (a retry, the CDN fallback landing). Each call used to add
+       ANOTHER onAuthStateChange subscription, so every auth event ran the pipeline N times —
+       re-creating exactly the thrash this handler exists to prevent. */
+    if (CG._authSub && CG._authSub.data && CG._authSub.data.subscription){
+      try { CG._authSub.data.subscription.unsubscribe(); } catch(e){}
+    }
+    CG._authSub = CG.sb.auth.onAuthStateChange(function(_e, sess){
       var uid = sess && sess.user ? sess.user.id : null;
       /* a session landing (or a real sign-out) resolves any OAuth round-trip still marked
          pending — without this the sign-in page's "completing" state could outlive the very
@@ -3772,9 +3798,17 @@ CG._armDraftTick = function(){
   var tick = function(){
     var e = document.getElementById("drTick");
     if (!e){ clearInterval(CG._drIv); return; }
-    /* this room is a draft room too — recover a dead socket here exactly as #/draft does,
-       instead of leaving the managers actually on the clock frozen while spectators self-heal */
-    if (CG._draftHeartbeat) CG._draftHeartbeat();
+    /* This room is a draft room too, so a dead socket must recover here as well — but WITHOUT
+       the full repaint the spectator room does: this panel carries the commissioner's controls
+       and a repaint every 10s would fight whatever they are doing. Re-arm the channel and refresh
+       the data; the tick below redraws the clock from it. */
+    if (CG._draftChannel === null && CG.subscribeDraft) CG.subscribeDraft();
+    if (CG.refreshDraftLite && !CG._drBeating && Date.now() - (CG._drBeatAt||0) > 10000){
+      CG._drBeating = true;
+      CG.refreshDraftLite().catch(function(){}).then(function(){
+        CG._drBeating = false; CG._drBeatAt = Date.now();
+      });
+    }
     var st = CG.lg.draftState || {};
     if (st.status==="paused"){ e.textContent = CG.fmtClockS(st.paused_remaining==null?(st.pick_seconds||0):st.paused_remaining); return; }
     if (st.status!=="live" || !st.clock_ends_at){ e.textContent = "–:––"; return; }
@@ -4390,7 +4424,7 @@ CG.loadDMs = async function(){
     /* newest 900 rather than the oldest 1000: the cap is silent, so ascending order quietly hid
        the most recent conversation once a heavy user crossed it */
     var r = await CG.sb.from("direct_messages").select("*").or("sender_id.eq."+me+",recipient_id.eq."+me).order("created_at",{ascending:false}).limit(900);
-    if (r && r.data) r.data = r.data.slice().sort(function(a,b){ return Date.parse(a.created_at)-Date.parse(b.created_at); });
+    if (r && r.data) r.data = r.data.slice().sort(CG._byCreatedAsc);
     CG._dm.msgs = r.data||[];
     var need = {}; CG._dm.msgs.forEach(function(m){ var o=CG.dmOtherId(m); if(o&&!CG._dm.profiles[o]) need[o]=1; });
     var ids = Object.keys(need);
@@ -6544,7 +6578,7 @@ CG.loadActionRequests = async function(){
     var msgs = {};
     /* fetched newest-first so the silent 1000-row cap drops the OLDEST, then restored to
        chronological order for the thread view */
-    ((q[1] && q[1].data)||[]).slice().sort(function(a,b){ return Date.parse(a.created_at)-Date.parse(b.created_at); })
+    ((q[1] && q[1].data)||[]).slice().sort(CG._byCreatedAsc)
       .forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
     CG.lg._actionMsgs = msgs;
   } catch(e){
@@ -7364,11 +7398,17 @@ CG.staffAttentionCard = function(){
 /* Application chat — a two-way thread between the applicant and the league office. UNLIKE the
    staff ballot, this is applicant-visible: RLS lets the applicant read/write their own thread and
    the office read/write any. Both sides are notified on each message (trg_application_message). */
+/* ISO timestamptz strings compare exactly as text — Date.parse truncates to whole milliseconds,
+   which left same-millisecond messages in the server's DESCENDING order. id breaks a true tie. */
+CG._byCreatedAsc = function(a,b){
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+  return (a.id||"") < (b.id||"") ? -1 : (a.id||"") > (b.id||"") ? 1 : 0;
+};
 CG._groupAppMsgs = function(rows){
   /* rows arrive newest-first (the fetch is capped, and a silent truncation must lose the oldest,
      not the newest) — the thread itself reads oldest-first */
   var map = {};
-  (rows||[]).slice().sort(function(a,b){ return Date.parse(a.created_at)-Date.parse(b.created_at); })
+  (rows||[]).slice().sort(CG._byCreatedAsc)
     .forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
   return map;
 };
@@ -7379,11 +7419,14 @@ CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[typ
    previous map — blanking it would repaint an open thread as "No messages yet" over a blip. */
 CG.loadAppMessages = function(){
   if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
+  /* newest-first + an explicit cap: PostgREST truncates at 1000 SILENTLY, and ascending order
+     meant the rows lost were the newest. _groupAppMsgs re-sorts for display, so the fingerprint
+     below reads the NEWEST row from the front of the list. */
+  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at",{ascending:false}).limit(900)
     .then(function(mm){
       if (!mm || mm.error) return false;
       var rows = mm.data || [];
-      var fp = rows.length + "|" + (rows.length ? rows[rows.length-1].created_at : "");
+      var fp = rows.length + "|" + (rows.length ? rows[0].created_at : "");
       var changed = fp !== CG._appMsgsFp;
       CG._appMsgsFp = fp;
       if (CG.lg) CG.lg._appMsgs = CG._groupAppMsgs(rows);
@@ -8720,8 +8763,24 @@ CG.hubRoster = function(qs){
   return h.replace('<span>Active payroll</span>', '<span>Payroll + dead cap</span>');
 };
 
+/* The window ea-poll actually runs in — Wed 18:00 through Sat 02:00 ET — mirrored from
+   netlify/functions/ea-poll.js's inGameWindow(). Used to grade the poller: not running is correct
+   outside the window and an outage inside it. */
+CG.inGameWindowET = function(){
+  try {
+    var f = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", weekday:"short", hour:"2-digit", hour12:false });
+    var parts = {}; f.formatToParts(new Date(CG.now())).forEach(function(p){ parts[p.type] = p.value; });
+    var d = String(parts.weekday||"").slice(0,3).toLowerCase(), h = parseInt(parts.hour,10);
+    if (d === "wed") return h >= 18;
+    if (d === "thu" || d === "fri") return true;
+    if (d === "sat") return h < 2;
+    return false;
+  } catch(e){ return true; }   /* unknown -> grade strictly rather than forgivingly */
+};
 CG.AUTOMATIONS = [
-  { key:"ea-poll", staleAfterMin:1440,          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
+  /* window-aware: 20 minutes DURING the game window (Wed 18:00 - Sat 02:00 ET), where a dead
+     poller means no scores all night; a day outside it, where not running is correct */
+  { key:"ea-poll", staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
   { key:"twitch-live-sync", staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome", staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
@@ -8823,7 +8882,8 @@ CG.AFTER._admAutomations = function(){
       /* Each job declares its own cadence one line above, so grade against THAT. One flat
          30-minute threshold marked a healthy daily briefing and a healthy Monday job amber
          every single day — which teaches the operator that amber means nothing. */
-      var fresh = mins < (a.staleAfterMin || 30);
+      var _stale = typeof a.staleAfterMin === "function" ? a.staleAfterMin() : a.staleAfterMin;
+      var fresh = mins < (_stale || 30);
       if (failed){
         stEl.textContent = "Failing";
         stEl.className = "chip chip-loss";
@@ -11268,6 +11328,11 @@ CG.bootScreen = function(){
 CG.bootLive = async function(){
   var app = document.getElementById("app");
   if (app) app.innerHTML = CG.bootScreen();
+  CG.LIVE = CG.LIVE || {};
+  /* Clear the failure BEFORE retrying, or the "online" listener below sees a permanently failed
+     app and re-boots the whole thing on every network transition for the rest of the session. */
+  CG.LIVE.error = null;
+  if (CG.ensureSb) CG.ensureSb();
   try {
     CG.lg = await CG.buildLiveLeague();
     /* surface Register in the nav while the open season is taking sign-ups */

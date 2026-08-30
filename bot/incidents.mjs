@@ -114,8 +114,13 @@ export function createIncidentNotifier(env, opts = {}) {
     let _ref = null;
     try {
       if (!row || !row.game_id || !row.team_id) { sum.skipped++; return "skip"; }
-      _ref = "inc:" + row.id;
-      if (!(await claim(_ref))) return "already";
+      /* A row without an id would make every ruling share the ref "inc:undefined" — one claim for
+         the whole league, so the second ruling ever posted would be silently swallowed as a
+         duplicate. Fall back to the row's own identity instead. (staff-alerts documents the same
+         trap.) */
+      _ref = row.id
+        ? "inc:" + row.id
+        : "inc:" + [row.game_id, row.team_id, row.kind, row.occurrence == null ? "" : row.occurrence].join(":");
       const games = await sbGet(`games?id=eq.${encodeURIComponent(row.game_id)}&select=id,week,stage,scheduled_at,home_team_id,away_team_id`);
       const g = games[0];
       if (!g) { sum.skipped++; return "no-game"; }
@@ -129,8 +134,11 @@ export function createIncidentNotifier(env, opts = {}) {
       const fixture = `${other.code} vs ${mine.code}${g.week != null ? ` · week ${g.week}` : ""}`;
       const colour = r.forfeit ? 0xC2410C : r.penalties > 0 ? 0xFFE500 : 0x2F9E44;
 
-      // the club that owes
-      if (mine.discord_channel_id) {
+      let _sent = 0, _held = 0;
+      // the club that owes — claimed for THIS channel only
+      if (mine.discord_channel_id && await claim(_ref + ":" + mine.discord_channel_id)) {
+        _held++;
+        try {
         await post(mine.discord_channel_id, { embeds: [{
           title: `⚖️ ${r.headline}`,
           description: `**${fixture}**\n\n${r.detail}` +
@@ -138,28 +146,32 @@ export function createIncidentNotifier(env, opts = {}) {
             (row.notes ? `\n\n_${row.notes}_` : ""),
           color: colour, footer: { text: "Ruled by league staff from the game incident log." },
         }], allowed_mentions: { parse: [] } });
-        sum.announced++;
+        sum.announced++; _sent++;
+        } catch (e) { await release(_ref + ":" + mine.discord_channel_id); throw e; }
       }
-      // the club that gets the choice
-      if (other.discord_channel_id) {
+      // the club that gets the choice — its own claim, so one failing never re-sends the other
+      if (other.discord_channel_id && await claim(_ref + ":" + other.discord_channel_id)) {
+        _held++;
         const yours = r.penalties === 2
           ? `**Your call:** take them both at once for a 5-on-3, or one after the other for two 5-on-4s. Tell ${mine.code} before the puck drops.`
           : r.penalties === 1 ? `${mine.code} takes one penalty. You start on the power play.`
           : r.forfeit ? `This one is ruled in your favor.`
           : `Nothing owed — logged for the record.`;
+        try {
         await post(other.discord_channel_id, { embeds: [{
           title: `⚖️ ${mine.code}: ${r.headline.toLowerCase()}`,
           description: `**${fixture}**\n\n${yours}` +
             (row.kind === "late_start" && r.penalties > 0 && !r.forfeit ? `\n\n_Both clubs may agree to waive the penalties — that is between you (Rule 3.2). The ten-minute forfeit is not waivable._` : ""),
           color: colour, footer: { text: "Ruled by league staff from the game incident log." },
         }], allowed_mentions: { parse: [] } });
-        sum.announced++;
+        sum.announced++; _sent++;
+        } catch (e) { await release(_ref + ":" + other.discord_channel_id); throw e; }
       }
-      return "announced";
+      if (!_held) return "already";        /* both destinations already delivered */
+      return _sent ? "announced" : "already";
     } catch (e) {
-      /* release the claim so the catch-up can try again — a swallowed error used to mean the
-         ruling was simply never delivered, with nothing anywhere that would retry it */
-      if (_ref) await release(_ref);
+      /* Only the FAILED destination's claim was released, above. The one that already delivered
+         keeps its claim, so a catch-up retries the missing half without re-sending the other. */
       note(e);
       return "error";
     }
@@ -167,7 +179,10 @@ export function createIncidentNotifier(env, opts = {}) {
 
   /* Realtime delivers nothing to a process that was down, and a failed post released its claim.
      Re-read recent rulings on a timer; the claim dedupes, so replaying a delivered one is free. */
-  async function catchUp(minutes = 60) {
+  /* 24 hours, not 60 minutes: the claim makes a replay free, and the window has to be wide enough
+     to cover the bot being down overnight — an hour meant a ruling written while it was offline
+     was simply never delivered. */
+  async function catchUp(minutes = 24 * 60) {
     try {
       const since = new Date(Date.now() - minutes * 60_000).toISOString();
       const rows = await sbGet(`game_incidents?created_at=gte.${encodeURIComponent(since)}&select=*&order=created_at.asc&limit=200`);

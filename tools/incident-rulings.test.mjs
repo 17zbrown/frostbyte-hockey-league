@@ -55,10 +55,27 @@ const TEAMS = [
   { id: "T2", code: "TOR", name: "Maple Leafs", discord_channel_id: "chan-tor" },
 ];
 let posts = [];
+const claimed = new Set();
 let failChannel = null;
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
+  /* the announcer claims a discord_post_log ref per destination before posting, so a retry can
+     never re-send a ruling a club already received (201 = claimed, 409 = someone else has it) */
+  if (u.includes("/rest/v1/discord_post_log")) {
+    if (opts.method === "POST") {
+      const ref = JSON.parse(opts.body).ref;
+      if (claimed.has(ref)) return new Response(null, { status: 409 });
+      claimed.add(ref);
+      return new Response(null, { status: 201 });
+    }
+    if (opts.method === "DELETE") {
+      const m2 = u.match(/ref=eq\.([^&]+)/);
+      if (m2) claimed.delete(decodeURIComponent(m2[1]));
+      return new Response(null, { status: 204 });
+    }
+    return J([]);
+  }
   if (u.includes("/rest/v1/games?id=eq.g1")) return J([GAME]);
   if (u.includes("/rest/v1/teams?id=in.")) return J(TEAMS);
   const m = u.match(/channels\/([\w-]+)\/messages/);
@@ -74,7 +91,7 @@ const text = (p) => JSON.stringify(p.body);
 
 console.log("\n— both clubs are told, and told different things");
 {
-  posts = [];
+  posts = []; claimed.clear();   /* each block is a fresh ruling; the claim dedupe is exercised on its own below */
   const r = await N.announce({ game_id: "g1", team_id: "T1", kind: "late_start", minutes_late: 8, occurrence: 1 });
   A("the announcement goes out", r === "announced" && posts.length === 2);
   const off = posts.find((p) => p.channel === "chan-bos"), opp = posts.find((p) => p.channel === "chan-tor");
@@ -89,7 +106,7 @@ console.log("\n— both clubs are told, and told different things");
 
 console.log("\n— a forfeit reads as a forfeit on both sides");
 {
-  posts = [];
+  posts = []; claimed.clear();   /* each block is a fresh ruling; the claim dedupe is exercised on its own below */
   await N.announce({ game_id: "g1", team_id: "T2", kind: "late_start", minutes_late: 12, occurrence: 1 });
   const off = posts.find((p) => p.channel === "chan-tor"), opp = posts.find((p) => p.channel === "chan-bos");
   A("the late club is told it forfeited", /Forfeit/.test(text(off)));
@@ -99,26 +116,46 @@ console.log("\n— a forfeit reads as a forfeit on both sides");
 
 console.log("\n— the waiver belongs to late starts only");
 {
-  posts = [];
+  posts = []; claimed.clear();   /* each block is a fresh ruling; the claim dedupe is exercised on its own below */
   await N.announce({ game_id: "g1", team_id: "T1", kind: "disconnect", occurrence: 2 });
   const opp = posts.find((p) => p.channel === "chan-tor");
   A("disconnect rulings never offer the mutual waiver", !/agree to waive/.test(text(opp)));
   A("...but still hand the 5-on-3 choice over", /Your call/.test(text(opp)));
-  posts = [];
+  posts = []; claimed.clear();   /* each block is a fresh ruling; the claim dedupe is exercised on its own below */
   await N.announce({ game_id: "g1", team_id: "T1", kind: "late_start", minutes_late: 8, occurrence: 1 });
   const opp2 = posts.find((p) => p.channel === "chan-tor");
   A("late-start rulings still do", /agree to waive/.test(text(opp2)));
   A("member-facing copy is American English", !/favour/.test(JSON.stringify(posts)));
 }
 
+console.log("\n— a ruling is never sent to the same club twice");
+{
+  posts = []; claimed.clear();
+  const row = { id: "inc-1", game_id: "g1", team_id: "T1", kind: "late_start", minutes_late: 8, occurrence: 1 };
+  const first = await N.announce(row);
+  A("the first announcement posts to both clubs", first === "announced" && posts.length === 2);
+  const again = await N.announce(row);
+  A("...and announcing it again posts nothing", again === "already" && posts.length === 2);
+  /* a half-delivery must retry ONLY the club that missed out */
+  posts = []; claimed.clear();
+  failChannel = "chan-tor";
+  const half = await N.announce(row);
+  A("a failed second destination reports an error", half === "error");
+  A("...but the first club still received its copy", posts.length === 1 && posts[0].channel === "chan-bos");
+  failChannel = null;
+  posts = [];
+  const retry = await N.announce(row);
+  A("the retry sends ONLY the club that missed it", retry === "announced" && posts.length === 1 && posts[0].channel === "chan-tor");
+}
+
 console.log("\n— failures never pretend to have delivered");
 {
-  posts = []; failChannel = "chan-bos";
+  posts = []; claimed.clear();   /* each block is a fresh ruling; the claim dedupe is exercised on its own below */ failChannel = "chan-bos";
   const r = await N.announce({ game_id: "g1", team_id: "T1", kind: "disconnect", occurrence: 2 });
   A("a dead channel makes the run an error", r === "error");
   A("...and is recorded", N.errors.length > 0);
   failChannel = null;
-  posts = [];
+  posts = []; claimed.clear();   /* each block is a fresh ruling; the claim dedupe is exercised on its own below */
   const r2 = await N.announce({ game_id: "g1", team_id: "T1", kind: "disconnect", occurrence: 1 });
   A("the next one still goes out", r2 === "announced" && posts.length === 2);
   const bad = await N.announce({ game_id: "nope", team_id: "T1", kind: "disconnect", occurrence: 1 });

@@ -19,6 +19,13 @@
 # extension glob, so a "/*.txt" rule silently matches nothing — it was written that way first, the
 # config looked right, the test passed, and the briefing stayed downloadable until a live curl
 # caught it. Adding a file to the root that should not be public means adding a line here.
+# The supabase client is parser-blocking and its VERSION is in the filename, so a bump changes
+# the URL — it can be cached forever and never revalidated.
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 [[redirects]]
   from = "/preview.html"
   to = "/index.html"
