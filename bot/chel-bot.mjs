@@ -93,6 +93,13 @@ client.once(Events.ClientReady, (c) => {
     .then((r) => { if (r && r.replayed) console.log(`role-sync catch-up: replayed ${r.replayed}`); })
     .catch((e) => console.error("role-sync catch-up failed:", e.message));
   roleSweep();
+  /* incident rulings: same reasoning as the two sweeps above — a ruling written while this
+     process was down, or one whose post failed and released its claim, is otherwise never sent */
+  const incSweep = () => INC.catchUp()
+    .then((n) => { if (n) console.log(`incident catch-up: announced ${n}`); })
+    .catch((e) => console.error("incident catch-up failed:", e.message));
+  incSweep();
+  setInterval(incSweep, 600_000);
   setInterval(roleSweep, 600_000);
 });
 client.on(Events.Error, (e) => console.error("gateway error:", e.message));

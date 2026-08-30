@@ -65,24 +65,57 @@ export function createIncidentNotifier(env, opts = {}) {
     if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
     return r.json();
   }
+  /* A ruling is the message a club acts on — it must not be lost to a 429 or a Discord blip.
+     Same retry discipline as the sweeps, and the caller claims the row so a retry cannot
+     double-post the same ruling. */
   async function post(channelId, body) {
-    const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+        method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (r.status === 429) {
+        const ra = +(r.headers.get("retry-after") || 1);
+        await new Promise((res) => setTimeout(res, ra * 1000 + 250));
+        continue;
+      }
+      if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
+      if (!r.ok) throw new Error(`post ${channelId} -> ${r.status}`);
+      const t = await r.text();
+      const j = t ? JSON.parse(t) : null;
+      if (!j || !j.id) throw new Error(`post ${channelId} did not deliver`);   // 404 must never read as sent
+      return j;
+    }
+    throw new Error(`post ${channelId} -> rate-limited after retries`);
+  }
+  /* one-shot claim on the shared discord_post_log (same table staff-alerts uses), so the live
+     realtime path and the catch-up below can both try a row and only one message is sent */
+  async function claim(ref) {
+    const r = await fetch(`${SB_URL}/rest/v1/discord_post_log`, {
+      method: "POST", headers: { ...sbHead(), Prefer: "return=minimal" },
+      body: JSON.stringify({ kind: "incident", ref }),
     });
-    if (!r.ok) throw new Error(`post ${channelId} -> ${r.status}`);
-    const t = await r.text();
-    const j = t ? JSON.parse(t) : null;
-    if (!j || !j.id) throw new Error(`post ${channelId} did not deliver`);   // 404 must never read as sent
-    return j;
+    if (r.status === 201) return true;
+    if (r.status === 409) return false;
+    note(new Error(`claim ${ref} -> ${r.status}`));
+    return false;
+  }
+  async function release(ref) {
+    try {
+      await fetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.incident&ref=eq.${encodeURIComponent(ref)}`,
+        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } });
+    } catch (e) { note(e); }
   }
 
   /* One incident row -> two messages, because the two clubs need different sentences: the club
      that offended needs to know what it owes, and the club that didn't needs to know the choice
      is theirs. Sending one generic message to both would leave the choice unclaimed. */
   async function announce(row) {
+    let _ref = null;
     try {
       if (!row || !row.game_id || !row.team_id) { sum.skipped++; return "skip"; }
+      _ref = "inc:" + row.id;
+      if (!(await claim(_ref))) return "already";
       const games = await sbGet(`games?id=eq.${encodeURIComponent(row.game_id)}&select=id,week,stage,scheduled_at,home_team_id,away_team_id`);
       const g = games[0];
       if (!g) { sum.skipped++; return "no-game"; }
@@ -123,8 +156,29 @@ export function createIncidentNotifier(env, opts = {}) {
         sum.announced++;
       }
       return "announced";
-    } catch (e) { note(e); return "error"; }
+    } catch (e) {
+      /* release the claim so the catch-up can try again — a swallowed error used to mean the
+         ruling was simply never delivered, with nothing anywhere that would retry it */
+      if (_ref) await release(_ref);
+      note(e);
+      return "error";
+    }
   }
 
-  return { announce, ruling, sum, errors };
+  /* Realtime delivers nothing to a process that was down, and a failed post released its claim.
+     Re-read recent rulings on a timer; the claim dedupes, so replaying a delivered one is free. */
+  async function catchUp(minutes = 60) {
+    try {
+      const since = new Date(Date.now() - minutes * 60_000).toISOString();
+      const rows = await sbGet(`game_incidents?created_at=gte.${encodeURIComponent(since)}&select=*&order=created_at.asc&limit=200`);
+      let n = 0;
+      for (const r of rows || []) {
+        const out = await announce(r);
+        if (out === "announced") n++;
+      }
+      return n;
+    } catch (e) { note(e); return 0; }
+  }
+
+  return { announce, ruling, catchUp, sum, errors };
 }

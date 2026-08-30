@@ -127,9 +127,18 @@ CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
 CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,twitch,live,"+
   "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone";
 
+/* Last known current-season id, remembered across visits so the first query of a cold boot can
+   already be scoped. Wrong-but-stale is safe: the season row is re-read in the same batch and the
+   hint is rewritten below, so at worst one load is scoped to the previous season and the next is
+   correct. Absent or unreadable storage simply means an unscoped load. */
+CG._seasonHint = function(){
+  if (CG.SEASON && CG.SEASON.id) return CG.SEASON.id;
+  try { return localStorage.getItem("cg_season_id") || null; } catch(e){ return null; }
+};
 CG.buildLiveLeague = async function(){
   var sb = CG.sb;
   CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
+  var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
   if (!sb) throw new Error("Supabase client unavailable");
   var q = await Promise.all([
     sb.from("teams").select("*"),
@@ -163,7 +172,18 @@ CG.buildLiveLeague = async function(){
       }), error:r.error };
     }),
     sb.from("leagues").select("*").order("sort_order"),
-    CG.sbAll("game_stats","*","id"),
+    /* Scoped to the season being viewed. game_stats is the largest thing this boot loads (~12
+       lines per game), and unscoped it would carry every season ever played forever — Season 2
+       starting at Season 1's final row count. season_id is filled by trg_game_stats_season.
+       The filter is skipped when the season isn't known yet so nothing silently disappears. */
+    /* Scoped to the season being viewed. game_stats is the largest thing this boot loads (~12
+       lines per game), and unscoped it carries every season ever played — Season 2 would start at
+       Season 1's final row count and grow from there. season_id is filled by trg_game_stats_season.
+       CG.SEASON isn't resolved until this batch RESOLVES, so the id comes from a hint stored on the
+       previous visit; with no hint we load unscoped, which is slower but never wrong. */
+    CG.sbAll("game_stats","*","id",true, function(qb){
+      return _hintUsed ? qb.eq("season_id", _hintUsed) : qb;
+    }),
     sb.from("feature_flags").select("key,enabled"),
     sb.from("site_config").select("key,value"),
     CG.sbAll("suspensions","*","created_at",false),
@@ -259,6 +279,14 @@ CG.buildLiveLeague = async function(){
 
   /* ---- season + cap ---- */
   CG.SEASON = season || {};
+  try { if (CG.SEASON.id) localStorage.setItem("cg_season_id", CG.SEASON.id); } catch(e){}
+  /* The hint pointed at a DIFFERENT season than the one we resolved (a rollover happened since
+     this browser last visited), so the box scores just loaded belong to the wrong season. Run one
+     corrective rebuild — the hint is now correct, so it cannot recur. */
+  if (_hintUsed && CG.SEASON.id && _hintUsed !== CG.SEASON.id && !CG._seasonHintFixed){
+    CG._seasonHintFixed = true;
+    if (CG.reloadLeague) setTimeout(function(){ CG.reloadLeague(); }, 0);
+  }
   CG.CAP = (season && season.salary_cap) ? season.salary_cap : 60000000;
   CG.ROSTER_MAX = (season && season.roster_max) || 17;   /* Rule 2.1 (v2.7): 3C+3LW+3RW+3LD+3RD+2G */
   var seasonId = season ? season.id : null;
@@ -783,13 +811,30 @@ CG.applySession = async function(session, quiet){
        paint — batched rather than awaited one at a time. Each resolves to null on its own
        failure so one denied policy can't blank the other three. */
     var one = function(qb){ return qb.then(function(r){ return (r && r.data) || null; }, function(){ return null; }); };
+    /* The PROFILE is different from the other three: losing it sets role to "guest", so a single
+       blipped request signed a member out of his own club in the UI while he was still logged in,
+       with no message and no way back but a reload. Retry once, and keep the profile we already
+       had rather than nulling it — a stale profile beats a wrong role. */
+    var oneProfile = function(){
+      var q = function(){ return CG.sb.from("profiles").select("*").eq("id", uid).maybeSingle(); };
+      return q().then(function(r){ return (r && !r.error && r.data) ? r.data : null; }, function(){ return null; })
+        .then(function(p){
+          if (p) return p;
+          return new Promise(function(res){ setTimeout(res, 400); })
+            .then(q)
+            .then(function(r2){ return (r2 && !r2.error && r2.data) ? r2.data : null; }, function(){ return null; });
+        });
+    };
     var mine = await Promise.all([
-      one(CG.sb.from("profiles").select("*").eq("id", uid).maybeSingle()),
+      oneProfile(),
       sidA ? one(CG.sb.from("season_registrations").select("*").eq("season_id", sidA).eq("profile_id", uid).maybeSingle()) : null,
       one(CG.sb.from("staff_applications").select("*").eq("profile_id", uid).maybeSingle()),
       one(CG.sb.from("owner_applications").select("*").eq("profile_id", uid).maybeSingle())
     ]);
-    CG.auth.profile = mine[0]; CG.auth.registration = mine[1];
+    if (mine[0]) CG.auth.profile = mine[0];
+    else if (!CG.auth.profile) CG.auth.profile = null;      /* nothing to fall back to */
+    else if (CG.toast) CG.toast("Couldn’t reach your account just now — showing what we last had.","err");
+    CG.auth.registration = mine[1];
     CG.auth.staffApp = mine[2]; CG.auth.ownerApp = mine[3];
     /* keep the profile's Discord fields matched to the account actually signed in — this is what
        moves a member's league identity to their NEW Discord after a link or account switch */
@@ -1010,7 +1055,10 @@ CG.loadManagerData = async function(){
        after the league builds), so this only fires on post-auth reloads — the authoritative
        load lives in applySession. */
     if (CG.auth.user){
-      jobs.push(CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at")
+      /* PostgREST caps a response at 1000 rows and truncates SILENTLY. Ascending order meant the
+         rows dropped were the newest — the ones people are reading. Newest-first + an explicit cap,
+         then re-sorted for display. */
+      jobs.push(CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at",{ascending:false}).limit(900)
         .then(function(mm){ CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); }, function(){ CG.lg._appMsgs = {}; }));
       /* GM/AGM appointment applications — two FKs to profiles (submitter + nominee) so qualify both.
          RLS: the office sees all; an owner their own; a nominee theirs. */
@@ -2900,8 +2948,12 @@ CG.promptEaId = function(){
 };
 CG.saveEaId = async function(v){
   if(!CG.sb||!CG.auth.user) return;
-  var r = await CG.sb.from("profiles").update({ ea_id:v }).eq("id", CG.auth.user.id);
+  /* .select() + a zero-row check: an RLS-refused UPDATE returns 0 rows and NO error, and this
+     one silently losing the EA ID costs the player a whole season of stats — the importer matches
+     box scores on it. */
+  var r = await CG.sb.from("profiles").update({ ea_id:v }).eq("id", CG.auth.user.id).select("id");
   if(r.error){ CG.toast("Couldn’t save EA ID: "+r.error.message,"err"); return; }
+  if(!(r.data||[]).length){ CG.toast("That didn’t save — your sign-in may have expired. Sign in again and retry.","err"); return; }
   CG.auth.profile.ea_id=v; if(CG.closeOverlay) CG.closeOverlay(); CG.toast("EA ID saved","ok"); CG.router();
 };
 CG.registerForSeason = async function(position, note){
@@ -3711,16 +3763,33 @@ CG._armDraftTick = function(){
   var tick = function(){
     var e = document.getElementById("drTick");
     if (!e){ clearInterval(CG._drIv); return; }
+    /* this room is a draft room too — recover a dead socket here exactly as #/draft does,
+       instead of leaving the managers actually on the clock frozen while spectators self-heal */
+    if (CG._draftHeartbeat) CG._draftHeartbeat();
     var st = CG.lg.draftState || {};
     if (st.status==="paused"){ e.textContent = CG.fmtClockS(st.paused_remaining==null?(st.pick_seconds||0):st.paused_remaining); return; }
     if (st.status!=="live" || !st.clock_ends_at){ e.textContent = "–:––"; return; }
     var ms = Date.parse(st.clock_ends_at) - Date.now();
     if (ms <= 0){
       e.textContent = "0:00";
-      if (!CG._drFired || Date.now()-CG._drFired > 15000){
-        CG._drFired = Date.now();
-        CG.sb.rpc("draft_auto_advance",{ p_season_number: st.season_number }).then(function(){});
-      }
+      /* Only privileged browsers may advance, and only one attempt at a time with backoff —
+         this path used to fire from every management tab at once and swallow the error, so a
+         genuinely stuck clock was invisible while the RPC was hammered. */
+      var role = (CG.auth && CG.auth.role) || "guest";
+      if (role!=="mgmt" && role!=="commish" && role!=="staff") return;
+      if (CG._drAdvancing || Date.now() < (CG._drAdvanceAfter||0)) return;
+      if (CG._drFired && Date.now()-CG._drFired < 15000) return;
+      CG._drFired = Date.now(); CG._drAdvancing = true;
+      CG.sb.rpc("draft_auto_advance",{ p_season_number: st.season_number }).then(function(r){
+        if (r && r.error) throw new Error(r.error.message);
+        CG._drAdvanceFails = 0; CG._drAdvanceAfter = 0;
+      }).catch(function(err){
+        CG._drAdvanceFails = (CG._drAdvanceFails||0)+1;
+        CG._drAdvanceAfter = Date.now() + Math.min(60000, 1500*Math.pow(2, CG._drAdvanceFails-1));
+        console.error("draft_auto_advance failed", err);
+        if (CG._drAdvanceFails === 3 && CG.toast)
+          CG.toast("The draft clock can't advance itself — a commissioner should skip the pick manually.","err");
+      }).then(function(){ CG._drAdvancing = false; });
       return;
     }
     e.textContent = CG.fmtClockS(Math.ceil(ms/1000));
@@ -4309,7 +4378,10 @@ CG.loadDMs = async function(){
   if (!CG.sb || !CG.dmUid()) return;
   var me=CG.dmUid();
   try {
-    var r = await CG.sb.from("direct_messages").select("*").or("sender_id.eq."+me+",recipient_id.eq."+me).order("created_at",{ascending:true});
+    /* newest 900 rather than the oldest 1000: the cap is silent, so ascending order quietly hid
+       the most recent conversation once a heavy user crossed it */
+    var r = await CG.sb.from("direct_messages").select("*").or("sender_id.eq."+me+",recipient_id.eq."+me).order("created_at",{ascending:false}).limit(900);
+    if (r && r.data) r.data = r.data.slice().sort(function(a,b){ return Date.parse(a.created_at)-Date.parse(b.created_at); });
     CG._dm.msgs = r.data||[];
     var need = {}; CG._dm.msgs.forEach(function(m){ var o=CG.dmOtherId(m); if(o&&!CG._dm.profiles[o]) need[o]=1; });
     var ids = Object.keys(need);
@@ -6452,7 +6524,7 @@ CG.loadActionRequests = async function(){
       CG.sb.from("action_requests")
         .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
         .order("created_at",{ascending:false}),
-      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:true})
+      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:false}).limit(900)
     ]);
     /* This used to fall back to [] on any error, so a failed query was indistinguishable from an
        empty queue — the Staff Desk read "the room is clean" while cases sat unanswered. Keep
@@ -6461,7 +6533,10 @@ CG.loadActionRequests = async function(){
     if (q[1] && q[1].error) throw new Error("case messages: "+(q[1].error.message||q[1].error.code||"query failed"));
     CG.lg._actionReqs = (q[0] && q[0].data) || [];
     var msgs = {};
-    ((q[1] && q[1].data)||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
+    /* fetched newest-first so the silent 1000-row cap drops the OLDEST, then restored to
+       chronological order for the thread view */
+    ((q[1] && q[1].data)||[]).slice().sort(function(a,b){ return Date.parse(a.created_at)-Date.parse(b.created_at); })
+      .forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
     CG.lg._actionMsgs = msgs;
   } catch(e){
     CG._actionLoadError = String((e && e.message) || e);
@@ -7281,7 +7356,11 @@ CG.staffAttentionCard = function(){
    staff ballot, this is applicant-visible: RLS lets the applicant read/write their own thread and
    the office read/write any. Both sides are notified on each message (trg_application_message). */
 CG._groupAppMsgs = function(rows){
-  var map = {}; (rows||[]).forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
+  /* rows arrive newest-first (the fetch is capped, and a silent truncation must lose the oldest,
+     not the newest) — the thread itself reads oldest-first */
+  var map = {};
+  (rows||[]).slice().sort(function(a,b){ return Date.parse(a.created_at)-Date.parse(b.created_at); })
+    .forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
   return map;
 };
 CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[type+":"+id] || []; };
@@ -8633,20 +8712,20 @@ CG.hubRoster = function(qs){
 };
 
 CG.AUTOMATIONS = [
-  { key:"ea-poll",          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
-  { key:"twitch-live-sync", name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
-  { key:"discord-sync",     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
-  { key:"discord-welcome",  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
-  { key:"discord-scheduler",name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
-  { key:"lfg-timers",       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
+  { key:"ea-poll", staleAfterMin:1440,          name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
+  { key:"twitch-live-sync", staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
+  { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
+  { key:"discord-welcome", staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
+  { key:"discord-scheduler", staleAfterMin:20,name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
+  { key:"lfg-timers", staleAfterMin:15,       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
   { key:"gateway-bot",      name:"Gateway bot (always on)",   every:"Continuously, from its own server", desc:"A live Discord connection — welcomes and departure logs land in about a second instead of on the next sweep. The sweeps above stay on as its safety net, so “never ran” here just means the bot’s server isn’t set up yet.", noRun:true },
-  { key:"rookie-distribution", name:"Rookie placement",       every:"Every 2 min inside the database", desc:"A stamped no-op today. Rulebook v2.22 restored the five-game pre-season requirement (Rule 2.8), so whether this job places short-of-five players again is a league-office decision.", rpc:"distribute_unproven_rookies" },
-  { key:"lifecycle-announcements", name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
-  { key:"latecomer-assign", name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
-  { key:"contract-enforcement", name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
-  { key:"staff-briefing", name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
-  { key:"weekly-potw",      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
-  { key:"watchdog",         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
+  { key:"rookie-distribution", staleAfterMin:15, name:"Rookie placement",       every:"Every 2 min inside the database", desc:"A stamped no-op today. Rulebook v2.22 restored the five-game pre-season requirement (Rule 2.8), so whether this job places short-of-five players again is a league-office decision.", rpc:"distribute_unproven_rookies" },
+  { key:"lifecycle-announcements", staleAfterMin:20, name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
+  { key:"latecomer-assign", staleAfterMin:20, name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
+  { key:"contract-enforcement", staleAfterMin:45, name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
+  { key:"staff-briefing", staleAfterMin:2160, name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
+  { key:"weekly-potw", staleAfterMin:11520,      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
+  { key:"watchdog", staleAfterMin:45,         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Automations</h2><p class="lede" style="margin-top:6px">Everything the league runs on its own. Each job also has a <b>Run now</b> for when you don’t want to wait for the next cycle.</p></div>';
@@ -8732,7 +8811,10 @@ CG.AFTER._admAutomations = function(){
       /* the departure rule's visible pulse: how many sign-ups the last sweep withdrew */
       if (a.key === "discord-sync" && res && res.signupsRemoved > 0 && tsEl)
         tsEl.textContent += " · withdrew " + res.signupsRemoved + " sign-up" + (res.signupsRemoved === 1 ? "" : "s");
-      var fresh = mins < 30 || (a.key==="ea-poll" && mins < 24*60);  /* ea-poll only runs in the game window */
+      /* Each job declares its own cadence one line above, so grade against THAT. One flat
+         30-minute threshold marked a healthy daily briefing and a healthy Monday job amber
+         every single day — which teaches the operator that amber means nothing. */
+      var fresh = mins < (a.staleAfterMin || 30);
       if (failed){
         stEl.textContent = "Failing";
         stEl.className = "chip chip-loss";
@@ -9400,6 +9482,9 @@ CG.admScheduleLive = function(){
                 : '<button class="btn btn-ghost" id="preGen">'+CG.ic("plus",15)+'Generate pre-season</button>')+
     (reg.length ? '<button class="btn btn-ghost" id="schedClear">Clear season ('+reg.length+')</button>'
                 : '<button class="btn btn-chrome" id="schedGen">'+CG.ic("plus",15)+'Generate season</button>')+'</span></div>';
+  /* Tonight's lineup readiness — the one thing an operator needs before a T-30 lock and the one
+     thing nothing on the site could answer. Filled asynchronously by the AFTER hook. */
+  h += '<div id="lineupReady"></div>';
   /* ---- schedule shape: the settings the generator builds from ---- */
   var shp = CG.seasonShape(CG.SEASON);
   var locked = lg.schedule.some(function(g){ return g.stage!=="preseason" && g.status==="final"; });
@@ -9456,7 +9541,52 @@ CG.admScheduleLive = function(){
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">All times Eastern. Lobby codes are shown here for the league office; players only see a code from 30 minutes before puck drop (Rule 4.2). Moving a game keeps its code and server picks; both clubs see the change instantly. <b>Forfeit</b> records a game a club didn’t show for — a 1-0 win for the opponent with no player stats (Rule 5.3), which also clears the game from release and playoff gates.</span></div></div>';
   return h;
 };
+/* Which clubs playing tonight have NOT filed a lineup, and how long each has left. One query
+   against tonight's fixtures; nothing else in the app asks this question. */
+CG.renderLineupReadiness = function(){
+  var host = document.getElementById("lineupReady");
+  if (!host || !CG.sb || !CG.SEASON || !CG.SEASON.id) return;
+  var today = CG.etDay ? CG.etDay(CG.now()) : null;
+  var tonight = (CG.lg.schedule||[]).filter(function(g){
+    return g.status!=="final" && (!today || (CG.etDay && CG.etDay(g.at)===today));
+  }).sort(function(a,b){ return a.at-b.at; });
+  if (!tonight.length){ host.innerHTML = ""; return; }
+  var ids = tonight.map(function(g){ return g.id; });
+  CG.sb.from("game_lineups").select("game_id,team_id").in("game_id", ids).then(function(r){
+    if (!r || r.error){
+      host.innerHTML = '<div class="card" style="margin-bottom:16px"><div class="card-b">'+
+        '<p class="caption" style="color:var(--red-ink)">Couldn’t read tonight’s lineups — this is not the same as "nobody has filed".</p></div></div>';
+      return;
+    }
+    var filed = {}; (r.data||[]).forEach(function(row){ filed[row.game_id+":"+row.team_id] = true; });
+    var idOf = (CG.lg._codeToId)||{};
+    var rows = [];
+    tonight.forEach(function(g){
+      [g.home, g.away].forEach(function(code){
+        var tid = idOf[code];
+        var ok = tid && filed[g.id+":"+tid];
+        rows.push({ code:code, at:g.at, ok:!!ok, lock:g.at-30*60000 });
+      });
+    });
+    var missing = rows.filter(function(x){ return !x.ok; });
+    host.innerHTML = '<div class="card" style="margin-bottom:16px'+(missing.length?';border-color:var(--red)':'')+'">'+
+      '<div class="card-h"><h3>Tonight’s lineups</h3>'+
+      (missing.length ? '<span class="chip chip-warn">'+missing.length+' not filed</span>'
+                      : '<span class="chip chip-win">all filed</span>')+'</div>'+
+      '<div class="card-b" style="display:flex;flex-wrap:wrap;gap:8px">'+
+      rows.map(function(x){
+        var mins = Math.round((x.lock - CG.now())/60000);
+        var late = mins <= 0;
+        return '<span class="chip '+(x.ok?"chip-win":(late?"chip-loss":"chip-warn"))+'" style="display:inline-flex;align-items:center;gap:6px">'+
+          CG.crest(x.code,16)+esc(x.code)+' '+CG.fmtTime(x.at)+
+          (x.ok ? ' ✓' : late ? ' — LOCKED, none filed' : ' — '+mins+'m left')+'</span>';
+      }).join("")+'</div>'+
+      (missing.length ? '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">A club with no lineup at puck drop forfeits under Rule 3.2 — a nudge in their room usually beats a ruling.</span></div>' : "")+
+      '</div>';
+  });
+};
 CG.AFTER._admScheduleLive = function(){
+  CG.renderLineupReadiness();
   /* Season shape: the arithmetic is shown live, because weeks x nights x times decides how many
      games there are, and that in turn decides which divisional splits are even possible. Typing a
      number that cannot work should say so before it is saved, not after a schedule is generated. */
@@ -10750,8 +10880,9 @@ CG.AFTER.hub = function(param, qs){
   if (sl) sl.addEventListener("click", function(){
     var ea=(document.getElementById("sEaLive").value||"").trim(), plat=document.getElementById("sPlatLive").value;
     if (ea && ea.length<2){ CG.toast("EA ID looks too short","err"); return; }
-    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null }).eq("id",CG.auth.user.id).then(function(r){
+    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if(!(r.data||[]).length){ CG.toast("That didn’t save — your sign-in may have expired. Sign in again and retry.","err"); return; }
       CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null;
       CG.toast("Profile saved","ok");
     });

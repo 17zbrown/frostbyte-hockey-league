@@ -1552,6 +1552,14 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
      bar, the single most-important conversion button for phone visitors from Discord — sat
      under the 44px minimum. Pad them up on touch widths without disturbing desktop. */
   .btn-sm{min-height:44px;padding-top:10px;padding-bottom:10px}
+  /* chips are controls too — a filter switcher, a data-go jump, a tab. At 11px/3px padding they
+     computed to ~26px, well under the touch floor, and they are what a phone user actually taps. */
+  a.chip,button.chip,.chip[data-go],.chip[href],.chip[data-tab]{min-height:44px;padding-top:9px;padding-bottom:9px;display:inline-flex;align-items:center}
+  /* A media query adds no specificity, so the bare `input,select,textarea{font-size:16px}` above
+     loses to every class-scoped rule that sets something smaller — and iOS then zooms the viewport
+     on focus and never zooms back. Re-assert the floor at matching specificity on the real
+     offenders (all within 3px of 16 already, so nothing shifts perceptibly). */
+  .tbl tr.tbl-filter input,.lc-nm,.scout-in,.fa-club,#seasonPick{font-size:16px}
 }
 
 /* mobile menu */

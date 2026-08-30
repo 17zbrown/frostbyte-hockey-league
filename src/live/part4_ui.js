@@ -1424,7 +1424,10 @@ CG.router = function(){
       '<button class="btn btn-ghost" style="margin-top:14px" onclick="location.reload()">Reload</button>'+
       '</div></div></section>';
   }
-  app.innerHTML = '<div class="pg">'+_html+'</div>';
+  /* Only animate a real navigation. The router re-renders in place for every small change —
+     a lineup slot, a toggle, a realtime update — and a fresh .pg node replayed the 380ms enter
+     animation each time, so routine edits flickered and felt like reloads. */
+  app.innerHTML = '<div'+(sameRoute?'':' class="pg"')+'>'+_html+'</div>';
   window.scrollTo({top:keepY, left:0, behavior:"instant"});
   CG.markActiveNav();
   /* a11y: every clickable data-go target is keyboard-reachable */
@@ -1511,7 +1514,7 @@ document.addEventListener("click", function(e){
       '</div>');
     return;
   }
-  if (e.target.closest("#burger")){ $("#mobilenav").classList.add("open"); $("#mobilenav").setAttribute("aria-hidden","false"); var fl=$("#mobilenav a"); if (fl) fl.focus(); return; }
+  if (e.target.closest("#burger")){ var mnv=$("#mobilenav"); try { mnv.inert = false; } catch(e2){} mnv.classList.add("open"); mnv.setAttribute("aria-hidden","false"); var fl=$("#mobilenav a"); if (fl) fl.focus(); return; }
   if (e.target.closest("[data-mn-close]")){ CG.closeMobileNav(); return; }
   if (e.target.closest("#mobilenav a")){ CG.closeMobileNav(); return; }
   if (e.target.closest("[data-signout]")){
@@ -1565,7 +1568,11 @@ document.addEventListener("keydown", function(e){
 });
 CG.closeMobileNav = function(){
   var mn = $("#mobilenav");
+  if (!mn) return;
   mn.classList.remove("open");
   mn.setAttribute("aria-hidden","true");
+  /* it is hidden by transform alone, so without this its links stay in the tab order — a keyboard
+     user tabs into an offscreen menu inside an aria-hidden subtree */
+  try { mn.inert = true; } catch(e){}
 };
 window.addEventListener("hashchange", CG.router);

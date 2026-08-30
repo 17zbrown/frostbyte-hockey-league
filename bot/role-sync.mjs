@@ -43,15 +43,27 @@ export function createRoleSyncer(env, opts = {}) {
     if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
     return r.json();
   }
+  /* Same transport discipline the sweeps already use (discord-sync.js). Without it a 429 was
+     recorded as a permanent failure and the member's roles simply never applied — and this is the
+     path that runs on every seat change, for 200+ members. */
   async function dApi(method, path, body) {
-    const r = await fetch(`https://discord.com/api/v10${path}`, {
-      method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (r.status === 404) return { __notfound: true };
-    const t = await r.text();
-    if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${t.slice(0, 120)}`);
-    return t ? JSON.parse(t) : null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const r = await fetch(`https://discord.com/api/v10${path}`, {
+        method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      if (r.status === 404) return { __notfound: true };
+      if (r.status === 429) {
+        const ra = +(r.headers.get("retry-after") || 1);
+        await new Promise((res) => setTimeout(res, ra * 1000 + 250));
+        continue;
+      }
+      if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
+      const t = await r.text();
+      if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${t.slice(0, 120)}`);
+      return t ? JSON.parse(t) : null;
+    }
+    throw new Error(`${method} ${path} -> rate-limited after retries`);
   }
 
   /* Guild roles and the season rows change rarely; cache them briefly. teams is deliberately NOT
@@ -180,17 +192,41 @@ export function createRoleSyncer(env, opts = {}) {
   /* One roster move writes several rows in one transaction, each of which lands a queue row
      naming the same member. The debounce collapses the burst into one sync instead of racing
      several identical PATCHes. */
+  /* One worker, not one timer per member. The debounce still coalesces repeat events for the same
+     profile, but the actual syncs now DRAIN serially: catchUp can hand this 500 rows at once, and
+     the old per-profile setTimeout fired them all simultaneously — a self-inflicted rate limit
+     against the very API that has no retry budget to spare. */
   const pending = new Map();   // profileId -> { timer, reason }
+  const queue = [];            // profileIds waiting for the worker
+  const queued = new Set();
+  let draining = false;
+  async function drain() {
+    if (draining) return;
+    draining = true;
+    try {
+      while (queue.length) {
+        const job = queue.shift();
+        queued.delete(job.profileId);
+        try {
+          const r = await syncProfile(job.profileId, job.reason);
+          if (job.onDone) job.onDone(r);
+          if (r !== "no-op" && r !== "unlinked") console.log(`role-sync ${job.profileId} (${job.reason}): ${r}`);
+        } catch (e) {
+          console.warn(`role-sync ${job.profileId} failed:`, e && e.message ? e.message : e);
+        }
+      }
+    } finally { draining = false; }
+  }
   function enqueue(profileId, reason, onDone) {
     if (!profileId) return;
     const prev = pending.get(profileId);
     if (prev) clearTimeout(prev.timer);
     const timer = setTimeout(() => {
       pending.delete(profileId);
-      syncProfile(profileId, reason).then((r) => {
-        if (onDone) onDone(r);
-        if (r !== "no-op" && r !== "unlinked") console.log(`role-sync ${profileId} (${reason}): ${r}`);
-      });
+      if (queued.has(profileId)) return;      /* already waiting its turn */
+      queued.add(profileId);
+      queue.push({ profileId, reason, onDone });
+      drain();
     }, DEBOUNCE_MS);
     pending.set(profileId, { timer, reason });
   }

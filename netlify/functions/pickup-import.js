@@ -239,6 +239,17 @@ async function resolveProfile(entry, cache) {
 export const _internals = { matchLobbyForImport, normalizeMatch, mapPos, mergeMatches, resolveProfile };
 
 export const handler = async (event) => {
+  /* Both diagnostics below reach EA through the PAID residential proxy, and both used to run
+     before any auth check on a public domain — anyone who learned the URL could spend our
+     proxy bandwidth and our EA rate budget in a loop. Same gate parse-screenshots.js uses. */
+  const _diagOk = () => {
+    const k = event.headers && (event.headers["x-ingest-key"] || event.headers["X-Ingest-Key"]);
+    return !!(process.env.INGEST_KEY && k === process.env.INGEST_KEY);
+  };
+  if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag && !_diagOk()) {
+    return { statusCode: 401, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "diagnostics require x-ingest-key" }) };
+  }
   // temp diag: is the residential proxy set, and does an EA call through it work?
   if (event.httpMethod === "GET" && (event.queryStringParameters || {}).diag === "puproxy9") {
     const out = { proxySet: !!PROXY, node: process.version };

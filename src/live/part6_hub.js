@@ -1065,7 +1065,16 @@ CG.AFTER._lines = function(qs){
      moves. Falls back to the router if the wrapper is somehow gone. */
   function repaint(){
     var host = document.getElementById("lcTab");
-    if (host){ host.outerHTML = CG.hubLines({}); CG.AFTER._lines({}); }
+    if (host){
+      /* The board is an 880px grid inside a horizontal scroller. Replacing the node reset that
+         scroll to 0, so on a phone every single assignment threw the manager back to the leftmost
+         column and he had to scroll out to his position again — six times per line. */
+      var prev = document.querySelector(".lc-wrap");
+      var x = prev ? prev.scrollLeft : 0;
+      host.outerHTML = CG.hubLines({});
+      CG.AFTER._lines({});
+      if (x){ var now = document.querySelector(".lc-wrap"); if (now) now.scrollLeft = x; }
+    }
     else if (CG.router) CG.router();
   }
   /* how many OTHER lines this goaltender already backstops (draft state, target line excluded) */

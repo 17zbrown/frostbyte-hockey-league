@@ -45,11 +45,20 @@ if (!head.includes(ANCHOR)) throw new Error("head anchor not found");
    together; the hash is `openssl dgst -sha384 -binary <file> | openssl base64 -A`. */
 const SUPABASE_JS = "2.110.7";
 const SUPABASE_SRI = "sha384-BmlQlKlDvXvKoxkn5OQuUo/aJQCTXeB+Kls6EccBmG4Kf8AXvp89RtO9MtPxP/r5";
+/* Served from OUR origin, not a third party. The whole app is behind this file, and jsDelivr
+   being unreachable — blocked network, corporate DNS, a CDN incident — took the entire league
+   down with it. vendor/ is byte-identical to the CDN copy (same SRI), so if Netlify served the
+   page it can serve this too. jsDelivr stays as an onerror fallback, and when the fallback
+   finishes it re-runs the boot that failed without it. */
 head = head.replace(
   ANCHOR,
   '<div id="toast-root" aria-live="polite"></div>\n' +
-  `<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPABASE_JS}" ` +
-  `integrity="${SUPABASE_SRI}" crossorigin="anonymous"></script>\n<script>`
+  `<script src="/vendor/supabase-js-${SUPABASE_JS}.min.js" integrity="${SUPABASE_SRI}" ` +
+  `crossorigin="anonymous" onerror="(function(s){s.onerror=null;var f=document.createElement('script');` +
+  `f.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPABASE_JS}';` +
+  `f.integrity='${SUPABASE_SRI}';f.crossOrigin='anonymous';` +
+  `f.onload=function(){try{if(window.CG&&CG.bootLive)CG.bootLive();}catch(e){}};` +
+  `document.head.appendChild(f);})(this)"></script>\n<script>`
 );
 
 const body = PARTS.map((f) => fs.readFileSync(path.join(DIR, f), "utf8")).join("\n");

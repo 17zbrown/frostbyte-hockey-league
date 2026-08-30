@@ -264,6 +264,17 @@ async function logAttempt(norm, raw, status, reason, gameId) {
   } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); }
 }
 
+/* Status-only touch for a match whose payload is ALREADY archived. EA re-serves the same recent
+   matches on every 5-minute poll, so the dedupe path re-uploaded a full match body dozens of
+   times per game; this PATCHes the row instead of re-sending it. */
+async function touchAttempt(eaMatchId, status, reason, gameId) {
+  try {
+    await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(eaMatchId)}`,
+      { status, reason: reason || null, game_id: gameId || null, last_attempt_at: new Date().toISOString() },
+      "return=minimal");
+  } catch (e) { console.log("ea_ingest_log touch failed:", String(e.message || e)); }
+}
+
 export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame, resolveProfile };
 
 // ---- Ingest ONE normalized match ----
@@ -273,7 +284,10 @@ async function ingestOne(norm, raw, summary, batch) {
   const dup = await sbGet(`games?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=id&limit=1`);
   if (dup[0]) {
     summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already ingested" });
-    await logAttempt(norm, raw, "ingested", "already ingested (dedupe)", dup[0].id);
+    /* The payload was archived the first time this match was seen. EA returns the same few recent
+       matches on every 5-minute poll, so re-uploading the full raw object here re-sent the entire
+       match body dozens of times per game for nothing. Touch the status only. */
+    await touchAttempt(norm.ea_match_id, "ingested", "already ingested (dedupe)", dup[0].id);
     return;
   }
   const mdup = await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&status=eq.merged&select=game_id&limit=1`);

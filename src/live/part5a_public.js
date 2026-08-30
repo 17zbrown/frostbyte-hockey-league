@@ -1506,7 +1506,23 @@ CG.AFTER.home = function(){
 /* ---------- SCHEDULE ---------- */
 CG.ROUTES.schedule = function(param, qs){
   var lg = CG.lg;
-  var fTeam = qs.team||"", fState = qs.state||"all", fWeek = qs.week||"";
+  var fTeam = qs.team||"", fState = qs.state||"all";
+  /* Default to the week in play rather than the whole season. Unfiltered, this route emitted a
+     card for every one of the season's 540 games — megabytes of DOM on a phone, and the game the
+     reader actually wanted was buried. `nowKey` below picks the current week; "All weeks" is
+     still one selection away in the filter. */
+  /* Default to the week in play rather than the whole season. Unfiltered, this route emitted a
+     card for every one of the season's 540 games — megabytes of DOM on a phone, with the game the
+     reader actually wanted buried in it. "All weeks" is still one selection away in the filter.
+     Computed from the raw schedule here because the grouping below is itself filtered by fWeek. */
+  var fWeek = qs.week;
+  if (fWeek === undefined){
+    var _soon = Infinity, _wk = null;
+    (lg.schedule||[]).forEach(function(g){
+      if (g.status!=="final" && g.at >= CG.now()-6*3600000 && g.at < _soon){ _soon = g.at; _wk = g.week; }
+    });
+    fWeek = _wk == null ? "" : String(_wk);
+  }
   var head = CG.pageHead(esc(CG.seasonTag())+" · schedule","Schedule & results","Every night, every final. All times Eastern. Game codes and lineups live on each matchup page.");
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<select id="fTeam" aria-label="Filter by club" style="max-width:220px"><option value="">All clubs</option>'+

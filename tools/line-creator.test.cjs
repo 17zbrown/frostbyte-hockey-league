@@ -242,7 +242,12 @@ console.log("\n— goaltending: two goalies, two lines each, never a third");
 console.log("\n— edits repaint in place; the page never resets");
 {
   A("the board swaps its own DOM instead of routing the page",
-    /function repaint\(\)/.test(src6) && /host\.outerHTML = CG\.hubLines\(\{\}\); CG\.AFTER\._lines\(\{\}\)/.test(src6));
+    /function repaint\(\)/.test(src6) &&
+    /host\.outerHTML = CG\.hubLines\(\{\}\);\s*\n?\s*CG\.AFTER\._lines\(\{\}\);/.test(src6));
+  /* ...and keeps the horizontal scroll, so a phone doesn't jump back to the leftmost
+     column on every assignment (daily-use audit, 2026-08-30) */
+  A("...preserving the board's horizontal scroll across that swap",
+    /var x = prev \? prev\.scrollLeft : 0;/.test(src6) && /now\.scrollLeft = x;/.test(src6));
   A("...and no drag path routes the whole page any more",
     !/CG\.router\(\);/.test(src6.slice(src6.indexOf("CG.AFTER._lines"), src6.indexOf("ROSTER — cap sheet"))
       .replace(/else if \(CG\.router\) CG\.router\(\);/, "")));
