@@ -310,6 +310,18 @@ async function ingestOne(norm, raw, summary, batch) {
     : gamesAll;
   const DAY = 86400000;
   const matchDayUnix = Date.parse(`${norm.et_day}T12:00:00Z`); // noon avoids DST edge wobble
+  // A playoff series plays the SAME two clubs twice on one night (2-2-3, Rule 8.3). With two open
+  // fixtures on the same ET day the pick below is whatever order Postgres happened to return, so
+  // the two box scores can land on the wrong games — and once one is claimed the other is filed
+  // against its sibling. Refuse to guess: route both to staff, who assign them per fixture from
+  // the Stats Manager / Club game stats desk.
+  const sameDay = games.filter((g) => etDayISO(g.scheduled_at) === norm.et_day);
+  if (sameDay.length > 1) {
+    const why = `${sameDay.length} open fixtures between these clubs on ${norm.et_day} (a same-night playoff double-header) — assign this box score to the right game by hand`;
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+    await logAttempt(norm, raw, "unmatched", why);
+    return;
+  }
   let game = games.find((g) => etDayISO(g.scheduled_at) === norm.et_day);
   if (!game) {
     const near = games

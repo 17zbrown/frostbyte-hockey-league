@@ -873,7 +873,20 @@ CG.standingsLadder = function(dv, pre){
              sub:  pre ? "roster" : (rec.w||0) + "-" + (rec.l||0) + "-" + (rec.otl||0) };
   });
   var peak = scored.reduce(function(m, r){ return Math.max(m, r.val || 0); }, 0) || 1;
-  if (!pre) scored.sort(function(a,b){ return (b.pts||0) - (a.pts||0); });
+  /* One source of order. A points-only sort published a different ladder — and a different
+     playoff cutline — than the standings page the moment two clubs tied on points. */
+  if (!pre){
+    var authoritative = (CG.standings ? CG.standings(CG.lg, dv) : null);
+    if (authoritative && authoritative.length){
+      var rankOf = {};
+      authoritative.forEach(function(row, idx){ rankOf[row.code || row.team || row] = idx; });
+      scored.sort(function(a,b){
+        var ra = rankOf[a.code], rb = rankOf[b.code];
+        if (ra == null || rb == null) return (b.pts||0) - (a.pts||0);
+        return ra - rb;
+      });
+    } else scored.sort(function(a,b){ return (b.pts||0) - (a.pts||0); });
+  }
 
   /* the cutline sits under the last qualifying lane — driven by the playoff setting, which is
      league law (Rule 8.1), so the front page can never disagree with the bracket again */
@@ -1057,7 +1070,7 @@ CG.ROUTES.home = function(){
       '<div><b class="num">Week '+homeCurWeek+'</b><span>of '+homeTotWeeks+' · '+esc(CG.seasonTag())+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+lg.results.length+'</b><span>Games played</span></div>'+
       (lead?'<div style="cursor:pointer" data-go="'+CG.playerRoute(lead)+'"><b>'+esc(lead.tag)+'</b><span>'+lg.pstats[lead.id].p+' pts · scoring lead</span></div>':"")+
-      '<div style="cursor:pointer" data-go="#/standings"><b class="num">3×2</b><span>Playoff spots per division</span></div>'+
+      '<div style="cursor:pointer" data-go="#/standings"><b class="num">'+(CG.playoffPerDiv?CG.playoffPerDiv():4)+'×'+(CG.playoffDivisions?CG.playoffDivisions().length:2)+'</b><span>Playoff spots per division</span></div>'+
     '</div></div></section>';
   }
   /* The scroll, in the order a first-time visitor asks the questions:
@@ -1607,8 +1620,14 @@ CG.playoffBracket = function(){
       var s = seriesByRound[rd][key] || (seriesByRound[rd][key]={ a:[g.home,g.away].sort()[0], b:[g.home,g.away].sort()[1], aw:0, bw:0, games:0 });
       s.games++;
       var res = (lg.allResults||[]).find(function(r){ return r.id===g.id; });
-      if (res){ var winner = res.score[g.home] > res.score[g.away] ? g.home : g.away;
-        if (winner===s.a) s.aw++; else s.bw++; }
+      /* same winner rule the rest of the site uses: a forfeit decides it, a tie decides nothing */
+      if (res){
+        var winner = null;
+        if (res.forfeit) winner = (res.forfeit===g.home) ? g.away : g.home;
+        else if (res.score[g.home] > res.score[g.away]) winner = g.home;
+        else if (res.score[g.away] > res.score[g.home]) winner = g.away;
+        if (winner){ if (winner===s.a) s.aw++; else s.bw++; }
+      }
     });
     var roundName = {1:"Quarter-finals",2:"Semi-finals",3:"Final"};
     var seriesCard = function(s){
@@ -1810,7 +1829,11 @@ CG.teamLine = function(code){
   }
   var div = CG.standings(lg, t.div);
   var rank = div.findIndex(function(r){ return r.code===code; }) + 1;
-  var pos = rank===1 ? "Top of the "+t.div : rank===div.length ? "Bottom of the "+t.div : ["","","Second","Third"][rank]+" in the "+t.div;
+  /* the word list stopped at "Third", so the 4th and 5th club in a division read
+     "undefined in the East" from the first regular-season final onward */
+  var ORD = ["","","Second","Third","Fourth","Fifth","Sixth","Seventh","Eighth","Ninth","Tenth"];
+  var pos = rank===1 ? "Top of the "+t.div : rank===div.length ? "Bottom of the "+t.div
+    : (ORD[rank] || ("#"+rank))+" in the "+t.div;
   var sn = parseInt(s.streak.slice(1),10)||0;
   var flavor;
   if (s.streak[0]==="W" && sn>=3) flavor = "winners of "+sn+" straight";

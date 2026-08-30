@@ -878,13 +878,17 @@ CG.setupChecklist = function(profile, registration, regOpen){
    level, so "no picks left" can never show while the picks simply don't exist. */
 CG.boardCoverage = function(boardIds, pool, remainingPicks){
   var inPool = {}; (pool||[]).forEach(function(pr){ inPool[pr.profileId] = true; });
-  var available = (boardIds||[]).filter(function(id){ return inPool[id]; }).length;
+  /* The auto-pick refuses an ineligible player (Rule 2.8), so counting ranked-but-ineligible
+     names told a club it was "covered" while none of its board could actually be drafted. */
+  var eligible = function(id){ return !CG.isDraftEligible || CG.isDraftEligible(id); };
+  var available = (boardIds||[]).filter(function(id){ return inPool[id] && eligible(id); }).length;
+  var ineligibleN = (boardIds||[]).filter(function(id){ return inPool[id] && !eligible(id); }).length;
   var level = remainingPicks==null ? "pre"
     : remainingPicks<=0 ? "done"
     : available >= remainingPicks + 3 ? "ok"          /* a cushion: others draft your targets too */
     : available >= remainingPicks ? "thin"
     : "short";
-  return { available:available, remaining:remainingPicks, level:level };
+  return { available:available, ineligible:ineligibleN, remaining:remainingPicks, level:level };
 };
 
 CG.mapDraftData = function(lg, draftPicks, registrations){
@@ -903,7 +907,9 @@ CG.mapDraftData = function(lg, draftPicks, registrations){
   var curSn = (CG.SEASON && CG.SEASON.number) || 1;
   var picked = {};
   lg.draftPicks.forEach(function(p){ if (p.used && p.playerId && p.season===curSn) picked[p.playerId] = true; });
-  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && !held[r.profile_id] && !picked[r.profile_id] && (!r.season_id || r.season_id===poolSeason); })
+  /* a declined registration is not in the pool — the commissioner is promised that Decline
+     keeps a banned or withdrawn member out of the draft entirely */
+  lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && !held[r.profile_id] && !picked[r.profile_id] && r.status!=="declined" && (!r.season_id || r.season_id===poolSeason); })
     .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(r.scout_ovr==null?null:r.scout_ovr), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
     .sort(function(a,b){ return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr); });
   lg.registrationsCount = (registrations||[]).length;
@@ -3662,6 +3668,8 @@ CG.hubDraftLive = function(){
   /* no pick order yet → coverage can't be graded; null keeps "no picks left" honest */
   var cov = CG.boardCoverage(board, pool, picks.length ? remainingMine : null);
   var covTxt = cov.available+' ranked for '+cov.remaining+' pick'+(cov.remaining===1?'':'s');
+  var covIneli = cov.ineligible ? ' <b>'+cov.ineligible+'</b> more '+(cov.ineligible===1?'is':'are')+
+    ' ranked but not draft-eligible yet (Rule 2.8) — they don\u2019t count toward coverage.' : '';
   var covChip = cov.level==="pre" ? '<span class="chip">'+cov.available+' ranked — pick order not set</span>'
     : cov.level==="done" ? '<span class="chip">no picks left</span>'
     : cov.level==="ok"   ? '<span class="chip chip-win">covered — '+covTxt+'</span>'
@@ -3674,6 +3682,7 @@ CG.hubDraftLive = function(){
     : cov.level==="thin"
     ? 'Enough for your picks with nothing to spare — other clubs draft your targets too. A few extra names is cheap insurance.'
     : 'If your clock ever runs out, the auto-pick takes the best player still available <b>from this list</b>.';
+  covNote += covIneli;
   var draftAt = CG.SEASON && CG.SEASON.draft_at ? Date.parse(CG.SEASON.draft_at) : null;
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · the war room</span>'+
@@ -9225,7 +9234,10 @@ CG.scheduleIssues = function(){
 CG.admScheduleLive = function(){
   var lg = CG.lg;
   var pre = lg.schedule.filter(function(g){ return g.stage==="preseason"; });
-  var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason"; });
+  /* the Clear button deletes REGULAR-season games only, so counting playoff games in its label
+     promised to remove fixtures it would leave behind (scheduleIssues/shapeMismatch already
+     exclude them for the same reason) */
+  var reg = lg.schedule.filter(function(g){ return g.stage!=="preseason" && g.stage!=="playoff"; });
   var issues = CG.scheduleIssues();
   var future = lg.schedule.filter(function(g){ return g.status!=="final"; }).sort(function(a,b){ return a.at-b.at; });
   var h = '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px"><div><h2 class="h-sec">Schedule</h2><p class="lede" style="margin-top:6px">'+
@@ -9887,7 +9899,15 @@ CG.seriesWinners = function(round){
   (CG.lg.playoffGames||[]).filter(function(g){ return (g.week||1)===round; }).forEach(function(g){
     var k=[g.home,g.away].sort().join("~"); var p=pairs[k]||(pairs[k]={a:[g.home,g.away].sort()[0],b:[g.home,g.away].sort()[1],aw:0,bw:0});
     var res=(CG.lg.allResults||[]).find(function(r){ return r.id===g.id; });
-    if(res){ var w=res.score[g.home]>res.score[g.away]?g.home:g.away; if(w===p.a)p.aw++; else p.bw++; }
+    /* A forfeit decides the game (Rule 3.2), and an equal score with no forfeit is not a
+       result at all — the old expression silently handed every tie to the away club. */
+    if(res){
+      var w = null;
+      if (res.forfeit) w = (res.forfeit===g.home) ? g.away : g.home;
+      else if (res.score[g.home] > res.score[g.away]) w = g.home;
+      else if (res.score[g.away] > res.score[g.home]) w = g.away;
+      if (w){ if(w===p.a) p.aw++; else p.bw++; }
+    }
   });
   return Object.keys(pairs).map(function(k){ var p=pairs[k];
     return p.aw>=need ? {code:p.a,opp:p.b} : p.bw>=need ? {code:p.b,opp:p.a} : null; }).filter(Boolean);
@@ -9943,6 +9963,21 @@ CG.generatePlayoffRound = function(round){
     if (round === 2) adv = adv.concat(round1Byes());
     var byDiv = {};
     adv.forEach(function(code){ (byDiv[divOf(code)] = byDiv[divOf(code)] || []).push(code); });
+    /* EVERY division must have finished the previous round. Generating while one is still playing
+       used to write a half-round for the division that WAS done, and the "that round already
+       exists" guard then blocked the retry — permanently stranding the other division with no way
+       forward short of deleting played games. */
+    var expected = {};
+    seedCodes.forEach(function(c){ expected[divOf(c)] = true; });
+    var stillPlaying = Object.keys(expected).filter(function(dv){
+      var survivors = (byDiv[dv]||[]).length;
+      return survivors < 2;      /* a division needs at least a pair to play the next round */
+    });
+    if (stillPlaying.length){
+      CG.toast("The "+stillPlaying.join(" and ")+" "+(stillPlaying.length===1?"division hasn":"divisions haven")+
+        "’t finished round "+(round-1)+" yet — every division must be decided before round "+round+" is drawn.","err");
+      return;
+    }
     matchups = [];
     Object.keys(byDiv).sort().forEach(function(dv){
       var line = byDiv[dv].slice().sort(bySeed);
@@ -9976,7 +10011,7 @@ CG.generatePlayoffRound = function(round){
         var day = wk[ni] || CG.dayAdd(wk[wk.length-1]||anchor, (ni+1)*2);
         rows.push({ season_id:s.id, week:round, stage:"playoff",
           home_team_id:(CG.lg._codeToId||{})[host], away_team_id:(CG.lg._codeToId||{})[away],
-          scheduled_at:CG.etISO(day, CG.NIGHT_SLOTS[k]||"21:00"), status:"scheduled" });
+          scheduled_at:CG.etISO(day, (shpP.slots&&shpP.slots[k]) || (shpP.slots&&shpP.slots[shpP.slots.length-1]) || CG.NIGHT_SLOTS[k] || "21:00"), status:"scheduled" });
       }
     }
   });
@@ -10835,7 +10870,9 @@ CG.proposeTrade = function(){
     } else { finish(); }
   });
 };
-CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error) CG.toast("Couldn’t accept: "+r.error.message,"err"); else { CG.toast("Trade accepted!","ok"); CG.refreshTrades(); } }); }); };
+/* reloadLeague, not refreshTrades: the latter reloads only the trade lists, so the accepting GM
+   kept building his next deal against the PRE-trade roster and cap sheet. */
+CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed — rosters updated for both clubs","ok"); CG.loadTrades().then(function(){ CG.reloadLeague(); }); }); }); };
 /* .select() on both: an RLS-refused update returns 0 rows and NO error, and the old success toast
    told a manager an offer was declined that the other club still saw live (the false-success class). */
 CG.declineTrade = function(id){ CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t decline — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); };

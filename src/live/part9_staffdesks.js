@@ -479,12 +479,17 @@ CG.opsReschedulePrompt = function(id){
 CG.deskTransactions = function(){
   var lg = CG.lg;
   var cap = CG.CAP || 60000000;
+  /* ONE cap definition for the whole site. Hand-summing playerSalary counted training-camp
+     players (Rule 2.1 excludes them) and missed unsigned-contract dead money (Rule 2.5), so this
+     audit table disagreed with the clubs' own cap sheets AND with the database's team_cap_used —
+     the surface whose entire job is catching cap trouble was using different arithmetic. */
   var byClub = {};
   (lg.players||[]).forEach(function(p){
     if (!p.team) return;
     var e = byClub[p.team] || (byClub[p.team] = { n:0, used:0 });
-    e.n++; e.used += (CG.playerSalary(lg, p.id) || 0);
+    if (p.squad !== "tc") e.n++;                 /* camp sits outside the 17 */
   });
+  Object.keys(byClub).forEach(function(c){ byClub[c].used = CG.teamPayroll(lg, c) || 0; });
   var clubs = Object.keys(byClub).sort();
   var over = clubs.filter(function(c){ return byClub[c].used > cap; });
   var rosterMax = (CG.SEASON && CG.SEASON.roster_max) || 17;
