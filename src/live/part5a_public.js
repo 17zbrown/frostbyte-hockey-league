@@ -879,12 +879,11 @@ CG.standingsLadder = function(dv, pre){
     var authoritative = (CG.standings ? CG.standings(CG.lg, dv) : null);
     if (authoritative && authoritative.length){
       var rankOf = {};
-      authoritative.forEach(function(row, idx){ rankOf[row.code || row.team || row] = idx; });
-      scored.sort(function(a,b){
-        var ra = rankOf[a.code], rb = rankOf[b.code];
-        if (ra == null || rb == null) return (b.pts||0) - (a.pts||0);
-        return ra - rb;
-      });
+      authoritative.forEach(function(row, idx){ if (row && row.code) rankOf[row.code] = idx; });
+      /* scored rows are {t, pts, ...} — the code lives on .t, not on the row */
+      var haveAll = scored.every(function(r){ return rankOf[r.t.code] != null; });
+      if (haveAll) scored.sort(function(a,b){ return rankOf[a.t.code] - rankOf[b.t.code]; });
+      else scored.sort(function(a,b){ return (b.pts||0) - (a.pts||0); });
     } else scored.sort(function(a,b){ return (b.pts||0) - (a.pts||0); });
   }
 
@@ -1070,7 +1069,7 @@ CG.ROUTES.home = function(){
       '<div><b class="num">Week '+homeCurWeek+'</b><span>of '+homeTotWeeks+' · '+esc(CG.seasonTag())+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+lg.results.length+'</b><span>Games played</span></div>'+
       (lead?'<div style="cursor:pointer" data-go="'+CG.playerRoute(lead)+'"><b>'+esc(lead.tag)+'</b><span>'+lg.pstats[lead.id].p+' pts · scoring lead</span></div>':"")+
-      '<div style="cursor:pointer" data-go="#/standings"><b class="num">'+(CG.playoffPerDiv?CG.playoffPerDiv():4)+'×'+(CG.playoffDivisions?CG.playoffDivisions().length:2)+'</b><span>Playoff spots per division</span></div>'+
+      '<div style="cursor:pointer" data-go="#/standings"><b class="num">'+(CG.playoffPerDiv?CG.playoffPerDiv():4)+'</b><span>Playoff spots per division</span></div>'+
     '</div></div></section>';
   }
   /* The scroll, in the order a first-time visitor asks the questions:

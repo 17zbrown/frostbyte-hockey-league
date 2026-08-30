@@ -16,7 +16,7 @@ console.log("— the public site stops publishing wrong numbers");
   A("...with a numeric fallback beyond the list", /\(ORD\[rank\] \|\| \("#"\+rank\)\)/.test(pub));
   A("...so 'undefined in the' can no longer render", !/\["","","Second","Third"\]\[rank\]/.test(pub));
   A("playoff spots are derived, not hardcoded 3×2", !/<b class="num">3×2<\/b>/.test(pub) &&
-    /CG\.playoffPerDiv\?CG\.playoffPerDiv\(\):4\)\+'×'\+/.test(pub));
+    /<b class="num">'\+\(CG\.playoffPerDiv\?CG\.playoffPerDiv\(\):4\)\+'<\/b><span>Playoff spots per division<\/span>/.test(pub));
   A("the home ladder orders by the standings comparator", /var authoritative = \(CG\.standings \? CG\.standings\(CG\.lg, dv\) : null\)/.test(pub));
   A("...falling back only when it can't", /\} else scored\.sort\(function\(a,b\)\{ return \(b\.pts\|\|0\) - \(a\.pts\|\|0\); \}\);/.test(pub));
 }
@@ -28,14 +28,16 @@ console.log("\n— playoff series are counted the way games are actually won");
   A("the public bracket uses the same rule", /if \(res\.forfeit\) winner = \(res\.forfeit===g\.home\) \? g\.away : g\.home;/.test(pub));
   A("a later round refuses while a division is unfinished", /division hasn|divisions haven/.test(live) &&
     /every division must be decided before round/.test(live));
-  A("playoff games use the season's own puck-drop times", /\(shpP\.slots&&shpP\.slots\[k\]\)/.test(live));
+  A("playoff games use the season's own puck-drop times", /CG\.etISO\(day, CG\.playoffSlot\(shpP, k\)\)/.test(live));
+  A("...and never reuse a slot for two games of one series", /mins = \(parseInt\(parts\[0\],10\)\|\|21\)\*60/.test(live));
   A("Clear season counts only what it deletes", /g\.stage!=="preseason" && g\.stage!=="playoff"/.test(live));
 }
 
 console.log("\n— draft night refuses what the database refuses");
 {
   A("a declined registration is out of the draft pool", /!picked\[r\.profile_id\] && r\.status!=="declined"/.test(live));
-  A("board coverage counts only draft-eligible names", /return inPool\[id\] && eligible\(id\);/.test(live));
+  A("board coverage counts only draft-eligible names", /return inPool\[id\] && \(!counts \|\| eligible\(id\)\);/.test(live));
+  A("...but not while the pre-season is still being played", /var counts = !preLeft;/.test(live));
   A("...and reports the ineligible remainder", /var ineligibleN = /.test(live) && /ineligible:ineligibleN/.test(live));
   A("...to the GM in words", /ranked but not draft-eligible yet \(Rule 2\.8\)/.test(live));
 }
@@ -51,7 +53,8 @@ console.log("\n— one cap definition, one roster definition");
 console.log("\n— a same-night double-header can't misfile a box score");
 {
   A("ambiguous same-day fixtures refuse to auto-attach", /const sameDay = games\.filter\(\(g\) => etDayISO\(g\.scheduled_at\) === norm\.et_day\);/.test(ingest));
-  A("...and say why, for staff to assign by hand", /a same-night playoff double-header/.test(ingest));
+  A("...picking the fixture that had already started", /game = started\[started\.length - 1\];/.test(ingest));
+  A("...and refusing only when time can't separate them", /no way to tell them apart \(no match end time\)/.test(ingest));
   A("...logged as unmatched, never silently dropped", /await logAttempt\(norm, raw, "unmatched", why\);/.test(ingest));
 }
 

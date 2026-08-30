@@ -484,6 +484,9 @@ CG.deskTransactions = function(){
      audit table disagreed with the clubs' own cap sheets AND with the database's team_cap_used —
      the surface whose entire job is catching cap trouble was using different arithmetic. */
   var byClub = {};
+  /* seed from the club list, not from roster rows: a club with an empty roster still has to be
+     graded (and a club carrying only dead money has a payroll but no players) */
+  (CG.TEAMS||[]).forEach(function(t){ byClub[t.code] = { n:0, used:0 }; });
   (lg.players||[]).forEach(function(p){
     if (!p.team) return;
     var e = byClub[p.team] || (byClub[p.team] = { n:0, used:0 });

@@ -316,13 +316,23 @@ async function ingestOne(norm, raw, summary, batch) {
   // against its sibling. Refuse to guess: route both to staff, who assign them per fixture from
   // the Stats Manager / Club game stats desk.
   const sameDay = games.filter((g) => etDayISO(g.scheduled_at) === norm.et_day);
+  let game = sameDay[0];
   if (sameDay.length > 1) {
-    const why = `${sameDay.length} open fixtures between these clubs on ${norm.et_day} (a same-night playoff double-header) — assign this box score to the right game by hand`;
-    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-    await logAttempt(norm, raw, "unmatched", why);
-    return;
+    // A playoff series lays all its games down at once (2-2-3, Rule 8.3), so two — or three —
+    // open fixtures between the same clubs on one night is NORMAL, not rare. Slots are 35 minutes
+    // apart, so the match that ENDED at norm.ts belongs to the latest fixture that had already
+    // started. Only refuse when that still cannot separate them.
+    const byStart = sameDay.slice().sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
+    const started = matchEndMs ? byStart.filter((g) => Date.parse(g.scheduled_at) <= matchEndMs) : [];
+    if (started.length) {
+      game = started[started.length - 1];
+    } else {
+      const why = `${sameDay.length} open fixtures between these clubs on ${norm.et_day} and no way to tell them apart (no match end time) — assign this box score to the right game by hand`;
+      summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+      await logAttempt(norm, raw, "unmatched", why);
+      return;
+    }
   }
-  let game = games.find((g) => etDayISO(g.scheduled_at) === norm.et_day);
   if (!game) {
     const near = games
       .map((g) => ({ g, days: Math.abs(Date.parse(`${etDayISO(g.scheduled_at)}T12:00:00Z`) - matchDayUnix) / DAY }))

@@ -40,13 +40,13 @@ console.log("\n— the player decides, from his own dashboard");
 {
   A("offers load for the signed-in player", /CG\.loadMyOffers = function\(\)/.test(live));
   A("...only the live ones", /\.in\("status", \["pending","countered"\]\)/.test(live));
-  A("...and are cleared on sign-out", /CG\._myOffers = null; CG\._myOffersFp = null;/.test(live));
+  A("...and are cleared on sign-out", /CG\._myOffers = null; CG\._myOffersFp = "";/.test(live));
   A("the card renders on every dashboard variant",
     (live.match(/offers \+ _hubDashboardProto\(\)/g)||[]).length === 1 &&
     (live.match(/offers \+ CG\._mgmtDashboard\(mt\)/g)||[]).length === 1 &&
     /roster spot\.<\/p><\/div>'\+offers;/.test(live));
   A("accept / counter / decline are wired", /data-offer-accept/.test(live) && /data-offer-counter/.test(live) && /data-offer-deny/.test(live));
-  A("...through respond_offer", (live.match(/rpc\("respond_offer"/g)||[]).length === 3);
+  A("...through respond_offer, from both sides", (live.match(/rpc\("respond_offer"/g)||[]).length === 6);
   A("...and bound before the hub's sub-page early returns", /if \(CG\.wireOfferActions\) CG\.wireOfferActions\(\);\n  if \(param==="messages"\)/.test(live));
   A("a counter cannot go below the league minimum", /Salary must be at least \$0\.75M/.test(live));
   A("the card says acceptance is the signing", /Accepting puts you on the club\\u2019s roster immediately/.test(live));
@@ -81,6 +81,35 @@ console.log("\n— the rulebook says what the site does (v2.28)");
 console.log("\n— roadToFive's arithmetic states its dependency");
 {
   A("it records that the pre-season is uncapped", /weekly appearance cap does not apply in the pre-season \(v2\.28\)/.test(live));
+}
+
+console.log("\n— the negotiation has BOTH sides (adversarial review, 2026-08-29)");
+{
+  A("the club's outgoing offers load too", /\.eq\("from_team_id", myTid\)/.test(live));
+  A("...into their own store", /CG\._clubOffers = club;/.test(live));
+  A("turn ownership comes from last_actor, not status", /CG\.offerAwaitsClub = function\(o\)\{ return \(o\.last_actor\|\|"team"\) === "player"; \}/.test(live));
+  A("a countered offer reaches the club with his number", /He countered — your move/.test(live));
+  A("...and the club can accept his terms", /data-coffer-accept/.test(live) && /Accept his terms/.test(live));
+  A("...revise", /data-coffer-counter/.test(live));
+  A("...or walk away", /data-coffer-deny/.test(live));
+  A("the club card is rendered on the dashboard", /CG\.offersCardHtml\(\) \+ CG\.clubOffersCardHtml\(\)/.test(live));
+  A("...and its actions are wired", /CG\.wireClubOfferActions\(\);/.test(live));
+  A("the player card no longer shows dead read-only rows", /var mine = false;   \/\* offers awaiting the club are filtered out above \*\//.test(live));
+  A("a GM doesn't see his own offer twice", /o\.player_id !== \(CG\.auth\.user\|\|\{\}\)\.id/.test(live));
+  A("offers refresh with every league reload", /CG\.loadTrades\(\), CG\.loadMyOffers\(\)/.test(live));
+  A("an empty first load doesn't force a repaint", /CG\._myOffers = null; CG\._myOffersFp = "";/.test(live));
+  A("the board lede describes offers, not first-come-first-served",
+    !/first come, first served/.test(live) && /sends real terms the player can accept, counter, or decline/.test(live));
+}
+
+console.log("\n— the pre-season uncapping reaches the client too");
+{
+  const hub = R("src/live/part6_hub.js");
+  A("a helper knows when only pre-season games lie ahead", /CG\.preseasonOnlyAhead = function\(club\)/.test(hub));
+  A("the Line Creator stops refusing a third goalie line", /if \(CG\.preseasonOnlyAhead && CG\.preseasonOnlyAhead\(club\)\) return null;/.test(hub));
+  A("...and the copy stops stating the caps flatly", /There is no weekly appearance cap in the pre-season/.test(hub));
+  A("...in both places", /No weekly cap applies in the pre-season/.test(hub));
+  A("the rulebook carries no literal markup", !/<b>The cap does not apply/.test(content));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

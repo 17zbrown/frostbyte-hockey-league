@@ -789,7 +789,7 @@ CG.applySession = async function(session, quiet){
   else { CG.teardownDMs && CG.teardownDMs(); }
   /* Rule 2.2: contract offers waiting on THIS player — he accepts, counters or declines them */
   if (CG.auth.user){ CG.loadMyOffers().then(function(ch){ if(ch && !quiet && location.hash.indexOf("/hub")>=0 && CG.router) CG.router(); }); }
-  else { CG._myOffers = null; CG._myOffersFp = null; }
+  else { CG._myOffers = null; CG._myOffersFp = ""; }
   /* Application chat + GM/AGM nominations. buildLiveLeague also loads these, but its load is
      gated on CG.auth.user — which is still null while the page boots, since the session is
      restored AFTER the league builds. On every cold page load that left the thread map empty:
@@ -881,8 +881,13 @@ CG.boardCoverage = function(boardIds, pool, remainingPicks){
   /* The auto-pick refuses an ineligible player (Rule 2.8), so counting ranked-but-ineligible
      names told a club it was "covered" while none of its board could actually be drafted. */
   var eligible = function(id){ return !CG.isDraftEligible || CG.isDraftEligible(id); };
-  var available = (boardIds||[]).filter(function(id){ return inPool[id] && eligible(id); }).length;
-  var ineligibleN = (boardIds||[]).filter(function(id){ return inPool[id] && !eligible(id); }).length;
+  /* Eligibility is still being EARNED while pre-season games are unplayed — a player at 2 of 5 is
+     not ineligible, he is unfinished. Only discount names once the pre-season is over, or the card
+     would read "short — 0 ranked" for every club all pre-season and tell GMs to rank more. */
+  var preLeft = ((CG.lg&&CG.lg.schedule)||[]).some(function(g){ return g.stage==="preseason" && g.status!=="final"; });
+  var counts = !preLeft;
+  var available = (boardIds||[]).filter(function(id){ return inPool[id] && (!counts || eligible(id)); }).length;
+  var ineligibleN = counts ? (boardIds||[]).filter(function(id){ return inPool[id] && !eligible(id); }).length : 0;
   var level = remainingPicks==null ? "pre"
     : remainingPicks<=0 ? "done"
     : available >= remainingPicks + 3 ? "ok"          /* a cushion: others draft your targets too */
@@ -1378,23 +1383,73 @@ CG._mgmtDashboard = function(mt){
  * A club offers; the player accepts, counters, or declines. Accepting
  * IS the signing: the league office confirms nothing.
  * ---------------------------------------------------------------- */
-CG._myOffers = null;
+CG._myOffers = null; CG._myOffersFp = "";
+CG._clubOffers = null;
+var _OFFER_COLS = "id,from_team_id,player_id,salary,years,start_season,status,last_actor,note,immediate,updated_at";
 CG.loadMyOffers = function(){
   if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  return CG.sb.from("contract_offers")
-    .select("id,from_team_id,player_id,salary,years,start_season,status,last_actor,note,immediate,updated_at")
-    .eq("player_id", CG.auth.user.id).in("status", ["pending","countered"]).order("updated_at",{ascending:false})
-    .then(function(r){
-      if (!r || r.error) return false;
-      var rows = r.data || [];
-      var fp = rows.map(function(o){ return o.id+":"+o.status+":"+o.salary+":"+o.years; }).join("|");
-      var changed = fp !== CG._myOffersFp;
-      CG._myOffersFp = fp; CG._myOffers = rows;
-      return changed;
-    }, function(){ return false; });
+  /* Two halves of the SAME negotiation: offers waiting on me as a PLAYER, and offers my CLUB has
+     out. Without the second, a player's counter dead-ended — the club was told "he countered" and
+     had nowhere to see the number, let alone accept it. */
+  var mt = CG.myManagedTeam && CG.myManagedTeam();
+  var myTid = mt ? ((CG.lg && CG.lg._codeToId) || {})[mt.code] : null;
+  var jobs = [
+    CG.sb.from("contract_offers").select(_OFFER_COLS)
+      .eq("player_id", CG.auth.user.id).in("status", ["pending","countered"]).order("updated_at",{ascending:false}),
+    myTid ? CG.sb.from("contract_offers").select(_OFFER_COLS)
+      .eq("from_team_id", myTid).in("status", ["pending","countered"]).order("updated_at",{ascending:false})
+      : Promise.resolve({ data: [] })
+  ];
+  return Promise.all(jobs).then(function(res){
+    var mine = (res[0] && !res[0].error && res[0].data) || [];
+    var club = (res[1] && !res[1].error && res[1].data) || [];
+    var key = function(o){ return o.id+":"+o.status+":"+o.salary+":"+o.years+":"+(o.last_actor||""); };
+    var fp = mine.map(key).join("|") + "#" + club.map(key).join("|");
+    var changed = fp !== CG._myOffersFp;
+    CG._myOffersFp = fp; CG._myOffers = mine; CG._clubOffers = club;
+    return changed;
+  }, function(){ return false; });
+};
+/* Whose move is it? last_actor is authoritative: 'team' means the club spoke last (the player
+   answers), 'player' means the player countered (the club answers). */
+CG.offerAwaitsClub = function(o){ return (o.last_actor||"team") === "player"; };
+/* The club's own outstanding offers — what it sent, and every counter it has been sent back. */
+CG.clubOffersCardHtml = function(){
+  var offs = (CG._clubOffers || []).filter(function(o){ return o.player_id !== (CG.auth.user||{}).id; });
+  if (!offs.length) return "";
+  var names = (CG.lg && CG.lg._profName) || {};
+  var waiting = offs.filter(CG.offerAwaitsClub).length;
+  return '<div class="card" style="margin-bottom:18px'+(waiting?';border-color:var(--chrome)':'')+'">'+
+    '<div class="card-h"><h3>Contract offers you have out</h3>'+
+    (waiting?'<span class="chip chip-warn">'+waiting+' awaiting you</span>'
+            :'<span class="chip">'+offs.length+' pending</span>')+'</div>'+
+    offs.map(function(o){
+      var theirs = CG.offerAwaitsClub(o);
+      var nm = names[o.player_id] || "a player";
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
+          '<b style="font-family:var(--f-disp);font-size:15px">'+esc(nm)+'</b>'+
+          '<span class="chip'+(theirs?' chip-live':'')+'">'+(theirs?'He countered — your move':'Waiting on him')+'</span>'+
+        '</div>'+
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px">'+
+          '<span><b class="num" style="font-size:18px">'+CG.fmtMoney(o.salary)+'</b><span class="caption" style="display:block">per season</span></span>'+
+          '<span><b class="num" style="font-size:18px">'+o.years+'</b><span class="caption" style="display:block">season'+(o.years>1?'s':'')+'</span></span>'+
+        '</div>'+
+        (theirs
+          ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;justify-content:flex-end">'+
+              '<button class="btn btn-ghost btn-sm" data-coffer-deny="'+o.id+'" data-name="'+esc(nm)+'">Walk away</button>'+
+              '<button class="btn btn-ghost btn-sm" data-coffer-counter="'+o.id+'" data-sal="'+o.salary+'" data-yrs="'+o.years+'" data-name="'+esc(nm)+'">Revise</button>'+
+              '<button class="btn btn-chrome btn-sm" data-coffer-accept="'+o.id+'" data-name="'+esc(nm)+'">Accept his terms</button>'+
+            '</div>'
+          : '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;justify-content:flex-end">'+
+              '<button class="btn btn-ghost btn-sm" data-coffer-deny="'+o.id+'" data-name="'+esc(nm)+'">Withdraw</button>'+
+            '</div>')+
+        '</div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Accepting his counter signs him immediately at his numbers (Rule 2.2). Revising sends the negotiation back to him.</span></div></div>';
 };
 CG.offersCardHtml = function(){
-  var offs = CG._myOffers || [];
+  var offs = (CG._myOffers || []).filter(function(o){ return !CG.offerAwaitsClub(o); });
   if (!offs.length) return "";
   var idToCode = (CG.lg && CG.lg._idToCode) || {};
   return '<div class="card" style="margin-bottom:18px;border-color:var(--chrome)">'+
@@ -1403,7 +1458,7 @@ CG.offersCardHtml = function(){
     offs.map(function(o){
       var code = idToCode[o.from_team_id] || null;
       var nm = (code && CG.TEAM[code] && CG.TEAM[code].name) || "A club";
-      var mine = o.status === "countered";   /* countered = the ball is with the CLUB */
+      var mine = false;   /* offers awaiting the club are filtered out above */
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
         '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
           (code?CG.crest(code,26):"")+'<b style="font-family:var(--f-disp);font-size:16px">'+esc(nm)+'</b>'+
@@ -1427,7 +1482,55 @@ CG.offersCardHtml = function(){
     }).join("")+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Accepting puts you on the club\u2019s roster immediately \u2014 no league approval (Rule 2.2). Accepting one offer withdraws the rest.</span></div></div>';
 };
+CG.wireClubOfferActions = function(){
+  document.querySelectorAll("[data-coffer-accept]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-coffer-accept"), nm=this.getAttribute("data-name"), btn=this;
+    CG.confirm("Accept "+nm+"’s terms?","He signs at the numbers he asked for and joins your roster immediately.","Accept and sign", function(){
+      btn.disabled=true;
+      CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"accept", p_salary:null, p_years:null }).then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        CG.toast(nm+" signed — welcome aboard","ok");
+        CG.loadMyOffers().then(function(){ CG.reloadLeague(); });
+      });
+    });
+  }); });
+  document.querySelectorAll("[data-coffer-deny]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-coffer-deny"), nm=this.getAttribute("data-name"), btn=this;
+    CG.confirm("Walk away from "+nm+"?","The offer closes and he is told. You can always send a fresh one.","Walk away", function(){
+      btn.disabled=true;
+      CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"deny", p_salary:null, p_years:null }).then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        CG.toast("Offer closed","ok");
+        CG.loadMyOffers().then(function(){ if(CG.router) CG.router(); });
+      });
+    });
+  }); });
+  document.querySelectorAll("[data-coffer-counter]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-coffer-counter"), nm=this.getAttribute("data-name");
+    var sal=parseInt(this.getAttribute("data-sal"),10)||750000, yrs=parseInt(this.getAttribute("data-yrs"),10)||1;
+    CG.modal("Revise your offer to "+esc(nm),
+      '<label class="fld"><span>Salary ($M per season)</span><input id="coSal" type="number" min="0.75" step="0.05" value="'+(sal/1e6).toFixed(2)+'"></label>'+
+      '<label class="fld"><span>Term (seasons)</span><select id="coYrs">'+[1,2,3,4].map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      '<p class="caption">He sees the new terms and can accept, counter again, or decline. League minimum $0.75M.</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="coGo">Send revised offer</button>');
+    document.getElementById("coGo").addEventListener("click", function(){
+      var v=parseFloat(document.getElementById("coSal").value);
+      if(!(v>=0.75)){ CG.toast("Salary must be at least $0.75M","err"); return; }
+      var y=parseInt(document.getElementById("coYrs").value,10)||1, btn2=this; btn2.disabled=true;
+      CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"edit", p_salary:Math.round(v*1e6), p_years:y }).then(function(r){
+        btn2.disabled=false;
+        if(r.error){ CG.toast(r.error.message,"err"); return; }
+        if(CG.closeOverlay) CG.closeOverlay();
+        CG.toast("Revised offer sent to "+nm,"ok");
+        CG.loadMyOffers().then(function(){ if(CG.router) CG.router(); });
+      });
+    });
+  }); });
+};
 CG.wireOfferActions = function(){
+  CG.wireClubOfferActions();
   document.querySelectorAll("[data-offer-accept]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-offer-accept"), club=this.getAttribute("data-club"), btn=this;
     CG.confirm("Sign with "+club+"?","Accepting puts you on their roster right away and withdraws every other offer you\u2019re holding.","Accept and sign", function(){
@@ -1481,7 +1584,7 @@ CG._wrapHubDashboard = function(){
   _hubDashboardProto = CG.hubDashboard;
   CG.hubDashboard = function(){
     var me = CG.me(), r = CG.role();
-    var offers = CG.offersCardHtml();     /* "" unless a club is waiting on this player */
+    var offers = CG.offersCardHtml() + CG.clubOffersCardHtml();
     if (me || r==="staff" || r==="commish" || !CG.auth.profile) return offers + _hubDashboardProto();
     /* A club owner/GM/AGM who holds no roster spot (every manager, pre-season) used to fall into
        the new-member "on the way to a roster spot" onboarding. They run a club — give them a
@@ -5763,7 +5866,8 @@ CG.reloadLeague = async function(){
   try {
     CG.lg = await CG.buildLiveLeague();
     await CG.loadManagerData();
-    await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
+    /* offers ride along with every reload, so a negotiation moves without a page refresh */
+    await Promise.all([CG.loadAvailability(), CG.loadTrades(), CG.loadMyOffers()]);
     CG.renderChrome(); CG.router();
   } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
 };
@@ -9893,6 +9997,18 @@ CG.AFTER._admPlayoffs = function(){
   document.querySelectorAll("[data-po-clear]").forEach(function(b){ b.addEventListener("click", function(){ CG.clearPlayoffRound(parseInt(this.getAttribute("data-po-clear"),10)); }); });
 };
 /* winner of a decided series in a round, by club code (null if none/undecided) */
+/* The k-th game of a playoff night. If the season defines fewer slots than the night needs, step
+   35 minutes past the last one rather than reusing it — two games of the SAME series at the same
+   minute would be unplayable and would also make the EA matcher's job impossible. */
+CG.playoffSlot = function(shp, k){
+  var slots = (shp && shp.slots && shp.slots.length) ? shp.slots : (CG.NIGHT_SLOTS || ["21:00"]);
+  if (slots[k]) return slots[k];
+  var last = slots[slots.length-1] || "21:00";
+  var parts = String(last).split(":");
+  var mins = (parseInt(parts[0],10)||21)*60 + (parseInt(parts[1],10)||0) + 35*(k - slots.length + 1);
+  mins = ((mins % 1440) + 1440) % 1440;
+  return ("0"+Math.floor(mins/60)).slice(-2)+":"+("0"+(mins%60)).slice(-2);
+};
 CG.seriesWinners = function(round){
   var need = Math.floor(CG.playoffBestOf()/2)+1;
   var pairs = {};
@@ -9967,11 +10083,21 @@ CG.generatePlayoffRound = function(round){
        used to write a half-round for the division that WAS done, and the "that round already
        exists" guard then blocked the retry — permanently stranding the other division with no way
        forward short of deleting played games. */
-    var expected = {};
-    seedCodes.forEach(function(c){ expected[divOf(c)] = true; });
-    var stillPlaying = Object.keys(expected).filter(function(dv){
-      var survivors = (byDiv[dv]||[]).length;
-      return survivors < 2;      /* a division needs at least a pair to play the next round */
+    /* How many clubs SHOULD have come out of the previous round in each division. Round 2 is
+       round-1 winners plus byes; a later round halves the field. A floor of 2 under-detected
+       whenever byes exist (Top-5/Top-6 qualifiers), writing the half-round it exists to prevent. */
+    var expectedIn = {};
+    for (var eb=0; eb+per<=seedCodes.length; eb+=per){
+      var block = seedCodes.slice(eb, eb+per);
+      var dvName = divOf(block[0]);
+      var r1 = CG.playoffRound1(block);
+      var afterR1 = r1.pairs.length + r1.byes.length;      /* survivors entering round 2 */
+      var want = afterR1;
+      for (var rr=3; rr<=round; rr++) want = Math.ceil(want/2);
+      expectedIn[dvName] = want;
+    }
+    var stillPlaying = Object.keys(expectedIn).filter(function(dv){
+      return (byDiv[dv]||[]).length < expectedIn[dv];
     });
     if (stillPlaying.length){
       CG.toast("The "+stillPlaying.join(" and ")+" "+(stillPlaying.length===1?"division hasn":"divisions haven")+
@@ -10011,7 +10137,7 @@ CG.generatePlayoffRound = function(round){
         var day = wk[ni] || CG.dayAdd(wk[wk.length-1]||anchor, (ni+1)*2);
         rows.push({ season_id:s.id, week:round, stage:"playoff",
           home_team_id:(CG.lg._codeToId||{})[host], away_team_id:(CG.lg._codeToId||{})[away],
-          scheduled_at:CG.etISO(day, (shpP.slots&&shpP.slots[k]) || (shpP.slots&&shpP.slots[shpP.slots.length-1]) || CG.NIGHT_SLOTS[k] || "21:00"), status:"scheduled" });
+          scheduled_at:CG.etISO(day, CG.playoffSlot(shpP, k)), status:"scheduled" });
       }
     }
   });
@@ -10638,7 +10764,7 @@ CG.hubFreeAgents = function(){
   var aucById = {}; (lg._rookieAuctions||[]).forEach(function(a){ aucById[a.profile_id]=a; });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
-    '<p class="lede" style="margin-top:8px">Every signable player without a club. Approach opens a direct message to talk terms; signing adds them to your roster at the salary you negotiated — first come, first served, under the cap.</p></div>';
+    '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>free agents</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num">'+rosterN+' / '+rosterMax+'</b><span>your roster</span></div>'+

@@ -511,6 +511,12 @@ CG.clubUpcomingGames = function(club, limit){
   }).sort(function(a,b){ return a.at-b.at; });
   return limit ? out.slice(0, limit) : out;
 };
+/* True while every game still ahead of this club is a pre-season game — the window in which
+   Rule 5.2's weekly appearance caps do not apply (v2.28). */
+CG.preseasonOnlyAhead = function(club){
+  var up = CG.clubUpcomingGames(club);
+  return up.length > 0 && up.every(function(g){ return g.stage === "preseason"; });
+};
 /* All of ONE night's upcoming games for a club (dressing a night covers every game in it).
    nightKey is a weekday ("wed"), and matching on the weekday alone returned every Wednesday
    left in the season — so "whole night" dressed ~45 games stretching into December instead of
@@ -1076,6 +1082,9 @@ CG.AFTER._lines = function(qs){
      goaltending week, so a third is always a mistake (mirrors set_team_line's own check) */
   function goalieCapped(pid, pos, line){
     if (pos!=="G") return null;
+    /* no weekly cap in the pre-season (Rule 5.2, v2.28), so a goaltender may cover every line —
+     the client must not refuse what set_game_lineup now allows */
+    if (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)) return null;
     if (gLines(pid, line) >= 2){
       var p = CG.playerById(lg, pid);
       return (p?p.tag:"That goaltender")+" already backstops two lines — a goaltender covers at most two (Rule 5.2).";
@@ -1414,7 +1423,9 @@ CG.hubRoster = function(qs){
       meter("right wings",posN("RW"),CG.ROSTER_QUOTA.RW)+meter("left D",posN("LD"),CG.ROSTER_QUOTA.LD)+meter("right D",posN("RD"),CG.ROSTER_QUOTA.RD)+
       meter("goaltenders",posN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+'</div>'+
       '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp holds up to 3 players. '+
-      'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). '+
+      (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
+        ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position. '
+        : 'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). ')+
       'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';
   }
   /* Road to 5 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'
@@ -1454,7 +1465,11 @@ CG.hubRoster = function(qs){
       '<div><b class="num" style="font-size:22px">6</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
       '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
       '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
-    '<p class="caption" style="margin-top:12px">Weekly caps are the limit, not a minimum (Rule 5.2). In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
+    '<p class="caption" style="margin-top:12px">'+
+    (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
+      ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
+      : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
+    'In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
   h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
