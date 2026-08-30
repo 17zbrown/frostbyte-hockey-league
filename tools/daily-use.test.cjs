@@ -27,6 +27,10 @@ console.log("— the boot's heaviest load is bounded");
   A("...written back after every boot", /localStorage\.setItem\("cg_season_id", CG\.SEASON\.id\)/.test(live));
   A("...unscoped rather than wrong when there is no hint", /slower but never wrong/.test(live));
   A("a stale hint self-corrects exactly once", /CG\._seasonHintFixed = true;/.test(live));
+  /* part2_engine seeds a prototype CG.SEASON={id:"S1"} that is still in place during boot —
+     scoping on it matched nothing and forced a second full league build on EVERY cold load */
+  A("only a real season uuid may scope the query", /if \(live && CG\._UUID_RE\.test\(live\)\) return live;/.test(live));
+  A("...and a non-uuid is never persisted as a hint", /CG\.SEASON\.id && CG\._UUID_RE\.test\(CG\.SEASON\.id\)/.test(live));
   A("no dead state left behind", !/_restatsPending/.test(live));
 }
 

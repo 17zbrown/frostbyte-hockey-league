@@ -131,9 +131,18 @@ CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,tw
    already be scoped. Wrong-but-stale is safe: the season row is re-read in the same batch and the
    hint is rewritten below, so at worst one load is scoped to the previous season and the next is
    correct. Absent or unreadable storage simply means an unscoped load. */
+CG._UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 CG._seasonHint = function(){
-  if (CG.SEASON && CG.SEASON.id) return CG.SEASON.id;
-  try { return localStorage.getItem("cg_season_id") || null; } catch(e){ return null; }
+  /* Only a real season UUID may scope the query. part2_engine seeds a PROTOTYPE
+     CG.SEASON = {id:"S1"} that is still in place while this boot runs, and scoping on it matched
+     no rows — so every cold boot loaded zero box scores and then rebuilt the whole league a second
+     time to correct itself. Anything that isn't a uuid means "no hint": load unscoped. */
+  var live = CG.SEASON && CG.SEASON.id;
+  if (live && CG._UUID_RE.test(live)) return live;
+  try {
+    var v = localStorage.getItem("cg_season_id");
+    return (v && CG._UUID_RE.test(v)) ? v : null;
+  } catch(e){ return null; }
 };
 CG.buildLiveLeague = async function(){
   var sb = CG.sb;
@@ -279,7 +288,7 @@ CG.buildLiveLeague = async function(){
 
   /* ---- season + cap ---- */
   CG.SEASON = season || {};
-  try { if (CG.SEASON.id) localStorage.setItem("cg_season_id", CG.SEASON.id); } catch(e){}
+  try { if (CG.SEASON.id && CG._UUID_RE.test(CG.SEASON.id)) localStorage.setItem("cg_season_id", CG.SEASON.id); } catch(e){}
   /* The hint pointed at a DIFFERENT season than the one we resolved (a rollover happened since
      this browser last visited), so the box scores just loaded belong to the wrong season. Run one
      corrective rebuild — the hint is now correct, so it cannot recur. */
