@@ -932,6 +932,7 @@ CG.applySession = async function(session, quiet){
 };
 CG.teardownDMs = function(){
   CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false; CG._dm.compose=false;
+  CG._dm._threadLoaded = {};
   /* signed URLs are per-user credentials — they must not survive a sign-out into the next session */
   CG._dm.mediaUrls={}; CG._dm.mediaExp={}; CG._dm.mediaPending={};
   if(CG._dm.channel){ try{ CG.sb.removeChannel(CG._dm.channel); }catch(e){} CG._dm.channel=null; }
@@ -4530,6 +4531,10 @@ if (typeof document !== "undefined" && !CG._dmDelegated){
     if (!el) return;
     var pid = el.getAttribute("data-pm");
     CG._dm.compose = false; CG._dm.active = pid;
+    /* The list load is a newest-900 slice across ALL conversations, so a thread that has gone
+       quiet can fall out of it entirely — and the room would then render "No messages yet — say
+       hi." over real history. Pull this pair's own messages on open and merge them in. */
+    if (CG.loadDmThread) CG.loadDmThread(pid);
     /* seed the name/avatar from the league-wide profile list so a fresh thread never says "Member" */
     if (!CG._dm.profiles[pid]){
       var pr = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id===pid; });
@@ -4537,6 +4542,27 @@ if (typeof document !== "undefined" && !CG._dmDelegated){
     }
   });
 }
+/* One conversation's full history, merged into the in-memory list by id. Cheap (one indexed
+   query on a pair) and idempotent, so re-opening a thread costs nothing visible. */
+CG.loadDmThread = function(other){
+  if (!CG.sb || !other || !CG.dmUid()) return Promise.resolve(false);
+  if (CG._dm._threadLoaded && CG._dm._threadLoaded[other]) return Promise.resolve(false);
+  var me = CG.dmUid();
+  return CG.sb.from("direct_messages").select("*")
+    .or("and(sender_id.eq."+me+",recipient_id.eq."+other+"),and(sender_id.eq."+other+",recipient_id.eq."+me+")")
+    .order("created_at",{ascending:false}).limit(900)
+    .then(function(r){
+      if (!r || r.error || !r.data) return false;
+      CG._dm._threadLoaded = CG._dm._threadLoaded || {};
+      CG._dm._threadLoaded[other] = true;
+      var have = {}; (CG._dm.msgs||[]).forEach(function(m){ have[m.id] = true; });
+      var added = r.data.filter(function(m){ return !have[m.id]; });
+      if (!added.length) return false;
+      CG._dm.msgs = (CG._dm.msgs||[]).concat(added).sort(CG._byCreatedAsc);
+      if (CG.router && location.hash.indexOf("/messages")>=0) CG.router();
+      return true;
+    }, function(){ return false; });
+};
 CG.subscribeDMs = function(){
   if(!CG.sb||!CG.dmUid()||CG._dm.channel) return;
   var me=CG.dmUid();
@@ -6560,26 +6586,28 @@ CG.loadActionRequests = async function(){
   if (!CG.sb || !CG.lg || !CG.auth.user) return;
   CG._actionLoadError = null;
   try {
-    var q = await Promise.all([
-      /* action_requests has THREE foreign keys to profiles — filer, assignee and the case subject —
-         so a bare profiles(...) embed is ambiguous and PostgREST rejects the whole query (PGRST201).
-         Name the constraint. `profiles` stays the response key, so consumers are unchanged. */
-      CG.sb.from("action_requests")
-        .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
-        .order("created_at",{ascending:false}),
-      CG.sb.from("action_messages").select("*, profiles(gamertag,role)").order("created_at",{ascending:false}).limit(900)
-    ]);
+    /* action_requests has THREE foreign keys to profiles — filer, assignee and the case subject —
+       so a bare profiles(...) embed is ambiguous and PostgREST rejects the whole query (PGRST201).
+       Name the constraint. `profiles` stays the response key, so consumers are unchanged. */
+    var cq = await CG.sb.from("action_requests")
+      .select("*, profiles!action_requests_profile_id_fkey(gamertag), target_profile:profiles!action_requests_target_profile_id_fkey(gamertag)")
+      .order("created_at",{ascending:false});
     /* This used to fall back to [] on any error, so a failed query was indistinguishable from an
        empty queue — the Staff Desk read "the room is clean" while cases sat unanswered. Keep
        whatever we already had and say so loudly instead of inventing an empty case list. */
-    if (q[0] && q[0].error) throw new Error("cases: "+(q[0].error.message||q[0].error.code||"query failed"));
-    if (q[1] && q[1].error) throw new Error("case messages: "+(q[1].error.message||q[1].error.code||"query failed"));
-    CG.lg._actionReqs = (q[0] && q[0].data) || [];
+    if (cq && cq.error) throw new Error("cases: "+(cq.error.message||cq.error.code||"query failed"));
+    CG.lg._actionReqs = (cq && cq.data) || [];
+
+    /* Messages scoped to THESE cases, paged so nothing is silently capped. A global newest-N
+       slice meant an older case rendered a partial disciplinary record with no sign of it. */
+    var ids = CG.lg._actionReqs.map(function(a){ return a.id; }).filter(Boolean);
     var msgs = {};
-    /* fetched newest-first so the silent 1000-row cap drops the OLDEST, then restored to
-       chronological order for the thread view */
-    ((q[1] && q[1].data)||[]).slice().sort(CG._byCreatedAsc)
-      .forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
+    if (ids.length){
+      var mq = await CG.sbAll("action_messages","*, profiles(gamertag,role)","created_at",true,
+        function(qb){ return qb.in("request_id", ids); });
+      if (mq && mq.error) throw new Error("case messages: "+(mq.error.message||mq.error.code||"query failed"));
+      (mq.data||[]).forEach(function(m){ (msgs[m.request_id]=msgs[m.request_id]||[]).push(m); });
+    }
     CG.lg._actionMsgs = msgs;
   } catch(e){
     CG._actionLoadError = String((e && e.message) || e);
@@ -11325,6 +11353,22 @@ CG.bootScreen = function(){
     '<p class="bl-sub">Pulling live clubs, rosters, and the schedule from the league database.</p>'+
   '</div></div></section>';
 };
+/* The failed-boot surface, shared by the boot catch and the router's pre-league guard — without
+   the router using it, any navigation after a failed boot replaced the error with a spinner that
+   never resolved. */
+CG.bootErrorCard = function(){
+  var why = (CG.LIVE && CG.LIVE.error) || "";
+  return '<section class="sec"><div class="shell"><div class="empty" style="padding:72px 20px">'+
+    '<div class="e-art">'+(CG.ic?CG.ic("flag",22):"")+'</div><b>The league didn’t load</b>'+
+    '<p>This is almost always a dropped connection. Your account and data are fine.</p>'+
+    '<button class="btn btn-chrome" style="margin-top:16px" id="bootRetry">Try again</button>'+
+    (why?'<p class="caption" style="margin-top:14px">'+(typeof esc==="function"?esc(why):"")+'</p>':"")+
+    '</div></div></section>';
+};
+CG.wireBootRetry = function(){
+  var rb = document.getElementById("bootRetry");
+  if (rb && !rb._wired){ rb._wired = true; rb.addEventListener("click", function(){ rb.disabled = true; CG.bootLive(); }); }
+};
 CG.bootLive = async function(){
   var app = document.getElementById("app");
   if (app) app.innerHTML = CG.bootScreen();
@@ -11377,15 +11421,8 @@ CG.bootLive = async function(){
     /* Render the CHROME first: without it the member is left on a blank page with one sentence
        and no nav, and navigating away swapped the message for a spinner that never resolved. */
     try { if (CG.renderChrome) CG.renderChrome(); } catch(_e){}
-    if (app) app.innerHTML =
-      '<section class="sec"><div class="shell"><div class="empty" style="padding:72px 20px">'+
-      '<div class="e-art">'+(CG.ic?CG.ic("flag",22):"")+'</div><b>The league didn’t load</b>'+
-      '<p>This is almost always a dropped connection. Your account and data are fine.</p>'+
-      '<button class="btn btn-chrome" style="margin-top:16px" id="bootRetry">Try again</button>'+
-      '<p class="caption" style="margin-top:14px">'+(typeof esc==="function"?esc(CG.LIVE.error):"")+'</p>'+
-      '</div></div></section>';
-    var rb = document.getElementById("bootRetry");
-    if (rb) rb.addEventListener("click", function(){ rb.disabled = true; CG.bootLive(); });
+    if (app) app.innerHTML = CG.bootErrorCard();
+    CG.wireBootRetry();
     /* and come back by itself when the network does */
     if (!CG._bootOnlineArmed){
       CG._bootOnlineArmed = true;

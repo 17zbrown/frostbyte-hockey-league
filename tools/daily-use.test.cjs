@@ -42,8 +42,9 @@ console.log("— silent truncation can't hide the newest rows");
      in the server's descending order */
   A("...with an exact, tie-broken comparator", /CG\._byCreatedAsc = function\(a,b\)/.test(live) && /a\.created_at < b\.created_at \? -1 : 1/.test(live));
   A("...shared by all three re-sorts", (live.match(/CG\._byCreatedAsc/g)||[]).length === 4);
-  A("case messages too", /action_messages[\s\S]{0,120}ascending:false\}\)\.limit\(900\)/.test(live));
-  A("...re-sorted for the thread", /fetched newest-first so the silent 1000-row cap drops the OLDEST/.test(live));
+  /* case messages took a different route: scoped to the loaded cases and paged, so there is no
+     cap to work around at all (see "nothing renders a partial record" below) */
+  A("case messages are not globally capped", !/action_messages[\s\S]{0,120}limit\(900\)/.test(live));
   A("application chat too", /application_messages[\s\S]{0,320}ascending:false\}\)\.limit\(900\)/.test(live));
   A("...re-sorted in the grouper", /rows arrive newest-first/.test(live));
 }
@@ -121,7 +122,26 @@ console.log("— nothing public burns metered resources");
   A("...via a status-only PATCH", /async function touchAttempt\(eaMatchId, status, reason, gameId\)/.test(ingest));
 }
 
-console.log("— the operator can see what needs them");
+console.log("— review round 2: nothing renders a partial record as a complete one");
+{
+  A("case messages are scoped to the cases loaded", /return qb\.in\("request_id", ids\); \}\);/.test(live));
+  A("...and paged, so nothing is silently capped", /CG\.sbAll\("action_messages"/.test(live));
+  A("opening a DM thread pulls that pair's own history", /CG\.loadDmThread = function\(other\)/.test(live));
+  A("...merged by id, not replacing the list", /var added = r\.data\.filter\(function\(m\)\{ return !have\[m\.id\]; \}\);/.test(live));
+  A("...and forgotten on sign-out", /CG\._dm\._threadLoaded = \{\};/.test(live));
+}
+
+console.log("\n— review round 2: a failed boot stays recoverable everywhere");
+{
+  A("the error card is shared by the catch and the router", /CG\.bootErrorCard = function\(\)/.test(live) && /CG\.bootErrorCard\(\)/.test(ui));
+  A("...so navigating after a failure shows the error, not a spinner",
+    /\(CG\.LIVE && CG\.LIVE\.error && CG\.bootErrorCard\) \? CG\.bootErrorCard\(\) : CG\.bootScreen\(\)/.test(ui));
+  A("renderChrome survives a missing league", /if \(CG\.lg && CG\.lg\.lastNight\) CG\.lg\.lastNight\.forEach/.test(ui) && /if \(CG\.lg && CG\.lg\.tonight\) CG\.lg\.tonight\.forEach/.test(ui));
+  A("the boot clears its own error before retrying", /CG\.LIVE\.error = null;/.test(live));
+  A("...and auth never stacks a second subscription", /CG\._authSub = CG\.sb\.auth\.onAuthStateChange/.test(live));
+}
+
+console.log("\n— the operator can see what needs them");
 {
   A("automations grade against their own cadence", /var fresh = mins < \(_stale \|\| 30\);/.test(live));
   /* a dead ea-poll used to read green for a whole game night on a flat 24h threshold */

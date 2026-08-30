@@ -611,14 +611,16 @@ CG.renderChrome = function(){
         '<button class="db-reset" data-demo-reset title="Clear everything you changed in this demo">Reset</button>'+
       '</div></div>';
   }
-  /* ticker: last night finals + tonight */
+  /* ticker: last night finals + tonight. Guarded: on a failed boot there is no league, and
+     dereferencing it here threw — which is why the boot error card was rendering with no
+     masthead or nav despite calling renderChrome first. */
   var items = [];
-  CG.lg.lastNight.forEach(function(r){
+  if (CG.lg && CG.lg.lastNight) CG.lg.lastNight.forEach(function(r){
     var hw = r.score[r.home]>r.score[r.away];
     items.push('<a class="tk-item" href="#/matchup/'+r.id+'"><span class="tk-lab">FINAL'+(r.ot?"/OT":"")+'</span>'+
       '<b class="'+(hw?"win":"")+'">'+r.home+' '+r.score[r.home]+'</b><b class="'+(!hw?"win":"")+'">'+r.away+' '+r.score[r.away]+'</b></a>');
   });
-  CG.lg.tonight.forEach(function(g){
+  if (CG.lg && CG.lg.tonight) CG.lg.tonight.forEach(function(g){
     items.push('<a class="tk-item" href="#/matchup/'+g.id+'"><span class="tk-lab" style="color:var(--red)">TONIGHT</span>'+
       '<b>'+g.away+' @ '+g.home+'</b><span class="tk-lab">'+CG.fmtTime(g.at)+'</span></a>');
   });
@@ -1401,7 +1403,11 @@ CG.router = function(){
   if (CG.LIVE_MODE && !CG.lg && CG.bootScreen && name !== "signin"){
     /* signin is exempt: OAuth errors land on a fresh page as bare fragments and MUST surface
        immediately — that page renders from the fragment alone and needs no league data. */
-    app.innerHTML = CG.bootScreen();
+    /* If the boot FAILED, show the failure and its retry — not a spinner. Navigating after a
+       failed boot used to replace the error card with a loading screen that never resolved,
+       stranding the member with no way back. */
+    app.innerHTML = (CG.LIVE && CG.LIVE.error && CG.bootErrorCard) ? CG.bootErrorCard() : CG.bootScreen();
+    if (CG.wireBootRetry) CG.wireBootRetry();
     return;
   }
   /* Scroll to top ONLY on a real navigation. Many surfaces call router() as "repaint after a state
