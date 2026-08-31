@@ -26,7 +26,8 @@ vm.createContext(ctx);
   const map = src.match(/CG\.NA_MAP = \{[\s\S]*?\n\};/);
   if (!map) { A("located CG.NA_MAP", false); process.exit(1); }
   vm.runInContext(map[0], ctx);
-  for (const decl of [/CG\.NA_VIEW_GROW = [\d.]+;/, /CG\.NA_GROW_KEEP = \d+;/, /CG\.NA_PIN_MIN = \d+;/,
+  for (const decl of [/CG\.NA_VIEW_GROW = [\d.]+;/, /CG\.NA_GROW_KEEP = \d+;/,
+                      /CG\.NA_GROW_KEEP_MUL = [\d.]+;/, /CG\.NA_GROW_KEEP_MAX = \d+;/, /CG\.NA_PIN_MIN = \d+;/,
                       /CG\.NA_PIN_GAP = \d+;/, /CG\.NA_PIN_SPAN = \d+;/, /CG\.NA_PIN_FLOOR = \d+;/,
                       /CG\.NA_PIN_CEIL = \d+;/, /CG\.NA_PIN_USABLE = \d+;/]) {
     const m = src.match(decl);
@@ -42,6 +43,14 @@ vm.createContext(ctx);
 const CG = ctx.CG, M = CG.NA_MAP;
 const CLUBS = ["BOS", "MTL", "NYI", "PIT", "TOR", "COL", "DAL", "SEA", "SJS", "UTA", "VAN", "VGK"];
 CG.TEAMS = CLUBS.map((c) => ({ code: c }));
+
+/* The hero's height, mirroring .na-wrap in part1_head.html: taller on large screens, because a
+   desktop plot far wider than the map's own shape forces a horizontal zoom-out that shrinks every
+   crest. Kept in step with the CSS by the assertion at the end of this file. */
+function plotHeight(w, h) {
+  return w >= 1200 ? Math.max(560, Math.min(900, Math.round(h * 0.78)))
+                   : Math.max(240, Math.min(740, Math.round(h * 0.66)));
+}
 
 /* exactly what naMapLayout does, minus the DOM */
 function layout(w, h) {
@@ -85,7 +94,7 @@ console.log("— every window shape a member might open the site in");
     ["tall narrow", 380, 1200], ["near square", 700, 700],
   ];
   for (const [label, w, h] of SHAPES) {
-    const boxH = Math.max(240, Math.round(h * 0.66));
+    const boxH = plotHeight(w, h);
     const r = layout(w, boxH);
     A(`${label} (${w}x${boxH}) — no crest clipped`, r.clipped.length === 0, r.clipped.join(","));
     A(`  …no two crests touching`, r.overlaps.length === 0, r.overlaps.slice(0, 4).join(" "));
@@ -96,18 +105,23 @@ console.log("— every window shape a member might open the site in");
 console.log("\n— logos sit on the real city, and the map shows the continent");
 {
   /* the explicit brief: true positions, more geography. Desktop and tablet must honour it exactly */
-  for (const [label, w, h] of [["ultrawide", 2560, 900], ["monitor", 1960, 740],
-                               ["laptop", 1440, 594], ["small laptop", 1024, 507], ["tablet", 768, 676]]) {
-    const r = layout(w, h);
+  for (const [label, w, h] of [["ultrawide", 2560, 1440], ["monitor", 1960, 1080],
+                               ["laptop", 1440, 900], ["small laptop", 1024, 768], ["tablet", 768, 1024]]) {
+    const r = layout(w, plotHeight(w, h));
     A(`${label}: every pin on its true coordinate`, r.drift === 0, `${r.drift.toFixed(1)}px drift`);
   }
-  const wide = layout(1960, 740);
+  const wide = layout(1960, plotHeight(1960, 1080));
   /* not necessarily 100%: NA_GROW_KEEP holds a readable crest, and the last stretch of framing is
      empty ocean and Arctic. What matters is that it is far more than the old club-tight crop. */
-  A("a monitor frames most of the continent", wide.shown >= 85, `${wide.shown.toFixed(0)}%`);
+  /* Commissioner ruling 2026-08-30: on a large screen the LOGOS matter more than the last
+     stretch of empty ocean — the map was showing ~85% of the drawn continent while rendering 35px
+     crests (1.8% of a 1920 screen, specks). The frame still carries most of the geography; it just
+     no longer buys the final slice at the cost of legible logos. */
+  A("a monitor still frames the bulk of the continent", wide.shown >= 70, `${wide.shown.toFixed(0)}%`);
   A("...at true positions", wide.drift === 0);
   A("...with nothing hidden", wide.clipped.length === 0 && wide.overlaps.length === 0);
-  A("a bigger screen never shows less of the map", layout(2560, 900).shown >= wide.shown);
+  A("a bigger screen never shows less of the map",
+    layout(2560, plotHeight(2560, 1440)).shown >= wide.shown);
 }
 
 console.log("\n— a phone cannot have both, and says so by degrading the right thing");
@@ -127,12 +141,35 @@ console.log("\n— a phone cannot have both, and says so by degrading the right 
   A("desktop never takes that trade", layout(1440, 594).moved === false);
 }
 
+console.log("\n— logos grow with the device (the 2026-08-30 ask)");
+{
+  /* the complaint was concrete: crests were ~2% of the screen on a big monitor and every club had
+     been dragged off its city. Both are pinned here. */
+  const sizes = [[1280,800],[1440,900],[1680,1050],[1920,1080],[2560,1440]]
+    .map(([w,h]) => ({ w, r: layout(w, plotHeight(w, h)) }));
+  sizes.forEach(({w,r}) => {
+    A(`${w}px wide: the crest is a real logo, not a speck`, r.size / w >= 0.02, `${r.size}px = ${(100*r.size/w).toFixed(1)}%`);
+    A(`  …every club on its own city`, r.drift === 0, `${r.drift.toFixed(1)}px`);
+    A(`  …nothing clipped or touching`, r.clipped.length === 0 && r.overlaps.length === 0);
+  });
+  for (let i = 1; i < sizes.length; i++)
+    A(`a wider screen never shrinks the crest (${sizes[i-1].w}→${sizes[i].w})`,
+      sizes[i].r.size >= sizes[i-1].r.size, `${sizes[i-1].r.size} → ${sizes[i].r.size}`);
+  /* the specific regression that started this: 1920 used to render 35px */
+  const at1920 = sizes.find((x) => x.w === 1920).r;
+  A("1920 is comfortably larger than the 35px it used to render", at1920.size >= 44, `${at1920.size}px`);
+  /* ultrawide used to push clubs out of frame entirely, and the clamp then parked them off-city */
+  const uw = layout(3440, plotHeight(3440, 1440));
+  A("an ultrawide holds every club in frame, on its city", uw.clipped.length === 0 && uw.drift === 0,
+    `clipped=${uw.clipped.join(",")||"none"} drift=${uw.drift.toFixed(1)}px`);
+}
+
 console.log("\n— the framing search behaves");
 {
-  A("geography is preferred while crests stay legible",
-    layout(1960, 740).grow >= 0.4, `grow=${layout(1960, 740).grow}`);
+  A("geography is still bought wherever the crest can afford it",
+    layout(1960, plotHeight(1960, 1080)).grow >= 0.1, `grow=${layout(1960, plotHeight(1960, 1080)).grow}`);
   A("a cramped screen pulls the frame in rather than overlap",
-    layout(768, 676).grow < layout(1960, 740).grow);
+    layout(768, plotHeight(768, 1024)).grow < layout(1960, plotHeight(1960, 1080)).grow);
   A("the raw fit is kept separate from the legibility floor, so the search can tell them apart",
     /CG\.naCrestRaw = function/.test(src) && /RAW, not the floored size/.test(src));
 }
@@ -154,6 +191,15 @@ console.log("\n— the CSS lets the layout own the crest size");
     /card\.style\.removeProperty\("--pin"\)/.test(src));
   A("...and always writes the computed size, never only on a change",
     /card\.style\.setProperty\("--pin", size \+ "px"\);/.test(src));
+}
+
+console.log("\n— the model matches the stylesheet");
+{
+  const css = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part1_head.html"), "utf8");
+  A("the small-screen hero height is what plotHeight() models",
+    /\.na-wrap\{--pin:54px;position:relative;min-height:clamp\(440px,66vh,740px\)/.test(css));
+  A("...and large screens get the taller one",
+    /@media\(min-width:1200px\)\{ \.na-wrap\{min-height:clamp\(560px,78vh,900px\)\} \}/.test(css));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

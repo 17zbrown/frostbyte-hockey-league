@@ -447,7 +447,17 @@ CG.naMapView = function(box, padB, grow){
      The pin fit still wins if the two ever disagree: losing a club is worse than showing an edge. */
   var bl = m.bl || [0, 0, m.w, m.h];
   var capW = Math.min(bl[2] - bl[0], (bl[3] - bl[1]) * aspect);
-  if (VW > capW){ VW = Math.max(vw, capW); VH = VW / aspect; }
+  /* The cap may only ever apply when the SMALLER window still holds every pin AND its margins.
+     It used to re-honor the width need alone (`Math.max(vw, capW)`), so on a very wide, short
+     plot — an ultrawide monitor — the capped window was too SHORT for the pin bbox and clubs
+     were pushed out of frame, then dragged back by the clamp and left off their cities.
+     Showing the drawn edge is the lesser evil: losing a club is worse. */
+  if (VW > capW){
+    var capH = capW / aspect;
+    var needW = (x1 - x0) * box.width / usableX;      /* window the pins demand, with pads */
+    var needH = (y1 - y0) * box.height / usableY;
+    if (capW >= needW && capH >= needH){ VW = capW; VH = capH; }
+  }
   var sx = box.width / VW, sy = box.height / VH;
   /* park the pin bbox in the middle of what's left after the margins */
   var vx = (x0 + x1) / 2 - (box.width / 2) / sx;                     /* left and right pads match */
@@ -478,6 +488,14 @@ CG.NA_VIEW_GROW = 0.5;   /* past this the whole drawn map is already in frame */
    show the continent, keep every logo on its own city, hide none of it. Raise this to buy
    bigger crests back at the cost of a tighter, more cropped frame. */
 CG.NA_GROW_KEEP = 38;
+/* The crest demand SCALES with the screen. Holding it at the flat NA_GROW_KEEP above meant a
+   1920 monitor asked for the same 38px a laptop did, took the widest framing that satisfied it,
+   and rendered 35px logos — 1.8% of the screen, specks. Asking for a fraction of what the plot
+   can actually carry (with a ceiling, so an ultrawide doesn't crop itself to a postage stamp)
+   buys back real size on big displays and leaves phones exactly where they were: at base 40 the
+   product is 22, below NA_PIN_MIN, so the floor still wins. */
+CG.NA_GROW_KEEP_MUL = 0.55;
+CG.NA_GROW_KEEP_MAX = 64;
 CG.NA_PIN_MIN = 26;
 CG.NA_PIN_GAP = 3;                                /* px of air demanded between two crests */
 /* the crest size the map WANTS at a given plot size, before collisions get a say */
@@ -584,7 +602,7 @@ CG.naMapGrow = function(box, padB, base){
   /* The crest size we refuse to go below in exchange for geography. Deliberately NOT a fraction of
      `base` — base is what a roomy screen would like, and anchoring to it made big monitors demand
      huge crests and therefore a tight, cropped frame, which is the opposite of the ask. */
-  var keep = Math.max(CG.NA_PIN_MIN, Math.min(CG.NA_GROW_KEEP, Math.round(base * 0.45)));
+  var keep = Math.max(CG.NA_PIN_MIN, Math.min(CG.NA_GROW_KEEP_MAX, Math.round(base * CG.NA_GROW_KEEP_MUL)));
   var best = 0, bestSize = -1;
   for (var g = CG.NA_VIEW_GROW; g >= -0.001; g -= 0.05){
     var grow = Math.max(0, g);

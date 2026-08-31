@@ -912,6 +912,11 @@ html.rv-on .ladder[data-rv].rv-in .lane-track>i{transform:scaleX(1);
 .na-wrap{--pin:54px;position:relative;min-height:clamp(440px,66vh,740px);overflow:hidden;
   background:radial-gradient(125% 95% at 50% 0%,var(--map-sea-1) 0%,var(--map-sea-2) 72%)}
 .na-plot{position:absolute;inset:0}
+/* A desktop hero is far wider than the map's own 16:9-ish shape, so fitting the continent
+   vertically forces a large horizontal zoom-out — and every crest shrinks with it. Giving the map
+   more height on big screens brings the plot's aspect closer to the map's, which buys back crest
+   size at no cost to how much geography is shown. */
+@media(min-width:1200px){ .na-wrap{min-height:clamp(560px,78vh,900px)} }
 .na-svg{position:absolute;inset:0;width:100%;height:100%;display:block;
   opacity:0;transform:scale(1.045);transition:opacity 1.5s ease .35s,transform 2.2s var(--ease-out) .35s;
   /* the geography itself fades in from the top, so the map has no edge to stop at — the crests
