@@ -7,7 +7,7 @@
    ice a legal lineup (was 3 clubs that could not); a 120-pick draft with no duplicate players and
    no club over 17; lineup position/lock enforcement; box score -> standings -> overall recalc;
    forfeits; a playoff series auto-concluding at 4 wins; and trades refusing a cap bust while
-   camp salaries stay cap-exempt. */
+   camp salaries counted against it (they became cap-eligible on 2026-09-02, rulebook v2.29). */
 const fs = require("fs"), path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const live = R("src/live/part_live.js");

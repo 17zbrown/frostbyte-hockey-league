@@ -288,10 +288,12 @@ CG.teamPayroll = function(lg, code){
      state in the browser. In the pure-Node engine test there is no store, so
      nothing is waived and this reduces to the raw contract sum. */
   var waived = (typeof CG!=="undefined" && CG.store && CG.store.get) ? (CG.store.get("waived")||{}) : {};
-  /* Training-camp salaries are off the cap (Rule 2.1) — camp sits outside the seventeen active
-     spots and outside the payroll with it. */
+  /* Training-camp salaries COUNT against the cap (Rule 2.5, commissioner ruling 2026-09-02).
+     Camp sits outside the seventeen active spots, but not outside the payroll: a club that
+     carries a player in camp pays for him exactly as it would on the active roster. This mirrors
+     public.team_cap_used in the database — if one changes, both must. */
   return lg.byTeam[code].reduce(function(s,p){
-    return s + ((waived[p.id] || p.squad==="tc") ? 0 : (p.salary||0));
+    return s + (waived[p.id] ? 0 : (p.salary||0));
   }, 0);
 };
 CG.capSpace = function(lg, code){ return CG.CAP - CG.teamPayroll(lg, code); };

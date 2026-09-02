@@ -72,44 +72,57 @@ console.log("\n— the reason each fix exists is written down where the next rea
   A("the random assigner says why it filters", /active-roster spots only — camp is carried beyond the seventeen/.test(live));
 }
 
-console.log("\n— training-camp salaries are off the cap (Rule 2.5, commissioner ruling 2026-08-18)");
+console.log("\n— training-camp salaries COUNT against the cap (Rule 2.5, commissioner ruling 2026-09-02)");
 {
-  A("the client payroll skips camp players",
-    /\(waived\[p\.id\] \|\| p\.squad==="tc"\) \? 0 : \(p\.salary\|\|0\)/.test(engine));
-  A("...and says why", /Training-camp salaries are off the cap/.test(engine));
-
-  /* drive it: the same club, with and without a camp player carrying a big number */
-  const vm = require("vm");
-  const ctx = { console, Math, Object, Array, String, Number, JSON };
-  ctx.window = ctx; ctx.globalThis = ctx; ctx.CG = { CAP: 40000000 };
-  vm.createContext(ctx);
-  const m = engine.match(/CG\.teamPayroll = function[\s\S]*?\n\};/);
-  if (!m) { A("located CG.teamPayroll", false); process.exit(1); }
-  vm.runInContext(m[0], ctx);
-  const lg = { byTeam: { NYI: [
-    { id: "a", salary: 3000000 },                    /* squad undefined = active */
-    { id: "b", salary: 2000000, squad: "pro" },
-    { id: "c", salary: 9000000, squad: "tc" },       /* camp: must not count */
-  ] } };
-  A("an active roster of $3M + $2M with a $9M camp player reads $5M",
-    ctx.CG.teamPayroll(lg, "NYI") === 5000000, String(ctx.CG.teamPayroll(lg, "NYI")));
-  lg.byTeam.NYI[2].squad = "pro";                    /* call him up */
-  A("...and $14M once that player is called up",
-    ctx.CG.teamPayroll(lg, "NYI") === 14000000, String(ctx.CG.teamPayroll(lg, "NYI")));
+  /* This REVERSES the 2026-08-18 ruling that put camp outside the cap (rulebook v2.24). Camp is
+     still outside the seventeen ACTIVE SPOTS — only the money changed. */
+  const rb2 = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
+  const sec = (id) => { for (const ch of rb2.chapters) for (const x of ch.sections) if (x.id === id) return x.paragraphs.join(" "); throw new Error("no " + id); };
+  A("the client payroll counts camp players",
+    /return s \+ \(waived\[p\.id\] \? 0 : \(p\.salary\|\|0\)\);/.test(engine));
+  A("...and says why, pointing at the database it mirrors",
+    /Training-camp salaries COUNT against the cap/.test(engine) && /mirrors\s+public\.team_cap_used/.test(engine));
+  A("...with no camp exemption left in the sum", !/p\.squad==="tc"\) \? 0/.test(engine));
+  {
+    const m = engine.match(/CG\.teamPayroll = function[\s\S]*?\n\};/);
+    const ctx = { CG: {} };
+    require("vm").createContext(ctx);
+    require("vm").runInContext("CG.teamPayroll = " + m[0].replace(/^CG\.teamPayroll = /, ""), ctx);
+    const lg = { byTeam: { X: [
+      { id: "a", salary: 3000000 },
+      { id: "b", salary: 2000000 },
+      { id: "c", salary: 9000000, squad: "tc" },   /* camp: now counts */
+    ] } };
+    A("a camp salary is inside the payroll", ctx.CG.teamPayroll(lg, "X") === 14000000,
+      `${ctx.CG.teamPayroll(lg, "X")}`);
+  }
+  A("Rule 2.5 says a camp salary IS part of the payroll",
+    /salary is part of that payroll/.test(sec("2.5")) && /but not outside the cap/.test(sec("2.5")));
+  A("Rule 2.1 agrees", /salaries count against the club's salary cap exactly as an active/.test(sec("2.1")));
+  A("...and camp still does not consume an active roster spot",
+    /carried beyond the active roster, not beyond the payroll/.test(sec("2.1")));
 }
 
-console.log("\n— the rulebook carries the cap ruling too");
+console.log("\n— the rulebook carries the cap ruling, and the reversal is on the record");
 {
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
-  A("Rule 2.5 says a camp salary is not part of the payroll",
-    /training-camp player's salary is not part of that payroll/.test(sec("2.5")));
-  A("...and that it starts counting on call-up",
-    /begins to count only when he is called up to the active roster/.test(sec("2.5")));
+  A("Rule 2.5 says a camp salary IS part of the payroll",
+    /training-camp player's salary is part of that payroll/.test(sec("2.5")));
+  A("...and that it counts from placement, not from call-up",
+    /from the moment he is placed there/.test(sec("2.5")) &&
+    /calling him up to the active roster changes nothing about what he costs/.test(sec("2.5")));
   A("Rule 2.1 repeats it where camp is defined",
-    /Their salaries do not count against the club's salary cap \(Rule 2\.5\)/.test(sec("2.1")));
-  A("the changelog records v2.24",
+    /salaries count against the club's salary cap exactly as an active player's does/.test(sec("2.1")));
+  A("no paragraph anywhere still claims the exemption",
+    !rb.chapters.some((ch) => ch.sections.some((x) => {
+      const t = x.paragraphs.join(" ");
+      return /(salaries do not count|is not part of that payroll|and outside the cap with them)/i.test(t);
+    })));
+  A("the changelog records the v2.24 exemption it replaced",
     rb.changelog.some((c) => c.version === "2.24" && /does not count against the salary cap/.test(c.summary)));
+  A("...and v2.29 reversing it",
+    rb.changelog.some((c) => c.version === "2.29" && /now counts against his club's salary cap/.test(c.summary)));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

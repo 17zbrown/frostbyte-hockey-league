@@ -74,7 +74,9 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("2.3: ...and cannot once a piece has moved on", /cannot be reversed once a player or pick in it has moved on/.test(sec("2.3")));
   A("5.2: the cap is regular season and playoffs", /weekly appearance cap in the regular season and the playoffs/.test(sec("5.2")));
   A("5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(sec("5.2")));
-  A("the changelog records v2.28", rb.changelog[0].version === "2.28" && rb.changelog[0].dateIso === "2026-08-29");
+  /* by version, not by position: pinning changelog[0] made every LATER rulebook change fail this
+     unrelated test (v2.29 did exactly that) */
+  A("the changelog records v2.28", rb.changelog.some((e) => e.version === "2.28" && e.dateIso === "2026-08-29"));
   A("...with dateIso throughout", rb.changelog.every((e) => !!e.dateIso));
 }
 
