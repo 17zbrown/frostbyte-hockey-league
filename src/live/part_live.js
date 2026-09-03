@@ -7745,10 +7745,11 @@ CG.submitMgmtApp = function(role, nomineeId, pitch){
 CG._origAfterRoster = CG.AFTER._roster;
 CG.AFTER._roster = function(){
   if (CG._origAfterRoster) CG._origAfterRoster();
-  /* Pro roster <-> training camp (Rule 2.1). Every limit — the 2/4/6 position
-     caps, the 3-player camp, and the 3-swaps-a-season ceiling — is enforced by
-     the database trigger, so the button never has to be the last line of
-     defence: whatever the DB refuses comes back as its own rule message. */
+  /* Active roster <-> training camp (Rule 2.1). The database enforces the exact
+     3C/3LW/3RW/3LD/3RD/2G shape (check_roster_structure, deferred to commit) and the
+     3-player camp limit (guard_squad_move); squad changes themselves are unlimited
+     (v2.30). So the button never has to be the last line of defense: whatever the
+     DB refuses comes back as its own rule message. */
   document.querySelectorAll("[data-squad]").forEach(function(b){ b.addEventListener("click", function(){
     var spot = this.getAttribute("data-squad"), to = this.getAttribute("data-squad-to"), btn = this;
     btn.disabled = true;

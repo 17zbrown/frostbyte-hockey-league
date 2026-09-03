@@ -1366,8 +1366,8 @@ function squadBtn(p){
       (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
   }
   /* roster full at this shape — a straight same-position swap is the only legal move */
-  return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="Roster full — swap for a '+
-    (p.squad==="tc"?"pro":"camp")+' player of the same position ('+title+')">Swap…</button>';
+  return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="Roster full — swap for '+
+    (p.squad==="tc"?"an active-roster":"a camp")+' player of the same position. '+title+'">Swap…</button>';
 }
 CG.hubRoster = function(qs){
   var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];

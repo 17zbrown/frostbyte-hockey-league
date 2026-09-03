@@ -26,6 +26,8 @@ A("no 'of 3 squad changes left' tooltip", !/of 3 squad changes left/.test(hub) &
 A("the squad button says changes are unlimited", /Squad changes are unlimited all season \(Rule 2\.1\)/.test(hub));
 A("the Squads card copy says so too", /there is no limit on squad changes \(Rule 2\.1\)/.test(hub));
 A("...and the camp meter is still 3", /meter\("training camp",tcSq\.length,3\)/.test(hub));
+A("no comment still claims a 3-swaps ceiling or the pre-v2.7 2/4/6 shape", !/3-swaps-a-season|2\/4\/6|2 G \/ 4 D \/ 6 F/.test(live + hub));
+A("the Swap tooltip does not nest parentheses", !/\('\+title\+'\)/.test(hub) && /of the same position\. '\+title\+'"/.test(hub));
 
 console.log("\n— the swap picker and call-up toast");
 A("the picker no longer filters by swaps remaining", !/\(3-\(x\.squadMoves\|\|0\)\)>0/.test(live));
