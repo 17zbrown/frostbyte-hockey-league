@@ -7754,15 +7754,14 @@ CG.AFTER._roster = function(){
     btn.disabled = true;
     CG.sb.rpc("set_roster_squad", { p_spot: spot, p_squad: to }).then(function(r){
       if (r.error){ btn.disabled = false; CG.toast(r.error.message, "err"); return; }
-      var left = (r.data && r.data.moves_left);
-      CG.toast((to==="tc" ? "Moved to training camp" : "Moved to the pro roster")+
-        (left!=null ? " · "+left+" swap"+(left===1?"":"s")+" left this season" : ""), "ok");
+      CG.toast(to==="tc" ? "Moved to training camp" : "Moved to the active roster", "ok");
       CG.reloadLeague();
     }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
   }); });
   /* Full roster: a straight, same-position pro<->camp swap (Rule 2.1). The picker
-     only lists legal counterparts (opposite squad, same position group, a swap
-     still left); the database validates the exchange as one atomic move. */
+     only lists legal counterparts (opposite squad, same exact position); the
+     database validates the exchange as one atomic move. Squad changes are
+     unlimited (v2.30), so nobody is ever "locked" out of the picker. */
   document.querySelectorAll("[data-squad-swap]").forEach(function(b){ b.addEventListener("click", function(){
     var spot = this.getAttribute("data-squad-swap");
     var club = CG.myClub(), roster = (CG.lg.byTeam[club]||[]);
@@ -7774,11 +7773,11 @@ CG.AFTER._roster = function(){
        database's shape check. */
     var opts = roster.filter(function(x){
       return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
-        x.pos===me.pos && (3-(x.squadMoves||0))>0;
+        x.pos===me.pos;
     });
     if (!opts.length){
       CG.toast("No eligible "+(wantSquad==="tc"?"camp":"active")+" "+esc(CG.POS_NAME[me.pos]||me.pos)+
-        " to swap with — everyone at this exact position has used their 3 changes.", "err");
+        " to swap with at this exact position.", "err");
       return;
     }
     var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
@@ -7786,10 +7785,10 @@ CG.AFTER._roster = function(){
     CG.modal("Swap "+esc(me.tag),
       '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
       ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
-      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+'. Each player uses one of their three season swaps.</p>'+
+      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+' at the same position. Squad changes are unlimited all season (Rule 2.1).</p>'+
       '<div class="stack" style="gap:6px">'+opts.map(function(x){
         return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
-          '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+(3-(x.squadMoves||0))+' swaps left</span></button>';
+          '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+CG.fmtMoney(x.salary||0)+'</span></button>';
       }).join("")+'</div>');
     document.querySelectorAll("[data-swap-with]").forEach(function(sb){ sb.addEventListener("click", function(){
       var other = this.getAttribute("data-swap-with");

@@ -1339,15 +1339,15 @@ CG.clubSeasonGames = function(club){
 };
 
 CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||pos==="RD") ? "D" : "F"; };
-/* Rule 2.1 — pro roster 2 G / 4 D / 6 F, training camp 3, and no player may
-   change squads more than 3 times a season. The database enforces all three
-   (guard_squad_move); this button only keeps the UI honest about it. */
-CG.SQUAD_CAPS = { G:2, D:4, F:6, TC:3 };
+/* Rule 2.1 — the active roster is 3C/3LW/3RW/3LD/3RD/2G (17) and training camp holds up to 3
+   beyond it. Since v2.30 a player may move between the two as often as management likes, all
+   season: the database (guard_squad_move) enforces the shape and the camp limit only, and this
+   button just keeps the UI honest about which move is currently possible. */
+CG.SQUAD_CAPS = { G:2, D:6, F:9, TC:3 };
 /* How many pro spots a club is using at a player's position group — a one-way move
    into the pro roster (or into camp) is only possible when there is slack. When the
    roster is full at that shape, the only legal move is a same-position swap, so the
    button offers "Swap" and opens a picker of eligible counterparts. */
-function squadMovesLeft(p){ return 3 - (p.squadMoves||0); }
 function squadRoom(club, p){
   var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
   if (p.squad==="tc"){
@@ -1358,10 +1358,8 @@ function squadRoom(club, p){
 }
 function squadBtn(p){
   if (!p.spotId) return "";
-  var left = squadMovesLeft(p);
-  if (left <= 0) return '<button class="btn btn-ghost btn-sm" disabled title="Swap limit reached — a player may change squads only 3 times a season (Rule 2.1)">Squad locked</button>';
   var club = CG.myClub();
-  var title = left+' of 3 squad changes left this season';
+  var title = 'Squad changes are unlimited all season (Rule 2.1)';
   if (squadRoom(club, p)){
     var to = p.squad==="tc" ? "pro" : "tc";
     return '<button class="btn btn-ghost btn-sm" data-squad="'+p.spotId+'" data-squad-to="'+to+'" title="'+title+'">'+
@@ -1435,7 +1433,7 @@ CG.hubRoster = function(qs){
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position. '
         : 'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). ')+
-      'You may move players between squads freely, but each player may change squads only 3 times a season.</p></div></div>';
+      'You may move players between the active roster and training camp freely, as often as you like, all season — there is no limit on squad changes (Rule 2.1).</p></div></div>';
   }
   /* Road to 5 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'
      draft eligibility — management is OBLIGED to spread ice time so everyone can reach five games.
