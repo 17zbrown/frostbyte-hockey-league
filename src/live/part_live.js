@@ -1980,7 +1980,8 @@ CG.AFTER["pickup-import"] = function(){
       var clubs = o.clubs||[];
       if (!clubs.length){ res.innerHTML = '<div class="note">No clubs found for “'+esc(name)+'”. Check the exact spelling.</div>'; return; }
       res.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick your club:</div>'+clubs.map(function(c){
-        return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+(c.memberCount?' · '+c.memberCount+' members':'')+'</button>';
+        return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+
+          '<span class="caption" style="display:block;margin-top:2px">EA club id <b class="mono" style="font-size:13px;color:var(--ink)">'+esc(c.clubId)+'</b>'+(c.memberCount?' · '+c.memberCount+' members':'')+'</span></button>';
       }).join("");
       res.querySelectorAll("[data-club]").forEach(function(b){ b.addEventListener("click", function(){ loadMatches(this.getAttribute("data-club"), this.getAttribute("data-cn")); }); });
     }).catch(function(e){ res.innerHTML = errBox(e.message); });
@@ -2359,7 +2360,8 @@ CG._smRenderList = function(body){
         var clubs = o.clubs||[];
         if (!clubs.length){ out.innerHTML = '<div class="note">No clubs found for “'+esc(name)+'”. Check the spelling.</div>'; return; }
         out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the club:</div>'+clubs.map(function(c){
-          return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+(c.memberCount?' · '+c.memberCount+' members':'')+'</button>';
+          return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+
+          '<span class="caption" style="display:block;margin-top:2px">EA club id <b class="mono" style="font-size:13px;color:var(--ink)">'+esc(c.clubId)+'</b>'+(c.memberCount?' · '+c.memberCount+' members':'')+'</span></button>';
         }).join("");
         out.querySelectorAll("[data-club]").forEach(function(b){ b.addEventListener("click", function(){ loadMatches(this.getAttribute("data-club"), this.getAttribute("data-cn")); }); });
       }).catch(function(e){ out.innerHTML = errBox(e.message); });
