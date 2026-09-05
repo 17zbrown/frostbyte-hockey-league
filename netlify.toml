@@ -8,6 +8,19 @@
   publish = "."
   functions = "netlify/functions"
 
+# HTTPS_PROXY (the IPRoyal residential proxy that lets the EA functions reach proclubs.ea.com from
+# Netlify's blocked datacenter IPs) is configured in the site's env vars with the "builds" scope on,
+# so npm ALSO tried to reach registry.npmjs.org through it. When the proxy lapsed on 2026-09-05 every
+# deploy died at "Install dependencies" with exit 1 — nothing in this repo had changed, and two
+# commits sat unpublished while the site served a 2-hour-old edge copy. The build is a dependency-free
+# file concatenation that needs no proxy, so blank it for the build only: npm goes direct, and the
+# functions keep using the proxy from the site env vars at runtime.
+[build.environment]
+  HTTPS_PROXY = ""
+  HTTP_PROXY = ""
+  https_proxy = ""
+  http_proxy = ""
+
 # `publish = "."` serves the WHOLE repo root, which quietly made three things public that were
 # never meant to be: preview.html (a full second copy of the live app, rebuilt every deploy and
 # reachable by anyone who guesses the name), the internal owners' briefing with its paste
