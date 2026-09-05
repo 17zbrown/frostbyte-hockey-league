@@ -563,7 +563,7 @@ CG.naMapLayout = function(){
   });
   /* Pins sit on their real cities. That is the whole point of a map, and at every desktop and
      tablet size the framing search has already guaranteed the logos clear each other there. A
-     phone cannot have both: twelve clubs at true positions inside 390px fit about a 9px crest, so
+     phone cannot have both: a full league at true positions inside 390px fits about a 9px crest, so
      rather than ship something unreadable, the pins are allowed to drift just far enough to wear a
      legible one. The cap keeps that drift small, and it is zero everywhere it is not needed. */
   var raw = CG.naCrestRaw(p);
