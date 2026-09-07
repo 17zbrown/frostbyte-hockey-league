@@ -655,7 +655,7 @@ CG.renderChrome = function(){
          broadcast strip, not one sentence repeated (the track duplicates its items to scroll). */
       var sN = CG.SEASON || {};
       items.push('<span class="tk-item"><span class="tk-lab">SEASON 1</span><b>The inaugural season</b></span>');
-      if (sN.registration_deadline) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtDate(sN.registration_deadline)+'</b></a>');
+      if (sN.registration_deadline && !CG.isRegisteredNow()) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtDate(sN.registration_deadline)+'</b></a>');
       if (sN.draft_at) items.push('<span class="tk-item"><span class="tk-lab">DRAFT</span><b>'+CG.fmtDate(sN.draft_at)+'</b></span>');
       if (sN.starts_at) items.push('<a class="tk-item" href="#/schedule"><span class="tk-lab">PUCK DROP</span><b>'+CG.fmtDate(sN.starts_at)+'</b></a>');
     }
@@ -669,7 +669,7 @@ CG.renderChrome = function(){
     '<a class="mh-brand" href="#/home" aria-label="Chel Gaming home">'+CG.leagueMark(36)+
       '<span class="wm"><b>CHEL GAMING</b><span>Hockey League</span></span></a>'+
     '<nav class="mh-nav" aria-label="Primary">'+
-      CG.NAV.map(function(n){ return '<a href="'+n[1]+'" data-navlink>'+n[0]+'</a>'; }).join("")+
+      CG.navVisible().map(function(n){ return '<a href="'+n[1]+'" data-navlink>'+n[0]+'</a>'; }).join("")+
       (CG.NAV_GROUPS||[]).map(function(g,gi){
         return '<div class="mh-dd"><a href="'+g[1][0][1]+'" data-dd="navg'+gi+'" aria-haspopup="true" aria-expanded="false">'+g[0]+CG.ic("down",11)+'</a>'+
           '<div class="pop" id="pop-navg'+gi+'" hidden>'+g[1].map(function(n){
@@ -702,7 +702,7 @@ CG.renderChrome = function(){
     '</div></div>';
   /* mobile nav */
   /* the mobile menu stays a flat, complete list: top-level + both groups + hub tabs */
-  var mnav = CG.NAV.concat(
+  var mnav = CG.navVisible().concat(
     (CG.NAV_GROUPS||[]).reduce(function(acc,g){ return acc.concat(g[1].map(function(n){ return [n[0],n[1]]; })); }, []),
     hubTabs);
   $("#mobilenav").innerHTML = '<div class="mn-h">'+CG.leagueMark(34)+
@@ -725,7 +725,7 @@ CG.renderChrome = function(){
       '<div><h4>Clubs & Players</h4><a class="fl" href="#/teams">All Clubs</a><a class="fl" href="#/players">Player Directory</a><a class="fl" href="#/stats">Stat Central</a></div>'+
       '<div><h4>League Office</h4><a class="fl" href="#/news">News</a><a class="fl" href="#/rulebook">Rulebook</a><a class="fl" href="#/brand">Brand</a><a class="fl" href="#/hub/complaints">Complaints</a>'+
         /* the only registration entry points were both on the homepage; the footer is on every page */
-        (CG.SEASON && CG.SEASON.registration_open ? '<a class="fl" href="#/register">Register to play</a>' : "")+
+        (CG.SEASON && CG.SEASON.registration_open && !CG.isRegisteredNow() ? '<a class="fl" href="#/register">Register to play</a>' : "")+
         '<a class="fl" href="#/owner">Apply — own a club</a><a class="fl" href="#/staffapply">Apply — join the staff</a>'+'</div>'+
       '<div><h4>Account</h4>'+(CG.role()==="guest"?'<a class="fl" href="#/signin">Sign in</a>':'<a class="fl" href="#/hub">Dashboard</a><a class="fl" href="#/hub/settings">Settings</a>')+(CG.LIVE_MODE?'':'<a class="fl" href="#/signin">Switch demo role</a>')+'</div>'+
     '</div>'+

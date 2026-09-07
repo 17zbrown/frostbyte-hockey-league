@@ -10,6 +10,28 @@
 "use strict";
 var CG = (typeof CG !== "undefined") ? CG : {};
 
+/* ---------- registration state ----------
+   Somebody who has already signed up must never be told to sign up again. Every prompt on the
+   site keys off this ONE answer — the Register nav item (a dropdown on mobile), the hero, the
+   registration strip, the ticker, the footer and every section link — so they cannot disagree
+   with each other as more get added. CG.auth.registration is the member's own row for the OPEN
+   season, loaded at sign-in, so a guest is correctly "not registered" and still sees the ask. */
+CG.isRegisteredNow = function(){
+  var r = CG.auth && CG.auth.registration;
+  if (!r) return false;
+  /* a withdrawn sign-up is NOT a sign-up — that member should be invited back in */
+  var st = String(r.status || "").toLowerCase();
+  return st !== "withdrawn" && st !== "removed" && st !== "denied";
+};
+/* the nav array is built once at boot, BEFORE auth resolves, so the Register item is filtered
+   here at render time instead — that also makes it disappear the moment someone registers,
+   without a reload */
+CG.navVisible = function(){
+  return (CG.NAV || []).filter(function(n){
+    return n[1] !== "#/register" || !CG.isRegisteredNow();
+  });
+};
+
 /* ---------- seeded PRNG (mulberry32) ---------- */
 CG.makeRng = function(seed){
   var t = seed >>> 0;

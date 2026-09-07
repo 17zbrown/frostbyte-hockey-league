@@ -976,7 +976,9 @@ CG.setupChecklist = function(profile, registration, regOpen){
       cta:"Join the Discord", href:(CG.discordJoinLink && CG.discordJoinLink()) || null, ext:true },
     { key:"ea", label:"EA ID on file", done: !!p.ea_id, cta:"Add EA ID", act:"ea" },
     { key:"register", label:"Registered for the season", done: !!registration,
-      cta: regOpen ? "Register to play" : null, href: regOpen ? "#/register" : null }
+      /* a done item must not still carry the ask — the card renders the CTA beside the tick */
+      cta: (regOpen && !registration) ? "Register to play" : null,
+      href: (regOpen && !registration) ? "#/register" : null }
   ];
   var doneN = items.filter(function(i){ return i.done; }).length;
   return { items:items, done:doneN, total:items.length, complete:doneN===items.length };

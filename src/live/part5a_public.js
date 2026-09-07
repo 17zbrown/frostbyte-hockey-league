@@ -171,7 +171,7 @@ CG.slideDefs = function(){
     var start = CG.seasonStartMs(), days = CG.daysToStart(), slides = [];
     var startTxt = start ? CG.fmtDate(new Date(start).toISOString()) : "soon";
     var sNum = (CG.SEASON&&CG.SEASON.number)||1;
-    var regOpen = CG.SEASON && CG.SEASON.registration_open;
+    var regOpen = CG.SEASON && CG.SEASON.registration_open && !CG.isRegisteredNow();
     slides.push({ key:"kickoff", label:CG.seasonTag(), html:
       '<span class="s-cat"><span class="chip chip-chrome">'+esc(CG.seasonTag())+(sNum===1?' · Inaugural':'')+'</span></span>'+
       '<h2>The puck drops '+startTxt+'.</h2>'+
@@ -740,7 +740,8 @@ CG.homeFigures = function(){
   var spots  = clubs * (s.roster_max || 17);
   if (signed) fig(signed, "Signed up for Season " + (s.number || 1),
     spots ? signed.toLocaleString() + " of " + spots.toLocaleString() + " roster spots claimed" : "",
-    spots ? Math.max(0, Math.min(1, signed / spots)) : null, "#/register");
+    spots ? Math.max(0, Math.min(1, signed / spots)) : null,
+    CG.isRegisteredNow() ? "#/players" : "#/register");
 
   if (clubs) fig(clubs, "Clubs", "Each with an owner, GM and assistant GM", null, "#/teams");
 
@@ -752,7 +753,7 @@ CG.homeFigures = function(){
   return '<section class="sec-tight"><div class="shell">' +
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">League</span>' +
     '<h2 class="h-sec">Season 1 at a glance</h2></div>' +
-    '<a class="sec-link" href="#/register">Sign up to play</a></div>' +
+    (CG.isRegisteredNow() ? '<a class="sec-link" href="#/players">The player pool</a>' : '<a class="sec-link" href="#/register">Sign up to play</a>') + '</div>' +
     '<div class="figs" data-rv="up">' + figs.join("") + '</div></div></section>';
 };
 
@@ -797,7 +798,10 @@ CG.roadModule = function(pre){
        apologising for an empty schedule. */
     var sD = CG.SEASON || {}, nowMs = CG.now();
     rows = [
-      ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff", "#/register"],
+      /* the date still matters to someone already signed up (it is their draft-eligibility
+         cutoff), so the milestone stays — it just stops sending them back to a form they filled */
+      ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff",
+        CG.isRegisteredNow() ? "#/hub" : "#/register"],
       ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
       ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/draft"],
       ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
@@ -857,7 +861,7 @@ CG.leagueIntro = function(){
         return '<p data-rv="mask" style="--rv-i:' + (i + 1) + ';font-size:16.5px;line-height:1.6;color:var(--on-ink-dim);margin:0">' + l + '</p>';
       }).join("") +
       '<div data-rv="up" style="--rv-i:4;display:flex;gap:11px;flex-wrap:wrap;margin-top:9px">' +
-        '<a class="btn btn-chrome" href="#/register">Sign up to play</a>' +
+        (CG.isRegisteredNow() ? '<a class="btn btn-chrome" href="#/hub">Your dashboard</a>' : '<a class="btn btn-chrome" href="#/register">Sign up to play</a>') +
         '<a class="btn btn-ghost" href="#/rulebook">Read the rulebook</a>' +
       '</div>' +
     '</div></div></section>';
@@ -978,7 +982,7 @@ CG.pulseModule = function(){
   return '<section class="sec"><div class="shell">' +
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Registration</span>' +
     '<h2 class="h-sec">Season ' + ((s.number)||1) + ' sign-ups</h2></div>' +
-    '<a class="sec-link" href="#/register">Register</a></div>' +
+    (CG.isRegisteredNow() ? '<a class="sec-link" href="#/players">Player directory</a>' : '<a class="sec-link" href="#/register">Register</a>') + '</div>' +
     '<div class="vzgrid">' + cards.join("") + '</div></div></section>';
 };
 
@@ -1012,7 +1016,7 @@ CG.ROUTES.home = function(){
   var html = '<h1 class="sr-only">'+esc(CG.seasonTag())+' — Chel Gaming Hockey League</h1>';
   /* sign-ups run right up to puck drop; registration_deadline is only the draft-eligibility
      cutoff. Both strips below key off registration_open and stop once the season is live. */
-  var regOpen = !!(CG.SEASON && CG.SEASON.registration_open && CG.SEASON.status !== "active");
+  var regOpen = !!(CG.SEASON && CG.SEASON.registration_open && CG.SEASON.status !== "active" && !CG.isRegisteredNow());
   /* free-agency countdown — pinned to the top of the front page while the window is open */
   var faO = CG.SEASON && CG.SEASON.free_agency_opens_at ? Date.parse(CG.SEASON.free_agency_opens_at) : null;
   var faC = CG.SEASON && CG.SEASON.free_agency_closes_at ? Date.parse(CG.SEASON.free_agency_closes_at) : null;
@@ -1608,7 +1612,7 @@ CG.ROUTES.schedule = function(param, qs){
           var dropTxt  = s.starts_at ? CG.fmtDate(Date.parse(s.starts_at)) : "the season opener";
           return '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>The Season 1 slate posts after the draft</b>'+
             '<p>Clubs are built on draft night'+esc(draftTxt)+', and the schedule goes up once the rosters that will play it exist. Puck drops '+esc(dropTxt)+'.</p>'+
-            '<a class="btn btn-chrome" href="#/register" style="margin-top:16px">Register to play</a></div>';
+            (CG.isRegisteredNow() ? '' : '<a class="btn btn-chrome" href="#/register" style="margin-top:16px">Register to play</a>')+'</div>';
         })()
   );
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
