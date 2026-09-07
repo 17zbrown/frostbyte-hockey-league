@@ -45,7 +45,7 @@ async function clubIds() {
 
 async function clubMatches(clubId) {
   const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${clubId}`;
-  const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/games/nhl/nhl-26" }, dispatcher: eaDispatcher });
+  const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.ea.com/" }, dispatcher: eaDispatcher });
   if (r.status === 403) throw new Error("EA 403 (this IP is blocked — use a residential proxy)");
   if (!r.ok) throw new Error(`EA ${r.status}: ${(await r.text()).slice(0, 120)}`);
   const data = await r.json();

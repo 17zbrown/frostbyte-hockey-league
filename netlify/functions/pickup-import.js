@@ -81,10 +81,10 @@ async function authUser(token) {
   } catch (e) { return null; }
 }
 
-/* ---------- EA Pro Clubs (through the residential proxy) ---------- */
-// Use undici's OWN fetch, not Node's global fetch: on Node 24 the global fetch silently drops the
-// `dispatcher` option, so the ProxyAgent is ignored and EA sees the datacenter IP (403). undici.fetch
-// honours dispatcher, routing the call through the residential proxy.
+/* ---------- EA Pro Clubs (direct, with the residential proxy as a fallback) ---------- */
+// A PROXIED attempt must use undici's OWN fetch: on Node 24 the global fetch silently drops the
+// `dispatcher` option, so the ProxyAgent would be ignored. The direct attempt deliberately uses
+// global fetch instead, which keeps the handler stubbable from tools/*.test.mjs.
 async function eaFetch(url) {
   const { ProxyAgent, fetch: uFetch } = await import("undici");
   const headers = {
@@ -94,19 +94,24 @@ async function eaFetch(url) {
     "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
     "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
   };
-  // EA's NHL 26 API blocks intermittently by IP; a NEW ProxyAgent each attempt = a fresh IPRoyal
-  // rotating IP, so a flaky 403 just retries on a different IP. Kept under Netlify's 10s fn timeout.
+  /* EA blocks by CLIENT FINGERPRINT, not by datacenter IP — verified 2026-09-07: curl is refused
+     (403) from a residential address while undici/global fetch is served (200) from BOTH a
+     residential and a datacenter address. So try DIRECT first: it needs no paid proxy and is a hop
+     faster. The residential proxy stays only as a fallback for the day EA starts refusing this
+     range again — a lapsed proxy can no longer take the whole EA pipeline down with it, which is
+     exactly what happened when IPRoyal expired and every import went dark. */
+  const routes = PROXY ? [null, PROXY, PROXY] : [null, null, null];
   let last = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (const proxy of routes) {
     try {
       const opts = { headers, signal: AbortSignal.timeout(2800) };
-      if (PROXY) opts.dispatcher = new ProxyAgent(PROXY);
-      /* undici's fetch exists ONLY to honour the dispatcher — with no proxy configured there is
-         nothing to honour, and global fetch keeps the handler drivable by tests */
-      const r = await (PROXY ? uFetch : fetch)(url, opts);
+      if (proxy) opts.dispatcher = new ProxyAgent(proxy);
+      /* the direct attempt uses global fetch so tests can stub it; only a PROXIED attempt needs
+         undici's own fetch, because Node's global fetch silently drops `dispatcher` */
+      const r = await (proxy ? uFetch(url, opts) : fetch(url, opts));
       if (r.ok) return r.json();
       last = `EA ${r.status}`;
-      if (r.status !== 403) throw new Error(last);   // non-403 errors won't be fixed by another IP
+      if (r.status !== 403) throw new Error(last);   // only a 403 is worth trying another route
     } catch (e) { last = String(e.message || e); }
   }
   throw new Error(`EA unreachable (${last}${last.includes("403") ? " — EA is throttling; try again in a moment" : ""})`);

@@ -1991,7 +1991,7 @@ CG.AFTER["pickup-import"] = function(){
     api({ action:"matches", clubId:cid }).then(function(o){
       if (o.error){ res.innerHTML = errBox(o.error); return; }
       var ms = o.matches||[];
-      if (!ms.length){ res.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'. EA’s private feed can be empty on NHL 26 — a screenshot import is the backup.</div>'; return; }
+      if (!ms.length){ res.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'. EA’s private feed can be empty — it only keeps a club’s few most recent private matches, so import soon after playing.</div>'; return; }
       res.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import — or <b>select several sessions</b> of a lagged-out game and import them as one:</div>'+ms.map(function(m){
         var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
         /* a visibly short session is the classic lagout fragment — worth a nudge */

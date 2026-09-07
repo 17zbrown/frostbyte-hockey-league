@@ -123,12 +123,32 @@ export default async () => {
       return json({ skipped: "no teams have an ea_club_id set", ok: false });
     }
 
-    // Use undici's OWN fetch (uFetch) below, not Node's global fetch: on Node 24 the global fetch
-    // silently drops the `dispatcher` option, so the ProxyAgent is ignored and EA sees the datacenter
-    // IP. undici.fetch honours dispatcher, routing through the residential proxy.
+    // uFetch (undici's own) is used below because a PROXIED attempt needs it: Node's global fetch
+    // silently drops the `dispatcher` option, which would ignore the ProxyAgent entirely.
     const { ProxyAgent, fetch: uFetch } = await import("undici");
-    let dispatcher;
-    if (PROXY) { dispatcher = new ProxyAgent(PROXY); }
+    /* Direct first, proxy only as a fallback — EA blocks by client FINGERPRINT, not by datacenter
+       IP (verified 2026-09-07: curl 403, undici 200, from both a residential and a datacenter
+       address). Keeping the poller on a paid residential proxy is what took the whole import down
+       when IPRoyal lapsed; now a dead proxy costs nothing because it is never the first route. */
+    const EA_HEADERS = {
+      "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+      "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
+      "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+      "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+      "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
+    };
+    async function eaGet(url) {
+      const routes = PROXY ? [null, PROXY] : [null];
+      let r = null;
+      for (const proxy of routes) {
+        const opts = { headers: EA_HEADERS };
+        if (proxy) opts.dispatcher = new ProxyAgent(proxy);
+        try { r = await uFetch(url, opts); } catch (e) { r = null; }
+        if (r && r.ok) return r;
+        if (r && r.status !== 403) return r;   // a non-403 will not be fixed by another route
+      }
+      return r;   // caller reads .ok/.status and classifies the failure
+    }
 
     const byId = new Map();
     const clubErrors = [];
@@ -137,13 +157,8 @@ export default async () => {
         const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${c}`;
         /* full fingerprint, KEPT IN SYNC with eaFetch in ingest-stats.js/pickup-import.js —
            and no title-pinned referer, so nothing here needs touching when a new NHL ships */
-        const r = await uFetch(url, { headers: {
-          "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
-          "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
-          "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-          "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
-          "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
-        }, dispatcher });
+        const r = await eaGet(url);
+        if (!r) { clubErrors.push({ club: c, status: 0, kind: "unreachable" }); continue; }
         if (!r.ok) {
           /* three distinct failure classes, so the Automations chip says what actually broke:
              a stale club id (title rollover reset it), an Akamai block, or a transient EA error.

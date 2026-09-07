@@ -98,10 +98,11 @@ function normalizeMatch(raw) {
 // shutout); the per-game ratings are time-on-ice-weighted rather than summed. The game-winning
 // goal cannot be attributed without goal timings, so it is zeroed rather than guessed.
 /* ---- live EA transport for the fixture desk's on-demand fetch ----
-   KEEP IN SYNC with eaFetch in pickup-import.js — same proxy dance, same reasons:
-   undici's fetch honours `dispatcher` (Node's global fetch silently drops it), a NEW ProxyAgent
-   per attempt = a fresh rotating IP for EA's flaky 403s, and proxyless falls back to global
-   fetch so tests can stub it. */
+   KEEP IN SYNC with eaFetch in pickup-import.js and eaGet in ea-poll.js — same route order, same
+   reasons: DIRECT first (EA blocks by client fingerprint, not by datacenter IP), then the
+   residential proxy only if EA answers 403. A proxied attempt needs undici's own fetch because
+   Node's global fetch silently drops `dispatcher`; the direct attempt uses global fetch so tests
+   can stub it. */
 const PLATFORM = process.env.PLATFORM || "common-gen5";
 const EA_PROXY = process.env.HTTPS_PROXY;
 const EA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -114,15 +115,24 @@ async function eaFetch(url) {
     "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
     "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
   };
+  /* EA blocks by CLIENT FINGERPRINT, not by datacenter IP — verified 2026-09-07: curl is refused
+     (403) from a residential address while undici/global fetch is served (200) from BOTH a
+     residential and a datacenter address. So try DIRECT first: it needs no paid proxy and is a hop
+     faster. The residential proxy stays only as a fallback for the day EA starts refusing this
+     range again — a lapsed proxy can no longer take the whole EA pipeline down with it, which is
+     exactly what happened when IPRoyal expired and every import went dark. */
+  const routes = EA_PROXY ? [null, EA_PROXY, EA_PROXY] : [null, null, null];
   let last = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (const proxy of routes) {
     try {
       const opts = { headers, signal: AbortSignal.timeout(2800) };
-      if (EA_PROXY) opts.dispatcher = new ProxyAgent(EA_PROXY);
-      const r = await (EA_PROXY ? uFetch : fetch)(url, opts);
+      if (proxy) opts.dispatcher = new ProxyAgent(proxy);
+      /* the direct attempt uses global fetch so tests can stub it; only a PROXIED attempt needs
+         undici's own fetch, because Node's global fetch silently drops `dispatcher` */
+      const r = await (proxy ? uFetch(url, opts) : fetch(url, opts));
       if (r.ok) return r.json();
       last = `EA ${r.status}`;
-      if (r.status !== 403) throw new Error(last);
+      if (r.status !== 403) throw new Error(last);   // only a 403 is worth trying another route
     } catch (e) { last = String(e.message || e); }
   }
   throw new Error(`EA unreachable (${last}${last.includes("403") ? " — EA is throttling; try again in a moment" : ""})`);
