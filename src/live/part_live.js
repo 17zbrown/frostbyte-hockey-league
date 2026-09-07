@@ -2641,7 +2641,9 @@ CG.AFTER.register = function(){
           CG.pingDiscordSync();   /* their Player/Free Agent roles come off without waiting for the cron */
           CG.toast("Sign-up withdrawn — register again any time while the window is open","ok");
           /* the pool labels and draft views are built from the league snapshot — reload it so
-             their own directory chip stops saying "Signed up" the moment they withdrew */
+             their own directory chip stops saying "Signed up" the moment they withdrew.
+             renderChrome brings the Register nav item back in the same beat. */
+          CG.renderChrome();
           if (CG.reloadLeague) CG.reloadLeague(); else CG.router();
         });
       });
@@ -3009,7 +3011,11 @@ CG.registerForSeason = async function(position, note){
   if(r.error){ CG.toast("Couldn’t register: "+r.error.message,"err"); return; }
   CG.auth.registration=payload;
   CG.pingDiscordSync();   /* registering changes their Discord roles (Player / Free Agent) — don't wait for the cron */
-  CG.toast("You’re registered for Season "+(s.number||1)+"!","ok"); CG.router();
+  CG.toast("You’re registered for Season "+(s.number||1)+"!","ok");
+  /* renderChrome as well as router: the Register nav item (and the mobile dropdown) lives in the
+     masthead, which the router does NOT redraw — without this it kept inviting them to register
+     until the next full reload */
+  CG.renderChrome(); CG.router();
 };
 
 /* ================================================================

@@ -36,6 +36,12 @@ console.log("\n— the signed-in surfaces");
 A("a completed checklist item drops its call to action", /cta: \(regOpen && !registration\) \? "Register to play" : null/.test(live));
 A("...and its link", /href: \(regOpen && !registration\) \? "#\/register" : null/.test(live));
 
+console.log("\n— the nav updates in the same beat, without a reload");
+A("registering redraws the masthead, not just the page body",
+  /CG\.toast\("You’re registered for Season "\+\(s\.number\|\|1\)\+"!","ok"\);[\s\S]{0,320}CG\.renderChrome\(\); CG\.router\(\);/.test(live));
+A("withdrawing brings the Register item back the same way",
+  /Sign-up withdrawn[\s\S]{0,340}CG\.renderChrome\(\);/.test(live));
+
 console.log("\n— every remaining #/register is behind a gate");
 {
   const gated = [];
