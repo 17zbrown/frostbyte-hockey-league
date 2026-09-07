@@ -31,8 +31,19 @@ A("...and none of them arms a dispatcher before the first attempt",
 A("a proxied attempt still uses undici's fetch (global fetch drops `dispatcher`)",
   /await \(proxy \? uFetch\(url, opts\) : fetch\(url, opts\)\)/.test(pickup) &&
   /await \(proxy \? uFetch\(url, opts\) : fetch\(url, opts\)\)/.test(ingest));
-A("ea-poll survives an unreachable club instead of throwing on r.ok",
-  /if \(!r\) \{ clubErrors\.push\(\{ club: c, status: 0, kind: "unreachable" \}\); continue; \}/.test(poll));
+/* clubErrors is a STRING channel: its first entry becomes lastError and is rendered straight into
+   the Automations chip tooltip, so an object there reads "[object Object]" and the operator learns
+   nothing. The first cut of this change pushed an object — caught in adversarial review. */
+A("ea-poll survives an unreachable club", /const msg = `club \$\{c\}: EA unreachable/.test(poll));
+A("...pushing a STRING, never an object, into the operator-facing error channel",
+  !/clubErrors\.push\(\{/.test(poll));
+A("...and logging it like every sibling failure branch",
+  /clubErrors\.push\(msg\); console\.error\("ea-poll " \+ msg\); continue;/.test(poll));
+A("eaGet keeps the failure cause instead of collapsing it to null", /return \{ response: r, why: why \|\| "no route answered" \};/.test(poll));
+A("...and a proxy that throws cannot erase a direct 403 (Akamai message survives)",
+  /r = res;\s+\/\/ never let a later throw erase an earlier answer/.test(poll));
+A("...with each attempt capped like the eaFetch siblings",
+  /const opts = \{ headers: EA_HEADERS, signal: AbortSignal\.timeout\(2800\) \};/.test(poll));
 
 console.log("\n— the title is not pinned anywhere");
 A("no NHL 26 reference survives in the EA callers", !/NHL ?26|nhl-26/i.test(pickup + ingest + poll + fetcher));

@@ -230,6 +230,72 @@ CG.deskReviewBoard = function(){
     : CG.deskEmpty("Nothing waiting. Members apply to own a club at <a href=\"#/owner\">#/owner</a> or to join the staff at <a href=\"#/staffapply\">#/staffapply</a>; owners nominate a GM or AGM from their Team HQ.");
   h += '</div>';
 
+  /* ── THE WAITLIST ───────────────────────────────────────────────────────────────────────────
+     A seat opening is a prompt for this board, not a decision. The two auto-appointment triggers
+     (fill_owner_vacancy / fill_staff_vacancy) were retired on 2026-09-07 because they fired on ANY
+     write that emptied a seat — withdrawing a club, rebranding one, correcting a mistake — and told
+     the next applicant they now owned a club. Nobody joins the league until a reviewer admits them
+     from here. Queue order is shown for reference; the board is free to take anyone. */
+  var byWaited = function(x, y){
+    return Date.parse(x.waitlisted_at||x.created_at||0) - Date.parse(y.waitlisted_at||y.created_at||0);
+  };
+  var waitO = owner.filter(function(a){ return a.status==="waitlisted"; }).sort(byWaited);
+  var waitS = staff.filter(function(a){ return a.status==="waitlisted"; }).sort(byWaited);
+  var waitN = waitO.length + waitS.length;
+  var taken = (CG.activeFranchiseSet ? CG.activeFranchiseSet() : {});
+
+  function waitRow(a, type, i){
+    var isOwner = type==="owner";
+    var who = ((a.profiles||{}).gamertag) || "Applicant";
+    var since = a.waitlisted_at || a.created_at;
+    var picks = isOwner ? [a.preferred_club, a.franchise_2, a.franchise_3].filter(Boolean) : [];
+    var club = isOwner ? (a.awarded_club || "") : "";
+    var depts = (!isOwner && a.departments && a.departments.length)
+      ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ")
+      : (isOwner ? "" : "Staff application");
+    return '<div class="card-b" style="border-top:1px solid var(--line-soft)">'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
+        '<span class="chip chip-xs">#'+(i+1)+'</span>'+
+        '<span class="chip '+(isOwner?"chip":"chip-chrome")+' chip-xs">'+(isOwner?"OWNER":"STAFF")+'</span>'+
+        '<b style="font-family:var(--f-disp);flex:1;min-width:140px">'+esc(who)+'</b>'+
+        (isOwner ? (club
+          ? '<span class="chip chip-chrome chip-xs">'+esc(club)+'</span>'
+          : '<span class="chip chip-warn chip-xs">no club chosen</span>') : '')+
+        '<span class="caption">waiting since '+(since?CG.fmtDay(Date.parse(since)):"—")+'</span>'+
+      '</div>'+
+      (isOwner
+        ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+            '<label class="caption" for="wlc-'+esc(a.id)+'">Club</label>'+
+            '<select id="wlc-'+esc(a.id)+'" data-wl-club="'+esc(a.id)+'" style="min-width:210px">'+
+              '<option value="">— none chosen —</option>'+
+              picks.map(function(nm){
+                return '<option value="'+esc(nm)+'"'+
+                  ((club && club.toLowerCase()===String(nm).toLowerCase()) ? ' selected' : '')+'>'+
+                  esc(nm)+(taken[nm] ? ' (taken)' : '')+'</option>';
+              }).join("")+
+            '</select>'+
+            '<span class="caption">the three they applied for — the club is created and handed over on admit</span>'+
+          '</div>'
+        : '<div class="caption" style="margin-bottom:10px">'+depts+'</div>')+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn btn-chrome btn-sm" data-wl-admit="'+esc(a.id)+'" data-wt="'+esc(type)+'" data-who="'+esc(who)+'">Admit into the league</button>'+
+        '<button class="btn btn-ghost btn-sm" data-wl-remove="'+esc(a.id)+'" data-wt="'+esc(type)+'" data-who="'+esc(who)+'">Remove from waitlist</button>'+
+        '<a class="btn btn-ghost btn-sm" href="#/hub/application?id='+esc(a.id)+'&amp;type='+esc(type)+'">Open application</a>'+
+      '</div></div>';
+  }
+
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Waitlist</h3>'+
+    '<span class="chip '+(waitN?"chip-chrome":"chip-win")+'">'+(waitN ? waitN+" waiting" : "empty")+'</span></div>'+
+    '<div class="card-b"><p class="caption" style="margin:0;max-width:78ch">'+
+      '<b style="font-family:var(--f-disp)">Nobody is admitted automatically.</b> When a seat opens the list '+
+      'does not move on its own — a reviewer admits from here, in whatever order the board decides. '+
+      'Admitting an owner hands them the club shown and creates it if it does not exist yet.</p></div>';
+  h += waitN
+    ? waitO.map(function(a,i){ return waitRow(a,"owner",i); }).join("")+
+      waitS.map(function(a,i){ return waitRow(a,"staff",i); }).join("")
+    : CG.deskEmpty("Nobody is waiting. An application with no seat open for it can be put here from its own page.");
+  h += '</div>';
+
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The board</h3>'+
     '<span class="chip">'+reviewers.length+'</span></div>';
   h += reviewers.length
@@ -262,6 +328,67 @@ CG.deskReviewBoard = function(){
   h += CG.deskCeiling("The board decides applications and nothing else. Handing out a role directly, "+
     "overriding a vote, or assigning a club by hand stays with the commissioners. You cannot vote on your own application.");
   return h;
+};
+
+/* Waitlist actions. Every one of these is a deliberate act by a reviewer — there is no longer any
+   code path that admits somebody on its own. Each RPC re-checks the caller server-side, so a stale
+   page cannot act on behalf of someone who has since lost the department. */
+CG.AFTER._deskReviewBoard = function(){
+  /* Club choice saves on change, so Admit always acts on what is on screen rather than on a value
+     the reviewer thought they had picked. */
+  document.querySelectorAll("[data-wl-club]").forEach(function(sel){ sel.addEventListener("change", function(){
+    var id = this.getAttribute("data-wl-club"), club = this.value, el = this;
+    el.disabled = true;
+    CG.sb.rpc("set_owner_app_club", { p_id:id, p_club: club || null }).then(function(r){
+      el.disabled = false;
+      if (r.error){ CG.toast("Couldn’t save the club: "+r.error.message, "err"); return; }
+      var d = r.data || {};
+      CG.toast(d.message || "Club saved", d.ok === false ? "err" : "ok");
+      CG.reloadLeague();
+    }, function(e){ el.disabled = false; CG.toast("Couldn’t save the club: "+((e&&e.message)||e), "err"); });
+  }); });
+
+  document.querySelectorAll("[data-wl-admit]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-wl-admit"), t = this.getAttribute("data-wt"),
+        who = this.getAttribute("data-who"), btn = this;
+    var sel = document.querySelector('[data-wl-club="'+id+'"]');
+    var club = sel ? sel.value : "";
+    CG.confirm("Admit "+esc(who)+" into the league?",
+      t === "owner"
+        ? (club
+            ? "They are handed the "+esc(club)+" straight away and the club goes live on the site. Nobody else on the list is moved."
+            : "No club is chosen, so this will be refused — pick one of their three franchises first.")
+        : "They are granted the staff role and the Staff Desk appears in their hub.",
+      "Admit", function(){
+      btn.disabled = true;
+      CG.sb.rpc("waitlist_admit", { p_type:t, p_id:id }).then(function(r){
+        btn.disabled = false;
+        if (r.error){ CG.toast("Couldn’t admit: "+r.error.message, "err"); return; }
+        var d = r.data || {};
+        /* the RPC reports a refusal in the payload, not as an error — a green toast on
+           ok:false is exactly how "approved into nothing" would look like success */
+        CG.toast(d.message || "Admitted", d.ok ? "ok" : "err");
+        CG.reloadLeague();
+      }, function(e){ btn.disabled = false; CG.toast("Couldn’t admit: "+((e&&e.message)||e), "err"); });
+    });
+  }); });
+
+  document.querySelectorAll("[data-wl-remove]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-wl-remove"), t = this.getAttribute("data-wt"),
+        who = this.getAttribute("data-who"), btn = this;
+    CG.confirm("Take "+esc(who)+" off the waitlist?",
+      "The application is closed and they are told they are no longer waiting. They can apply again any time.",
+      "Remove", function(){
+      btn.disabled = true;
+      CG.sb.rpc("waitlist_remove", { p_type:t, p_id:id, p_reason:null }).then(function(r){
+        btn.disabled = false;
+        if (r.error){ CG.toast("Couldn’t remove: "+r.error.message, "err"); return; }
+        var d = r.data || {};
+        CG.toast(d.message || "Removed from the waitlist", d.ok ? "ok" : "err");
+        CG.reloadLeague();
+      }, function(e){ btn.disabled = false; CG.toast("Couldn’t remove: "+((e&&e.message)||e), "err"); });
+    });
+  }); });
 };
 
 /* ---------------------------------------------------------------- *
@@ -744,7 +871,7 @@ CG.deskDraftRoom = function(){
  * `dept` is the gate, `key` is the hub route, and `after` runs post-render.
  * ---------------------------------------------------------------- */
 CG.STAFF_DESKS = [
-  { key:"reviewboard", dept:"applications", label:"Review Board",       icon:"flag",   render:function(){ return CG.deskReviewBoard(); },  after:function(){ } },
+  { key:"reviewboard", dept:"applications", label:"Review Board",       icon:"flag",   render:function(){ return CG.deskReviewBoard(); },  after:function(){ CG.AFTER._deskReviewBoard(); } },
   { key:"officials",   dept:"officiating",  label:"Officials’ desk",    icon:"shield", render:function(){ return CG.deskOfficials(); },    after:function(){ CG.AFTER._deskOfficials(); } },
   { key:"opsdesk",     dept:"operations",   label:"Operations desk",    icon:"cal",    render:function(){ return CG.deskOperations(); },   after:function(){ CG.AFTER._deskOperations(); } },
   { key:"draftroom",   dept:"draft",        label:"Draft room",         icon:"play",   render:function(){ return CG.deskDraftRoom(); },    after:function(){ CG.AFTER._admDraft(); } },

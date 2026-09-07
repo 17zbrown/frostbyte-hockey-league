@@ -139,15 +139,26 @@ export default async () => {
     };
     async function eaGet(url) {
       const routes = PROXY ? [null, PROXY] : [null];
-      let r = null;
+      /* Keep BOTH the best response and the last transport error. Returning a bare null on failure
+         threw away the reason, and — worse — a direct 403 followed by a proxy that throws would
+         discard the 403 too, turning "EA blocked us (Akamai)" into a blank "unreachable". Each
+         attempt is capped like the eaFetch siblings so two routes across seven clubs cannot run
+         past the function timeout. */
+      let r = null, why = "";
       for (const proxy of routes) {
-        const opts = { headers: EA_HEADERS };
+        const opts = { headers: EA_HEADERS, signal: AbortSignal.timeout(2800) };
         if (proxy) opts.dispatcher = new ProxyAgent(proxy);
-        try { r = await uFetch(url, opts); } catch (e) { r = null; }
-        if (r && r.ok) return r;
-        if (r && r.status !== 403) return r;   // a non-403 will not be fixed by another route
+        let res = null;
+        try { res = await uFetch(url, opts); }
+        catch (e) { why = (proxy ? "proxy: " : "direct: ") + String((e && e.message) || e); }
+        if (res) {
+          r = res;                                  // never let a later throw erase an earlier answer
+          if (res.ok) return res;
+          why = (proxy ? "proxy: " : "direct: ") + "EA " + res.status;
+          if (res.status !== 403) return res;       // a non-403 will not be fixed by another route
+        }
       }
-      return r;   // caller reads .ok/.status and classifies the failure
+      return { response: r, why: why || "no route answered" };
     }
 
     const byId = new Map();
@@ -157,8 +168,15 @@ export default async () => {
         const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${c}`;
         /* full fingerprint, KEPT IN SYNC with eaFetch in ingest-stats.js/pickup-import.js —
            and no title-pinned referer, so nothing here needs touching when a new NHL ships */
-        const r = await eaGet(url);
-        if (!r) { clubErrors.push({ club: c, status: 0, kind: "unreachable" }); continue; }
+        const got = await eaGet(url);
+        /* eaGet returns a Response directly on success; on failure it returns {response, why} so the
+           cause survives. clubErrors is a STRING channel — its first entry becomes lastError and is
+           rendered straight into the Automations chip tooltip, where an object reads "[object Object]". */
+        const r = (got && typeof got.ok === "boolean") ? got : (got && got.response) || null;
+        if (!r) {
+          const msg = `club ${c}: EA unreachable — ${(got && got.why) || "no route answered"}`;
+          clubErrors.push(msg); console.error("ea-poll " + msg); continue;
+        }
         if (!r.ok) {
           /* three distinct failure classes, so the Automations chip says what actually broke:
              a stale club id (title rollover reset it), an Akamai block, or a transient EA error.
