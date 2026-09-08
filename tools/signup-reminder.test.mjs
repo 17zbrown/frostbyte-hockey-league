@@ -102,6 +102,23 @@ console.log("\n— a season with no deadline still reads correctly");
   A("...and still links register", /#\/register/.test(posts[0].content));
 }
 
+console.log("\n— the off switch");
+{
+  for (const v of ["off", "false", "0", "no", "paused", "OFF"]) {
+    reset();
+    cfgRows.push({ key: "signup_reminder_enabled", value: v });
+    const body = await (await call()).json();
+    A(`"${v}" pauses it`, posts.length === 0 && /^paused/.test(String(body.signups)), String(body.signups));
+  }
+  reset();                                   // unset = on, so a fresh environment still runs
+  let body = await (await call()).json();
+  A("unset leaves it running", posts.length === 1, String(body.signups));
+  reset();
+  cfgRows.push({ key: "signup_reminder_enabled", value: "on" });
+  body = await (await call()).json();
+  A("...and \"on\" turns it back on with no deploy", posts.length === 1, String(body.signups));
+}
+
 console.log("\n— the quiet cases stay quiet");
 {
   reset({ regs: [{ profile_id: "p1" }, { profile_id: "p2" }, { profile_id: "p3" }] });

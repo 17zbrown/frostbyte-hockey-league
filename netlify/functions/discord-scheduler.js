@@ -319,7 +319,7 @@ export default async (req) => {
     // (C) team reminders — ~30 min before a club's first game of the night
     sum.reminders = await gameReminders(games, teamById, now, sum.errors);
     // (D) casework nudge — daily 12pm ET: @ reviewers who still owe an application vote, and staff
-    //     sitting on a claimed case. (E) sign-up reminder — an unpinged notice in #season-signups.
+    //     sitting on a claimed case. (E) sign-up reminder — unpinged, and pausable from app_config.
     if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors, sum.unconfigured);
     if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors, sum.unconfigured);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
@@ -565,6 +565,13 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
 // allowed_mentions {parse:[]}, so even a stray <@&…> in the copy could not fire a notification.
 // The ROLE itself stays: discord-sync still uses it for channel permissions and the GIF carve-out.
 async function signupReminder(cfg, et, dry, errors, unconfigured) {
+  /* OFF SWITCH (commissioner, 2026-09-08): the notice is PAUSED, not deleted. Turn it back on by
+     setting app_config.signup_reminder_enabled to "on" — or deleting that row — with no deploy.
+     Unset means ON so a fresh environment never silently loses a job it is supposed to run, and the
+     gate sits above the webhook check so a paused job is never reported as misconfigured. A forced
+     ?run=signups is paused too: "stopped" has to mean stopped, or the pause cannot be trusted. */
+  const sw = String(cfg.signup_reminder_enabled ?? "").trim().toLowerCase();
+  if (["off", "0", "false", "no", "paused"].includes(sw)) return `paused (app_config.signup_reminder_enabled=${sw})`;
   const EVERY = Math.max(1, parseInt(cfg.signup_reminder_days || "3", 10) || 3);
   const url = cfg.discord_signup_webhook || cfg.discord_default_webhook;
   if (!url) { unconfigured.push("sign-up reminder (discord_signup_webhook)"); return "no signup webhook"; }
