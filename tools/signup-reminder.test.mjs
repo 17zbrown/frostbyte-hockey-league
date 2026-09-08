@@ -1,4 +1,8 @@
-// The daily sign-up reminder. Run: node tools/signup-reminder.test.mjs
+// The recurring sign-up notice. Run: node tools/signup-reminder.test.mjs
+//
+// It posts every N days (commissioner's setting, currently 3) and, since 2026-09-08, pings NOBODY —
+// the "Not Signed Up" role mention was removed. This file is the runtime half of that guarantee:
+// it asserts the actual posted body AND its allowed_mentions, which a static grep cannot see.
 //
 // This exists because of a silent four-day outage: the v2.8 rule change (the sign-up deadline is a
 // draft cutoff, not a hard close) removed the `deadline` binding while the message below still
@@ -25,6 +29,7 @@ function reset(over = {}) {
   posts = []; claims = [];
   cfgRows = [
     { key: "discord_signup_webhook", value: "https://discord.com/api/webhooks/x/y" },
+    /* deliberately still present: the notice must not mention it even when it IS configured */
     { key: "discord_not_signed_up_role_id", value: "ROLE1" },
   ];
 }
@@ -68,7 +73,12 @@ console.log("— it posts at all (the regression)");
   A("the run records no error", !body.error, body.error);
   A("...specifically not a ReferenceError", !/is not defined/.test(String(body.error || "")));
   A("a reminder is actually posted", posts.length === 1);
-  A("...pinging the Not Signed Up role", /<@&ROLE1>/.test(posts[0].content));
+  A("...mentioning nobody — the role ping was removed 2026-09-08", !/<@&/.test(posts[0].content));
+  A("...and suppressed at the API level, so a stray mention could not fire",
+    JSON.stringify(posts[0].allowed_mentions) === JSON.stringify({ parse: [] }),
+    JSON.stringify(posts[0].allowed_mentions));
+  A("...while still naming how many are outstanding", /2 members haven't registered/.test(posts[0].content),
+    posts[0].content.split("\n")[0]);
   A("...and only the unregistered are counted", /2 remaining/.test(String(body.signups)), String(body.signups));
 }
 

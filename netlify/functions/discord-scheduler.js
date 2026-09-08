@@ -319,7 +319,7 @@ export default async (req) => {
     // (C) team reminders — ~30 min before a club's first game of the night
     sum.reminders = await gameReminders(games, teamById, now, sum.errors);
     // (D) casework nudge — daily 12pm ET: @ reviewers who still owe an application vote, and staff
-    //     sitting on a claimed case. (E) sign-up reminder — daily 6pm ET: ping the "Not Signed Up" role.
+    //     sitting on a claimed case. (E) sign-up reminder — an unpinged notice in #season-signups.
     if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors, sum.unconfigured);
     if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors, sum.unconfigured);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
@@ -559,14 +559,15 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   return `nudged (${appLines.length} apps, ${caseLines.length} cases)`;
 }
 
-// (E) Daily #season-signups reminder while registration is open: one clean ping of the bot-maintained
-// "Not Signed Up" role (discord-sync keeps its membership current). Skips when nobody's left.
+// (E) Recurring #season-signups notice while registration is open. It used to @-ping the bot-maintained
+// "Not Signed Up" role; the commissioner removed that ping on 2026-09-08. The notice still posts — it
+// carries the deadline and the link — and now mentions nobody: postWebhook without `ping` sends
+// allowed_mentions {parse:[]}, so even a stray <@&…> in the copy could not fire a notification.
+// The ROLE itself stays: discord-sync still uses it for channel permissions and the GIF carve-out.
 async function signupReminder(cfg, et, dry, errors, unconfigured) {
   const EVERY = Math.max(1, parseInt(cfg.signup_reminder_days || "3", 10) || 3);
   const url = cfg.discord_signup_webhook || cfg.discord_default_webhook;
-  const roleId = cfg.discord_not_signed_up_role_id;
   if (!url) { unconfigured.push("sign-up reminder (discord_signup_webhook)"); return "no signup webhook"; }
-  if (!roleId) return "not-signed-up role not provisioned yet";
   const s = (await sbGet("seasons?select=id,name,registration_open,signup_deadline_at,registration_deadline&registration_open=is.true&order=number.desc&limit=1"))[0];
   if (!s) return "registration closed";   /* Rule 1.1 (v2.8): open until the next season's opens */
   const [members, regs] = await Promise.all([
@@ -581,7 +582,7 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
      four days: the template below still referenced it, so every run threw ReferenceError before
      reaching the post. Keep the date in the copy, but say what it actually means. */
   const deadline = s.signup_deadline_at || s.registration_deadline || null;
-  const content = `⏰ **${s.name} sign-ups are open!** <@&${roleId}> — you haven't registered yet.\n` +
+  const content = `⏰ **${s.name} sign-ups are open** — ${remaining} member${remaining === 1 ? " hasn't" : "s haven't"} registered yet.\n` +
     ((deadline && new Date(deadline).getTime() > Date.now())
       ? `Sign up before **${fmtDay(deadline)}** to go into the draft — after that you can still join, you'll just be placed on a club: https://chelgamingleague.com/#/register`
       : `Grab your spot: https://chelgamingleague.com/#/register`);
@@ -593,9 +594,9 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
      are refused, so a missed tick simply catches up the next evening. */
   const windowRef = `w${EVERY}-${Math.floor(etDayNum(et.ymd) / EVERY)}`;
   if (!(await claim("signup_reminder", windowRef))) return `already posted this ${EVERY}-day window`;
-  const res = await postWebhook(url, content, { ping: true });
+  const res = await postWebhook(url, content);   /* no `ping` → allowed_mentions {parse:[]} → mentions nobody */
   if (!res.ok) { errors.push(`signup reminder: ${res.error}`); if (!res.ambiguous) await release("signup_reminder", windowRef); return `post failed: ${res.error}`; }
-  return `pinged the not-signed-up role (${remaining} remaining, every ${EVERY} days)`;
+  return `posted the sign-up notice, no ping (${remaining} remaining, every ${EVERY} days)`;
 }
 
 function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } }); }
