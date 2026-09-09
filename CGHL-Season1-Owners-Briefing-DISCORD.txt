@@ -70,6 +70,8 @@ Pre-season carries its own standings. Those games count toward player ratings an
 
 **Build your board in advance.** It is private to your management group. If your clock runs out, the league takes the best available player off your own board, so an absent manager never costs the club a pick or lands someone you never ranked.
 
+**What a pick costs.** Draft salaries are set by round, not negotiated: round 10 pays the $750,000 league minimum and every round above it adds $250,000, so round 1 is $3,000,000. Every pick in a round costs the same — first overall and tenth overall are identical against the cap — and a full 10-pick class costs $18,750,000. The same scale applies if your clock expires and the league picks off your board.
+
 **✍️ FREE AGENCY: SEPT 27 TO OCT 4**
 
 Undrafted first year players go to rookie bidding. Bids open at **$750,000** and rise in **$250,000** steps, and the winning club signs the player for one season.
@@ -92,7 +94,7 @@ Tampering with another club's rostered players is a discipline matter.
 
 **Training camp is capped at 3 players.** Those 3 can be dressed at any position, up to 3 games a week each.
 
-**Cap is $40,000,000 hard.** Minimum salary $750,000, contract terms of 1 to 3 seasons. Owner counts $0 against the cap, GM $3M, AGM $3M. A manager cannot be waived or traded while holding the seat. Cap and contract details stay inside your management group.
+**Cap is $40,000,000 hard.** Minimum salary $750,000, and every salary in the league moves in $250,000 steps — $750K, $1M, $1.25M, $1.5M and up. Anything off that lattice is refused when you type it. Contract terms of 1 to 3 seasons. Owner counts $0 against the cap, GM $3M, AGM $3M. A manager cannot be waived or traded while holding the seat. Cap and contract details stay inside your management group.
 
 ════════════════════════════════════════
 

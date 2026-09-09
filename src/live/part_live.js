@@ -1631,13 +1631,14 @@ CG.wireClubOfferActions = function(){
     var id=this.getAttribute("data-coffer-counter"), nm=this.getAttribute("data-name");
     var sal=parseInt(this.getAttribute("data-sal"),10)||750000, yrs=parseInt(this.getAttribute("data-yrs"),10)||1;
     CG.modal("Revise your offer to "+esc(nm),
-      '<label class="fld"><span>Salary ($M per season)</span><input id="coSal" type="number" min="0.75" step="0.05" value="'+(sal/1e6).toFixed(2)+'"></label>'+
+      '<label class="fld"><span>Salary ($M per season)</span><input id="coSal" type="number" min="0.75" step="0.25" value="'+(sal/1e6).toFixed(2)+'"></label>'+
       '<label class="fld"><span>Term (seasons)</span><select id="coYrs">'+[1,2,3,4].map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
-      '<p class="caption">He sees the new terms and can accept, counter again, or decline. League minimum $0.75M.</p>',
+      '<p class="caption">He sees the new terms and can accept, counter again, or decline. League minimum $0.75M, and salaries move in $0.25M steps (Rule 2.5).</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="coGo">Send revised offer</button>');
     document.getElementById("coGo").addEventListener("click", function(){
       var v=parseFloat(document.getElementById("coSal").value);
-      if(!(v>=0.75)){ CG.toast("Salary must be at least $0.75M","err"); return; }
+      var salBad = CG.salaryProblem(Math.round(v*1e6));   /* Rule 2.5: minimum + $250K lattice */
+      if(salBad){ CG.toast(salBad,"err"); return; }
       var y=parseInt(document.getElementById("coYrs").value,10)||1, btn2=this; btn2.disabled=true;
       CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"edit", p_salary:Math.round(v*1e6), p_years:y }).then(function(r){
         btn2.disabled=false;
@@ -1679,13 +1680,14 @@ CG.wireOfferActions = function(){
     var id=this.getAttribute("data-offer-counter");
     var sal=parseInt(this.getAttribute("data-sal"),10)||750000, yrs=parseInt(this.getAttribute("data-yrs"),10)||1;
     CG.modal("Counter the offer",
-      '<label class="fld"><span>Salary you want ($M per season)</span><input id="ocSal" type="number" min="0.75" step="0.05" value="'+(sal/1e6).toFixed(2)+'"></label>'+
+      '<label class="fld"><span>Salary you want ($M per season)</span><input id="ocSal" type="number" min="0.75" step="0.25" value="'+(sal/1e6).toFixed(2)+'"></label>'+
       '<label class="fld"><span>Term (seasons)</span><select id="ocYrs">'+[1,2,3,4].map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
-      '<p class="caption">The club sees your number and can accept it, come back again, or walk away. League minimum $0.75M.</p>',
+      '<p class="caption">The club sees your number and can accept it, come back again, or walk away. League minimum $0.75M, and salaries move in $0.25M steps (Rule 2.5).</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ocGo">Send counter</button>');
     document.getElementById("ocGo").addEventListener("click", function(){
       var v=parseFloat(document.getElementById("ocSal").value);
-      if(!(v>=0.75)){ CG.toast("Salary must be at least $0.75M","err"); return; }
+      var salBad = CG.salaryProblem(Math.round(v*1e6));   /* Rule 2.5: minimum + $250K lattice */
+      if(salBad){ CG.toast(salBad,"err"); return; }
       var y=parseInt(document.getElementById("ocYrs").value,10)||1, btn=this; btn.disabled=true;
       CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"edit", p_salary:Math.round(v*1e6), p_years:y }).then(function(r){
         btn.disabled=false;
@@ -3438,6 +3440,9 @@ CG.ROUTES.draft = function(){
   var pool = lg.draftPool||[];
   var onClock = (st && (dstatus==="live"||dstatus==="paused")) ? cur.find(function(p){ return p.overall===st.current_overall; }) : null;
   var onClockCode = onClock ? onClock.ownerCode : null;
+  /* Rule 2.8: a pick's salary is its round's, and the last round pays the league minimum — so the
+     scale depends on how many rounds this board actually has, exactly as the database derives it. */
+  var draftRounds = (cur && cur.length) ? Math.max.apply(null, cur.map(function(p){ return p.round||1; })) : 10;
   var myTurn = isMgr && onClock && onClockCode===myClub && !onClock.used && !onClock.skipped && dstatus==="live";
 
   var clockBox = "";
@@ -3447,13 +3452,14 @@ CG.ROUTES.draft = function(){
       statusChip+
       '<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap"><span class="caption">On the clock</span>'+
         (onClock?CG.crest(onClockCode,24)+'<b style="font-family:var(--f-disp);font-size:16px">'+esc((CG.TEAM[onClockCode]||{}).name||onClockCode)+'</b>':'<span>—</span>')+
-        '<span class="chip">Pick '+st.current_overall+' / '+total+(onClock?' · R'+onClock.round:'')+'</span></div>'+
+        '<span class="chip">Pick '+st.current_overall+' / '+total+(onClock?' · R'+onClock.round:'')+'</span>'+
+        (onClock?'<span class="chip">'+CG.fmtMoney(CG.draftRoundSalary(onClock.round, draftRounds))+' · set by round (Rule 2.8)</span>':"")+'</div>'+
       '<div id="draftClock" data-status="'+dstatus+'" data-ends="'+esc(st.clock_ends_at||"")+'" data-remaining="'+(st.paused_remaining==null?"":st.paused_remaining)+'" data-season="'+maxSn+'" style="margin-left:auto;font-family:var(--f-mono);font-size:26px;font-weight:800">--:--</div>'+
       (isComm?'<div style="display:flex;gap:8px;flex-wrap:wrap">'+
         (dstatus==="live"?'<button class="btn btn-ghost btn-sm" data-draft-pause>Pause</button>':'<button class="btn btn-chrome btn-sm" data-draft-resume>Resume</button>')+
         '<button class="btn btn-ghost btn-sm" data-draft-skip>Skip pick</button></div>':"")+
       '</div>'+
-      (myTurn?'<div class="card-b" style="border-top:1px solid var(--line);background:var(--chrome-tint)"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><b style="font-family:var(--f-disp);font-size:15px">Your club is on the clock — make your pick.</b><button class="btn btn-chrome" data-makepick="'+onClock.id+'">'+CG.ic("plus",14)+'Draft a player</button></div></div>':"")+
+      (myTurn?'<div class="card-b" style="border-top:1px solid var(--line);background:var(--chrome-tint)"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><b style="font-family:var(--f-disp);font-size:15px">Your club is on the clock — make your pick.</b><span class="caption">This pick signs at '+CG.fmtMoney(CG.draftRoundSalary(onClock.round, draftRounds))+' against your cap — every pick in round '+onClock.round+' costs the same (Rule 2.8).</span><button class="btn btn-chrome" data-makepick="'+onClock.id+'">'+CG.ic("plus",14)+'Draft a player</button></div></div>':"")+
       '</div>';
   } else if (dstatus==="complete"){
     clockBox = '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">The Season '+maxSn+' draft is complete.</b> Every pick is in — the results are below.</div>';
@@ -11137,15 +11143,16 @@ CG.AFTER._hubFreeAgents = function(){
     var used=t?CG.teamPayroll(CG.lg, t.code):0;   /* includes unsigned-contract dead cap (Rule 2.5) */
     var space=Math.max(0,(CG.CAP||60000000)-used);
     CG.modal("Offer terms to "+esc(name),
-      '<label class="fld"><span>Salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.05" value="0.75"></label>'+
+      '<label class="fld"><span>Salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.25" value="0.75"></label>'+
       '<label class="fld"><span>Term (seasons)</span><select id="faYears">'+
         [1,2,3,4].map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
       '<label class="fld"><span>Note to the player (optional)</span><input id="faNote" placeholder="Why he fits your club…"></label>'+
-      '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b> · league minimum $0.75M. He can accept, counter, or decline — nothing moves until he accepts, and then he is on your roster immediately (Rule 2.2). A new offer to the same player replaces your previous one.</p>',
+      '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b> · league minimum $0.75M, in $0.25M steps (Rule 2.5). He can accept, counter, or decline — nothing moves until he accepts, and then he is on your roster immediately (Rule 2.2). A new offer to the same player replaces your previous one.</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="faSignGo">Send offer</button>');
     document.getElementById("faSignGo").addEventListener("click", function(){
       var v=parseFloat(document.getElementById("faSal").value);
-      if(!(v>=0.75)){ CG.toast("Salary must be at least $0.75M","err"); return; }
+      var salBad = CG.salaryProblem(Math.round(v*1e6));   /* Rule 2.5: minimum + $250K lattice */
+      if(salBad){ CG.toast(salBad,"err"); return; }
       var sal=Math.round(v*1e6);
       var yrs=parseInt((document.getElementById("faYears")||{}).value,10)||1;
       var note=(document.getElementById("faNote")||{}).value||null;
@@ -11182,7 +11189,10 @@ CG.AFTER._hubFreeAgents = function(){
     document.getElementById("rbGo").addEventListener("click", function(){
       var v=parseFloat(document.getElementById("rbAmt").value), amt=Math.round(v*1e6);
       if(!(amt>=minBid)){ CG.toast("Bid must be at least "+CG.fmtMoney(minBid),"err"); return; }
-      if((amt-750000)%250000!==0){ CG.toast("Bids must be in $0.25M increments from $0.75M","err"); return; }
+      /* the lattice itself comes from the one shared predicate (Rule 2.5) rather than a second
+         copy of the arithmetic; only the beat-the-high-bid floor above is bidding's own rule */
+      var bidBad = CG.salaryProblem(amt);
+      if(bidBad){ CG.toast(bidBad,"err"); return; }
       var btn=this; btn.disabled=true;
       CG.sb.rpc("place_rookie_bid",{ p_profile:pid, p_amount:amt }).then(function(r){
         btn.disabled=false;

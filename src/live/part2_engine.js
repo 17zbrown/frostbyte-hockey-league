@@ -266,6 +266,39 @@ CG.simGame = function(game, playersByTeam, rng, suspensions){
 /* ---------- salary & cap system (LG-style: management on $0, everyone else under contract) ---------- */
 CG.CAP = 65000000;                 /* team salary cap */
 CG.MIN_SALARY = 750000;            /* league minimum */
+CG.SALARY_STEP = 250000;           /* Rule 2.5 (v2.31): every negotiated figure sits on this lattice */
+
+/* The one salary predicate the front end asks — rookie bidding, offers, counters and revisions
+   all route here so there is a single definition to get right. Draft pay is NOT negotiated and so
+   does not come through here: it is set by public.draft_pick_salary() in the database at the
+   moment the pick is made, and CG.draftRoundSalary below only mirrors that scale for display.
+   This function mirrors the database's public.legal_salary(), which is the real enforcement; it
+   exists to say no in plain language before a manager sends a figure the server would reject.
+   Returns a message to show, or null when the figure is legal. $0 is management (Rule 2.6), never
+   negotiated, so it is not this function's business — callers never hand it one. */
+CG.salaryProblem = function(dollars){
+  var v = Number(dollars);
+  if (!isFinite(v)) return "Enter a salary.";
+  /* every salary field on the site is labelled and typed in $M, so the correction speaks in $M
+     too — CG.fmtMoney drops under a million into thousands ("$750K"), which contradicts the box
+     the manager is typing into. */
+  var M = function(d){ return "$" + (d/1000000).toFixed(2).replace(/0$/,"").replace(/\.$/,"") + "M"; };
+  if (v < CG.MIN_SALARY) return "The league minimum is " + M(CG.MIN_SALARY) + " (Rule 2.5).";
+  if (v % CG.SALARY_STEP !== 0){
+    var lo = v - (v % CG.SALARY_STEP), hi = lo + CG.SALARY_STEP;
+    return "Salaries move in " + M(CG.SALARY_STEP) + " steps (Rule 2.5) — try "
+         + M(lo) + " or " + M(hi) + ".";
+  }
+  return null;
+};
+
+/* Rule 2.8 (v2.31): drafted players are paid by round. The last round pays the league minimum
+   and every round above it adds one step, so a ten-round draft runs $750K (R10) to $3M (R1). */
+CG.draftRoundSalary = function(round, rounds){
+  var n = Math.max(1, rounds || 10);
+  var r = Math.max(1, Math.min(round || 1, n));
+  return CG.MIN_SALARY + (n - r) * CG.SALARY_STEP;
+};
 CG.fmtMoney = function(v){
   if (v==null) return "—";
   if (v===0) return "$0";

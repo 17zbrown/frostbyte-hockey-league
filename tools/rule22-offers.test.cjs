@@ -48,7 +48,12 @@ console.log("\n— the player decides, from his own dashboard");
   A("accept / counter / decline are wired", /data-offer-accept/.test(live) && /data-offer-counter/.test(live) && /data-offer-deny/.test(live));
   A("...through respond_offer, from both sides", (live.match(/rpc\("respond_offer"/g)||[]).length === 6);
   A("...and bound before the hub's sub-page early returns", /if \(CG\.wireOfferActions\) CG\.wireOfferActions\(\);\n  if \(param==="messages"\)/.test(live));
-  A("a counter cannot go below the league minimum", /Salary must be at least \$0\.75M/.test(live));
+  /* v2.31 moved this guard from an inline ">= 0.75" check to the shared CG.salaryProblem(), which
+     enforces the league minimum AND the $250K lattice (Rule 2.5). The rule this line exists to
+     pin — a counter can never go below the minimum — is unchanged; only its mechanism moved. */
+  A("a counter cannot go below the league minimum, or land off the $250K lattice",
+    (live.match(/CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/g) || []).length === 3 &&
+    !/Salary must be at least/.test(live));
   A("the card says acceptance is the signing", /Accepting puts you on the club\\u2019s roster immediately/.test(live));
 }
 
