@@ -6875,10 +6875,18 @@ CG.fileActionRequest = function(type){
     }
   }
   if (type==="position_change"){
+    /* Rule 2.9 — closed after the Tuesday before the pre-season opens. The database refuses the
+       insert regardless; this stops a member writing out a request that cannot be granted. */
+    var pcDl = CG.positionChangeDeadline();
+    if (pcDl && Date.now() > pcDl){
+      CG.toast("Position changes closed "+CG.fmtFull(pcDl)+" — your position is set for this season","err");
+      return;
+    }
     var posOpts = ["C","LW","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
     fields += '<div class="grid g2" style="gap:12px">'+
       '<label class="fld"><span>Current position</span><select id="acCur">'+posOpts+'</select></label>'+
-      '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>';
+      '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>'+
+      (pcDl?'<p class="caption">Position changes close <b>'+CG.fmtFull(pcDl)+'</b> — 11:59 PM ET on the Tuesday before the first pre-season game (Rule 2.9). After that your position is set for the season.</p>':"");
   }
   if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
   fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
@@ -9429,6 +9437,30 @@ CG.etISO = function(ymd, hm){ /* correct across EDT/EST */
   return guess.toISOString();
 };
 CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(iso)); };
+
+/* Rule 2.9: position changes close at 11:59 PM ET on the Tuesday before the first pre-season game.
+   DERIVED from the schedule, never a stored date — the pre-season gets re-spaced and rescheduled,
+   and a deadline that does not follow it is a deadline that quietly lies. "The Tuesday before"
+   means the last Tuesday STRICTLY before the first pre-season game's ET calendar day, so a
+   pre-season that happens to open on a Tuesday closes changes the Tuesday prior.
+   This mirrors public.position_change_deadline(); the DATABASE is the real gate, and this exists
+   only so the form can say no before a member types out a request nobody can act on. */
+CG.positionChangeDeadline = function(){
+  var lg = CG.lg || {}, first = null;
+  (lg.schedule||[]).forEach(function(g){
+    if (g.stage==="preseason" && g.at && (first===null || g.at < first)) first = g.at;
+  });
+  if (first === null && CG.SEASON && CG.SEASON.preseason_starts_at)
+    first = Date.parse(CG.SEASON.preseason_starts_at);
+  if (first === null || isNaN(first)) return null;
+  /* noon UTC on the game's ET calendar day: far enough from either midnight that no offset
+     shifts the weekday out from under us */
+  var d = new Date(CG.etYMD(new Date(first).toISOString()) + "T12:00:00Z");
+  var dow = d.getUTCDay();                       /* 0=Sun..6=Sat */
+  var isodow = dow === 0 ? 7 : dow;              /* 1=Mon..7=Sun, matching Postgres isodow */
+  d.setUTCDate(d.getUTCDate() - (((isodow - 2 + 7) % 7) || 7));
+  return Date.parse(CG.etISO(d.toISOString().slice(0,10), "23:59"));
+};
 /* The observed holiday landing in the Mon..Sun week around a game Wednesday, or null. Returns the
    holiday itself rather than a boolean so the generator can say WHICH one cost a week — "skipped
    the week of Nov 25 for Thanksgiving (US)" is a reason; "holiday week skipped" is a shrug. */
