@@ -35,8 +35,9 @@ CG.twitchChip = function(p, dark){
 };
 CG.setTwitchLive = function(on){
   if (!CG.LIVE_MODE || !CG.sb || !CG.auth.user){ CG.toast("Sign in first","err"); return; }
-  CG.sb.from("profiles").update({ live: on }).eq("id", CG.auth.user.id).then(function(r){
+  CG.sb.from("profiles").update({ live: on }).eq("id", CG.auth.user.id).select("id").then(function(r){
     if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+    if (!(r.data||[]).length){ CG.toast("Couldn’t update — your sign-in has expired. Sign out and back in, then retry.","err"); return; }
     if (CG.auth.profile) CG.auth.profile.live = on;
     var me = CG.lg.players.find(function(x){ return x.id===CG.auth.user.id; });
     if (me) me.twitchLive = on;
@@ -55,8 +56,9 @@ CG.setTwitchHandle = function(){
   document.getElementById("twSave").addEventListener("click", function(){
     var h = (document.getElementById("twHandle").value||"").trim().replace(/^@|.*twitch\.tv\//i,"");
     var patch = h ? { twitch: h } : { twitch: null, live: false };
-    CG.sb.from("profiles").update(patch).eq("id", CG.auth.user.id).then(function(r){
+    CG.sb.from("profiles").update(patch).eq("id", CG.auth.user.id).select("id").then(function(r){
       if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (!(r.data||[]).length){ CG.toast("Couldn’t save — your sign-in has expired. Sign out and back in, then retry.","err"); return; }
       if (CG.auth.profile) CG.auth.profile.twitch = h||null;
       if (me) me.twitch = h||null;
       if (CG.closeOverlay) CG.closeOverlay();
@@ -803,7 +805,7 @@ CG.roadModule = function(pre){
       ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff",
         CG.isRegisteredNow() ? "#/hub" : "#/register"],
       ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
-      ["Draft night", sD.draft_at, "ten rounds, live on the site", "#/draft"],
+      ["Draft night", sD.draft_at, "fourteen rounds, live on the site", "#/draft"],
       ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
     ].filter(function(x){ return x[1]; }).map(function(st, i){
       var past = Date.parse(st[1]) < nowMs;
@@ -1025,7 +1027,7 @@ CG.ROUTES.home = function(){
     html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
       '<span class="chip chip-live"><span class="live-dot"></span>Free agency is open</span>'+
       '<span style="color:var(--on-ink-dim);font-size:13px">Clubs can sign free agents until '+CG.fmtFull(faC)+
-        (regOpen?' — register now and you’re in the pool they’re signing from':"")+'</span>'+
+        (regOpen?' — sign up now and you’re placed on a club with room automatically (Rule 2.2)':"")+'</span>'+
       '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Closes in</span>'+
       '<b id="faCountdown" class="num" data-close="'+faC+'" style="font-family:var(--f-disp);font-size:24px;line-height:1;color:#fff;font-variant-numeric:tabular-nums">—</b></span>'+
       (regOpen?'<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a>':"")+'</span>'+
@@ -1229,7 +1231,7 @@ CG.ROUTES.home = function(){
       [s0.registration_deadline, "Draft-eligibility deadline", "Register by now to enter the draft. Later sign-ups still play — they’re placed on a club automatically after it."],
       [s0.preseason_starts_at, "Pre-season opens", "Two weeks of real games on randomly assigned rosters."],
       [s0.draft_at, "Draft night", "Clubs pick from the eligible pool live on the site."],
-      [s0.free_agency_opens_at, "Free agency opens", "One week for clubs to sign the remaining free agents."],
+      [s0.free_agency_opens_at, "Free agency opens", "One week for players whose contracts have ended to take offers from any club."],
       [s0.free_agency_closes_at, "Free agency closes", "Rosters settle — puck drop is the Wednesday after."],
       [s0.starts_at, "Puck drop", "The regular season begins."],
       [s0.playoffs_start_at, "Playoffs begin", "Top "+(CG.playoffPerDiv?CG.playoffPerDiv():4)+" per division qualify — a divisional bracket to the final."],
@@ -1694,7 +1696,7 @@ CG.playoffBracket = function(){
     return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff bracket</h3>'+
       (champ?'<span class="chip chip-win">'+esc((CG.TEAM[champ]||{}).name||champ)+' — champions</span>':'<span class="chip chip-chrome">Postseason live</span>')+'</div>'+
       '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+col(1)+col(2)+col(3)+'</div>'+
-      '<p class="caption" style="margin-top:14px">Series play out best-of-'+((need-1)*2+1)+'; the higher seed holds home designation (Rule 8.1). Decided series drop their unplayed games automatically.</p></div></div>';
+      '<p class="caption" style="margin-top:14px">Series play out best-of-'+((need-1)*2+1)+'; the higher seed holds home designation (Rule 8.3). Decided series drop their unplayed games automatically.</p></div></div>';
   }
 
   /* ----- PROJECTION: seed the field from today's table (Rule 8.1) ----- */

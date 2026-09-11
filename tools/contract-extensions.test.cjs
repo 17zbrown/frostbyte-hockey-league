@@ -38,7 +38,14 @@ console.log("— the window opens with the season's free agency, as extension_wi
 {
   CG.SEASON = { number: 1, free_agency_opens_at: "2026-09-27T04:00:00Z", starts_at: "2026-10-07T04:00:00Z" };
   A("the cap year opens at free agency, not puck drop", CG.capYearOpensAt() === Date.parse("2026-09-27T04:00:00Z"));
-  A("the window tracks that date", CG.extensionWindowOpen() === (Date.now() >= Date.parse("2026-09-27T04:00:00Z")));
+  /* pin the clock on both sides of the date — the live clock crossed it on Sep 27 and would have
+     exercised only the open branch from then on */
+  { var realNow = Date.now;
+    Date.now = function(){ return Date.parse("2026-09-20T00:00:00Z"); };
+    A("the window is closed before that date", CG.extensionWindowOpen() === false);
+    Date.now = function(){ return Date.parse("2026-09-27T04:00:00Z"); };
+    A("...and opens the moment free agency does", CG.extensionWindowOpen() === true);
+    Date.now = realNow; }
   CG.SEASON = { number: 1, free_agency_opens_at: "2020-01-01T00:00:00Z" };
   A("...and stays open the whole final season — no movement-deadline term anywhere", CG.extensionWindowOpen() === true && !/movementDeadlineAt/.test(live));
   CG.SEASON = { number: 1, starts_at: "2020-01-01T00:00:00Z" };
@@ -155,7 +162,7 @@ console.log("— the offer cards tell the truth about extensions");
 
 console.log("— the rulebook says the same thing");
 {
-  A("the changelog records v2.34 first", rb.changelog[0].version === "2.34" && /Contract extensions/.test(rb.changelog[0].summary));
+  A("the changelog records v2.34, with nothing older above it", rb.changelog.some(function(c){ return c.version === "2.34" && /Contract extensions/.test(c.summary); }) && rb.changelog[0].version >= "2.34");
   A("Rule 2.5 describes the extension", /A club re-signs its own player through an extension/.test(sec("2.5")));
   A("...opening with the final season's free agency, for the whole season", /at any point in the final season of his deal — from the day that season's free agency opens/.test(sec("2.5")));
   A("...defining the cap year as free agency to free agency", /The cap year runs from one free-agency opening to the next/.test(sec("2.5")));

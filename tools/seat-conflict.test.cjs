@@ -69,7 +69,7 @@ console.log("\n— what must NOT be flagged, or the desk cries wolf");
   A("a club we cannot resolve returns null rather than guessing",
     CG.seatConflict(app({ team_id: "t-ghost" }), lg) === null);
   A("no application at all returns null", CG.seatConflict(null, lg) === null);
-  A("a missing league object does not throw", CG.seatConflict(app(), null) === null || true);
+  A("a missing league object does not throw", (function(){ try { CG.seatConflict(app(), null); return true; } catch (e) { return false; } })());
 }
 
 console.log("— one person, one club seat — including inside a single club");

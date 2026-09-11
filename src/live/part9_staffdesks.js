@@ -661,7 +661,7 @@ CG.deskTransactions = function(){
 
   h += CG.deskCeiling("The league has no say in a trade as it is made: two clubs agreeing is enough, and the cap check "+
     "runs inside the database on every accept — a deal that would put either club over is refused before it lands. "+
-    "Afterwards this desk may send a completed trade back if it isn’t a natural hockey deal (Rule 2.4). Reversing "+
+    "Afterwards this desk may send a completed trade back if it isn’t a natural hockey deal (Rule 2.3). Reversing "+
     "returns every player and pick to its original club and tells both clubs why, in your words.");
   return h;
 };

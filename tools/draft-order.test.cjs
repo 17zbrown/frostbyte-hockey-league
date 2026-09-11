@@ -95,7 +95,7 @@ console.log("\n— the rulebook states all of it (v2.27)");
   A("...five order methods including the NHL lottery", /one of five ways: by an NHL-style draft lottery drawn from the previous season/.test(r28));
   A("...weighted odds for the top two, champion last", /weighted odds for the top two selections/.test(r28) && /the champion last/.test(r28));
   A("...a first season uses a random shuffle", /A first season, having no previous season to draw on, uses a pure random shuffle/.test(r28));
-  A("...picks are tradeable before and during the draft", /may be traded under the ordinary trade rules of Rule 2\.4 and Rule 2\.5 — before the draft and during it/.test(r28));
+  A("...picks are tradeable before and during the draft", /may be traded under the ordinary trade rules of Rule 2\.3, within the cap of Rule 2\.5 — before the draft and during it/.test(r28));
   A("...a traded on-the-clock pick keeps its timer", /including a pick currently on the clock, whose timer continues unchanged/.test(r28));
   A("...and a used pick refuses as stale", /A pick that has already been used cannot be traded/.test(r28));
   A("...and 2.8 states the expansion-club treatment",

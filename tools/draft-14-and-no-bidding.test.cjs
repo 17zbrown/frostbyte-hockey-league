@@ -38,10 +38,10 @@ A("Rule 2.2 says free agency is for ended contracts, not rookies", /for players 
 A("...and states the exclusive re-signing window as a tampering rule with a start AND an end", /may negotiate only with the club that holds it — either side may open the conversation — at any point in that season, from the day its free agency opens until the free-agency period that FOLLOWS his contract's final season opens/.test(sec("2.2")) && /is tampering under the paragraph above/.test(sec("2.2")));
 A("...says the club's right survives the rollover", /survives the contract's expiry at the season rollover/.test(sec("2.2")));
 A("...and is honest that the Season 2 draft-or-free-agency path is still to be published", /published before that season's registration opens/.test(sec("2.2")));
-A("...leaving the restricted-free-agent rights sentences untouched", /His former club may match any offer made to him/.test(sec("2.2")));
+A("...leaving the restricted-free-agent rights sentences in place (v2.35: the match mechanism is the office's to publish)", /RESTRICTED free agent until he has accrued four \(4\) off-seasons/.test(sec("2.2")) && /exercises those rights when another club makes him an offer is set by the league office/.test(sec("2.2")));
 A("the free-agent page has no bidding board", !/Rookie bidding board|data-rookie-bid|rbAmt|rbGo/.test(live));
 A("...and never calls the removed RPC or table", !/place_rookie_bid|rookie_auctions|_rookieAuctions/.test(live));
-A("...and keeps one pool built from faFree alone", /var pool=\(lg\._registrationsRaw\|\|\[\]\)\.filter\(function\(r\)\{ return faFree\(r\); \}\)/.test(live));
+A("...and keeps one pool built from faFree, narrowed to genuine free agents (v2.35)", /var pool=\(lg\._registrationsRaw\|\|\[\]\)\.filter\(function\(r\)\{\n\s*if \(!faFree\(r\)\) return false;/.test(live) && /return ps==="free_agent" \|\| ps==="rfa";/.test(live));
 A("no surviving copy still routes undrafted players to bidding", !/go to free agency and rookie bidding|first-year → rookie bidding/.test(live));
 A("the Draft Room channel topic no longer promises a bidding board", !/bidding board/.test(R("shared/roles.mjs")));
 

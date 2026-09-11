@@ -10,7 +10,7 @@ actually renders.
 ## 1. Who we are
 
 **Chel Gaming Hockey League** — abbreviated **CGHL** — is a free, community-run competitive
-EA Sports NHL league played 6-on-6 in World of Chel. Eight clubs, two divisions, a full season
+EA Sports NHL league played 6-on-6 in World of Chel. Ten clubs, two divisions, a full season
 with live standings, imported box scores, trades, and playoffs.
 
 - **Chel Gaming** is the umbrella brand (the organization). **CGHL** is its flagship league. Written
@@ -55,15 +55,15 @@ mark), `chel-gaming-logo-light-tile-1024.png` (light tile), `og.png` (share card
 - **Minimum size:** 24px for the favicon; 20px in dense UI. Below that the crossbar closes up.
 - **Background match is the whole point.** The chrome-yellow crossbar is ~1.07:1 on white — it
   *vanishes*. Use the light mark on light, the badge on dark. Never the chrome mark on white.
-- **Never** recolour the C or crossbar off-palette, stretch or skew the mark, rotate it, add a drop
+- **Never** recolor the C or crossbar off-palette, stretch or skew the mark, rotate it, add a drop
   shadow / glow / outline / gradient, box the transparent mark in an unapproved tile, or place the
   badge on a busy or low-contrast photo.
 
 ---
 
-## 3. Colour
+## 3. Color
 
-A confident neutral base, **one** disciplined accent, and semantic status colours that never
+A confident neutral base, **one** disciplined accent, and semantic status colors that never
 double as decoration.
 
 ### Neutrals
@@ -94,7 +94,7 @@ Energy comes from composition, type, and this single accent — never from a gra
 | `--amber-ink` | `#8A6D00` | Warning / needs attention |
 
 **The fill-vs-ink rule.** `--red` / `--green` are **fills** — light text sits on them, so they stay
-dark in both themes. The `--*-ink` values are the **text/mark** colours and flip per theme. Never use
+dark in both themes. The `--*-ink` values are the **text/mark** colors and flip per theme. Never use
 a fill token as a foreground; it cannot clear 4.5:1 on both a light and a dark surface at once.
 
 **Contrast floor is WCAG AA** — 4.5:1 for body text, 3:1 for large text — in both themes. Not
@@ -145,9 +145,9 @@ Write from the reader's side of the screen.
 
 | Don't | Do |
 |---|---|
-| "Unlock your competitive journey today!" | "Register to play — sign-ups close the Monday before the draft." |
+| "Unlock your competitive journey today!" | "Register to play — sign-ups close the Monday before the pre-season." |
 | "An error occurred." | "Couldn't save — your sign-in expired. Sign out and back in, then retry." |
-| "96 players and counting 🔥" | "Eight clubs. Rosters fill through the draft." |
+| "96 players and counting 🔥" | "Ten clubs. Rosters fill through the draft." |
 | "Admin backend" | "Control Center" · "the league office" |
 
 ---

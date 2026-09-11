@@ -26,7 +26,7 @@ console.log("— the rulebook defines the classes, because this is a rule before
   const r22 = sec("2.2");
   A("Rule 2.2 names the unrestricted class", /never completed a season on a club's roster is an UNRESTRICTED free agent/.test(r22));
   A("...and the restricted one", /RESTRICTED free agent until he has accrued four \(4\) off-seasons of service/.test(r22));
-  A("...with the former club's matching right spelled out", /may match any offer made to him/.test(r22));
+  A("...with the former club's rights acknowledged and the match mechanism left to the office (v2.35)", /his rights stay with that club when his contract ends/.test(r22) && /exercises those rights when another club makes him an offer is set by the league office/.test(r22));
   A("...and says why Season 1 has none", /every registered player begins unrestricted/.test(r22));
   A("...and that the count is a setting, published before signings", /is a league-office setting/.test(r22));
   A("the changelog records v2.25", rb.changelog.some((c) => c.version === "2.25" && /restricted free agent/i.test(c.summary)));

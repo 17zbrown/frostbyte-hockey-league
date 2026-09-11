@@ -45,8 +45,8 @@ console.log("\n— every client roster count excludes training camp");
   /* three separate sites counted byTeam wholesale; each one is a place a manager was told
      "full" while an active spot sat empty */
   const counts = live.match(/\(lg\.byTeam(?:&&lg\.byTeam)?\[?[^\]]*\]?\|\|\[\]\)\.filter\(function\(p\)\{ return p\.squad!=="tc"; \}\)\.length/g) || [];
-  A("the manager dashboard, the free-agency desk and the random assigner all filter camp out",
-    counts.length === 3, counts.length + " sites");
+  A("the manager dashboard and the free-agency desk filter camp out (the random assigner moved into the database, v2.35)",
+    counts.length === 2, counts.length + " sites");
   A("no client site counts the raw roster length against the cap any more",
     !/var rosterN=\(lg\.byTeam(&&lg\.byTeam)?\[[^\]]*\]\|\|\[\]\)\.length/.test(live) &&
     !/counts\[t\.code\]=\(lg\.byTeam\[t\.code\]\|\|\[\]\)\.length;/.test(live));
@@ -69,7 +69,7 @@ console.log("\n— the reason each fix exists is written down where the next rea
 {
   A("the dashboard counter cites the rule", /training-camp players are carried BEYOND the seventeen/.test(live));
   A("the free-agency desk explains the Sign button", /disabled the Sign button three players early/.test(live));
-  A("the random assigner says why it filters", /active-roster spots only — camp is carried beyond the seventeen/.test(live));
+  A("the random assigner runs inside the database, position by position (v2.35)", /CG\.sb\.rpc\("preseason_random_assign"\)/.test(live) && !/origin:"preseason_random" \}\);/.test(live));
 }
 
 console.log("\n— training-camp salaries COUNT against the cap (Rule 2.5, commissioner ruling 2026-09-02)");

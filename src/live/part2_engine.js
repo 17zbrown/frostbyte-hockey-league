@@ -264,7 +264,7 @@ CG.simGame = function(game, playersByTeam, rng, suspensions){
 
 /* ---------- full season build ---------- */
 /* ---------- salary & cap system (LG-style: management on $0, everyone else under contract) ---------- */
-CG.CAP = 65000000;                 /* team salary cap */
+CG.CAP = 40000000;                 /* team salary cap — fallback until the season row loads */
 CG.MIN_SALARY = 750000;            /* league minimum */
 CG.SALARY_STEP = 250000;           /* Rule 2.5 (v2.31): every negotiated figure sits on this lattice */
 
@@ -293,7 +293,7 @@ CG.salaryProblem = function(dollars){
 };
 
 /* Rule 2.8 (v2.31): drafted players are paid by round. The last round pays the league minimum
-   and every round above it adds one step, so a ten-round draft runs $750K (R10) to $3M (R1). */
+   and every round above it adds one step, so a fourteen-round draft runs $750K (R14) to $4.0M (R1). */
 CG.draftRoundSalary = function(round, rounds){
   var n = Math.max(1, rounds || 10);
   var r = Math.max(1, Math.min(round || 1, n));

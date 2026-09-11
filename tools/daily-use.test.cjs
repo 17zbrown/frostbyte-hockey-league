@@ -59,7 +59,7 @@ console.log("— a signed-in member stays signed in");
 console.log("— member writes can't report a success the server refused");
 {
   A("saveEaId checks for a zero-row write", /update\(\{ ea_id:v \}\)[\s\S]{0,80}\.select\("id"\)/.test(live));
-  A("...with an honest message", (live.match(/your sign-in may have expired/g)||[]).length === 2);
+  A("...with an honest message", (live.match(/your sign-in may have expired/gi)||[]).length >= 2);
   A("the settings twin too", /update\(\{ ea_id:ea\|\|null, platform:plat\|\|null \}\)[\s\S]{0,60}\.select\("id"\)/.test(live));
 }
 

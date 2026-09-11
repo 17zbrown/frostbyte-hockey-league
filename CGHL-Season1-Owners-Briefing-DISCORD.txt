@@ -80,7 +80,7 @@ Pre-season carries its own standings. Those games count toward player ratings an
 
 There is no rookie bidding. Ten minutes after the draft ends, everyone still without a club is placed on one by the league office at $750K — you don’t choose, they don’t choose. Free agency is for players whose contracts have ended (nobody, in Season 1). A player in the last season of his deal can only talk to his own club until free agency opens.
 
-Everyone else takes contract offers and picks the one they want.
+From Season 2 on, a player whose deal has ended takes contract offers and picks the one he wants.
 
 **A free agency pool stays open** for players who have been waived and are looking to be picked up by another club.
 
@@ -122,7 +122,7 @@ The 10 minute forfeit can only be waived by a staff member who is not involved i
 
 **Illegal builds forfeit the game.** Banned X-Factors: Truculence, Big Tipper, Hipster, Pressure+, Spark Plug, Unstoppable, Big Rig, Wheels, plus every Elite tier ability. No special or mascot classes. Forwards build as Sniper, Playmaker, Grinder, Power Forward, Two-Way or Dangler. Defensemen build as Defensive, Offensive, Two-Way or Puck-Moving.
 
-**These lists are subject to change when NHL 27 releases.** The league office will review and reissue them for the new game, so check before week 1.
+**These lists were written against NHL 26 and apply as written until the league office reissues them for NHL 27.** Any change is posted in the rulebook changelog — check it before week 1.
 
 ════════════════════════════════════════
 

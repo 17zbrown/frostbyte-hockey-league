@@ -28,4 +28,7 @@ preview.html
 chelgaming-live.html
 chelgaming-preview.html
 redesign-preview.html
-.github/workflows/db-backup.yml
+/live*.html
+
+# Plugin session state — churns every session, never part of the site
+**/.claude-flow/

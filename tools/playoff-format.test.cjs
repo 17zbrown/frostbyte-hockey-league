@@ -49,7 +49,7 @@ console.log("\n— the config and copy agree on best-of-7");
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const r83 = (() => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === "8.3") return s.paragraphs.join(" "); })();
   A("Rule 8.3 already describes best-of-seven 2-2-3", /best-of-seven series played inside a single game week in a 2-2-3 format/.test(r83));
-  A("...and win-4-and-advance with the rest cancelled", /wins four \(4\) games advances immediately, and the remaining games of the series are cancelled/.test(r83));
+  A("...and win-4-and-advance with the rest canceled", /wins four \(4\) games advances immediately, and the remaining games of the series are canceled/.test(r83));
 }
 
 console.log("\n— the series-cap flag uses the right cap per position");

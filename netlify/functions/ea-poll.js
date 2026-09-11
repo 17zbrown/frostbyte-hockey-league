@@ -16,7 +16,10 @@
 export const config = { schedule: "*/5 * * * *" };
 
 const SB_URL = process.env.SUPABASE_URL;
-const SB_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+/* service role first (v2.35): the reads ran on the anon key, a leftover of the retired GitHub
+   fetcher, and worked only because RLS happens to let anon read teams — a policy change would
+   have returned [] and read as "no club has an ea_club_id". The anon key remains a fallback. */
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const INGEST_KEY = process.env.INGEST_KEY;
 const PLATFORM = process.env.PLATFORM || "common-gen5";
 const PROXY = process.env.HTTPS_PROXY;
@@ -90,7 +93,7 @@ async function nhl27Canary(dispatcher, uFetch) {
 
 export default async () => {
   if (!SB_URL || !SB_KEY || !INGEST_KEY) {
-    console.log("ea-poll: missing env (need SUPABASE_URL/ANON_KEY + INGEST_KEY) — skipping");
+    console.log("ea-poll: missing env (need SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + INGEST_KEY) — skipping");
     return new Response("skipped: missing env", { status: 200 });
   }
   if (await ranRecently("ea-poll", 90)) return json({ skipped: "ran moments ago" });
@@ -110,6 +113,18 @@ export default async () => {
          seventeen days — "the function runs" and "the pipeline works" were indistinguishable. */
       await recordResult("ea-poll", { ok: true, skipped: "outside game window", at: new Date().toISOString() });
       return json({ skipped: "outside game window (Wed 6pm - Sat 2am ET)" });
+    }
+
+    /* v2.35: only poll when a league game could actually have been played — a fixture scheduled
+       within the last six hours (a box score lands minutes after the final horn, lag-out segments
+       later) or starting within the next half hour. The weekday window above is a free pre-filter;
+       this is the real gate. Without it an EA hiccup on a Friday with no fixture for five more days
+       was recorded as a failing run and paged the commissioners. */
+    const dueFrom = new Date(Date.now() - 6 * 3600e3).toISOString(), dueTo = new Date(Date.now() + 30 * 60e3).toISOString();
+    const due = await sbGet(`games?voided=not.is.true&scheduled_at=gte.${encodeURIComponent(dueFrom)}&scheduled_at=lte.${encodeURIComponent(dueTo)}&select=id&limit=1`);
+    if (!due.length) {
+      await recordResult("ea-poll", { ok: true, skipped: "no fixture due", at: new Date().toISOString() });
+      return json({ skipped: "no fixture due (none scheduled in the last 6 h or the next 30 min)" });
     }
 
     const clubs = [...new Set((await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id`)).map((t) => String(t.ea_club_id)).filter(Boolean))];

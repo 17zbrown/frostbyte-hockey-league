@@ -1416,16 +1416,21 @@ CG.hubRoster = function(qs){
       status += ' <span class="chip chip-warn" title="Training camp — may dress in at most 3 games a week (Rule 2.1)">Camp</span>';
     /* v2.34 — where his deal stands, and the one club-side move: extend, once the window is open */
     var signedExt = CG.signedExtensionOf ? CG.signedExtensionOf(p.id) : null;
-    var expiring = !p.mgmt && CG.isExpiring && CG.isExpiring(p.id);
+    /* v2.35: a pre-season loan is not a contract — no term, no "final season", no club actions */
+    var loan = !p.mgmt && p.origin === "preseason_random";
+    var expiring = !p.mgmt && !loan && CG.isExpiring && CG.isExpiring(p.id);
     var openOffer = !p.mgmt && (CG._clubOffers||[]).filter(function(o){ return o.player_id===p.id && !o.immediate; })[0];
     if (signedExt) status += ' <span class="chip chip-win" title="Re-signed — the new deal starts with next season’s cap year (Rule 2.5)">Signed thru S'+esc(String(signedExt.end_season))+'</span>';
     else if (expiring) status += ' <span class="chip chip-warn" title="His contract ends after this season (Rule 2.2)">Final season</span>';
     if (openOffer) status += ' <span class="chip chip-live" title="'+(CG.offerAwaitsClub(openOffer)?'His number is waiting for you on your dashboard':'Your offer is waiting on him')+'">'+(CG.offerAwaitsClub(openOffer)?'His ask':'Offer out')+'</span>';
-    var extRow = !p.mgmt && CG.extendableContractOf && CG.extendableContractOf(p.id);
+    if (loan) status += ' <span class="chip" title="Randomly assigned for the pre-season — he returns to the draft pool when the final pre-season game ends (Rule 0.4)">Pre-season loan</span>';
+    var extRow = !p.mgmt && !loan && CG.extendableContractOf && CG.extendableContractOf(p.id);
     var extBtn = (extRow && extRow.team_id === (lg._codeToId||{})[club])
       ? '<button class="btn btn-chrome btn-sm" data-extend="'+p.id+'">Extend</button>' : '';
     var actions = p.mgmt
       ? '<span class="caption">Management contract — protected</span>'
+      : loan
+      ? '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">'+squadBtn(p)+'<span class="caption" title="A loan is not the club’s asset to trade or waive — he is released automatically after the pre-season">On loan</span></div>'
       : (waived
         ? '<button class="btn btn-ghost btn-sm" data-reinstate="'+p.id+'">Reinstate</button>'
         : '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
@@ -1439,7 +1444,7 @@ CG.hubRoster = function(qs){
       '<td class="tnum">'+p.pos+'</td>'+
       '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
       '<td class="tnum" data-v="'+(p.salary||0)+'"><b>'+CG.fmtMoney(p.salary)+'</b></td>'+
-      '<td class="tnum">'+p.term+' yr'+(p.term>1?"s":"")+'</td>'+
+      '<td class="tnum">'+(loan?'<span class="caption">loan</span>':p.term+' yr'+(p.term>1?"s":""))+'</td>'+
       '<td class="tnum" data-v="'+gp+'">'+gp+'</td>'+
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
@@ -1507,7 +1512,8 @@ CG.hubRoster = function(qs){
       ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
       : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
     'In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
-  h += '<div class="card"><div class="card-h"><h3>Roster — '+roster.length+' under contract</h3>'+
+  var loanN = roster.filter(function(p){ return p.origin==="preseason_random"; }).length;
+  h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
     '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
@@ -1525,11 +1531,11 @@ CG.renderCapOutlook = function(rows){
   var body = document.getElementById("capOutlookBody"); if (!body) return;
   if (!rows || !rows.length){ body.innerHTML = '<p class="caption">No outlook yet — the season has no cap set.</p>'; return; }
   var cols = rows.map(function(r){
-    var neg = r.space < 0, ending = r.deals.filter(function(d){ return d.final; });
+    var deals = r.deals||[], neg = r.space < 0, ending = deals.filter(function(d){ return d.final; });
     return '<div class="kpi" style="cursor:default;align-items:stretch;text-align:left;padding:14px">'+
       '<div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-family:var(--f-disp)">Season '+r.season+'</b>'+(r.current?'<span class="chip chip-chrome">now</span>':'')+'</div>'+
       '<b class="num" style="font-size:22px;color:'+(neg?"var(--red)":"var(--green)")+';margin-top:6px">'+CG.fmtMoney(r.space)+'</b><span>cap space</span>'+
-      '<div class="caption" style="margin-top:8px;line-height:1.5">'+CG.fmtMoney(r.committed)+' committed<br>'+r.deals.length+' player deal'+(r.deals.length===1?'':'s')+' · '+CG.fmtMoney(r.management)+' front office'+
+      '<div class="caption" style="margin-top:8px;line-height:1.5">'+CG.fmtMoney(r.committed)+' committed<br>'+deals.length+' player deal'+(deals.length===1?'':'s')+' · '+CG.fmtMoney(r.management)+' front office'+
       (r.expiring_after>0?'<br><span style="color:var(--steel)">'+CG.fmtMoney(r.expiring_after)+' comes off after this season ('+ending.map(function(d){ return esc(d.name); }).join(", ")+')</span>':'')+'</div></div>';
   }).join("");
   body.innerHTML = '<div class="grid g4" style="gap:12px">'+cols+'</div>'+
@@ -1707,7 +1713,7 @@ CG.hubTradeHub = function(qs){
       '<span class="chip '+(over?"chip-loss":"chip-win")+'">Your cap after: '+CG.fmtMoney(capAfter)+' · '+CG.fmtMoney(CG.CAP-capAfter)+(over?" OVER":" free")+'</span>'+
       '<button class="btn btn-chrome" id="thPropose" style="margin-left:auto"'+(over?" disabled":"")+'>Send offer to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
     '</div>'+
-    '<p class="caption" style="margin-top:10px">Both clubs must clear the $'+(CG.CAP/1000000)+'M cap after the deal. The league office reviews every accepted trade before it’s official (Rule 2.3).</p>'+
+    '<p class="caption" style="margin-top:10px">Both clubs must clear the $'+(CG.CAP/1000000)+'M cap after the deal. A trade is official the moment the other club accepts; the transactions department may only reverse one afterward (Rule 2.3).</p>'+
     '</div></div>';
 
   /* ---- outgoing (proposed) ---- */
@@ -1868,7 +1874,7 @@ CG.hubComplaints = function(){
   }).join("")+'</div>'
   : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>No cases on file</b><p>Complaints you submit appear here with live status. Everything stays confidential to you, assigned staff, and the commissioner.</p></div></div>';
   return h + body +
-    '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → staff assignment → review → written decision, with appeals within 48 hours (Rule 7.6). Access to every case is logged.</div>';
+    '<div class="note" style="margin-top:18px">Complaints follow Chapter 7: submission → staff assignment → review → written decision, with appeals within 48 hours (Rule 7.6). Access to every case is logged.</div>';
 };
 CG.hubComplaintDetail = function(caseId){
   var c = CG.visibleComplaints().find(function(x){ return x.caseId===caseId; });

@@ -51,8 +51,8 @@ console.log("— the rulebook says what the announcement says");
   A("Rule 3.2 lets only an uninvolved staff member waive the ten-minute forfeit",
     /waived by a member of league staff who is not playing in, managing, or otherwise involved/.test(sec("3.2")) &&
     !/is a hard rule and is not waivable/.test(sec("3.2")));
-  A("Rule 4.5 flags the ban lists as changing at NHL 27",
-    /subject to change on the release of NHL 27/.test(sec("4.5")));
+  A("Rule 4.5 says the ban lists apply as written until reissued for NHL 27 (v2.35)",
+    /were written against NHL 26 and apply as written until the league office reissues them for NHL 27/.test(sec("4.5")));
 }
 
 console.log("\n— the code agrees with the rulebook");

@@ -38,10 +38,14 @@ CG.pingDiscordSync = function(){
 };
 /* RPCs that change who someone is (site role, club seat, roster spot, ban) — i.e. what Discord
    roles they should be wearing. Anything added here is picked up automatically. */
+/* NOT listed (v2.35): draft_make_pick, auto_assign_latecomers, distribute_unproven_rookies. Each
+   writes roster_spots, and that table's trigger feeds role_sync_queue, which the always-on bot
+   drains within seconds — the ping only added a full guild reconciliation per pick, up to one
+   every six seconds through a 140-pick draft night. */
 CG.ROLE_RPCS = ("set_member_role set_team_manager set_staff_profile sign_free_agent move_player "+
-  "waive_player admin_remove_from_roster ban_player unban_player accept_trade draft_make_pick "+
+  "waive_player admin_remove_from_roster ban_player unban_player accept_trade "+
   "apply_application_decision override_application_decision decide_staff_application "+
-  "decide_owner_application auto_assign_latecomers distribute_unproven_rookies start_next_season"
+  "decide_owner_application start_next_season"
 ).split(" ").reduce(function(m,k){ m[k]=1; return m; }, {});
 CG._installRoleRpcWrapper = function(){
   if (!CG.sb || typeof CG.sb.rpc !== "function" || CG.sb._roleRpcWrapped) return;
@@ -310,7 +314,7 @@ CG.buildLiveLeague = async function(){
     CG._seasonHintFixed = true;
     if (CG.reloadLeague) setTimeout(function(){ CG.reloadLeague(); }, 0);
   }
-  CG.CAP = (season && season.salary_cap) ? season.salary_cap : 60000000;
+  CG.CAP = (season && season.salary_cap) ? season.salary_cap : 40000000;
   CG.ROSTER_MAX = (season && season.roster_max) || 17;   /* Rule 2.1 (v2.7): 3C+3LW+3RW+3LD+3RD+2G */
   var seasonId = season ? season.id : null;
 
@@ -2572,8 +2576,14 @@ CG._smRenderDetail = function(body, gid){
    ================================================================ */
 CG.ROUTES.register = function(){
   var s = CG.regSeason() || {}, open = !!s.registration_open;
+  /* v2.35: name the deadline, and say the truth once it has passed — the page used to read
+     "sign up by the deadline" forever, with no date and no change after Monday night */
+  var dlIso = s.signup_deadline_at || s.registration_deadline || null, dlMs = dlIso ? Date.parse(dlIso) : NaN;
+  var dlPast = !isNaN(dlMs) && dlMs < CG.now(), dlText = isNaN(dlMs) ? "the deadline" : CG.fmtFull(dlMs);
   var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
-    "Register for the season", "One form puts you in the player pool. Sign up by the deadline to enter the draft; after it — or if you join mid-season — you're placed on a club with an open spot automatically (Rule 2.2).");
+    "Register for the season", dlPast
+      ? "The draft-eligibility deadline passed "+dlText+". You can still register — you're placed on a club with an open spot automatically after the draft; you just won't be in the draft itself (Rule 2.2)."
+      : "One form puts you in the player pool. Sign up by "+dlText+" to enter the pre-season and the draft; after it — or if you join mid-season — you're placed on a club with an open spot automatically (Rule 2.2).");
   if (!CG.auth.profile){
     /* site_config is anon-readable, so guests get the real join link at the exact moment they're
        told they need it — the site cannot add them to the server on their behalf */
@@ -2608,7 +2618,12 @@ CG.ROUTES.register = function(){
   var onRoster = !!(myCt && p && ((CG.lg && CG.lg._rosteredIds) || {})[p.id]);
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> '+(myCt&&onRoster
       ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
-      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. Register by the deadline and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.')+' Update your details below any time before the deadline.'+
+      : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. '+
+        ((reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
+          ? 'You registered after the draft-eligibility deadline ('+dlText+'), so you’re not in the draft — you’re placed on a club automatically once it concludes (Rule 2.2). You’ll be notified.'
+          : dlPast
+          ? 'You registered in time: you’re in the pre-season, and five pre-season games make you draft-eligible (Rule 2.8). If you’re not drafted you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'
+          : 'Register by '+dlText+' and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'))+' Update your details below any time.'+
       (reg && (reg.status==="pending"||!reg.status) && !onRoster
         ? ' <button class="btn btn-ghost btn-sm" id="regWithdraw" style="color:var(--red);margin-left:6px">Withdraw my sign-up</button>'
         : reg ? ' <span class="caption">Need out? You’ve already been placed — message the league office.</span>' : '')+
@@ -2874,9 +2889,9 @@ CG.ROUTES.brand = function(){
 
   /* ---- colour ---- */
   h += '<section class="sec-dark"><div class="shell">'+
-    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Colour</span>'+
+    '<div class="sec-head"><div class="lead"><span class="eyebrow chr">Color</span>'+
       '<h2 class="h-sec">A quiet base, one loud accent</h2>'+
-      '<p class="lede" style="color:var(--on-ink-dim)">Confident neutrals do the work; chrome yellow is a spotlight used once per view. Semantic colour means status — never decoration.</p></div></div></div>'+
+      '<p class="lede" style="color:var(--on-ink-dim)">Confident neutrals do the work; chrome yellow is a spotlight used once per view. Semantic color means status — never decoration.</p></div></div></div>'+
     '<div class="shell">'+
     /* every swatch sits under the heading it actually belongs to — surfaces and structure are
        Neutrals, the accent trio stands alone, and Semantic holds only status colours. Grouping had
@@ -2944,7 +2959,7 @@ CG.ROUTES.brand = function(){
       '<h2 class="h-sec">Broadcast-grade, player-run</h2>'+
       '<p class="lede" style="color:var(--on-ink-dim)">Write from the reader’s side of the screen. Plain and specific, active voice, real numbers. A control says exactly what it does; an error says how to fix it.</p></div></div></div>'+
     '<div class="shell"><div class="grid g2">'+
-      [["“Unlock your competitive journey today!”","“Register to play — sign-ups close the Monday before the draft.”"],
+      [["“Unlock your competitive journey today!”","“Register to play — sign-ups close the Monday before the pre-season.”"],
        ["“An error occurred.”","“Couldn’t save — your sign-in expired. Sign out and back in, then retry.”"],
        ["“96 players and counting 🔥”","“Rosters fill through the draft.”"],
        ["“Admin backend”","“Control Center” · “the league office”"]
@@ -3524,7 +3539,7 @@ CG.ROUTES.draft = function(){
         : '<span class="caption">On the board</span>';
       return '<tr'+(isCurrent?' style="background:var(--chrome-tint)"':(isMine?' style="background:var(--ice)"':""))+'>'+
         '<td class="tnum">'+(p.overall||"—")+'</td><td class="tnum">R'+p.round+'</td>'+
-        '<td class="tleft"><span class="teamcell">'+(p.ownerCode?CG.crest(p.ownerCode,18):"")+'<span class="mono" style="font-size:11px">'+esc(p.ownerCode||"—")+'</span></span></td>'+
+        '<td class="tleft"><span class="teamcell">'+(p.ownerCode?CG.crest(p.ownerCode,18):"")+'<span class="mono" style="font-size:11px">'+esc(p.ownerCode||"—")+'</span>'+(p.origCode&&p.origCode!==p.ownerCode?'<span class="caption" style="font-size:10px">via '+esc(p.origCode)+'</span>':'')+'</span></td>'+
         '<td class="tleft">'+result+'</td>'+
         (showAdmin?'<td class="tright">'+(p.used?'<button class="btn btn-ghost btn-sm" data-reversepick="'+p.id+'">Reverse</button>':'<span class="caption">—</span>')+'</td>':'')+'</tr>';
     }).join("")+'</tbody></table></div></div>';
@@ -3534,8 +3549,12 @@ CG.ROUTES.draft = function(){
       pool.slice(0,40).map(function(pr,i){
         var ps=(CG.lg.preGp||{})[pr.profileId], vet=CG.lg.isVeteran&&CG.lg.isVeteran(pr.profileId);
         var preLine = ps&&ps.gp ? ps.gp+" GP · "+ps.g+"G "+ps.a+"A pre-season" : "no pre-season games";
-        var eligChip = vet ? "" : (ps&&ps.gp>=5 ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
-                                                : ' <span class="chip chip-warn" style="font-size:9px">'+((ps&&ps.gp)||0)+' OF 5</span>');
+        /* v2.35: the same predicate the pick RPC enforces (deadline first, then five games or a
+           returning player) — a late registrant with five games used to read ELIGIBLE here */
+        var el = CG.eligOf(pr.profileId);
+        var eligChip = el.vet ? "" : (el.ok ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
+                                    : el.gp>=5 ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
+                                               : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF 5</span>');
         return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
           '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+' · '+preLine+'</small></span>'+
           '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
@@ -4245,12 +4264,12 @@ CG.admDraftLive = function(){
       }).join("")+'</div>'+
       '<div id="dManualWrap" style="display:none;margin-bottom:14px"><span class="eyebrow" style="display:block;margin-bottom:8px">Arrange the order — first pick at the top</span><div id="dManualList"></div></div>'+
       '<div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">'+
-      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+((meta&&meta.rounds)||10)+'"></label>'+
+      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+((meta&&meta.rounds)||14)+'"></label>'+
       '<button class="btn btn-chrome" id="dGenerate">'+CG.ic("grid",15)+(hasPicks?"Regenerate the board":"Generate the board")+'</button>'+
       (meta?'<button class="btn btn-ghost" id="dAnnounce">Announce the order</button>':"")+
       '</div>'+
       (hasPicks?'<p class="caption" style="margin-top:10px">Regenerating replaces every pick — it’s blocked once any pick has been made (reverse them first). '+picks.length+' picks exist now.</p>'
-               :'<p class="caption" style="margin-top:10px">Ten rounds, the same order every round (like the NHL — never a snake). The pick order publishes to the clubs the moment you generate.</p>')+
+               :'<p class="caption" style="margin-top:10px">Fourteen rounds, the same order every round (like the NHL — never a snake). The pick order publishes to the clubs the moment you generate.</p>')+
       (meta&&meta.codes?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">'+meta.codes.map(function(c,i){ return '<span class="chip'+(i===0?" chip-chrome":"")+'" style="font-size:10px">'+(i+1)+' · '+esc(c)+'</span>'; }).join("")+'</div>':"")+
       '</div></div>';
   }
@@ -4287,7 +4306,7 @@ CG.admDraftLive = function(){
           rounds[rn].sort(function(a,b){ return a.overall-b.overall; }).map(function(p){
             var isCur = cur && p.id===cur.id;
             return '<tr class="'+(isCur?"dr-now":"")+'"><td class="num">'+p.overall+'</td>'+
-              '<td class="tleft"><span class="teamcell">'+CG.crest(p.ownerCode,20)+'<span class="mono" style="font-size:12px">'+esc(p.ownerCode||"?")+'</span></span></td>'+
+              '<td class="tleft"><span class="teamcell">'+CG.crest(p.ownerCode,20)+'<span class="mono" style="font-size:12px">'+esc(p.ownerCode||"?")+'</span>'+(p.origCode&&p.origCode!==p.ownerCode?'<span class="caption" style="font-size:10px">via '+esc(p.origCode)+'</span>':'')+'</span></td>'+
               '<td class="tleft">'+(p.used?'<b>'+esc(p.playerName||"")+'</b>':'<span class="caption">—</span>')+'</td>'+
               '<td class="tleft">'+(isCur?'<span class="chip chip-live" style="font-size:9px"><span class="live-dot"></span>ON THE CLOCK</span>'
                 : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
@@ -4356,7 +4375,7 @@ CG.AFTER._admDraft = function(){
   renderManual();
   var gen = document.getElementById("dGenerate");
   if (gen) gen.addEventListener("click", function(){
-    var rounds = parseInt((document.getElementById("dRounds")||{}).value,10)||10;
+    var rounds = parseInt((document.getElementById("dRounds")||{}).value,10)||14;
     var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===style;})||["","?"])[1];
     var manualIds = style==="manual" ? CG._manualOrder.map(function(c){ return (CG.lg._codeToId||{})[c]; }) : null;
     CG.confirm("Generate the draft board?",
@@ -4380,7 +4399,7 @@ CG.AFTER._admDraft = function(){
     CG.confirm("Announce the draft order?","Publishes a newsroom story with the round-one order — it posts to Discord automatically.","Publish it", function(){
       var body = "The Season "+sn+" draft order is set — decided by "+decided+".\n\n"+
         codes.map(function(c,i){ return (i+1)+". "+((CG.TEAM[c]||{}).name||c); }).join("\n")+
-        "\n\nThe order holds for every round \u2014 no snake. "+(meta.rounds||10)+" rounds on the night, and clubs can trade picks right through the draft.";
+        "\n\nThe order holds for every round \u2014 no snake. "+(meta.rounds||14)+" rounds on the night, and clubs can trade picks right through the draft.";
       CG.sb.from("news").insert({ season_id: CG.SEASON.id, category:"League News", title:"The draft order is set",
         author:"CGHL Wire", published_at:new Date().toISOString(), body: body }).then(function(r){
         if(r.error){ CG.toast("Couldn’t publish: "+r.error.message,"err"); return; }
@@ -4451,7 +4470,9 @@ CG.AFTER.draft = function(){
     CG.subscribeDraft();
     return;                                        /* no manager controls to wire */
   }
-  document.querySelectorAll("[data-makepick]").forEach(function(b){ b.addEventListener("click", function(){ CG.draftMakePick(this.getAttribute("data-makepick")); }); });
+  /* v2.35: the shared modal — eligible players first, eligibility chips, search — not the bare
+     OVR-sorted select that offered a manager on a two-minute clock players the draft refuses */
+  document.querySelectorAll("[data-makepick]").forEach(function(b){ b.addEventListener("click", function(){ CG.draftPickModalLive(this.getAttribute("data-makepick"), (CG.myManagedTeam&&CG.myManagedTeam()||{}).code); }); });
   document.querySelectorAll("[data-reversepick]").forEach(function(b){ b.addEventListener("click", function(){ CG.draftReverse(this.getAttribute("data-reversepick")); }); });
   var s=document.querySelector("[data-draft-start]"); if(s) s.addEventListener("click", CG.draftStart);
   var p=document.querySelector("[data-draft-pause]"); if(p) p.addEventListener("click", function(){ CG.draftPauseResume(true); });
@@ -4986,6 +5007,11 @@ CG.poolState = function(pid){
      "Needs pre-season games" on the public players page. */
   var _preOpen = CG.SEASON && CG.SEASON.preseason_starts_at
     && Date.parse(CG.SEASON.preseason_starts_at) <= CG.now();
+  /* v2.35: a sign-up filed after the deadline can never reach the draft however many games he
+     plays — "Needs pre-season games" would be a door that never opens. Say what actually happens. */
+  var _dl = CG.SEASON && (CG.SEASON.signup_deadline_at || CG.SEASON.registration_deadline);
+  if (!draftDone && _dl && reg.created_at && Date.parse(reg.created_at) > Date.parse(_dl))
+    return { key:"late", label:"Late sign-up — placed after the draft", chip:"chip-warn" };
   if (!draftDone && _preOpen && !CG.isDraftEligible(pid))
     return { key:"needs_preseason", label:"Needs pre-season games", chip:"chip-warn" };
   if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
@@ -5194,8 +5220,8 @@ CG.AFTER._preseason = function(){
     el.addEventListener("change", function(){
       var id=this.getAttribute("data-scout"), v=(this.value||"").trim();
       var nv = v===""?null:Math.max(40,Math.min(99,parseInt(v,10)||0));
-      CG.sb.from("season_registrations").update({scout_ovr:nv}).eq("id",id).then(function(r){
-        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); }
+      CG.sb.from("season_registrations").update({scout_ovr:nv}).eq("id",id).select("id").then(function(r){
+        if(r.error||!(r.data||[]).length){ CG.toast("Couldn’t save"+(r.error?": "+r.error.message:" — nothing was written; sign out and back in, then retry"),"err"); }
         else { CG.toast("Scout OVR saved","ok"); var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===id;}); if(reg)reg.scout_ovr=nv; }
       });
     });
@@ -5294,47 +5320,20 @@ CG.preseasonRandomAssign = function(){
   var rosteredIds=lg._rosteredIds||{};
   var pool=(lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined"; });
   if (!pool.length){ CG.toast("Everyone registered is already on a club","err"); return; }
-  var rosterMax=s.roster_max||17;
   CG.confirm("Randomly assign "+pool.length+" players for the pre-season?",
-    "Every unrostered registration is spread evenly across the "+CG.TEAMS.length+" clubs (management counts toward the split, clubs cap at "+rosterMax+"). "+
+    "Every unrostered registration is placed by the league office — position by position, so each club gets its goaltenders and defensemen before any club gets a spare, with training camp taking the overflow (Rule 2.1). "+
     "They are released back to the draft pool automatically when the final pre-season game ends.",
     "Assign randomly", function(){
-    var counts={}, used={};
-    CG.TEAMS.forEach(function(t){
-      /* active-roster spots only — camp is carried beyond the seventeen (Rule 2.1) */
-      counts[t.code]=(lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }).length;
-      used[t.code]={}; (lg.byTeam[t.code]||[]).forEach(function(p){ if(p.jersey) used[t.code][p.jersey]=1; });
+    /* v2.35: the placement runs inside the database (preseason_random_assign → _assign_reg_random),
+       the same position-aware placer post-draft placement uses. The old browser-side spread was
+       position-blind: it could hand a club a fourth goaltender with a full camp, and the deferred
+       roster-shape check then failed a hundred-row insert half-way through the pass. */
+    CG.sb.rpc("preseason_random_assign").then(function(r){
+      if (r.error){ CG.toast("Assignment stopped: "+r.error.message,"err"); CG.reloadLeague(); return; }
+      var d=r.data||{}, n=d.placed||0, left=(d.skipped||0)+(d.errors||0);
+      CG.toast(n+" players randomly assigned"+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:" (no club has room)"):""), left?"err":"ok");
+      CG.reloadLeague();
     });
-    var rows=[], regIds=[], skipped=0;
-    CG.shuffleArr(pool).forEach(function(r){
-      var open=CG.TEAMS.filter(function(t){ return counts[t.code]<rosterMax; });
-      if (!open.length){ skipped++; return; }
-      var min=Math.min.apply(null, open.map(function(t){ return counts[t.code]; }));
-      var lows=open.filter(function(t){ return counts[t.code]===min; });
-      var pick=lows[Math.floor(Math.random()*lows.length)];
-      counts[pick.code]++;
-      rows.push({ season_id:s.id, team_id:pick.id, profile_id:r.profile_id,
-        jersey_number:CG.nextJersey(used[pick.code]), position:r.position||"C", salary:0, origin:"preseason_random" });
-      regIds.push(r.id);
-    });
-    if (!rows.length){ CG.toast("No club has an open roster spot","err"); return; }
-    var chunks=[]; for (var c=0;c<rows.length;c+=100) chunks.push(rows.slice(c,c+100));
-    (function insertNext(idx){
-      if (idx>=chunks.length){
-        CG.sb.from("season_registrations").update({ status:"assigned" }).in("id", regIds).then(function(){
-          CG.sb.from("transactions").insert({ season_id:s.id, type:"sign",
-            description:"Pre-season: "+rows.length+" registered players randomly assigned across the league" }).then(function(){
-            CG.toast(rows.length+" players randomly assigned"+(skipped?" · "+skipped+" left out (rosters full)":""),"ok");
-            CG.reloadLeague();
-          });
-        });
-        return;
-      }
-      CG.sb.from("roster_spots").insert(chunks[idx]).then(function(rz){
-        if (rz.error){ CG.toast("Assignment stopped: "+rz.error.message,"err"); CG.reloadLeague(); return; }
-        insertNext(idx+1);
-      });
-    })(0);
   });
 };
 
@@ -5495,17 +5494,13 @@ CG.preseasonRelease = function(){
     "This is what happens automatically when the final pre-season game ends — use it early only if you mean to. "+
     "Players return to the draft pool; their pre-season stats and eligibility are kept. Management and manually signed players stay put.",
     "Release to draft pool", function(){
-    CG.sb.from("roster_spots").delete().eq("season_id",s.id).eq("origin","preseason_random").select("profile_id").then(function(r){
+    /* v2.35: one database routine (the same one the final-game trigger and the draft opening use)
+       deletes the loans, resets the registrations and writes the log line together — the old
+       three-step browser path never checked whether the registration reset actually landed. */
+    CG.sb.rpc("preseason_release_now").then(function(r){
       if (r.error){ CG.toast("Couldn’t release: "+r.error.message,"err"); return; }
-      var ids=(r.data||[]).map(function(x){ return x.profile_id; });
-      var after=function(){
-        CG.sb.from("transactions").insert({ season_id:s.id, type:"release",
-          description:"Pre-season complete — "+ids.length+" randomly assigned players returned to the draft pool" }).then(function(){
-          CG.toast(ids.length+" players released to the draft pool","ok"); CG.reloadLeague();
-        });
-      };
-      if (ids.length) CG.sb.from("season_registrations").update({ status:"pending" }).eq("season_id",s.id).in("profile_id",ids).then(after);
-      else { CG.toast("Nothing to release","ok"); CG.reloadLeague(); }
+      var n=r.data||0;
+      CG.toast(n?n+" players released to the draft pool":"Nothing to release","ok"); CG.reloadLeague();
     });
   });
 };
@@ -5544,8 +5539,11 @@ CG.assignLatecomers = function(){
 };
 /* Decline / reinstate a registration (keeps banned or duplicate accounts out of assignment + the draft). */
 CG.setRegStatus = function(regId, status, name){
-  CG.sb.from("season_registrations").update({status:status}).eq("id",regId).then(function(r){
+  /* status is a guarded column (guard_registration_columns reverts it silently for anyone the
+     database does not trust), so read it back rather than trusting a green response */
+  CG.sb.from("season_registrations").update({status:status}).eq("id",regId).select("id,status").then(function(r){
     if (r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+    if (!(r.data||[]).length || r.data[0].status!==status){ CG.toast("Couldn’t update — the change did not take. Sign out and back in, then retry.","err"); return; }
     CG.toast((name||"Registration")+(status==="declined"?" declined":" reinstated"),"ok");
     var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===regId;}); if(reg)reg.status=status;
     CG.reloadLeague();
@@ -5559,8 +5557,10 @@ CG.assignRegistration = async function(regId, profileId, position, playerName, c
   var num=0; for(var n=1;n<=99;n++){ if(!used[n]){ num=n; break; } }
   var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 });
   if(r1.error){ CG.toast("Couldn’t sign: "+r1.error.message,"err"); return; }
-  await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId);
-  await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" });
+  var r2 = await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId).select("id,status");
+  if (r2.error || !(r2.data||[]).length || r2.data[0].status!=="assigned") CG.toast("On the roster, but the registration still reads as unplaced"+(r2.error?": "+r2.error.message:""),"err");
+  var r3 = await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" }).select("id");
+  if (r3.error || !(r3.data||[]).length) CG.toast("Signed, but the move did not reach the transaction log"+(r3.error?": "+r3.error.message:""),"err");
   /* optimistic local update so the view reflects it immediately */
   CG.lg._rosteredIds[profileId]=true;
   if(CG.lg.byTeam[code]) CG.lg.byTeam[code].push({ id:profileId, tag:playerName, team:code, pos:position, jersey:num, mgmt:null, salary:0, depth:9 });
@@ -6230,8 +6230,9 @@ CG.renameDivision = function(id, oldName){
     if(!name){ CG.toast("Give the division a name","err"); return; }
     if(name===oldName){ if(CG.closeOverlay)CG.closeOverlay(); return; }
     if((CG.DIVISIONS||[]).some(function(d){ return d.toLowerCase()===name.toLowerCase(); })){ CG.toast(name+" already exists","err"); return; }
-    CG.sb.from("divisions").update({ name:name }).eq("id",id).then(function(r){
+    CG.sb.from("divisions").update({ name:name }).eq("id",id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t rename: "+r.error.message,"err"); return; }
+      if(!(r.data||[]).length){ CG.toast("Couldn’t rename — nothing was written. Sign out and back in, then retry.","err"); return; }
       /* clubs reference the division by name — carry them along */
       CG.sb.from("teams").update({ division:name }).eq("division",oldName).then(function(r2){
         if(r2.error){ CG.toast("Division renamed, but clubs didn’t follow: "+r2.error.message,"err"); return; }
@@ -6245,8 +6246,9 @@ CG.deleteDivision = function(id, name, count){
   if (count>0){ CG.toast("Can’t delete "+name+" — move its "+count+" club"+(count===1?"":"s")+" to another division first","err"); return; }
   if ((CG._divisionsRaw||[]).length<=1){ CG.toast("The league needs at least one division","err"); return; }
   CG.confirm("Delete the "+esc(name)+" division?","It’s empty, so nothing moves. This can’t be undone.","Delete division", function(){
-    CG.sb.from("divisions").delete().eq("id",id).then(function(r){
+    CG.sb.from("divisions").delete().eq("id",id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+      if(!(r.data||[]).length){ CG.toast("Nothing was deleted — sign out and back in, then retry.","err"); return; }
       CG.toast(name+" deleted","ok"); CG.reloadLeague();
     });
   });
@@ -6532,10 +6534,11 @@ CG.teamForm = function(t){
       logo_url: document.getElementById("tfLogoDrop").getAttribute("data-url") || null };
     var btn=this; btn.disabled=true;
     var q = isNew
-      ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null }))
-      : CG.sb.from("teams").update(rec).eq("id", t.id);
+      ? CG.sb.from("teams").insert(Object.assign({}, rec, { league_id:(CG.TOP_LEAGUE&&CG.TOP_LEAGUE.id)||null })).select("id")
+      : CG.sb.from("teams").update(rec).eq("id", t.id).select("id");
     q.then(function(r){
       if(r.error){ btn.disabled=false; CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if(!(r.data||[]).length){ btn.disabled=false; CG.toast("Couldn’t save — nothing was written. Your sign-in may have expired: sign out and back in, then retry.","err"); return; }
       /* apply front-office moves one at a time — each RPC clears the member’s prior seat first */
       var chain=Promise.resolve();
       mgmtChanges.forEach(function(ch){
@@ -6831,7 +6834,7 @@ CG.hubComplaintsLive = function(opts){
   h += queue.length
     ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
     : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
-  h += '<div class="note" style="margin-top:18px">Complaints follow Rule 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
+  h += '<div class="note" style="margin-top:18px">Complaints follow Chapter 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
   return h;
 };
 /* Everyone in the league, not just everyone on a roster. A complaint can name a free agent or a
@@ -9233,10 +9236,11 @@ CG.newsForm = function(slug){
       /* The byline was hardcoded to "— Commissioner", so a media-department story would have
          published under a title its author doesn't hold. Sign it with the seat they actually sit in. */
       ? CG.sb.from("news").insert(Object.assign({}, rec, { author:((CG.auth.profile&&CG.auth.profile.gamertag)||"League office")+" — "+(CG.role()==="commish"?"Commissioner":"League staff"), published_at:new Date().toISOString(), season_id:CG.SEASON.id }))
-      : CG.sb.from("news").update(rec).eq("id", slug);
+      : CG.sb.from("news").update(rec).eq("id", slug).select("id");
     q.then(function(r){
       btn.disabled=false;
       if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (!isNew && !(r.data||[]).length){ CG.toast("Couldn’t save — nothing was written. Your sign-in may have expired: sign out and back in, then retry.","err"); return; }
       if (CG.closeOverlay) CG.closeOverlay();
       CG.toast(isNew?"Published — it’s live and posted to #news":"Story updated","ok");
       CG.reloadLeague();
@@ -9611,7 +9615,7 @@ CG.roadAheadCard = function(s, opts){
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
     [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
     [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with five pre-season appearances (Rule 2.8). Undrafted players are placed on clubs automatically ten minutes after it concludes."],
-    [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
+    [s.free_agency_opens_at, "Free agency opens", "One week for players whose contracts have ended to take offers from any club (Rule 2.2) — in a first season, nobody: undrafted players are placed, not signed."],
     [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
   ].filter(function(st){ return st[0]; });
   if (!steps.length) return "";
@@ -10070,8 +10074,9 @@ CG.AFTER._admScheduleLive = function(){
       var v=document.getElementById("rsWhen").value;
       if(!v){ CG.toast("Pick the new date and time","err"); return; }
       var iso=CG.etISO(v.slice(0,10), v.slice(11,16));
-      CG.sb.from("games").update({ scheduled_at: iso }).eq("id",id).then(function(r){
+      CG.sb.from("games").update({ scheduled_at: iso }).eq("id",id).select("id").then(function(r){
         if(r.error){ CG.toast("Couldn’t reschedule: "+r.error.message,"err"); return; }
+        if(!(r.data||[]).length){ CG.toast("Couldn’t reschedule — nothing was written. Sign out and back in, then retry.","err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast("Game moved to "+CG.fmtFull(Date.parse(iso)),"ok"); CG.reloadLeague();
       });
@@ -10275,10 +10280,11 @@ CG.seasonForm = function(id){
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
       moves_lock_override:document.getElementById("ssMoves").value };
     var btn=this; btn.disabled=true;
-    var q = isNew ? CG.sb.from("seasons").insert(rec) : CG.sb.from("seasons").update(rec).eq("id",id);
+    var q = isNew ? CG.sb.from("seasons").insert(rec).select("id") : CG.sb.from("seasons").update(rec).eq("id",id).select("id");
     q.then(function(r){
       btn.disabled=false;
       if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if(!(r.data||[]).length){ CG.toast("Couldn’t save — nothing was written. Your sign-in may have expired: sign out and back in, then retry.","err"); return; }
       /* push the configured numbers onto every sitting Owner/GM/AGM immediately — otherwise
          the new salaries would only take effect the next time a seat changed hands */
       CG.sb.rpc("apply_mgmt_salaries").then(function(ar){
@@ -10326,9 +10332,10 @@ CG.deleteSeason = function(id, name){
     document.getElementById("sdGo").addEventListener("click", function(){
       if ((document.getElementById("sdConfirm").value||"").trim()!==name){ CG.toast("Type the season name exactly to confirm","err"); return; }
       var btn=this; btn.disabled=true;
-      CG.sb.from("seasons").delete().eq("id",id).then(function(r){
+      CG.sb.from("seasons").delete().eq("id",id).select("id").then(function(r){
         btn.disabled=false;
         if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
+        if(!(r.data||[]).length){ CG.toast("Nothing was deleted — your sign-in may have expired. Sign out and back in, then retry.","err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast(name+" deleted","ok");
         CG.reloadLeague();
@@ -10726,7 +10733,8 @@ CG.clearPlayoffRound = function(round){
       if (round===1){
         /* clearing the quarter-finals unlocks the seeding again */
         var key="playoff_seeds_"+((s&&s.number)||1);
-        CG.sb.from("site_config").delete().eq("key",key).then(function(){
+        CG.sb.from("site_config").delete().eq("key",key).select("key").then(function(r){
+          if (r.error || !(r.data||[]).length){ CG.toast("Round cleared, but the seeding lock is still in place"+(r.error?" — "+r.error.message:" — nothing was deleted; sign out and back in, then retry"),"err"); CG.reloadLeague(); return; }
           if (CG._siteCfg) delete CG._siteCfg[key];
           CG.toast("Round cleared — seeding unlocked","ok"); CG.reloadLeague();
         });
@@ -11390,7 +11398,14 @@ CG.hubFreeAgents = function(){
   /* ONE board (v2.33). Rookie bidding is abolished: a fourteen-round draft fills every active
      spot outright, so there is no post-draft rookie class to auction. Anyone still without a
      club — first-year or veteran — is signed here by offer and acceptance (Rule 2.2). */
-  var pool=(lg._registrationsRaw||[]).filter(function(r){ return faFree(r); }).sort(byOvr);
+  /* v2.35: only the players free agency is FOR — a deal that has ended (Rule 2.2). Before the
+     draft every sign-up passed faFree, so the board called the whole class "free agents" and lit
+     Approach on each of them; undrafted players are placed, not signed, and never belong here. */
+  var pool=(lg._registrationsRaw||[]).filter(function(r){
+    if (!faFree(r)) return false;
+    var ps = CG.poolState ? CG.poolState(r.profile_id).key : "free_agent";
+    return ps==="free_agent" || ps==="rfa";
+  }).sort(byOvr);
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
     '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>';
@@ -11478,7 +11493,8 @@ CG._liveTrade = null;
 CG.liveTrade = function(){ if(!CG._liveTrade) CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; return CG._liveTrade; };
 CG.tPlayer = function(pid){ return (CG.lg.players||[]).find(function(p){ return p.id===pid; }); };
 CG.tPick = function(kid){ return (CG.lg.draftPicks||[]).find(function(p){ return p.id===kid; }); };
-CG.tRoster = function(code){ return (CG.lg.byTeam[code]||[]).filter(function(p){ return !p.mgmt; }); };
+/* a pre-season loan is not the club's asset to trade — he is released after the pre-season */
+CG.tRoster = function(code){ return (CG.lg.byTeam[code]||[]).filter(function(p){ return !p.mgmt && p.origin!=="preseason_random"; }); };
 CG.tPicks = function(code){
   /* Skipped make-up picks stay tradeable (Rule 2.8, and accept_trade allows them); scope to the
      current draft's season the same way draftPicksCur does. */
@@ -11508,7 +11524,7 @@ CG.hubTradeHubLive = function(qs){
   if(incoming.length){
     inc+=incoming.map(function(tr){ var fromCode=lg._idToCode[tr.from_team_id];
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
-        '<span class="teamcell">'+CG.crest(fromCode,22)+'<span class="nm">'+esc((CG.TEAM[fromCode]||{}).name||fromCode)+'</span></span><span class="nf-t">'+CG.fmtDate((tr.created_at||"").slice(0,10)||"2026-01-01")+'</span></div>'+
+        '<span class="teamcell">'+CG.crest(fromCode,22)+'<span class="nm">'+esc((CG.TEAM[fromCode]||{}).name||fromCode)+'</span></span><span class="nf-t">'+(tr.created_at?CG.fmtDate(tr.created_at.slice(0,10)):"—")+'</span></div>'+
         '<div class="grid g2" style="gap:14px"><div><span class="caption">You receive</span>'+items(tr.offered_profile_ids,tr.offered_pick_ids)+'</div>'+
         '<div><span class="caption">You send</span>'+items(tr.requested_profile_ids,tr.requested_pick_ids)+'</div></div>'+
         (tr.note?'<p class="small" style="color:var(--steel);margin-top:10px;font-style:italic">“'+esc(tr.note)+'”</p>':"")+
@@ -11574,7 +11590,10 @@ CG.proposeTrade = function(){
     /* If this proposal is a counter, decline the original offer so the same deal isn't live
        twice. Quietly (no second toast); a failure just leaves the original as-is. */
     if (counteredId){
-      CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",counteredId).then(finish, finish);
+      CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",counteredId).select("id").then(function(r){
+        if (r.error || !(r.data||[]).length) CG.toast("Counter sent, but the original offer is still open — decline it by hand"+(r.error?": "+r.error.message:""),"err");
+        finish();
+      }, finish);
     } else { finish(); }
   });
 };

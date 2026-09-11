@@ -1591,10 +1591,16 @@ export default async (req) => {
      a failing result where the panel reads it. */
   try {
 
+  /* v2.35: a failed input load used to leave its map EMPTY and the role pass ran regardless — one
+     Supabase blip stripped department, position, Player/FA/RFA/Rookie and Not-Signed-Up roles from
+     every member, and the next sweep put them all back. Any load failure below flips this off and
+     the managed roles are left exactly as they are for this run. */
+  let inputsOk = true; const inputsErr = [];
   const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username");
   // staff department picks (site) -> department Discord roles for the officials who chose them
   const deptByProfile = {};
-  try { for (const p of await sbGet("profiles?select=id,departments&role=in.(staff,commissioner)")) deptByProfile[p.id] = p.departments || []; } catch (e) {}
+  try { for (const p of await sbGet("profiles?select=id,departments&role=in.(staff,commissioner)")) deptByProfile[p.id] = p.departments || []; }
+  catch (e) { inputsOk = false; inputsErr.push("departments: " + String(e.message || e)); }
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
   // current in_guild per profile, so we only write when it changes
   const inGuildById = {};
@@ -1621,7 +1627,7 @@ export default async (req) => {
       for (const r of await sbGet(`season_registrations?season_id=eq.${seasonId}&select=profile_id,position`)) if (r.position) posOf[r.profile_id] = r.position;
       for (const s of await sbGet(`roster_spots?season_id=eq.${seasonId}&select=profile_id,position`)) if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
     }
-  } catch (e) { /* positions optional */ }
+  } catch (e) { inputsOk = false; inputsErr.push("positions: " + String(e.message || e)); }
 
 
   // guild roles + channels (id -> current name) for auto-rename + id-based assignment
@@ -1686,7 +1692,7 @@ export default async (req) => {
       if (!priorSeasons[p.id] && !draftedBefore.has(p.id)) rookies.add(p.id);
     }
     sum.rights = { rfa: rfa.size, rookies: rookies.size, rfaYears: RFA_YEARS };
-  } catch (e) { sum.errors.push({ rights: String(e.message || e) }); }
+  } catch (e) { inputsOk = false; inputsErr.push("rights"); sum.errors.push({ rights: String(e.message || e) }); }
 
   /* @everyone/@here stays with the league office — re-checked every sweep, not just once.
      Must run AFTER `sum` exists: this call sat nine lines above the declaration for one deploy,
@@ -2043,7 +2049,7 @@ export default async (req) => {
       regOpen = !!s.registration_open;   /* Rule 1.1 (v2.8): the deadline never closes registration */
       for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
     }
-  } catch (e) { sum.errors.push({ regStatus: String(e.message || e) }); }
+  } catch (e) { inputsOk = false; inputsErr.push("registrations"); sum.errors.push({ regStatus: String(e.message || e) }); }
 
   // Guild ban list (paginated), fetched once per run. Two jobs:
   //  * stop re-PUTting the same ban every 5 minutes for already-banned members
@@ -2097,6 +2103,7 @@ export default async (req) => {
   try { await removeDepartedSignups(sum); }
   catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
 
+  if (!inputsOk) sum.errors.push({ inputs: "load failed (" + inputsErr.join("; ") + ") — managed roles left untouched this run" });
   for (const m of links) {
     if (!m.discord_id) continue;
     try {
@@ -2144,12 +2151,14 @@ export default async (req) => {
 
       // (2) role sync — desired managed roles for this member. The rules live in
       // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
-      const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
-        mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies });
-      const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
-      if (changed) {
-        const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
-        if (!(res && res.__notfound)) sum.roleUpdated++;
+      if (inputsOk) {
+        const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
+          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies });
+        const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
+        if (changed) {
+          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
+          if (!(res && res.__notfound)) sum.roleUpdated++;
+        }
       }
     } catch (e) {
       // owner + higher-role members can't be modified by the bot — log and continue
@@ -2165,7 +2174,7 @@ export default async (req) => {
      exactly {Not Signed Up} while sign-ups are open (they have not signed up, by definition), and
      none once the window closes. Their non-managed roles are left alone, same as pass 1. */
   try {
-    if (memberListOk && roleId["not signed up"]) {
+    if (inputsOk && memberListOk && roleId["not signed up"]) {
       const linkedIds = new Set(links.filter((l) => l.discord_id).map((l) => String(l.discord_id)));
       sum.unlinkedSeen = 0;
       for (const [uid, mem] of memberById) {
