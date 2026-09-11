@@ -1621,12 +1621,14 @@ export default async (req) => {
   // POS_LABEL / POSITION_ROLES come from shared/roles.mjs (imported at top)
   const posOf = {};
   try {
-    const seasons = await sbGet("seasons?select=id&order=number.desc&limit=1");
-    const seasonId = seasons[0] && seasons[0].id;
-    if (seasonId) {
-      for (const r of await sbGet(`season_registrations?season_id=eq.${seasonId}&select=profile_id,position`)) if (r.position) posOf[r.profile_id] = r.position;
-      for (const s of await sbGet(`roster_spots?season_id=eq.${seasonId}&select=profile_id,position`)) if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
-    }
+    /* v2.36: sign-up positions come from the season taking sign-ups and roster positions from the
+       season in play (active, else the lowest-numbered open season). "Newest season" pointed at a
+       Season 2 row created ahead of time and would have emptied every position role. */
+    const seasons = await sbGet("seasons?select=id,number,status,registration_open&status=neq.complete&order=number.asc");
+    const curSeason = seasons.find((s) => s.status === "active") || seasons[0] || null;
+    const regSeasonRow = seasons.filter((s) => s.registration_open).sort((a, b) => b.number - a.number)[0] || curSeason;
+    if (regSeasonRow) for (const r of await sbGet(`season_registrations?season_id=eq.${regSeasonRow.id}&select=profile_id,position`)) if (r.position) posOf[r.profile_id] = r.position;
+    if (curSeason) for (const s of await sbGet(`roster_spots?season_id=eq.${curSeason.id}&select=profile_id,position`)) if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
   } catch (e) { inputsOk = false; inputsErr.push("positions: " + String(e.message || e)); }
 
 
@@ -1660,8 +1662,12 @@ export default async (req) => {
      too but applied independently: no prior-season roster spot and no pick in an EARLIER draft. */
   const rfa = new Set(), rookies = new Set();
   try {
-    const seasonsAll = await sbGet("seasons?select=id,number&order=number.desc");
-    const curSeason = seasonsAll[0] || null;
+    /* v2.36: "current" = the season in play (active, else the lowest-numbered open season). The
+       newest row is not it once a next season exists ahead of time — with Season 2 created in
+       September, "newest" made every Season 1 roster spot read as PRIOR service and would have
+       handed the whole league Restricted Free Agent roles. */
+    const seasonsAll = await sbGet("seasons?select=id,number,status&status=neq.complete&order=number.asc");
+    const curSeason = seasonsAll.find((s) => s.status === "active") || seasonsAll[0] || null;
     const curId = curSeason && curSeason.id, curNum = (curSeason && curSeason.number) || 1;
     const cfgRows = await sbGet("app_config?key=eq.rfa_offseasons&select=value");
     const RFA_YEARS = Math.max(1, parseInt((cfgRows[0] && cfgRows[0].value) || "4", 10) || 4);

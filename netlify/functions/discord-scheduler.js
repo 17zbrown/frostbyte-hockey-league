@@ -305,7 +305,9 @@ export default async (req) => {
     try { sum.rules = await rulesUpkeep(sum.errors); } catch (e) { sum.errors.push(`rules: ${String(e.message || e)}`); }
 
     const active = await sbGet("seasons?select=id,number&status=eq.active&order=number.desc&limit=1");
-    const season = active[0] || (await sbGet("seasons?select=id,number&status=neq.complete&order=number.desc&limit=1"))[0];
+    /* v2.36: no active season yet -> the LOWEST-numbered open one (the season next up), never the
+       newest — a Season 2 row created ahead of time would otherwise have swallowed the pre-season slate */
+    const season = active[0] || (await sbGet("seasons?select=id,number&status=neq.complete&order=number.asc&limit=1"))[0];
     if (!season) return json({ skipped: "no season" });
     const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id,discord_role_id");
     const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));

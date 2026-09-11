@@ -75,16 +75,19 @@ export function createRoleSyncer(env, opts = {}) {
     if (slow && Date.now() - slowAt < 60_000) return slow;
     const [guildRoles, seasons, rfaCfg] = await Promise.all([
       dApi("GET", `/guilds/${GUILD}/roles`),
-      sbGet("seasons?select=id,number,registration_open&order=number.desc&limit=5"),
+      sbGet("seasons?select=id,number,status,registration_open&status=neq.complete&order=number.asc"),
       sbGet("app_config?key=eq.rfa_offseasons&select=value"),
     ]);
     if (!Array.isArray(guildRoles)) throw new Error("guild roles unavailable");
     const roleId = {};
     for (const r of guildRoles) roleId[String(r.name || "").toLowerCase()] = r.id;
-    /* same season selection as the sweep: the registration_open season drives Player/FA/Not
-       Signed Up; the LATEST season drives positions */
-    const regSeason = (seasons || []).find((s) => s.registration_open) || (seasons || [])[0] || null;
-    const posSeason = (seasons || [])[0] || null;
+    /* same season selection as the sweep (v2.36): the registration_open season drives Player/FA/
+       Not Signed Up and sign-up positions; the season IN PLAY — active, else the lowest-numbered
+       open season, never the newest, which a next season created ahead of time would be — drives
+       roster positions and the rights classes */
+    const curSeason = (seasons || []).find((s) => s.status === "active") || (seasons || [])[0] || null;
+    const regSeason = (seasons || []).filter((s) => s.registration_open).sort((a, b) => (b.number || 0) - (a.number || 0))[0] || curSeason;
+    const posSeason = curSeason;
     const rfaYears = Math.max(1, parseInt((rfaCfg && rfaCfg[0] && rfaCfg[0].value) || "4", 10) || 4);
     slow = { roleId, regSeason, posSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears };
     slowAt = Date.now();
@@ -125,14 +128,13 @@ export function createRoleSyncer(env, opts = {}) {
          the sweep's exact iteration order. */
       let isRegistered = false; let pos = null;
       if (C.regSeason) {
-        const reg = await sbGet(`season_registrations?season_id=eq.${C.regSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id`);
+        const reg = await sbGet(`season_registrations?season_id=eq.${C.regSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,position`);
         isRegistered = !!(reg && reg[0]);
+        for (const r of reg || []) if (r.position) pos = r.position;    // sign-up position, from the season taking sign-ups
       }
       if (C.posSeason) {
-        const regp = await sbGet(`season_registrations?season_id=eq.${C.posSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=position`);
-        for (const r of regp || []) if (r.position) pos = r.position;
         const spots = await sbGet(`roster_spots?season_id=eq.${C.posSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=position`);
-        for (const s of spots || []) if (s.position) pos = s.position;   // roster spot wins over signup
+        for (const s of spots || []) if (s.position) pos = s.position;   // roster spot (season in play) wins over signup
       }
 
       /* club seat — held on the team row, not the profile; same overwrite order as the sweep's
