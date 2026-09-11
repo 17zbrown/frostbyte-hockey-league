@@ -234,9 +234,14 @@ CG.buildLiveLeague = async function(){
   CG.pickCurrentSeason = function(rows){        /* rows arrive ordered by number desc */
     rows = rows||[];
     CG.SEASONS = rows;
+    /* The season in play, or the next one up: active first, else the LOWEST-numbered season
+       that is not complete. Mirrors the database's current_season_id(). "Newest non-complete"
+       let a Season 2 row created ahead of time (calendar published, games generated) take
+       over the whole site while Season 1 was still waiting for puck drop. */
+    var open = rows.filter(function(s){ return s.status!=="complete"; })
+                   .sort(function(a,b){ return (a.number||0)-(b.number||0); });
     return rows.find(function(s){ return s.status==="active"; })
-        || rows.find(function(s){ return s.status!=="complete"; })
-        || rows[0] || null;
+        || open[0] || rows[0] || null;
   };
   /* The season currently taking sign-ups. During the playoffs the DISPLAYED season (active,
      playing out) and the REGISTERING season (next, opened by the rollover) are different rows —
@@ -9038,7 +9043,8 @@ CG.inGameWindowET = function(){
 CG.AUTOMATIONS = [
   /* window-aware: 20 minutes DURING the game window (Wed 18:00 - Sat 02:00 ET), where a dead
      poller means no scores all night; a day outside it, where not running is correct */
-  { key:"ea-poll", staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller",           every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET)", desc:"Pulls finished EA matches and writes scores + box scores." },
+  { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; calls EA only when a fixture is due", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves — pulls each linked club’s finished matches and hands them to the importer within about a minute of the final horn. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
+  { key:"ea-poll", staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET); stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
   { key:"twitch-live-sync", staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome", staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
