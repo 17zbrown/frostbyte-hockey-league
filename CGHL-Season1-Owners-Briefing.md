@@ -55,6 +55,8 @@ Pre-season carries its own standings. Those games count toward player ratings an
 
 **Build your board in advance.** It is private to your management group. If your clock runs out, the league takes the best available player off your own board, so an absent manager never costs the club a pick or lands someone you never ranked.
 
+**Re-signing your own players.** From the day free agency opens, any player on a deal in its final season can be extended — you offer from Team HQ (Roster), or he sends you his own number from his dashboard — 1 to 3 seasons, $250K steps. An accepted extension changes nothing this season: it starts with next season’s cap year and is checked against the space you will have then. Team HQ’s new **Cap outlook** shows this season and the next three. No other club can approach a player under contract until his deal has ended and free agency opens; after the rollover you still hold his rights until then, and a deal signed in that stretch is for the season under way and takes effect at once.
+
 **What a pick costs.** Draft salaries are set by round, not negotiated: round 14 pays the $750,000 league minimum and every round above it adds $250,000, so round 1 is $4,000,000. Every pick in a round costs the same — first overall and tenth overall are identical against the cap — and a full 14-pick class costs $33,250,000. With your GM and AGM at $3M each that is $39.25M of a $40M cap, so a club that uses every pick has $750K of room left before free agency. The same scale applies if your clock expires and the league picks off your board.
 
 **Your front office must be complete.** The draft will not start while any club is missing an Owner, GM or AGM. Fill your seats before draft night — the draft room shows which clubs are still short.

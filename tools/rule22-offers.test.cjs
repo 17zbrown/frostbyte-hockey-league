@@ -46,15 +46,19 @@ console.log("\n— the player decides, from his own dashboard");
     (live.match(/offers \+ CG\._mgmtDashboard\(mt\)/g)||[]).length === 1 &&
     /roster spot\.<\/p><\/div>'\+offers;/.test(live));
   A("accept / counter / decline are wired", /data-offer-accept/.test(live) && /data-offer-counter/.test(live) && /data-offer-deny/.test(live));
-  A("...through respond_offer, from both sides", (live.match(/rpc\("respond_offer"/g)||[]).length === 6);
+  /* seven since v2.34: accept/deny/counter on each side, plus the player withdrawing his own ask */
+  A("...through respond_offer, from both sides", (live.match(/rpc\("respond_offer"/g)||[]).length === 7);
   A("...and bound before the hub's sub-page early returns", /if \(CG\.wireOfferActions\) CG\.wireOfferActions\(\);\n  if \(param==="messages"\)/.test(live));
   /* v2.31 moved this guard from an inline ">= 0.75" check to the shared CG.salaryProblem(), which
      enforces the league minimum AND the $250K lattice (Rule 2.5). The rule this line exists to
      pin — a counter can never go below the minimum — is unchanged; only its mechanism moved. */
+  /* four since v2.34: offer, revise, counter, and the player's ask-to-re-sign — every negotiated
+     figure on the site goes through the one predicate */
   A("a counter cannot go below the league minimum, or land off the $250K lattice",
-    (live.match(/CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/g) || []).length === 3 &&
+    (live.match(/CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/g) || []).length === 4 &&
     !/Salary must be at least/.test(live));
-  A("the card says acceptance is the signing", /Accepting puts you on the club\\u2019s roster immediately/.test(live));
+  A("the card says acceptance of a free-agent offer is the signing", /Accepting a free-agent offer puts you on the club\\u2019s roster immediately/.test(live));
+  A("...and that an extension changes nothing this season", /Accepting an extension signs your next deal and changes nothing this season/.test(live));
 }
 
 console.log("\n— transactions staff can send a trade back");
@@ -95,7 +99,7 @@ console.log("\n— the negotiation has BOTH sides (adversarial review, 2026-08-2
   A("the club's outgoing offers load too", /\.eq\("from_team_id", myTid\)/.test(live));
   A("...into their own store", /CG\._clubOffers = club;/.test(live));
   A("turn ownership comes from last_actor, not status", /CG\.offerAwaitsClub = function\(o\)\{ return \(o\.last_actor\|\|"team"\) === "player"; \}/.test(live));
-  A("a countered offer reaches the club with his number", /He countered — your move/.test(live));
+  A("a countered offer reaches the club with his number", /His number — your move/.test(live));
   A("...and the club can accept his terms", /data-coffer-accept/.test(live) && /Accept his terms/.test(live));
   A("...revise", /data-coffer-counter/.test(live));
   A("...or walk away", /data-coffer-deny/.test(live));

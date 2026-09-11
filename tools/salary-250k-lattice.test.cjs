@@ -89,12 +89,15 @@ console.log("— the offer forms carry the lattice");
 {
   A("no salary input still steps by $0.05", !/step="0\.05"/.test(live));
   const steps = (live.match(/id="(faSal|coSal|ocSal)" type="number" min="0\.75" step="0\.25"/g) || []).length;
-  A("all three negotiation inputs step by $0.25", steps === 3, String(steps));
-  const guards = (live.match(/CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/g) || []).length;
-  A("...and all three validate through the shared predicate", guards === 3, String(guards));
+  A("all three original negotiation inputs step by $0.25", steps === 3, String(steps));
+  A("...and so do the two v2.34 inputs (ask to re-sign, extend)", /id="rsSal" type="number" min="0\.75" step="0\.25"/.test(live) && /id="exSal" type="number" min="0\.75" step="0\.25"/.test(R("src/live/part6_hub.js")));
+  const hubSrc = R("src/live/part6_hub.js");
+  const guards = (live.match(/CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/g) || []).length + (hubSrc.match(/CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/g) || []).length;
+  /* five negotiation forms since v2.34: offer, revise, counter and ask-to-re-sign in part_live.js, extend in part6_hub.js */
+  A("...and every negotiation form, in both files, validates through the shared predicate", guards === 5, String(guards));
   A("no form still accepts anything at or above $0.75M unchecked", !/if\(!\(v>=0\.75\)\)/.test(live));
   A("the captions tell managers about the step",
-    (live.match(/\$0\.25M steps \(Rule 2\.5\)/g) || []).length === 3);
+    (live.match(/\$0\.25M steps \(Rule 2\.5\)/g) || []).length === 4);
   A("rookie bidding is gone from the free-agent page (v2.33)",
     !/data-rookie-bid|place_rookie_bid|rookie_auctions|Rookie bidding board/.test(live));
   A("the draft room shows what the pick on the clock costs",

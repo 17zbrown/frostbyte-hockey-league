@@ -1386,6 +1386,26 @@ CG.hubRoster = function(qs){
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(payroll)+'</b><span>Active payroll</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px;color:'+(space<0?"var(--red)":"var(--green)")+'">'+CG.fmtMoney(space)+'</b><span>Cap space</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(CG.CAP)+'</b><span>Salary cap</span></div></div>';
+  /* v2.34 — the cap outlook: this season and the next three, from the same arithmetic every cap
+     check uses (team_cap_outlook), so what management plans against is what the guards enforce.
+     Filled in AFTER._roster; the placeholder keeps the page from jumping when it lands. */
+  h += '<div class="card" style="margin-bottom:20px" id="capOutlookCard"><div class="card-h"><h3>Cap outlook</h3><span class="chip">This season + 3</span></div>'+
+       '<div class="card-b" id="capOutlookBody"><p class="caption">Loading your commitments…</p></div></div>';
+  /* v2.34 — between the rollover and this season's free agency, the players whose deals just ended
+     are not on the roster but the club still holds their rights: they can be re-signed from here. */
+  var rightsHeld = [];
+  if (CG.extendableContractOf && lg._contractsRaw){
+    var tid = (lg._codeToId||{})[club], sn = (CG.SEASON && CG.SEASON.number) || 1, seen = {};
+    lg._contractsRaw.forEach(function(c){
+      if (c.team_id!==tid || c.status!=="expired" || c.is_manager || (c.end_season||1)!==sn-1 || seen[c.profile_id]) return;
+      /* the ONE predicate the Re-sign button relies on: rights still held, nothing real happened to
+         him this season, and he is not already re-signed — so the list never shows a button the
+         server would refuse */
+      var x = CG.extendableContractOf(c.profile_id); if (!x || x.id!==c.id) return;
+      if ((lg.byTeam[club]||[]).some(function(p){ return p.id===c.profile_id; })) return;
+      seen[c.profile_id] = 1; rightsHeld.push({ id:c.profile_id, tag:(lg._profName||{})[c.profile_id]||"a player", salary:c.salary, end:c.end_season });
+    });
+  }
   var rows = roster.map(function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
     var status = waived ? '<span class="chip chip-loss">Waived</span>'
@@ -1394,12 +1414,22 @@ CG.hubRoster = function(qs){
       : '<span class="chip chip-win">Active</span>';
     if (p.spotId && p.squad === "tc")
       status += ' <span class="chip chip-warn" title="Training camp — may dress in at most 3 games a week (Rule 2.1)">Camp</span>';
+    /* v2.34 — where his deal stands, and the one club-side move: extend, once the window is open */
+    var signedExt = CG.signedExtensionOf ? CG.signedExtensionOf(p.id) : null;
+    var expiring = !p.mgmt && CG.isExpiring && CG.isExpiring(p.id);
+    var openOffer = !p.mgmt && (CG._clubOffers||[]).filter(function(o){ return o.player_id===p.id && !o.immediate; })[0];
+    if (signedExt) status += ' <span class="chip chip-win" title="Re-signed — the new deal starts with next season’s cap year (Rule 2.5)">Signed thru S'+esc(String(signedExt.end_season))+'</span>';
+    else if (expiring) status += ' <span class="chip chip-warn" title="His contract ends after this season (Rule 2.2)">Final season</span>';
+    if (openOffer) status += ' <span class="chip chip-live" title="'+(CG.offerAwaitsClub(openOffer)?'His number is waiting for you on your dashboard':'Your offer is waiting on him')+'">'+(CG.offerAwaitsClub(openOffer)?'His ask':'Offer out')+'</span>';
+    var extRow = !p.mgmt && CG.extendableContractOf && CG.extendableContractOf(p.id);
+    var extBtn = (extRow && extRow.team_id === (lg._codeToId||{})[club])
+      ? '<button class="btn btn-chrome btn-sm" data-extend="'+p.id+'">Extend</button>' : '';
     var actions = p.mgmt
       ? '<span class="caption">Management contract — protected</span>'
       : (waived
         ? '<button class="btn btn-ghost btn-sm" data-reinstate="'+p.id+'">Reinstate</button>'
         : '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
-          squadBtn(p)+
+          extBtn+squadBtn(p)+
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
           '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
@@ -1482,10 +1512,40 @@ CG.hubRoster = function(qs){
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
     '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
+    (rightsHeld.length ? '<div class="card-b" style="border-top:1px solid var(--line)"><b style="font-family:var(--f-disp);display:block;margin-bottom:8px">Rights held until free agency opens</b>'+
+      '<p class="caption" style="margin-bottom:10px">Their deals ended with last season. Until this season’s free agency opens, only you can re-sign them — after that they are free agents (Rule 2.2).</p>'+
+      '<div class="stack" style="gap:8px">'+rightsHeld.map(function(r){
+        var oo = (CG._clubOffers||[]).filter(function(o){ return o.player_id===r.id && !o.immediate; })[0];
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1"><b>'+esc(r.tag)+'</b> <span class="caption">was '+CG.fmtMoney(r.salary)+' through Season '+r.end+'</span>'+(oo?' <span class="chip chip-live">'+(CG.offerAwaitsClub(oo)?'His ask':'Offer out')+'</span>':'')+'</span>'+
+          '<button class="btn btn-chrome btn-sm" data-extend="'+esc(r.id)+'">Re-sign</button></div>'; }).join("")+'</div></div>' : '')+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him to the free-agent pool immediately and clears his cap hit; any club may then sign him under the free-agency rules (Rule 2.2).</span></div></div>';
   return h;
 };
+CG.renderCapOutlook = function(rows){
+  var body = document.getElementById("capOutlookBody"); if (!body) return;
+  if (!rows || !rows.length){ body.innerHTML = '<p class="caption">No outlook yet — the season has no cap set.</p>'; return; }
+  var cols = rows.map(function(r){
+    var neg = r.space < 0, ending = r.deals.filter(function(d){ return d.final; });
+    return '<div class="kpi" style="cursor:default;align-items:stretch;text-align:left;padding:14px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-family:var(--f-disp)">Season '+r.season+'</b>'+(r.current?'<span class="chip chip-chrome">now</span>':'')+'</div>'+
+      '<b class="num" style="font-size:22px;color:'+(neg?"var(--red)":"var(--green)")+';margin-top:6px">'+CG.fmtMoney(r.space)+'</b><span>cap space</span>'+
+      '<div class="caption" style="margin-top:8px;line-height:1.5">'+CG.fmtMoney(r.committed)+' committed<br>'+r.deals.length+' player deal'+(r.deals.length===1?'':'s')+' · '+CG.fmtMoney(r.management)+' front office'+
+      (r.expiring_after>0?'<br><span style="color:var(--steel)">'+CG.fmtMoney(r.expiring_after)+' comes off after this season ('+ending.map(function(d){ return esc(d.name); }).join(", ")+')</span>':'')+'</div></div>';
+  }).join("");
+  body.innerHTML = '<div class="grid g4" style="gap:12px">'+cols+'</div>'+
+    '<p class="caption" style="margin-top:12px">Each season’s figure counts every deal signed for it — current contracts that run that far, extensions already signed, and the three front-office seats at their fixed values (Rule 2.6). A new deal that starts next season is checked against <b>next</b> season’s space, not this one’s: contracts turn over when a season’s free agency opens, and that is when what is coming off your books comes off (Rule 2.5).</p>';
+};
 CG.AFTER._roster = function(){
+  (function(){
+    var club = CG.myClub(), tid = ((CG.lg && CG.lg._codeToId) || {})[club];
+    if (!tid || !CG.sb || !document.getElementById("capOutlookBody")) return;
+    CG.sb.rpc("team_cap_outlook",{ p_team: tid }).then(function(r){
+      var body = document.getElementById("capOutlookBody"); if (!body) return;
+      if (r.error){ body.innerHTML = '<p class="small" style="color:var(--red)">Couldn’t load the outlook — '+esc(r.error.message)+'</p>'; return; }
+      CG._capOutlook = r.data || [];
+      CG.renderCapOutlook(CG._capOutlook);
+    });
+  })();
   $$("[data-trade]").forEach(function(b){ b.addEventListener("click", function(){
     location.hash = "#/hub/tradehub?add="+this.getAttribute("data-trade");
   }); });
@@ -1497,11 +1557,42 @@ CG.AFTER._roster = function(){
     CG.toast(on ? p.tag+" removed from the trade block" : p.tag+" listed on the trade block", "ok");
     CG.router();
   }); });
+  $$("[data-extend]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid = this.getAttribute("data-extend"), sn = (CG.SEASON && CG.SEASON.number) || 1;
+    var rights = !CG.contractOf(pid) && CG.rightsHeldContractOf(pid);
+    var target = rights ? sn : sn + 1;   /* a rights-held re-sign is for the season now under way */
+    var p = CG.playerById(CG.lg, pid) || (function(){ var rh = CG.rightsHeldContractOf(pid); return rh ? { tag:((CG.lg._profName||{})[pid]||"this player"), salary:rh.salary } : { tag:"this player", salary:750000 }; })();
+    var live = (CG._clubOffers||[]).filter(function(o){ return o.player_id===pid && !o.immediate; })[0];
+    CG.modal((CG.playerById(CG.lg, pid)?"Extend ":"Re-sign ")+esc(p.tag),
+      (live?'<div class="note" style="margin-bottom:12px">A negotiation with him is already open — '+(CG.offerAwaitsClub(live)?'his ask of '+CG.fmtMoney(live.salary)+' × '+live.years+' is waiting for you on your dashboard.':'your offer of '+CG.fmtMoney(live.salary)+' × '+live.years+' is waiting on him.')+' Sending a new offer replaces it.</div>':'')+
+      '<label class="fld"><span>Salary ($M per season)</span><input id="exSal" type="number" min="0.75" step="0.25" value="'+((p.salary||750000)/1e6).toFixed(2)+'"></label>'+
+      '<label class="fld"><span>Term (seasons)</span><select id="exYrs">'+[1,2,3].map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      '<label class="fld"><span>Note (optional)</span><input id="exNote" maxlength="200" placeholder="A word to go with the number"></label>'+
+      (function(){ var nx = (CG._capOutlook||[]).filter(function(r){ return r.season===target; })[0];
+        return nx ? '<div class="note" style="margin-bottom:12px">Season '+target+' space right now: <b>'+CG.fmtMoney(nx.space)+'</b> ('+CG.fmtMoney(nx.committed)+' already committed). This deal has to fit inside that.</div>' : ''; })()+
+      (rights
+        ? '<p class="caption">A deal for Season '+sn+' — the season now under way. His last deal ended and you hold his rights until free agency opens; the moment he accepts the deal takes effect and, once he is registered, he is seated on your roster. It is checked against this season’s cap. Salaries move in $0.25M steps (Rule 2.5).</p>'
+        : '<p class="caption">A new deal starting Season '+(sn+1)+'. He can accept, counter, or decline; nothing changes this season, and it is checked against next season’s cap alongside every deal already signed for it — the server refuses anything that would not fit. Salaries move in $0.25M steps (Rule 2.5).</p>'),
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="exGo">Send offer</button>');
+    document.getElementById("exGo").addEventListener("click", function(){
+      var v=parseFloat(document.getElementById("exSal").value), bad=CG.salaryProblem(Math.round(v*1e6));
+      if (bad){ CG.toast(bad,"err"); return; }
+      var y=parseInt(document.getElementById("exYrs").value,10)||1, note=(document.getElementById("exNote").value||"").trim()||null, btn=this; btn.disabled=true;
+      CG.sb.rpc("offer_extension",{ p_profile:pid, p_salary:Math.round(v*1e6), p_years:y, p_note:note }).then(function(r){
+        btn.disabled=false;
+        if (r.error){ CG.toast("Couldn’t offer: "+r.error.message,"err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast((rights?"Offer sent to ":"Extension offered to ")+p.tag+" — "+CG.fmtMoney(Math.round(v*1e6))+" × "+y+". He decides.","ok");
+        CG.loadMyOffers().then(function(){ if (CG.router) CG.router(); });
+      });
+    });
+  }); });
   $$("[data-waive]").forEach(function(b){ b.addEventListener("click", function(){
     var pid = this.getAttribute("data-waive"), p = CG.playerById(CG.lg, pid);
     if (CG.LIVE_MODE){
+      var sx = CG.signedExtensionOf ? CG.signedExtensionOf(pid) : null;
       CG.confirm("Waive "+p.tag+"?",
-        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and they return to the free-agent pool where any club can sign them (Rule 2.5). The move is logged for the whole league.",
+        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and they return to the free-agent pool where any club can sign them (Rule 2.5)."+(sx?" His signed extension through Season "+sx.end_season+" is voided with the waiver.":"")+" The move is logged for the whole league.",
         "Waive player", function(){
         CG.sb.rpc("waive_player",{ p_profile:pid }).then(function(r){
           if (r.error){ CG.toast("Couldn’t waive: "+r.error.message,"err"); return; }

@@ -35,7 +35,7 @@ A("...shown on the Build-the-board card too", /The draft cannot start yet<\/b> �
 console.log("— rookie bidding is gone");
 for (const id of ["0.6", "2.2", "2.5"]) A(`section ${id} no longer mentions rookie bidding`, !/rookie bidding/i.test(sec(id)));
 A("Rule 2.2 says free agency is for ended contracts, not rookies", /for players whose contracts have ended/.test(sec("2.2")) && /It is not for rookies/.test(sec("2.2")));
-A("...and states the exclusive re-signing window as a tampering rule with a start AND an end", /may negotiate only with the club that holds it, from the day that season's movement deadline passes until the free-agency period that FOLLOWS his contract's final season opens/.test(sec("2.2")) && /is tampering under the paragraph above/.test(sec("2.2")));
+A("...and states the exclusive re-signing window as a tampering rule with a start AND an end", /may negotiate only with the club that holds it — either side may open the conversation — at any point in that season, from the day its free agency opens until the free-agency period that FOLLOWS his contract's final season opens/.test(sec("2.2")) && /is tampering under the paragraph above/.test(sec("2.2")));
 A("...says the club's right survives the rollover", /survives the contract's expiry at the season rollover/.test(sec("2.2")));
 A("...and is honest that the Season 2 draft-or-free-agency path is still to be published", /published before that season's registration opens/.test(sec("2.2")));
 A("...leaving the restricted-free-agent rights sentences untouched", /His former club may match any offer made to him/.test(sec("2.2")));
@@ -63,8 +63,12 @@ A("...and so does a late sign-up's", /latecomer_random" \? "Placed by the league
 A("the free-agent page explains an empty board honestly", /Free agency is for players whose contracts have ended\. Undrafted players are placed on clubs automatically/.test(live));
 
 console.log("— the record and the briefings");
-A("the changelog records v2.33 first", rb.changelog[0].version === "2.33" && !!rb.changelog[0].dateIso);
-A("...naming all three rulings", /fourteen \(14\) rounds/.test(rb.changelog[0].summary) && /full front office/.test(rb.changelog[0].summary) && /Rookie bidding is abolished/.test(rb.changelog[0].summary) && /ten minutes after the draft concludes/.test(rb.changelog[0].summary) && /eighteen such contracts were closed/.test(rb.changelog[0].summary));
+{
+  const v233 = rb.changelog.find((c) => c.version === "2.33");
+  A("the changelog records v2.33", !!v233 && !!v233.dateIso);
+  A("...naming all three rulings", !!v233 && /fourteen \(14\) rounds/.test(v233.summary) && /full front office/.test(v233.summary) && /Rookie bidding is abolished/.test(v233.summary) && /ten minutes after the draft concludes/.test(v233.summary) && /eighteen such contracts were closed/.test(v233.summary));
+  A("...and the newest entry sits first", rb.changelog[0].version >= "2.33", rb.changelog[0].version);
+}
 for (const f of ["CGHL-Season1-Owners-Briefing.md", "CGHL-Season1-Owners-Briefing-DISCORD.txt"]) {
   const b = R(f);
   A(`${f}: 14 rounds`, /^14 rounds, the same club order/m.test(b) && !/^10 rounds,/m.test(b));

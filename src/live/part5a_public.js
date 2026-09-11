@@ -2371,13 +2371,16 @@ CG.ROUTES.player = function(pid, qs){
     body += '<div class="grid g23"><div>'+ leftTop +preCard+advCard+'</div>'+
       '<div class="stack">'+sideCard+(archived?"":
         '<div class="card"><div class="card-h"><h3>Contract</h3>'+
-        (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
+        (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>'
+               :(CG.signedExtensionOf&&CG.signedExtensionOf(p.id))?'<span class="chip chip-win">Signed thru S'+esc(String(CG.signedExtensionOf(p.id).end_season))+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
         '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
           '<div><b class="num" style="font-size:22px">'+CG.fmtMoney(p.salary)+'</b><span class="caption" style="display:block">Cap hit</span></div>'+
           '<div><b class="num" style="font-size:22px">'+p.term+' yr'+(p.term>1?"s":"")+'</b><span class="caption" style="display:block">Term remaining</span></div></div>'+
         '<p class="caption" style="margin-top:12px">'+(p.mgmt
           ? "Management contracts (Owner, GM, AGM) carry a fixed cap value and are protected from waivers and trades (Rule 2.6)."
-          : "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. Contracts run one to three seasons; expiring deals return to free agency (Rule 2.5).")+'</p>'+
+          : (CG.signedExtensionOf&&CG.signedExtensionOf(p.id))
+            ? "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. He has re-signed: "+CG.fmtMoney(CG.signedExtensionOf(p.id).salary)+" a season from Season "+CG.signedExtensionOf(p.id).start_season+" through Season "+CG.signedExtensionOf(p.id).end_season+", in force with that season’s cap year (Rule 2.5)."
+            : "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. Contracts run one to three seasons; a deal in its final season may be extended by the club that holds it, and one that ends returns the player to free agency (Rule 2.5).")+'</p>'+
         '</div></div>')+CG.broadcastCard(p)+'</div></div>';
   }
   if (tab==="log"){

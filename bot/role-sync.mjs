@@ -156,7 +156,7 @@ export function createRoleSyncer(env, opts = {}) {
         const onRosterNow = (allSpots || []).some((r) => r.season_id === curId);
         const dp = await sbGet(`draft_picks?player_id=eq.${encodeURIComponent(profileId)}&select=season_number`);
         const draftedBefore = (dp || []).some((d) => (d.season_number || 0) < curNum);
-        const cts = await sbGet(`contracts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=is_manager,start_season,end_season`);
+        const cts = await sbGet(`contracts?profile_id=eq.${encodeURIComponent(profileId)}&status=in.(active,signed)&select=is_manager,start_season,end_season`);
         const underContract = (cts || []).some((c) => !c.is_manager && (c.start_season || 1) <= curNum && (c.end_season || 1) >= curNum);
         isRookie = priorSeasons.size === 0 && !draftedBefore;
         isRfa = priorSeasons.size > 0 && priorSeasons.size < C.rfaYears && !onRosterNow && !underContract;

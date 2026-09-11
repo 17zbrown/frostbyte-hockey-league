@@ -1673,7 +1673,8 @@ export default async (req) => {
     const onRosterNow = new Set();
     if (curId) for (const r of await sbGet(`roster_spots?season_id=eq.${curId}&select=profile_id`)) onRosterNow.add(r.profile_id);
     const underContract = new Set();
-    for (const c of await sbGet(`contracts?status=eq.active&select=profile_id,is_manager,start_season,end_season`)) {
+    // a deal SIGNED for this season (an extension from last season's window, v2.34) holds the player as an active one does
+    for (const c of await sbGet(`contracts?status=in.(active,signed)&select=profile_id,is_manager,start_season,end_season`)) {
       if (c.is_manager) continue;
       if ((c.start_season || 1) <= curNum && (c.end_season || 1) >= curNum) underContract.add(c.profile_id);
     }
