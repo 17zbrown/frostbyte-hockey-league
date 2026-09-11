@@ -543,7 +543,7 @@ CG.buildLiveLeague = async function(){
   lg.isVeteran = function(pid){ return !!(draftedEver[pid] || priorSeason[pid] || (careerGp[pid]||0)>=5); };
   /* returning (FREE-AGENCY track, Rule 2.2) = actually been in the league before (drafted or
      rostered a prior season). This is what separates open free agency (returning players) from
-     rookie bidding (undrafted FIRST-years). */
+     post-draft placement (undrafted first-years are placed on clubs, never auctioned). */
   lg.isReturning = function(pid){ return !!(draftedEver[pid] || priorSeason[pid]); };
   /* A rookie is simply a player who has NOT been here before. This was hardcoded false on every
      roster row (see the player mapper above), so the "R" chip, the rookie filter on #/players and
@@ -799,32 +799,32 @@ CG.computeRole = function(profile){
   if (profile.role === "staff") return "staff";
   return "member";
 };
-/* What the profile's Discord fields SHOULD be, given who just signed in — or null when nothing
-   needs to change. handle_new_user writes discord_id once, at first-ever sign-in, and nothing
-   refreshed it after that: a member who moved to a new Discord account (or linked one) kept their
-   OLD id on file, so the guild sweep decorated the old account forever. The freshest identity —
-   by last_sign_in_at — is the one the member is actually using.
+/* What the profile's Discord NAME and AVATAR should be — or null when nothing needs to change.
+   WHICH account the league follows is decided in exactly one place: switch_discord_account(),
+   from Settings (v2.33). This function never proposes discord_id. It used to — "follow the
+   freshest sign-in" — and that fought the member's choice: after switching to account B, one
+   sign-in with A would propose A again, the column guard would silently revert it, and the
+   client would toast "now linked" on a write that changed nothing. Now: if profiles.discord_id
+   is one of this login's identities, THAT identity is the account, and its name and avatar are
+   what the profile tracks; the freshest identity is used only when no account is on file.
    Pure decision, separated from the write so it can be tested. */
 CG.discordIdentityPatch = function(user, profile){
   if (!user || !profile) return null;
   var ids = (user.identities || []).filter(function(i){ return i.provider === "discord"; });
   if (!ids.length) return null;
-  var cur = ids.slice().sort(function(a,b){
-    return Date.parse(b.last_sign_in_at||0) - Date.parse(a.last_sign_in_at||0); })[0];
-  var d = cur.identity_data || {};
-  var newId = d.provider_id || d.sub || cur.id || null;
-  if (!newId) return null;
+  var idOf = function(i){ var dd = i.identity_data || {}; return String(dd.provider_id || dd.sub || i.id || ""); };
   /* A discord_id that belongs to NONE of this user's identities was pinned by the league office —
      e.g. a member whose in-server Discord differs from the one their site login uses (three-account
      tangles are real). A pin is an override, not staleness: leave it. The moment the pinned account
      is linked or signs in it becomes an identity and normal refresh resumes. */
-  var knownIds = ids.map(function(i){
-    var dd = i.identity_data || {}; return String(dd.provider_id || dd.sub || i.id || ""); });
-  if (profile.discord_id && knownIds.indexOf(String(profile.discord_id)) < 0) return null;
+  var chosen = profile.discord_id ? ids.filter(function(i){ return idOf(i) === String(profile.discord_id); })[0] : null;
+  if (profile.discord_id && !chosen) return null;
+  var cur = chosen || ids.slice().sort(function(a,b){
+    return Date.parse(b.last_sign_in_at||0) - Date.parse(a.last_sign_in_at||0); })[0];
+  var d = cur.identity_data || {};
   var newName = d.custom_claims && d.custom_claims.global_name || d.full_name || d.name ||
                 d.user_name || d.preferred_username || null;
   var patch = {};
-  if (String(profile.discord_id||"") !== String(newId)) patch.discord_id = String(newId);
   if (newName && profile.discord_username !== newName) patch.discord_username = newName;
   /* avatar follows the new account too — but never clobber a custom (supabase-hosted) picture */
   var av = d.avatar_url || null;
@@ -865,8 +865,8 @@ CG.applySession = async function(session, quiet){
     else if (CG.toast) CG.toast("Couldn’t reach your account just now — showing what we last had.","err");
     CG.auth.registration = mine[1];
     CG.auth.staffApp = mine[2]; CG.auth.ownerApp = mine[3];
-    /* keep the profile's Discord fields matched to the account actually signed in — this is what
-       moves a member's league identity to their NEW Discord after a link or account switch */
+    /* keep the profile's Discord name and avatar matched to the account the league follows.
+       Which account that IS changes only through switch_discord_account (Settings, v2.33). */
     var idPatch = CG.discordIdentityPatch(CG.auth.user, CG.auth.profile);
     if (idPatch){
       try {
@@ -875,7 +875,6 @@ CG.applySession = async function(session, quiet){
           Object.assign(CG.auth.profile, idPatch);
           CG._idPatchFailedFp = null;
           if (CG.pingDiscordSync) CG.pingDiscordSync();   /* guild follows within seconds */
-          if (idPatch.discord_id) CG.toast("Your new Discord account is now linked — Discord roles follow in a couple of minutes","ok");
         } else if (pr && (pr.error || !(pr.data||[]).length)){
           /* remembered so the auth handler stops forcing loud re-runs for a patch that
              will just be refused again on the next event */
@@ -1891,7 +1890,7 @@ CG.ROUTES.signin = function(){
         '<a class="btn btn-chrome" href="'+(CG.role()==="commish"?"#/admin":"#/hub")+'">'+(CG.role()==="commish"?"Control Center":"My dashboard")+'</a>'+
         '<button class="btn btn-ghost" onclick="CG.signOut()">Sign out</button></div>'+
       '<div class="card" style="margin-top:26px;text-align:left"><div class="card-h"><h3>Switched to a new Discord account?</h3></div>'+
-        '<div class="card-b"><p class="small" style="color:var(--steel)">Link it here and your league account follows you — history, roster spot, stats, everything. Your name and roles in the league Discord update within a couple of minutes.</p>'+
+        '<div class="card-b"><p class="small" style="color:var(--steel)">Link it here and the league switches to it — history, roster spot, stats, everything stay with you. You’ll land on your Settings page, where it takes effect; your Discord roles follow within a couple of minutes once that account is in the server.</p>'+
         '<button class="btn btn-ghost btn-sm" id="dcLink" style="margin-top:12px">'+CG.DISCORD_GLYPH+'Link a new Discord account</button>'+
         '<p class="caption" id="dcLinkMsg" style="margin-top:8px">Discord opens in this browser — make sure it’s signed into the NEW account there (use “Not you?” on Discord’s page if it shows the old one).</p></div></div></div></section>';
   }
@@ -1926,11 +1925,16 @@ CG.AFTER.signin = function(){
   if (lk) lk.addEventListener("click", function(){
     if (!CG.sb || !CG.sb.auth || !CG.sb.auth.linkIdentity){ CG.toast("Not connected — reload and retry","err"); return; }
     lk.disabled = true;
-    try { localStorage.setItem("cg_return", JSON.stringify({ h:"#/signin", at:Date.now() })); } catch(e){}
+    /* same stash as the Settings card: come back to Settings and switch to the account just
+       linked. Before v2.33 this returned to #/signin and only refreshed name/avatar — the league
+       kept following the old account, which is the very thing the member came here to change. */
+    try { localStorage.setItem("cg_return", JSON.stringify({ h:"#/hub/settings", at:Date.now() }));
+          localStorage.setItem("cg_dc_switch", JSON.stringify({ at:Date.now() })); } catch(e){}
     CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } })
       .then(function(r){
         if (r && r.error){
           lk.disabled = false;
+          try { localStorage.removeItem("cg_dc_switch"); } catch(e){}
           var m = document.getElementById("dcLinkMsg");
           /* fail-loud, verbatim: "manual linking disabled" here means the Supabase project setting
              (Authentication → Sign-in methods → "Allow manual linking") needs turning on */
@@ -3229,7 +3233,7 @@ CG.STAFF_DEPARTMENTS = [
   ["applications","Review Board","Cast the deciding vote on owner, GM, AGM, and staff applications"],
   ["officiating","Officials","Rule on game-night disputes, forfeits, and calls"],
   ["operations","Operations","Run the schedule — reschedules, game codes, and no-show follow-up"],
-  ["draft","Draft Room","Run draft night and the free-agency bidding board"],
+  ["draft","Draft Room","Run draft night"],
   ["transactions","Transactions","Review trades, waivers, and cap & contract compliance"],
   ["community","Community","Moderate Discord, welcome new members, and onboarding"],
   ["statistics","Statistics","Spot-check the EA imports and keep the record book"],
@@ -3535,6 +3539,15 @@ CG.ROUTES.draft = function(){
   return head + '<div class="shell" style="padding-bottom:48px">'+clockBox+ticker+summary+
     '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
+/* Rule 2.8 (v2.33): the draft will not start while any club is short an Owner, GM or AGM. The
+   database is the gate (start_draft asks draft_management_gaps()); this mirrors it from the seats
+   already loaded so the page can say WHO is short before the button is pressed, not after. */
+CG.draftSeatGaps = function(){
+  return (CG.TEAMS||[]).map(function(t){
+    var m=[]; if(!t.owner) m.push("Owner"); if(!t.gm) m.push("GM"); if(!t.agm) m.push("AGM");
+    return m.length ? { code:t.code, name:t.name, missing:m } : null;
+  }).filter(Boolean);
+};
 CG._draftSeason = function(){ return (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number) || 1; };
 CG.refreshDraft = function(){ if(!CG.sb) return;
   var role = CG.auth.role;
@@ -3544,9 +3557,21 @@ CG.refreshDraft = function(){ if(!CG.sb) return;
   }); };
 CG.draftStart = function(){
   var el=document.getElementById("draftSecs"), secs=el?(parseInt(el.value,10)||120):120, sn=CG._draftSeason();
-  CG.confirm("Start the live draft?","This puts the first club on the clock — the order was locked when the board was generated and holds every round. Clubs draft their own picks; you run the clock.","Start draft", function(){
-    CG.sb.rpc("start_draft",{ p_season_number:sn, p_pick_seconds:secs }).then(function(r){
-      if(r.error) CG.toast("Couldn’t start: "+r.error.message,"err"); else { CG.toast("The draft is live","ok"); CG.refreshDraft(); }
+  /* ask the database, not the cached seats — a seat filled thirty seconds ago must count */
+  CG.sb.rpc("draft_management_gaps").then(function(g){
+    var gaps=(g&&!g.error&&Array.isArray(g.data))?g.data:CG.draftSeatGaps();
+    if (gaps.length){
+      CG.modal("The draft can’t start yet",
+        '<p>Every club needs an Owner, a GM and an AGM before the draft begins (Rule 2.8). Still open:</p><ul>'+
+        gaps.map(function(x){ return '<li><b>'+esc(x.code)+'</b> — '+esc((x.missing||[]).join(", "))+'</li>'; }).join("")+
+        '</ul><p class="caption">Seat them under Teams, then come back. The server refuses to start regardless of this check.</p>',
+        '<button class="btn btn-chrome" data-close>OK</button>');
+      return;
+    }
+    CG.confirm("Start the live draft?","This puts the first club on the clock — the order was locked when the board was generated and holds every round. Clubs draft their own picks; you run the clock.","Start draft", function(){
+      CG.sb.rpc("start_draft",{ p_season_number:sn, p_pick_seconds:secs }).then(function(r){
+        if(r.error) CG.toast("Couldn’t start: "+r.error.message,"err"); else { CG.toast("The draft is live","ok"); CG.refreshDraft(); }
+      });
     });
   });
 };
@@ -4195,6 +4220,7 @@ CG.admDraftLive = function(){
     var meta = st && st.order_meta;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
       (meta?'<span class="chip chip-win">'+(meta.fallback?'order set — random draw (no prior season)':'order set — '+esc(CG.dStyleName(meta)))+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
+      (function(){ var g=CG.draftSeatGaps(); return g.length ? '<div class="note" style="margin-bottom:14px"><b>The draft cannot start yet</b> — every club needs an Owner, GM and AGM (Rule 2.8). Still open: '+g.map(function(x){ return esc(x.code)+' ('+x.missing.join(", ")+')'; }).join("; ")+'.</div>' : ''; })()+
       '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
       CG.DRAFT_STYLES.map(function(s){
         var on = s[0]===(CG._dStyle||(meta&&meta.style)||"nhl_lottery");
@@ -4231,7 +4257,7 @@ CG.admDraftLive = function(){
       (running&&cur?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
         '<b style="font-family:var(--f-disp)">'+esc(CG.TEAM[cur.ownerCode]?CG.TEAM[cur.ownerCode].name:cur.ownerCode)+' are on the clock</b><span class="caption">R'+cur.round+' · #'+cur.overall+' overall</span>'+
         '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-openpick="'+cur.id+'">Pick on their behalf</button></div>':"")+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the league auto-drafts from the club’s own board (best available), then best-rated eligible player. Skipped picks stay recoverable — clubs use them from Team HQ, or you can from the table below. Concluding releases every unused pick; undrafted players go to free agency and rookie bidding.</span></div></div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the league auto-drafts from the club’s own board (best available), then best-rated eligible player. Skipped picks stay recoverable — clubs use them from Team HQ, or you can from the table below. Concluding releases every unused pick; ten minutes later everyone still without a club is placed on one automatically (Rule 2.8).</span></div></div>';
   }
 
   /* FULL BOARD */
@@ -4905,7 +4931,9 @@ CG.AFTER.messages = function(param){
    · Signed up   — registered, unrostered, and the draft hasn't happened yet (a prospect in the
                    draft pool — this is what most "10 free agents" actually are). NOT a free agent.
    · Free agent  — POST-draft returning veteran, unrostered, signable in open free agency (Rule 2.2).
-   · Undrafted FA — POST-draft first-year who went undrafted → rookie bidding board (Rule 2.2).
+   · Awaiting placement — POST-draft, undrafted or short of five games: placed on a club by the
+                    league office ten minutes after the draft concludes (Rule 2.8, v2.33). Never a
+                    free agent — free agency is for players whose contracts have ended.
                     (v2.22: Rule 2.8 restored the five-game pre-season requirement, so an unmet one shows as its own state.)
    · Declined / Not signed up — kept out of assignment / no registration. */
 /* Rule 2.8 (v2.22): the pre-season appearance requirement, mirrored from the database's
@@ -4915,6 +4943,12 @@ CG.AFTER.messages = function(param){
    spot, so they are out of the pool entirely. */
 CG.PRESEASON_MIN_GP = 5;
 CG.isDraftEligible = function(pid){
+  /* Rule 2.8 P3, first test (v2.33): only a registration filed by the draft-eligibility deadline is
+     ever in the pool, however many pre-season games its owner plays. Mirrors the database's
+     is_draft_eligible(), which now checks this before anything else. */
+  var _reg = ((CG.lg && CG.lg._registrationsRaw) || []).find(function(r){ return r.profile_id===pid && r.status!=="declined"; });
+  var _dl = CG.SEASON && (CG.SEASON.signup_deadline_at || CG.SEASON.registration_deadline);
+  if (_reg && _dl && _reg.created_at && Date.parse(_reg.created_at) > Date.parse(_dl)) return false;
   var lg = CG.lg || {};
   if (lg.isVeteran && lg.isVeteran(pid)) return true;
   return ((((lg.preGp||{})[pid])||{}).gp || 0) >= CG.PRESEASON_MIN_GP;
@@ -4948,7 +4982,7 @@ CG.poolState = function(pid){
   if (served > 0 && served < CG.rfaOffseasons())
     return { key:"rfa", label:"Restricted free agent", chip:"chip-warn" };
   if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
-  return { key:"undrafted_fa", label:"Undrafted FA", chip:"chip-warn" };   /* v2.7: no minimum, no ineligible class */
+  return { key:"undrafted_fa", label:"Awaiting placement", chip:"chip-warn" };   /* v2.33: placed automatically ten minutes after the draft (Rule 2.8) */
 };
 /* how many off-seasons of service a player must accrue before his rights stop being held.
    A setting, so the office can move the line without a deploy (Rule 2.2). */
@@ -4988,21 +5022,21 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs five pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Free agency runs a full week; puck drop waits for it to close.</p></div>'
+      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs five pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. Free agency runs a full week for players whose contracts have ended; puck drop waits for it to close.</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions (pool + dl are defined once near the top of this function) */
   var randomN = (lg.players||[]).filter(function(p){ return p.origin==="preseason_random"; }).length;
-  var rookies = pool.filter(function(r){ return !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5; });
+  var rookies = pool;   /* v2.33: post-draft placement takes EVERYONE still without a club, not only the short-of-five */
   var lateN = pool.filter(function(r){ return dl && r.created_at && Date.parse(r.created_at) > Date.parse(dl); }).length;
   h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pre-season lifecycle</h3></div><div class="card-b">'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
     '<button class="btn btn-chrome" id="preAssignAll"'+(pool.length?"":" disabled")+'>Randomly assign unrostered ('+pool.length+')</button>'+
     '<button class="btn btn-ghost" id="preReleaseNow"'+(randomN?"":" disabled")+'>Release random assignments ('+randomN+')</button>'+
-    '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Distribute unproven rookies ('+rookies.length+')</button>'+
+    '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Place everyone unplaced ('+rookies.length+')</button>'+
     '<button class="btn btn-ghost" id="preLatecomers"'+(lateN?"":" disabled")+'>Assign late sign-ups ('+lateN+')</button></div>'+
     '<p class="caption" style="margin-top:12px">Randomly assign spreads every unrostered registration evenly across the clubs (management counts toward the split). '+
-    'Release runs automatically after the final pre-season game; rookie placement runs automatically ten minutes after the draft’s final pick. '+
+    'Release runs automatically after the final pre-season game; post-draft placement runs automatically ten minutes after the draft concludes and seats everyone still without a club at the league minimum. '+
     'The sign-up deadline is a draft-eligibility cutoff, not a hard close — anyone registering after it (and anyone joining mid-season) is placed on a club with an open spot automatically. These buttons are manual overrides.</p></div></div>';
 
   var sortedRegs=regs.slice().sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
@@ -5053,7 +5087,7 @@ CG.admPreseason = function(){
           '<td class="tright reg-act">'+actions+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (returning veteran) or <b>Undrafted FA</b> (first-year → rookie bidding). A randomly assigned player needs five pre-season appearances to reach the draft (Rule 2.8); returning players are exempt, and anyone short is placed on a club automatically instead. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (a returning player whose contract has ended) or <b>Awaiting placement</b> (undrafted — placed on a club automatically ten minutes after the draft). A randomly assigned player needs five pre-season appearances to reach the draft (Rule 2.8); returning players are exempt, and anyone short is placed on a club automatically instead. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
   /* Road to 5 (Rule 2.8): the office's obligation-tracker — which clubs are leaving randomly
      assigned players short of draft eligibility. Only alive while the pre-season is deciding it. */
@@ -5466,16 +5500,16 @@ CG.distributeRookies = function(){
   var rosteredIds=lg._rosteredIds||{};
   var rookies=(lg._registrationsRaw||[]).filter(function(r){
     return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined" &&
-      !lg.isVeteran(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) < 5;
+      true;   /* v2.33: everyone still without a club, drafted-around or short of five games alike */
   });
-  if (!rookies.length){ CG.toast("No unproven rookies to place","err"); return; }
-  CG.confirm("Distribute "+rookies.length+" unproven rookies now?",
-    "Currently a stamped no-op. Rulebook v2.22 restored the five-game pre-season requirement (Rule 2.8), so this job's placement role is under review by the league office. "+
-    "Running it is harmless and simply re-verifies that nothing needs placing.",
-    "Distribute rookies", function(){
+  if (!rookies.length){ CG.toast("Everyone registered is already on a club","err"); return; }
+  CG.confirm("Place "+rookies.length+" unplaced player"+(rookies.length===1?"":"s")+" now?",
+    "Every registered player still without a club goes to a club with room at his position, at the league minimum, in random order — no club chooses (Rule 2.8). "+
+    "This runs on its own ten minutes after the draft concludes; the button forces it now. Anyone who cannot be seated is reported to the office.",
+    "Place them", function(){
     CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
       if (r.error){ CG.toast("Couldn’t place: "+r.error.message,"err"); return; }
-      CG.toast((r.data||0)+" rookie"+((r.data||0)===1?"":"s")+" placed on random clubs","ok"); CG.reloadLeague();
+      CG.toast((r.data||0)+" player"+((r.data||0)===1?"":"s")+" placed on clubs","ok"); CG.reloadLeague();
     });
   });
 };
@@ -8839,7 +8873,7 @@ CG.AUTOMATIONS = [
   { key:"discord-scheduler", staleAfterMin:20,name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
   { key:"lfg-timers", staleAfterMin:15,       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
   { key:"gateway-bot",      name:"Gateway bot (always on)",   every:"Continuously, from its own server", desc:"A live Discord connection — welcomes and departure logs land in about a second instead of on the next sweep. The sweeps above stay on as its safety net, so “never ran” here just means the bot’s server isn’t set up yet.", noRun:true },
-  { key:"rookie-distribution", staleAfterMin:15, name:"Rookie placement",       every:"Every 2 min inside the database", desc:"A stamped no-op today. Rulebook v2.22 restored the five-game pre-season requirement (Rule 2.8), so whether this job places short-of-five players again is a league-office decision.", rpc:"distribute_unproven_rookies" },
+  { key:"rookie-distribution", staleAfterMin:15, name:"Post-draft placement",   every:"Every 2 min inside the database", desc:"Ten minutes after the draft concludes, places every registered player still without a club — the draft’s leftovers and anyone short of five pre-season games — at the league minimum, in random order (Rule 2.8). Reports anyone it cannot seat.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", staleAfterMin:20, name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
   { key:"latecomer-assign", staleAfterMin:20, name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
   { key:"contract-enforcement", staleAfterMin:45, name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
@@ -9407,7 +9441,7 @@ CG.roadAheadCard = function(s, opts){
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
     [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
-    [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with five pre-season appearances (Rule 2.8). Undrafted players go to free agency and rookie bidding."],
+    [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with five pre-season appearances (Rule 2.8). Undrafted players are placed on clubs automatically ten minutes after it concludes."],
     [s.free_agency_opens_at, "Free agency opens", "A one-week window where clubs sign the remaining free agents at negotiated salaries."],
     [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
   ].filter(function(st){ return st[0]; });
@@ -11021,6 +11055,7 @@ CG.AFTER.hub = function(param, qs){
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var clEa=document.getElementById("clEaBtn"); if(clEa) clEa.addEventListener("click", CG.promptEaId);   /* the Get-set-up checklist's EA button */
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
+  if (document.getElementById("dcAcctCard")) CG.loadDiscordAccounts();
   var sl=document.getElementById("sSaveLive");
   if (sl) sl.addEventListener("click", function(){
     var ea=(document.getElementById("sEaLive").value||"").trim(), plat=document.getElementById("sPlatLive").value;
@@ -11035,6 +11070,93 @@ CG.AFTER.hub = function(param, qs){
   if (CG._origHubAfter) CG._origHubAfter(param, qs);
 };
 CG._wrapHubDashboard();   /* part6 is loaded by now — install the onboarding dashboard */
+
+/* ---- Discord account switching (member settings, v2.33) ----
+   A member with a new Discord links it here and the league follows it: site roles move the
+   moment the switch lands, and the server catches up on its own — the bot re-syncs this one
+   member within seconds, the two-minute sweep gives the new account its roles (or notes it is
+   not in the server yet and waits), and the same sweep strips the old account, which is now
+   simply an unlinked guild member.
+   The DATABASE decides whether a switch is allowed: switch_discord_account() accepts only an id
+   that appears among this login's own Discord identities, so nobody inherits someone else's
+   roles by posting their id. Until now a member could not do this at all — profiles.discord_id
+   is column-guarded, so a linked second account never took effect without the office editing
+   the row by hand. */
+CG.loadDiscordAccounts = function(){
+  var body=document.getElementById("dcAcctBody"); if(!body||!CG.sb) return;
+  CG.sb.rpc("my_discord_accounts").then(function(r){
+    if (r.error){ body.innerHTML='<p class="small" style="color:var(--red)">Couldn’t load your Discord accounts — '+esc(r.error.message)+'</p>'; return; }
+    var d=r.data||{}, accts=d.accounts||[], cur=String(d.current||"");
+    /* back from "Link a different account": the identity linked in the last few minutes that
+       isn't the current one is the account they just proved they own — switch without making
+       them hunt for a second button. The flag is consumed on read so a refresh can't repeat it. */
+    var want=false, since=0; try{ var f=localStorage.getItem("cg_dc_switch"); if(f){ localStorage.removeItem("cg_dc_switch"); var o=JSON.parse(f); since=(o&&o.at)||0; want=!!(since && Date.now()-since < 10*60000); } }catch(e){}
+    if (want){
+      /* only an identity linked AFTER this flag was set — an older linked account is never
+         switched to just because a later link was abandoned on Discord's page */
+      var fresh=accts.filter(function(a){ return String(a.discord_id)!==cur && a.linked_at && Date.parse(a.linked_at) >= since - 60000; })
+        .sort(function(a,b){ return Date.parse(b.linked_at)-Date.parse(a.linked_at); })[0];
+      if (fresh){ CG.switchDiscordAccount(fresh.discord_id, fresh.username||"your new account"); return; }
+    }
+    CG.renderDiscordAccounts(d);
+  }, function(e){ body.innerHTML='<p class="small" style="color:var(--red)">Couldn’t load — '+esc(String((e&&e.message)||e))+'</p>'; });
+};
+CG.renderDiscordAccounts = function(d){
+  var body=document.getElementById("dcAcctBody"), chip=document.getElementById("dcAcctChip"); if(!body) return;
+  var accts=d.accounts||[], cur=String(d.current||""), inGuild=!!d.in_guild;
+  var curA=accts.filter(function(a){ return String(a.discord_id)===cur; })[0];
+  var others=accts.filter(function(a){ return String(a.discord_id)!==cur; });
+  if (chip){ chip.textContent = inGuild ? "In the server" : "Not in the server yet"; chip.className = "chip "+(inGuild?"chip-win":"chip-loss"); }
+  var h='<p class="small" style="color:var(--steel)">The league follows <b>'+esc((curA&&curA.username)||(CG.auth.profile&&CG.auth.profile.discord_username)||"this account")+'</b>'+(cur?' <span class="caption">('+esc(cur)+')</span>':'')+'.</p>';
+  var invite=d.invite||(CG._siteCfg&&CG._siteCfg.discord_invite)||null;
+  /* Auto-join is retired (sign-in asks Discord for `identify` only), so the member joins the
+     server themselves — the same invite + re-check the register page uses. This has to be loud:
+     Rule 1.1 withdraws a pending sign-up after about a day out of the server, and a member who
+     switches to an account that never joins is exactly the case that clock was built for. */
+  if (!inGuild) h+='<div class="note red" style="margin-top:10px"><b>This account isn’t in the league Discord yet.</b> Your site roles have moved to it, but Discord roles can’t follow until it joins the server'+
+     ' — and a pending sign-up is withdrawn after about a day out of the server (Rule 1.1), so join now.'+
+     '<div style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
+     (invite?'<a class="btn btn-sm" style="background:#5865F2;color:#fff" href="'+esc(invite)+'" target="_blank" rel="noopener">Join the server with this account</a>':'<span class="caption">Ask a commissioner for the invite.</span>')+
+     '<button class="btn btn-ghost btn-sm" id="dcRecheck">I’ve joined — re-check</button></div></div>';
+  if (others.length) h+='<div style="margin-top:12px"><span class="caption">Other Discord accounts linked to this login</span>'+others.map(function(a){
+      return '<div style="display:flex;align-items:center;gap:10px;margin-top:8px"><span style="flex:1"><b>'+esc(a.username||"Discord account")+'</b> <span class="caption">('+esc(String(a.discord_id))+')</span></span>'+
+        '<button class="btn btn-ghost btn-sm" data-dc-use="'+esc(String(a.discord_id))+'" data-name="'+esc(a.username||"")+'">Use this account</button></div>'; }).join("")+'</div>';
+  h+='<div style="margin-top:14px"><button class="btn btn-ink btn-sm" id="dcLinkNew">'+CG.ic("plus",14)+'Link a different Discord account</button>'+
+     '<p class="caption" style="margin-top:8px">Made a new Discord, or want the league on a different one? Link it and the league switches to it: your site roles move immediately, your server roles follow within a couple of minutes once that account is in the server, and the old account’s league roles come off in the same sweep. Your league name follows the new account’s Discord display name, so set its server nickname first. On Discord’s page make sure it’s the <b>new</b> account that’s signed in (log out at discord.com first if it isn’t).</p><p class="caption" id="dcLinkMsg2"></p></div>';
+  body.innerHTML=h;
+  body.querySelectorAll("[data-dc-use]").forEach(function(b){ b.addEventListener("click", function(){ CG.switchDiscordAccount(this.getAttribute("data-dc-use"), this.getAttribute("data-name")); }); });
+  var rc=document.getElementById("dcRecheck");
+  if (rc) rc.addEventListener("click", function(){
+    var btn=this; btn.disabled=true; btn.textContent="Checking…";
+    /* my_discord_accounts reads presence from the bot's guild_members row, so a join shows within seconds */
+    CG.sb.rpc("my_discord_accounts").then(function(r){
+      var dd=(r&&r.data)||{};
+      if (!r.error && dd.in_guild){ if(CG.auth&&CG.auth.profile) CG.auth.profile.in_guild=true; CG.toast("You’re in — your Discord roles follow within a couple of minutes","ok"); if (CG.pingDiscordSync) CG.pingDiscordSync(); CG.renderDiscordAccounts(dd); }
+      else { btn.disabled=false; btn.textContent="I’ve joined — re-check"; CG.toast("Not seeing that account in the server yet — make sure you joined with the account the league follows","err"); }
+    });
+  });
+  var lk=document.getElementById("dcLinkNew");
+  if (lk) lk.addEventListener("click", function(){
+    if (!CG.sb || !CG.sb.auth || !CG.sb.auth.linkIdentity){ CG.toast("Not connected — reload and retry","err"); return; }
+    lk.disabled=true;
+    try { localStorage.setItem("cg_return", JSON.stringify({ h:"#/hub/settings", at:Date.now() }));
+          localStorage.setItem("cg_dc_switch", JSON.stringify({ at:Date.now() })); } catch(e){}
+    CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } })
+      .then(function(r){ if (r && r.error){ lk.disabled=false; try { localStorage.removeItem("cg_dc_switch"); } catch(e){} var m=document.getElementById("dcLinkMsg2"); if(m){ m.textContent="Couldn’t start the link: "+r.error.message; m.style.color="var(--red)"; } } });
+  });
+};
+CG.switchDiscordAccount = function(id, name){
+  CG.sb.rpc("switch_discord_account",{ p_discord_id:String(id) }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t switch: "+r.error.message,"err"); CG.loadDiscordAccounts(); return; }
+    var d=r.data||{};
+    if (CG.auth && CG.auth.profile){ CG.auth.profile.discord_id=String(d.discord_id||id); CG.auth.profile.in_guild=!!d.in_guild; }
+    if (d.changed){
+      if (CG.pingDiscordSync) CG.pingDiscordSync();   /* the server follows within seconds */
+      CG.toast("Switched to "+(name||d.display||"your new account")+(d.in_guild?" — your Discord roles are moving over":" — site roles moved; join the server with it for Discord roles"),"ok");
+    }
+    CG.loadDiscordAccounts();
+  });
+};
 
 /* Settings — the live version writes to the real profile; the prototype's placebo privacy
    toggles and demo-seat card are gone. Theme picker keeps part6's markup + wiring. */
@@ -11054,7 +11176,9 @@ CG.hubSettings = function(){
     '<label class="fld"><span>EA ID</span><input id="sEaLive" value="'+esc(p.ea_id||"")+'"><span class="hint">Used to link your EA box scores to your profile — required to register.</span></label>'+
     '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
     '<button class="btn btn-ink" id="sSaveLive">Save profile</button></div></div>'+
-    '<div class="stack"><div class="card"><div class="card-h"><h3>Your data</h3></div><div class="card-b">'+
+    '<div class="stack">'+
+    '<div class="card" id="dcAcctCard"><div class="card-h"><h3>Discord account</h3><span class="chip" id="dcAcctChip">Checking…</span></div><div class="card-b" id="dcAcctBody"><p class="small" style="color:var(--steel)">Loading your linked accounts…</p></div></div>'+
+    '<div class="card"><div class="card-h"><h3>Your data</h3></div><div class="card-b">'+
     '<p class="small" style="color:var(--steel)">The league stores your Discord identity (id, username, avatar), your EA ID and platform, your registrations and availability, and the stats you generate in league games. Discord passes your email to our sign-in provider, but the league never uses or displays it; availability is visible only to your club’s management and league staff.</p>'+
     '<p class="small" style="color:var(--steel);margin-top:10px">Read the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a>. To delete your account and data, message any commissioner from <a href="#/hub/messages" style="font-weight:700;border-bottom:2px solid var(--chrome)">Messages</a> — deletion covers everything except the league’s permanent game record (box scores keep your gamertag).</p>'+
     '</div></div>'+
@@ -11087,25 +11211,17 @@ CG.hubFreeAgents = function(){
       rosterMax=s.roster_max||17;
   var rosteredIds=lg._rosteredIds||{}, faHeld=CG.contractHeldIds();
   /* Two tracks (Rule 2.2): RETURNING players (drafted/rostered before) sign through open free agency
-     here; undrafted FIRST-years are won on the bidding
+     here; undrafted first-years are placed on clubs ten minutes after the draft, never on any bidding
      board. isReturning (not isVeteran) is the split — 5 pre-season games alone don't make a veteran. */
   var faFree=function(r){
     return (!r.season_id || r.season_id===s.id) && r.status!=="declined" &&
       !rosteredIds[r.profile_id] && !faHeld[r.profile_id];
   };
   var byOvr=function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); };
-  var bidPool=(lg._registrationsRaw||[]).filter(function(r){
-    return faFree(r) && !lg.isReturning(r.profile_id) && ((lg.preGp[r.profile_id]||{}).gp||0) >= 5;
-  }).sort(byOvr);
-  /* The open board is the COMPLEMENT of the bidding board, not "returning players only".
-     Filtering on isReturning left every undrafted first-year with fewer than five pre-season
-     games on NEITHER board — in Season 1, where nobody is returning, that is most of the league:
-     unrostered, unsignable, invisible to every club with holes to fill. */
-  var inBid={}; bidPool.forEach(function(r){ inBid[r.profile_id]=true; });
-  var pool=(lg._registrationsRaw||[]).filter(function(r){
-    return faFree(r) && !inBid[r.profile_id];
-  }).sort(byOvr);
-  var aucById = {}; (lg._rookieAuctions||[]).forEach(function(a){ aucById[a.profile_id]=a; });
+  /* ONE board (v2.33). Rookie bidding is abolished: a fourteen-round draft fills every active
+     spot outright, so there is no post-draft rookie class to auction. Anyone still without a
+     club — first-year or veteran — is signed here by offer and acceptance (Rule 2.2). */
+  var pool=(lg._registrationsRaw||[]).filter(function(r){ return faFree(r); }).sort(byOvr);
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
     '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>';
@@ -11132,28 +11248,8 @@ CG.hubFreeAgents = function(){
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">You offer, the player decides (Rule 2.2). Send terms and the player accepts, counters, or declines from his dashboard — the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room, and the window are checked again both when you send and when he accepts.</span></div>'
-    :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Unsigned, draft-eligible players land here after the draft. Check back once free agency opens.</p></div></div>')+'</div>';
+    :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Free agency is for players whose contracts have ended. Undrafted players are placed on clubs automatically, so in a first season this board stays empty until deals expire.</p></div></div>')+'</div>';
 
-  /* ---- Rookie bidding board (Rule 2.2): $750K start, $250K increments, 12h resets per bid ---- */
-  h+='<div class="card" style="margin-top:20px"><div class="card-h"><h3>Rookie bidding</h3><span class="chip chip-chrome">Auction</span></div>'+
-    (bidPool.length?'<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Rookie bidding board</caption><thead><tr>'+
-      '<th class="tleft">Rookie</th><th>POS</th><th>Scout OVR</th><th>High bid</th><th class="tleft">Closes in</th><th class="tright">Action</th></tr></thead><tbody>'+
-      bidPool.map(function(r){
-        var prof=r.profiles||{}, a=aucById[r.profile_id];
-        var mine = a && a.high_team_id===t.id;
-        var closes = a ? '<span data-countdown="'+a.closes_at+'">'+CG.fmtCountdown(Math.max(0,Date.parse(a.closes_at)-nowMs))+'</span>' : '<span class="caption">no bids yet</span>';
-        var high = a ? '<b>'+CG.fmtMoney(a.high_bid)+'</b>'+(mine?' <span class="chip chip-win chip-xs">you</span>':'') : '<span class="caption">— (opens $0.75M)</span>';
-        var full = rosterN>=rosterMax;
-        return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
-          '<td class="tnum">'+esc(r.position||"—")+'</td>'+
-          '<td class="tnum">'+(r.scout_ovr==null?'<span class="caption">—</span>':r.scout_ovr)+'</td>'+
-          '<td class="tnum">'+high+'</td>'+
-          '<td class="tleft">'+closes+'</td>'+
-          '<td class="tright"><button class="btn btn-chrome btn-sm" data-rookie-bid="'+r.profile_id+'" data-name="'+esc(prof.gamertag||"this rookie")+'" data-high="'+(a?a.high_bid:0)+'"'+
-            ((canSign&&!full&&!mine)?"":" disabled")+(mine?' title="You hold the high bid"':full?' title="Your roster is full"':!canSign?' title="Bidding opens with free agency"':'')+'>'+(mine?"High bid":"Bid")+'</button></td></tr>';
-      }).join("")+'</tbody></table></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Bids start at $750K and rise in $250K steps. Every bid resets a 12-hour clock; when it hits zero the high bid wins and becomes the rookie’s contract (Rule 2.2). Cap and roster space are checked on every bid and again at the award.</span></div>'
-    :'<div class="card-b"><div class="empty" style="padding:44px 20px"><div class="e-art">'+CG.ic("db",22)+'</div><b>No rookies up for bid</b><p>Undrafted first-year players appear here when free agency opens.</p></div></div>')+'</div>';
   return h;
 };
 CG.AFTER._hubFreeAgents = function(){
@@ -11198,44 +11294,6 @@ CG.AFTER._hubFreeAgents = function(){
     });
   }); });
 
-  /* Load the open rookie auctions once, then re-render so the bidding board shows live bids. */
-  if (CG.sb && CG.SEASON && CG.SEASON.id && !CG.lg._rookieAuctionsLoaded){
-    CG.lg._rookieAuctionsLoaded = true;
-    CG.sb.from("rookie_auctions").select("profile_id,high_bid,high_team_id,closes_at,status")
-      .eq("season_id", CG.SEASON.id).eq("status","open")
-      .then(function(r){ CG.lg._rookieAuctions=(r&&r.data)||[]; if(location.hash.indexOf("#/hub/freeagents")===0 && CG.router) CG.router(); },
-            function(){ CG.lg._rookieAuctions=[]; });
-  }
-  /* live countdowns on each auction */
-  document.querySelectorAll("[data-countdown]").forEach(function(el){
-    if (CG.countdown) CG.countdown(el, Date.parse(el.getAttribute("data-countdown")), function(e){ e.textContent="closing…"; });
-  });
-  /* place a bid */
-  document.querySelectorAll("[data-rookie-bid]").forEach(function(b){ b.addEventListener("click", function(){
-    var pid=this.getAttribute("data-rookie-bid"), name=this.getAttribute("data-name"), high=parseInt(this.getAttribute("data-high"),10)||0;
-    var minBid = high>0 ? high+250000 : 750000;
-    CG.modal("Bid on "+esc(name),
-      '<label class="fld"><span>Your bid ($M)</span><input id="rbAmt" type="number" min="'+(minBid/1e6)+'" step="0.25" value="'+(minBid/1e6)+'"></label>'+
-      '<p class="caption">Minimum '+(high>0?'to outbid: <b>'+CG.fmtMoney(minBid)+'</b> (current high '+CG.fmtMoney(high)+')':'opening bid: <b>$0.75M</b>')+'. Bids rise in $0.25M steps and reset the 12-hour clock. The cap and your roster space are checked on submit.</p>',
-      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="rbGo">Place bid</button>');
-    document.getElementById("rbGo").addEventListener("click", function(){
-      var v=parseFloat(document.getElementById("rbAmt").value), amt=Math.round(v*1e6);
-      if(!(amt>=minBid)){ CG.toast("Bid must be at least "+CG.fmtMoney(minBid),"err"); return; }
-      /* the lattice itself comes from the one shared predicate (Rule 2.5) rather than a second
-         copy of the arithmetic; only the beat-the-high-bid floor above is bidding's own rule */
-      var bidBad = CG.salaryProblem(amt);
-      if(bidBad){ CG.toast(bidBad,"err"); return; }
-      var btn=this; btn.disabled=true;
-      CG.sb.rpc("place_rookie_bid",{ p_profile:pid, p_amount:amt }).then(function(r){
-        btn.disabled=false;
-        if (r.error){ CG.toast("Couldn’t bid: "+r.error.message,"err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast(String(r.data||"Bid placed"),"ok");
-        CG.lg._rookieAuctionsLoaded=false;   /* force a reload of the board */
-        CG.reloadLeague();
-      });
-    });
-  }); });
 };
 
 /* ================================================================

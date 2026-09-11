@@ -2437,6 +2437,8 @@ CG.ROUTES.player = function(pid, qs){
          : p.origin==="free_agency" ? "Signed as a free agent"
          : p.origin==="rookie_bid" ? "Won in rookie bidding"
          : p.origin==="preseason_random" ? "Assigned for the pre-season"
+         : p.origin==="postdraft_random" ? "Placed by the league office after the draft"
+         : p.origin==="latecomer_random" ? "Placed by the league office as a late sign-up"
          : "On the "+esc(t.name)+" roster")+'</p></span></div></div>';
   }
   if (tab==="pickup"){

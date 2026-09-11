@@ -75,6 +75,12 @@ console.log("— draft pay by round");
   A("every round's pay is itself a legal salary", got.every((v) => CG.salaryProblem(v) === null));
   A("the last round always pays the minimum, whatever the round count",
     [6, 8, 10, 12].every((n) => CG.draftRoundSalary(n, n) === CG.MIN_SALARY));
+  {
+    const got14 = Array.from({ length: 14 }, (_, i) => CG.draftRoundSalary(i + 1, 14));
+    A("this season's fourteen-round class runs $4.0M down to $750K", got14[0] === 4000000 && got14[13] === 750000, got14.join(","));
+    A("...and costs $33.25M in total", got14.reduce((a, v) => a + v, 0) === 33250000, String(got14.reduce((a, v) => a + v, 0)));
+    A("...which with $6M of management sits $750K under the $40M cap", 40000000 - 6000000 - got14.reduce((a, v) => a + v, 0) === 750000);
+  }
   A("out-of-range rounds clamp rather than inventing a salary",
     CG.draftRoundSalary(0, 10) === 3000000 && CG.draftRoundSalary(99, 10) === 750000);
 }
@@ -89,8 +95,8 @@ console.log("— the offer forms carry the lattice");
   A("no form still accepts anything at or above $0.75M unchecked", !/if\(!\(v>=0\.75\)\)/.test(live));
   A("the captions tell managers about the step",
     (live.match(/\$0\.25M steps \(Rule 2\.5\)/g) || []).length === 3);
-  A("rookie bidding routes through the shared predicate, not its own copy of the lattice",
-    /var bidBad = CG\.salaryProblem\(amt\)/.test(live) && !/\(amt-750000\)%250000!==0/.test(live));
+  A("rookie bidding is gone from the free-agent page (v2.33)",
+    !/data-rookie-bid|place_rookie_bid|rookie_auctions|Rookie bidding board/.test(live));
   A("the draft room shows what the pick on the clock costs",
     (live.match(/CG\.draftRoundSalary\(onClock\.round, draftRounds\)/g) || []).length === 2);
   A("...sized from the board's own round count, not a hardcoded ten",
@@ -112,11 +118,11 @@ console.log("— the rulebook says the same thing");
   {
     /* the prose spells all ten figures out by hand; check every one against the computed scale
        rather than spot-checking the ends, which is where a typo would hide */
-    const words = ["one","two","three","four","five","six","seven","eight","nine","ten"];
+    const words = ["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen"];
     const text = sec("2.8");
     const missing = words.filter((w, i) =>
-      !new RegExp("round " + w + " \\$" + CG.draftRoundSalary(i + 1, 10).toLocaleString("en-US")).test(text));
-    A("...and all ten published round figures match the computed scale",
+      !new RegExp("round " + w + " \\$" + CG.draftRoundSalary(i + 1, 14).toLocaleString("en-US")).test(text));
+    A("...and all fourteen published round figures match the computed scale",
       missing.length === 0, "wrong or missing: " + missing.join(", "));
   }
   A("...states the scale follows the round count rather than assuming ten",
@@ -125,10 +131,9 @@ console.log("— the rulebook says the same thing");
     /clock expires and the league picks from its board/.test(sec("2.8")));
   A("...states every pick in a round costs the same",
     /identical cap hit/.test(sec("2.8")));
-  A("...and prices the full class", /\$18,750,000/.test(sec("2.8")));
+  A("...and prices the full class", /\$33,250,000/.test(sec("2.8")));
   A("Chapter 0.5 tells new members the draft pays by round", /set by the round he goes in/.test(sec("0.5")));
-  A("rookie bidding still reads $250,000, unchanged and now consistent",
-    /rise in \$250,000 increments/.test(sec("2.2")));
+  A("Rule 2.2 no longer describes a rookie auction (v2.33)", !/rookie bidding|live auction/i.test(sec("2.2")));
   A("no rulebook section still promises the old $100,000 step",
     !/\$100,000 increments/.test(rb.chapters.map((c) => c.sections.map((s) => s.paragraphs.join(" ")).join(" ")).join(" ")));
 }
@@ -142,9 +147,9 @@ console.log("— the owners' briefings, the documents owners actually work from"
     A(`${f}: states the $250,000 step`, /every salary in the league moves in \$250,000\s*steps/.test(b));
     A(`${f}: says an off-lattice figure is refused`, /refused when you type it/.test(b));
     A(`${f}: still states the $750,000 minimum`, /Minimum salary \$750,000/.test(b));
-    A(`${f}: tells owners what a pick costs`, /round 10 pays the\s*\$750,000 league minimum/.test(b));
-    A(`${f}: ...and that round 1 is $3,000,000`, /round 1 is \$3,000,000/.test(b));
-    A(`${f}: ...and that a full class is $18,750,000`, /\$18,750,000/.test(b));
+    A(`${f}: tells owners what a pick costs`, /round 14 pays the\s*\$750,000 league minimum/.test(b));
+    A(`${f}: ...and that round 1 is $4,000,000`, /round 1 is \$4,000,000/.test(b));
+    A(`${f}: ...and that a full class is $33,250,000`, /\$33,250,000/.test(b));
     A(`${f}: ...and that an expired clock signs at the same price`, /if your clock expires/.test(b));
   }
 }

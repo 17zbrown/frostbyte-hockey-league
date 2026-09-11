@@ -65,7 +65,11 @@ console.log("\n— the public site tells the truth");
 
 console.log("\n— free agency covers everyone");
 {
-  A("the open board is the complement of the bidding board", /return faFree\(r\) && !inBid\[r\.profile_id\];/.test(live));
+  /* v2.33: rookie bidding is abolished, so there is ONE board and the old complement split is
+     gone. The defect this block was born from — first-years short of five pre-season games
+     landing on NEITHER board — is now impossible by construction: the pool is faFree alone. */
+  A("there is one board, built from faFree alone", /var pool=\(lg\._registrationsRaw\|\|\[\]\)\.filter\(function\(r\)\{ return faFree\(r\); \}\)/.test(live));
+  A("...with no second board for anyone to fall between", !/inBid\[|bidPool/.test(live));
   A("...not 'returning players only'", !/&&\s*\n?\s*lg\.isReturning\(r\.profile_id\);/.test(live));
 }
 

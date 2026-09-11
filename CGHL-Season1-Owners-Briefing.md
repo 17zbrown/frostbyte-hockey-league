@@ -39,7 +39,7 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 ## 🧊 PRE-SEASON (SEPT 16 TO 25) AND THE 5 GAME RULE
 
-Your management group plays for your own club. Every other registered player is spread randomly and evenly across the twelve clubs for two weeks of real games.
+Your management group plays for your own club. Every other registered player is spread randomly and evenly across the ten clubs for two weeks of real games.
 
 **Any randomly assigned player who is not already on a full time roster must play at least 5 pre-season games to stay draft eligible.**
 
@@ -51,15 +51,17 @@ Pre-season carries its own standings. Those games count toward player ratings an
 
 ## 📋 DRAFT NIGHT: SAT SEPT 26, 7:00 PM
 
-10 rounds, the same club order every round (linear, like the NHL — no snake), live on the site on a pick clock. The commissioner sets the order and publishes it before the draft starts.
+14 rounds, the same club order every round (linear, like the NHL — no snake), live on the site on a pick clock. The commissioner sets the order and publishes it before the draft starts.
 
 **Build your board in advance.** It is private to your management group. If your clock runs out, the league takes the best available player off your own board, so an absent manager never costs the club a pick or lands someone you never ranked.
 
-**What a pick costs.** Draft salaries are set by round, not negotiated: round 10 pays the $750,000 league minimum and every round above it adds $250,000, so round 1 is $3,000,000. Every pick in a round costs the same — first overall and tenth overall are identical against the cap — and a full 10-pick class costs $18,750,000. The same scale applies if your clock expires and the league picks off your board.
+**What a pick costs.** Draft salaries are set by round, not negotiated: round 14 pays the $750,000 league minimum and every round above it adds $250,000, so round 1 is $4,000,000. Every pick in a round costs the same — first overall and tenth overall are identical against the cap — and a full 14-pick class costs $33,250,000. With your GM and AGM at $3M each that is $39.25M of a $40M cap, so a club that uses every pick has $750K of room left before free agency. The same scale applies if your clock expires and the league picks off your board.
+
+**Your front office must be complete.** The draft will not start while any club is missing an Owner, GM or AGM. Fill your seats before draft night — the draft room shows which clubs are still short.
 
 **✍️ FREE AGENCY: SEPT 27 TO OCT 4**
 
-Undrafted first year players go to rookie bidding. Bids open at **$750,000** and rise in **$250,000** steps, and the winning club signs the player for one season.
+There is no rookie bidding. Ten minutes after the draft ends, everyone still without a club is placed on one by the league office at $750K — you don’t choose, they don’t choose. Free agency is for players whose contracts have ended (nobody, in Season 1). A player in the last season of his deal can only talk to his own club until free agency opens.
 
 Everyone else takes contract offers and picks the one they want.
 

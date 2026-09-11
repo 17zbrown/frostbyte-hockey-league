@@ -268,7 +268,7 @@ CG.CAP = 65000000;                 /* team salary cap */
 CG.MIN_SALARY = 750000;            /* league minimum */
 CG.SALARY_STEP = 250000;           /* Rule 2.5 (v2.31): every negotiated figure sits on this lattice */
 
-/* The one salary predicate the front end asks — rookie bidding, offers, counters and revisions
+/* The one salary predicate the front end asks — offers, counters and revisions
    all route here so there is a single definition to get right. Draft pay is NOT negotiated and so
    does not come through here: it is set by public.draft_pick_salary() in the database at the
    moment the pick is made, and CG.draftRoundSalary below only mirrors that scale for display.

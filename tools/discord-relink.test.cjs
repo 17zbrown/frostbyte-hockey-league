@@ -120,7 +120,7 @@ console.log("\n— signed in, the page offers the link flow");
   A("the signed-out page names the discord.com cookie trap", /log out at discord\.com first/.test(live));
 }
 
-console.log("\n— the profile follows the FRESHEST Discord identity");
+console.log("\n— the profile follows the CHOSEN Discord identity (v2.33), never proposing discord_id");
 {
   const user = (ids) => ({ id: "u1", identities: ids });
   const idn = (pid, name, when, avatar) => ({ provider: "discord", id: pid, last_sign_in_at: when,
@@ -130,13 +130,17 @@ console.log("\n— the profile follows the FRESHEST Discord identity");
 
   let p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "111", discord_username: "old-name",
     avatar_url: "https://cdn.discordapp.com/avatars/111/a.png" });
-  A("a newer identity produces a patch", !!p);
-  A("...moving discord_id to the new account", p.discord_id === "222");
-  A("...and the username", p.discord_username === "new-name");
-  A("...and the avatar, since the old one was Discord's", p.avatar_url === "https://cdn.discordapp.com/avatars/222/b.png");
+  A("a newer sign-in on another owned account does NOT move the league off the chosen one", p === null);
 
-  p = CG.discordIdentityPatch(user([NEW, OLD]), { discord_id: "111", discord_username: "old-name", avatar_url: null });
-  A("identity order doesn't matter — recency does", p && p.discord_id === "222");
+  p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "111", discord_username: "stale", avatar_url: null });
+  A("...but the chosen account's own name still refreshes", p && p.discord_username === "old-name");
+  A("...and discord_id is never in a patch — switch_discord_account is the only writer", p && !("discord_id" in p));
+
+  p = CG.discordIdentityPatch(user([NEW, OLD]), { discord_id: "222", discord_username: "x", avatar_url: null });
+  A("identity order doesn't matter — the profile's discord_id decides", p && p.discord_username === "new-name" && p.avatar_url === "https://cdn.discordapp.com/avatars/222/b.png");
+
+  p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: null, discord_username: null, avatar_url: null });
+  A("with no account on file the freshest identity supplies name and avatar", p && p.discord_username === "new-name" && !("discord_id" in p));
 
   p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "222", discord_username: "new-name",
     avatar_url: "https://cdn.discordapp.com/avatars/222/b.png" });
@@ -144,7 +148,7 @@ console.log("\n— the profile follows the FRESHEST Discord identity");
 
   p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "111", discord_username: "old-name",
     avatar_url: "https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/avatars/custom.webp" });
-  A("a custom (supabase-hosted) avatar is never clobbered", p && !("avatar_url" in p));
+  A("a custom (supabase-hosted) avatar is never clobbered", p === null || !("avatar_url" in p));
 
   A("gamertag is deliberately untouched — it's the league name, not the Discord name",
     !("gamertag" in (CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "111", gamertag: "Keeper" }) || {})));
@@ -158,7 +162,7 @@ console.log("\n— the profile follows the FRESHEST Discord identity");
   p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "999-pinned-by-office", discord_username: "server-account" });
   A("an office-pinned foreign discord_id is never reverted", p === null);
   p = CG.discordIdentityPatch(user([OLD, NEW]), { discord_id: "222", discord_username: "old-name" });
-  A("...but an id the user owns still refreshes normally", p && p.discord_username === "new-name");
+  A("...but an id the user owns still refreshes normally, from THAT identity", p && p.discord_username === "new-name");
 
   const live = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_live.js"), "utf8");
   A("applySession applies the patch fail-loud (checks rows came back)",

@@ -18,7 +18,7 @@ export const STAFF_DEPARTMENTS = [
   { key: "applications", role: "Review Board", channel: "review-board", topic: "Review Board — the deciding vote on owner, GM, AGM, and staff applications." },
   { key: "officiating",  role: "Officials",    channel: "officials",    topic: "Officials — game-night disputes, forfeits, and rule calls." },
   { key: "operations",   role: "Operations",   channel: "operations",   topic: "Operations — scheduling, reschedules, game codes, and no-show follow-up." },
-  { key: "draft",        role: "Draft Room",   channel: "draft-room",   topic: "Draft Room — draft night and the free-agency bidding board." },
+  { key: "draft",        role: "Draft Room",   channel: "draft-room",   topic: "Draft Room — draft night." },
   { key: "transactions", role: "Transactions", channel: "transactions-desk", alt: ["transactions"], topic: "Transactions — trades, waivers, and cap & contract compliance." },
   { key: "community",    role: "Community",     channel: "community",    topic: "Community — Discord moderation, welcome, and onboarding." },
   { key: "statistics",   role: "Statistics",   channel: "statistics",   topic: "Statistics — EA import accuracy and the record book." },
