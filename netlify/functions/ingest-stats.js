@@ -1015,7 +1015,14 @@ export const handler = async (event) => {
   for (const raw of matches) {
     try {
       const norm = normalizeMatch(raw);
-      if (!norm) { summary.errors.push({ reason: "unparseable match (need 2 clubs + matchId)" }); continue; }
+      if (!norm) {
+        /* EA also returns half-formed records with a single club (an opponent that never
+           registered, an abandoned lobby). They can never be a league game — skipped, not an
+           error, so a night with one of them does not read as a failing import. */
+        const nClubs = raw && raw.clubs && typeof raw.clubs === "object" ? Object.keys(raw.clubs).length : 0;
+        if (raw && raw.matchId != null && nClubs < 2) { summary.skipped.push({ ea_match_id: String(raw.matchId), reason: "incomplete match (one club only — never a league game)" }); continue; }
+        summary.errors.push({ reason: "unparseable match (need 2 clubs + matchId)" }); continue;
+      }
       await ingestOne(norm, raw, summary, batch);
     } catch (e) {
       summary.errors.push({ ea_match_id: raw && raw.matchId, error: String(e.message || e) });

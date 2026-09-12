@@ -238,16 +238,16 @@ export default async () => {
     }
 
     const matches = [...byId.values()];
+    /* the VM lane may have come back during the 10-20 s of EA fetching above — re-check before
+       ANY result write or hand-off, so this lane never overwrites the VM's record with a lane-less
+       one nor ingests a batch the VM is already handling */
+    if (await vmPollerActive()) return json({ skipped: "VM poller active (resumed mid-run)", matches: matches.length });
     if (!matches.length) {
       await recordResult("ea-poll", { ok: clubErrors.length === 0, polled: clubs.length, matches: 0,
         errCount: clubErrors.length, lastError: clubErrors[0] || null });
       return json({ polled: clubs.length, matches: 0, clubErrors });
     }
 
-    /* the VM lane may have come back during the 10-20 s of EA fetching above — re-check before the
-       hand-off so two lanes never ingest the same batch (ingest dedupes by match id, but this keeps
-       the traffic and the log honest) */
-    if (await vmPollerActive()) return json({ skipped: "VM poller active (resumed mid-run)", matches: matches.length });
     const ir = await fetch(`${ORIGIN}/api/ingest-stats`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-ingest-key": INGEST_KEY },

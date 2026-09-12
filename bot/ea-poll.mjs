@@ -86,7 +86,7 @@ export function createEaPoller(env, opts = {}) {
   async function pollClubs(clubs) {
     const byId = new Map();
     const clubErrors = [];      // STRING channel: [0] becomes lastError and lands in the chip tooltip
-    let blocked = false;
+    let blocked = false, incomplete = 0;
     for (let i = 0; i < clubs.length; i++) {
       const c = clubs[i];
       if (i) await sleep(CLUB_GAP_MS);
@@ -108,14 +108,21 @@ export function createEaPoller(env, opts = {}) {
           clubErrors.push(msg); log("ea-poll: " + msg);
         } else {
           const data = await r.json();
-          if (Array.isArray(data)) for (const m of data) if (m && m.matchId != null) byId.set(String(m.matchId), m);
+          /* EA also returns half-formed records with a single club (an opponent that never
+             registered, an abandoned lobby). They can never be a league game, and ingest counts
+             them as errors — so they are dropped here and only counted. */
+          if (Array.isArray(data)) for (const m of data) {
+            if (!m || m.matchId == null) continue;
+            if (!m.clubs || Object.keys(m.clubs).length < 2) { incomplete++; continue; }
+            byId.set(String(m.matchId), m);
+          }
         }
       } catch (e) {
         const msg = `club ${c}: ${String((e && e.message) || e)}`;
         clubErrors.push(msg); log("ea-poll: " + msg);
       }
     }
-    return { matches: [...byId.values()], clubErrors, blocked };
+    return { matches: [...byId.values()], clubErrors, blocked, incomplete };
   }
 
   /* ---- one cycle. Throws only on infrastructure failure (Supabase unreachable); every EA and
@@ -125,6 +132,20 @@ export function createEaPoller(env, opts = {}) {
     /* refreshed every cycle, not only after a poll: a backoff that expired during a quiet stretch
        (nothing due, so no poll ever re-evaluated it) must not keep advertising itself in the
        heartbeat as if EA were still blocked */
+    if (lastPollAt === -Infinity) {
+      /* first cycle of THIS process: honor the poll floor and any 403 backoff a previous process
+         (a restart, a one-shot) left in the ledgers, so a crash loop can never hammer EA */
+      try {
+        const rows = await sbGet("app_config?key=in.(rl_ea-poll,rl_ea-poll_backoff)&select=key,value");
+        for (const r of rows || []) {
+          const t = Date.parse(r && r.value);
+          if (!Number.isFinite(t)) continue;
+          if (r.key === "rl_ea-poll") lastPollAt = t;
+          if (r.key === "rl_ea-poll_backoff" && t > t0) backoffUntil = t;
+        }
+      } catch (e) { log("ea-poll: could not read the ledgers, starting unseeded — " + String((e && e.message) || e)); }
+      if (lastPollAt === -Infinity) lastPollAt = 0;
+    }
     sum.backoffUntil = t0 < backoffUntil ? iso(backoffUntil) : null;
     await cfgSet("rl_ea-poll-vm", iso(t0));                       // (1) alive
     try {
@@ -151,18 +172,24 @@ export function createEaPoller(env, opts = {}) {
       const clubs = [...new Set((rows || []).map((t) => t && t.ea_club_id).filter((v) => v != null && v !== "").map(String))];
       if (!clubs.length) {
         /* NOT ok. Without a single linked club no box score can ever import — this is the one
-           skip that must show red rather than pass quietly. */
+           skip that must show red rather than pass quietly (but written at the idle cadence, not
+           once a minute for the length of the outage). */
         const lastError = "No club has an ea_club_id — the EA import cannot run. Link each club's EA id in Control Center → Clubs.";
         sum.lastError = lastError;
-        await record({ ok: false, polled: 0, matches: 0, errCount: 1, lastError, linkedClubs: 0 });
+        if (t0 - lastIdleStampAt >= IDLE_STAMP_MS) {
+          await record({ ok: false, polled: 0, matches: 0, errCount: 1, lastError, linkedClubs: 0 });
+          lastIdleStampAt = t0;
+        }
         return { skipped: "no teams have an ea_club_id set", ok: false, lastError };
       }
 
       lastPollAt = t0; sum.polls++; sum.lastPollAt = iso(t0);
-      const { matches, clubErrors, blocked } = await pollClubs(clubs);
+      const { matches, clubErrors, blocked, incomplete } = await pollClubs(clubs);
       if (blocked) {
         backoffUntil = now() + BACKOFF_MS;
         log(`ea-poll: EA answered 403 — backing off, no EA calls until ${iso(backoffUntil)}`);
+        /* persisted so a restarted process (or a one-shot) inherits it — see the first-cycle seed */
+        try { await cfgSet("rl_ea-poll_backoff", iso(backoffUntil)); } catch (e) { log("ea-poll: could not persist the backoff — " + String((e && e.message) || e)); }
       }
       sum.backoffUntil = backoffUntil > now() ? iso(backoffUntil) : null;
       sum.matches += matches.length;
@@ -170,7 +197,9 @@ export function createEaPoller(env, opts = {}) {
       let ir = null, out = {}, ingestFail = null;
       if (matches.length) {
         try {
-          ir = await F(`${site}/api/ingest-stats`, { method: "POST",
+          /* redirect:"error" — this request carries the service-role key, and fetch keeps custom
+             headers across a cross-origin redirect; a redirect must fail loud, never be followed */
+          ir = await F(`${site}/api/ingest-stats`, { method: "POST", redirect: "error",
             headers: { "Content-Type": "application/json", "x-ingest-key": SB_KEY },
             body: JSON.stringify({ matches }), signal: AbortSignal.timeout(INGEST_TIMEOUT_MS) });
           out = await ir.json().catch(() => ({}));
@@ -192,6 +221,7 @@ export function createEaPoller(env, opts = {}) {
         unmatched: Array.isArray(out.unmatched) ? out.unmatched.length : 0,
         skipped: Array.isArray(out.skipped) ? out.skipped.length : 0,
         errors: ingestErrs.length,
+        incomplete,
       };
       sum.ingested += res.ingested;
       sum.lastError = lastError;

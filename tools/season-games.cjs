@@ -93,6 +93,19 @@ function validateInput(input){
   const s = input.season;
   if (!s || typeof s !== "object") bad("input.season is required");
   if (!s.id) bad("input.season.id is required (the rows hang off it)");
+  /* a zone-less timestamp is read in the HOST's local time, so the ET anchor day would depend on
+     where the script runs; the seasons row always carries an offset */
+  for (const k of ["preseason_starts_at", "starts_at"]) {
+    const v = s[k];
+    if (v == null) continue;
+    if (!Number.isFinite(Date.parse(v)) || !/(Z|[+-]\d{2}:?\d{2})$/.test(String(v).trim()))
+      bad("input.season." + k + " must be an ISO timestamp with a zone (e.g. 2027-02-04T02:00:00+00:00), got " + JSON.stringify(v));
+  }
+  if (s.night_slots != null) {
+    const slots = String(Array.isArray(s.night_slots) ? s.night_slots.join(",") : s.night_slots).split(",").map((t) => t.trim());
+    if (!slots.length || !slots.every((t) => /^\d{1,2}:\d{2}$/.test(t)))
+      bad("input.season.night_slots must be 24-hour HH:MM times separated by commas (the Control Center form's rule), got " + JSON.stringify(s.night_slots));
+  }
   if (!Array.isArray(input.teams)) bad("input.teams must be an array of { id, code, div }");
   const codes = {}, ids = {};
   input.teams.forEach((t, i) => {
@@ -292,14 +305,17 @@ async function generate(input, opts){
 
 function parseArgs(argv){
   const out = { input: null, out: null, seed: null, stages: null };
+  /* a repeated flag is refused, never last-wins: "--stage preseason --stage regular" used to
+     silently drop the whole pre-season lane */
+  const once = (flag, already) => { if (already != null) throw Object.assign(new Error(flag + " given more than once"), { code: "EINPUT" }); };
   for (let i = 0; i < argv.length; i++){
     const a = argv[i];
-    if (a === "--out"){ out.out = argv[++i]; if (!out.out) throw Object.assign(new Error("--out needs a path"), { code: "EINPUT" }); }
-    else if (a.startsWith("--out=")) out.out = a.slice(6);
-    else if (a === "--seed"){ out.seed = argv[++i]; if (out.seed == null || out.seed === "") throw Object.assign(new Error("--seed needs a number"), { code: "EINPUT" }); }
-    else if (a.startsWith("--seed=")) out.seed = a.slice(7);
-    else if (a === "--stage"){ out.stages = [argv[++i]]; }
-    else if (a.startsWith("--stage=")) out.stages = [a.slice(8)];
+    if (a === "--out"){ once("--out", out.out); out.out = argv[++i]; if (!out.out) throw Object.assign(new Error("--out needs a path"), { code: "EINPUT" }); }
+    else if (a.startsWith("--out=")){ once("--out", out.out); out.out = a.slice(6); }
+    else if (a === "--seed"){ once("--seed", out.seed); out.seed = argv[++i]; if (out.seed == null || out.seed === "") throw Object.assign(new Error("--seed needs a number"), { code: "EINPUT" }); }
+    else if (a.startsWith("--seed=")){ once("--seed", out.seed); out.seed = a.slice(7); }
+    else if (a === "--stage"){ once("--stage", out.stages); out.stages = [argv[++i]]; }
+    else if (a.startsWith("--stage=")){ once("--stage", out.stages); out.stages = [a.slice(8)]; }
     else if (a === "-h" || a === "--help") out.help = true;
     else if (a.startsWith("-")) throw Object.assign(new Error("unknown option " + a), { code: "EINPUT" });
     else if (!out.input) out.input = a;
@@ -321,6 +337,9 @@ async function main(){
   try { args = parseArgs(process.argv.slice(2)); }
   catch (e){ console.error("season-games: " + e.message + "\n" + USAGE); process.exit(2); }
   if (args.help || !args.input){ console.error(USAGE); process.exit(args.help ? 0 : 2); }
+  if (args.out && require("node:path").resolve(args.out) === require("node:path").resolve(args.input)){
+    console.error("season-games: --out must not be the input file (it would overwrite the season definition)"); process.exit(2);
+  }
   let input;
   try { input = JSON.parse(fs.readFileSync(args.input, "utf8")); }
   catch (e){ console.error("season-games: could not read " + args.input + " — " + e.message); process.exit(2); }
@@ -333,7 +352,8 @@ async function main(){
   }
   const json = JSON.stringify(result, null, 2);
   if (args.out){
-    fs.writeFileSync(args.out, json + "\n");
+    try { fs.writeFileSync(args.out, json + "\n"); }
+    catch (e){ console.error("season-games: could not write " + args.out + " — " + e.message); process.exit(2); }
     const s = result.summary;
     console.error("season-games: " + s.preseason + " pre-season + " + s.regular + " regular games -> " + args.out +
       (s.holidayWeeksSkipped.length ? " (skipped " + s.holidayWeeksSkipped.map((h) => h.name + " week of " + h.week).join(", ") + ")" : ""));
