@@ -860,17 +860,19 @@ CG.AFTER._lineup = function(){
           if (!targets.some(function(g){ return g.id===game.id; })) targets.unshift(game);
           /* v2.38: under "Owner approves" each game's lineup is queued for the Owner, not dressed */
           if (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve"){
-            var qN = 0;
+            var qN = 0, qFail = 0;
             (function qnext(i){
               if (i >= targets.length){
                 save(qN ? "Sent to the Owner for approval" : "Not sent");
-                if (qN) CG.toast("Sent "+qN+" lineup"+(qN===1?"":"s")+" to the Owner for approval — dressed when they approve","ok");
-                CG.reloadLeague(); return;
+                if (qN) CG.toast("Sent "+qN+" lineup"+(qN===1?"":"s")+" to the Owner for approval — dressed when they approve"+(qFail?" ("+qFail+" could not be sent)":""),"ok");
+                if (qN && CG._luEmergency) delete CG._luEmergency[game.id];
+                if (qN) CG.reloadLeague();
+                return;
               }
               var g = targets[i], oppc = g.home===club ? g.away : g.home;
               CG.mgmtQueue("set_game_lineup", Object.assign({ p_game:g.id, p_emergency:(g.id===game.id?emg:false) }, slots6),
                 (emg?"emergency call-up":"dress the lineup")+" vs "+((CG.TEAM[oppc]||{}).name||oppc)+" · "+CG.fmtDay(g.at)+" "+CG.fmtTime(g.at), { quiet:true })
-                .then(function(q){ if (q) qN++; qnext(i+1); });
+                .then(function(q){ if (q===true) qN++; else if (q) qFail++; qnext(i+1); });
             })(0);
             return;
           }
@@ -1244,17 +1246,20 @@ CG.AFTER._lines = function(qs){
     saveAll.disabled = true;
     /* v2.38: under "Owner approves" each changed line is queued for the Owner, not saved */
     if (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve"){
-      var qN = 0;
+      var qN = 0, qFail = 0, sentSlots = [];
       (function qnext(i){
         if (i >= dirty.length){
           saveAll.disabled = false;
-          if (qN){ CG.toast("Sent "+qN+" line"+(qN===1?"":"s")+" to the Owner for approval — saved when they approve","ok"); CG._lcDraft = {}; CG._lcName = {}; }
-          CG.reloadLeague(); return;
+          /* only the lines that were actually sent leave the draft; a refused one keeps its edits */
+          sentSlots.forEach(function(n){ delete CG._lcDraft[n]; if (CG._lcName) delete CG._lcName[n]; });
+          if (qN) CG.toast("Sent "+qN+" line"+(qN===1?"":"s")+" to the Owner for approval — saved when they approve"+(qFail?" ("+qFail+" could not be sent and stay unsaved here)":""),"ok");
+          if (qN) CG.reloadLeague(); else repaint();
+          return;
         }
         var n = dirty[i], d = CG._lcDraft[n] || {};
         var name = (CG._lcName && CG._lcName[n] != null) ? CG._lcName[n] : (((lg._teamLines||{})[n]||{}).name || "");
         CG.mgmtQueue("set_team_line", { p_season:CG.SEASON.id, p_slot:n, p_name:name||null, p_lw:d.LW||null, p_center:d.C||null, p_rw:d.RW||null, p_ld:d.LD||null, p_rd:d.RD||null, p_goalie:d.G||null },
-          "save line "+n+(name?" (“"+name+"”)":""), { quiet:true }).then(function(q){ if (q) qN++; qnext(i+1); });
+          "save line "+n+(name?" (“"+name+"”)":""), { quiet:true }).then(function(q){ if (q===true){ qN++; sentSlots.push(n); } else if (q) qFail++; qnext(i+1); });
       })(0);
       return;
     }
@@ -1308,7 +1313,9 @@ CG.AFTER._lines = function(qs){
     /* v2.38: under "Owner approves" the dressing is queued (done(null, "queued")) — never claimed dressed */
     var gq = (lg.schedule||[]).find(function(x){ return x.id===gameId; })||{}, oppq = gq.home===club ? gq.away : gq.home;
     CG.mgmtQueue("set_game_lineup", { p_game:gameId, p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null, p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false },
-      "dress "+(row.name||("Line "+slot))+" vs "+((CG.TEAM[oppq]||{}).name||oppq||"?")+(gq.at?" · "+CG.fmtDay(gq.at)+" "+CG.fmtTime(gq.at):""), { quiet:true }).then(function(q){ if (q){ done(null, "queued"); return; }
+      "dress "+(row.name||("Line "+slot))+" vs "+((CG.TEAM[oppq]||{}).name||oppq||"?")+(gq.at?" · "+CG.fmtDay(gq.at)+" "+CG.fmtTime(gq.at):""), { quiet:true }).then(function(q){
+      if (q===true){ done(null, "queued"); return; }
+      if (q){ done("could not be sent to the Owner"); return; }
     CG.sb.rpc("set_game_lineup", { p_game:gameId, p_team:tid,
       p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null,
       p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false
@@ -1625,7 +1632,7 @@ CG.AFTER._roster = function(){
   }); });
   $$("[data-block]").forEach(function(b){ b.addEventListener("click", function(){
     var pid = this.getAttribute("data-block"), on = CG.isOnBlock(pid);
-    CG.setOnBlock(pid, !on);
+    if (CG.setOnBlock(pid, !on)) return;   /* v2.38: sent to the Owner — nothing to claim yet */
     var p = CG.playerById(CG.lg, pid);
     CG.audit(on?"Removed from trade block":"Added to trade block", p.tag);
     CG.toast(on ? p.tag+" removed from the trade block" : p.tag+" listed on the trade block", "ok");
@@ -1652,7 +1659,7 @@ CG.AFTER._roster = function(){
       var v=parseFloat(document.getElementById("exSal").value), bad=CG.salaryProblem(Math.round(v*1e6));
       if (bad){ CG.toast(bad,"err"); return; }
       var y=parseInt(document.getElementById("exYrs").value,10)||1, note=(document.getElementById("exNote").value||"").trim()||null, btn=this; btn.disabled=true;
-      CG.mgmtQueue("offer_extension", { p_profile:pid, p_salary:Math.round(v*1e6), p_years:y, p_note:note }, (rights?"offer ":"offer an extension to ")+p.tag+" — "+CG.fmtMoney(Math.round(v*1e6))+" × "+y).then(function(q){ if (q){ btn.disabled=false; return; }
+      CG.mgmtQueue("offer_extension", { p_profile:pid, p_salary:Math.round(v*1e6), p_years:y, p_note:note }, (rights?"offer ":"offer an extension to ")+p.tag+" — "+CG.fmtMoney(Math.round(v*1e6))+" × "+y, { page: rights?"freeagents":"roster" }).then(function(q){ if (q){ btn.disabled=false; return; }
       CG.sb.rpc("offer_extension",{ p_profile:pid, p_salary:Math.round(v*1e6), p_years:y, p_note:note }).then(function(r){
         btn.disabled=false;
         if (r.error){ CG.toast("Couldn’t offer: "+r.error.message,"err"); return; }

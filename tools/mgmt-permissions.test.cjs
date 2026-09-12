@@ -63,7 +63,7 @@ console.log("\n— the queue wrapper: queued under approve, pass-through otherwi
   }).then(() => {
     const gm2 = harness("u-gm", { gm:{ roster:"approve" } });
     gm2.sb.rpc = () => Promise.resolve({ data:null, error:{ message:"nope" } });
-    return gm2.mgmtQueue("waive_player", {}, "waive").then(q => A("a refused request still stops the caller (the gate would refuse the direct call too)", q === true));
+    return gm2.mgmtQueue("waive_player", {}, "waive").then(q => A("a refused request is reported as MGMT_FAILED — truthy (the caller stops) but never 'sent'", q === gm2.MGMT_FAILED && q !== true && !!q));
   }).then(finish);
 }
 
@@ -89,7 +89,7 @@ function finish(){
   {
     const sites = [
       ["trade block flag", live, /CG\.mgmtQueue\("roster_block"/], ["squad move", live, /CG\.mgmtQueue\("set_roster_squad"/], ["squad swap", live, /CG\.mgmtQueue\("swap_roster_squad"/],
-      ["free-agent offer", live, /CG\.mgmtQueue\("offer_free_agent"/], ["club answers to a counter (accept/deny/revise)", live, /CG\.mgmtQueue\(isExt\?"respond_extension":"respond_offer"/],
+      ["free-agent offer", live, /CG\.mgmtQueue\("offer_free_agent"/], ["club answers to a counter (accept/deny/revise), on the page the offer belongs to", live, /CG\.mgmtQueue\("respond_offer", \{ p_offer:id, p_action:"accept"[^\n]*\{ page: isExt\?"roster":"freeagents" \}/],
       ["trade proposal", live, /CG\.mgmtQueue\("trade_propose"/], ["trade accept", live, /CG\.mgmtQueue\("accept_trade"/], ["trade decline", live, /CG\.mgmtQueue\("trade_decline"/], ["trade withdraw", live, /CG\.mgmtQueue\("trade_cancel"/],
       ["draft board", live, /CG\.mgmtQueue\("save_draft_board"/], ["draft pick (modal + quick pick)", live, /CG\.mgmtQueue\("draft_make_pick"/],
       ["waiver", hub, /CG\.mgmtQueue\("waive_player"/], ["extension offer", hub, /CG\.mgmtQueue\("offer_extension"/],
@@ -97,7 +97,17 @@ function finish(){
     ];
     sites.forEach(([l, src, re]) => A(l, re.test(src)));
     A("the draft pick is wrapped at both club-desk sites", (live.match(/CG\.mgmtQueue\("draft_make_pick"/g) || []).length === 2);
-    A("the club's three counter answers are all wrapped", (live.match(/CG\.mgmtQueue\(isExt[A-Z]?\?"respond_extension":"respond_offer"/g) || []).length === 3);
+    A("the club's three counter answers are all wrapped, each choosing roster vs free agents by the offer", (live.match(/\{ page: isExt[A-Z]?\?"roster":"freeagents" \}/g) || []).length === 3);
+    A("...and every one of those buttons carries data-ext so the page choice is never guessed", (live.match(/data-coffer-(deny|counter|accept)="'\+o\.id\+'"[^>]*data-ext="'\+\(ext\?'1':''\)\+'"/g) || []).length === 4);
+    A("a rights-held re-sign is queued as free-agent business, as the database gates it", /\{ page: rights\?"freeagents":"roster" \}/.test(hub));
+    A("a queued counter-proposal carries the offer it counters, so approval closes the original", /countered_id:CG\._counteringId\|\|null/.test(live));
+    A("a refused send is a third outcome (MGMT_FAILED), never counted as sent", /return CG\.MGMT_FAILED;/.test(live) && /if \(q===true\) qN\+\+; else if \(q\) qFail\+\+;/.test(hub) && /if \(q===true\)\{ qN\+\+; sentSlots\.push\(n\); \} else if \(q\) qFail\+\+;/.test(hub));
+    A("...and only lines actually sent leave the draft", /sentSlots\.forEach\(function\(n\)\{ delete CG\._lcDraft\[n\];/.test(hub));
+    A("...and a refused squad move re-enables its button", /if \(q===CG\.MGMT_FAILED\) btn\.disabled = false;/.test(live) && /if \(q===CG\.MGMT_FAILED\) swapBtn\.disabled = false;/.test(live));
+    A("the trade-block toggle decides synchronously and the click skips its success toast when queued", /if \(CG\.setOnBlock\(pid, !on\)\) return;/.test(hub) && /if \(CG\.mgmtAccess && CG\.mgmtAccess\("roster"\)==="approve"\)\{\n    CG\.mgmtQueue\("roster_block"/.test(live));
+    A("the draft board under approval sends one request after the ranking settles and keeps the local ranking across reloads", /CG\._boardQueueT = setTimeout\(/.test(live) && /if \(waiting\) CG\.lg\._myBoard = CG\._boardLocal\.slice\(\); else CG\._boardLocal = null;/.test(live));
+    A("an emergency call-up sent for approval leaves emergency mode", /if \(qN && CG\._luEmergency\) delete CG\._luEmergency\[game\.id\];/.test(hub));
+    A("the last-loaded policy stands in during a rebuild (no raw gate refusal in the window)", /\|\| CG\._mgmtPolicyCache \|\| \{\}/.test(live));
     A("dressing from a saved line reports 'queued' instead of claiming dressed", /done\(null, "queued"\)/.test(hub) && /else if \(queued\) qN\+\+; else okN\+\+;/.test(hub));
     A("the prototype build has a no-op queue so load order never matters", /if \(!CG\.mgmtQueue\) CG\.mgmtQueue = function\(\)\{ return Promise\.resolve\(false\); \};/.test(hub));
   }
@@ -112,6 +122,8 @@ function finish(){
     A("...the saved policy pre-selected", /data-perm-seat="gm" data-perm-page="roster" data-perm-mode="approve" aria-pressed="true"/.test(card));
     A("...and Management pre-selected as hidden when unset", /data-perm-seat="gm" data-perm-page="management" data-perm-mode="hidden" aria-pressed="true"/.test(card) && /data-perm-seat="agm" data-perm-page="management" data-perm-mode="hidden" aria-pressed="true"/.test(card));
     A("...and a Save button that starts disabled (nothing changed yet)", /id="permSave" disabled/.test(card));
+    A("unsaved matrix edits hold the live reload until saved or discarded", /CG\._holdReload = d \? "permissions" : null;/.test(live) && /if \(CG\._holdReload\) return true;/.test(live));
+    A("the save toast claims a notification only when a manager is seated", /var seated = !!\(m\.t\.gm \|\| m\.t\.agm\);/.test(live));
     const q = own.mgmtApprovalsCard(m);
     A("the Owner's approvals card offers Approve and Deny on a waiting move", /data-mgmt-decide="m1" data-approve="1"/.test(q) && /data-mgmt-decide="m1" data-approve="0"/.test(q) && /Mr\. Plow · GM/.test(q));
     const gm = harness("u-gm", { gm:{ roster:"approve" } }, [{ id:"m1", page:"roster", status:"pending", requested_by:"u-gm", summary:"waive Jugg", created_at:"2027-01-01T00:00:00Z" }]);
@@ -154,6 +166,9 @@ function finish(){
     A("...a stale approved move fails loudly, and both are told", /fails rather than half-applies, and both the Owner and the manager are told why/.test(r26));
     A("...every manager has the same Team HQ", /Every member of the management group — Owner, General Manager and Assistant General Manager alike — has the same Team HQ/.test(r26));
     A("...and the league office is untouched", /none of this limits the league office/.test(r26));
+    A("...the Owner approves a league-built description, and a newer request supersedes", /never text the manager wrote/.test(r26) && /replaces the older one still waiting/.test(r26));
+    A("Team HQ says all three seats before the draft (Rule 2.8), not 'before the first game' with an optional AGM", !/first regular-season game/.test(live) && !/AGM is optional/.test(live) && /row\("agm","Assistant GM",true\)/.test(live));
+    A("the changelog no longer lists the game stats desk among approve-able pages", /the game stats desk is open or hidden only/.test(rb.changelog[0].summary));
     A("the changelog records v2.38", rb.changelog[0].version === "2.38" && /management permissions/.test(rb.changelog[0].summary));
     A("...in American spelling", !/practis|colour|centre|organis|defence/i.test(rb.changelog[0].summary + r26));
   }

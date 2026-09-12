@@ -170,7 +170,7 @@ Series are best of seven. **Per series caps are the same as the weekly ones: a s
 
 **<@&1525295582128636027> <@&1524883583154524420> and <@&1525295583386927106> are the club's formal contact with the league office.** Protests, reschedules and roster paperwork only count as filed when they come from management.
 
-**Your front office is yours to run.** Only the Owner nominates a GM or AGM, and only the Owner removes one — from Team HQ → Management, at once, no league-office step. The same page sets what each manager can do: for every Team HQ page (roster, lineups, schedule picks, game stats, Trade Hub, free agents, draft) your GM and your AGM each get full access, *Owner approves* (they see the page, but every move on it waits for your approval), or hidden. Everyone starts on full access; approvals land on your Management page and in your notifications (Rule 2.6).
+**Your front office is yours to run.** Only the Owner nominates a GM or AGM, and only the Owner removes one — from Team HQ → Management, at once, no league-office step. The same page sets what each manager can do: for every Team HQ page (roster, lineups, schedule picks, Trade Hub, free agents, draft) your GM and your AGM each get full access, *Owner approves* (they see the page, but every move on it waits for your approval), or hidden — the game stats desk is open or hidden only, since its repairs go through the statistics staff. Everyone starts on full access; approvals land on your Management page and in your notifications (Rule 2.6).
 
 ════════════════════════════════════════
 
