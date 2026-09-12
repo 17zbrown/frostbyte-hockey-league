@@ -8,8 +8,10 @@
 //      result record of its own.
 //   2. Netlify lane (FALLBACK): this file, every 5 min on Netlify's scheduler. It takes over only
 //      when the VM stamp is stale or cannot be read (fail open), and it can reach EA only through
-//      HTTPS_PROXY (a residential proxy) or from an egress EA is not blocking. It still ONLY hits
-//      EA when a scheduled, not-yet-final game is around now (±window).
+//      HTTPS_PROXY (a residential proxy) or from an egress EA is not blocking.
+// Both lanes obey shared/game-window.mjs: EA is asked only while a fixture's game window
+// (puck drop − 10 min … + 3 h, plus a 15-min fetching grace) contains now, and only for the clubs
+// in those fixtures. Everything found is forwarded; the importer alone decides what files.
 //
 // Reads club ids from Supabase, pulls each club's recent private matches from EA, and forwards
 // them to /api/ingest-stats which does the schedule-matching + DB writes.
@@ -19,6 +21,8 @@
 // No-ops safely if required env is missing. Node 18+.
 
 export const config = { schedule: "*/5 * * * *" };
+
+import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../../shared/game-window.mjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 /* service role first (v2.35): the reads ran on the anon key, a leftover of the retired GitHub
@@ -132,37 +136,31 @@ export default async () => {
       const noClubs = !(await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id&limit=1`)).length;
       if (noClubs) await nhl27Canary(PROXY ? new ProxyAgent(PROXY) : undefined, uFetch);
     }
-    // Only poll during the league's game window: Wed 6pm ET -> Sat 2am ET (continuous, every week).
-    // Enforced in America/New_York so it stays correct across daylight saving (a fixed-UTC cron can't).
-    if (!inGameWindow()) {
-      /* Record the skip. Returning silently left rl_ea-poll_result showing the last SUCCESSFUL run,
-         so the Automations chip and the watchdog read green while the poller had done nothing for
-         seventeen days — "the function runs" and "the pipeline works" were indistinguishable. */
-      await recordResult("ea-poll", { ok: true, skipped: "outside game window", at: new Date().toISOString() });
-      return json({ skipped: "outside game window (Wed 6pm - Sat 2am ET)" });
+    /* THE GATE (shared/game-window.mjs, the same rule the VM lane and the importer apply): EA is
+       asked only while a fixture's game window (puck drop − 10 min to + 3 h, plus the fetching
+       grace) contains now, and only for the clubs in those fixtures. A fixture a first sitting has
+       already filed stays in the set: its Rule 4.3 replay still has to be collected and merged. A
+       poll on a night with no fixture used to record a failing run on any EA hiccup and page the
+       commissioners; now it simply does not happen. Recording the skip keeps rl_ea-poll_result
+       honest ("nothing to do" rather than a stale success the chip and the watchdog read as green). */
+    const fixtures = await sbGet(`games?status=in.(scheduled,final)&${openFixtureFilter(Date.now(), GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS + POLL_GRACE_MS)}&select=id,home_team_id,away_team_id,scheduled_at,status`);
+    const open = fixtures.filter((g) => g && g.home_team_id && g.away_team_id && g.scheduled_at);
+    if (!open.length) {
+      await recordResult("ea-poll", { ok: true, skipped: "no fixture in its game window", at: new Date().toISOString() });
+      return json({ skipped: `no fixture in its game window (${describeWindow()})` });
     }
-
-    /* v2.35: only poll when a league game could actually have been played — a fixture scheduled
-       within the last six hours (a box score lands minutes after the final horn, lag-out segments
-       later) or starting within the next half hour. The weekday window above is a free pre-filter;
-       this is the real gate. Without it an EA hiccup on a Friday with no fixture for five more days
-       was recorded as a failing run and paged the commissioners. */
-    const dueFrom = new Date(Date.now() - 6 * 3600e3).toISOString(), dueTo = new Date(Date.now() + 30 * 60e3).toISOString();
-    const due = await sbGet(`games?voided=not.is.true&scheduled_at=gte.${encodeURIComponent(dueFrom)}&scheduled_at=lte.${encodeURIComponent(dueTo)}&select=id&limit=1`);
-    if (!due.length) {
-      await recordResult("ea-poll", { ok: true, skipped: "no fixture due", at: new Date().toISOString() });
-      return json({ skipped: "no fixture due (none scheduled in the last 6 h or the next 30 min)" });
-    }
-
-    const clubs = [...new Set((await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id`)).map((t) => String(t.ea_club_id)).filter(Boolean))];
+    const teamIds = [...new Set(open.flatMap((g) => [g.home_team_id, g.away_team_id]))];
+    const linked = await sbGet(`teams?id=in.(${teamIds.map(encodeURIComponent).join(",")})&ea_club_id=not.is.null&select=id,ea_club_id`);
+    const teamByClub = Object.fromEntries(linked.filter((t) => t.ea_club_id != null && t.ea_club_id !== "").map((t) => [String(t.ea_club_id), t.id]));
+    const clubs = Object.keys(teamByClub);
     if (!clubs.length) {
-      /* NOT ok. Without a single linked club no box score can ever import — no scores, no stats,
-         no standings, and no on-ice basis for the draft order. This is the one skip that must
-         show red rather than pass quietly. */
+      /* NOT ok. Without a linked club no box score can ever import — no scores, no stats, no
+         standings, and no on-ice basis for the draft order. This is the one skip that must show
+         red rather than pass quietly. */
       await recordResult("ea-poll", { ok: false, errCount: 1,
-        lastError: "No club has an ea_club_id — the EA import cannot run. Link each club's EA id in Control Center → Clubs.",
+        lastError: `None of the ${teamIds.length} clubs in tonight's open fixtures has an EA club linked — their box scores cannot import. Link each club's EA id in Control Center → Clubs.`,
         linkedClubs: 0, at: new Date().toISOString() });
-      return json({ skipped: "no teams have an ea_club_id set", ok: false });
+      return json({ skipped: "no linked EA club among the open fixtures", ok: false });
     }
 
     // uFetch (undici's own) is used below because a PROXIED attempt needs it: Node's global fetch
@@ -237,15 +235,29 @@ export default async () => {
       await sleep(1200);
     }
 
-    const matches = [...byId.values()];
+    /* everything EA returned for these clubs goes to the importer — the one place that files, and
+       it needs the whole picture (its archive, and the Rule 4.3 merge's "did either club play
+       anyone else in between" test). Half-formed single-club records are dropped here; offWindow
+       counts what the importer is expected to refuse (not a scheduled matchup, or ended outside
+       the fixture's window). */
+    let offWindow = 0, incomplete = 0;
+    const matches = [...byId.values()].filter((m) => {
+      const cl = Object.keys(m.clubs || {});
+      if (cl.length < 2) { incomplete++; return false; }
+      const a = teamByClub[String(cl[0])], b = teamByClub[String(cl[1])];
+      if (!(a && b && fixtureForMatch(open, a, b, (+m.timestamp || 0) * 1000))) offWindow++;
+      return true;
+    });
+    const unlinked = teamIds.filter((id) => !linked.some((t) => t.id === id));
+    const warning = unlinked.length ? `${unlinked.length} club${unlinked.length === 1 ? "" : "s"} in tonight's fixtures ${unlinked.length === 1 ? "has" : "have"} no EA club linked — their games cannot import until they are linked in Team HQ` : undefined;
     /* the VM lane may have come back during the 10-20 s of EA fetching above — re-check before
        ANY result write or hand-off, so this lane never overwrites the VM's record with a lane-less
        one nor ingests a batch the VM is already handling */
     if (await vmPollerActive()) return json({ skipped: "VM poller active (resumed mid-run)", matches: matches.length });
     if (!matches.length) {
-      await recordResult("ea-poll", { ok: clubErrors.length === 0, polled: clubs.length, matches: 0,
-        errCount: clubErrors.length, lastError: clubErrors[0] || null });
-      return json({ polled: clubs.length, matches: 0, clubErrors });
+      await recordResult("ea-poll", { ok: clubErrors.length === 0, polled: clubs.length, matches: 0, offWindow, incomplete, fixturesOpen: open.length,
+        errCount: clubErrors.length, lastError: clubErrors[0] || null, ...(warning ? { warning, unlinkedInFixtures: unlinked.length } : {}) });
+      return json({ polled: clubs.length, matches: 0, offWindow, incomplete, clubErrors });
     }
 
     const ir = await fetch(`${ORIGIN}/api/ingest-stats`, {
@@ -255,7 +267,7 @@ export default async () => {
     });
     const out = await ir.json().catch(() => ({}));
     const ingestErrs = (out.errors || []).length;
-    const summary = { polled: clubs.length, matches: matches.length, ingest: ir.status, ingested: (out.ingested || []).length, unmatched: (out.unmatched || []).length, skipped: (out.skipped || []).length, errors: ingestErrs };
+    const summary = { polled: clubs.length, matches: matches.length, offWindow, incomplete, fixturesOpen: open.length, ingest: ir.status, ingested: (out.ingested || []).length, unmatched: (out.unmatched || []).length, skipped: (out.skipped || []).length, errors: ingestErrs, ...(warning ? { warning, unlinkedInFixtures: unlinked.length } : {}) };
     console.log("ea-poll:", JSON.stringify(summary));
     await recordResult("ea-poll", { ok: ir.status === 200 && ingestErrs === 0 && clubErrors.length === 0,
       ...summary, errCount: clubErrors.length + ingestErrs,
@@ -269,20 +281,3 @@ export default async () => {
 };
 
 function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } }); }
-
-// League game window: Wed 6:00pm ET -> Sat 2:00am ET, continuous. DST-safe (evaluated in ET).
-function inGameWindow() {
-  /* Wednesday 6pm through Saturday 2am ET. Deliberately wider than the current schedule: a poll
-     that runs when no game exists costs one cheap query, while a poll that does NOT run when a
-     game just finished loses that box score until someone notices. The schedule's night pattern is
-     a per-season setting now, so widening beats trying to track it here. */
-  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hour12: false })
-    .formatToParts(new Date());
-  const wdName = (p.find((x) => x.type === "weekday") || {}).value;
-  const hr = +((p.find((x) => x.type === "hour") || {}).value || 0);
-  const wd = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wdName];
-  if (wd === 3) return hr >= 18;          // Wednesday from 6pm ET
-  if (wd === 4 || wd === 5) return true;  // all of Thursday and Friday
-  if (wd === 6) return hr < 2;            // Saturday until 2am ET
-  return false;                           // Sun / Mon / Tue: off
-}

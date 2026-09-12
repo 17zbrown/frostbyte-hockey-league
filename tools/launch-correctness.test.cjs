@@ -31,8 +31,8 @@ console.log("\n— the availability deadline is 8pm ET across the DST change");
 
 console.log("\n— the EA auto-import only attaches to an open fixture");
 {
-  A("the match query excludes voided, forfeit-ruled, and non-scheduled games",
-    /status=eq\.scheduled&voided=not\.is\.true&forfeit_team_id=is\.null/.test(ingest));
+  A("a box score may file only on an open fixture: scheduled, unclaimed, not voided, not forfeit-ruled (v2.37: filtered from the pair's whole night)",
+    /const gamesAll = pairAll\.filter\(\(g\) => g\.status === "scheduled" && g\.ea_match_id == null && !g\.voided && g\.forfeit_team_id == null\);/.test(ingest));
 }
 
 console.log("\n— stale rules copy is corrected");

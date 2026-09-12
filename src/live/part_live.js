@@ -6017,7 +6017,7 @@ CG.admEAStats = function(){
         '<td class="tleft"><input data-ea-name="'+t.id+'" value="'+esc(t.eaClub||"")+'" placeholder="EA club name" style="max-width:200px"></td>'+
         '<td class="tright"><button class="btn btn-ghost btn-sm" data-ea-save="'+t.id+'" data-code="'+esc(t.code)+'">Save</button></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the scheduled poller matches EA games to your schedule by club-pair + date and writes the final score and every box-score stat — no manual entry.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Find a club’s id in the EA NHL app or its Pro Clubs page. Once linked, the score poller files each EA game on the fixture between those two clubs whose game window (10 minutes before puck drop to 3 hours after) holds the match’s end time, and writes the final score and every box-score stat — no manual entry.</span></div></div>';
   h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Recent activity</h3>'+(imported.length?'<span class="chip chip-win">'+imported.length+' imported</span>':"")+'</div>';
   if (imported.length){
     h+= imported.slice().sort(function(a,b){ return b.at-a.at; }).slice(0,8).map(function(g){
@@ -9030,9 +9030,9 @@ CG.hubRoster = function(qs){
   return h.replace('<span>Active payroll</span>', '<span>Payroll + dead cap</span>');
 };
 
-/* The window ea-poll actually runs in — Wed 18:00 through Sat 02:00 ET — mirrored from
-   netlify/functions/ea-poll.js's inGameWindow(). Used to grade the poller: not running is correct
-   outside the window and an outage inside it. */
+/* A client-only heuristic for grading the Netlify poller's chip — Wed 18:00 through Sat 02:00 ET,
+   the nights Season 1 plays. The pollers themselves gate on each fixture's own game window
+   (shared/game-window.mjs); this only decides how long a stale stamp is tolerated. */
 CG.inGameWindowET = function(){
   try {
     var f = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", weekday:"short", hour:"2-digit", hour12:false });
@@ -9047,8 +9047,8 @@ CG.inGameWindowET = function(){
 CG.AUTOMATIONS = [
   /* window-aware: 20 minutes DURING the game window (Wed 18:00 - Sat 02:00 ET), where a dead
      poller means no scores all night; a day outside it, where not running is correct */
-  { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; calls EA only when a fixture is due", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves — pulls each linked club’s finished matches and hands them to the importer within about a minute of the final horn. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
-  { key:"ea-poll", staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min on game nights (Wed 6pm–Sat 2am ET); stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
+  { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; asks EA only while a fixture’s game window is open", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves. It asks EA only while a fixture’s game window is open (10 minutes before puck drop to 3 hours after, plus a short grace so a game that ends at the buzzer is still collected), only for the clubs in those fixtures, and hands everything it finds to the importer — which files only a match between the two scheduled clubs that ended inside that window, merges a lag-out replay into the game it continues (Rule 4.3), and archives the rest. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
+  { key:"ea-poll", staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min; same fixture-window rule; stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
   { key:"twitch-live-sync", staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome", staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
@@ -9156,6 +9156,12 @@ CG.AFTER._admAutomations = function(){
         stEl.textContent = "Failing";
         stEl.className = "chip chip-loss";
         stEl.title = res.lastError ? String(res.lastError).slice(0,180) : "last run reported errors";
+      } else if (res && res.warning){
+        /* the job ran fine, but something it is meant to cover cannot be covered — a club in
+           tonight's fixtures with no EA club linked, say. Amber, with the sentence. */
+        stEl.textContent = "Check";
+        stEl.className = "chip chip-warn";
+        stEl.title = String(res.warning).slice(0,180);
       } else if (res && res.unconfiguredCount > 0){
         /* the job ran fine, but a feed it is meant to publish has no webhook — dark, not broken.
            Without this it painted green and a public feed could stay silent all season. */

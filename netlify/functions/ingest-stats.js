@@ -1,8 +1,9 @@
 // Netlify Function: POST /api/ingest-stats  (redirected from netlify.toml)
-// Receives raw EA Pro Clubs match objects (forwarded by the home/VPS fetcher),
-// matches each to a scheduled league game by club-id pair + ET date, and writes
-// the final score + per-player box score into Supabase. Idempotent: a match whose
-// id already lives on a game (games.ea_match_id) is skipped.
+// Receives raw EA Pro Clubs match objects (forwarded by the score pollers), files each on the
+// fixture between exactly its two clubs whose GAME WINDOW (shared/game-window.mjs: puck drop
+// − 10 min … + 3 h) contains the match's end time, and writes the final score + per-player box
+// score into Supabase. Idempotent: a match whose id already lives on a game (games.ea_match_id)
+// is skipped. Anything that fits no fixture is archived, never guessed onto one.
 //
 // Auth: the fetcher must send  x-ingest-key: <INGEST_KEY>  — OR the SUPABASE_SERVICE_ROLE_KEY,
 // which the always-on VM poller (bot/ea-poll.mjs) already holds, so it needs no second secret.
@@ -14,6 +15,7 @@
 export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
 
 import { timingSafeEqual } from "node:crypto";
+import { matchInWindow, fixtureForMatch, describeWindow, FULL_GAME_CLOCK_S, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS } from "../../shared/game-window.mjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -102,14 +104,17 @@ function normalizeMatch(raw) {
   return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), ts: +raw.timestamp || 0, clubs, went_ot: wentOt };
 }
 
-// ---- Merge the segments of a disconnected game into one box score ----
+// ---- Merge the sittings of a disconnected game into one box score ----
 //
-// A mid-game disconnect produces TWO EA matches: the partial first sitting, then a fresh lobby
-// where the clubs replay only the remaining time. League rule: that is ONE game. The segments are
-// summed per player; the win/OT outcome comes from the FINAL sitting; a shutout is re-derived from
-// the combined line (a goalie clean in the resume but scored on in the first sitting has no
-// shutout); the per-game ratings are time-on-ice-weighted rather than summed. The game-winning
-// goal cannot be attributed without goal timings, so it is zeroed rather than guessed.
+// A mid-game disconnect produces TWO (or more) EA matches: the abandoned first sitting, then the
+// fresh lobby in which the clubs replay the game under Rule 4.3 — the whole game, or a single
+// period when the drop came early in the third. League rule (4.3 P2): however many sittings a
+// game takes, they are ONE game record, and everything earned in the abandoned sitting counts in
+// full. So the sittings are summed per player and per club; the win/OT outcome comes from the
+// FINAL sitting; a shutout is re-derived from the combined line (a goalie clean in the replay but
+// scored on in the first sitting has no shutout); the per-game ratings are time-on-ice-weighted
+// rather than summed. The game-winning goal cannot be attributed without goal timings, so it is
+// zeroed rather than guessed.
 /* ---- live EA transport for the fixture desk's on-demand fetch ----
    KEEP IN SYNC with eaFetch in pickup-import.js and eaGet in ea-poll.js — same route order, same
    reasons: DIRECT first (EA blocks by client fingerprint, not by datacenter IP), then the
@@ -155,9 +160,13 @@ const eaSearchClubs = (name) =>
 const eaClubMatches = (clubId) =>
   eaFetch(`https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${encodeURIComponent(clubId)}`);
 
-const REGULATION_S = 720;                 // 3 periods x 4 minutes
-const RESUME_WINDOW_S = 3 * 3600;         // segments further apart than this are not one game
-const COMBINED_CAP_S = Math.round(REGULATION_S * 1.7);   // room for OT on the resumed end
+/* EA's toiseconds runs on the DISPLAYED 20-minute clock: 3600 for a full regulation game, more in
+   overtime, less when the game ended early (a disconnection or a quit). See shared/game-window.mjs;
+   the old value here (720, the real-time length of the league's four-minute periods) meant no real
+   sitting ever read as unfinished, so the lag-out merge could never fire. */
+const REGULATION_S = FULL_GAME_CLOCK_S;
+const RESUME_WINDOW_S = 3 * 3600;         // sittings further apart than this are not one game
+const SITTING_CAP_S = Math.round(REGULATION_S * 1.5);   // longer than a game plus a long overtime is not a sitting
 
 function segElapsed(seg) {
   // the longest time-on-ice in a segment is how long that sitting actually ran
@@ -284,7 +293,16 @@ async function logAttempt(norm, raw, status, reason, gameId) {
       status, reason: reason || null, game_id: gameId || null,
       last_attempt_at: new Date().toISOString()
     }], "resolution=merge-duplicates,return=minimal");
-  } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); }
+    return true;
+  } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); return false; }
+}
+/* Archive a refusal without re-uploading a payload that is already archived: EA re-serves the same
+   recent matches on every poll (every ~2 min on the VM lane), so a scrimmage would otherwise be
+   re-sent ~100 times a night. First sighting stores the payload; later ones touch the status. */
+async function logRefusal(norm, raw, status, reason) {
+  const seen = await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=status&limit=1`).catch(() => []);
+  if (seen && seen[0]) return touchAttempt(norm.ea_match_id, status, reason);
+  return logAttempt(norm, raw, status, reason);
 }
 
 /* Status-only touch for a match whose payload is ALREADY archived. EA re-serves the same recent
@@ -301,7 +319,11 @@ async function touchAttempt(eaMatchId, status, reason, gameId) {
 export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame, resolveProfile };
 
 // ---- Ingest ONE normalized match ----
-async function ingestOne(norm, raw, summary, batch) {
+// opts.relaxed (commissioner re-ingest of an archived payload only): the fixture window widens to
+// a day either side, because the commissioner is deliberately replaying something the robot
+// refused. Every automatic path runs strict.
+async function ingestOne(norm, raw, summary, batch, opts = {}) {
+  const winBefore = opts.relaxed ? 86400000 : undefined, winAfter = opts.relaxed ? 86400000 : undefined;
   // dedupe — a match that owns a game, or was merged into one as a resume segment, is done.
   // Without the second check every later poll would re-merge the resume segment and double it.
   const dup = await sbGet(`games?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=id&limit=1`);
@@ -330,61 +352,71 @@ async function ingestOne(norm, raw, summary, batch) {
   const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
   const tA = teamByClub[ids[0]], tB = teamByClub[ids[1]];
 
-  // find a scheduled, not-yet-ingested game between these two clubs. Prefer the exact ET day;
-  // otherwise fall back to the nearest game within +/-1 ET day. A game that finishes after
-  // midnight ET (or spills into OT) reports the *next* ET day while the fixture stays on game
-  // night — exact-day matching would silently drop those box scores, so widen the window.
+  // THE MATCHUP RULE (shared/game-window.mjs): a box score is filed only on an OPEN fixture between
+  // exactly these two clubs whose game window (describeWindow(): puck drop − 10 min to + 3 h)
+  // contains the time the match ENDED. Not the calendar day, not "a day either side": a scrimmage between two clubs the
+  // afternoon of their game, a rematch after the night, a Tuesday lobby before a Wednesday fixture
+  // are all refused and left for the fixture desk, where staff file by hand if one ever was the
+  // league game.
   const or = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
+  const matchEndMs = (norm.ts || 0) * 1000;
+  // The pair's fixtures around this match, every status: the OPEN ones are where a box score may
+  // file; the rest (claimed, ruled, final) tell the window rule which slot is which on a playoff
+  // night and whether this pair was scheduled at all.
+  const DAY = 86400000;
+  const pairAll = matchEndMs
+    ? await sbGet(`games?${or}&scheduled_at=gte.${encodeURIComponent(new Date(matchEndMs - DAY - (winAfter ?? 0)).toISOString())}&scheduled_at=lte.${encodeURIComponent(new Date(matchEndMs + DAY + (winBefore ?? 0)).toISOString())}&select=id,scheduled_at,home_team_id,away_team_id,season_id,status,ea_match_id,voided,forfeit_team_id`)
+    : [];
   // Only auto-attach to a genuinely open fixture: scheduled, not voided, not forfeit-ruled. Without
   // these filters an EA payload could mark a voided game final again, or overwrite a staff forfeit
   // ruling's score with the played numbers while leaving the ruling in place (Rule 3.2 / 4.3).
-  const gamesAll = await sbGet(`games?${or}&ea_match_id=is.null&status=eq.scheduled&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id`);
-  // A match cannot belong to a fixture that had not started when the match ENDED (codes go out at
-  // T-30). Without this, a stray payload could mark a future game final with someone else's score.
-  const matchEndMs = (norm.ts || 0) * 1000;
-  const games = matchEndMs
-    ? gamesAll.filter((g) => Date.parse(g.scheduled_at) <= matchEndMs + 2 * 3600000)
-    : gamesAll;
-  const DAY = 86400000;
-  const matchDayUnix = Date.parse(`${norm.et_day}T12:00:00Z`); // noon avoids DST edge wobble
-  // A playoff series plays the SAME two clubs twice on one night (2-2-3, Rule 8.3). With two open
-  // fixtures on the same ET day the pick below is whatever order Postgres happened to return, so
-  // the two box scores can land on the wrong games — and once one is claimed the other is filed
-  // against its sibling. Refuse to guess: route both to staff, who assign them per fixture from
-  // the Stats Manager / Club game stats desk.
-  const sameDay = games.filter((g) => etDayISO(g.scheduled_at) === norm.et_day);
-  let game = sameDay[0];
-  if (sameDay.length > 1) {
-    // A playoff series lays all its games down at once (2-2-3, Rule 8.3), so two — or three —
-    // open fixtures between the same clubs on one night is NORMAL, not rare. Slots are 35 minutes
-    // apart, so the match that ENDED at norm.ts belongs to the latest fixture that had already
-    // started. Only refuse when that still cannot separate them.
-    const byStart = sameDay.slice().sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
-    const started = matchEndMs ? byStart.filter((g) => Date.parse(g.scheduled_at) <= matchEndMs) : [];
-    if (started.length) {
-      game = started[started.length - 1];
-    } else {
-      const why = `${sameDay.length} open fixtures between these clubs on ${norm.et_day} and no way to tell them apart (no match end time) — assign this box score to the right game by hand`;
+  const gamesAll = pairAll.filter((g) => g.status === "scheduled" && g.ea_match_id == null && !g.voided && g.forfeit_team_id == null);
+  const siblings = pairAll.filter((g) => !g.voided);
+  if (!matchEndMs) {
+    // EA stamps every match; without the end time the window cannot be checked, and a box score
+    // that cannot be placed in time is never guessed onto a fixture.
+    const why = "EA gave this match no end time — it cannot be placed in a game window; file it by hand if it was the league game";
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+    await logAttempt(norm, raw, "unmatched", why);
+    return;
+  }
+  // A playoff series plays the SAME two clubs twice or three times on one night (2-2-3, Rule 8.3),
+  // so several open fixtures can hold this match's end time. Matches are ingested oldest first and
+  // a claimed fixture leaves the open set, so the EARLIEST open fixture in window is the slot the
+  // match was played in.
+  let game = fixtureForMatch(gamesAll, tA, tB, matchEndMs, undefined, undefined, siblings);
+  if (!game && opts.relaxed) {
+    // a commissioner replaying an archived payload: the NEAREST open fixture within a day, never
+    // the earliest — a still-open Wednesday slot must not swallow Thursday's box score
+    game = gamesAll.filter((g) => matchInWindow(matchEndMs, g.scheduled_at, winBefore, winAfter))
+      .sort((a, b) => Math.abs(Date.parse(a.scheduled_at) - matchEndMs) - Math.abs(Date.parse(b.scheduled_at) - matchEndMs))[0] || null;
+  }
+  // Rule 4.3: a disconnected game is REPLAYED in a fresh lobby, and the abandoned sitting and the
+  // replay are one record. So before this match claims an open fixture, ask whether a FINAL game
+  // between the same clubs inside this window is still unfinished (its clock never reached the
+  // end of regulation). A complete game is never resumed. When an open sibling slot could ALSO
+  // take this match (a 2-2-3 playoff night after a short first game), nobody can tell a lag-out
+  // replay from the next game — that case goes to statistics staff, never guessed.
+  const cont = await ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, winAfter, game);
+  if (cont.done) return;
+  if (!game) {
+    const endIso = new Date(matchEndMs).toISOString();
+    // "a scheduled matchup" means ANY fixture between the pair within a day of this match,
+    // whatever its status — a forfeit-ruled or voided one included. Those go to the staff board:
+    // a same-pair match hours before or after its slot may be the league game played off the
+    // clock, and the office should see it. Only a pair with no fixture at all is quietly archived.
+    if (pairAll.length || cont.sawFixture || opts.relaxed) {
+      // a scheduled matchup, but this match is not it (or ran past the window): staff should look
+      const why = `no open fixture between these clubs has a game window containing ${endIso} (windows run ${describeWindow(winBefore, winAfter)}) — not the scheduled game, or played outside its window; file it by hand if it was`;
       summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-      await logAttempt(norm, raw, "unmatched", why);
-      return;
+      await logRefusal(norm, raw, "unmatched", why);
+    } else {
+      // two league clubs that are not scheduled against each other in this window: a scrimmage,
+      // never staff work — archived (replayable by a commissioner), not flagged
+      const why = `not a scheduled matchup — no fixture between these clubs has a game window containing ${endIso}`;
+      summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: why });
+      await logRefusal(norm, raw, "ignored", why);
     }
-  }
-  if (!game) {
-    const near = games
-      .map((g) => ({ g, days: Math.abs(Date.parse(`${etDayISO(g.scheduled_at)}T12:00:00Z`) - matchDayUnix) / DAY }))
-      .filter((x) => x.days <= 1)
-      .sort((a, b) => a.days - b.days);
-    if (near[0]) game = near[0].g;
-  }
-  if (!game) {
-    // No unclaimed fixture. If a FINAL game between these same clubs sits close by in time, this
-    // payload may be the second sitting of a disconnected game — the league replays only the
-    // remaining time in a fresh lobby, and that lobby reports as a brand-new EA match.
-    const done = await ingestContinuation(norm, raw, summary, batch, tA, tB);
-    if (done) return;
-    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: `no scheduled game for these clubs within a day of ${norm.et_day}` });
-    await logAttempt(norm, raw, "unmatched", `no scheduled game for these clubs within a day of ${norm.et_day}`);
     return;
   }
 
@@ -486,41 +518,79 @@ async function postGameRecaps(game, rows, homeScore, awayScore, summary) {
 // The league's procedure for a mid-game disconnect is to restart the lobby and play only the time
 // remaining, so ONE fixture arrives as TWO (or more) EA matches. This merges them, under four
 // tests, every one of which must pass — anything that fails falls through to "unmatched" and a
-// commissioner decides:
-//   1. a FINAL game between the same two clubs exists within the day window;
+// commissioner decides (or, when `probe` is set because an open sibling fixture also fits, falls
+// back to filing the match on that fixture):
+//   1. a FINAL game between the same two clubs exists whose game window holds this end time AND
+//      whose last recorded sitting is UNFINISHED — its clock never reached the end of regulation
+//      (a complete game, decided or gone to overtime and decided, is never resumed);
 //   2. the sittings are close in time (RESUME_WINDOW_S);
 //   3. NEITHER club played anyone else in between — a club that moved on to a different opponent
 //      finished its game (a quit still counts in full; it is not a disconnect);
-//   4. the incoming sitting is shorter than a whole game, and all sittings together fit inside
-//      one game plus overtime — two full-length games are a replay for the commissioner to rule
-//      on, never an automatic merge.
-async function ingestContinuation(norm, raw, summary, batch, tA, tB) {
+//   4. the incoming sitting is at most one game plus a long overtime — under Rule 4.3 the replay
+//      IS full length (or one period), so its length is no longer evidence against a merge.
+// Returns { done, sawFixture }: done = the match was handled here (merged, or refused for the
+// record when not probing); sawFixture = a same-pair final existed in the window at all.
+async function ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, winAfter, sibling = null) {
+  const probe = !!sibling;   // an open same-pair fixture could take this match instead
   const orC = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
-  const finals = await sbGet(`games?${orC}&status=eq.final&ea_match_id=not.is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id`);
+  // a forfeit-ruled or voided game is never a resume target (Rule 3.2 / 4.3 P7: the ruling stands)
+  const finals = await sbGet(`games?${orC}&status=eq.final&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id`);
   const matchEndMs = (norm.ts || 0) * 1000;
-  const cand = finals
-    .filter((g) => Math.abs(Date.parse(g.scheduled_at) - matchEndMs) < 86400000)
-    .sort((a, b) => Math.abs(Date.parse(a.scheduled_at) - matchEndMs) - Math.abs(Date.parse(b.scheduled_at) - matchEndMs))[0];
-  if (!cand) return false;
-
-  // every prior sitting of this fixture: the one on the game row + any already merged into it
-  const logRows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(cand.ea_match_id)},and(game_id.eq.${cand.id},status.eq.merged))&select=ea_match_id,payload`);
-  const priors = [];
-  for (const rowL of logRows) {
-    if (!rowL.payload) continue;
-    const n2 = normalizeMatch(rowL.payload);
-    if (n2 && !priors.some((x) => x.ea_match_id === n2.ea_match_id)) priors.push(n2);
-  }
-  if (!priors.length) {
-    const why = "looks like a resume of an ingested game, but its first sitting is not archived — commissioner re-ingest needed";
+  const inWindow = finals
+    .filter((g) => matchInWindow(matchEndMs, g.scheduled_at, winBefore, winAfter))
+    .sort((a, b) => Math.abs(Date.parse(a.scheduled_at) - matchEndMs) - Math.abs(Date.parse(b.scheduled_at) - matchEndMs));
+  const R = (done) => ({ done, sawFixture: inWindow.length > 0 });
+  if (!inWindow.length) return R(false);
+  /* when an open sibling fixture could also take this match (a playoff night), a resume test that
+     fails must hand the match back rather than filing it as unmatched */
+  const refuse = async (why) => {
+    if (probe) return R(false);
     summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
     await logAttempt(norm, raw, "unmatched", why);
-    return true;
+    return R(true);
+  };
+  /* 1. the candidate is the nearest same-pair final in window that is still UNFINISHED. A game is
+     complete when its sittings' clocks add up to a full game (a single-period replay under 4.3 P5
+     finishes the game it continues), when its last sitting ran the whole clock, or when it went
+     to overtime — a complete game is never resumed: on a playoff night it is the previous game,
+     not this one's first half. */
+  let cand = null, priors = [], missingArchive = false;
+  for (const g of inWindow) {
+    const logRows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(g.ea_match_id)},and(game_id.eq.${g.id},status.eq.merged))&select=ea_match_id,payload`);
+    const ps = [];
+    for (const rowL of logRows) {
+      if (!rowL.payload) continue;
+      const n2 = normalizeMatch(rowL.payload);
+      if (n2 && !ps.some((x) => x.ea_match_id === n2.ea_match_id)) ps.push(n2);
+    }
+    if (!ps.length) { missingArchive = true; continue; }   // cannot be judged; see below
+    const sorted = ps.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const last = sorted[sorted.length - 1];
+    const total = ps.reduce((a, p2) => a + segElapsed(p2), 0);
+    if (segElapsed(last) >= REGULATION_S || total >= REGULATION_S || last.went_ot) continue;   // finished
+    cand = g; priors = ps; break;
+  }
+  if (!cand) {
+    /* a same-pair final with no archive cannot be judged — exactly the case a commissioner
+       re-ingest exists for. Say so, unless an open sibling is waiting to take the match. */
+    if (missingArchive && !probe) return refuse("looks like a resume of an ingested game, but its first sitting is not archived — commissioner re-ingest needed");
+    return R(false);
+  }
+  /* An unfinished same-pair game AND an open same-pair slot both fit this match (a 2-2-3 playoff
+     night after a short first game). A lag-out replay and the next game look identical here — a
+     quit, or an abandoned game the clubs never replayed, leaves the same short sitting — so this
+     is a human's call. Leave the slot open, put the match on the statistics desk, name both. */
+  if (probe) {
+    const slotEt = new Date(sibling.scheduled_at).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+    const why = `could be the Rule 4.3 replay of the unfinished ${cand.id} game or the ${slotEt} ET game between the same clubs — assign it by hand (merge it, or file it on the ${slotEt} slot) from the Stats manager`;
+    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+    await logRefusal(norm, raw, "unmatched", why);
+    return R(true);
   }
 
   // 2. time proximity, against the nearest prior sitting
   const nearest = priors.reduce((m, p2) => Math.min(m, Math.abs((norm.ts || 0) - (p2.ts || 0))), Infinity);
-  if (nearest > RESUME_WINDOW_S) return false;
+  if (nearest > RESUME_WINDOW_S) return R(false);
 
   // 3. neither club played a DIFFERENT opponent between the sittings. The poll batch carries each
   //    club's recent history, so an intervening game is visible right here.
@@ -530,31 +600,27 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB) {
     if (!other || other.ea_match_id === norm.ea_match_id) continue;
     if (priors.some((p2) => p2.ea_match_id === other.ea_match_id)) continue;
     const ids2 = other.clubs.map((c) => c.ea_club_id);
-    const involvesUs = ids2.some((id2) => pair.includes(id2));
+    const ours = norm.clubs.map((c) => c.ea_club_id);
+    const involvesUs = ids2.some((id2) => ours.includes(id2));
     const samePair = ids2.slice().sort().join("|") === pair;
     if (involvesUs && !samePair && (other.ts || 0) > t0 && (other.ts || 0) < t1) {
       const why = "a different opponent came between the two sittings — not a disconnect resume";
-      summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-      await logAttempt(norm, raw, "unmatched", why);
-      return true;
+      return refuse(why);
     }
   }
 
-  // 4. the sittings must LOOK like one game split in two
+  // 4. the incoming sitting must be a sitting: a whole replayed game (Rule 4.3 P1), one period
+  //    (P5), or another abandoned attempt — never longer than a game plus a long overtime
   const incomingLen = segElapsed(norm);
   const totalLen = priors.reduce((a, p2) => a + segElapsed(p2), 0) + incomingLen;
-  if (incomingLen >= REGULATION_S || totalLen > COMBINED_CAP_S) {
-    const why = `same clubs back to back but the sittings do not fit one game (${incomingLen}s incoming, ${totalLen}s combined) — flagged for commissioner`;
-    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-    await logAttempt(norm, raw, "unmatched", why);
-    return true;
+  if (incomingLen > SITTING_CAP_S) {
+    const why = `same clubs back to back but the incoming sitting (${incomingLen}s of game clock) is longer than any one game — flagged for commissioner`;
+    return refuse(why);
   }
 
   const merged = mergeSegments(priors.concat([norm]));
   if (merged.error) {
-    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: merged.error });
-    await logAttempt(norm, raw, "unmatched", merged.error);
-    return true;
+    return refuse(merged.error);
   }
 
   // write exactly as a normal ingest writes, from the merged line
@@ -565,7 +631,7 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB) {
   if (!homeClub || !awayClub) {
     summary.errors.push({ ea_match_id: norm.ea_match_id, error: "resume merge could not map clubs to teams" });
     await logAttempt(norm, raw, "error", "resume merge could not map clubs to teams");
-    return true;
+    return R(true);
   }
 
   const cache = new Map();
@@ -603,11 +669,14 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB) {
     rows, homeClub.score, awayClub.score, summary).catch((e) =>
     console.warn("recap re-issue failed (the merge itself is unaffected):", String(e && e.message || e)));
 
-  await logAttempt(norm, raw, "merged",
-    `second sitting of a disconnected game — merged into ${cand.ea_match_id} (${priors.length + 1} sittings, ${totalLen}s)`, cand.id);
+  /* this row is what the NEXT match's completeness test and the merge dedupe read — a failed
+     write must be loud, or the same replay would be merged again on every poll */
+  const logged = await logAttempt(norm, raw, "merged",
+    `a later sitting of a disconnected game (Rule 4.3) — merged into ${cand.ea_match_id} (${priors.length + 1} sittings, ${totalLen}s of game clock)`, cand.id);
+  if (!logged) summary.errors.push({ ea_match_id: norm.ea_match_id, error: `merged into ${cand.ea_match_id} but the merge could not be archived — the next poll may merge it again; check ea_ingest_log` });
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, merged_into: cand.ea_match_id,
     score: `${homeClub.score}-${awayClub.score}`, players: rows.length, resumed: true });
-  return true;
+  return R(true);
 }
 
 // ---- Commissioner re-ingest: replay an archived payload by ea_match_id ----
@@ -996,7 +1065,7 @@ export const handler = async (event) => {
     try {
       const norm = normalizeMatch(row.payload);
       if (!norm) summary.errors.push({ reason: "archived payload is unparseable" });
-      else await ingestOne(norm, row.payload, summary, [norm]);
+      else await ingestOne(norm, row.payload, summary, [norm], { relaxed: true });   /* a deliberate replay: window widens to a day either side */
     } catch (e) { summary.errors.push({ ea_match_id: body.reingest, error: String(e.message || e) }); }
     return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(summary) };
   }

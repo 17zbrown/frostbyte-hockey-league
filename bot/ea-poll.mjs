@@ -8,11 +8,16 @@
 // /api/ingest-stats endpoint, which dedupes by ea_match_id, so whichever lane reaches EA first
 // wins and the other's delivery is a no-op.
 //
-// Same gate as the Netlify poller: EA is only asked when a league fixture could actually have
-// been played — one scheduled within the last six hours or the next half hour. An idle cycle
-// costs one cheap Supabase query and the heartbeat, nothing more. On game nights this polls
-// about every two minutes (60-s cycles with a 90-s floor between EA calls) instead of Netlify's
-// 5 min, which is the whole point of running it here.
+// Same gate as the Netlify poller, defined once in shared/game-window.mjs: EA is only asked while
+// a fixture's game window (puck drop − 10 min … + 3 h, plus a 15-min fetching grace) contains
+// now, and only for the clubs in those fixtures. Everything EA returns for those clubs is handed
+// to the importer, which is the one place that files: it takes only a match between the two
+// scheduled clubs that ended inside their fixture's window, archives the rest, and merges a
+// disconnected game's replay into its first sitting (Rule 4.3) — which is why a fixture already
+// filed by a first sitting stays in the poll set while its window is open. An idle cycle costs
+// one cheap Supabase query and the heartbeat, nothing more. On game nights this polls about every
+// two minutes (60-s cycles with a 90-s floor between EA calls) instead of Netlify's 5 min, which
+// is the whole point of running it here.
 //
 // Ledgers (app_config), in the shapes the Automations panel and automation_watchdog read:
 //   rl_ea-poll-vm       every cycle — "this lane is alive"
@@ -26,6 +31,7 @@
 
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
+import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../shared/game-window.mjs";
 
 /* KEEP IN SYNC with EA_HEADERS in netlify/functions/ea-poll.js (and eaFetch in ingest-stats.js /
    pickup-import.js). EA blocks by CLIENT FINGERPRINT, not by address: this exact browser-shaped
@@ -53,12 +59,11 @@ export function createEaPoller(env, opts = {}) {
 
   const CYCLE_MS = opts.cycleMs ?? 60_000;                 // how often a cycle runs
   const MIN_GAP_MS = opts.minPollGapMs ?? 90_000;          // floor between two EA polls
-  const IDLE_STAMP_MS = opts.idleStampMs ?? 30 * 60_000;   // "no fixture due" result, at most this often
+  const IDLE_STAMP_MS = opts.idleStampMs ?? 30 * 60_000;   // "no fixture in its game window" result, at most this often
   const BACKOFF_MS = opts.backoffMs ?? 5 * 60_000;         // after any 403: no EA call for this long
   const CLUB_GAP_MS = opts.clubGapMs ?? 300;               // pause between clubs
   const EA_TIMEOUT_MS = opts.eaTimeoutMs ?? 8000;
   const INGEST_TIMEOUT_MS = opts.ingestTimeoutMs ?? 30_000;
-  const DUE_BACK_MS = 6 * 3600e3, DUE_AHEAD_MS = 30 * 60e3;
 
   /* surfaced as eaPoll in the gateway heartbeat's extra */
   const sum = { live: true, polls: 0, matches: 0, ingested: 0, lastPollAt: null, lastError: null, backoffUntil: null };
@@ -149,42 +154,70 @@ export function createEaPoller(env, opts = {}) {
     sum.backoffUntil = t0 < backoffUntil ? iso(backoffUntil) : null;
     await cfgSet("rl_ea-poll-vm", iso(t0));                       // (1) alive
     try {
-      /* (2) DUE GATE — same query as the Netlify lane: a fixture scheduled within the last six
-         hours (a box score lands minutes after the final horn, lag-out segments later) or the
-         next half hour. Without it an EA hiccup on a night with no fixture reads as a failing run. */
-      const dueFrom = iso(t0 - DUE_BACK_MS), dueTo = iso(t0 + DUE_AHEAD_MS);
-      const due = await sbGet(`games?voided=not.is.true&scheduled_at=gte.${encodeURIComponent(dueFrom)}&scheduled_at=lte.${encodeURIComponent(dueTo)}&select=id&limit=1`);
-      const fixtureDue = Array.isArray(due) && due.length > 0;
+      /* (2) DUE GATE — the fixtures (scheduled OR already filed final; a forfeit-ruled or voided
+         one too, because the office still wants what was played archived) whose game window —
+         plus the fetching grace — contains now. Same definition as the Netlify lane and the
+         importer (shared/game-window.mjs), and the importer alone decides what files. A fixture a
+         first sitting has already filed stays in the set: its Rule 4.3 replay still has to be
+         collected and merged. No window open means no EA call at all: an EA hiccup on a night
+         with no fixture must never read as a failing import. */
+      const fixtures = await sbGet(`games?status=in.(scheduled,final)&${openFixtureFilter(t0, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS + POLL_GRACE_MS)}&select=id,home_team_id,away_team_id,scheduled_at,status,ea_match_id`);
+      const open = Array.isArray(fixtures) ? fixtures.filter((g) => g && g.home_team_id && g.away_team_id && g.scheduled_at) : [];
+      const fixtureDue = open.length > 0;
       if (!fixtureDue && !force) {
         /* the idle record is what keeps the chip honest ("nothing to do" rather than a stale
            success), but once per cycle would be 1,440 identical upserts a day */
         if (t0 - lastIdleStampAt >= IDLE_STAMP_MS) {
-          await record({ ok: true, skipped: "no fixture due" });
+          await record({ ok: true, skipped: "no fixture in its game window" });
           lastIdleStampAt = t0;
         }
-        return { skipped: "no fixture due" };
+        return { skipped: "no fixture in its game window" };
       }
       if (t0 < backoffUntil) return { skipped: "EA backoff after a 403", backoffUntil: iso(backoffUntil) };
       if (t0 - lastPollAt < MIN_GAP_MS) return { skipped: "polled moments ago", nextPollAt: iso(lastPollAt + MIN_GAP_MS) };
 
-      /* (3) poll */
-      const rows = await sbGet("teams?ea_club_id=not.is.null&select=ea_club_id");
-      const clubs = [...new Set((rows || []).map((t) => t && t.ea_club_id).filter((v) => v != null && v !== "").map(String))];
+      /* (3) poll — ONLY the clubs playing in a fixture whose window is open. With none open (a
+         forced one-shot) every linked club is asked, purely as a diagnostic. */
+      const teamIds = [...new Set(open.flatMap((g) => [g.home_team_id, g.away_team_id]))];
+      const teamQ = teamIds.length
+        ? `teams?id=in.(${teamIds.map(encodeURIComponent).join(",")})&ea_club_id=not.is.null&select=id,ea_club_id`
+        : "teams?ea_club_id=not.is.null&select=id,ea_club_id";
+      const rows = await sbGet(teamQ);
+      const teamByClub = {};
+      for (const t of rows || []) if (t && t.ea_club_id != null && t.ea_club_id !== "") teamByClub[String(t.ea_club_id)] = t.id;
+      const clubs = Object.keys(teamByClub);
       if (!clubs.length) {
-        /* NOT ok. Without a single linked club no box score can ever import — this is the one
-           skip that must show red rather than pass quietly (but written at the idle cadence, not
-           once a minute for the length of the outage). */
-        const lastError = "No club has an ea_club_id — the EA import cannot run. Link each club's EA id in Control Center → Clubs.";
+        /* NOT ok. Without a linked club no box score can ever import — this is the one skip that
+           must show red rather than pass quietly (but written at the idle cadence, not once a
+           minute for the length of the outage). */
+        const lastError = fixtureDue
+          ? `None of the ${teamIds.length} clubs in tonight's open fixtures has an EA club linked — their box scores cannot import. Link each club's EA id in Control Center → Clubs.`
+          : "No club has an ea_club_id — the EA import cannot run. Link each club's EA id in Control Center → Clubs.";
         sum.lastError = lastError;
         if (t0 - lastIdleStampAt >= IDLE_STAMP_MS) {
           await record({ ok: false, polled: 0, matches: 0, errCount: 1, lastError, linkedClubs: 0 });
           lastIdleStampAt = t0;
         }
-        return { skipped: "no teams have an ea_club_id set", ok: false, lastError };
+        return { skipped: "no linked EA club among the open fixtures", ok: false, lastError };
       }
+      const unlinked = teamIds.filter((id) => !rows.some((t) => t && t.id === id));
 
       lastPollAt = t0; sum.polls++; sum.lastPollAt = iso(t0);
-      const { matches, clubErrors, blocked, incomplete } = await pollClubs(clubs);
+      const polled = await pollClubs(clubs);
+      const { clubErrors, blocked, incomplete } = polled;
+      /* (4) everything EA returned for these clubs goes to the importer — it is the one place that
+         files, and it needs the whole picture: the archive it keeps (every payload replayable by
+         a commissioner) and the Rule 4.3 merge (which asks whether a club played anyone else
+         between two sittings) both break if the poller pre-trims. `offWindow` is the count the
+         importer is expected to refuse: matches that are not between the two clubs of a fixture
+         in window, or that ended outside it (a scrimmage before the slot, a rematch after). */
+      const matches = polled.matches;
+      let offWindow = 0;
+      for (const m of matches) {
+        const cl = Object.keys(m.clubs || {});
+        const a = teamByClub[String(cl[0])], b = teamByClub[String(cl[1])];
+        if (!(a && b && fixtureForMatch(open, a, b, (+m.timestamp || 0) * 1000))) offWindow++;
+      }
       if (blocked) {
         backoffUntil = now() + BACKOFF_MS;
         log(`ea-poll: EA answered 403 — backing off, no EA calls until ${iso(backoffUntil)}`);
@@ -221,13 +254,16 @@ export function createEaPoller(env, opts = {}) {
         unmatched: Array.isArray(out.unmatched) ? out.unmatched.length : 0,
         skipped: Array.isArray(out.skipped) ? out.skipped.length : 0,
         errors: ingestErrs.length,
-        incomplete,
+        incomplete, offWindow, fixturesOpen: open.length,
+        ...(unlinked.length ? { unlinkedInFixtures: unlinked.length,
+          warning: `${unlinked.length} club${unlinked.length === 1 ? "" : "s"} in tonight's fixtures ${unlinked.length === 1 ? "has" : "have"} no EA club linked — their games cannot import until they are linked in Team HQ` } : {}),
       };
       sum.ingested += res.ingested;
       sum.lastError = lastError;
       await cfgSet("rl_ea-poll", iso());
       await record(res);
-      log(`ea-poll: polled ${clubs.length} club${clubs.length === 1 ? "" : "s"}, ${matches.length} match${matches.length === 1 ? "" : "es"}` +
+      log(`ea-poll: ${open.length} fixture${open.length === 1 ? "" : "s"} in window, polled ${clubs.length} club${clubs.length === 1 ? "" : "s"}, ${matches.length} match${matches.length === 1 ? "" : "es"}` +
+        (offWindow ? ` (${offWindow} outside any fixture's window — the importer will refuse them)` : "") +
         (matches.length ? `, ingest ${ingestStatus} (ingested ${res.ingested}, unmatched ${res.unmatched}, skipped ${res.skipped}, errors ${res.errors})` : "") +
         (clubErrors.length ? `, ${clubErrors.length} club error${clubErrors.length === 1 ? "" : "s"}` : ""));
       return { at: iso(), lane: "vm", ...res, clubErrors, fixtureDue };
@@ -277,7 +313,7 @@ const isMain = (() => {
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
-    console.log("usage: node bot/ea-poll.mjs --once [--force]\n  --once   run one poll cycle and exit (the only mode; the loop lives in chel-bot.mjs)\n  --force  poll EA even when no fixture is due\nenv: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (source /etc/chel-bot.env)");
+    console.log(`usage: node bot/ea-poll.mjs --once [--force]\n  --once   run one poll cycle and exit (the only mode; the loop lives in chel-bot.mjs)\n  --force  ask EA even when no fixture's game window (${describeWindow()}) is open — a diagnostic: with no open fixture nothing found can be filed\nenv: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (source /etc/chel-bot.env)`);
     process.exit(0);
   }
   const force = args.includes("--force");

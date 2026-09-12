@@ -16,12 +16,16 @@ const env = { SB_URL: "https://sb.invalid", SB_KEY: "service-role-key-123" };
 let T = Date.parse("2026-09-16T23:30:00Z");                 // a Wednesday night, mid game window
 const now = () => T;
 const advance = (ms) => { T += ms; };
-const M = (id, ts) => ({ matchId: id, timestamp: ts || 1_789_000_000, clubs: { 111: { score: 3 }, 222: { score: 2 } } });
+/* a match between the two clubs of tonight's fixture that ENDED 40 minutes after puck drop
+   (inside the fixture's window) unless told otherwise */
+const PUCK = Date.parse("2026-09-16T23:00:00Z");          // tonight's fixture: 7:00 PM ET
+const M = (id, ts, home = 111, away = 222) => ({ matchId: id, timestamp: ts || Math.floor((PUCK + 40 * 60_000) / 1000), clubs: { [home]: { score: 3 }, [away]: { score: 2 } } });
+const FIXTURE = { id: "g1", home_team_id: "tA", away_team_id: "tB", scheduled_at: new Date(PUCK).toISOString() };
 
 const world = {
-  due: [{ id: "g1" }],
+  due: [FIXTURE],
   dueThrows: false,
-  clubs: [{ ea_club_id: 111 }, { ea_club_id: 222 }, { ea_club_id: 111 }],   // 111 twice: must poll once
+  clubs: [{ id: "tA", ea_club_id: 111 }, { id: "tB", ea_club_id: 222 }, { id: "tA", ea_club_id: 111 }],   // 111 twice: must poll once
   ea: {},                                     // clubId -> array | () => Response
   ingestReply: { ingested: [{ ea_match_id: "m1" }], unmatched: [], skipped: [], errors: [] },
   ingestStatus: 200,
@@ -68,8 +72,8 @@ const lastResult = () => JSON.parse(cfg["rl_ea-poll_result"]);
 const reset = () => {
   calls.length = 0; cfgWrites.length = 0;
   for (const k of Object.keys(cfg)) delete cfg[k];
-  world.due = [{ id: "g1" }]; world.dueThrows = false;
-  world.clubs = [{ ea_club_id: 111 }, { ea_club_id: 222 }, { ea_club_id: 111 }];
+  world.due = [FIXTURE]; world.dueThrows = false;
+  world.clubs = [{ id: "tA", ea_club_id: 111 }, { id: "tB", ea_club_id: 222 }, { id: "tA", ea_club_id: 111 }];
   world.ea = { 111: [M("m1"), M("m2")], 222: [M("m2"), M("m3")] };
   world.ingestReply = { ingested: [{ ea_match_id: "m1" }], unmatched: [{ ea_match_id: "m2" }], skipped: [], errors: [] };
   world.ingestStatus = 200; world.ingestThrows = false;
@@ -80,21 +84,22 @@ console.log("— idle: no fixture due, so EA is never asked");
   reset(); world.due = [];
   const P = mk();
   const r = await P.runOnce();
-  A("the cycle reports the skip", r && r.skipped === "no fixture due");
+  A("the cycle reports the skip", r && r.skipped === "no fixture in its game window", r && r.skipped);
   A("no EA call", eaCalls().length === 0);
   A("no ingest call", ingestCalls().length === 0);
   A("the heartbeat rl_ea-poll-vm is stamped with the injected clock", cfg["rl_ea-poll-vm"] === new Date(T).toISOString());
   const hb = cfgWrites.find((w) => w.key === "rl_ea-poll-vm");
   A("...as a merge-duplicates upsert", hb && hb.prefer === "resolution=merge-duplicates");
   const due = calls.find((c) => c.kind === "due");
-  A("the due gate asks for a live fixture in [now-6h, now+30min]",
-    due && due.url.includes("voided=not.is.true") && due.url.includes("select=id") && due.url.includes("limit=1")
-      && due.url.includes("scheduled_at=gte." + encodeURIComponent(new Date(T - 6 * 3600e3).toISOString()))
-      && due.url.includes("scheduled_at=lte." + encodeURIComponent(new Date(T + 30 * 60e3).toISOString())), due && due.url);
+  A("the gate asks for fixtures (scheduled OR already final — a replay still has to be collected; ruled or voided ones too, so what was played is archived) whose game window plus the fetching grace holds now (puck drop within [now-3h15, now+10min])",
+    due && due.url.includes("status=in.(scheduled,final)") && !due.url.includes("voided=") && !due.url.includes("forfeit_team_id=")
+      && !due.url.includes("ea_match_id=is.null") && due.url.includes("select=id,home_team_id,away_team_id,scheduled_at,status,ea_match_id")
+      && due.url.includes("scheduled_at=gte." + encodeURIComponent(new Date(T - (3 * 3600e3 + 15 * 60e3)).toISOString()))
+      && due.url.includes("scheduled_at=lte." + encodeURIComponent(new Date(T + 10 * 60e3).toISOString())), due && due.url);
   A("...with the service key", due && due.opts.headers.apikey === env.SB_KEY && due.opts.headers.Authorization === `Bearer ${env.SB_KEY}`);
   const res = lastResult();
-  A("the idle result is written once: ok, lane vm, 'no fixture due'",
-    resultWrites().length === 1 && res.ok === true && res.lane === "vm" && res.skipped === "no fixture due" && res.at === new Date(T).toISOString());
+  A("the idle result is written once: ok, lane vm, 'no fixture in its game window'",
+    resultWrites().length === 1 && res.ok === true && res.lane === "vm" && res.skipped === "no fixture in its game window" && res.at === new Date(T).toISOString());
   advance(60_000);
   await P.runOnce();
   A("a minute later the heartbeat is stamped again", cfg["rl_ea-poll-vm"] === new Date(T).toISOString());
@@ -112,6 +117,9 @@ console.log("\n— due: one EA call per linked club, deduped matches, one ingest
   const P = mk();
   const r = await P.runOnce();
   A("EA is called once per DISTINCT linked club (111 listed twice → 2 calls)", eaCalls().length === 2, `calls=${eaCalls().length}`);
+  const clubQ = calls.find((c) => c.kind === "clubs");
+  A("...and only for the clubs IN the open fixtures (teams?id=in.(tA,tB)), never every linked club",
+    clubQ && /teams\?id=in\.\(tA,tB\)&ea_club_id=not\.is\.null&select=id,ea_club_id/.test(clubQ.url), clubQ && clubQ.url);
   const urls = eaCalls().map((c) => c.url);
   A("the URL is the Netlify poller's, verbatim",
     urls[0] === "https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=common-gen5&clubIds=111"
@@ -253,6 +261,8 @@ console.log("\n— force bypasses the due gate only");
   const r = await P.runOnce({ force: true });
   A("with force, EA is polled although nothing is due", eaCalls().length === 2 && r.polled === 2 && r.fixtureDue === false);
   A("...and the result is a real poll record, not the idle stamp", lastResult().polled === 2 && lastResult().skipped === 0);
+  A("...and with no fixture in window every match found is counted offWindow (the importer will refuse them all)",
+    r.matches === 3 && r.offWindow === 3 && r.fixturesOpen === 0, JSON.stringify(r));
 }
 
 console.log("\n— never more than one EA poll per 90 s");
@@ -279,7 +289,7 @@ console.log("\n— no linked club is a red result, not a quiet skip");
   const P = mk();
   const r = await P.runOnce();
   A("no EA call, no ingest", eaCalls().length === 0 && ingestCalls().length === 0);
-  A("ok false, with the fix in the message", lastResult().ok === false && /ea_club_id/.test(lastResult().lastError) && r.ok === false);
+  A("ok false, with the fix in the message", lastResult().ok === false && /EA club linked|ea_club_id/.test(lastResult().lastError) && r.ok === false, lastResult().lastError);
 }
 
 console.log("\n— the loop survives a cycle that throws");
@@ -296,7 +306,7 @@ console.log("\n— the loop survives a cycle that throws");
   A("sum.lastError carries it", /503/.test(P.sum.lastError));
   world.dueThrows = false; world.due = [];
   await new Promise((r) => setTimeout(r, 30));
-  A("once the database answers again the cycle goes through", calls.some((c) => c.kind === "due") && lastResult().skipped === "no fixture due");
+  A("once the database answers again the cycle goes through", calls.some((c) => c.kind === "due") && lastResult().skipped === "no fixture in its game window");
   P.stop();
   A("stop() marks the lane not live", P.sum.live === false);
   const after = calls.length;
@@ -335,6 +345,58 @@ console.log("\n— wired into the gateway bot");
   A("the poller has no discord.js or supabase-js dependency", !/from "discord\.js"|from "@supabase/.test(poller));
   A("...and stays on plain global fetch — no undici, no proxy (the VM reaches EA directly)", !/from "undici"|ProxyAgent|HTTPS_PROXY/.test(poller));
   A("the interval is unref'd", /timer\.unref\(\)/.test(poller));
+}
+
+console.log("\n— everything found for the fixture's clubs is forwarded; the importer is the one place that files");
+{
+  reset();
+  const minAfter = (n) => Math.floor((PUCK + n * 60_000) / 1000);
+  world.clubs = [{ id: "tA", ea_club_id: 111 }, { id: "tB", ea_club_id: 222 }];
+  world.ea = {
+    111: [M("real", minAfter(38)),                         // tonight's game, ended 38 min after puck drop
+          M("scrim", minAfter(-300)),                      // the same two clubs, a scrimmage that afternoon
+          M("late", minAfter(185)),                        // a rematch after the window
+          M("wrong-pair", minAfter(40), 111, 333)],        // tA vs a club not in tonight's fixtures
+    222: [M("real", minAfter(38)), M("early", minAfter(-11))],
+  };
+  const P = mk();
+  const r = await P.runOnce();
+  const body = JSON.parse(ingestCalls()[0].opts.body);
+  A("all five distinct matches reach the importer (its archive and its Rule 4.3 merge need the whole history)",
+    ingestCalls().length === 1 && body.matches.map((m) => m.matchId).sort().join() === "early,late,real,scrim,wrong-pair", JSON.stringify(body.matches.map((m) => m.matchId)));
+  A("the record says how many the importer is expected to refuse: 4 of 5 are outside any fixture's window or not a matchup",
+    r.matches === 5 && r.offWindow === 4, JSON.stringify(r));
+  A("the result record carries the counts and the fixture tally", lastResult().offWindow === 4 && lastResult().fixturesOpen === 1 && lastResult().matches === 5);
+}
+
+console.log("\n— a night with two fixtures: only the four clubs playing are asked, and an unlinked club is flagged");
+{
+  reset();
+  const minAfter = (n) => Math.floor((PUCK + n * 60_000) / 1000);
+  world.due = [FIXTURE, { id: "g2", home_team_id: "tC", away_team_id: "tD", scheduled_at: new Date(PUCK).toISOString() }];
+  world.clubs = [{ id: "tA", ea_club_id: 111 }, { id: "tB", ea_club_id: 222 }, { id: "tC", ea_club_id: 333 }];   // tD has no EA club
+  world.ea = { 111: [M("ab", minAfter(35))], 222: [M("ab", minAfter(35))], 333: [M("cd", minAfter(41), 333, 444)] };
+  const P = mk();
+  const r = await P.runOnce();
+  A("three clubs polled (the linked ones among the four playing)", eaCalls().length === 3 && r.polled === 3);
+  const clubQ = calls.find((c) => c.kind === "clubs");
+  A("...requested by fixture team ids", clubQ && /teams\?id=in\.\(tA,tB,tC,tD\)/.test(clubQ.url), clubQ && clubQ.url);
+  A("the unlinked club is named in a warning on the record — ok stays true", r.ok === true && r.unlinkedInFixtures === 1 && /no EA club linked/.test(r.warning), JSON.stringify(r));
+}
+
+console.log("\n— a fixture a first sitting has already filed stays in the poll set until its window closes (the replay still has to be collected)");
+{
+  reset();
+  world.due = [{ ...FIXTURE, status: "final", ea_match_id: "first-sitting" }];
+  const P = mk();
+  const r = await P.runOnce();
+  A("EA is still asked for its clubs, and its matches are forwarded", eaCalls().length === 2 && r.polled === 2 && r.fixtureDue === true && r.matches === 3 && r.offWindow === 0, JSON.stringify(r));
+}
+
+console.log("\n— the one-shot's --help names the window so the operator knows what it will and will not do");
+{
+  const src = fs.readFileSync(new URL("../bot/ea-poll.mjs", import.meta.url), "utf8");
+  A("the usage text derives the window from the shared definition", /describeWindow\(\)/.test(src) && /shared\/game-window\.mjs/.test(src));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

@@ -164,7 +164,7 @@ Series are best of seven. **Per series caps are the same as the weekly ones: a s
 • Game stats and lag out repair: #/hub/gamestats
 • Rulebook: #/rulebook
 
-**Results import automatically** from EA after every game, so nobody submits scores by hand. It only works if the game is played in the assigned lobby between the two linked EA clubs.
+**Results import automatically** from EA after every game, so nobody submits scores by hand. It only works if the game is played in the assigned lobby between the two linked EA clubs and finishes inside its game window (10 minutes before the scheduled puck drop to 3 hours after). A scrimmage earlier that day or a rematch after the night is never taken as the league game; a lag-out replay is merged into the game it continues; a game that ran past the window is filed by the statistics staff.
 
 **Screenshots are not required.** For the first couple of weeks they would be appreciated as a backup, in case the API has trouble with the new game.
 
