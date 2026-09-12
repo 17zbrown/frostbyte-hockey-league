@@ -159,6 +159,7 @@ function finish(){
     const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
     const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); };
     const r26 = sec("2.6");
+    const cl238 = rb.changelog.find((c) => c.version === "2.38");
     A("Rule 2.6: the Owner alone nominates and removes", /The front-office seats are the Owner’s alone/.test(r26) && /A General Manager or Assistant General Manager nominates and removes nobody/.test(r26));
     A("...removal is immediate, no league-office step, office told", /without a league-office step; the removal takes effect at once, the seat falls vacant, and the league office is told/.test(r26));
     A("...the three modes, with full as the default", /full, in which case the manager acts freely/.test(r26) && /subject to the Owner’s approval/.test(r26) && /withheld, in which case the page is hidden/.test(r26) && /The default for every seat and page is full access, with one exception/.test(r26));
@@ -168,8 +169,8 @@ function finish(){
     A("...and the league office is untouched", /none of this limits the league office/.test(r26));
     A("...the Owner approves a league-built description, and a newer request supersedes", /never text the manager wrote/.test(r26) && /replaces the older one still waiting/.test(r26));
     A("Team HQ says all three seats before the draft (Rule 2.8), not 'before the first game' with an optional AGM", !/first regular-season game/.test(live) && !/AGM is optional/.test(live) && /row\("agm","Assistant GM",true\)/.test(live));
-    A("the changelog no longer lists the game stats desk among approve-able pages", /the game stats desk is open or hidden only/.test(rb.changelog[0].summary));
-    A("the changelog records v2.38", rb.changelog[0].version === "2.38" && /management permissions/.test(rb.changelog[0].summary));
+    A("the changelog no longer lists the game stats desk among approve-able pages", !!cl238 && /the game stats desk is open or hidden only/.test(cl238.summary));
+    A("the changelog records v2.38", !!cl238 && /management permissions/.test(cl238.summary));
     A("...in American spelling", !/practis|colour|centre|organis|defence/i.test(rb.changelog[0].summary + r26));
   }
   console.log(`\n${ok ? "PASS" : "FAIL"}`);

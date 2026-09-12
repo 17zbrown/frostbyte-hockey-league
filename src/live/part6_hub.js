@@ -651,6 +651,7 @@ CG.hubLineup = function(qs){
   var nightSwitch = gameSwitch;
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Per-game adjustments'+nightSwitch+'</h1>'+
+    (game.stage==="preseason" ? '<div class="note" style="margin-top:10px"><b style="font-family:var(--f-disp)">Pre-season game.</b> No weekly caps, and your Owner, GM and AGM can be dressed at any position — get as many players into games as you can (Rules 0.4 and 5.2).</div>' : '')+
     '<p class="lede" style="margin-top:8px">One game, one lineup. Day-to-day lines live in the <a href="#/hub/lines" style="font-weight:700;border-bottom:2px solid var(--chrome)">Lineup builder</a> — this page adjusts a single night, and after the '+CG.fmtTime(lockAt)+' lock every change costs one in-game penalty (Rule 5.3).</p></div>';
   /* the night plan reaching the real game: when this night has a planned line, offer it as a
      one-click fill. Fill only — submitting stays an explicit second step. */
@@ -738,11 +739,15 @@ CG.AFTER._lineup = function(){
     store[key]=state; CG.store.set("lineups", store);
     CG.router();
   }
+  /* Rule 2.1 — position groups are binding, but a training-camp player fills any slot, and in a
+     PRE-SEASON game so does the club's Owner, GM or AGM (v2.39: get as many players scheduled as
+     possible). The database makes the same test (lineup_slot_ok). */
+  var preGame = game.stage==="preseason";
+  function flex(p){ return p.squad==="tc" || (preGame && !!p.mgmt); }
   function validate(p, pos){
     if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — use an emergency call-up to swap a player now.";
-    /* Rule 2.1 — position groups are binding, but a training-camp player fills any slot */
-    if (p.squad!=="tc" && CG.posGroup(p.pos)!==CG.posGroup(pos))
-      return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players fill any position (Rule 2.1).";
+    if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
+      return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
     if (avNightKey && (CG.avFor(p.id).nights[avNightKey]||{}).st==="no") return p.tag+" is marked unavailable for this night.";
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
@@ -762,8 +767,8 @@ CG.AFTER._lineup = function(){
       $$(".bp").forEach(function(x){ x.classList.remove("sel"); });
       el.classList.add("sel");
       var p = CG.playerById(lg, sel);
-      msg("Selected "+p.tag+" — now click "+(p.squad==="tc" ? "any slot (camp players fill any position)" : "a "+CG.posGroup(p.pos)+" slot")+".");
-      $$(".slot").forEach(function(s){ s.classList.toggle("target", p.squad==="tc" || CG.posGroup(s.getAttribute("data-slot"))===CG.posGroup(p.pos)); });
+      msg("Selected "+p.tag+" — now click "+(flex(p) ? "any slot ("+(p.squad==="tc" ? "camp players fill any position" : "management fills any position in the pre-season")+")" : "a "+CG.posGroup(p.pos)+" slot")+".");
+      $$(".slot").forEach(function(s){ s.classList.toggle("target", flex(p) || CG.posGroup(s.getAttribute("data-slot"))===CG.posGroup(p.pos)); });
     });
     el.addEventListener("dragstart", function(ev){ ev.dataTransfer.setData("text/plain", el.getAttribute("data-bench")); });
   });
@@ -810,11 +815,12 @@ CG.AFTER._lineup = function(){
   if (auto) auto.addEventListener("click", function(){
     if (isLocked()){ CG.toast("Lineup is locked (Rule 5.3)","err"); return; }
     ["LW","C","RW","LD","RD","G"].forEach(function(pos){
-      /* group-based eligibility (matches the DB); camp players are eligible anywhere
-         but sort last so auto-fill spends a pro player before a camp player's cap */
-      var pick = lg.byTeam[club].filter(function(p){ return p.squad==="tc" || CG.posGroup(p.pos)===CG.posGroup(pos); })
+      /* group-based eligibility (matches the DB); camp players — and, in a pre-season game,
+         management — are eligible anywhere but sort last, so auto-fill spends a player at his own
+         position before it borrows one */
+      var pick = lg.byTeam[club].filter(function(p){ return flex(p) || CG.posGroup(p.pos)===CG.posGroup(pos); })
         .sort(function(a,b){
-          var ac=a.squad==="tc"?1:0, bc=b.squad==="tc"?1:0;
+          var ac=CG.posGroup(a.pos)!==CG.posGroup(pos)?1:0, bc=CG.posGroup(b.pos)!==CG.posGroup(pos)?1:0;
           return ac-bc || lg.ratings[b.id].ovr-lg.ratings[a.id].ovr;
         })
         .find(function(p){ return !validate(p,pos) || state.slots[pos]===p.id; });
@@ -992,7 +998,8 @@ CG.hubLines = function(qs){
 
   var bar = '<div class="note '+(dirtyN?"chr":"grn")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">'+(dirtyN?dirtyN+" line"+(dirtyN===1?"":"s")+" with unsaved changes":"All lines saved")+'</b>'+
-    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on more than one line — the weekly limits are checked when a lineup is actually dressed.</span>'+
+    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on more than one line — the weekly limits are checked when a lineup is actually dressed.'+
+    ((CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)) ? ' <b>Pre-season:</b> your Owner, GM and AGM may sit at any position on a line; a line carrying one out of position dresses in pre-season games only (Rule 5.2).' : '')+'</span>'+
     '<span style="display:flex;gap:9px">'+
     '<button class="btn btn-ghost btn-sm" id="lcRevert"'+(dirtyN?"":" disabled")+'>Revert</button>'+
     '<button class="btn btn-chrome btn-sm" id="lcSaveAll"'+(dirtyN?"":" disabled")+'>Save changes</button></span></div>';
@@ -1147,10 +1154,14 @@ CG.AFTER._lines = function(qs){
     if (!CG._lcDraft[n]) CG._lcDraft[n] = CG.lineFromRow((lg._teamLines||{})[n]);
     return CG._lcDraft[n];
   }
+  var preAhead = !!(CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club));
   function fits(pid, pos){
     var p = CG.playerById(lg, pid); if (!p) return "no longer rostered";
-    /* Rule 2.1 groups, with the builder's training-camp exception: a camp player fills any slot */
-    if (p.squad!=="tc"){
+    /* Rule 2.1 groups, with the builder's training-camp exception: a camp player fills any slot —
+       and while the club's next game is a pre-season game, so does its Owner, GM or AGM (v2.39).
+       set_team_line makes the same test; dressing the line into a regular-season game is
+       re-checked against that game. */
+    if (p.squad!=="tc" && !(preAhead && p.mgmt)){
       var want = pos==="G" ? "G" : (pos==="LD"||pos==="RD") ? "D" : "F";
       if (CG.posGroup(p.pos)!==want)
         return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — "+CG.POS_NAME[pos]+" needs a "+(want==="G"?"goaltender":want==="D"?"defenseman":"forward")+".";
