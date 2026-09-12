@@ -37,6 +37,9 @@ console.log("— the access model mirrors public.mgmt_access_for");
   A("a GM reads their own cells", gm.mgmtAccess("roster") === "approve" && gm.mgmtAccess("tradehub") === "hidden");
   A("...and full is the default for everything unset", gm.mgmtAccess("lines") === "full" && gm.mgmtAccess("draft") === "full");
   A("...Management and Game stats never take 'approve' (nothing there to approve)", gm.mgmtAccess("management") === "full" && gm.mgmtAccess("gamestats") === "full");
+  const gm0 = harness("u-gm", {});
+  A("the Management page is the Owner's by default — hidden from an unset GM, everything else full", gm0.mgmtAccess("management") === "hidden" && gm0.mgmtAccess("roster") === "full" && gm0.mgmtAccess("draft") === "full");
+  A("...and the matrix mirrors that default", gm0.mgmtDefaultMode("management") === "hidden" && gm0.mgmtDefaultMode("tradehub") === "full");
   const agm = harness("u-agm", { gm:{ roster:"approve" }, agm:{ lines:"approve" } });
   A("the AGM's cells are the AGM's, not the GM's", agm.mgmtAccess("roster") === "full" && agm.mgmtAccess("lines") === "approve");
   const none = harness("u-nobody", {});
@@ -77,6 +80,9 @@ function finish(){
     A("...naming the Owner and listing the manager's own waiting moves, with Withdraw", /ItzPeakz approves trade hub moves/.test(ban) && /accept the trade offer from Utah/.test(ban) && /data-mgmt-withdraw-move="m1"/.test(ban));
     A("...and not on a full-access page", gm.mgmtApprovalBanner("roster") === "");
     A("the dashboard tasks card shows the Owner's queue and a manager's own waiting moves", /waiting for your approval\./.test(hub) && /waiting for the Owner’s approval\./.test(hub));
+    A("...a manager's row never links into a hidden Management page", /CG\.mgmtAccess\("management"\)!=="hidden" \? "#\/hub\/management" : \("#\/hub\/"\+\(\(firstP && firstP\.page\) \|\| "roster"\)\)/.test(hub));
+    A("...nor does the team overview's Front office link", /CG\.mgmtAccess\("management"\)!=="hidden" \? '<a class="sec-link" href="#\/hub\/management">Front office →<\/a>' : ''/.test(live));
+    A("...and the GM-vacancy nudge is the Owner's", /if \(to && !to\.gm && \(!CG\.mySeat \|\| CG\.mySeat\(\)==="owner"\)\)/.test(hub));
   }
 
   console.log("\n— every management write goes through the queue first");
@@ -104,6 +110,7 @@ function finish(){
     A("the Owner gets a three-way control per page per seat", (card.match(/data-perm-mode="approve"/g) || []).length === 12 && (card.match(/data-perm-mode="full"/g) || []).length === 16, String((card.match(/data-perm-mode="approve"/g) || []).length));
     A("...with 'approve' withheld from Management and Game stats", !/data-perm-page="management" data-perm-mode="approve"/.test(card) && !/data-perm-page="gamestats" data-perm-mode="approve"/.test(card));
     A("...the saved policy pre-selected", /data-perm-seat="gm" data-perm-page="roster" data-perm-mode="approve" aria-pressed="true"/.test(card));
+    A("...and Management pre-selected as hidden when unset", /data-perm-seat="gm" data-perm-page="management" data-perm-mode="hidden" aria-pressed="true"/.test(card) && /data-perm-seat="agm" data-perm-page="management" data-perm-mode="hidden" aria-pressed="true"/.test(card));
     A("...and a Save button that starts disabled (nothing changed yet)", /id="permSave" disabled/.test(card));
     const q = own.mgmtApprovalsCard(m);
     A("the Owner's approvals card offers Approve and Deny on a waiting move", /data-mgmt-decide="m1" data-approve="1"/.test(q) && /data-mgmt-decide="m1" data-approve="0"/.test(q) && /Mr\. Plow · GM/.test(q));
@@ -142,7 +149,8 @@ function finish(){
     const r26 = sec("2.6");
     A("Rule 2.6: the Owner alone nominates and removes", /The front-office seats are the Owner’s alone/.test(r26) && /A General Manager or Assistant General Manager nominates and removes nobody/.test(r26));
     A("...removal is immediate, no league-office step, office told", /without a league-office step; the removal takes effect at once, the seat falls vacant, and the league office is told/.test(r26));
-    A("...the three modes, with full as the default", /full, in which case the manager acts freely/.test(r26) && /subject to the Owner’s approval/.test(r26) && /withheld, in which case the page is hidden/.test(r26) && /The default for every seat and page is full access/.test(r26));
+    A("...the three modes, with full as the default", /full, in which case the manager acts freely/.test(r26) && /subject to the Owner’s approval/.test(r26) && /withheld, in which case the page is hidden/.test(r26) && /The default for every seat and page is full access, with one exception/.test(r26));
+    A("...except the Management page, which is the Owner's unless opened", /is the Owner’s alone and is withheld from the General Manager and the Assistant General Manager unless the Owner opens it to them/.test(r26));
     A("...a stale approved move fails loudly, and both are told", /fails rather than half-applies, and both the Owner and the manager are told why/.test(r26));
     A("...every manager has the same Team HQ", /Every member of the management group — Owner, General Manager and Assistant General Manager alike — has the same Team HQ/.test(r26));
     A("...and the league office is untouched", /none of this limits the league office/.test(r26));

@@ -6177,8 +6177,10 @@ CG.MGMT_PAGES = [
   ["tradehub",   "Trade Hub",      "Propose, accept, decline and withdraw trades", true],
   ["freeagents", "Free agents",    "Contract offers and answers to counters", true],
   ["draft",      "Draft",          "The club's draft board and picks on the clock", true],
-  ["management", "Management",     "This page — read-only for a GM or AGM either way", false]
+  ["management", "Management",     "This page — the Owner’s by default; open it to let a manager read the front office and the queue", false]
 ];
+/* the Management page is the Owner's unless opened; every other page starts at full access */
+CG.mgmtDefaultMode = function(page){ return page==="management" ? "hidden" : "full"; };
 CG.MGMT_MODES = [["full","Full access"],["approve","Owner approves"],["hidden","Hidden"]];
 CG.MGMT_ACTION_PAGE = {
   waive_player:"roster", offer_extension:"roster", set_roster_squad:"roster", swap_roster_squad:"roster", roster_block:"roster", respond_extension:"roster",
@@ -6208,8 +6210,8 @@ CG.mgmtAccess = function(page){
   if (seat==="owner") return "owner";
   if (CG.role()==="commish") return "office";
   var pol = (CG.lg && CG.lg._mgmtPolicy) || {};
-  var mode = (pol[seat] || {})[page] || "full";
-  if (["full","approve","hidden"].indexOf(mode) < 0) mode = "full";
+  var mode = (pol[seat] || {})[page] || CG.mgmtDefaultMode(page);
+  if (["full","approve","hidden"].indexOf(mode) < 0) mode = CG.mgmtDefaultMode(page);
   if ((page==="management" || page==="gamestats") && mode==="approve") mode = "full";
   return mode;
 };
@@ -7862,7 +7864,7 @@ CG.teamOverviewCard = function(mt){
     '</div></div>'+
     '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap;align-items:center">'+
       '<div style="display:flex;gap:18px;flex-wrap:wrap;flex:1">'+seats+'</div>'+
-      '<a class="sec-link" href="#/hub/management">Front office →</a></div>'+
+      (!CG.mgmtAccess || CG.mgmtAccess("management")!=="hidden" ? '<a class="sec-link" href="#/hub/management">Front office →</a>' : '')+'</div>'+
     '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:10px">'+
       '<span class="rb-lab">Next</span>'+
       (next&&opp&&CG.TEAM[opp]?'<span class="teamcell">'+CG.crest(opp,22)+'<span class="nm">'+(next.home===code?"vs ":"@ ")+esc(CG.TEAM[opp].name)+'</span></span>'+
@@ -7940,10 +7942,10 @@ CG.mgmtPermissionsCard = function(m){
   var pol=(CG.lg&&CG.lg._mgmtPolicy)||{}, names=(CG.lg&&CG.lg._profName)||{};
   var seats=[["gm","General Manager",m.t.gm],["agm","Assistant GM",m.t.agm]];
   var head='<div class="card-h"><h3>Management permissions</h3>'+(m.isOwner?'<span class="chip chip-xs">Only you can change these</span>':'<span class="chip chip-xs">Set by the Owner</span>')+'</div>';
-  var intro='<div class="card-b" style="padding-bottom:6px"><p class="caption" style="margin:0;max-width:78ch">For every Team HQ page, each seat gets <b>full access</b>, <b>Owner approves</b> (they see the page, but every move on it waits for your approval), or <b>hidden</b> (the page is withheld and its moves refused). Your own seat is never limited, and the league office keeps its powers either way (Rule 2.6).</p></div>';
+  var intro='<div class="card-b" style="padding-bottom:6px"><p class="caption" style="margin:0;max-width:78ch">For every Team HQ page, each seat gets <b>full access</b>, <b>Owner approves</b> (they see the page, but every move on it waits for your approval), or <b>hidden</b> (the page is withheld and its moves refused). Everything starts at full access except this Management page, which only you see unless you open it. Your own seat is never limited, and the league office keeps its powers either way (Rule 2.6).</p></div>';
   var rows=CG.MGMT_PAGES.map(function(pg){
     var cells=seats.map(function(sd){
-      var mode=((pol[sd[0]]||{})[pg[0]])||"full";
+      var mode=((pol[sd[0]]||{})[pg[0]])||CG.mgmtDefaultMode(pg[0]);
       if (!pg[3] && mode==="approve") mode="full";
       if (!m.isOwner) return '<td class="tleft"><span class="chip chip-xs'+(mode==="full"?" chip-win":mode==="approve"?" chip-warn":"")+'">'+esc(CG.MGMT_MODES.find(function(x){return x[0]===mode;})[1])+'</span></td>';
       return '<td class="tleft"><div class="seg" role="radiogroup" aria-label="'+esc(sd[1]+" · "+pg[1])+'">'+CG.MGMT_MODES.filter(function(md){ return pg[3] || md[0]!=="approve"; }).map(function(md){
@@ -7955,7 +7957,7 @@ CG.mgmtPermissionsCard = function(m){
   var seatHead=seats.map(function(sd){ var nm=sd[2]?(names[sd[2]]||"Assigned"):null; return '<th class="tleft">'+esc(sd[1])+(nm?'<div class="caption" style="font-weight:400">'+esc(nm)+'</div>':'<div class="caption" style="font-weight:400">Vacant — applies when seated</div>')+'</th>'; }).join("");
   var foot=m.isOwner?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
       '<button class="btn btn-chrome" id="permSave" disabled>Save permissions</button><button class="btn btn-ghost" id="permReset" disabled>Discard changes</button>'+
-      '<span class="caption" id="permStatus">'+(CG.lg&&CG.lg._mgmtPolicyAt?'Last saved '+esc(CG.fmtAgo(Date.parse(CG.lg._mgmtPolicyAt)))+'.':'Every seat currently has full access.')+'</span></div>':'';
+      '<span class="caption" id="permStatus">'+(CG.lg&&CG.lg._mgmtPolicyAt?'Last saved '+esc(CG.fmtAgo(Date.parse(CG.lg._mgmtPolicyAt)))+'.':'Defaults: full access everywhere, and this Management page is yours alone.')+'</span></div>':'';
   return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px" id="permCard">'+head+intro+
     '<div class="tblwrap"><table class="tbl compact perm-tbl"><thead><tr><th class="tleft">Page</th>'+seatHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+foot+'</div>';
 };

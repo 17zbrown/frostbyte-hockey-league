@@ -1,7 +1,7 @@
 /* DEMO LAYER — never deployed. Boots the live build against an in-memory league so the Team HQ
    Management page (v2.38 permissions + approvals) can be looked at without a Supabase session.
    Build: node src/live/build.cjs <out.html> ../../tools/demo/mgmt_layer.js
-   Open:  out.html#/hub/management?as=owner   |   ?as=gm   |   ?as=agm */
+   Open:  out.html?as=owner#/hub/management  |  ?as=gm (Management opened for them)  |  ?as=agm (hidden by default) */
 (function(){
   var qs = new URLSearchParams(location.search); var AS = qs.get("as") || "owner";
   var UIDS = { owner:"u-own", gm:"u-gm", agm:"u-agm" };
@@ -42,7 +42,8 @@
     CG.TEAMS.forEach(function(x){ CG.lg._codeToId[x.code] = x.id; CG.lg._idToCode[x.id] = x.code; });
     CG.lg._profName = NAMES; CG.lg._mgmtApps = []; CG.lg._myTrades = []; CG.lg._myOffers = []; CG.lg._appMsgs = {};
     /* the Owner has set a policy: the GM's roster and trades wait for approval, the AGM cannot see the draft */
-    CG.lg._mgmtPolicy = { gm:{ roster:"approve", tradehub:"approve" }, agm:{ draft:"hidden", freeagents:"approve" } };
+    /* Management is the Owner's by default: the GM has been given it (read-only), the AGM has not */
+    CG.lg._mgmtPolicy = { gm:{ roster:"approve", tradehub:"approve", management:"full" }, agm:{ draft:"hidden", freeagents:"approve" } };
     CG.lg._mgmtPolicyAt = new Date(CG.now() - 26*3600000).toISOString();
     var ago = function(h){ return new Date(CG.now() - h*3600000).toISOString(); };
     CG.lg._mgmtMoves = [

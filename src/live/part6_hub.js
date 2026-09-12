@@ -210,10 +210,15 @@ CG.gmTasksCard = function(team){
   if (CG.mgmtPendingCount && CG.mySeat){
     var pend = CG.mgmtPendingCount(), seat = CG.mySeat();
     if (pend && seat==="owner") rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1"><b>'+pend+' move'+(pend===1?"":"s")+'</b> from your management waiting for your approval.</span><a class="btn btn-chrome btn-sm" href="#/hub/management">Review</a></div>';
-    else if (pend) rows += '<div class="titem"><span class="t-dot"></span><span style="flex:1">'+pend+' of your move'+(pend===1?"":"s")+' waiting for the Owner’s approval.</span><a class="btn btn-ghost btn-sm" href="#/hub/management">See</a></div>';
+    else if (pend){
+      var uidP = (CG.auth.user||{}).id, firstP = CG.mgmtMoves("pending").filter(function(m){ return m.requested_by===uidP; })[0];
+      var goP = CG.mgmtAccess("management")!=="hidden" ? "#/hub/management" : ("#/hub/"+((firstP && firstP.page) || "roster"));
+      rows += '<div class="titem"><span class="t-dot"></span><span style="flex:1">'+pend+' of your move'+(pend===1?"":"s")+' waiting for the Owner’s approval.</span><a class="btn btn-ghost btn-sm" href="'+goP+'">See</a></div>';
+    }
   }
   var to = (CG.TEAMS||[]).find(function(t){ return t.code===team; });
-  if (to && !to.gm){
+  /* the GM vacancy nudge is the Owner's to act on (Rule 2.6) */
+  if (to && !to.gm && (!CG.mySeat || CG.mySeat()==="owner")){
     rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1">No General Manager appointed yet — nominate one from the Management tab.</span><a class="btn btn-ghost btn-sm" href="#/hub/management">Management</a></div>';
   }
   return '<div class="card" style="border-color:var(--ink)"><div class="card-h"><h3>Management tasks</h3><span class="chip chip-chrome">Management</span></div><div class="tasklist">'+rows+'</div></div>';
