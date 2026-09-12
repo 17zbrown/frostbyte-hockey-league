@@ -61,9 +61,9 @@ console.log("\n— the night is all its games, not one");
 console.log("\n— the old single-game-per-night resolution is gone from the write paths");
 {
   A("the per-night dress button now keys on the night, dressing all its games",
-    /var night = el\.getAttribute\("data-night"\)/.test(src) && /dressNight\(night, slot, function\(err, okN\)/.test(src));
+    /var night = el\.getAttribute\("data-night"\)/.test(src) && /dressNight\(night, slot, function\(err, okN, qN\)/.test(src));
   A("...via a helper that loops every not-yet-locked game", /function dressNight\(nightKey, slot, done\)\{[\s\S]{0,260}CG\.nightGames\(club, nightKey\)/.test(src));
-  A("Dress-the-week dresses whole nights, not first games", /dressNight\(n\.key, pl, function\(err, dressed\)/.test(src));
+  A("Dress-the-week dresses whole nights, not first games", /dressNight\(n\.key, pl, function\(err, dressed, queued\)/.test(src));
   A("the builder switcher is per game", /href="#\/hub\/lineup\?game='\+g\.id/.test(src));
   A("the tasks tile counts all of tonight's games", /subN \+ ' \/ ' \+ tonightGs\.length \+ ' submitted'/.test(src) || /subN\+' \/ '\+tonightGs\.length/.test(src));
 }

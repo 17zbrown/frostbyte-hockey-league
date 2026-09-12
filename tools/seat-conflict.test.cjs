@@ -142,9 +142,10 @@ console.log("\n— the failsafe is wired into every surface a reviewer votes fro
   A("...counting only true blocks, not merely contested seats", /c\.kind!=="contested"/.test(desk));
   A("...and splits the roll-up by cause, since the remedies differ",
     /kind==="filled"/.test(desk) && /kind==="holds-seat"/.test(desk) && /kind==="heldup"/.test(desk));
-  A("...telling the board only a commissioner can vacate a seat", /Only a commissioner can vacate a seat/.test(desk));
+  A("...telling the board who can vacate a seat (the club's Owner, or a commissioner)", /Only the club’s Owner \(or a commissioner\) can vacate a seat/.test(desk));
   A("Team HQ no longer offers Replace on a held seat", !/\(holder\?"Replace":"Nominate"\)/.test(live));
-  A("...saying who clears it instead", /Seat held — a commissioner vacates it/.test(live));
+  A("...saying who clears it instead (v2.38: the Owner removes; a GM/AGM reads who decides)",
+    /Only the Owner changes this seat/.test(live) && /data-remove-role="'\+role\+'"/.test(live));
   A("...and the how-it-works note stops promising an automatic overwrite",
     /an approval into a seat that is still held is refused/.test(live));
   A("the Staff Desk queue flags it too", /var sc = isMgmt \? CG\.seatConflict\(a, lg\) : null;/.test(live));
@@ -166,7 +167,7 @@ console.log("\n— the rulebook says it, so the site and the book agree");
   A("...and that appointing into a held seat is refused",
     /appointment through the application process into a seat that is already held is refused/.test(r26));
   A("...and that the incumbent goes first, so nobody is displaced silently",
-    /steps down, or is removed by the league office, before a successor can be approved/.test(r26) &&
+    /steps down, or is removed by the Owner or the league office, before a successor can be approved/.test(r26) &&
     /no manager is displaced by an appointment without being told/.test(r26));
   A("the changelog records it", rb.changelog.some((c) => c.version === "2.23" && /refused rather than applied/.test(c.summary)));
   A("...in American spelling", !rb.changelog.some((c) => /practis|colour|centre|organis/i.test(c.summary)));

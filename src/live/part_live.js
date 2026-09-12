@@ -1107,6 +1107,15 @@ CG.loadManagerData = async function(){
         .then(function(ma){ CG.lg._mgmtApps = (ma && !ma.error && ma.data) || []; }, function(){ CG.lg._mgmtApps = []; }));
     }
     if (myTid){
+      /* v2.38: the Owner's management permissions for this club + the approval queue. Both are
+         club-scoped by RLS; a page that cannot read them simply runs at the default (full access,
+         nothing queued) — but the database gates every write regardless of what the page thinks. */
+      CG.lg._mgmtPolicy = null; CG.lg._mgmtMoves = [];
+      jobs.push(CG.sb.from("team_mgmt_policy").select("policy,updated_at,updated_by").eq("team_id", myTid).maybeSingle()
+        .then(function(pp){ CG.lg._mgmtPolicy = (pp && !pp.error && pp.data && pp.data.policy) || {}; CG.lg._mgmtPolicyAt = (pp && pp.data && pp.data.updated_at) || null; }, function(){ CG.lg._mgmtPolicy = {}; }));
+      jobs.push(CG.sb.from("team_mgmt_moves").select("*, requester:profiles!team_mgmt_moves_requested_by_fkey(gamertag), decider:profiles!team_mgmt_moves_decided_by_fkey(gamertag)")
+        .eq("team_id", myTid).order("created_at",{ascending:false}).limit(80)
+        .then(function(mm){ CG.lg._mgmtMoves = (mm && !mm.error && mm.data) || []; }, function(){ CG.lg._mgmtMoves = []; }));
       /* my club's live trades (incoming + outgoing, still open) */
       jobs.push(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false})
         .then(function(tr){ CG.lg._myTrades = (tr && !tr.error && tr.data) || []; }, function(){ CG.lg._myTrades = []; }));
@@ -1253,6 +1262,7 @@ CG.notifRoute = function(view, param){
     case "game":         return p ? "#/matchup/"+encodeURIComponent(p) : "#/schedule";
     case "draft":        return "#/hub/draft";
     case "manager":      return "#/hub";
+    case "mgmtapprovals": return "#/hub/management";
     case "transactions": return "#/home";
     case "automations":  return "#/admin/automations";
     case "preseason":    return "#/admin/preseason";
@@ -1390,6 +1400,9 @@ CG.loadNotifs = async function(){
              in the bell but stays quiet. The DB flags it via create_notification. */
           if (CG.sound && !n.silent) CG.sound.play();
           if (CG.renderChrome) CG.renderChrome();
+          /* a seat changed hands (appointed, removed): rebuild so Team HQ appears or goes on its
+             own, with the role re-derived — no refresh, nothing the member is doing interrupted */
+          if ((n.type === "role" || n.type === "request") && CG.liveReload) CG.liveReload();
         }).subscribe();
     }
   } catch(e){ CG._notifs = CG._notifs || []; }
@@ -1621,28 +1634,32 @@ CG.wireClubOfferActions = function(){
     var id=this.getAttribute("data-coffer-accept"), nm=this.getAttribute("data-name"), btn=this, isExt=this.getAttribute("data-ext")==="1";
     CG.confirm("Accept "+nm+"’s terms?", isExt?"He re-signs at the numbers he asked for. A next-season deal changes nothing this season and comes into force with next season’s cap year; a rights-held re-sign takes effect the moment it is accepted.":"He signs at the numbers he asked for and joins your roster immediately.", isExt?"Re-sign him":"Accept and sign", function(){
       btn.disabled=true;
+      CG.mgmtQueue(isExt?"respond_extension":"respond_offer", { p_offer:id, p_action:"accept", p_salary:null, p_years:null }, "accept "+nm+"’s terms"+(isExt?" on his extension":"")).then(function(q){ if (q){ btn.disabled=false; return; }
       CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"accept", p_salary:null, p_years:null }).then(function(r){
         btn.disabled=false;
         if(r.error){ CG.toast(r.error.message,"err"); return; }
         CG.toast(isExt ? nm+" re-signed — his new deal starts with next season’s cap year" : nm+" signed — welcome aboard","ok");
         CG.loadMyOffers().then(function(){ CG.reloadLeague(); });
       });
+      });
     });
   }); });
   document.querySelectorAll("[data-coffer-deny]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-coffer-deny"), nm=this.getAttribute("data-name"), btn=this;
+    var id=this.getAttribute("data-coffer-deny"), nm=this.getAttribute("data-name"), btn=this, isExtD=this.getAttribute("data-ext")==="1";
     CG.confirm("Walk away from "+nm+"?","The offer closes and he is told. You can always send a fresh one.","Walk away", function(){
       btn.disabled=true;
+      CG.mgmtQueue(isExtD?"respond_extension":"respond_offer", { p_offer:id, p_action:"deny", p_salary:null, p_years:null }, "walk away from "+nm+"’s counter").then(function(q){ if (q){ btn.disabled=false; return; }
       CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"deny", p_salary:null, p_years:null }).then(function(r){
         btn.disabled=false;
         if(r.error){ CG.toast(r.error.message,"err"); return; }
         CG.toast("Offer closed","ok");
         CG.loadMyOffers().then(function(){ if(CG.router) CG.router(); });
       });
+      });
     });
   }); });
   document.querySelectorAll("[data-coffer-counter]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-coffer-counter"), nm=this.getAttribute("data-name");
+    var id=this.getAttribute("data-coffer-counter"), nm=this.getAttribute("data-name"), isExtC=this.getAttribute("data-ext")==="1";
     var sal=parseInt(this.getAttribute("data-sal"),10)||750000, yrs=parseInt(this.getAttribute("data-yrs"),10)||1;
     CG.modal("Revise your offer to "+esc(nm),
       '<label class="fld"><span>Salary ($M per season)</span><input id="coSal" type="number" min="0.75" step="0.25" value="'+(sal/1e6).toFixed(2)+'"></label>'+
@@ -1654,12 +1671,14 @@ CG.wireClubOfferActions = function(){
       var salBad = CG.salaryProblem(Math.round(v*1e6));   /* Rule 2.5: minimum + $250K lattice */
       if(salBad){ CG.toast(salBad,"err"); return; }
       var y=parseInt(document.getElementById("coYrs").value,10)||1, btn2=this; btn2.disabled=true;
+      CG.mgmtQueue(isExtC?"respond_extension":"respond_offer", { p_offer:id, p_action:"edit", p_salary:Math.round(v*1e6), p_years:y }, "revise the offer to "+nm+" — "+CG.fmtMoney(Math.round(v*1e6))+" × "+y).then(function(q){ if (q){ btn2.disabled=false; return; }
       CG.sb.rpc("respond_offer",{ p_offer:id, p_action:"edit", p_salary:Math.round(v*1e6), p_years:y }).then(function(r){
         btn2.disabled=false;
         if(r.error){ CG.toast(r.error.message,"err"); return; }
         if(CG.closeOverlay) CG.closeOverlay();
         CG.toast("Revised offer sent to "+nm,"ok");
         CG.loadMyOffers().then(function(){ if(CG.router) CG.router(); });
+      });
       });
     });
   }); });
@@ -3925,11 +3944,14 @@ CG.saveMyBoard = function(ids){
   var t = CG.myManagedTeam(); if (!t || !CG.sb) return;
   CG.lg._myBoard = ids.slice();
   CG.rerenderKeepScroll();  /* optimistic */
+  CG.mgmtQueue("save_draft_board", { p_players: ids }, "save the draft board ("+ids.length+" ranked)", { quiet:true }).then(function(q){
+    if (q){ CG.toast("Board sent to the Owner for approval — it takes effect when they approve it","ok"); return; }
   CG.sb.rpc("save_draft_board",{ p_team: t.id, p_players: ids }).then(function(r){
     if (r.error){
       CG.toast("The board didn’t save: "+r.error.message, "err");
       CG.loadManagerData().then(function(){ CG.rerenderKeepScroll(); });
     }
+  });
   });
 };
 /* re-render without the jump-to-top — board edits and realtime pick updates keep your place */
@@ -3968,10 +3990,12 @@ CG.draftPickModalLive = function(pickId, forCode){
     document.querySelectorAll("[data-modpick]").forEach(function(b){ b.addEventListener("click", function(){
       var pid=this.getAttribute("data-modpick"), nm=this.getAttribute("data-name"), btn=this;
       btn.disabled=true; btn.textContent="Drafting…";
+      CG.mgmtQueue("draft_make_pick", { p_pick:pickId, p_player:pid }, "draft "+nm+" with the pick on the clock").then(function(q){ if (q){ btn.disabled=false; btn.textContent="Draft"; return; }
       CG.sb.rpc("draft_make_pick",{ p_pick:pickId, p_player:pid }).then(function(r){
         if(r.error){ CG.toast(r.error.message,"err"); btn.disabled=false; btn.textContent="Draft"; return; }
         if(CG.closeOverlay) CG.closeOverlay();
         CG.toast(nm+" drafted","ok"); CG.refreshDraft();
+      });
       });
     }); });
   }
@@ -4214,9 +4238,11 @@ CG.AFTER._hubDraft = function(){
   document.querySelectorAll("[data-quickpick]").forEach(function(b){ b.addEventListener("click", function(){
     var pid=this.getAttribute("data-quickpick"), pickId=this.getAttribute("data-pick"), nm=this.getAttribute("data-name"), btn=this;
     btn.disabled=true;
+    CG.mgmtQueue("draft_make_pick", { p_pick:pickId, p_player:pid }, "draft "+nm+" with the pick on the clock").then(function(q){ if (q){ btn.disabled=false; return; }
     CG.sb.rpc("draft_make_pick",{ p_pick:pickId, p_player:pid }).then(function(r){
       if(r.error){ CG.toast(r.error.message,"err"); btn.disabled=false; return; }
       CG.toast(nm+" drafted — welcome aboard","ok"); CG.refreshDraft();
+    });
     });
   }); });
   document.querySelectorAll("[data-openpick]").forEach(function(b){ b.addEventListener("click", function(){
@@ -4756,6 +4782,9 @@ CG.managesClub = function(){
    commissioners only; picking "None" puts the nav back exactly as it was. */
 CG._origHubShell = CG.hubShell;
 CG.hubShell = function(section, inner){
+  /* v2.38: the Owner-approves banner sits above the page it governs, for every role */
+  var ban = CG.mgmtApprovalBanner ? CG.mgmtApprovalBanner(section) : "";
+  if (ban) inner = ban + inner;
   if (CG.role() !== "commish") return CG._origHubShell(section, inner);
   var pv = CG.previewClub();
   var opts = (CG.TEAMS||[]).map(function(t){
@@ -4844,12 +4873,15 @@ CG.withdrawTradeOffer = function(id){
 CG.isOnBlock = function(pid){ var p = CG.playerById(CG.lg, pid); return !!(p && p.onBlock); };
 CG.setOnBlock = function(pid, on){
   var p = CG.playerById(CG.lg, pid); if (!p) return;
-  p.onBlock = !!on; /* optimistic — the row below is the truth */
-  CG.sb.from("roster_spots").update({ on_block: !!on })
-    .eq("season_id", CG.SEASON.id).eq("profile_id", pid).select("id").then(function(r){
-      var refused = r.error || !r.data || !r.data.length;   /* 0 rows + no error = RLS refusal */
-      if (refused){ p.onBlock = !on; CG.toast("Couldn’t update the block"+(r.error?": "+r.error.message:" — no roster row was changed"),"err"); CG.router(); }
-    });
+  CG.mgmtQueue("roster_block", { p_profile:pid, on_block:!!on }, (on?"put ":"take ")+p.tag+(on?" on":" off")+" the trade block").then(function(q){
+    if (q){ CG.router(); return; }
+    p.onBlock = !!on; /* optimistic — the row below is the truth */
+    CG.sb.from("roster_spots").update({ on_block: !!on })
+      .eq("season_id", CG.SEASON.id).eq("profile_id", pid).select("id").then(function(r){
+        var refused = r.error || !r.data || !r.data.length;   /* 0 rows + no error = RLS refusal */
+        if (refused){ p.onBlock = !on; CG.toast("Couldn’t update the block"+(r.error?": "+r.error.message:" — no roster row was changed"),"err"); CG.router(); }
+      });
+  });
 };
 
 CG.ROUTES.messages = function(){ location.hash = "#/hub/messages"; return ""; };
@@ -6116,9 +6148,125 @@ CG.AFTER._admEAStats = function(){
 /* ================================================================
    LIVE ADMIN: TEAMS — add / edit / remove clubs (real teams table)
    ================================================================ */
+/* The role is derived from the seat pointers (CG.computeRole), but it was computed ONCE, on the
+   auth event. A GM approved while signed in, or one the Owner removed, kept the old role until a
+   hard refresh: the Team HQ tab (which reads the seats live) and the routes behind it (which read
+   CG.auth.role) disagreed. Every league rebuild now re-derives it. A "View as…" preview is left
+   alone — it is deliberately not reality. */
+CG.refreshRole = function(){
+  if (CG._va || !CG.auth || !CG.auth.user || !CG.auth.profile || !CG.computeRole) return false;
+  var r = CG.computeRole(CG.auth.profile);
+  if (r === CG.auth.role) return false;
+  CG.auth.role = r;
+  return true;
+};
+/* ================================================================
+   v2.38 · MANAGEMENT PERMISSIONS (Rule 2.6)
+   The Owner sets, per Team HQ page and per seat (GM, AGM), one of three modes:
+     full     — the seat acts freely (the default; nothing changes for a club that never sets this)
+     approve  — the seat sees the page, but every move on it is queued for the Owner's approval
+     hidden   — the page is withheld from the seat, and its moves are refused
+   The database is the authority (public.mgmt_access_for / mgmt_gate on every management write);
+   this mirror only decides what to draw and where to send a move.
+   ================================================================ */
+CG.MGMT_PAGES = [
+  ["roster",     "Roster",         "Waivers, extension offers, trade-block flags, camp moves", true],
+  ["lines",      "Lineup builder", "Saved lines, night plans and per-game lineups", true],
+  ["schedule",   "Schedule",       "Server vetoes and preferred picks", true],
+  ["gamestats",  "Game stats",     "Box-score repairs — reviewed by the statistics staff, so there is no approval mode", false],
+  ["tradehub",   "Trade Hub",      "Propose, accept, decline and withdraw trades", true],
+  ["freeagents", "Free agents",    "Contract offers and answers to counters", true],
+  ["draft",      "Draft",          "The club's draft board and picks on the clock", true],
+  ["management", "Management",     "This page — read-only for a GM or AGM either way", false]
+];
+CG.MGMT_MODES = [["full","Full access"],["approve","Owner approves"],["hidden","Hidden"]];
+CG.MGMT_ACTION_PAGE = {
+  waive_player:"roster", offer_extension:"roster", set_roster_squad:"roster", swap_roster_squad:"roster", roster_block:"roster", respond_extension:"roster",
+  set_team_line:"lines", set_team_line_night:"lines", set_game_lineup:"lines",
+  schedule_pick:"schedule",
+  trade_propose:"tradehub", accept_trade:"tradehub", trade_decline:"tradehub", trade_cancel:"tradehub",
+  offer_free_agent:"freeagents", respond_offer:"freeagents",
+  draft_make_pick:"draft", save_draft_board:"draft"
+};
+if (!CG.fmtAgo) CG.fmtAgo = function(ts){
+  var d = Math.max(0, (CG.now ? CG.now() : Date.now()) - ts), m = Math.round(d/60000);
+  if (m < 1) return "just now"; if (m < 60) return m+" min ago";
+  var h = Math.round(m/60); if (h < 24) return h+" h ago";
+  return CG.fmtFull ? CG.fmtFull(ts) : new Date(ts).toLocaleString();
+};
+CG.mgmtPageLabel = function(page){ var r = CG.MGMT_PAGES.find(function(x){ return x[0]===page; }); return r ? r[1] : page; };
+/* which seat the signed-in member holds on their club: owner | gm | agm | null */
+CG.mySeat = function(){
+  var t = CG.myManagedTeam && CG.myManagedTeam(); var uid = CG.auth && CG.auth.user && CG.auth.user.id;
+  if (!t || !uid) return null;
+  return t.owner===uid ? "owner" : t.gm===uid ? "gm" : t.agm===uid ? "agm" : null;
+};
+/* mirror of public.mgmt_access_for — what the signed-in member may do on one Team HQ page */
+CG.mgmtAccess = function(page){
+  var seat = CG.mySeat();
+  if (!seat){ return CG.role()==="commish" && CG.previewClub && CG.previewClub() ? "office" : "none"; }
+  if (seat==="owner") return "owner";
+  if (CG.role()==="commish") return "office";
+  var pol = (CG.lg && CG.lg._mgmtPolicy) || {};
+  var mode = (pol[seat] || {})[page] || "full";
+  if (["full","approve","hidden"].indexOf(mode) < 0) mode = "full";
+  if ((page==="management" || page==="gamestats") && mode==="approve") mode = "full";
+  return mode;
+};
+CG.mgmtMoves = function(status){
+  var list = (CG.lg && CG.lg._mgmtMoves) || [];
+  return status ? list.filter(function(m){ return m.status===status; }) : list;
+};
+/* the Owner's count of moves waiting; a GM/AGM's count of their own */
+CG.mgmtPendingCount = function(){
+  var seat = CG.mySeat(); if (!seat) return 0;
+  var uid = CG.auth.user && CG.auth.user.id;
+  return CG.mgmtMoves("pending").filter(function(m){ return seat==="owner" || m.requested_by===uid; }).length;
+};
+/* Every management write passes here first. Under "Owner approves" the move is queued for the
+   Owner instead of made (mgmt_request_move) and the caller stops; otherwise the caller makes it
+   itself. The database refuses the direct call anyway (mgmt_gate), so this is the seamless path,
+   not the only guard. opts.quiet: no toast, no reload — for loops that report once at the end. */
+CG.mgmtQueue = function(action, args, summary, opts){
+  opts = opts || {};
+  var page = CG.MGMT_ACTION_PAGE[action], t = CG.myManagedTeam && CG.myManagedTeam();
+  if (!page || !t || CG.mgmtAccess(page) !== "approve") return Promise.resolve(false);
+  return CG.sb.rpc("mgmt_request_move", { p_team_code:t.code, p_action:action, p_args:args||{}, p_summary:summary }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t send that to the Owner: "+r.error.message,"err"); return true; }
+    if (!opts.quiet){
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast("Sent to the Owner for approval — "+summary,"ok");
+      CG.reloadLeague();
+    }
+    return true;
+  }, function(e){ CG.toast("Couldn’t send that to the Owner: "+(e&&e.message||e),"err"); return true; });
+};
+/* A GM or AGM on a page the Owner approves sees why their buttons queue instead of act, and what
+   of theirs is still waiting. Rendered above every Team HQ page in that mode. */
+CG.mgmtApprovalBanner = function(section){
+  var page = section==="lineup" ? "lines" : section;
+  if (!CG.MGMT_ACTION_PAGE || !CG.MGMT_PAGES.some(function(x){ return x[0]===page; })) return "";
+  if (CG.mgmtAccess(page) !== "approve") return "";
+  var t = CG.myManagedTeam(), names = (CG.lg && CG.lg._profName) || {}, ownerName = t && t.owner ? (names[t.owner] || "the Owner") : "the Owner";
+  var uid = CG.auth.user && CG.auth.user.id;
+  var mine = CG.mgmtMoves("pending").filter(function(m){ return m.page===page && m.requested_by===uid; });
+  return '<div class="note" style="margin-bottom:16px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+esc(ownerName)+' approves '+esc(CG.mgmtPageLabel(page)).toLowerCase()+' moves</b>'+
+    'Everything you do on this page is sent to the Owner and takes effect only when they approve it (Rule 2.6). You are told either way.'+
+    (mine.length ? '<div class="stack" style="gap:6px;margin-top:10px">'+mine.map(function(m){
+      return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="chip chip-warn chip-xs">Waiting</span><span style="flex:1">'+esc(m.summary)+' <span class="caption">· '+esc(CG.fmtAgo ? CG.fmtAgo(Date.parse(m.created_at)) : "")+'</span></span>'+
+        '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw-move="'+esc(m.id)+'">Withdraw</button></div>';
+    }).join("")+'</div>' : '')+'</div>';
+};
+CG.withdrawMgmtMove = function(id){
+  CG.sb.rpc("mgmt_withdraw_move", { p_id:id }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t withdraw: "+r.error.message,"err"); return; }
+    CG.toast("Move withdrawn","ok"); CG.reloadLeague();
+  });
+};
 CG.reloadLeague = async function(){
   try {
     CG.lg = await CG.buildLiveLeague();
+    CG.refreshRole();
     await CG.loadManagerData();
     /* offers ride along with every reload, so a negotiation moves without a page refresh */
     await Promise.all([CG.loadAvailability(), CG.loadTrades(), CG.loadMyOffers()]);
@@ -6150,6 +6298,7 @@ CG.liveReload = function(){
     CG._liveBusy = true;
     CG.buildLiveLeague().then(function(lg){
       CG.lg = lg;
+      CG.refreshRole();
       return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
     }).then(function(){
       /* don't yank the page out from under an active interaction — the data is
@@ -7739,11 +7888,14 @@ CG.mgmtSeatsTable = function(m){
     /* A filled seat cannot be nominated over: the approval is refused (Rule 2.6). Offering
        "Replace" here promised something the league office will not do, so a held seat says
        who has to clear it instead of handing the owner a dead button. */
+    /* Rule 2.6 (v2.38): the Owner alone nominates and removes the GM and AGM. A held seat offers
+       the Owner "Remove"; a GM or AGM reading the same table sees who decides it. */
     var action=owner?'<span class="caption">—</span>'
       :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
-      :holder?'<span class="caption">Seat held — a commissioner vacates it</span>'
+      :holder?(m.isOwner?'<button class="btn btn-ghost btn-sm" data-remove-role="'+role+'" data-remove-name="'+esc(holder)+'">Remove</button>'
+                        :'<span class="caption">Only the Owner changes this seat</span>')
       :m.isOwner?'<button class="btn '+(required?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">Nominate</button>'
-      :'<span class="caption">—</span>';
+      :'<span class="caption">Only the Owner nominates</span>';
     return '<tr>'+
       '<td class="tleft"><span class="chip chip-chrome chip-xs">'+esc(label.toUpperCase())+'</span></td>'+
       '<td class="tleft"><b style="font-family:var(--f-disp)">'+(holder?esc(holder):'<span style="color:var(--steel-2)">Vacant</span>')+'</b>'+(isMe?' <span class="caption">· you</span>':'')+'</td>'+
@@ -7751,12 +7903,61 @@ CG.mgmtSeatsTable = function(m){
       '<td class="tleft" style="text-align:right">'+action+'</td></tr>';
   }
   return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px">'+
-    '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">Read-only</span>')+'</div>'+
+    '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">The Owner decides these seats</span>')+'</div>'+
     '<div class="tblwrap"><table class="tbl compact"><thead><tr>'+
       '<th class="tleft">Seat</th><th class="tleft">Holder</th><th class="tleft">Status</th><th class="tleft" style="text-align:right">Action</th>'+
     '</tr></thead><tbody>'+
       row("owner","Owner",true)+row("gm","General Manager",true)+row("agm","Assistant GM",false)+
     '</tbody></table></div></div>';
+};
+/* ---- v2.38 · Owner-set permissions + the approval queue (Team HQ → Management) ---- */
+CG.mgmtMoveRow = function(mv, forOwner){
+  var names=(CG.lg&&CG.lg._profName)||{};
+  var who=(mv.requester&&mv.requester.gamertag)||names[mv.requested_by]||"Manager";
+  var seat=(function(){ var t=CG.myManagedTeam(); return !t?"":t.gm===mv.requested_by?"GM":t.agm===mv.requested_by?"AGM":""; })();
+  var st={pending:'<span class="chip chip-warn chip-xs">Waiting</span>',approved:'<span class="chip chip-win chip-xs">Approved</span>',denied:'<span class="chip chip-xs">Denied</span>',
+          withdrawn:'<span class="chip chip-xs">Withdrawn</span>',failed:'<span class="chip chip-xs" style="color:var(--red-ink);border-color:var(--red-ink)">Could not be made</span>'}[mv.status]||esc(mv.status);
+  var when=mv.status==="pending"?CG.fmtAgo(Date.parse(mv.created_at)):(mv.decided_at?CG.fmtAgo(Date.parse(mv.decided_at)):"");
+  var tail=mv.status==="failed"&&mv.result?'<div class="caption" style="color:var(--red-ink);margin-top:2px">'+esc(mv.result)+'</div>':(mv.note?'<div class="caption" style="margin-top:2px">Note: '+esc(mv.note)+'</div>':'');
+  var act=mv.status!=="pending"?'':forOwner
+    ?'<span style="display:flex;gap:6px"><button class="btn btn-chrome btn-sm" data-mgmt-decide="'+esc(mv.id)+'" data-approve="1">Approve</button><button class="btn btn-ghost btn-sm" data-mgmt-decide="'+esc(mv.id)+'" data-approve="0">Deny</button></span>'
+    :(mv.requested_by===(CG.auth.user||{}).id?'<button class="btn btn-ghost btn-sm" data-mgmt-withdraw-move="'+esc(mv.id)+'">Withdraw</button>':'');
+  return '<div class="titem" style="align-items:flex-start"><span style="flex:1;min-width:0"><b style="font-family:var(--f-disp)">'+esc(mv.summary)+'</b>'+
+    '<div class="caption">'+esc(who)+(seat?' · '+seat:'')+' · '+esc(CG.mgmtPageLabel(mv.page))+' · '+esc(when)+'</div>'+tail+'</span>'+st+act+'</div>';
+};
+CG.mgmtApprovalsCard = function(m){
+  var uid=(CG.auth.user||{}).id, all=CG.mgmtMoves();
+  var pending=all.filter(function(x){ return x.status==="pending" && (m.isOwner || x.requested_by===uid); });
+  var recent=all.filter(function(x){ return x.status!=="pending" && (m.isOwner || x.requested_by===uid); }).slice(0,8);
+  if (!m.isOwner && !pending.length && !recent.length) return "";
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(m.isOwner?"Approvals":"Your moves awaiting the Owner")+'</h3>'+
+    (pending.length?'<span class="chip chip-warn chip-xs">'+pending.length+' waiting</span>':'<span class="chip chip-xs">Nothing waiting</span>')+'</div>'+
+    '<div class="tasklist">'+(pending.length?pending.map(function(x){ return CG.mgmtMoveRow(x, m.isOwner); }).join("")
+      :'<div class="titem"><span class="caption">'+(m.isOwner?"Moves your GM or AGM make on a page set to “Owner approves” land here. Approving runs the move at once; denying tells them why.":"Nothing of yours is waiting.")+'</span></div>')+
+    '</div>'+(recent.length?'<div class="card-b" style="border-top:1px solid var(--line)"><span class="rb-lab" style="display:block;margin-bottom:6px">Recent decisions</span><div class="tasklist">'+recent.map(function(x){ return CG.mgmtMoveRow(x, false); }).join("")+'</div></div>':'')+'</div>';
+};
+CG.mgmtPermissionsCard = function(m){
+  var pol=(CG.lg&&CG.lg._mgmtPolicy)||{}, names=(CG.lg&&CG.lg._profName)||{};
+  var seats=[["gm","General Manager",m.t.gm],["agm","Assistant GM",m.t.agm]];
+  var head='<div class="card-h"><h3>Management permissions</h3>'+(m.isOwner?'<span class="chip chip-xs">Only you can change these</span>':'<span class="chip chip-xs">Set by the Owner</span>')+'</div>';
+  var intro='<div class="card-b" style="padding-bottom:6px"><p class="caption" style="margin:0;max-width:78ch">For every Team HQ page, each seat gets <b>full access</b>, <b>Owner approves</b> (they see the page, but every move on it waits for your approval), or <b>hidden</b> (the page is withheld and its moves refused). Your own seat is never limited, and the league office keeps its powers either way (Rule 2.6).</p></div>';
+  var rows=CG.MGMT_PAGES.map(function(pg){
+    var cells=seats.map(function(sd){
+      var mode=((pol[sd[0]]||{})[pg[0]])||"full";
+      if (!pg[3] && mode==="approve") mode="full";
+      if (!m.isOwner) return '<td class="tleft"><span class="chip chip-xs'+(mode==="full"?" chip-win":mode==="approve"?" chip-warn":"")+'">'+esc(CG.MGMT_MODES.find(function(x){return x[0]===mode;})[1])+'</span></td>';
+      return '<td class="tleft"><div class="seg" role="radiogroup" aria-label="'+esc(sd[1]+" · "+pg[1])+'">'+CG.MGMT_MODES.filter(function(md){ return pg[3] || md[0]!=="approve"; }).map(function(md){
+        return '<button type="button" class="seg-b'+(mode===md[0]?" on":"")+'" data-perm-seat="'+sd[0]+'" data-perm-page="'+pg[0]+'" data-perm-mode="'+md[0]+'" aria-pressed="'+(mode===md[0]?"true":"false")+'">'+esc(md[1])+'</button>';
+      }).join("")+'</div></td>';
+    }).join("");
+    return '<tr><td class="tleft"><b style="font-family:var(--f-disp)">'+esc(pg[1])+'</b><div class="caption">'+esc(pg[2])+'</div></td>'+cells+'</tr>';
+  }).join("");
+  var seatHead=seats.map(function(sd){ var nm=sd[2]?(names[sd[2]]||"Assigned"):null; return '<th class="tleft">'+esc(sd[1])+(nm?'<div class="caption" style="font-weight:400">'+esc(nm)+'</div>':'<div class="caption" style="font-weight:400">Vacant — applies when seated</div>')+'</th>'; }).join("");
+  var foot=m.isOwner?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+      '<button class="btn btn-chrome" id="permSave" disabled>Save permissions</button><button class="btn btn-ghost" id="permReset" disabled>Discard changes</button>'+
+      '<span class="caption" id="permStatus">'+(CG.lg&&CG.lg._mgmtPolicyAt?'Last saved '+esc(CG.fmtAgo(Date.parse(CG.lg._mgmtPolicyAt)))+'.':'Every seat currently has full access.')+'</span></div>':'';
+  return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px" id="permCard">'+head+intro+
+    '<div class="tblwrap"><table class="tbl compact perm-tbl"><thead><tr><th class="tleft">Page</th>'+seatHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+foot+'</div>';
 };
 CG.hubManagement = function(){
   var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
@@ -7764,9 +7965,11 @@ CG.hubManagement = function(){
   var needsGm=!m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
-    '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the owner nominates management for the league office to approve.</p></div>';
+    '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the Owner nominates management for the league office to approve, or removes a sitting GM or AGM.</p></div>';
   if (needsGm && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">A General Manager is required</b>Every club must appoint a GM before its first regular-season game. Nominate one below — the league office’s reviewers approve it.</div>';
+  h+=CG.mgmtApprovalsCard(m);
   h+=CG.mgmtSeatsTable(m);
+  h+=CG.mgmtPermissionsCard(m);
   if (m.isOwner) pending.forEach(function(a){
     var rl=a.role==="gm"?"General Manager":"Assistant GM";
     h+='<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(rl)+'</h3>'+
@@ -7776,15 +7979,70 @@ CG.hubManagement = function(){
   });
   h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
     (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract, on league staff, or holding a seat at another club — they don’t have to be on your roster. "
-               : "Only the club owner can nominate a GM or AGM. ")+
+               : "Only the club’s Owner nominates or removes a GM or AGM (Rule 2.6). ")+
     "The league office’s reviewers vote; on approval the nominee is seated automatically, and if denied nothing changes. "+
-    "Each seat holds one person (Rule 2.6): to change a sitting GM or AGM, ask the league office to vacate the seat first — "+
+    "Each seat holds one person (Rule 2.6): to change a sitting GM or AGM, "+
+    (m.isOwner ? "remove them first — that is your call alone, takes effect at once, and the league office is told — then nominate the successor; "
+               : "the Owner removes them first, then nominates the successor; ")+
     "an approval into a seat that is still held is refused and nothing moves. "+
+    "A removed manager’s management contract ends with the seat, and a spot held only because of the seat is released with it. "+
     "A GM is required before your first regular-season game; an AGM is optional.</div>";
   return h;
 };
 CG.AFTER._management = function(){
+  /* v2.38: the Owner's approval queue */
+  document.querySelectorAll("[data-mgmt-decide]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-mgmt-decide"), ok=this.getAttribute("data-approve")==="1";
+    var mv=CG.mgmtMoves().find(function(x){ return x.id===id; })||{summary:"this move"};
+    CG.modal((ok?"Approve — ":"Deny — ")+esc(mv.summary),
+      '<p class="caption" style="margin-bottom:12px">'+(ok?"The move is made the moment you approve it, through the league’s usual checks. If it can no longer be made, you both see why.":"Nothing changes; your manager is told.")+'</p>'+
+      '<label class="fld"><span>Note to your manager (optional)</span><input id="mgmtDecideNote" maxlength="200" placeholder="'+(ok?"Go ahead":"Not this week")+'"></label>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn '+(ok?"btn-chrome":"btn-ink")+'" id="mgmtDecideGo">'+(ok?"Approve and make it":"Deny")+'</button>');
+    document.getElementById("mgmtDecideGo").addEventListener("click", function(){
+      var note=((document.getElementById("mgmtDecideNote")||{}).value||"").trim()||null, btn=this; btn.disabled=true;
+      CG.sb.rpc("mgmt_decide_move",{ p_id:id, p_approve:ok, p_note:note }).then(function(r){
+        btn.disabled=false;
+        if(r.error){ CG.toast("Couldn’t decide: "+r.error.message,"err"); return; }
+        if(CG.closeOverlay) CG.closeOverlay();
+        var d=r.data||{};
+        if (d.status==="failed") CG.toast("Approved, but it could not be made: "+(d.error||"the league’s checks refused it"),"err");
+        else CG.toast(ok?"Approved — the move is made":"Denied — your manager has been told","ok");
+        CG.reloadLeague();
+      });
+    });
+  }); });
+  /* v2.38: the permissions matrix — local edits, one save, honest status */
+  var card=document.getElementById("permCard");
+  if (card && card.querySelector("[data-perm-seat]")){
+    var draft={}, base={};
+    card.querySelectorAll(".seg-b.on").forEach(function(b){ (base[b.getAttribute("data-perm-seat")]=base[b.getAttribute("data-perm-seat")]||{})[b.getAttribute("data-perm-page")]=b.getAttribute("data-perm-mode"); });
+    draft=JSON.parse(JSON.stringify(base));
+    var saveB=document.getElementById("permSave"), resetB=document.getElementById("permReset"), stat=document.getElementById("permStatus");
+    function dirty(){ return JSON.stringify(draft)!==JSON.stringify(base); }
+    function paint(){
+      card.querySelectorAll(".seg-b").forEach(function(b){ var on=draft[b.getAttribute("data-perm-seat")][b.getAttribute("data-perm-page")]===b.getAttribute("data-perm-mode"); b.classList.toggle("on",on); b.setAttribute("aria-pressed",on?"true":"false"); });
+      var d=dirty(); if(saveB) saveB.disabled=!d; if(resetB) resetB.disabled=!d;
+      if (stat && d) stat.textContent="Unsaved changes.";
+    }
+    card.querySelectorAll(".seg-b").forEach(function(b){ b.addEventListener("click", function(){ draft[this.getAttribute("data-perm-seat")][this.getAttribute("data-perm-page")]=this.getAttribute("data-perm-mode"); paint(); }); });
+    if (resetB) resetB.addEventListener("click", function(){ draft=JSON.parse(JSON.stringify(base)); paint(); if(stat) stat.textContent="Changes discarded."; });
+    if (saveB) saveB.addEventListener("click", function(){
+      var m=CG.clubMgmt(); if(!m||!m.isOwner){ CG.toast("Only the club’s Owner sets management permissions","err"); return; }
+      saveB.disabled=true; if(stat) stat.textContent="Saving…";
+      CG.sb.rpc("set_team_mgmt_policy",{ p_team_code:m.club, p_policy:draft }).then(function(r){
+        if(r.error){ saveB.disabled=false; if(stat) stat.textContent="Not saved."; CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        CG.lg._mgmtPolicy=r.data||{}; CG.lg._mgmtPolicyAt=new Date().toISOString();
+        base=JSON.parse(JSON.stringify(draft)); paint();
+        if(stat) stat.textContent="Saved just now. Your managers have been told.";
+        CG.toast("Permissions saved — your managers have been told","ok");
+        if (CG.renderChrome) CG.renderChrome();
+      });
+    });
+  }
   document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
+  document.querySelectorAll("[data-remove-role]").forEach(function(b){ b.addEventListener("click", function(){
+    CG.removeManager(this.getAttribute("data-remove-role"), this.getAttribute("data-remove-name")||"this manager");
+  }); });
   document.querySelectorAll("[data-mgmt-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-mgmt-withdraw");
     CG.confirm("Withdraw this nomination?","The application is withdrawn and the reviewers stop voting on it.","Withdraw", function(){
@@ -7795,6 +8053,22 @@ CG.AFTER._management = function(){
     });
   }); });
   if (CG.wireAppChat) CG.wireAppChat();
+};
+/* Rule 2.6 (v2.38): the Owner removes a sitting GM or AGM. Owner-only in the database too
+   (owner_remove_manager checks teams.owner_profile_id = auth.uid()), so this button grants nothing
+   the seat does not already carry. Fail-loud: a refused call is a toast, never a silent no-op. */
+CG.removeManager = function(role, name){
+  var m = CG.clubMgmt(); if(!m || !m.isOwner){ CG.toast("Only the club’s Owner can remove management","err"); return; }
+  if (role!=="gm" && role!=="agm"){ CG.toast("An Owner removes the GM or AGM only","err"); return; }
+  var label = role==="gm"?"General Manager":"Assistant GM";
+  CG.confirm("Remove "+name+" as "+label+"?",
+    "This takes effect at once: the seat becomes vacant, their management contract ends with it, the move posts to the transaction wire, and the league office is told. Nominate a successor afterwards"+(role==="gm"?" — a GM is required before your first regular-season game.":"."),
+    "Remove", function(){
+      CG.sb.rpc("owner_remove_manager", { p_team_code:m.club, p_role:role }).then(function(r){
+        if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
+        CG.toast(name+" removed as "+label,"ok"); CG.reloadLeague();
+      });
+    });
 };
 CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
@@ -7838,11 +8112,14 @@ CG.AFTER._roster = function(){
   document.querySelectorAll("[data-squad]").forEach(function(b){ b.addEventListener("click", function(){
     var spot = this.getAttribute("data-squad"), to = this.getAttribute("data-squad-to"), btn = this;
     btn.disabled = true;
+    var who = ((CG.lg.byTeam[CG.myClub()]||[]).find(function(x){ return x.spotId===spot; })||{}).tag || "a player";
+    CG.mgmtQueue("set_roster_squad", { p_spot:spot, p_squad:to }, "move "+who+(to==="tc"?" to training camp":" to the active roster")).then(function(q){ if (q) return;
     CG.sb.rpc("set_roster_squad", { p_spot: spot, p_squad: to }).then(function(r){
       if (r.error){ btn.disabled = false; CG.toast(r.error.message, "err"); return; }
       CG.toast(to==="tc" ? "Moved to training camp" : "Moved to the active roster", "ok");
       CG.reloadLeague();
     }, function(e){ btn.disabled = false; CG.toast("Couldn’t move that player: "+(e&&e.message||e), "err"); });
+    });
   }); });
   /* Full roster: a straight, same-position pro<->camp swap (Rule 2.1). The picker
      only lists legal counterparts (opposite squad, same exact position); the
@@ -7879,12 +8156,15 @@ CG.AFTER._roster = function(){
     document.querySelectorAll("[data-swap-with]").forEach(function(sb){ sb.addEventListener("click", function(){
       var other = this.getAttribute("data-swap-with");
       var proSpot = pro ? pro.spotId : other, tcSpot = camp ? camp.spotId : other;
+      var otherTag = (opts.find(function(x){ return x.spotId===other; })||{}).tag || "a player";
       this.disabled = true;
+      CG.mgmtQueue("swap_roster_squad", { p_pro_spot:proSpot, p_tc_spot:tcSpot }, "swap "+me.tag+" and "+otherTag+" between the roster and camp").then(function(q){ if (q) return;
       CG.sb.rpc("swap_roster_squad", { p_pro_spot: proSpot, p_tc_spot: tcSpot }).then(function(r){
         if (r.error){ CG.toast(r.error.message, "err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast("Squads swapped", "ok"); CG.reloadLeague();
       }, function(e){ CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
+      });
     }); });
   }); });
   document.querySelectorAll("[data-nominate-role]").forEach(function(b){ b.addEventListener("click", function(){ CG.nominateManagerModal(this.getAttribute("data-nominate-role")); }); });
@@ -8007,7 +8287,7 @@ CG.seatConflict = function(app, lg){
   /* 2 · somebody else already holds the seat */
   if (holder && holder!==nominee) return { kind:"filled", chip:seat+" seat filled",
     text:"The "+label+" seat at "+club+" is held by "+who(holder)+". A club holds "+art+" "+label+
-         " (Rule 2.6), so approving this will not seat "+nomName+" — a commissioner vacates the seat first." };
+         " (Rule 2.6), so approving this will not seat "+nomName+" — the club’s Owner removes the sitting manager (or a commissioner vacates the seat) first." };
 
   /* 3 · a seat they already hold would be emptied by seating them here — at this club or another */
   if (nominee){
@@ -11202,6 +11482,11 @@ CG.AFTER._hubGameStats = function(){
    player hub shell instead of holding its own top-level nav slot. */
 CG._origHubRoute = CG.ROUTES.hub;
 CG.ROUTES.hub = function(param, qs){
+  /* v2.38: a page the Owner withheld from this seat is not reachable by URL either */
+  var pageKey = param==="lineup" ? "lines" : param;
+  if (CG.mgmtAccess && CG.MGMT_PAGES.some(function(x){ return x[0]===pageKey; }) && CG.mgmtAccess(pageKey)==="hidden"){
+    return CG.unauthorized("Your club’s Owner hasn’t given your seat access to "+CG.mgmtPageLabel(pageKey)+" (Rule 2.6).");
+  }
   if (param==="messages"){
     if (CG.role()==="guest") return CG.unauthorized("Sign in to reach your messages.");
     return CG.hubShell("messages", CG.messagesBody());
@@ -11242,6 +11527,11 @@ CG.AFTER.hub = function(param, qs){
   /* first, before any of the sub-page early returns: the contract-offer card renders on the
      dashboard, and finding nothing to bind on the other hub pages costs nothing */
   if (CG.wireOfferActions) CG.wireOfferActions();
+  /* v2.38: the Owner-approves banner's Withdraw buttons, on whichever page it renders */
+  document.querySelectorAll("[data-mgmt-withdraw-move]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-mgmt-withdraw-move");
+    CG.confirm("Withdraw this move?","It comes off the Owner’s queue and nothing changes.","Withdraw", function(){ CG.withdrawMgmtMove(id); });
+  }); });
   if (param==="messages"){ CG.AFTER.messages(); return; }
   if (param==="draft"){ CG.AFTER._hubDraft(); return; }
   if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
@@ -11495,11 +11785,13 @@ CG.AFTER._hubFreeAgents = function(){
       var yrs=parseInt((document.getElementById("faYears")||{}).value,10)||1;
       var note=(document.getElementById("faNote")||{}).value||null;
       var btn=this; btn.disabled=true;
+      CG.mgmtQueue("offer_free_agent", { p_registration:regId, p_salary:sal, p_years:yrs, p_note:note }, "offer "+name+" "+CG.fmtMoney(sal)+" × "+yrs+" season"+(yrs>1?"s":"")).then(function(q){ if (q){ btn.disabled=false; return; }
       CG.sb.rpc("offer_free_agent",{ p_registration:regId, p_salary:sal, p_years:yrs, p_note:note }).then(function(r){
         btn.disabled=false;
         if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast("Offer sent to "+name+" — "+CG.fmtMoney(sal)+" for "+yrs+" season"+(yrs>1?"s":"")+". He decides.","ok");
+      });
       });
     });
   }); });
@@ -11603,6 +11895,9 @@ CG.proposeTrade = function(){
   if((!d.offP.length&&!d.offK.length)||(!d.reqP.length&&!d.reqK.length)){ CG.toast("Add at least one player or pick on each side","err"); return; }
   var payload={ season_id:CG.SEASON.id, from_team_id:CG.lg._codeToId[club], to_team_id:CG.lg._codeToId[d.partner], from_profile_id:CG.auth.user.id,
     offered_profile_ids:d.offP, requested_profile_ids:d.reqP, offered_pick_ids:d.offK, requested_pick_ids:d.reqK, retention:d.ret||{}, note:((document.getElementById("tradeNote")||{}).value||"").trim()||null };
+  var tsum = "propose a trade to "+CG.TEAM[d.partner].name+" ("+(d.offP.length+d.offK.length)+" for "+(d.reqP.length+d.reqK.length)+")";
+  CG.mgmtQueue("trade_propose", { to_team_id:payload.to_team_id, season_id:payload.season_id, offered_profile_ids:d.offP, requested_profile_ids:d.reqP, offered_pick_ids:d.offK, requested_pick_ids:d.reqK, retention:d.ret||{}, note:payload.note }, tsum).then(function(q){
+    if (q){ CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; CG._counteringId=null; return; }
   CG.sb.from("trades").insert(payload).then(function(r){
     if(r.error){ CG.toast("Couldn’t propose: "+r.error.message,"err"); return; }
     CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}};
@@ -11617,14 +11912,21 @@ CG.proposeTrade = function(){
       }, finish);
     } else { finish(); }
   });
+  });
 };
 /* reloadLeague, not refreshTrades: the latter reloads only the trade lists, so the accepting GM
    kept building his next deal against the PRE-trade roster and cap sheet. */
-CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed — rosters updated for both clubs","ok"); CG.loadTrades().then(function(){ CG.reloadLeague(); }); }); }); };
+CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed — rosters updated for both clubs","ok"); CG.loadTrades().then(function(){ CG.reloadLeague(); }); }); }); }); };
 /* .select() on both: an RLS-refused update returns 0 rows and NO error, and the old success toast
    told a manager an offer was declined that the other club still saw live (the false-success class). */
-CG.declineTrade = function(id){ CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t decline — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); };
-CG.cancelTrade = function(id){ CG.sb.from("trades").update({ status:"cancelled", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t withdraw: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t withdraw — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer withdrawn","ok"); CG.refreshTrades(); } }); };
+CG.declineTrade = function(id){ CG.mgmtQueue("trade_decline",{ p_trade:id }, "decline the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t decline — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); }); };
+CG.cancelTrade = function(id){ CG.mgmtQueue("trade_cancel",{ p_trade:id }, "withdraw the trade offer to "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.from("trades").update({ status:"cancelled", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t withdraw: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t withdraw — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer withdrawn","ok"); CG.refreshTrades(); } }); }); };
+/* the other club's name for a trade id — for the Owner's approval summaries */
+CG.tradePartnerName = function(id){
+  var tr=(CG.lg._myTrades||[]).find(function(x){ return x.id===id; }); if(!tr) return "another club";
+  var mine=(CG.lg._codeToId||{})[CG.myClub()], other=tr.from_team_id===mine?tr.to_team_id:tr.from_team_id;
+  var code=(CG.lg._idToCode||{})[other]; return (code && CG.TEAM[code] && CG.TEAM[code].name) || "another club";
+};
 CG.counterTrade = function(id){
   var tr=(CG.lg._myTrades||[]).find(function(x){ return x.id===id; }); if(!tr) return;
   CG._liveTrade={ partner:CG.lg._idToCode[tr.from_team_id], offP:(tr.requested_profile_ids||[]).slice(), reqP:(tr.offered_profile_ids||[]).slice(), offK:(tr.requested_pick_ids||[]).slice(), reqK:(tr.offered_pick_ids||[]).slice(), ret:{} };

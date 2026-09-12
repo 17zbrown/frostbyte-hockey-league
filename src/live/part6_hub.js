@@ -90,6 +90,9 @@ CG.tradePlayerLine = function(pid){
 };
 
 /* hub sidebar per role */
+/* v2.38: the management-permissions queue is installed by part_live; in the prototype build every
+   move is simply made (the wrapper resolves false), so these pages never depend on load order. */
+if (!CG.mgmtQueue) CG.mgmtQueue = function(){ return Promise.resolve(false); };
 CG.hubNav = function(section){
   var r = CG.role();
   /* the sidebar is split by hat: personal tools under "My Hub", club management
@@ -124,12 +127,15 @@ CG.hubNav = function(section){
     if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
     if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);
     if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubDraftLive) club.push(["draft","Draft","play"]);
+    /* v2.38: pages the Owner withheld from this seat are not listed (and not routable) */
+    if (CG.mgmtAccess) club = club.filter(function(it){ return CG.mgmtAccess(it[0]) !== "hidden"; });
   }
   function render(items){
     return items.map(function(it){
       var badge = "";
       if (it[0]==="availability" && CG.WEEK8 && CG.WEEK8.open && !CG.availGet((CG.me()||{}).id)) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
+      if (it[0]==="management" && CG.mgmtPendingCount && CG.mgmtPendingCount()) badge = '<span class="hs-n">'+CG.mgmtPendingCount()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
       if (it[0]==="complaints" && CG.role()==="staff"){
         var openN = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; }).length;
@@ -200,6 +206,12 @@ CG.gmTasksCard = function(team){
   }
   var inc = CG.incomingCount ? CG.incomingCount() : 0;
   rows += '<div class="titem"><span class="t-dot'+(inc?" red":" grn")+'"></span><span style="flex:1">'+(inc? inc+' incoming trade offer'+(inc===1?"":"s")+' awaiting your review.' : 'No pending trade offers.')+'</span><a class="btn btn-ghost btn-sm" href="#/hub/tradehub">Trade Hub</a></div>';
+  /* v2.38: the Owner's approval queue, or a manager's own moves still waiting */
+  if (CG.mgmtPendingCount && CG.mySeat){
+    var pend = CG.mgmtPendingCount(), seat = CG.mySeat();
+    if (pend && seat==="owner") rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1"><b>'+pend+' move'+(pend===1?"":"s")+'</b> from your management waiting for your approval.</span><a class="btn btn-chrome btn-sm" href="#/hub/management">Review</a></div>';
+    else if (pend) rows += '<div class="titem"><span class="t-dot"></span><span style="flex:1">'+pend+' of your move'+(pend===1?"":"s")+' waiting for the Owner’s approval.</span><a class="btn btn-ghost btn-sm" href="#/hub/management">See</a></div>';
+  }
   var to = (CG.TEAMS||[]).find(function(t){ return t.code===team; });
   if (to && !to.gm){
     rows += '<div class="titem"><span class="t-dot red"></span><span style="flex:1">No General Manager appointed yet — nominate one from the Management tab.</span><a class="btn btn-ghost btn-sm" href="#/hub/management">Management</a></div>';
@@ -571,10 +583,14 @@ CG.saveVeto = function(gameId, changedSel){
     if(veto&&pref&&veto===pref){ CG.toast("Preferred can’t be the server you vetoed","err"); changedSel.value=""; return; }
     rec.veto=veto; rec.preferred=pref;
   }
+  var oppv = g.home===club ? g.away : g.home;
+  CG.mgmtQueue("schedule_pick", { game_id:gameId, veto:rec.veto||null, preferred:rec.preferred||null, pref1:rec.pref1||null, pref2:rec.pref2||null },
+    (g.home===club?"set the server choices":"set the server veto and preference")+" vs "+((CG.TEAM[oppv]||{}).name||oppv||"?")+(g.at?" · "+CG.fmtDay(g.at):"")).then(function(q){ if (q) return;
   CG.sb.from("game_vetoes").upsert(rec,{onConflict:"game_id,team_id"}).then(function(r){
     if(r.error){ CG.toast(/lock/i.test(r.error.message||"")?"Picks are locked":"Couldn’t save: "+r.error.message,"err"); return; }
     CG.lg._vetoes = CG.lg._vetoes||{}; CG.lg._vetoes[gameId] = Object.assign({}, CG.lg._vetoes[gameId]||{}, rec);
     CG.toast(g.home===club?"1st & 2nd choices saved":"Veto & preferred saved","ok");
+  });
   });
 };
 
@@ -837,6 +853,22 @@ CG.AFTER._lineup = function(){
             ? CG.nightGames(club, CG.gameNight(game)).filter(function(g){ return CG.now() < g.at - 30*60000; })
             : [game];
           if (!targets.some(function(g){ return g.id===game.id; })) targets.unshift(game);
+          /* v2.38: under "Owner approves" each game's lineup is queued for the Owner, not dressed */
+          if (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve"){
+            var qN = 0;
+            (function qnext(i){
+              if (i >= targets.length){
+                save(qN ? "Sent to the Owner for approval" : "Not sent");
+                if (qN) CG.toast("Sent "+qN+" lineup"+(qN===1?"":"s")+" to the Owner for approval — dressed when they approve","ok");
+                CG.reloadLeague(); return;
+              }
+              var g = targets[i], oppc = g.home===club ? g.away : g.home;
+              CG.mgmtQueue("set_game_lineup", Object.assign({ p_game:g.id, p_emergency:(g.id===game.id?emg:false) }, slots6),
+                (emg?"emergency call-up":"dress the lineup")+" vs "+((CG.TEAM[oppc]||{}).name||oppc)+" · "+CG.fmtDay(g.at)+" "+CG.fmtTime(g.at), { quiet:true })
+                .then(function(q){ if (q) qN++; qnext(i+1); });
+            })(0);
+            return;
+          }
           var okN = 0, errs = [];
           (function next(i){
             if (i >= targets.length){
@@ -1205,6 +1237,22 @@ CG.AFTER._lines = function(qs){
     var dirty = Object.keys(CG._lcDraft||{}).map(Number);
     if (!dirty.length) return;
     saveAll.disabled = true;
+    /* v2.38: under "Owner approves" each changed line is queued for the Owner, not saved */
+    if (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve"){
+      var qN = 0;
+      (function qnext(i){
+        if (i >= dirty.length){
+          saveAll.disabled = false;
+          if (qN){ CG.toast("Sent "+qN+" line"+(qN===1?"":"s")+" to the Owner for approval — saved when they approve","ok"); CG._lcDraft = {}; CG._lcName = {}; }
+          CG.reloadLeague(); return;
+        }
+        var n = dirty[i], d = CG._lcDraft[n] || {};
+        var name = (CG._lcName && CG._lcName[n] != null) ? CG._lcName[n] : (((lg._teamLines||{})[n]||{}).name || "");
+        CG.mgmtQueue("set_team_line", { p_season:CG.SEASON.id, p_slot:n, p_name:name||null, p_lw:d.LW||null, p_center:d.C||null, p_rw:d.RW||null, p_ld:d.LD||null, p_rd:d.RD||null, p_goalie:d.G||null },
+          "save line "+n+(name?" (“"+name+"”)":""), { quiet:true }).then(function(q){ if (q) qN++; qnext(i+1); });
+      })(0);
+      return;
+    }
     var okN = 0, errs = [];
     /* sequential, so one refusal names its line instead of four racing toasts */
     (function next(i){
@@ -1236,6 +1284,8 @@ CG.AFTER._lines = function(qs){
       if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
       var night = el.getAttribute("data-night");
       var slot = el.value ? parseInt(el.value,10) : null;
+      CG.mgmtQueue("set_team_line_night", { p_season:CG.SEASON.id, p_night:night, p_slot:slot },
+        slot ? "dress "+((((lg._teamLines||{})[slot]||{}).name)||("Line "+slot))+" on "+(CG.NIGHT_LABEL[night]||night)+"s" : "clear the "+(CG.NIGHT_LABEL[night]||night)+" line plan").then(function(q){ if (q){ repaint(); return; }
       CG.sb.rpc("set_team_line_night", { p_season:CG.SEASON.id, p_team:tid, p_night:night, p_slot:slot }).then(function(r){
         if (r.error){ CG.toast("Couldn’t save the plan: "+r.error.message,"err"); repaint(); return; }
         lg._linePlan = lg._linePlan||{};
@@ -1244,11 +1294,16 @@ CG.AFTER._lines = function(qs){
                       : ((CG.NIGHT_LABEL[night]||night)+" plan cleared"),"ok");
         repaint();
       });
+      });
     });
   });
   /* one night's dressing, shared by the per-night button and Dress-the-week */
   function dressGame(gameId, slot, done){
     var row = (lg._teamLines||{})[slot]; if (!row || !tid){ done("no line"); return; }
+    /* v2.38: under "Owner approves" the dressing is queued (done(null, "queued")) — never claimed dressed */
+    var gq = (lg.schedule||[]).find(function(x){ return x.id===gameId; })||{}, oppq = gq.home===club ? gq.away : gq.home;
+    CG.mgmtQueue("set_game_lineup", { p_game:gameId, p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null, p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false },
+      "dress "+(row.name||("Line "+slot))+" vs "+((CG.TEAM[oppq]||{}).name||oppq||"?")+(gq.at?" · "+CG.fmtDay(gq.at)+" "+CG.fmtTime(gq.at):""), { quiet:true }).then(function(q){ if (q){ done(null, "queued"); return; }
     CG.sb.rpc("set_game_lineup", { p_game:gameId, p_team:tid,
       p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null,
       p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false
@@ -1258,6 +1313,7 @@ CG.AFTER._lines = function(qs){
       lg._lineups = lg._lineups||{}; lg._lineups[club+":"+gameId] = lrow;
       done(null);
     });
+    });
   }
   /* dress EVERY not-yet-locked game of a night with one line, in sequence. This is the fix: a
      night has up to three games and each must get its own lineup row, or games 2 and 3 go
@@ -1265,11 +1321,11 @@ CG.AFTER._lines = function(qs){
   function dressNight(nightKey, slot, done){
     var games = CG.nightGames(club, nightKey).filter(function(g){ return CG.now() < g.at - 30*60000; });
     if (!games.length){ done("every game this night has locked", 0); return; }
-    var okN = 0, errs = [];
+    var okN = 0, qN = 0, errs = [];
     (function next(i){
-      if (i >= games.length){ done(errs.length ? errs.join("; ") : null, okN); return; }
-      dressGame(games[i].id, slot, function(err){
-        if (err) errs.push(CG.fmtTime(games[i].at)+" — "+err); else okN++;
+      if (i >= games.length){ done(errs.length ? errs.join("; ") : null, okN, qN); return; }
+      dressGame(games[i].id, slot, function(err, queued){
+        if (err) errs.push(CG.fmtTime(games[i].at)+" — "+err); else if (queued) qN++; else okN++;
         next(i+1);
       });
     })(0);
@@ -1287,18 +1343,19 @@ CG.AFTER._lines = function(qs){
       ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before its lock.",
       "Dress the week", function(){
       dressWeek.disabled = true;
-      var okN = 0, errs = [];
+      var okN = 0, qN = 0, errs = [];
       (function next(i){
         if (i >= jobs.length){
           dressWeek.disabled = false;
-          if (errs.length) CG.toast("Dressed "+okN+" game"+(okN===1?"":"s")+", refused: "+errs.join("; "),"err");
-          else CG.toast("Week dressed — "+okN+" game"+(okN===1?"":"s")+". Adjust any single game in the per-game builder before its lock.","ok");
+          if (qN && !okN && !errs.length){ CG.toast("Sent "+qN+" lineup"+(qN===1?"":"s")+" to the Owner for approval — dressed when they approve","ok"); CG.reloadLeague(); return; }
+          if (errs.length) CG.toast("Dressed "+okN+" game"+(okN===1?"":"s")+(qN?", sent "+qN+" for approval":"")+", refused: "+errs.join("; "),"err");
+          else CG.toast("Week dressed — "+okN+" game"+(okN===1?"":"s")+(qN?" ("+qN+" sent to the Owner)":"")+". Adjust any single game in the per-game builder before its lock.","ok");
           repaint(); return;
         }
         var n = jobs[i], pl = (lg._linePlan||{})[n.key];
-        dressNight(n.key, pl, function(err, dressed){
+        dressNight(n.key, pl, function(err, dressed, queued){
           if (err) errs.push((CG.NIGHT_LABEL[n.key]||n.key)+" — "+err);
-          okN += dressed;
+          okN += dressed; qN += (queued||0);
           next(i+1);
         });
       })(0);
@@ -1314,8 +1371,9 @@ CG.AFTER._lines = function(qs){
         "This submits the line as the real lineup for every not-yet-locked game that night vs "+esc((CG.TEAM[opp]||{}).name||opp)+" and others, through the same checks as the builder — weekly limits, suspensions and each game’s 30-minute lock included. Fine-tune any single game in the per-game builder until it locks.",
         "Dress the night", function(){
         el.disabled = true;
-        dressNight(night, slot, function(err, okN){
+        dressNight(night, slot, function(err, okN, qN){
           el.disabled = false;
+          if (qN && !okN && !err){ CG.toast("Sent "+qN+" lineup"+(qN===1?"":"s")+" to the Owner for approval — dressed when they approve","ok"); CG.reloadLeague(); return; }
           if (err){ CG.toast((okN?("Dressed "+okN+"; "):"")+"the rules refused: "+err,"err"); repaint(); return; }
           CG.pushNotif("check","Lineup dressed from the night plan", (row.name||("Line "+slot))+" — "+okN+" game"+(okN===1?"":"s")+" "+(CG.NIGHT_LABEL[night]||night)+". Adjust any single game until its lock.","#/hub/lines");
           CG.toast((row.name||("Line "+slot))+" dressed for "+okN+" game"+(okN===1?"":"s"),"ok");
@@ -1589,12 +1647,14 @@ CG.AFTER._roster = function(){
       var v=parseFloat(document.getElementById("exSal").value), bad=CG.salaryProblem(Math.round(v*1e6));
       if (bad){ CG.toast(bad,"err"); return; }
       var y=parseInt(document.getElementById("exYrs").value,10)||1, note=(document.getElementById("exNote").value||"").trim()||null, btn=this; btn.disabled=true;
+      CG.mgmtQueue("offer_extension", { p_profile:pid, p_salary:Math.round(v*1e6), p_years:y, p_note:note }, (rights?"offer ":"offer an extension to ")+p.tag+" — "+CG.fmtMoney(Math.round(v*1e6))+" × "+y).then(function(q){ if (q){ btn.disabled=false; return; }
       CG.sb.rpc("offer_extension",{ p_profile:pid, p_salary:Math.round(v*1e6), p_years:y, p_note:note }).then(function(r){
         btn.disabled=false;
         if (r.error){ CG.toast("Couldn’t offer: "+r.error.message,"err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast((rights?"Offer sent to ":"Extension offered to ")+p.tag+" — "+CG.fmtMoney(Math.round(v*1e6))+" × "+y+". He decides.","ok");
         CG.loadMyOffers().then(function(){ if (CG.router) CG.router(); });
+      });
       });
     });
   }); });
@@ -1605,10 +1665,12 @@ CG.AFTER._roster = function(){
       CG.confirm("Waive "+p.tag+"?",
         "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and they return to the free-agent pool where any club can sign them (Rule 2.5)."+(sx?" His signed extension through Season "+sx.end_season+" is voided with the waiver.":"")+" The move is logged for the whole league.",
         "Waive player", function(){
+        CG.mgmtQueue("waive_player", { p_profile:pid }, "waive "+p.tag).then(function(q){ if (q) return;
         CG.sb.rpc("waive_player",{ p_profile:pid }).then(function(r){
           if (r.error){ CG.toast("Couldn’t waive: "+r.error.message,"err"); return; }
           CG.toast(String(r.data||p.tag)+" waived — back in the free-agent pool","ok");
           CG.reloadLeague();
+        });
         });
       });
       return;

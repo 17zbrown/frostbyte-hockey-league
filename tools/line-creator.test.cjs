@@ -170,7 +170,7 @@ console.log("\n— switching the previewed club reloads its data");
 console.log("\n— locks and caps cannot be planned around");
 {
   A("dressing goes through set_game_lineup and nothing else",
-    /function dressGame[\s\S]{0,400}CG\.sb\.rpc\("set_game_lineup"/.test(src6) &&
+    /function dressGame[\s\S]{0,1200}CG\.sb\.rpc\("set_game_lineup"/.test(src6)   /* v2.38: the Owner-approval queue sits in front of the RPC */ &&
     /function dressNight\(nightKey, slot, done\)[\s\S]{0,500}dressGame\(games\[i\]\.id, slot/.test(src6));
   A("...with p_emergency false — the plan can never bypass the lock", /p_emergency:false/.test(src6));
   A("no direct insert into game_lineups anywhere in the creator",
@@ -277,7 +277,7 @@ console.log("\n— training camp, the week button, and the penalty price");
   A("a locked night offers the emergency door, priced",
     /#\/hub\/lineup\?game='\+games\[games\.length-1\]\.id/.test(src6) && /one in-game penalty per change \(Rule 5\.3\)/.test(src6));
   A("dressed penalties surface as a chip", /serves '\+owed\+' penalt/.test(src6));
-  A("Dress the week exists and walks each planned night", /id="lcDressWeek"/.test(src6) && /dressNight\(n\.key, pl, function\(err, dressed\)/.test(src6));
+  A("Dress the week exists and walks each planned night", /id="lcDressWeek"/.test(src6) && /dressNight\(n\.key, pl, function\(err, dressed, queued\)/.test(src6));
   A("...through the same single write path", (src6.match(/CG\.sb\.rpc\("set_game_lineup"/g)||[]).length === 2);
   A("...reporting refusals, counting games", /Dressed "\+okN\+" game/.test(src6));
   A("the emergency confirm names the cost",

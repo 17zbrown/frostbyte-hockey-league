@@ -750,7 +750,15 @@ async function authForGame(jwt, game) {
   try { seats = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,owner_profile_id,gm_profile_id,agm_profile_id`); }
   catch { return deny; }
   const mine = (seats || []).find((t) => t.owner_profile_id === uid || t.gm_profile_id === uid || t.agm_profile_id === uid);
-  if (mine) return { ok: true, uid, who, via: "management", club: mine.code, teamId: mine.id };
+  if (mine) {
+    /* v2.38 (Rule 2.6): the Owner may withhold the game stats desk from a GM or AGM. The database
+       is the authority on that (public.mgmt_access_for); a refused lookup denies, never allows. */
+    try {
+      const mode = await sbSend("POST", "rpc/mgmt_access_for", { p_profile: uid, p_team: mine.id, p_page: "gamestats" });
+      if (mode === "hidden") return { ok: false, uid, who, reason: "The Owner has not given your seat access to Game stats." };
+    } catch { return deny; }
+    return { ok: true, uid, who, via: "management", club: mine.code, teamId: mine.id };
+  }
   return deny;
 }
 
@@ -822,7 +830,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,home_score,away_score`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away) return { statusCode: 422, body: JSON.stringify({ error: "This game's clubs no longer exist." }) };
@@ -879,7 +887,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (name.length < 2) return { statusCode: 400, body: JSON.stringify({ error: "Enter at least 2 characters." }) };
     const data = await eaSearchClubs(name).catch((e) => ({ __err: e.message }));
     if (data && data.__err) return { statusCode: 502, body: JSON.stringify({ error: data.__err }) };
@@ -897,7 +905,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (!clubId || !/^\d+$/.test(clubId)) return { statusCode: 400, body: JSON.stringify({ error: "Pick a club from the search results." }) };
     /* Management may link only its OWN club, and only when it isn't linked yet — re-pointing an
        established linkage would redirect every future auto-import and is a staff decision. */
@@ -925,7 +933,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id,scheduled_at`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     /* fetch as the actor's own club when it's linked; otherwise any linked side of the fixture */
     const mine = actor.via === "management" ? teams.find((t) => t.id === actor.teamId) : null;
@@ -957,7 +965,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (game.voided) return { statusCode: 422, body: JSON.stringify({ error: "That game is voided." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);

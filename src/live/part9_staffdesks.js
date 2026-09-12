@@ -218,7 +218,7 @@ CG.deskReviewBoard = function(){
       ' nomination'+(blocked.length===1?"":"s")+' cannot be seated as things stand</b>'+
       'A club holds one Owner, one General Manager and one Assistant GM (Rule 2.6), so approving these changes '+
       'nothing until the way is clear: '+lines.join(" ")+
-      ' Only a commissioner can vacate a seat; the decision open to the board is to hold or to deny. Each one is flagged below.</div>';
+      ' Only the club’s Owner (or a commissioner) can vacate a seat; the decision open to the board is to hold or to deny. Each one is flagged below.</div>';
   }
 
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>On the board</h3>'+
