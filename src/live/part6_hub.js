@@ -514,8 +514,11 @@ CG.clubUpcomingGames = function(club, limit){
 /* True while every game still ahead of this club is a pre-season game — the window in which
    Rule 5.2's weekly appearance caps do not apply (v2.28). */
 CG.preseasonOnlyAhead = function(club){
-  var up = CG.clubUpcomingGames(club);
-  return up.length > 0 && up.every(function(g){ return g.stage === "preseason"; });
+  /* v2.36: the club's NEXT game decides. "Every remaining game is a pre-season game" was never
+     true once the regular-season schedule existed beside the pre-season one, so the pre-season
+     branch never rendered and the line builder refused a goaltender a third line in the pre-season. */
+  var up = CG.clubUpcomingGames(club).slice().sort(function(a,b){ return (a.at||0)-(b.at||0); });
+  return up.length > 0 && up[0].stage === "preseason";
 };
 /* All of ONE night's upcoming games for a club (dressing a night covers every game in it).
    nightKey is a weekday ("wed"), and matching on the weekday alone returned every Wednesday
@@ -1413,7 +1416,9 @@ CG.hubRoster = function(qs){
       : onBlk ? '<span class="chip chip-warn">On block</span>'
       : '<span class="chip chip-win">Active</span>';
     if (p.spotId && p.squad === "tc")
-      status += ' <span class="chip chip-warn" title="Training camp — may dress in at most 3 games a week (Rule 2.1)">Camp</span>';
+      status += ' <span class="chip chip-warn" title="'+((CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club))
+        ? 'Training camp — fills any position; no weekly cap in the pre-season (Rules 2.1, 5.2)'
+        : 'Training camp — fills any position; may dress in at most 3 games a week (Rules 2.1, 5.2)')+'">Camp</span>';
     /* v2.34 — where his deal stands, and the one club-side move: extend, once the window is open */
     var signedExt = CG.signedExtensionOf ? CG.signedExtensionOf(p.id) : null;
     /* v2.35: a pre-season loan is not a contract — no term, no "final season", no club actions */

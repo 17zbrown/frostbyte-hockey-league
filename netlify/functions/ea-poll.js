@@ -1,16 +1,21 @@
-// Netlify Scheduled Function — reliable EA stats poller.
-// Replaces the unreliable GitHub Actions cron (GitHub delays/skips */5 schedules).
-// Runs every 5 min on Netlify's scheduler, but ONLY hits EA when there's a
-// scheduled, not-yet-final game around now (±window) — so it uses the residential
-// proxy / EA bandwidth only when there's actually a game to catch.
+// Netlify Scheduled Function — the FALLBACK lane of the EA stats poller.
 //
-// Reads club ids from Supabase (public read), pulls each club's recent private
-// matches from EA (through the residential proxy, since Netlify runs on a
-// datacenter IP EA blocks), and forwards them to /api/ingest-stats which does the
-// schedule-matching + DB writes.
+// The poll runs in two lanes:
+//   1. VM lane (PRIMARY): bot/ea-poll.mjs on the always-on Oracle VM runs the same cycle from an
+//      egress EA serves, stamps app_config rl_ea-poll-vm every cycle, and owns rl_ea-poll_result.
+//      While that stamp is under 10 minutes old this function returns "VM poller active" right
+//      after the debounce — before any EA call, before the NHL 27 canary, and without writing a
+//      result record of its own.
+//   2. Netlify lane (FALLBACK): this file, every 5 min on Netlify's scheduler. It takes over only
+//      when the VM stamp is stale or cannot be read (fail open), and it can reach EA only through
+//      HTTPS_PROXY (a residential proxy) or from an egress EA is not blocking. It still ONLY hits
+//      EA when a scheduled, not-yet-final game is around now (±window).
 //
-// Env: SUPABASE_URL, SUPABASE_ANON_KEY (or SERVICE_ROLE), INGEST_KEY, HTTPS_PROXY
-//      (residential proxy, same value as the old GitHub secret), optional PLATFORM.
+// Reads club ids from Supabase, pulls each club's recent private matches from EA, and forwards
+// them to /api/ingest-stats which does the schedule-matching + DB writes.
+//
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (SUPABASE_ANON_KEY as a read fallback), INGEST_KEY,
+//      optional HTTPS_PROXY (residential proxy), optional PLATFORM.
 // No-ops safely if required env is missing. Node 18+.
 
 export const config = { schedule: "*/5 * * * *" };
@@ -60,6 +65,24 @@ async function recordResult(key, obj) {
   } catch {}
 }
 
+/* The VM lane's heartbeat. bot/ea-poll.mjs stamps rl_ea-poll-vm each cycle; while it is fresh the
+   Netlify lane stands down. A stamp that is missing, unparseable, or unreadable (a Supabase error,
+   an RLS surprise on the anon key) reads as NOT fresh, so the Netlify lane fails OPEN and polls —
+   the failure mode is a redundant poll, never a missed box score. */
+const VM_FRESH_MS = 10 * 60 * 1000;
+async function vmPollerActive() {
+  try {
+    const rows = await sbGet(`app_config?key=eq.rl_ea-poll-vm&select=value`);
+    const at = rows && rows[0] && rows[0].value ? Date.parse(rows[0].value) : NaN;
+    /* bounded on BOTH sides: a future-dated stamp (a VM clock ahead, a bad manual write) must not
+       keep this lane standing down forever after the VM has died */
+    return Number.isFinite(at) && Math.abs(Date.now() - at) < VM_FRESH_MS;
+  } catch (e) {
+    console.warn("ea-poll: VM lane stamp unreadable, falling back to the Netlify lane:", String(e && e.message || e));
+    return false;
+  }
+}
+
 /* --- NHL 27 pre-launch canary (self-disabling) ---
    EA drained the club registry when the backend flipped to the NHL 27 environment
    (observed 2026-08-28: clubs/search returns {} for every name; title rollovers reset all
@@ -97,6 +120,10 @@ export default async () => {
     return new Response("skipped: missing env", { status: 200 });
   }
   if (await ranRecently("ea-poll", 90)) return json({ skipped: "ran moments ago" });
+  /* VM lane first: while the always-on bot is polling, do nothing here — no EA call, no canary,
+     and no rl_ea-poll_result write (the VM owns that record, so a write here would overwrite the
+     run that actually happened) */
+  if (await vmPollerActive()) return json({ skipped: "VM poller active" });
   try {
     /* the canary runs OUTSIDE the game-window gate: pre-launch there are no games, and the
        whole point is to hear the registry come back on whatever day EA flips it on */
@@ -217,6 +244,10 @@ export default async () => {
       return json({ polled: clubs.length, matches: 0, clubErrors });
     }
 
+    /* the VM lane may have come back during the 10-20 s of EA fetching above — re-check before the
+       hand-off so two lanes never ingest the same batch (ingest dedupes by match id, but this keeps
+       the traffic and the log honest) */
+    if (await vmPollerActive()) return json({ skipped: "VM poller active (resumed mid-run)", matches: matches.length });
     const ir = await fetch(`${ORIGIN}/api/ingest-stats`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-ingest-key": INGEST_KEY },

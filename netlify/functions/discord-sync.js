@@ -1305,7 +1305,7 @@ export default async (req) => {
       /* Rule 1.1 (v2.8): registration stays open until the NEXT season's opens — the deadline is
          only the draft-eligibility line. Prefer the season whose registration is open. */
       const season = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
-        || (await sbGet("seasons?select=id,registration_open&order=number.desc&limit=1"))[0] || {};
+        || (await sbGet("seasons?select=id,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0] || {};
       const regOpen = !!season.registration_open;
       const registered = new Set((await sbGet(`season_registrations?season_id=eq.${season.id}&select=profile_id&limit=10000`)).map((r) => r.profile_id));
       const linkRows = await sbGet("discord_links?select=profile_id,gamertag,discord_id");
@@ -2050,7 +2050,7 @@ export default async (req) => {
   let regOpen = false; const registered = new Set();
   try {
     const s = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
-      || (await sbGet("seasons?select=id,registration_open&order=number.desc&limit=1"))[0];
+      || (await sbGet("seasons?select=id,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0];   /* v2.36: the season in play, never the newest */
     if (s) {
       regOpen = !!s.registration_open;   /* Rule 1.1 (v2.8): the deadline never closes registration */
       for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);

@@ -4,16 +4,29 @@
 // the final score + per-player box score into Supabase. Idempotent: a match whose
 // id already lives on a game (games.ea_match_id) is skipped.
 //
-// Auth: the fetcher must send  x-ingest-key: <INGEST_KEY>.  Writes use the Supabase
-// SERVICE ROLE key (bypasses RLS) — both are Netlify env vars, never in the browser.
+// Auth: the fetcher must send  x-ingest-key: <INGEST_KEY>  — OR the SUPABASE_SERVICE_ROLE_KEY,
+// which the always-on VM poller (bot/ea-poll.mjs) already holds, so it needs no second secret.
+// Either value is compared timing-safely; a missing header fails closed. Writes use the Supabase
+// SERVICE ROLE key (bypasses RLS) — all of these are Netlify env vars, never in the browser.
 //   Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, INGEST_KEY
 // Node 18+ runtime (global fetch, no dependencies).
 
 export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
 
+import { timingSafeEqual } from "node:crypto";
+
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const INGEST_KEY = process.env.INGEST_KEY;
+
+/* Constant-time secret compare for the x-ingest-key header. timingSafeEqual throws on buffers of
+   unequal length, so a length mismatch is answered with a plain false first; an absent header or
+   an unset expected value never matches anything (fail closed). */
+function keyMatches(presented, expected) {
+  if (!presented || !expected) return false;
+  const a = Buffer.from(String(presented)), b = Buffer.from(String(expected));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 // ---- Supabase REST helpers (PostgREST) ----
 const sbHeaders = (extra) => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", ...extra });
@@ -709,7 +722,9 @@ export const handler = async (event) => {
   catch (e) { return { statusCode: 400, body: JSON.stringify({ error: e.message }) }; }
 
   const key = event.headers["x-ingest-key"] || event.headers["X-Ingest-Key"];
-  const authed = INGEST_KEY && key === INGEST_KEY;
+  /* the dedicated INGEST_KEY, or the service-role key the VM poller (bot/ea-poll.mjs) already
+     carries — both timing-safe, and no header at all is never authed */
+  const authed = keyMatches(key, INGEST_KEY) || keyMatches(key, process.env.SUPABASE_SERVICE_ROLE_KEY);   /* bound to the secret by name, never to an alias that might grow a fallback */
 
   /* ---- Manual lag-out merge (statistics staff): the override for the sittings the automatic
      resume-merge refused — too far apart, over the length cap, a missed poll, or a wrong call.

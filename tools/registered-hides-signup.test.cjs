@@ -20,13 +20,13 @@ A("CG.navVisible filters the Register item", /n\[1\] !== "#\/register" \|\| !CG\
 console.log("\n— the chrome that appears on every page");
 A("desktop nav renders through navVisible", /CG\.navVisible\(\)\.map\(function\(n\)\{ return '<a href="'\+n\[1\]/.test(ui));
 A("mobile nav (the dropdown) renders through navVisible", /var mnav = CG\.navVisible\(\)\.concat\(/.test(ui));
-A("the ticker's SIGN UP BY item is gated", /sN\.registration_deadline && !CG\.isRegisteredNow\(\)/.test(ui));
+A("the ticker's SIGN UP BY item is gated (and reads the season taking sign-ups, v2.36)", /sR\.registration_deadline && !CG\.isRegisteredNow\(\)/.test(ui));
 A("the footer's Register link is gated", /registration_open && !CG\.isRegisteredNow\(\) \? '<a class="fl" href="#\/register">/.test(ui));
 
 console.log("\n— the landing page");
 A("the hero/slide regOpen gate includes it", /var regOpen = CG\.SEASON && CG\.SEASON\.registration_open && !CG\.isRegisteredNow\(\);/.test(pub));
 A("the registration + free-agency strips gate includes it",
-  /registration_open && CG\.SEASON\.status !== "active" && !CG\.isRegisteredNow\(\)\);/.test(pub));
+  /registration_open && sR\.status !== "active" && !CG\.isRegisteredNow\(\)\);/.test(pub));
 A("no un-gated 'Sign up to play' survives", !/(?<!\)\s*\? )'<a class="sec-link" href="#\/register">Sign up to play<\/a>'\s*\+\s*'<\/div>'/.test(pub));
 A("the stat card no longer links a registered member to the form", /CG\.isRegisteredNow\(\) \? "#\/players" : "#\/register"/.test(pub));
 A("the season-timeline milestone stays but re-points", /CG\.isRegisteredNow\(\) \? "#\/hub" : "#\/register"/.test(pub));

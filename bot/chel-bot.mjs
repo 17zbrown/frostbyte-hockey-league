@@ -16,6 +16,7 @@ import { createHandlers } from "./handlers.mjs";
 import { createIncidentNotifier } from "./incidents.mjs";
 import { createStaffAlerter } from "./staff-alerts.mjs";
 import { createRoleSyncer } from "./role-sync.mjs";
+import { createEaPoller } from "./ea-poll.mjs";
 import { createClient } from "@supabase/supabase-js";
 
 const env = {
@@ -29,6 +30,14 @@ if (missing.length) {
   console.error(`gateway-bot: missing env (${missing.join(", ")}) — check /etc/chel-bot.env`);
   process.exit(1);
 }
+
+/* ---- EA score poller, VM lane ----
+   Netlify's address is Akamai-blocked and the residential proxy has lapsed; this VM reaches EA
+   directly, so it is the primary lane for box scores now. Same due gate and the same
+   /api/ingest-stats hand-off as the Netlify poller, which stays deployed as the backstop.
+   Independent of the gateway: it runs whether or not Discord is connected. */
+const EA = createEaPoller(env, { log: console.log });
+EA.start();
 
 /* The heartbeat must answer "is this bot hearing Discord", not "is this process running".
    Without this the timer below keeps stamping a healthy row while the gateway is dead, and
@@ -197,7 +206,8 @@ if (env.SB_URL && env.SB_KEY) {
 // per-run result alongside it. Stop beating and the automation_watchdog pages within ~25 min.
 setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced,
     deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed,
-    roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched } })
+    roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched,
+    eaPoll: EA.sum } })
   .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

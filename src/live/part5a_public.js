@@ -300,7 +300,7 @@ CG.seasonTimeline = function(){
   /* which phase are we in? the latest stop whose date has passed */
   var nowIdx = -1;
   stops.forEach(function(st,i){ if (st.at <= now) nowIdx = i; });
-  var regOpenNow = nowIdx === -1 && s.registration_open && stops[0].name === "Sign-up deadline";
+  var regOpenNow = nowIdx === -1 && !!(((CG.regSeason && CG.regSeason()) || s).registration_open) && stops[0].name === "Sign-up deadline";
   var N = stops.length;
   var fillPct = nowIdx >= 0 ? ((nowIdx + 0.5) / N) * 100 : (regOpenNow ? (0.5 / N) * 100 : 0);
   var body = stops.map(function(st, i){
@@ -1018,7 +1018,9 @@ CG.ROUTES.home = function(){
   var html = '<h1 class="sr-only">'+esc(CG.seasonTag())+' — Chel Gaming Hockey League</h1>';
   /* sign-ups run right up to puck drop; registration_deadline is only the draft-eligibility
      cutoff. Both strips below key off registration_open and stop once the season is live. */
-  var regOpen = !!(CG.SEASON && CG.SEASON.registration_open && CG.SEASON.status !== "active" && !CG.isRegisteredNow());
+  /* v2.36: the sign-up strip belongs to the season TAKING sign-ups (during the playoffs, the next one) */
+  var sR = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};
+  var regOpen = !!(sR.registration_open && sR.status !== "active" && !CG.isRegisteredNow());
   /* free-agency countdown — pinned to the top of the front page while the window is open */
   var faO = CG.SEASON && CG.SEASON.free_agency_opens_at ? Date.parse(CG.SEASON.free_agency_opens_at) : null;
   var faC = CG.SEASON && CG.SEASON.free_agency_closes_at ? Date.parse(CG.SEASON.free_agency_closes_at) : null;
@@ -1034,7 +1036,7 @@ CG.ROUTES.home = function(){
     '</div></section>';
   }
   /* registration strip — stays up for the whole sign-up window, not just the eligibility run-up */
-  var regDl = CG.SEASON && CG.SEASON.registration_deadline ? Date.parse(CG.SEASON.registration_deadline) : null;
+  var regDl = sR.registration_deadline ? Date.parse(sR.registration_deadline) : null;
   if (regOpen && !faLive){
     var draftEligible = !!(regDl && Date.now() < regDl);
     html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+

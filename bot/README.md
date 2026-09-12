@@ -103,10 +103,15 @@ journalctl -u chel-bot -f    # watch it connect
   recorded silently instead of mass-pinging (raid / outage protection).
 - Heartbeat: `rl_gateway-bot` (+ `rl_gateway-bot_result`) in `app_config`, watched by
   `automation_watchdog` with a 10-minute max age.
+- **EA score poller (primary lane):** `ea-poll.mjs`, tested by `tools/ea-poll-vm.test.mjs`.
+  EA's Pro Clubs API answers this VM but blocks Netlify's address, so the box-score import runs
+  here: a 60-second cycle that stamps `rl_ea-poll-vm`, asks EA only when a league fixture is due
+  (scheduled within the last 6 h or the next 30 min, at most every 90 s), and hands matches to
+  `/api/ingest-stats` with the service-role key. `netlify/functions/ea-poll.js` stands down while
+  the stamp is under 10 minutes old and takes over (proxy permitting) if this lane dies. One-shot
+  from the VM: `sudo -E bash -c 'set -a; . /etc/chel-bot.env; set +a; node /opt/chel-gaming/bot/ea-poll.mjs --once --force'`.
 
 ## Phase 2 candidates (not built yet)
 
 - Second-resolution pickup lobby timers (currently the 2-min `lfg-timers` sweep).
-- Faster EA polling on game nights (EA has no push API — polling is the floor; the VM could
-  poll every 60–90 s vs. the current 5 min without touching Netlify's free tier).
 - Instant role sync on site changes (currently within ~2 min via `discord-sync`).

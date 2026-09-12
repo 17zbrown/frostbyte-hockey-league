@@ -51,7 +51,7 @@ console.log("— the standings table counts only regular, non-void, forfeit-awar
 console.log("\n— the job follows the ACTIVE season, not merely the newest");
 {
   A("it asks for the active season first", /seasons\?select=id,number&status=eq\.active/.test(src));
-  A("...and only falls back to newest NON-COMPLETE when none is active", /status=neq\.complete&order=number\.desc&limit=1/.test(src));
+  A("...and only falls back to the LOWEST-numbered open season when none is active (v2.36: never the newest)", /status=neq\.complete&order=number\.asc&limit=1/.test(src));
   A("the old unconditional newest-season query is gone",
     !/const seasons = await sbGet\("seasons\?select=id,number&order=number\.desc&limit=1"\)/.test(src));
 }

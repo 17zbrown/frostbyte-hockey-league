@@ -1752,7 +1752,7 @@ CG._wrapHubDashboard = function(){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
       (reg?'<span class="chip chip-win">Registered</span>':(s.registration_open?'<span class="chip chip-warn">Not registered</span>':'<span class="chip">Closed</span>'))+'</div><div class="card-b">'+
       (reg
-        ? '<p class="small" style="color:var(--steel)">You’re in the '+esc(CG.seasonTag())+' pool as a <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"skater")+'</b>. '+
+        ? '<p class="small" style="color:var(--steel)">You’re in the Season '+esc(String((s&&s.number)||1))+' pool as a <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"skater")+'</b>. '+
           (
             /* what matters is when they REGISTERED versus the deadline, not whether the deadline
                has since passed — otherwise an on-time registrant's card flips to "placed
@@ -3192,7 +3192,7 @@ CG.ROUTES.owner = function(){
   /* the owner-application window (seasons.owner_app_deadline) is now enforced in the database;
      mirror it here so a member sees the closed state instead of hitting the wall on submit. An
      applicant who already has one in can still withdraw, but not edit, after the close. */
-  var s = CG.SEASON || {};
+  var s = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};   /* owner applications are for the season taking sign-ups */
   var deadlineClosed = !!(s.owner_app_deadline && Date.parse(s.owner_app_deadline) <= CG.now());
   var closedNote = (deadlineClosed && !lockedFromOwning)
     ? '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
@@ -3237,7 +3237,7 @@ CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   var r0=CG.role();
   if(r0==="commish"||r0==="staff"){ CG.toast((r0==="commish"?"Commissioners":"Staff")+" can’t own or manage a club — you can still play as a member","err"); return; }
-  var _s=CG.SEASON||{};
+  var _s=(CG.regSeason&&CG.regSeason())||CG.SEASON||{};
   if(_s.owner_app_deadline && Date.parse(_s.owner_app_deadline) <= CG.now()){ CG.toast("Owner applications closed on "+CG.fmtFull(Date.parse(_s.owner_app_deadline)),"err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   function sv(id){ var el=document.getElementById(id); return el?(el.value||"").trim()||null:null; }
@@ -4987,8 +4987,9 @@ CG.isDraftEligible = function(pid){
   /* Rule 2.8 P3, first test (v2.33): only a registration filed by the draft-eligibility deadline is
      ever in the pool, however many pre-season games its owner plays. Mirrors the database's
      is_draft_eligible(), which now checks this before anything else. */
-  var _reg = ((CG.lg && CG.lg._registrationsRaw) || []).find(function(r){ return r.profile_id===pid && r.status!=="declined"; });
-  var _dl = CG.SEASON && (CG.SEASON.signup_deadline_at || CG.SEASON.registration_deadline);
+  var _sR = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};
+  var _reg = ((CG.lg && CG.lg._registrationsRaw) || []).find(function(r){ return r.profile_id===pid && r.status!=="declined" && (!r.season_id || !_sR.id || r.season_id===_sR.id); });
+  var _dl = _sR.signup_deadline_at || _sR.registration_deadline || null;
   if (_reg && _dl && _reg.created_at && Date.parse(_reg.created_at) > Date.parse(_dl)) return false;
   var lg = CG.lg || {};
   if (lg.isVeteran && lg.isVeteran(pid)) return true;
@@ -4999,7 +5000,10 @@ CG.poolState = function(pid){
   var seat=(CG.TEAMS||[]).some(function(t){ return t.owner===pid || t.gm===pid || t.agm===pid; });
   if (seat) return { key:"management", label:"Management", chip:"chip-chrome" };
   if ((lg._rosteredIds||{})[pid]) return { key:"rostered", label:"Rostered", chip:"chip-win" };
-  var reg=(lg._registrationsRaw||[]).find(function(r){ return r.profile_id===pid; });
+  /* v2.36: his registration for the season TAKING sign-ups — during the playoffs that is the next
+     season, and a member can hold a row for each */
+  var sR=(CG.regSeason&&CG.regSeason())||CG.SEASON||{};
+  var reg=(lg._registrationsRaw||[]).find(function(r){ return r.profile_id===pid && (!r.season_id || !sR.id || r.season_id===sR.id); });
   if (!reg) return { key:"unregistered", label:"Not signed up", chip:"chip" };
   if (reg.status==="declined") return { key:"declined", label:"Declined", chip:"chip-loss" };
   if ((CG.contractHeldIds?CG.contractHeldIds():{})[pid]) return { key:"under_contract", label:"Under contract", chip:"chip-win" };
@@ -5014,7 +5018,7 @@ CG.poolState = function(pid){
     && Date.parse(CG.SEASON.preseason_starts_at) <= CG.now();
   /* v2.35: a sign-up filed after the deadline can never reach the draft however many games he
      plays — "Needs pre-season games" would be a door that never opens. Say what actually happens. */
-  var _dl = CG.SEASON && (CG.SEASON.signup_deadline_at || CG.SEASON.registration_deadline);
+  var _dl = sR.signup_deadline_at || sR.registration_deadline || null;
   if (!draftDone && _dl && reg.created_at && Date.parse(reg.created_at) > Date.parse(_dl))
     return { key:"late", label:"Late sign-up — placed after the draft", chip:"chip-warn" };
   if (!draftDone && _preOpen && !CG.isDraftEligible(pid))
@@ -10179,7 +10183,10 @@ CG.seasonForm = function(id){
   var s = id ? (CG._seasonsRaw||[]).find(function(x){ return x.id===id; }) : null;
   var isNew = !s;
   var maxN = (CG._seasonsRaw||[]).reduce(function(m,x){ return Math.max(m, x.number||0); }, 0);
-  s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:true,
+  /* one season takes sign-ups at a time (Rule 1.1; enforced by the seasons_one_registering index):
+     a new season defaults to closed while another is open, and opens at the movement deadline */
+  var anotherOpen = (CG._seasonsRaw||[]).some(function(x){ return x.registration_open && x.status!=="complete"; });
+  s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:!anotherOpen,
              salary_cap:40000000, roster_max:17, trade_deadline_week:6, moves_lock_override:"auto" };
   function dt(v){ /* ISO -> datetime-local in ET */
     if (!v) return "";
@@ -10268,6 +10275,8 @@ CG.seasonForm = function(id){
     if(!(num>=1)){ CG.toast("Season number must be 1 or more","err"); return; }
     var clash=(CG._seasonsRaw||[]).find(function(x){ return x.number===num && (!id || x.id!==id); });
     if(clash){ CG.toast("Number "+num+" is already "+(clash.name||"another season"),"err"); return; }
+    var otherOpen=(CG._seasonsRaw||[]).find(function(x){ return x.registration_open && x.status!=="complete" && (!id || x.id!==id); });
+    if(document.getElementById("ssRegOpen").value==="1" && otherOpen){ CG.toast("Sign-ups are already open for "+(otherOpen.name||"another season")+" — one season takes sign-ups at a time (Rule 1.1). Close that one first.","err"); return; }
     function iso(elId){ var v=document.getElementById(elId).value; return v ? CG.etISO(v.slice(0,10), v.slice(11,16)) : null; }
     var cap=Math.round(parseFloat(document.getElementById("ssCap").value||"40")*1e6);
     var rec={ name:name, number:num, status:document.getElementById("ssStatus").value,

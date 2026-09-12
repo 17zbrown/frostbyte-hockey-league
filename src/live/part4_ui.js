@@ -654,8 +654,10 @@ CG.renderChrome = function(){
       /* No games or leaders yet — carry the season's real milestones so the ticker reads like a
          broadcast strip, not one sentence repeated (the track duplicates its items to scroll). */
       var sN = CG.SEASON || {};
+      /* the sign-up line belongs to the season TAKING sign-ups, which during the playoffs is the next one */
+      var sR = (CG.regSeason && CG.regSeason()) || sN;
       items.push('<span class="tk-item"><span class="tk-lab">SEASON 1</span><b>The inaugural season</b></span>');
-      if (sN.registration_deadline && !CG.isRegisteredNow()) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtFull(Date.parse(sN.registration_deadline))+'</b></a>');
+      if (sR.registration_deadline && !CG.isRegisteredNow()) items.push('<a class="tk-item" href="#/register"><span class="tk-lab">SIGN UP BY</span><b>'+CG.fmtFull(Date.parse(sR.registration_deadline))+'</b></a>');
       if (sN.draft_at) items.push('<span class="tk-item"><span class="tk-lab">DRAFT</span><b>'+CG.fmtDate(sN.draft_at)+'</b></span>');
       if (sN.starts_at) items.push('<a class="tk-item" href="#/schedule"><span class="tk-lab">PUCK DROP</span><b>'+CG.fmtDate(sN.starts_at)+'</b></a>');
     }
