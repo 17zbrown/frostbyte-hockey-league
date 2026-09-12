@@ -9,7 +9,7 @@
 //   2. Netlify lane (FALLBACK): this file, every 5 min on Netlify's scheduler. It takes over only
 //      when the VM stamp is stale or cannot be read (fail open), and it can reach EA only through
 //      HTTPS_PROXY (a residential proxy) or from an egress EA is not blocking.
-// Both lanes obey shared/game-window.mjs: EA is asked only while a fixture's game window
+// Both lanes obey shared/game-window.cjs: EA is asked only while a fixture's game window
 // (puck drop − 10 min … + 3 h, plus a 15-min fetching grace) contains now, and only for the clubs
 // in those fixtures. Everything found is forwarded; the importer alone decides what files.
 //
@@ -22,7 +22,7 @@
 
 export const config = { schedule: "*/5 * * * *" };
 
-import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../../shared/game-window.mjs";
+import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../../shared/game-window.cjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 /* service role first (v2.35): the reads ran on the anon key, a leftover of the retired GitHub
@@ -136,7 +136,7 @@ export default async () => {
       const noClubs = !(await sbGet(`teams?ea_club_id=not.is.null&select=ea_club_id&limit=1`)).length;
       if (noClubs) await nhl27Canary(PROXY ? new ProxyAgent(PROXY) : undefined, uFetch);
     }
-    /* THE GATE (shared/game-window.mjs, the same rule the VM lane and the importer apply): EA is
+    /* THE GATE (shared/game-window.cjs, the same rule the VM lane and the importer apply): EA is
        asked only while a fixture's game window (puck drop − 10 min to + 3 h, plus the fetching
        grace) contains now, and only for the clubs in those fixtures. A fixture a first sitting has
        already filed stays in the set: its Rule 4.3 replay still has to be collected and merged. A

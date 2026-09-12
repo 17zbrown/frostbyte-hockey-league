@@ -106,7 +106,7 @@ journalctl -u chel-bot -f    # watch it connect
 - **EA score poller (primary lane):** `ea-poll.mjs`, tested by `tools/ea-poll-vm.test.mjs`.
   EA's Pro Clubs API answers this VM but blocks Netlify's address, so the box-score import runs
   here: a 60-second cycle that stamps `rl_ea-poll-vm`, asks EA only while a fixture's game window
-  (`shared/game-window.mjs`: puck drop − 10 min to + 3 h, plus a 15-min fetching grace) is open,
+  (`shared/game-window.cjs`: puck drop − 10 min to + 3 h, plus a 15-min fetching grace) is open,
   only for the clubs in those fixtures, at most every 90 s, and hands everything it finds to
   `/api/ingest-stats` with the service-role key — the importer alone files (scheduled matchup,
   inside the window) and merges a Rule 4.3 replay into the sitting it continues. `netlify/functions/ea-poll.js` stands down while

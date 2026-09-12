@@ -8,7 +8,7 @@
 // /api/ingest-stats endpoint, which dedupes by ea_match_id, so whichever lane reaches EA first
 // wins and the other's delivery is a no-op.
 //
-// Same gate as the Netlify poller, defined once in shared/game-window.mjs: EA is only asked while
+// Same gate as the Netlify poller, defined once in shared/game-window.cjs: EA is only asked while
 // a fixture's game window (puck drop − 10 min … + 3 h, plus a 15-min fetching grace) contains
 // now, and only for the clubs in those fixtures. Everything EA returns for those clubs is handed
 // to the importer, which is the one place that files: it takes only a match between the two
@@ -31,7 +31,7 @@
 
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
-import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../shared/game-window.mjs";
+import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../shared/game-window.cjs";
 
 /* KEEP IN SYNC with EA_HEADERS in netlify/functions/ea-poll.js (and eaFetch in ingest-stats.js /
    pickup-import.js). EA blocks by CLIENT FINGERPRINT, not by address: this exact browser-shaped
@@ -157,7 +157,7 @@ export function createEaPoller(env, opts = {}) {
       /* (2) DUE GATE — the fixtures (scheduled OR already filed final; a forfeit-ruled or voided
          one too, because the office still wants what was played archived) whose game window —
          plus the fetching grace — contains now. Same definition as the Netlify lane and the
-         importer (shared/game-window.mjs), and the importer alone decides what files. A fixture a
+         importer (shared/game-window.cjs), and the importer alone decides what files. A fixture a
          first sitting has already filed stays in the set: its Rule 4.3 replay still has to be
          collected and merged. No window open means no EA call at all: an EA hiccup on a night
          with no fixture must never read as a failing import. */

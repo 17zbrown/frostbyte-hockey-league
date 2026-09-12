@@ -1,5 +1,5 @@
 // The game window — "only during the designated game time window, only for the scheduled
-// matchup" — enforced by shared/game-window.mjs and the importer. Run: node tools/game-window.test.mjs
+// matchup" — enforced by shared/game-window.cjs and the importer. Run: node tools/game-window.test.mjs
 //
 // What must never break: a box score attaches ONLY to an open fixture between exactly its two
 // clubs whose window (puck drop − 10 min … + 3 h) holds the match's END time. A scrimmage that
@@ -11,14 +11,14 @@
 // the displayed one (3600 for a full game), and the tests use it.
 // The real importer runs here against a stubbed Supabase; nothing touches the network.
 import { fixtureWindow, matchInWindow, openFixtureFilter, fixtureForMatch, describeWindow,
-  GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS, FULL_GAME_CLOCK_S } from "../shared/game-window.mjs";
+  GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS, FULL_GAME_CLOCK_S } from "../shared/game-window.cjs";
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 const ms = (s) => Date.parse(s);
 const MIN = 60_000, H = 3_600_000;
 
-console.log("— shared/game-window.mjs: one definition");
+console.log("— shared/game-window.cjs: one definition");
 {
   const puck = "2026-10-21T21:00:00-04:00";              // Wed Oct 21, 9:00 PM ET
   const w = fixtureWindow(puck);

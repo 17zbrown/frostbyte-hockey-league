@@ -9032,7 +9032,7 @@ CG.hubRoster = function(qs){
 
 /* A client-only heuristic for grading the Netlify poller's chip — Wed 18:00 through Sat 02:00 ET,
    the nights Season 1 plays. The pollers themselves gate on each fixture's own game window
-   (shared/game-window.mjs); this only decides how long a stale stamp is tolerated. */
+   (shared/game-window.cjs); this only decides how long a stale stamp is tolerated. */
 CG.inGameWindowET = function(){
   try {
     var f = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", weekday:"short", hour:"2-digit", hour12:false });

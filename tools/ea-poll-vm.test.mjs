@@ -396,7 +396,7 @@ console.log("\n— a fixture a first sitting has already filed stays in the poll
 console.log("\n— the one-shot's --help names the window so the operator knows what it will and will not do");
 {
   const src = fs.readFileSync(new URL("../bot/ea-poll.mjs", import.meta.url), "utf8");
-  A("the usage text derives the window from the shared definition", /describeWindow\(\)/.test(src) && /shared\/game-window\.mjs/.test(src));
+  A("the usage text derives the window from the shared definition", /describeWindow\(\)/.test(src) && /shared\/game-window\.cjs/.test(src));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

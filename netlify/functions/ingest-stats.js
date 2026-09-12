@@ -1,6 +1,6 @@
 // Netlify Function: POST /api/ingest-stats  (redirected from netlify.toml)
 // Receives raw EA Pro Clubs match objects (forwarded by the score pollers), files each on the
-// fixture between exactly its two clubs whose GAME WINDOW (shared/game-window.mjs: puck drop
+// fixture between exactly its two clubs whose GAME WINDOW (shared/game-window.cjs: puck drop
 // − 10 min … + 3 h) contains the match's end time, and writes the final score + per-player box
 // score into Supabase. Idempotent: a match whose id already lives on a game (games.ea_match_id)
 // is skipped. Anything that fits no fixture is archived, never guessed onto one.
@@ -15,7 +15,7 @@
 export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
 
 import { timingSafeEqual } from "node:crypto";
-import { matchInWindow, fixtureForMatch, describeWindow, FULL_GAME_CLOCK_S, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS } from "../../shared/game-window.mjs";
+import { matchInWindow, fixtureForMatch, describeWindow, FULL_GAME_CLOCK_S, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS } from "../../shared/game-window.cjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -161,7 +161,7 @@ const eaClubMatches = (clubId) =>
   eaFetch(`https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${encodeURIComponent(clubId)}`);
 
 /* EA's toiseconds runs on the DISPLAYED 20-minute clock: 3600 for a full regulation game, more in
-   overtime, less when the game ended early (a disconnection or a quit). See shared/game-window.mjs;
+   overtime, less when the game ended early (a disconnection or a quit). See shared/game-window.cjs;
    the old value here (720, the real-time length of the league's four-minute periods) meant no real
    sitting ever read as unfinished, so the lag-out merge could never fire. */
 const REGULATION_S = FULL_GAME_CLOCK_S;
@@ -352,7 +352,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
   const tA = teamByClub[ids[0]], tB = teamByClub[ids[1]];
 
-  // THE MATCHUP RULE (shared/game-window.mjs): a box score is filed only on an OPEN fixture between
+  // THE MATCHUP RULE (shared/game-window.cjs): a box score is filed only on an OPEN fixture between
   // exactly these two clubs whose game window (describeWindow(): puck drop − 10 min to + 3 h)
   // contains the time the match ENDED. Not the calendar day, not "a day either side": a scrimmage between two clubs the
   // afternoon of their game, a rematch after the night, a Tuesday lobby before a Wednesday fixture

@@ -53,7 +53,7 @@ console.log("\n— one cap definition, one roster definition");
 console.log("\n— a same-night double-header can't misfile a box score (v2.37: the game window, one shared definition)");
 {
   A("the importer files only on an open fixture whose game window holds the match END time (siblings from the pair's whole night)", /let game = fixtureForMatch\(gamesAll, tA, tB, matchEndMs, undefined, undefined, siblings\);/.test(ingest));
-  A("...taking the EARLIEST open fixture in window (a 2-2-3 night files each match on its own slot)", /export function fixtureForMatch\(fixtures, teamA, teamB, matchEndMs[\s\S]{0,900}\.filter\(pair\)\.sort\(byTime\)\.filter\(/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "shared", "game-window.mjs"), "utf8")));
+  A("...taking the EARLIEST open fixture in window (a 2-2-3 night files each match on its own slot)", /function fixtureForMatch\(fixtures, teamA, teamB, matchEndMs[\s\S]{0,900}\.filter\(pair\)\.sort\(byTime\)\.filter\(/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "shared", "game-window.cjs"), "utf8")));
   A("...a match with no end time is never guessed onto a fixture", /EA gave this match no end time — it cannot be placed in a game window/.test(ingest));
   A("...and the day-either-side fallback is gone from the automatic path (a commissioner replay is the one relaxed caller)", !/days <= 1/.test(ingest) && !/no scheduled game for these clubs within a day of/.test(ingest));
   A("...logged as unmatched, never silently dropped", /await logAttempt\(norm, raw, "unmatched", why\);/.test(ingest));

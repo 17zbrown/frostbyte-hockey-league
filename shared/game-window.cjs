@@ -1,3 +1,8 @@
+// CommonJS on purpose: netlify/functions/ingest-stats.js is a v1-style function that Netlify
+// transpiles to CommonJS, and CommonJS cannot require() an ES module — the first deploy as .mjs
+// 502'd every import. A .cjs file is loadable from CommonJS AND from Node ESM (the bot, the v2
+// Netlify poller) with named imports, because Node's lexer reads the `exports.x =` lines below.
+//
 // The ONE definition of a fixture's game window — when a league game can legitimately have been
 // played, and therefore the only time the EA auto-import may attach a box score to it — plus the
 // one fact about EA's clock that the lag-out merge depends on.
@@ -22,32 +27,32 @@
 //            under Rule 4.3, a slow first game pushing the 9:35 and 10:10 slots back, overtime)
 // Anything later than that is the fixture desk's to judge, not the robot's.
 
-export const GAME_WINDOW_BEFORE_MS = 10 * 60_000;
-export const GAME_WINDOW_AFTER_MS = 3 * 3_600_000;
+const GAME_WINDOW_BEFORE_MS = 10 * 60_000;
+const GAME_WINDOW_AFTER_MS = 3 * 3_600_000;
 
 /* The pollers keep asking EA this long after a window closes. EA publishes a match a minute or
    two after the final horn and the pollers run every ~2 min (VM) / 5 min (Netlify), so a game that
    ended in the window's last minutes would otherwise never be fetched — and nothing retries. The
    grace is for FETCHING only; the importer still files nothing that ended after the window. */
-export const POLL_GRACE_MS = 15 * 60_000;
+const POLL_GRACE_MS = 15 * 60_000;
 
 /* EA's `toiseconds` runs on the DISPLAYED clock: three 20-minute periods = 3600 for a player who
    never left the ice in a full regulation game, more with overtime (4014 seen), less when the
    game ended early — a disconnection or a quit. Measured on real payloads (2026-09-11: 30 of 36
    archived lines read exactly 3600; the one overtime game 4014). The league's four-minute real
    periods (Rule 4.3 P4) do NOT change this: EA reports the game clock, not wall time. */
-export const FULL_GAME_CLOCK_S = 3600;
+const FULL_GAME_CLOCK_S = 3600;
 
 const ms = (t) => (typeof t === "number" ? t : Date.parse(t));
 
 /** {opens, closes} in epoch ms for a fixture's scheduled_at (ISO string or ms). */
-export function fixtureWindow(scheduledAt, before = GAME_WINDOW_BEFORE_MS, after = GAME_WINDOW_AFTER_MS) {
+function fixtureWindow(scheduledAt, before = GAME_WINDOW_BEFORE_MS, after = GAME_WINDOW_AFTER_MS) {
   const t = ms(scheduledAt);
   return { opens: t - before, closes: t + after };
 }
 
 /** Does a match that ENDED at matchEndMs fall inside this fixture's window? Unknown end = no. */
-export function matchInWindow(matchEndMs, scheduledAt, before, after) {
+function matchInWindow(matchEndMs, scheduledAt, before, after) {
   if (!Number.isFinite(matchEndMs) || matchEndMs <= 0) return false;
   const w = fixtureWindow(scheduledAt, before, after);
   return matchEndMs >= w.opens && matchEndMs <= w.closes;
@@ -56,7 +61,7 @@ export function matchInWindow(matchEndMs, scheduledAt, before, after) {
 /** PostgREST filter selecting fixtures whose window contains `nowMs`:
  *  scheduled_at ∈ [now − after, now + before]. Append to a games query. Pollers pass
  *  after = GAME_WINDOW_AFTER_MS + POLL_GRACE_MS so they keep fetching through the grace. */
-export function openFixtureFilter(nowMs, before = GAME_WINDOW_BEFORE_MS, after = GAME_WINDOW_AFTER_MS) {
+function openFixtureFilter(nowMs, before = GAME_WINDOW_BEFORE_MS, after = GAME_WINDOW_AFTER_MS) {
   const from = new Date(nowMs - after).toISOString(), to = new Date(nowMs + before).toISOString();
   return `scheduled_at=gte.${encodeURIComponent(from)}&scheduled_at=lte.${encodeURIComponent(to)}`;
 }
@@ -70,7 +75,7 @@ export function openFixtureFilter(nowMs, before = GAME_WINDOW_BEFORE_MS, after =
  *  that runs ahead of the clock can finish game two before slot two's own window opens, so a
  *  later sibling's window opens no later than the previous sibling's puck drop. The earliest-open
  *  rule still files game one on slot one; only a claimed slot one lets game two reach slot two. */
-export function fixtureForMatch(fixtures, teamA, teamB, matchEndMs, before, after, siblings) {
+function fixtureForMatch(fixtures, teamA, teamB, matchEndMs, before, after, siblings) {
   const pair = (g) => (g.home_team_id === teamA && g.away_team_id === teamB) || (g.home_team_id === teamB && g.away_team_id === teamA);
   const byTime = (x, y) => ms(x.scheduled_at) - ms(y.scheduled_at);
   const all = (siblings || fixtures || []).filter(pair).sort(byTime);
@@ -85,7 +90,17 @@ export function fixtureForMatch(fixtures, teamA, teamB, matchEndMs, before, afte
 }
 
 /** Human wording for messages and tooltips. */
-export function describeWindow(before = GAME_WINDOW_BEFORE_MS, after = GAME_WINDOW_AFTER_MS) {
+function describeWindow(before = GAME_WINDOW_BEFORE_MS, after = GAME_WINDOW_AFTER_MS) {
   const span = (v) => { const m = Math.round(v / 60_000); return m % 60 === 0 && m >= 60 ? m / 60 + " h" : m + " min"; };
   return `${span(before)} before puck drop to ${span(after)} after`;
 }
+
+exports.GAME_WINDOW_BEFORE_MS = GAME_WINDOW_BEFORE_MS;
+exports.GAME_WINDOW_AFTER_MS = GAME_WINDOW_AFTER_MS;
+exports.POLL_GRACE_MS = POLL_GRACE_MS;
+exports.FULL_GAME_CLOCK_S = FULL_GAME_CLOCK_S;
+exports.fixtureWindow = fixtureWindow;
+exports.matchInWindow = matchInWindow;
+exports.openFixtureFilter = openFixtureFilter;
+exports.fixtureForMatch = fixtureForMatch;
+exports.describeWindow = describeWindow;
