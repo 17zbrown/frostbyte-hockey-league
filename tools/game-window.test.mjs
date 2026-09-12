@@ -70,6 +70,12 @@ globalThis.fetch = async (url, opts = {}) => {
     /* the resume-candidate query: finals only, never ruled or voided */
     return J(pairRows(world.finals, u).filter((g) => !g.voided && g.forfeit_team_id == null).map((g) => ({ ...g, status: "final" })));
   }
+  if (u.includes("/rest/v1/games?or=(home_team_id.eq.") && !u.includes(",away_team_id.eq.") === false && /or=\(home_team_id\.eq\.(\w+),away_team_id\.eq\.\1\)/.test(u)) {
+    /* the known-club-only query (one linked side): its fixtures whose window holds the match */
+    const t = u.match(/home_team_id\.eq\.(\w+)/)[1];
+    const from = Date.parse(decodeURIComponent(u.match(/scheduled_at=gte\.([^&]+)/)[1])), to = Date.parse(decodeURIComponent(u.match(/scheduled_at=lte\.([^&]+)/)[1]));
+    return J(((world.clubOnly || {})[t] || []).filter((g) => ms(g.scheduled_at) >= from && ms(g.scheduled_at) <= to));
+  }
   if (u.includes("/rest/v1/games?") && u.includes("scheduled_at=gte.")) {
     /* the pair's whole night, every status — the importer sorts open from claimed itself */
     const open = pairRows(world.open, u).map((g) => ({ status: "scheduled", ea_match_id: null, voided: false, forfeit_team_id: null, ...g }));
@@ -96,7 +102,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/app_config")) return J([]);
   throw new Error("unexpected fetch " + m + " " + u);
 };
-const reset = () => { world.open = []; world.finals = []; world.logs = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
+const reset = () => { world.open = []; world.finals = []; world.logs = []; world.clubOnly = {}; for (const k of Object.keys(writes)) writes[k].length = 0; };
 const summary = () => ({ received: 1, ingested: [], skipped: [], unmatched: [], errors: [] });
 /* an EA match between two clubs that ENDED at `end` (ISO) and ran `toi` seconds of game clock */
 const ea = (id, end, home, away, toi = 3600, scores = [3, 2]) => ({ matchId: id, timestamp: Math.floor(ms(end) / 1000),
@@ -135,6 +141,17 @@ console.log("— two league clubs that are NOT scheduled against each other: arc
   A("skipped — not a scheduled matchup", s.ingested.length === 0 && s.unmatched.length === 0 && s.skipped.length === 1 && /not a scheduled matchup/.test(s.skipped[0].reason), JSON.stringify(s));
   A("...archived with status ignored (replayable, never flagged for staff)", writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "ignored"));
   A("the tA–tB fixture is untouched", writes.gamePatches.length === 0);
+}
+
+console.log("— an unknown opponent: staff work only when the known club has a fixture in that window");
+{
+  reset(); world.open = [G900];                                            // tA plays tB at 9:00
+  world.clubOnly = { tA: [G900] };
+  const s1 = await run(ea("x1", at(30), 111, 999));                        // tA vs an EA club nobody linked, inside tA's window
+  A("inside the known club's window: unmatched, telling staff to link and file", s1.unmatched.length === 1 && /not linked to an EA club/.test(s1.unmatched[0].reason), JSON.stringify(s1));
+  reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
+  const s2 = await run(ea("x2", at(-300), 111, 999));                      // the same pair five hours before tA's game
+  A("outside it: a scrimmage against an outside club — archived as ignored, not flagged", s2.skipped.length === 1 && s2.unmatched.length === 0 && writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "ignored"), JSON.stringify(s2));
 }
 
 console.log("— a match with no end time is never guessed onto a fixture");

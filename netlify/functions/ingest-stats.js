@@ -345,8 +345,23 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   const ids = norm.clubs.map((c) => c.ea_club_id);
   const teams = await sbGet(`teams?ea_club_id=in.(${ids.map(encodeURIComponent).join(",")})&select=id,ea_club_id`);
   if (teams.length < 2) {
-    summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: "one or both clubs not registered (teams.ea_club_id)" });
-    await logAttempt(norm, raw, "unmatched", "one or both clubs not registered (teams.ea_club_id)");
+    /* An unknown opponent is either a club outside the league (a scrimmage — never staff work) or
+       a league club that has not linked its EA id yet (its game cannot import until it does — and
+       THAT is staff work). The tell: does the club we do know have a fixture whose window holds
+       this match? If so the unknown side is very likely the scheduled opponent, unlinked. */
+    const known = teams[0] && teams[0].id, endMs = (norm.ts || 0) * 1000;
+    const nearby = known && endMs
+      ? await sbGet(`games?or=(home_team_id.eq.${known},away_team_id.eq.${known})&voided=not.is.true&scheduled_at=gte.${encodeURIComponent(new Date(endMs - (opts.relaxed ? 86400000 : GAME_WINDOW_AFTER_MS)).toISOString())}&scheduled_at=lte.${encodeURIComponent(new Date(endMs + (opts.relaxed ? 86400000 : GAME_WINDOW_BEFORE_MS)).toISOString())}&select=id&limit=1`)
+      : [];
+    if (nearby.length || opts.relaxed) {
+      const why = "one club is not linked to an EA club (teams.ea_club_id) — if this is the scheduled game, link the club's EA id and file it from the fixture desk";
+      summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
+      await logRefusal(norm, raw, "unmatched", why);
+    } else {
+      const why = "a match against a club outside the league, with no fixture for the known club in this window — not a league game";
+      summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: why });
+      await logRefusal(norm, raw, "ignored", why);
+    }
     return;
   }
   const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
