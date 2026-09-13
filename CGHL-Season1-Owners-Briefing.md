@@ -39,7 +39,7 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 ## 🧊 PRE-SEASON (SEPT 16 TO 25) AND THE 5 GAME RULE
 
-Your management group plays for your own club. Every other registered player is spread randomly and evenly across the ten clubs for two weeks of real games.
+Your management group plays for your own club. Every other registered player is spread randomly and evenly across the nine clubs for two weeks of real games.
 
 **Any randomly assigned player who is not already on a full time roster must play at least 5 pre-season games to stay draft eligible.**
 
