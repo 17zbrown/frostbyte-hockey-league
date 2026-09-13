@@ -10,7 +10,7 @@ actually renders.
 ## 1. Who we are
 
 **Chel Gaming Hockey League** — abbreviated **CGHL** — is a free, community-run competitive
-EA Sports NHL league played 6-on-6 in World of Chel. Nine clubs, two divisions, a full season
+EA Sports NHL league played 6-on-6 in World of Chel. Eight clubs, two divisions, a full season
 with live standings, imported box scores, trades, and playoffs.
 
 - **Chel Gaming** is the umbrella brand (the organization). **CGHL** is its flagship league. Written
@@ -147,7 +147,7 @@ Write from the reader's side of the screen.
 |---|---|
 | "Unlock your competitive journey today!" | "Register to play — sign-ups close the Monday before the pre-season." |
 | "An error occurred." | "Couldn't save — your sign-in expired. Sign out and back in, then retry." |
-| "96 players and counting 🔥" | "Nine clubs. Rosters fill through the draft." |
+| "96 players and counting 🔥" | "Eight clubs. Rosters fill through the draft." |
 | "Admin backend" | "Control Center" · "the league office" |
 
 ---
