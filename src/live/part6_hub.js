@@ -1426,7 +1426,7 @@ CG.clubSeasonGames = function(club){
 };
 
 CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||pos==="RD") ? "D" : "F"; };
-/* Rule 2.1 — the active roster is 3C/3LW/3RW/3LD/3RD/2G (17) and training camp holds up to 3
+/* Rule 2.1 (v2.41) — the active roster is 9 forwards / 6 defensemen / 2 goaltenders (17) and training camp holds up to 3
    beyond it. Since v2.30 a player may move between the two as often as management likes, all
    season: the database (guard_squad_move) enforces the shape and the camp limit only, and this
    button just keeps the UI honest about which move is currently possible. */
@@ -1541,8 +1541,10 @@ CG.hubRoster = function(qs){
   var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !CG.isWaived(p.id); });
   var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !CG.isWaived(p.id); });
   if (roster.some(function(p){ return p.spotId; })){
-    /* Rule 2.1 (v2.7): the active roster is quota'd by EXACT position — 3C/3LW/3RW/3LD/3RD/2G. */
+    /* Rule 2.1 (v2.41): the active roster is shaped by position GROUP — 9 forwards / 6 defensemen /
+       2 goaltenders; the exact split is shown for balance, not enforced. */
     var posN = function(p0){ return proSq.filter(function(p){ return p.pos===p0; }).length; };
+    var grpN = function(g){ return proSq.filter(function(p){ return CG.posGroup(p.pos)===g; }).length; };
     function meter(label,nv,cap){
       var over = cap!=null && nv>cap;
       return '<div><b class="num" style="font-size:22px;color:'+(over?"var(--red)":"inherit")+'">'+nv+(cap!=null?' / '+cap:'')+'</b>'+
@@ -1550,10 +1552,10 @@ CG.hubRoster = function(qs){
     }
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp</span></div><div class="card-b">'+
-      '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("centers",posN("C"),CG.ROSTER_QUOTA.C)+meter("left wings",posN("LW"),CG.ROSTER_QUOTA.LW)+
-      meter("right wings",posN("RW"),CG.ROSTER_QUOTA.RW)+meter("left D",posN("LD"),CG.ROSTER_QUOTA.LD)+meter("right D",posN("RD"),CG.ROSTER_QUOTA.RD)+
-      meter("goaltenders",posN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+'</div>'+
-      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp holds up to 3 players. '+
+      '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),CG.ROSTER_QUOTA.F)+
+      meter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),CG.ROSTER_QUOTA.D)+
+      meter("goaltenders",grpN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+'</div>'+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 9 forwards (centers and wings in any mix), 6 defensemen (either side) and 2 goaltenders, the one position locked to its exact role; training camp holds up to 3 players. '+
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
         : 'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). ')+

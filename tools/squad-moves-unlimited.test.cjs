@@ -33,7 +33,7 @@ console.log("\n— the swap picker and call-up toast");
 A("the picker no longer filters by swaps remaining", !/\(3-\(x\.squadMoves\|\|0\)\)>0/.test(live));
 A("...and never says 'swaps left'", !/swaps left/.test(live) && !/three season swaps/.test(live));
 A("the call-up toast no longer reads moves_left from the RPC", !/moves_left/.test(live));
-A("the picker still matches the EXACT position (v2.7 shape)", /x\.pos===me\.pos;/.test(live));
+A("the picker matches the position GROUP (v2.41 shape: a wing for a center, either side of defense; goalie for goalie)", /CG\.posGroup\(x\.pos\)===CG\.posGroup\(me\.pos\);/.test(live) && !/x\.pos===me\.pos;/.test(live));
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

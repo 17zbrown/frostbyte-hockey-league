@@ -109,23 +109,25 @@ assert("funnel: 15 placed (registered AND rostered, not 16)", /Placed on a club<
 assert("funnel flags the 52 waiting", out.includes("52 registered players still waiting on a club"));
 assert("funnel flags the roster spot with no registration", /1 holds a roster spot without registering/.test(out));
 
-// 3 — sign-ups vs the league's roster spots (Rule 2.1 quota × clubs: 30 per position, 20 in goal)
-const posOrder = [...out.matchAll(/<em>(Center|Left Wing|Right Wing|Left Defense|Right Defense|Goaltender)<\/em>/g)].map((m)=>m[1]);
-assert("positions stay in ice order, not sorted by count", posOrder.join(",") === "Center,Left Wing,Right Wing,Left Defense,Right Defense,Goaltender", posOrder.join(","));
-assert("center shows 15 / 30 (3 spots x 10 clubs)", /Center<\/em><\/span><span class="vz-hbv">15 \/ 30</.test(out));
-assert("right defense shows 7 / 30", /Right Defense<\/em><\/span><span class="vz-hbv">7 \/ 30</.test(out));
-assert("goaltender shows 12 / 20 (2 spots x 10 clubs)", /Goaltender<\/em><\/span><span class="vz-hbv">12 \/ 20</.test(out));
+// 3 — sign-ups vs the league's roster spots (Rule 2.1, v2.41: by GROUP — 9 forwards / 6 defensemen /
+//     2 goaltenders per club × 10 clubs = 90 / 60 / 20; the exact split rides in the note)
+const grpOrder = [...out.matchAll(/<em>(Forwards|Defensemen|Goaltenders)<\/em>/g)].map((m)=>m[1]);
+assert("groups stay in ice order, not sorted by count", grpOrder.join(",") === "Forwards,Defensemen,Goaltenders", grpOrder.join(","));
+assert("forwards show 40 / 90 (9 spots x 10 clubs)", /Forwards<\/em><\/span><span class="vz-hbv">40 \/ 90</.test(out));
+assert("defensemen show 15 / 60 (6 spots x 10 clubs)", /Defensemen<\/em><\/span><span class="vz-hbv">15 \/ 60</.test(out));
+assert("goaltenders show 12 / 20 (2 spots x 10 clubs)", /Goaltenders<\/em><\/span><span class="vz-hbv">12 \/ 20</.test(out));
 assert("corner value is signups over total spots", out.includes("67 / 170"));
-assert("note reports coverage and the thinnest position", /67 of 170 active-roster spots have a registrant/.test(out) && /thinnest at right defense \(7 for 30\)/.test(out));
+assert("note reports coverage and the thinnest group", /67 of 170 active-roster spots have a registrant/.test(out) && /thinnest among defensemen \(15 for 60\)/.test(out));
+assert("...and the exact-position split, for balance", /by position: 15 center, 13 left wing, 12 right wing, 8 left defense, 7 right defense, 12 goaltender/.test(out));
 assert("no stale per-club framing", !/ \/ 10</.test(out) && !out.includes("starting jobs"));
 // the bar FILL is the true ratio against each row's own capacity, not the series max
 const rowWidth = (label) => {
   const m = out.match(new RegExp('<i style="width:(\\d+)%"></i>\\s*<em>' + label + '</em>'));
   return m ? +m[1] : null;
 };
-assert("center 15 / 30 fills half the bar", rowWidth("Center") === 50, rowWidth("Center") + "%");
-assert("goaltender 12 / 20 fills 60%", rowWidth("Goaltender") === 60, rowWidth("Goaltender") + "%");
-assert("right defense 7 / 30 fills 23%", rowWidth("Right Defense") === 23, rowWidth("Right Defense") + "%");
+assert("forwards 40 / 90 fill 44%", rowWidth("Forwards") === 44, rowWidth("Forwards") + "%");
+assert("goaltenders 12 / 20 fill 60%", rowWidth("Goaltenders") === 60, rowWidth("Goaltenders") + "%");
+assert("defensemen 15 / 60 fill 25%", rowWidth("Defensemen") === 25, rowWidth("Defensemen") + "%");
 assert("a full club (DAL 3 / 3) fills 100%", rowWidth("DAL") === 100, rowWidth("DAL") + "%");
 assert("a 1 / 3 club fills a third", rowWidth("VAN") === 33, rowWidth("VAN") + "%");
 

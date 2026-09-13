@@ -76,7 +76,11 @@ CG.now = function(){ return Date.now(); };
    in the database. Anything that needs "how many of this position does a club (or the league)
    carry" reads THIS, so the two can't drift apart one hardcoded 3 at a time. Top-level on purpose:
    it is a rulebook constant, not app state, and render code must not depend on boot order for it. */
-CG.ROSTER_QUOTA = { C:3, LW:3, RW:3, LD:3, RD:3, G:2 };
+/* Rule 2.1 (v2.41): the active roster is shaped by position GROUP — nine forwards (centers and
+   wings in any mix), six defensemen (either side), two goaltenders. Only the goaltender is locked to
+   an exact position. The database (check_roster_structure, place_new_roster_spot) enforces the same. */
+CG.ROSTER_QUOTA = { F:9, D:6, G:2 };
+CG.GROUP_NAME = { F:"Forwards", D:"Defensemen", G:"Goaltenders" };
 
 /* format a time-on-ice value (seconds) as m:ss for box scores / stat lines */
 CG.fmtToi = function(sec){ sec = Math.max(0, Math.round(+sec||0)); var m=Math.floor(sec/60), s=sec%60; return m+":"+(s<10?"0":"")+s; };
@@ -5384,7 +5388,7 @@ CG.preseasonRandomAssign = function(){
   var pool=(lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined"; });
   if (!pool.length){ CG.toast("Everyone registered is already on a club","err"); return; }
   CG.confirm("Randomly assign "+pool.length+" players for the pre-season?",
-    "Every unrostered registration is placed by the league office — position by position, so each club gets its goaltenders and defensemen before any club gets a spare. Every open active-roster seat in the league is filled before anyone goes to camp: a player whose own position is full everywhere is loaned into an open seat in his group, then into any open seat, and only then to training camp, spread evenly at random (Rule 0.4). "+
+    "Every unrostered registration is placed by the league office by position group — nine forwards, six defensemen, two goaltenders per club — so each club gets its goaltenders and defensemen before any club gets a spare, and a club short of left defensemen takes an extra right defenseman (Rule 2.1). Every open active-roster seat in the league is filled before anyone goes to camp: a player whose group is full everywhere is loaned into another group's open seat, and only then to training camp, spread evenly at random (Rule 0.4). "+
     "They are released back to the draft pool automatically when the final pre-season game ends.",
     "Assign randomly", function(){
     /* v2.35: the placement runs inside the database (preseason_random_assign → _assign_reg_random),
@@ -5394,7 +5398,7 @@ CG.preseasonRandomAssign = function(){
     CG.sb.rpc("preseason_random_assign").then(function(r){
       if (r.error){ CG.toast("Assignment stopped: "+r.error.message,"err"); CG.reloadLeague(); return; }
       var d=r.data||{}, n=d.placed||0, left=(d.skipped||0)+(d.errors||0);
-      CG.toast(n+" players randomly assigned"+(d.out_of_position?" · "+d.out_of_position+" loaned out of position to fill open seats":"")+(d.camp?" · "+d.camp+" to camp":"")+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:" (every seat and camp spot is taken)"):""), left?"err":"ok");
+      CG.toast(n+" players randomly assigned"+(d.out_of_position?" · "+d.out_of_position+" loaned across position groups to fill open seats":"")+(d.camp?" · "+d.camp+" to camp":"")+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:" (every seat and camp spot is taken)"):""), left?"err":"ok");
       CG.reloadLeague();
     });
   });
@@ -8169,16 +8173,16 @@ CG.AFTER._roster = function(){
     var me = roster.find(function(x){ return x.spotId===spot; });
     if (!me) return;
     var wantSquad = me.squad==="tc" ? "pro" : "tc";
-    /* v2.7: the active roster is quota'd by EXACT position (3C/3LW/3RW/3LD/3RD/2G), so a legal
-       straight swap must match the exact position — a same-group swap (LW for C) now fails the
-       database's shape check. */
+    /* v2.41: the active roster is shaped by position GROUP (9 forwards / 6 defensemen / 2 goaltenders),
+       so a straight swap matches the group — a wing for a center, a left defenseman for a right one;
+       a goaltender only for a goaltender. The database's shape check makes the same test. */
     var opts = roster.filter(function(x){
       return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
-        x.pos===me.pos;
+        CG.posGroup(x.pos)===CG.posGroup(me.pos);
     });
     if (!opts.length){
-      CG.toast("No eligible "+(wantSquad==="tc"?"camp":"active")+" "+esc(CG.POS_NAME[me.pos]||me.pos)+
-        " to swap with at this exact position.", "err");
+      CG.toast("No eligible "+(wantSquad==="tc"?"camp":"active")+" "+(CG.posGroup(me.pos)==="G"?"goaltender":CG.posGroup(me.pos)==="D"?"defenseman":"forward")+
+        " to swap with.", "err");
       return;
     }
     var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
@@ -8186,7 +8190,7 @@ CG.AFTER._roster = function(){
     CG.modal("Swap "+esc(me.tag),
       '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
       ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
-      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+' at the same position. Squad changes are unlimited all season (Rule 2.1).</p>'+
+      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+' — any position in the group (Rule 2.1). Squad changes are unlimited all season.</p>'+
       '<div class="stack" style="gap:6px">'+opts.map(function(x){
         return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
           '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+CG.fmtMoney(x.salary||0)+'</span></button>';
@@ -8906,26 +8910,30 @@ CG.overviewCharts = function(){
      identical picture — the one comparison this chart exists to make. */
   /* Ice order, not sorted by count, so the eye reads forwards and the gaps sit where you expect
      them. Names come from CG.POS_NAME, spots from CG.ROSTER_QUOTA — no second copy of either. */
-  var POSN = ["C","LW","RW","LD","RD","G"];
+  /* v2.41: spots are counted by position GROUP (Rule 2.1 — 9 forwards / 6 defensemen / 2 goaltenders
+     per club); the exact-position split rides in the note, since it is balance, not a rule */
+  var GRPS = ["F","D","G"], POSN = ["C","LW","RW","LD","RD","G"];
   var clubs = (CG.TEAMS||[]).length || 10;
-  var spotsAt = function(p){ return (CG.ROSTER_QUOTA[p]||0) * clubs; };
-  var byPos = {}; regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
+  var spotsAt = function(g){ return (CG.ROSTER_QUOTA[g]||0) * clubs; };
+  var byPos = {}, byGrp = {};
+  regs.forEach(function(r){ if (r.position){ byPos[r.position] = (byPos[r.position]||0) + 1; var g = CG.posGroup(r.position); byGrp[g] = (byGrp[g]||0) + 1; } });
   if (Object.keys(byPos).length){
-    var totalSpots = POSN.reduce(function(s,p){ return s + spotsAt(p); }, 0);
-    var covered = POSN.reduce(function(s,p){ return s + Math.min(byPos[p]||0, spotsAt(p)); }, 0);
-    /* the thinnest position by coverage share is the one the commissioner recruits for */
-    var thin = POSN.reduce(function(b,p){
-      return ((byPos[p]||0)/spotsAt(p)) < ((byPos[b]||0)/spotsAt(b)) ? p : b; }, POSN[0]);
-    var over = POSN.filter(function(p){ return (byPos[p]||0) > spotsAt(p); })
-      .map(function(p){ return (CG.POS_NAME[p]||p).toLowerCase()+" is over ("+byPos[p]+" for "+spotsAt(p)+")"; });
+    var totalSpots = GRPS.reduce(function(s,g){ return s + spotsAt(g); }, 0);
+    var covered = GRPS.reduce(function(s,g){ return s + Math.min(byGrp[g]||0, spotsAt(g)); }, 0);
+    /* the thinnest group by coverage share is the one the commissioner recruits for */
+    var thin = GRPS.reduce(function(b,g){
+      return ((byGrp[g]||0)/spotsAt(g)) < ((byGrp[b]||0)/spotsAt(b)) ? g : b; }, GRPS[0]);
+    var over = GRPS.filter(function(g){ return (byGrp[g]||0) > spotsAt(g); })
+      .map(function(g){ return CG.GROUP_NAME[g].toLowerCase()+" are over ("+byGrp[g]+" for "+spotsAt(g)+")"; });
+    var split = POSN.filter(function(p){ return byPos[p]; }).map(function(p){ return byPos[p]+" "+(CG.POS_NAME[p]||p).toLowerCase(); }).join(", ");
     out.push(CG.viz.card({ title:"Sign-ups against the league's roster spots",
-      sub: clubs+" clubs × "+CG.ROSTER_QUOTA.C+" per position, "+CG.ROSTER_QUOTA.G+" goalies (Rule 2.1)",
+      sub: clubs+" clubs × "+CG.ROSTER_QUOTA.F+" forwards, "+CG.ROSTER_QUOTA.D+" defensemen, "+CG.ROSTER_QUOTA.G+" goaltenders (Rule 2.1)",
       value: regs.length+" / "+totalSpots,
-      body: CG.viz.hbars(POSN.map(function(p){ return { k:CG.POS_NAME[p]||p, v:byPos[p]||0, pos:p, cap:spotsAt(p) }; }),
+      body: CG.viz.hbars(GRPS.map(function(g){ return { k:CG.GROUP_NAME[g], v:byGrp[g]||0, pos:g, cap:spotsAt(g) }; }),
         { sort:false, fmt:function(v,r){ return v+" / "+spotsAt(r.pos); },
-          note: covered+" of "+totalSpots+" active-roster spots have a registrant · thinnest at "+
-                (CG.POS_NAME[thin]||thin).toLowerCase()+" ("+(byPos[thin]||0)+" for "+spotsAt(thin)+")"+
-                (over.length ? " · "+over.join(" · ") : "") }) }));
+          note: covered+" of "+totalSpots+" active-roster spots have a registrant · thinnest among "+
+                CG.GROUP_NAME[thin].toLowerCase()+" ("+(byGrp[thin]||0)+" for "+spotsAt(thin)+")"+
+                (over.length ? " · "+over.join(" · ") : "")+(split ? " · by position: "+split : "") }) }));
   }
 
   /* 4 — Front-office seats. Owner + GM + AGM per club; a club running on one person is a club

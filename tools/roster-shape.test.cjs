@@ -36,8 +36,8 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   const r21 = sec("2.1");
   A("camp is carried BEYOND the seventeen active spots",
     /up to three \(3\) training-camp players beyond its seventeen active spots/.test(r21));
-  A("...and the active roster is the exact 17-man shape",
-    /three \(3\) centers, three \(3\) left wings, three \(3\) right wings, three \(3\) left defensemen, three \(3\) right defensemen, and two \(2\) goaltenders/.test(r21));
+  A("...and the active roster is the 17-man shape by GROUP (v2.41): 9 forwards, 6 defensemen, 2 goaltenders",
+    /nine \(9\) forwards — centers, left wings and right wings in any mix/.test(r21) && /six \(6\) defensemen — left or right in any mix/.test(r21) && /two \(2\) goaltenders, the one position locked to its exact role/.test(r21));
 }
 
 console.log("\n— every client roster count excludes training camp");
