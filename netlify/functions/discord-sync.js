@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
    member's roles should be — they can only disagree about when. */
 import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
   desiredRolesFor, applyManagedRoles, managedRoleIds } from "../../shared/roles.mjs";
+import { buildDepartureEmbed } from "../../shared/departure-card.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -201,29 +202,29 @@ async function ensureDeparturesChannel(guildChannels, roleId, sum) {
   } catch (e) { sum.errors.push({ departChan: String(e.message || e) }); return null; }
 }
 
+/* The member's place in the league, described once by the database (member_league_card) so this
+   lane and the gateway bot post the same thing. A failed lookup posts the visitor wording rather
+   than nothing — the departure itself is already recorded. */
+async function leagueCardFor(discordId, sum) {
+  try {
+    const r = await rfetch(`${SB_URL}/rest/v1/rpc/member_league_card`, { method: "POST", headers: sbHead(), body: JSON.stringify({ p_discord_id: String(discordId) }) });
+    if (!r.ok) throw new Error(`member_league_card -> ${r.status}`);
+    return await r.json();
+  } catch (e) { sum.errors.push({ departCard: String(discordId), error: String(e.message || e) }); return null; }
+}
+
 async function announceDepartures(gone, profByDiscord, codeByTeam, registered, sum) {
   const chId = sum.__departChanId;
   if (!chId) { sum.departUnannounced = gone.length; return; }
-  /* one message per departure, so each can be replied to — a thread on "why did X leave" is a
-     normal thing for a league office to want */
+  /* one message per departure, so each can be replied to — the room is public now, so the post
+     is a league notice (who they were to the league, how long they were with us), not a log line */
   for (const g of gone) {
     const link = profByDiscord.get(String(g.discord_id));
-    const pid = g.profile_id || (link && link.profile_id);
-    const club = link && codeByTeam[link.team_id];
     const days = g.joined_guild_at ? Math.max(0, Math.round((Date.now() - Date.parse(g.joined_guild_at)) / 86400000)) : null;
-    const who = g.display_name || g.username || (link && link.gamertag) || g.discord_id;
-    const fields = [];
-    if (link && link.gamertag) fields.push({ name: "Site account", value: String(link.gamertag), inline: true });
-    if (club) fields.push({ name: "Club", value: String(club), inline: true });
-    if (days != null) fields.push({ name: "In the server", value: days === 0 ? "less than a day" : days + " day" + (days === 1 ? "" : "s"), inline: true });
-    if (pid && registered.has(pid)) fields.push({ name: "Season sign-up", value: "was registered to play", inline: true });
+    const who = g.display_name || g.username || (link && link.gamertag) || "A member";
+    const card = (await leagueCardFor(g.discord_id, sum)) || { linked: !!link, gamertag: link && link.gamertag, kind: link ? "member" : "none", registered: !!(link && registered.has(link.profile_id)) };
     try {
-      await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
-        title: "👋 " + who + " left the server",
-        description: (link ? "" : "No linked site account — they never signed in at chelgamingleague.com.\n") +
-          "`" + g.discord_id + "`",
-        color: 0xC2410C, fields: fields.length ? fields : undefined,
-        timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
+      await dApi("POST", `/channels/${chId}/messages`, { embeds: [buildDepartureEmbed({ who, card, days })], allowed_mentions: { parse: [] } });
       sum.departAnnounced = (sum.departAnnounced || 0) + 1;
     } catch (e) { sum.errors.push({ departPost: g.discord_id, error: String(e.message || e) }); }
   }

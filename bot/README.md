@@ -7,7 +7,9 @@ Netlify sweep.
 
 **What it does today (phase 1):**
 - Welcomes new members in `#welcome` the moment they join (respects membership screening).
-- Logs departures to `#member-departures` and the database the moment someone leaves.
+- Logs departures to `#member-departures` (public, in Information) and the database the moment
+  someone leaves — the post says who they were to the league (club seat, roster spot, staff
+  department or sign-up), from `public.member_league_card`, the same card the sweep reads.
 - Heartbeats every minute into the same Automations panel + watchdog as every other job.
 
 **What it deliberately does NOT do:** replace the Netlify sweeps. They keep running at their
@@ -91,7 +93,8 @@ journalctl -u chel-bot -f    # watch it connect
 
 ## Architecture notes
 
-- `handlers.mjs` holds all logic, dependency-free, tested by `tools/gateway-bot.test.mjs`.
+- `handlers.mjs` holds all logic (no discord.js — only `shared/departure-card.mjs`, the one
+  definition of the #member-departures post it shares with the sweep), tested by `tools/gateway-bot.test.mjs`.
   `chel-bot.mjs` only maps discord.js events onto it.
 - Exactly-once interlocks with the sweeps:
   - Welcomes: `welcomed_members` (post first, record after — a failed post is retried by

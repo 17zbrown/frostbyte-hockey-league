@@ -77,6 +77,12 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/teams?id=eq.")) { const id = u.match(/id=eq\.([^&]+)/)[1]; return J(world.teams[id] ? [{ code: world.teams[id] }] : []); }
   if (u.includes("season_registrations")) { const p = u.match(/profile_id=eq\.([^&]+)/)[1]; return J(world.registered.has(p) ? [{ profile_id: p }] : []); }
   if (u.includes("guild_departures") && m === "POST") { events.push({ departure: JSON.parse(opts.body)[0] }); return J(null); }
+  /* the league card the database builds for the post (public.member_league_card) */
+  if (u.includes("rpc/member_league_card")) {
+    if (world.failCard) return new Response("nope", { status: 500 });
+    const id = JSON.parse(opts.body).p_discord_id;
+    return J(world.cards && world.cards[id] ? world.cards[id] : { linked: false, kind: "none", standing: null });
+  }
   return J([]);
 };
 
@@ -127,6 +133,7 @@ console.log("\n— departures");
     joined_guild_at: "2026-06-01T00:00:00Z", is_bot: false, present: true };
   world.links["vet"] = { profile_id: "P1", gamertag: "VetTag", team_id: "T1" };
   world.registered.add("P1");
+  world.cards = { vet: { linked: true, gamertag: "VetTag", kind: "player", standing: "Left wing on the Boston Bruins", club_code: "BOS", club: "Boston Bruins", registered: true } };
   const H = mk();
   events.length = 0;
   A("a known member's departure is announced", (await H.onMemberRemove(member("vet"))) === "announced");
@@ -136,7 +143,8 @@ console.log("\n— departures");
   A("present flips false — the census diff now skips them", up && up.present === false);
   A("the embed goes to #member-departures with no pings", post.post === "CD" && post.body.allowed_mentions.parse.length === 0);
   const emb = post.body.embeds[0];
-  A("the embed names the club and the sign-up", JSON.stringify(emb.fields).includes("BOS") && JSON.stringify(emb.fields).includes("registered to play"));
+  A("the embed says who they were to the league, from the database's card", /Left wing on the Boston Bruins\./.test(emb.description) && /Vet \(VetTag on the site\) has left the server/.test(emb.title));
+  A("...with no raw id or fields block (the public post)", !emb.fields && !emb.description.includes("`vet`"));
   events.length = 0;
   A("a second remove event is a no-op", (await H.onMemberRemove(member("vet"))) === "already-recorded" && events.length === 0);
 }
@@ -146,7 +154,19 @@ console.log("\n— departures");
   const r = await H.onMemberRemove(member("ghost"));   // never censused, no link
   A("a never-censused leaver is still recorded", r === "announced" && events.some((e) => e.departure && e.departure.discord_id === "ghost"));
   const post = events.find((e) => e.post);
-  A("...flagged as having no site account", post.body.embeds[0].description.includes("never signed in"));
+  A("...described as a visitor, kindly", post.body.embeds[0].description.includes("here as a visitor") && !post.body.embeds[0].description.includes("never signed in"));
+}
+{
+  world.guildMembers["gm2"] = { discord_id: "gm2", username: "GmUser", display_name: "GM Two", profile_id: "P2", joined_guild_at: "2026-06-01T00:00:00Z", is_bot: false, present: true };
+  world.links["gm2"] = { profile_id: "P2", gamertag: "GmTwo", team_id: "T1" };
+  world.failCard = true;
+  const H = mk();
+  events.length = 0;
+  const r = await H.onMemberRemove(member("gm2"));
+  world.failCard = false;
+  const post = events.find((e) => e.post);
+  A("a failed card lookup still announces from what the bot already knew", r === "announced" && post && /GM Two \(GmTwo on the site\)/.test(post.body.embeds[0].title));
+  A("...and records the failure", H.errors.some((e) => String(e.where || e.error || JSON.stringify(e)).includes("depart-card")));
 }
 {
   world.channels = world.channels.filter((c) => c.name !== "member-departures");

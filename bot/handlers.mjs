@@ -12,6 +12,8 @@
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID.
 
+import { buildDepartureEmbed } from "../shared/departure-card.mjs";
+
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 export function createHandlers(env, opts = {}) {
@@ -240,19 +242,15 @@ export function createHandlers(env, opts = {}) {
       const chId = byName["member-departures"];
       if (!chId) { sum.departUnannounced++; return "recorded-unannounced"; }
 
-      const who = displayName || username || (link && link.gamertag) || id;
-      const fields = [];
-      if (link && link.gamertag) fields.push({ name: "Site account", value: String(link.gamertag), inline: true });
-      if (club) fields.push({ name: "Club", value: String(club), inline: true });
-      if (days != null) fields.push({ name: "In the server", value: days === 0 ? "less than a day" : days + " day" + (days === 1 ? "" : "s"), inline: true });
-      if (wasRegistered) fields.push({ name: "Season sign-up", value: "was registered to play", inline: true });
+      const who = displayName || username || (link && link.gamertag) || "A member";
+      // the member's place in the league, described by the database — the same card the sweep
+      // reads, so the two lanes never disagree; a failed lookup falls back to what we already know
+      let card = null;
+      try { card = await sbPost("rpc/member_league_card", { p_discord_id: id }, "return=representation"); }
+      catch (e) { recordError(`depart-card ${id}`, e); }
+      if (!card) card = { linked: !!link, gamertag: link && link.gamertag, kind: link ? "member" : "none", registered: wasRegistered };
       try {
-        await dPost(`/channels/${chId}/messages`, { embeds: [{
-          title: "👋 " + who + " left the server",
-          description: (link ? "" : "No linked site account — they never signed in at chelgamingleague.com.\n") +
-            "`" + id + "`",
-          color: 0xC2410C, fields: fields.length ? fields : undefined,
-          timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
+        await dPost(`/channels/${chId}/messages`, { embeds: [buildDepartureEmbed({ who, card, days })], allowed_mentions: { parse: [] } });
         sum.departAnnounced++;
         return "announced";
       } catch (e) { recordError(`depart-post ${id}`, e); sum.departUnannounced++; return "recorded-postfail"; }

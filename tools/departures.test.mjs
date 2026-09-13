@@ -36,6 +36,11 @@ globalThis.fetch = async (url, opts = {}) => {
     return J([]);
   }
   if (u.includes("/rest/v1/guild_departures") && m === "POST") { DB.guild_departures.push(...JSON.parse(opts.body)); return J([]); }
+  /* the league card the database builds for the post (public.member_league_card) */
+  if (u.includes("/rest/v1/rpc/member_league_card")) {
+    const id = JSON.parse(opts.body).p_discord_id;
+    return J(DB.cards && DB.cards[id] ? DB.cards[id] : { linked: false, kind: "none", standing: null });
+  }
   if (u.includes("discord.com")) { if (m === "POST") posts.push(JSON.parse(opts.body || "{}")); return J({ id: "msg" }); }
   return J([]);
 };
@@ -63,22 +68,43 @@ console.log("— a normal departure");
   A("days in server captured", r.departures[0].days_in_server === 30, r.departures[0].days_in_server + "d");
   A("marked absent, not deleted", DB.guild_members.find((x) => x.discord_id === "3").present === false);
   A("announced once", r.posts.length === 1);
-  A("names them in the title", /user3 left the server/.test(JSON.stringify(r.posts[0])));
+  A("names them in the title", /user3 has left the server/.test(JSON.stringify(r.posts[0])));
+  const b0 = JSON.stringify(r.posts[0]);
+  A("a visitor with no site account is described kindly, with no Discord id in the post", /here as a visitor/.test(b0) && !/`3`/.test(b0) && !/never signed in/.test(b0));
+  A("...and how long they were with us", /With us for 30 days/.test(b0));
   A("no mass-departure flag", !r.sum.departSuspicious);
 }
 
-console.log("\n— a member who was on a club and signed up");
+console.log("\n— a member who was on a club and signed up (the public-facing post)");
 {
   seed(["1","9"]);
   DB.season_registrations = [{ profile_id: "p9" }];
+  DB.cards = { "9": { linked: true, gamertag: "Sniper", kind: "management", standing: "General Manager of the Boston Bruins", club_code: "BOS", club: "Boston Bruins", registered: true } };
   const links = [{ discord_id: "9", profile_id: "p9", gamertag: "Sniper", team_id: "t1" }];
   const r = await run(["1"], true, links, [{ id: "t1", code: "BOS" }]);
   A("club recorded", r.departures[0].club === "BOS", r.departures[0].club);
   A("registration recorded", r.departures[0].was_registered === true);
   A("profile linked", r.departures[0].profile_id === "p9");
   const body = JSON.stringify(r.posts[0]);
-  A("post names the club and the sign-up", /BOS/.test(body) && /was registered to play/.test(body));
-  DB.season_registrations = [];
+  A("the post names their place in the league — the club seat", /General Manager of the Boston Bruins/.test(body) && /front office has an open seat/.test(body));
+  A("...and their site name when it differs from their Discord name", /user9 \(Sniper on the site\) has left the server/.test(body));
+  A("...never a raw Discord id or a 'no linked account' line", !/`9`/.test(body) && !/No linked site account/.test(body));
+  A("a management departure is highlighted in league yellow", r.posts[0].embeds[0].color === 0xFFE500);
+  A("...with no pings", r.posts[0].allowed_mentions.parse.length === 0);
+  DB.season_registrations = []; DB.cards = null;
+}
+
+console.log("\n— when the card lookup fails, the post still goes out");
+{
+  seed(["1","7"]);
+  DB.cards = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => (String(url).includes("member_league_card") ? new Response("nope", { status: 500 }) : realFetch(url, opts));
+  const links = [{ discord_id: "7", profile_id: "p7", gamertag: "Backup", team_id: null }];
+  const r = await run(["1"], true, links, []);
+  globalThis.fetch = realFetch;
+  A("announced from what the sweep already knew", r.posts.length === 1 && /Backup/.test(JSON.stringify(r.posts[0])));
+  A("...and the failure is surfaced, not swallowed", r.sum.errors.some((e) => e.departCard === "7"));
 }
 
 console.log("\n— the guards against a fake exodus");
