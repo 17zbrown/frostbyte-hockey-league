@@ -98,8 +98,8 @@ function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "
 /* ---- who left the server ----------------------------------------------------------------
    Discord keeps no "who left" record and this league runs no gateway bot, so a departure is only
    ever visible as the difference between two census sweeps. The census above already pulls the
-   whole member list; this gives it a memory to diff against and posts what changed into a
-   commissioner-only room.
+   whole member list; this gives it a memory to diff against and posts what changed into the
+   #member-departures room (Information — public, like #welcome, since 2026-09-13).
 
    The one thing that must never happen is a false mass-departure. Three guards:
      1. memberListOk — set only AFTER every page came back, so a throw mid-pagination leaves it
@@ -173,29 +173,25 @@ async function trackDepartures(memberById, memberListOk, links, teams, sum) {
   await announceDepartures(gone, profByDiscord, codeByTeam, registered, sum);
 }
 
-/* The commissioner-only room the log posts into. Created private in the SAME call that denies
-   @everyone, so it is never briefly visible. Commissioners only — deliberately NOT the staff role,
-   because who left is league-office information and the ask was commissioners. */
+/* The departures log lives in the Information category beside #welcome and carries the same
+   permissions (2026-09-13 — it was a commissioner-only Staff room before). It is found by name and
+   never re-permissioned here, so a commissioner's changes in Discord stand; this only creates it
+   if it is missing, in the same shape it has today. */
 async function ensureDeparturesChannel(guildChannels, roleId, sum) {
-  const commish = roleId["commissioner"];
-  if (!commish) return null;
   const NAME = "member-departures";
   let ch = guildChannels.find((c) => c.type === 0 && c.name === NAME);
   if (ch) return ch;
-  let cat = guildChannels.find((c) => c.type === 4 && /^staff\b/i.test(c.name || ""));
+  let cat = guildChannels.find((c) => c.type === 4 && /^information\b/i.test(c.name || ""))
+         || guildChannels.find((c) => c.type === 4 && /^staff\b/i.test(c.name || ""));
   try {
     ch = await dApi("POST", `/guilds/${GUILD}/channels`, {
       name: NAME, type: 0, parent_id: cat ? cat.id : undefined,
-      topic: "Who left the server, posted automatically. Commissioners only.",
-      permission_overwrites: [
-        { id: GUILD, type: 0, deny: "1024", allow: "0" },          /* @everyone: no VIEW */
-        { id: commish, type: 0, allow: "68608", deny: "0" }        /* VIEW + SEND + READ_HISTORY */
-      ]
+      topic: "Who left the server, posted automatically within a couple of minutes — how long they were around, and whether they had signed up or held a club seat."
+      /* no overwrites: it inherits the category exactly as #welcome does */
     });
     if (ch && ch.id) {
       guildChannels.push(ch);
       sum.departChanCreated = 1;
-      /* the category may be readable by staff, so re-deny at the channel to keep it commissioner-only */
       await dApi("POST", `/channels/${ch.id}/messages`, { embeds: [{
         title: "👋 Member departures",
         description: "Anyone who leaves the server is logged here within a couple of minutes, with how long they were around and whether they had signed up or held a club seat.\n\nDiscord does not tell a bot who left unless it is running a live gateway connection, so this is worked out by comparing each member sweep to the last one. A sweep that fails is skipped rather than guessed at, so a quiet day here means a quiet day, not a broken job.",
@@ -1753,7 +1749,7 @@ export default async (req) => {
       await fetch(`${SB_URL}/rest/v1/app_config?key=eq.discord_reap`, { method: "DELETE", headers: sbHead() });
     }
   } catch (e) { sum.errors.push({ reap: String(e.message || e) }); }
-  /* the commissioner-only departures room, and its id for the announcer further down */
+  /* the departures room (Information, beside #welcome), and its id for the announcer further down */
   try { const dch = await ensureDeparturesChannel(guildChannels, roleId, sum); if (dch && dch.id) sum.__departChanId = dch.id; }
   catch (e) { sum.errors.push({ departChan: String(e.message || e) }); }
   const deptRoleByChannel = {};
