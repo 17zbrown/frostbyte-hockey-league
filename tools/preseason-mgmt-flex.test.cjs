@@ -28,8 +28,9 @@ console.log("\n— the rulebook says it (rendered JSON)");
   A("2.1: two exceptions to the groups — camp, and management in the pre-season", /There are two exceptions/.test(sec("2.1")) && /in pre-season games only the club’s Owner, General Manager and Assistant General Manager may be dressed at any position/.test(sec("2.1")));
   A("5.2: the exception ends with the pre-season and a saved line will not dress into a regular-season game", /the exception ends with the pre-season, and a saved line that carries a manager out of his group will not dress into a regular-season or playoff game/.test(sec("5.2")));
   A("5.2: groups are applied when a lineup is filed, not only when built", /apply these groups when a lineup is filed, not only when it is built/.test(sec("5.2")));
-  A("changelog 2.39", rb.changelog[0].version === "2.39" && /Pre-season flexibility for management/.test(rb.changelog[0].summary));
-  A("...American spelling", !/practis|colour|centre|organis|defence/i.test(rb.changelog[0].summary + sec("5.2") + sec("2.1")));
+  const cl239 = rb.changelog.find((c) => c.version === "2.39");
+  A("changelog 2.39", !!cl239 && /Pre-season flexibility for management/.test(cl239.summary));
+  A("...American spelling", !/practis|colour|centre|organis|defence/i.test((cl239 ? cl239.summary : "") + sec("5.2") + sec("2.1")));
 }
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

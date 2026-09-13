@@ -5384,7 +5384,7 @@ CG.preseasonRandomAssign = function(){
   var pool=(lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined"; });
   if (!pool.length){ CG.toast("Everyone registered is already on a club","err"); return; }
   CG.confirm("Randomly assign "+pool.length+" players for the pre-season?",
-    "Every unrostered registration is placed by the league office — position by position, so each club gets its goaltenders and defensemen before any club gets a spare, with training camp taking the overflow (Rule 2.1). "+
+    "Every unrostered registration is placed by the league office — position by position, so each club gets its goaltenders and defensemen before any club gets a spare. Every open active-roster seat in the league is filled before anyone goes to camp: a player whose own position is full everywhere is loaned into an open seat in his group, then into any open seat, and only then to training camp, spread evenly at random (Rule 0.4). "+
     "They are released back to the draft pool automatically when the final pre-season game ends.",
     "Assign randomly", function(){
     /* v2.35: the placement runs inside the database (preseason_random_assign → _assign_reg_random),
@@ -5394,7 +5394,7 @@ CG.preseasonRandomAssign = function(){
     CG.sb.rpc("preseason_random_assign").then(function(r){
       if (r.error){ CG.toast("Assignment stopped: "+r.error.message,"err"); CG.reloadLeague(); return; }
       var d=r.data||{}, n=d.placed||0, left=(d.skipped||0)+(d.errors||0);
-      CG.toast(n+" players randomly assigned"+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:" (no club has room)"):""), left?"err":"ok");
+      CG.toast(n+" players randomly assigned"+(d.out_of_position?" · "+d.out_of_position+" loaned out of position to fill open seats":"")+(d.camp?" · "+d.camp+" to camp":"")+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:" (every seat and camp spot is taken)"):""), left?"err":"ok");
       CG.reloadLeague();
     });
   });
