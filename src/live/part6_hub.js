@@ -816,11 +816,14 @@ CG.AFTER._lineup = function(){
     if (isLocked()){ CG.toast("Lineup is locked (Rule 5.3)","err"); return; }
     ["LW","C","RW","LD","RD","G"].forEach(function(pos){
       /* group-based eligibility (matches the DB); camp players — and, in a pre-season game,
-         management — are eligible anywhere but sort last, so auto-fill spends a player at his own
-         position before it borrows one */
+         management — are eligible anywhere. Order: a rostered player at his own position first
+         (Rule 5.2 — rostered players are preferred over camp players wherever one is available),
+         then a rostered manager borrowed from another group (pre-season), then camp players —
+         in-group before out-of-group — so auto-fill spends a camp player's three games last. */
+      var rank = function(p){ return (p.squad==="tc"?2:0) + (CG.posGroup(p.pos)!==CG.posGroup(pos)?1:0); };
       var pick = lg.byTeam[club].filter(function(p){ return flex(p) || CG.posGroup(p.pos)===CG.posGroup(pos); })
         .sort(function(a,b){
-          var ac=CG.posGroup(a.pos)!==CG.posGroup(pos)?1:0, bc=CG.posGroup(b.pos)!==CG.posGroup(pos)?1:0;
+          var ac=rank(a), bc=rank(b);
           return ac-bc || lg.ratings[b.id].ovr-lg.ratings[a.id].ovr;
         })
         .find(function(p){ return !validate(p,pos) || state.slots[pos]===p.id; });
@@ -1552,7 +1555,7 @@ CG.hubRoster = function(qs){
       meter("goaltenders",posN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+'</div>'+
       '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 3 centers, 3 left wings, 3 right wings, 3 left defensemen, 3 right defensemen and 2 goaltenders; training camp holds up to 3 players. '+
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
-        ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position. '
+        ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
         : 'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). ')+
       'You may move players between the active roster and training camp freely, as often as you like, all season — there is no limit on squad changes (Rule 2.1).</p></div></div>';
   }

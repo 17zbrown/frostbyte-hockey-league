@@ -75,7 +75,7 @@ Tampering with another club's rostered players is a discipline matter.
 
 **17 players: 3 C, 3 LW, 3 RW, 3 LD, 3 RD, 2 G.** Team HQ enforces the shape and refuses anything that breaks it.
 
-**Positions work by group.** Any forward can dress at C, LW or RW. Any defenseman can dress at LD or RD. Goalies dress only in goal.
+**Positions work by group.** Any forward can dress at C, LW or RW. Any defenseman can dress at LD or RD. Goalies dress only in goal. Two exceptions: training-camp players fill any position, and in **pre-season games** your Owner, GM and AGM can be dressed at any position — use it to get as many players into games as you can (Rules 2.1 and 5.2).
 
 **Weekly caps:** a skater plays at most 3 games a week, a goalie at most 6. An over cap lineup is simply refused. None of these caps apply in the pre-season — dress anyone as often as you need (Rule 5.2).
 

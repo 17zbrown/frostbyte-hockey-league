@@ -10,7 +10,9 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 console.log("— the per-game builder");
 A("a pre-season game lets management fill any slot (camp players always could)", /var preGame = game\.stage==="preseason";\n  function flex\(p\)\{ return p\.squad==="tc" \|\| \(preGame && !!p\.mgmt\); \}/.test(hub));
 A("...validate, the bench hint, the slot targets and auto-fill all use the one test", (hub.match(/flex\(p\)/g) || []).length >= 4);
-A("...auto-fill still spends a player at his own position before borrowing one", /var ac=CG\.posGroup\(a\.pos\)!==CG\.posGroup\(pos\)\?1:0, bc=CG\.posGroup\(b\.pos\)!==CG\.posGroup\(pos\)\?1:0;/.test(hub));
+A("...auto-fill ranks a rostered player at his own position first, then a borrowed manager, then camp (Rule 5.2 P2 kept)", /var rank = function\(p\)\{ return \(p\.squad==="tc"\?2:0\) \+ \(CG\.posGroup\(p\.pos\)!==CG\.posGroup\(pos\)\?1:0\); \};/.test(hub));
+A("...the roster page's pre-season note names the exception too", /and in pre-season games so do your Owner, GM and AGM \(Rule 2\.1\)/.test(hub));
+A("the owners' briefings carry the exception", /in \*\*pre-season games\*\* your Owner, GM and AGM can be dressed at any position/.test(R("CGHL-Season1-Owners-Briefing.md")) && /in \*\*pre-season games\*\* your Owner, GM and AGM can be dressed at any position/.test(R("CGHL-Season1-Owners-Briefing-DISCORD.txt")));
 A("...and the refusal names the pre-season exception only when it applies", /Only training-camp players"\+\(preGame\?" and, in the pre-season, the Owner, GM and AGM":""\)\+" fill any position \(Rule 2\.1\)/.test(hub));
 A("...with a note on the page for a pre-season game", /Pre-season game\.<\/b> No weekly caps, and your Owner, GM and AGM can be dressed at any position/.test(hub));
 
