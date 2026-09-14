@@ -619,14 +619,14 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
   try { await sbUpsertCfg("discord_role_icons", JSON.stringify({ at: new Date().toISOString(), result: snap })); } catch (e) { /* observability only */ }
 }
 
-// #announcements under an Information category: everyone reads, only the league office writes.
-// Its webhook is stored so the site can post league news without a bot token. Creation only —
-// if the channel already exists under Information we adopt it and just make sure the hook is on
-// file, so this never fights a channel the commissioners set up by hand.
-// VIEW(1024)+SEND(2048)+READ_HISTORY(65536)=68608; members get VIEW+READ_HISTORY (66560) and no SEND.
+// #announcements under an Information category: everyone reads, only the commissioners write —
+// the same lock enforceReadOnlyCategories holds on every channel under Information (2026-09-13;
+// Staff used to be granted posting here too). Its webhook is stored so the site can post league
+// news without a bot token. Creation only — if the channel already exists under Information we
+// adopt it and just make sure the hook is on file.
 async function ensureAnnouncements(guildChannels, roleId, sum) {
-  const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
-  if (office.length < 2) return;                       // roles not provisioned yet — try next run
+  const office = ["commissioner"].map((n) => roleId[n]).filter(Boolean);
+  if (office.length < 1) return;                       // role not provisioned yet — try next run
 
   let cat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "information");
   if (!cat) {
@@ -643,8 +643,8 @@ async function ensureAnnouncements(guildChannels, roleId, sum) {
         name: "announcements", type: 0, parent_id: cat.id,
         topic: "League announcements from the commissioners. Read-only — discussion goes in the forums or #general.",
         permission_overwrites: [
-          { id: GUILD, type: 0, allow: "66560", deny: "2048" },        // everyone: read, don't post
-          ...office.map((id) => ({ id, type: 0, allow: "68608", deny: "0" })),
+          { id: GUILD, type: 0, allow: String(INFO_EVERYONE_ALLOW), deny: String(INFO_EVERYONE_DENY) },   // everyone: read; no messages, no threads
+          ...office.map((id) => ({ id, type: 0, allow: String(INFO_POSTER_ALLOW), deny: "0" })),
         ],
       });
       guildChannels.push(ch); sum.announcementsCreated = 1;
@@ -1123,6 +1123,55 @@ async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
       chan.permission_overwrites = next;
       sum.boardsLocked = (sum.boardsLocked || 0) + 1;
     } catch (e) { sum.errors.push({ postOnlyBoard: cname, error: String(e.message || e) }); }
+  }
+}
+
+/* Read-only CATEGORIES (2026-09-13): every channel under Information — welcome, rules, schedule,
+   standings, season-signups, news, website, announcements, member-departures, and whatever is added
+   there next — is the league talking to its members, never the other way round. Nobody but the
+   commissioners may post a message or open a thread in any of them; everyone reads. The category
+   itself carries the same overwrites, so a channel created inside it inherits the lock before the
+   next sweep re-asserts it. The bot is Administrator, so the feeds it writes are unaffected.
+   Thread bits: CREATE_PUBLIC_THREADS 1<<35, CREATE_PRIVATE_THREADS 1<<36, SEND_MESSAGES_IN_THREADS 1<<38. */
+const THREAD_BITS = (1n << 35n) | (1n << 36n) | (1n << 38n);
+const INFO_EVERYONE_ALLOW = 66560n;                       /* VIEW + READ_HISTORY */
+const INFO_EVERYONE_DENY = 2048n | THREAD_BITS;           /* SEND + every thread bit */
+const INFO_POSTER_ALLOW = 51200n | THREAD_BITS;           /* SEND + EMBED + ATTACH + threads */
+const READ_ONLY_CATEGORIES = { information: ["commissioner"] };
+async function enforceReadOnlyCategories(guildChannels, roleId, sum) {
+  for (const catName of Object.keys(READ_ONLY_CATEGORIES)) {
+    const cat = (guildChannels || []).find((c) => c.type === 4 && new RegExp("^" + catName + "\\b", "i").test(c.name || ""));
+    if (!cat) continue;                           // no such category — nothing to enforce
+    const posters = READ_ONLY_CATEGORIES[catName].map((n) => roleId[n]).filter(Boolean);
+    if (!posters.length) continue;                // the commissioner role is not provisioned yet
+    const targets = [cat, ...(guildChannels || []).filter((c) => c.parent_id === cat.id && [0, 5, 15].includes(c.type))];
+    for (const chan of targets) {
+      const ow = chan.permission_overwrites || [];
+      const has = (id, allow, deny) => {
+        const o = ow.find((x) => x.id === id);
+        if (!o) return false;
+        return (BigInt(o.allow || "0") & allow) === allow && (BigInt(o.deny || "0") & deny) === deny;
+      };
+      /* Discord applies a role or member overwrite AFTER the @everyone one, so any other entry that
+         ALLOWS a posting bit would quietly reopen the room (the Staff grant a recreated
+         #announcements used to carry, a hand-added role). Those bits are stripped from every kept
+         entry; everything else about it (a mute, a bot's view grant) stays as it is. */
+      const POSTING = 2048n | THREAD_BITS;
+      const others = ow.filter((o) => o.id !== GUILD && !posters.includes(o.id));
+      const othersClean = others.every((o) => (BigInt(o.allow || "0") & POSTING) === 0n);
+      if (has(GUILD, INFO_EVERYONE_ALLOW, INFO_EVERYONE_DENY) && posters.every((rid) => has(rid, INFO_POSTER_ALLOW, 0n)) && othersClean) continue;
+      const keep = others.map((o) => ({ id: o.id, type: o.type, allow: String(BigInt(o.allow || "0") & ~POSTING), deny: String(o.deny || "0") }));
+      const next = [
+        { id: GUILD, type: 0, allow: String(INFO_EVERYONE_ALLOW), deny: String(INFO_EVERYONE_DENY) },
+        ...posters.map((rid) => ({ id: rid, type: 0, allow: String(INFO_POSTER_ALLOW), deny: "0" })),
+        ...keep,
+      ];
+      try {
+        await dApi("PATCH", `/channels/${chan.id}`, { permission_overwrites: next });
+        chan.permission_overwrites = next;
+        sum.infoLocked = (sum.infoLocked || 0) + 1;
+      } catch (e) { sum.errors.push({ readOnlyCategory: chan.name, error: String(e.message || e) }); }
+    }
   }
 }
 
@@ -1722,6 +1771,9 @@ export default async (req) => {
   /* #scouting-links: the league reads, club management posts. */
   try { await enforcePostOnlyBoards(guildChannels, roleId, sum); }
   catch (e) { sum.errors.push({ postOnlyBoard: String(e.message || e) }); }
+  /* Information: the league posts, everyone reads — no member messages or threads anywhere in it. */
+  try { await enforceReadOnlyCategories(guildChannels, roleId, sum); }
+  catch (e) { sum.errors.push({ readOnlyCategory: String(e.message || e) }); }
 
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
@@ -2219,7 +2271,7 @@ export default async (req) => {
         roleIcons: sum.roleIcons || 0,
         automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
         automodCreated: sum.automodCreated || null, automodGifAllow: sum.automodGifAllow || 0,
-        automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0,
+        automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0, infoLocked: sum.infoLocked || 0,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
         verificationRaised: sum.verificationRaised || null,
@@ -2252,6 +2304,7 @@ export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy
   AUTOMOD_URL_RULE, AUTOMOD_URL_REGEX, AUTOMOD_URL_ALLOW, DENY_STRIP_NAMED, DENY_GRANT_NAMED,
   AUTOMOD_EXEMPT_CHANNELS, enforcePostOnlyBoards, POST_ONLY_BOARDS,
   BOARD_EVERYONE_ALLOW, BOARD_EVERYONE_DENY, BOARD_POSTER_ALLOW,
+  enforceReadOnlyCategories, READ_ONLY_CATEGORIES, INFO_EVERYONE_ALLOW, INFO_EVERYONE_DENY, INFO_POSTER_ALLOW, THREAD_BITS,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
   removeDepartedSignups, SIGNUP_REMOVAL_GRACE_HOURS,
