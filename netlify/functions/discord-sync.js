@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
   desiredRolesFor, applyManagedRoles, managedRoleIds } from "../../shared/roles.mjs";
 import { buildDepartureEmbed } from "../../shared/departure-card.mjs";
+import { buildNoticeEmbed } from "../../bot/club-notices.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -1126,6 +1127,42 @@ async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
   }
 }
 
+/* ---- club notices backstop (v2.42) ------------------------------------------------------------
+   public.club_notify() writes club_notices; the always-on bot posts them into the club's private
+   room within a second. If the bot is down, nothing else would ever deliver them — so every sweep
+   posts whatever has sat unposted for 5 minutes, claiming each row on discord_post_log exactly the
+   way the bot does, so the two lanes never double-post. */
+const CLUB_NOTICE_BACKSTOP_MS = 5 * 60 * 1000;
+async function flushClubNotices(sum) {
+  const before = new Date(Date.now() - CLUB_NOTICE_BACKSTOP_MS).toISOString();
+  const rows = await sbGet(`club_notices?posted_at=is.null&created_at=lt.${encodeURIComponent(before)}&order=created_at.asc&limit=50`);
+  if (!rows || !rows.length) return;
+  const teamIds = Array.from(new Set(rows.map((r) => r.team_id)));
+  const teams = await sbGet(`teams?id=in.(${teamIds.join(",")})&select=id,discord_channel_id`);
+  const roomOf = Object.fromEntries((teams || []).map((t) => [t.id, t.discord_channel_id]));
+  for (const row of rows) {
+    const room = roomOf[row.team_id];
+    if (!room) { sum.clubNoticesNoRoom = (sum.clubNoticesNoRoom || 0) + 1; continue; }
+    const ref = "club:" + row.id;
+    const c = await rfetch(`${SB_URL}/rest/v1/discord_post_log`, { method: "POST", headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify({ kind: "club", ref }) });
+    if (c.status !== 201) continue;                       // 409: the bot has it
+    let actor = null;
+    if (row.actor_profile_id) {
+      try { const p = await sbGet(`profiles?id=eq.${row.actor_profile_id}&select=gamertag`); actor = p[0] && p[0].gamertag ? p[0].gamertag : null; } catch { /* fine */ }
+    }
+    try {
+      const r = await dApi("POST", `/channels/${room}/messages`, { embeds: [buildNoticeEmbed(row, actor)], allowed_mentions: { parse: [] } });
+      if (!r || r.__notfound || !r.id) throw new Error("did not deliver");
+      await sbPatch(`club_notices?id=eq.${row.id}`, { posted_at: new Date().toISOString(), post_error: null });
+      sum.clubNoticesPosted = (sum.clubNoticesPosted || 0) + 1;
+    } catch (e) {
+      await rfetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.club&ref=eq.${encodeURIComponent(ref)}`, { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } }).catch(() => {});
+      try { await sbPatch(`club_notices?id=eq.${row.id}`, { post_error: String(e.message || e).slice(0, 200) }); } catch { /* observability only */ }
+      sum.errors.push({ clubNotice: row.id, error: String(e.message || e) });
+    }
+  }
+}
+
 /* Read-only CATEGORIES (2026-09-13): every channel under Information — welcome, rules, schedule,
    standings, season-signups, news, website, announcements, member-departures, and whatever is added
    there next — is the league talking to its members, never the other way round. Nobody but the
@@ -1774,6 +1811,10 @@ export default async (req) => {
   /* Information: the league posts, everyone reads — no member messages or threads anywhere in it. */
   try { await enforceReadOnlyCategories(guildChannels, roleId, sum); }
   catch (e) { sum.errors.push({ readOnlyCategory: String(e.message || e) }); }
+  /* Club notices the gateway bot did not post (it is the instant lane; this is the backstop when
+     it is down): anything unposted for 5 minutes goes out from here, under the same claim. */
+  try { await flushClubNotices(sum); }
+  catch (e) { sum.errors.push({ clubNotices: String(e.message || e) }); }
 
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
@@ -2272,6 +2313,7 @@ export default async (req) => {
         automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
         automodCreated: sum.automodCreated || null, automodGifAllow: sum.automodGifAllow || 0,
         automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0, infoLocked: sum.infoLocked || 0,
+        clubNoticesPosted: sum.clubNoticesPosted || 0,
         reapedRoles: sum.reapedRoles || 0, reapedChannels: sum.reapedChannels || 0,
         postingStripped: sum.postingStripped || 0, postingGranted: sum.postingGranted || 0,
         verificationRaised: sum.verificationRaised || null,

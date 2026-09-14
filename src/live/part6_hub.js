@@ -1493,7 +1493,13 @@ CG.hubRoster = function(qs){
       seen[c.profile_id] = 1; rightsHeld.push({ id:c.profile_id, tag:(lg._profName||{})[c.profile_id]||"a player", salary:c.salary, end:c.end_season });
     });
   }
-  var rows = roster.map(function(p){
+  /* v2.42: pre-season loans (randomly assigned, or a late sign-up placed the same way) are set
+     apart from the club's own players — their own block, a tinted row, a LOAN chip first, and the
+     position they registered when they are listed elsewhere for the pre-season (Rule 0.4). */
+  var isLoan = function(p){ return !p.mgmt && (p.origin === "preseason_random" || p.origin === "latecomer_random"); };
+  var regPos = {}; (lg._registrationsRaw||[]).forEach(function(r){ if (r.profile_id && r.position) regPos[r.profile_id] = r.position; });
+  var contracted = roster.filter(function(p){ return !isLoan(p); }), loans = roster.filter(isLoan);
+  var rowFor = function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
     var status = waived ? '<span class="chip chip-loss">Waived</span>'
       : mrole ? '<span class="chip chip-chrome">'+mrole+'</span>'
@@ -1506,13 +1512,13 @@ CG.hubRoster = function(qs){
     /* v2.34 — where his deal stands, and the one club-side move: extend, once the window is open */
     var signedExt = CG.signedExtensionOf ? CG.signedExtensionOf(p.id) : null;
     /* v2.35: a pre-season loan is not a contract — no term, no "final season", no club actions */
-    var loan = !p.mgmt && p.origin === "preseason_random";
+    var loan = isLoan(p);
     var expiring = !p.mgmt && !loan && CG.isExpiring && CG.isExpiring(p.id);
     var openOffer = !p.mgmt && (CG._clubOffers||[]).filter(function(o){ return o.player_id===p.id && !o.immediate; })[0];
     if (signedExt) status += ' <span class="chip chip-win" title="Re-signed — the new deal starts with next season’s cap year (Rule 2.5)">Signed thru S'+esc(String(signedExt.end_season))+'</span>';
     else if (expiring) status += ' <span class="chip chip-warn" title="His contract ends after this season (Rule 2.2)">Final season</span>';
     if (openOffer) status += ' <span class="chip chip-live" title="'+(CG.offerAwaitsClub(openOffer)?'His number is waiting for you on your dashboard':'Your offer is waiting on him')+'">'+(CG.offerAwaitsClub(openOffer)?'His ask':'Offer out')+'</span>';
-    if (loan) status += ' <span class="chip" title="Randomly assigned for the pre-season — he returns to the draft pool when the final pre-season game ends (Rule 0.4)">Pre-season loan</span>';
+    if (loan) status = '<span class="chip chip-ink" style="--bc:var(--steel)" title="'+(p.origin==="latecomer_random"?"Late sign-up placed for the pre-season":"Randomly assigned for the pre-season")+' — not the club’s asset: no trades, no waivers; he returns to the draft pool when the final pre-season game ends (Rule 0.4)">Loan</span> '+status;
     var extRow = !p.mgmt && !loan && CG.extendableContractOf && CG.extendableContractOf(p.id);
     var extBtn = (extRow && extRow.team_id === (lg._codeToId||{})[club])
       ? '<button class="btn btn-chrome btn-sm" data-extend="'+p.id+'">Extend</button>' : '';
@@ -1528,16 +1534,22 @@ CG.hubRoster = function(qs){
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
           '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
     var gp = (lg.pstats[p.id]||{}).gp||0;
-    return '<tr'+(waived?' style="opacity:.55"':"")+'>'+
+    var rp = regPos[p.id];
+    var posCell = (loan && rp && rp !== p.pos)
+      ? '<span title="Listed at '+esc(p.pos)+' for the pre-season to fill an open seat; he registered as '+esc(rp)+' (Rule 0.4)">'+esc(p.pos)+' <span class="caption">· reg. '+esc(rp)+'</span></span>'
+      : esc(p.pos);
+    return '<tr class="'+(loan?"loan-row":"")+'"'+(waived?' style="opacity:.55"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
-      '<td class="tnum">'+p.pos+'</td>'+
+      '<td class="tnum">'+posCell+'</td>'+
       '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
       '<td class="tnum" data-v="'+(p.salary||0)+'"><b>'+CG.fmtMoney(p.salary)+'</b></td>'+
       '<td class="tnum">'+(loan?'<span class="caption">loan</span>':p.term+' yr'+(p.term>1?"s":""))+'</td>'+
       '<td class="tnum" data-v="'+gp+'">'+gp+'</td>'+
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
-  }).join("");
+  };
+  var rows = contracted.map(rowFor).join("") +
+    (loans.length ? '<tr class="loan-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
   var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !CG.isWaived(p.id); });
   var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !CG.isWaived(p.id); });
   if (roster.some(function(p){ return p.spotId; })){
@@ -1603,7 +1615,7 @@ CG.hubRoster = function(qs){
       ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
       : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
     'In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
-  var loanN = roster.filter(function(p){ return p.origin==="preseason_random"; }).length;
+  var loanN = loans.length;
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+

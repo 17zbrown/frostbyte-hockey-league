@@ -17,7 +17,9 @@ let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
 const SEASON = { id: "S1", name: "Season 1", registration_open: true,
-  signup_deadline_at: "2026-09-14T04:00:00.000Z", registration_deadline: null };
+  /* a deadline still ahead of the real clock — the notice drops the date once it has passed, and a
+     fixed date here quietly started failing the day the real deadline went by (2026-09-14) */
+  signup_deadline_at: new Date(Date.now() + 10 * 86400000).toISOString(), registration_deadline: null };
 
 let DB, posts, claims, cfgRows;
 function reset(over = {}) {

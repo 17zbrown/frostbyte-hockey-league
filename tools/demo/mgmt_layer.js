@@ -40,7 +40,10 @@
     CG.TEAMS.forEach(function(x){ if (!x.id) x.id = "t-"+x.code; });
     CG.lg._codeToId = {}; CG.lg._idToCode = {};
     CG.TEAMS.forEach(function(x){ CG.lg._codeToId[x.code] = x.id; CG.lg._idToCode[x.id] = x.code; });
-    CG.lg._profName = NAMES; CG.lg._mgmtApps = []; CG.lg._myTrades = []; CG.lg._myOffers = []; CG.lg._appMsgs = {};
+    CG.lg._profName = NAMES;
+    /* a few pre-season loans on the demo roster, one listed out of position, so the roster page's loan block can be seen */
+    (function(){ var rs = (CG.lg.byTeam[t.code]||[]); rs.slice(-4).forEach(function(p, i){ p.origin = i===3 ? "latecomer_random" : "preseason_random"; p.spotId = p.spotId || ("spot-"+p.id); p.term = 1; });
+      CG.lg._registrationsRaw = rs.slice(-4).map(function(p, i){ return { profile_id: p.id, position: i===0 ? (p.pos==="C" ? "LW" : "C") : p.pos, season_id: CG.SEASON.id, status: "assigned" }; }); })(); CG.lg._mgmtApps = []; CG.lg._myTrades = []; CG.lg._myOffers = []; CG.lg._appMsgs = {};
     /* the Owner has set a policy: the GM's roster and trades wait for approval, the AGM cannot see the draft */
     /* Management is the Owner's by default: the GM has been given it (read-only), the AGM has not */
     CG.lg._mgmtPolicy = { gm:{ roster:"approve", tradehub:"approve", management:"full" }, agm:{ draft:"hidden", freeagents:"approve" } };

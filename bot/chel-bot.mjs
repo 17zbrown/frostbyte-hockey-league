@@ -17,6 +17,7 @@ import { createIncidentNotifier } from "./incidents.mjs";
 import { createStaffAlerter } from "./staff-alerts.mjs";
 import { createRoleSyncer } from "./role-sync.mjs";
 import { createEaPoller } from "./ea-poll.mjs";
+import { createClubNotices } from "./club-notices.mjs";
 import { createClient } from "@supabase/supabase-js";
 
 const env = {
@@ -108,6 +109,13 @@ client.once(Events.ClientReady, (c) => {
     .then((n) => { if (n) console.log(`incident catch-up: announced ${n}`); })
     .catch((e) => console.error("incident catch-up failed:", e.message));
   incSweep();
+  /* club notices: a signing, waiver, trade or roster move written while this process was down is
+     otherwise never posted into the club's room */
+  const clubSweep = () => CLUB.catchUp()
+    .then((n) => { if (n) console.log(`club-notice catch-up: posted ${n}`); })
+    .catch((e) => console.error("club-notice catch-up failed:", e.message));
+  clubSweep();
+  setInterval(clubSweep, 300_000);
   setInterval(incSweep, 600_000);
   setInterval(roleSweep, 600_000);
 });
@@ -139,6 +147,8 @@ client.on(Events.ShardDisconnect, (event) => {
 const INC = createIncidentNotifier(env);
 const DESK = createStaffAlerter(env);
 const RS = createRoleSyncer(env);
+const CLUB = createClubNotices(env);
+let clubNoticesLive = false;
 let incidentsLive = false;
 let deskAlertsLive = false;
 let roleSyncLive = false;
@@ -191,6 +201,19 @@ if (env.SB_URL && env.SB_KEY) {
      arrive stripped to a bare id (realtime.apply_rls filters old rows to pkey even for the
      service role). Same rules module as the sweep (shared/roles.mjs). The sweep remains the
      backstop for everything the triggers can't see: new links, Discord-side edits, season flips. */
+  /* ---- club notices, instantly ----
+     public.club_notify() writes one row per club per event (signing, waiver, trade step, loan,
+     squad move, block flag, offer); this posts it into the club's private room within a second.
+     The site notifications for the Owner/GM/AGM are written by the database in the same call. */
+  sb.channel("club-notices")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "club_notices" }, (payload) => {
+      CLUB.announce(payload.new).then((r) => { if (r !== "skip") console.log(`club notice ${payload.new && payload.new.id}: ${r}`); });
+    })
+    .subscribe((status) => {
+      clubNoticesLive = status === "SUBSCRIBED";
+      console.log(`club notices: ${status}`);
+    });
+
   sb.channel("role-sync")
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "role_sync_queue" }, (payload) => {
       const row = payload.new || {};
@@ -207,6 +230,7 @@ if (env.SB_URL && env.SB_KEY) {
 setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced,
     deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed,
     roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched,
+    clubNoticesLive, clubNotices: CLUB.sum.announced, clubNoticesFailed: CLUB.sum.failed,
     eaPoll: EA.sum } })
   .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
