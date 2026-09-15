@@ -126,7 +126,7 @@ console.log("\n— wired into the sweep, after its bindings exist");
   const at = (re) => lines.findIndex((l) => re.test(l));
   const sumLine = at(/^\s*const sum = \{/), chanLine = at(/^\s*const guildChannels = await dApi/);
   const boardCall = at(/await enforcePostOnlyBoards\(guildChannels, roleId, sum\)/);
-  const amCall = at(/await enforceAutomodExemptions\(roleId, guildChannels, sum\)/);
+  const amCall = at(/await enforceAutomodExemptions\(roleId, guildChannels, sum, teams\)/);
   A("the board sweep is called", boardCall > -1);
   A("...after `sum`", boardCall > sumLine, `sum ${sumLine + 1}, call ${boardCall + 1}`);
   A("...and after `guildChannels`", boardCall > chanLine, `chans ${chanLine + 1}, call ${boardCall + 1}`);

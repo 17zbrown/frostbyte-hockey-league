@@ -103,11 +103,45 @@ console.log("\n— it degrades safely");
   A("...and no error either — the next sweep retries", sum.errors.length === 0);
 }
 
+console.log("\n— a club's management may @ whatever it wants in its own room (2026-09-15)");
+{
+  ROLE["cghl management"] = "r-mgmt";
+  const mention = (exempt, chans) => ([
+    ...rule(idsFor(I.AUTOMOD_EXEMPT)),
+    { id: "AM4", name: I.AUTOMOD_SPAM_RULE, exempt_roles: exempt, exempt_channels: [] },
+    { id: "AM5", name: I.AUTOMOD_MENTION_RULE, exempt_roles: exempt, exempt_channels: chans },
+  ]);
+  const TEAMS = [{ id: "t1", discord_channel_id: "room-bos" }, { id: "t2", discord_channel_id: "room-dal" }, { id: "t3", discord_channel_id: null }];
+  rules = mention(idsFor(["commissioner", "staff"]), []); patched = []; created = [];
+  let sum = { errors: [] };
+  await I.enforceAutomodExemptions(ROLE, NO_CHANS, sum, TEAMS);
+  const spam = patched.find((x) => x.id === "AM4"), ment = patched.find((x) => x.id === "AM5");
+  A("the Spam content rule is patched", !!spam);
+  for (const n of I.AUTOMOD_MGMT_EXEMPT) A(`...${n} exempt from Spam content`, spam && spam.body.exempt_roles.includes(ROLE[n]));
+  A("...commissioner and staff still exempt (add-only)", spam && spam.body.exempt_roles.includes(ROLE.commissioner) && spam.body.exempt_roles.includes(ROLE.staff));
+  A("...players are NOT exempt from Spam content", spam && !spam.body.exempt_roles.includes(ROLE.player));
+  A("the Mention spam rule is patched", !!ment);
+  for (const n of I.AUTOMOD_MGMT_EXEMPT) A(`...${n} exempt from Mention spam`, ment && ment.body.exempt_roles.includes(ROLE[n]));
+  A("...every club room is exempt from Mention spam", ment && ment.body.exempt_channels.includes("room-bos") && ment.body.exempt_channels.includes("room-dal"));
+  A("...a club with no room adds nothing", ment && !ment.body.exempt_channels.includes(null) && ment.body.exempt_channels.length === 2);
+  A("...club rooms are NOT exempted from Spam content (generic spam stays gated for the rest of the room)", !spam.body.exempt_channels);
+  A("counted", sum.automodMgmtExempted === I.AUTOMOD_MGMT_EXEMPT.length * 2, String(sum.automodMgmtExempted));
+
+  rules = mention(idsFor(["commissioner", "staff", ...I.AUTOMOD_MGMT_EXEMPT]), ["room-bos", "room-dal"]); patched = []; created = []; sum = { errors: [] };
+  await I.enforceAutomodExemptions(ROLE, NO_CHANS, sum, TEAMS);
+  A("an already-correct pair needs no write", !patched.find((x) => x.id === "AM4" || x.id === "AM5"));
+
+  rules = mention(idsFor(["commissioner", "staff"]), []); patched = []; sum = { errors: [] };
+  await I.enforceAutomodExemptions(ROLE, NO_CHANS, sum);
+  A("with no teams passed, roles are still exempted and no channel is invented", !!patched.find((x) => x.id === "AM4") && !(patched.find((x) => x.id === "AM5") || {}).body?.exempt_channels);
+  A("the four exempt roles are exactly the front office", JSON.stringify(I.AUTOMOD_MGMT_EXEMPT) === JSON.stringify(["owner","general manager","assistant general manager","cghl management"]));
+}
+
 console.log("\n— reconciled by NAME every sweep, not left as hand-entered ids");
 {
   const fs = await import("node:fs");
   const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
-  A("the sweep calls it", /await enforceAutomodExemptions\(roleId, guildChannels, sum\)/.test(src));
+  A("the sweep calls it, passing the club rooms", /await enforceAutomodExemptions\(roleId, guildChannels, sum, teams\)/.test(src));
   A("...resolving ids from role NAMES", /AUTOMOD_EXEMPT\.map\(\(n\) => roleId\[n\]\)/.test(src));
   const lines = src.split("\n");
   const sumLine = lines.findIndex((l) => /^\s*const sum = \{/.test(l));

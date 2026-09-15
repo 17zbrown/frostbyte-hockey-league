@@ -978,9 +978,22 @@ const AUTOMOD_EXEMPT = ["commissioner", "staff", "player", "free agent", "owner"
    channel widens nothing: the audience that can write in it is already the narrowest on the server. */
 const AUTOMOD_EXEMPT_CHANNELS = { [AUTOMOD_LINK_RULE]: ["scouting-links"],
   [AUTOMOD_ADS_RULE]: ["scouting-links"] };
-async function enforceAutomodExemptions(roleId, guildChannels, sum) {
+/* A club's management may @ whatever it wants in its own room, any time (2026-09-15). A GM tagging
+   the six he is dressing is the point of the room, and Discord's generic "Spam content" detector —
+   which flags mention-heavy messages — blocked exactly that in #stars. AutoMod exemptions cannot be
+   scoped to "this role in that channel", so: the four front-office roles are exempt from both
+   mention-shaped rules everywhere (accountable seats; the ML spam gate never had a reason to fire
+   on them), and every club room is exempt from the mention-spam rule outright — it is a private
+   room of ~20 people, and nobody outside the club is reachable from it. Add-only and by NAME, like
+   the rest of this reconciler, so a rebuilt role or a hand-edit heals within a sweep. */
+const AUTOMOD_SPAM_RULE = "Spam content";
+const AUTOMOD_MENTION_RULE = "Mention spam";
+const AUTOMOD_MGMT_EXEMPT = ["owner", "general manager", "assistant general manager", "cghl management"];
+async function enforceAutomodExemptions(roleId, guildChannels, sum, teams) {
   const want = AUTOMOD_EXEMPT.map((n) => roleId[n]).filter(Boolean);
   if (!want.length) return;                       // roles not provisioned yet — try next sweep
+  const wantMgmt = AUTOMOD_MGMT_EXEMPT.map((n) => roleId[n]).filter(Boolean);
+  const clubRooms = (teams || []).map((t) => t && t.discord_channel_id).filter(Boolean);
   const rules = await dApi("GET", `/guilds/${GUILD}/auto-moderation/rules`);
   if (!Array.isArray(rules)) return;
   const chanId = (name) => {
@@ -1005,7 +1018,7 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum) {
     } catch (e) { sum.errors.push({ automodCreate: AUTOMOD_URL_RULE, error: String(e.message || e) }); }
   }
 
-  for (const ruleName of [AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE, AUTOMOD_URL_RULE]) {
+  for (const ruleName of [AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE, AUTOMOD_URL_RULE, AUTOMOD_SPAM_RULE, AUTOMOD_MENTION_RULE]) {
     const rule = rules.find((r) => r && r.name === ruleName);
     if (!rule) { sum.automodMissing = (sum.automodMissing ? sum.automodMissing + "," : "") + ruleName; continue; }
     const patch = {};
@@ -1017,6 +1030,15 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum) {
       if (missingRoles.length) {
         patch.exempt_roles = Array.from(new Set([...(rule.exempt_roles || []), ...want]));
         sum.automodExempted = (sum.automodExempted || 0) + missingRoles.length;
+      }
+    }
+    /* the two mention-shaped rules never fire on the front office */
+    if ((ruleName === AUTOMOD_SPAM_RULE || ruleName === AUTOMOD_MENTION_RULE) && wantMgmt.length) {
+      const haveM = new Set(rule.exempt_roles || []);
+      const missingM = wantMgmt.filter((id) => !haveM.has(id));
+      if (missingM.length) {
+        patch.exempt_roles = Array.from(new Set([...(rule.exempt_roles || []), ...wantMgmt]));
+        sum.automodMgmtExempted = (sum.automodMgmtExempted || 0) + missingM.length;
       }
     }
     /* the URL gate's GIF allow-list is add-only, like every other reconciliation here — a hand-
@@ -1034,7 +1056,8 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum) {
         sum.automodGifAllow = (sum.automodGifAllow || 0) + missingAllow.length;
       }
     }
-    const wantChans = (AUTOMOD_EXEMPT_CHANNELS[ruleName] || []).map(chanId).filter(Boolean);
+    const wantChans = (AUTOMOD_EXEMPT_CHANNELS[ruleName] || []).map(chanId).filter(Boolean)
+      .concat(ruleName === AUTOMOD_MENTION_RULE ? clubRooms : []);
     const haveChans = new Set(rule.exempt_channels || []);
     const missingChans = wantChans.filter((id) => !haveChans.has(id));
     if (missingChans.length) {
@@ -1767,7 +1790,7 @@ export default async (req) => {
   /* Signed-up members may post links; the not-signed-up may not. Runs after `roleId`,
      `guildChannels` and `sum` (all declared above), for the temporal-dead-zone reason noted on the
      mention policy. */
-  try { await enforceAutomodExemptions(roleId, guildChannels, sum); }
+  try { await enforceAutomodExemptions(roleId, guildChannels, sum, teams); }
   catch (e) { sum.errors.push({ automodExempt: String(e.message || e) }); }
   /* #scouting-links: the league reads, club management posts. */
   try { await enforcePostOnlyBoards(guildChannels, roleId, sum); }
@@ -2273,7 +2296,7 @@ export default async (req) => {
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
-        automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
+        automodExempted: sum.automodExempted || 0, automodMgmtExempted: sum.automodMgmtExempted || 0, automodChannels: sum.automodChannels || 0,
         automodCreated: sum.automodCreated || null, automodGifAllow: sum.automodGifAllow || 0,
         automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0, infoLocked: sum.infoLocked || 0,
         clubNoticesPosted: sum.clubNoticesPosted || 0,
@@ -2305,6 +2328,7 @@ export default async (req) => {
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
 export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
+  AUTOMOD_SPAM_RULE, AUTOMOD_MENTION_RULE, AUTOMOD_MGMT_EXEMPT,
   enforceAutomodExemptions, AUTOMOD_EXEMPT, AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE,
   AUTOMOD_URL_RULE, AUTOMOD_URL_REGEX, AUTOMOD_URL_ALLOW, DENY_STRIP_NAMED, DENY_GRANT_NAMED,
   AUTOMOD_EXEMPT_CHANNELS, enforcePostOnlyBoards, POST_ONLY_BOARDS,
