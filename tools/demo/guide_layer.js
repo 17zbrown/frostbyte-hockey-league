@@ -81,7 +81,7 @@
     CG.auth = { user:{ id:uid }, profile:{ id:uid, gamertag:NAMES[uid], display_name:NAMES[uid], role:"member", in_guild:true, ea_id:NAMES[uid].replace(/[^A-Za-z0-9]/g,"")+"_EA", platform:"PS5" }, role: AS==="player" ? "member" : "mgmt", registration:null, ownerApp:null };
     CG._notifs = []; CG._trades = [];
     CG.myClub = function(){ return t.code; };
-    CG.loadManagerData = async function(){}; CG.loadMyLineups = function(){}; CG.loadAvailability = async function(){}; CG.loadTrades = async function(){}; CG.loadMyOffers = async function(){ return false; };
+    CG.loadManagerData = async function(){}; CG.loadMyLineups = function(){}; CG.loadMyWeekLineups = function(){ return Promise.resolve(); }; CG.loadAvailability = async function(){}; CG.loadTrades = async function(){}; CG.loadMyOffers = async function(){ return false; };
     CG.reloadLeague = async function(){ CG.renderChrome(); CG.router(); };
     CG.liveReload = function(){};
     /* per-topic seeds live in tools/demo/seeds/<topic>.js: each pushes { name, run } onto

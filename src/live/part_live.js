@@ -674,7 +674,8 @@ CG.buildLiveLeague = async function(){
        week had only one, invent a second two days later, which is where the phantom dates came
        from. A three-night week silently lost its Friday: players could not mark it, and Rule 5.1
        asks them to cover all three games of at least two nights. */
-    var nights = Object.keys(byNight).sort().map(function(k){ return byNight[k]; });
+    var nightDays = Object.keys(byNight).sort();
+    var nights = nightDays.map(function(k){ return byNight[k]; });
     /* Deadline: the first game night's own day at 7:30 PM ET — a normal week opens Wednesday, so
        that is Wednesday 7:30 PM ET, 90 minutes before the 9:00 PM puck drop (and before the T-30
        lineup lock, Rule 5.3). A holiday-shifted week keeps the same rule against its own first
@@ -683,7 +684,7 @@ CG.buildLiveLeague = async function(){
     CG.WEEK8 = { key:(avStage==="preseason"?"pre":avStage==="playoff"?"po":"w")+avWk,
       label:(avStage==="preseason"?"Pre-season week ":avStage==="playoff"?"Playoff week ":"Week ")+avWk,
       deadline: Date.parse(CG.etISO(dlDay, "19:30")),   /* 7:30pm ET, correct across EDT/EST */
-      nights: nights.map(function(at, i){ return { key:"n"+(i+1), at:at }; }), open:true };
+      nights: nights.map(function(at, i){ return { key:"n"+(i+1), at:at, day:nightDays[i] }; }), open:true };
   } else {
     /* No unplayed games — off-season, or before a schedule exists. Without this the prototype
        seed from part6_hub survives and the site publicly advertises a dead 2026 deadline.
@@ -700,12 +701,27 @@ CG.buildLiveLeague = async function(){
     var saved = CG.availGet(playerId);
     /* Defaults are built from the week's REAL night keys. A saved entry from a two-night week is
        merged over them, so a player who answered before the schedule changed shows answered for
-       the nights they answered and "no response" for the new one, rather than the row breaking. */
+       the nights they answered and "no response" for the new one, rather than the row breaking.
+       v2.44: an answer is PER GAME — nights[k].games = { "<gameId>": "yes"|"no" } — with nights[k].st
+       kept as the night's summary (yes / no / part / nr) so every older consumer still reads. A row
+       saved under the old per-night form ({ st } with no games) is honored as that answer for
+       every game that night (CG.avGame falls back to st). */
     var base = { nights:{}, at:null };
-    ((CG.WEEK8 && CG.WEEK8.nights) || []).forEach(function(n){ base.nights[n.key] = { st:"nr" }; });
+    ((CG.WEEK8 && CG.WEEK8.nights) || []).forEach(function(n){ base.nights[n.key] = { st:"nr", games:{} }; });
     if (!saved) return base;
     var out = { at: saved.at, nights: {} };
-    Object.keys(base.nights).forEach(function(k){ out.nights[k] = saved.nights[k] || { st:"nr" }; });
+    Object.keys(base.nights).forEach(function(k){
+      var v = saved.nights[k];
+      if (!v){ out.nights[k] = { st:"nr", games:{} }; return; }
+      var games = v.games || {};
+      var ids = Object.keys(games);
+      var st = v.st;
+      if (ids.length){
+        var yes = ids.filter(function(g){ return games[g]==="yes"; }).length;
+        st = yes===ids.length ? "yes" : yes===0 ? "no" : "part";
+      }
+      out.nights[k] = { st: st||"nr", games: games, note: v.note||"" };
+    });
     return out;
   };
 
@@ -1492,6 +1508,30 @@ CG.loadMyLineups = function(){
       /* re-seed from scratch each pass: a cached "no lineup yet" MUST be able to become a real
          lineup once the GM posts it, which a write-once cache could never do */
       mine.forEach(function(g){ CG._pubLineups[me.team+":"+g.id] = null; });
+      ((r&&r.data)||[]).forEach(function(row){ CG._pubLineups[me.team+":"+row.game_id] = row; });
+      if (/^#\/hub/.test(location.hash) && CG.rerenderKeepScroll) CG.rerenderKeepScroll();
+    }, function(){});
+};
+/* v2.44: the WHOLE roster can see the lineups set for the week. game_lineups is readable by
+   every signed-in member (the builder was only ever gated in the UI), so fetch the club's rows for
+   every game in the current availability week — all three nights, not just tonight's — into the
+   same cache plannedLineup reads. Re-render in place when they land so nothing jumps. */
+CG._myWeekLineupsAt = 0;
+CG.loadMyWeekLineups = function(force){
+  if (!CG.sb || !CG.lg || !CG.auth.user) return Promise.resolve();
+  var me = CG.me && CG.me(); if (!me || !me.team) return Promise.resolve();
+  var tid = (CG.lg._codeToId||{})[me.team]; if (!tid) return Promise.resolve();
+  if (!force && CG.now() - CG._myWeekLineupsAt < 60000) return Promise.resolve();   /* a minute is plenty */
+  var nights = (CG.WEEK8 && CG.WEEK8.open && CG.WEEK8.nights) || [];
+  var games = [];
+  nights.forEach(function(n){ (CG.clubGamesOnNight ? CG.clubGamesOnNight(me.team, n) : []).forEach(function(g){ games.push(g); }); });
+  if (!games.length) return Promise.resolve();
+  CG._myWeekLineupsAt = CG.now();
+  return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie")
+    .eq("team_id", tid).in("game_id", games.map(function(g){ return g.id; }))
+    .then(function(r){
+      if (r && r.error) return;                     /* leave it UNKNOWN rather than assert "not set" */
+      games.forEach(function(g){ CG._pubLineups[me.team+":"+g.id] = null; });
       ((r&&r.data)||[]).forEach(function(row){ CG._pubLineups[me.team+":"+row.game_id] = row; });
       if (/^#\/hub/.test(location.hash) && CG.rerenderKeepScroll) CG.rerenderKeepScroll();
     }, function(){});
@@ -4712,6 +4752,25 @@ CG.subscribeDMs = function(){
    LIVE: AVAILABILITY (availability table) + TRADES (trades table + accept_trade)
    The prototype accessors in part6 are overridden here — one source of truth.
    ================================================================ */
+/* ---- availability helpers (pure; used by the hub, the builder, the grid and the demo) ---- */
+/* one game's answer: the per-game value, else the night's legacy answer, else no response */
+CG.avGame = function(av, nightKey, gameId){
+  var n = av && av.nights && av.nights[nightKey]; if (!n) return "nr";
+  if (n.games && n.games[gameId]) return n.games[gameId];
+  if (!n.games || !Object.keys(n.games).length){ return n.st==="yes"?"yes":n.st==="no"?"no":n.st&&n.st!=="nr"?"maybe":"nr"; }
+  return "nr";
+};
+/* the club's games on one availability night, in puck-drop order (the 3 games a club plays
+   each night; a holiday week may have fewer) */
+CG.clubGamesOnNight = function(club, night){
+  if (!club || !night || !CG.lg) return [];
+  var fmt = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"});
+  var day = night.day || fmt.format(new Date(night.at));
+  return (CG.lg.schedule||[]).filter(function(g){
+    return (g.home===club || g.away===club) && fmt.format(new Date(g.at))===day;
+  }).sort(function(a,b){ return a.at-b.at; });
+};
+
 CG._avail = {};
 CG.loadAvailability = async function(){
   if (!CG.sb || !CG.auth.user || !CG.SEASON || !CG.SEASON.id) return;

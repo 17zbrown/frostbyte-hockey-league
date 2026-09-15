@@ -8,10 +8,10 @@
    dates, so any failure to derive the real week published phantom game nights to managers instead
    of admitting there was nothing scheduled. Shape matches the live object; `open` is the signal. */
 CG.WEEK8 = { key:null, label:"Game week", deadline:null, nights:[], open:false };
-CG.AV_OPTS = [
-  ["yes","Available"],["no","Unavailable"],["maybe","Maybe"],
-  ["late","Available late"],["until","Available until…"],["emg","Emergency sub only"]
-];
+/* v2.44: one answer PER GAME, and it is binary — a night's three games each get Available or Not
+   Available; anything more nuanced goes in the night's note. (The six-way per-night pill set —
+   Maybe / late / until / emergency — was retired with it.) */
+CG.AV_OPTS = [ ["yes","Available"], ["no","Not Available"] ];
 /* availability storage seam — the live build overrides both with the real
    availability table; the prototype keeps its local store */
 CG.availGet = function(pid){ return (CG.store.get("availability")||{})[CG.WEEK8.key+":"+pid] || null; };
@@ -99,6 +99,9 @@ CG.hubNav = function(section){
      under "Team HQ" (complaints is a player tool, so it stays out of Team HQ) */
   var mine = [["", "Dashboard", "home"]];
   if (CG.can("availability.submit")) mine.push(["availability","Availability","cal"]);
+  /* v2.44: every rostered member can see the lineups set for the week (read-only); the builder
+     itself stays a Team HQ tool */
+  (function(){ var meN = CG.me && CG.me(); if (meN && meN.team && CG.can("lineup.viewOwn")) mine.push(["lineups","Lineups","grid"]); })();
   var _mo = CG.mediaOnlyStaff && CG.mediaOnlyStaff();
   if (CG.can("complaints.file")||CG.can("complaints.review")) mine.push(["complaints", (r==="staff" && !_mo)?"Case queue":"Action Center","flag"]);
   /* Messages lives in the account menu (avatar), not the hub sidebar */
@@ -171,6 +174,7 @@ CG.ROUTES.hub = function(param, qs){
   var section = param||"";
   if (section==="") return CG.hubShell("", CG.hubDashboard());
   if (section==="availability") return CG.hubShell("availability", CG.hubAvailability());
+  if (section==="lineups") return (CG.can("lineup.viewOwn") && CG.me() && CG.me().team) ? CG.hubShell("lineups", CG.hubWeekLineups()) : CG.unauthorized("This week's lineups are for the club's rostered players.");
   if (section==="roster") return CG.can("roster.manage") ? CG.hubShell("roster", CG.hubRoster(qs)) : CG.unauthorized("Roster management is a team-management tool.");
   if (section==="tradehub") return CG.can("trades.manage") ? CG.hubShell("tradehub", CG.hubTradeHub(qs)) : CG.unauthorized("The Trade Hub is confidential to team management.");
   if (section==="lineup") return CG.can("lineup.build") ? CG.hubShell("lineup", CG.hubLineup(qs)) : CG.unauthorized("The lineup builder is a team-management tool.");
@@ -274,6 +278,27 @@ CG.hubDashboard = function(){
     if (lg.tonight.length){
       cards.push(CG.tonightCard(me, tonight, inLineup));
     }
+    /* v2.44: the week's lineups, at a glance — which games you are dressed for */
+    if (CG.WEEK8 && CG.WEEK8.open && CG.clubGamesOnNight && me.team){
+      var wk = [];
+      CG.WEEK8.nights.forEach(function(n){ CG.clubGamesOnNight(me.team, n).forEach(function(g){ wk.push(g); }); });
+      if (wk.length){
+        var POSW = ["LW","C","RW","LD","RD","G"], setN = 0, inN = 0;
+        var rowsW = wk.map(function(g){
+          var row = CG._pubLineups ? CG._pubLineups[me.team+":"+g.id] : undefined;
+          if (row === undefined && lg._lineups) row = lg._lineups[me.team+":"+g.id];
+          var slots = row ? CG.plannedLineup(g, me.team) : null;
+          var mySlot = slots ? POSW.filter(function(ps){ return slots[ps]===me.id; })[0] : null;
+          if (row) setN++; if (mySlot) inN++;
+          var opp = g.home===me.team ? 'vs '+((CG.TEAM[g.away]||{}).code||g.away) : '@ '+((CG.TEAM[g.home]||{}).code||g.home);
+          return '<div class="titem"><span class="t-dot '+(mySlot?"grn":row?"":row===null?"red":"")+'"></span><span style="flex:1"><b>'+esc(CG.fmtDay(g.at))+' · '+CG.fmtTime(g.at)+'</b> '+esc(opp)+'</span>'+
+            '<span class="chip'+(mySlot?" chip-win":row?"":row===null?" chip-loss":"")+'" style="font-size:9px;padding:1px 7px">'+(mySlot?"you at "+mySlot:row?"dressed without you":row===null?"not set yet":"…")+'</span></div>';
+        }).join("");
+        cards.push('<div class="card" style="grid-column:1/-1"><div class="card-h"><h3>This week’s lineups</h3><a class="sec-link" href="#/hub/lineups">All six</a></div>'+
+          '<div class="tasklist">'+rowsW+'</div>'+
+          '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+setN+' of '+wk.length+' game'+(wk.length===1?"":"s")+' set so far'+(inN?' · you’re dressed for '+inN:'')+'. Your management can change a lineup until 30 minutes before puck drop (Rule 5.3).</span></div></div>');
+      }
+    }
     if (lg.pstats[me.id].gp){
       var last3 = lg.glog[me.id].slice(-3).reverse();
       cards.push('<div class="card"><div class="card-h"><h3>My last three games</h3><a class="sec-link" href="'+CG.playerRoute(me)+'">Full log</a></div>'+
@@ -367,7 +392,7 @@ CG.hubAvailability = function(){
   var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+
       (CG.WEEK8.open ? ' · deadline '+CG.fmtFull(CG.WEEK8.deadline) : ' · not yet scheduled')+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Weekly availability</h1>'+
-    '<p class="lede" style="margin-top:8px">'+(CG.WEEK8.nights.length||0)+' night'+(CG.WEEK8.nights.length===1?'':'s')+' this week. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
+    '<p class="lede" style="margin-top:8px">'+(CG.WEEK8.nights.length||0)+' night'+(CG.WEEK8.nights.length===1?'':'s')+' this week — answer each game. Answers stay private to your club’s management and league staff (Rule 5.1'+(r==="mgmt"?" — as GM you also see the team grid below":"")+').</p></div>';
   var form = !me
     ? '<div class="note">You’re viewing as league staff — no player profile, so there’s nothing personal to submit. The team grid below is what management and staff see.</div>'
     : '<div class="card"><div class="card-h"><h3>My submission</h3>'+
@@ -375,25 +400,34 @@ CG.hubAvailability = function(){
     '<div class="card-b">'+
     (closed && !mine ? '<div class="empty"><b>The '+esc(CG.WEEK8.label)+' window has closed</b><p>Availability locked at the deadline. Message your GM — a commissioner can still enter a late submission with an override.</p></div>'
     : CG.WEEK8.nights.map(function(n,i){
-      var cur = mine && mine.nights[n.key] ? mine.nights[n.key].st : null;
       var note = mine && mine.nights[n.key] ? (mine.nights[n.key].note||"") : "";
+      var games = CG.clubGamesOnNight ? CG.clubGamesOnNight(me.team, n) : [];
       return '<div style="padding:14px 0;border-top:'+(i?"1px solid var(--line-soft)":"0")+'">'+
-        '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:11px">'+
-        '<b style="font-family:var(--f-disp)">'+CG.fmtFull(n.at)+'</b><span class="caption">Game night '+(i+1)+'</span></div>'+
-        '<div class="av-opt" data-night="'+n.key+'">'+CG.AV_OPTS.map(function(o){
-          return '<button data-av="'+o[0]+'" class="'+(cur===o[0]?("on "+(o[0]==="yes"?"yes":o[0]==="no"?"no":"")):"")+'" '+(closed?"disabled":"")+'>'+o[1]+'</button>';
-        }).join("")+'</div>'+
+        '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">'+
+        '<b style="font-family:var(--f-disp)">'+CG.fmtDay(n.at)+'</b><span class="caption">Game night '+(i+1)+(games.length?' · '+games.length+' game'+(games.length===1?'':'s'):'')+'</span></div>'+
+        (games.length ? games.map(function(g, gi){
+          var cur = CG.avGame ? CG.avGame(mine||{nights:{}}, n.key, g.id) : "nr";
+          var opp = g.home===me.team ? 'vs '+((CG.TEAM[g.away]||{}).name||g.away) : '@ '+((CG.TEAM[g.home]||{}).name||g.home);
+          return '<div class="av-game" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 0">'+
+            '<span class="small" style="min-width:230px"><b class="num">'+CG.fmtTime(g.at)+'</b> <span style="color:var(--steel)">· Game '+(gi+1)+' · '+esc(opp)+'</span></span>'+
+            '<span class="av-opt" data-night="'+n.key+'" data-game="'+esc(g.id)+'">'+CG.AV_OPTS.map(function(o){
+              return '<button data-av="'+o[0]+'" class="'+(cur===o[0]?("on "+o[0]):"")+'" '+(closed?"disabled":"")+'>'+o[1]+'</button>';
+            }).join("")+'</span></div>';
+        }).join("") : '<p class="caption">No games for your club this night.</p>')+
         '<input type="text" data-note="'+n.key+'" placeholder="Optional note (e.g. “on at 9:30 after work”)" value="'+esc(note)+'" style="margin-top:10px;max-width:460px" '+(closed?"disabled":"")+'>'+
       '</div>';
     }).join("")+
     (!closed?'<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
       '<button class="btn btn-chrome" id="avSubmit">'+(mine?"Update availability":"Submit availability")+'</button>'+
-      '<button class="btn btn-ghost" id="avCopy">Copy last week (all available)</button>'+
+      '<button class="btn btn-ghost" id="avCopy">Mark every game available</button>'+
       '<span class="caption" style="align-self:center" id="avCount"></span></div>':""))+
     '</div></div>';
   var grid = "";
   if (CG.can("availability.viewTeam")){
     var roster = (lg.byTeam[me&&me.team?me.team:CG.myClub()]||[]).slice().sort(function(a,b){ return a.pos.localeCompare(b.pos); });
+    var clubCode = me&&me.team?me.team:CG.myClub();
+    var nightGames = {};
+    CG.WEEK8.nights.forEach(function(n){ nightGames[n.key] = CG.clubGamesOnNight ? CG.clubGamesOnNight(clubCode, n) : []; });
     grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc((CG.TEAM[me&&me.team?me.team:CG.myClub()]||{}).name||"—")+'</h3>'+
       '<span class="chip">Visible to management & staff only</span></div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(CG.WEEK8.label)+' availability by player</caption><thead><tr>'+
@@ -404,11 +438,15 @@ CG.hubAvailability = function(){
       '<th class="tleft">Note</th><th>Logged</th></tr></thead><tbody>'+
       roster.map(function(p){
         var av = CG.avFor(p.id);
+        /* v2.44: one mark per GAME that night (✓ available · ✗ not · — no answer), oldest first */
         function cell(nk){
-          var st = av.nights[nk] ? av.nights[nk].st : "nr";
-          var map = { yes:["yes","✓"], no:["no","✗"], maybe:["mb","?"], late:["mb","L"], until:["mb","U"], emg:["mb","E"], nr:["nr","—"] };
-          var m = map[st]||map.nr;
-          return '<span class="avcell '+m[0]+'" title="'+st+'">'+m[1]+'</span>';
+          var games = nightGames[nk] || [];
+          if (!games.length){ var st0 = av.nights[nk] ? av.nights[nk].st : "nr"; var m0 = st0==="yes"?["yes","✓"]:st0==="no"?["no","✗"]:st0==="nr"?["nr","—"]:["mb","?"]; return '<span class="avcell '+m0[0]+'" title="'+st0+'">'+m0[1]+'</span>'; }
+          return '<span style="display:inline-flex;gap:3px">'+games.map(function(g){
+            var v = CG.avGame ? CG.avGame(av, nk, g.id) : "nr";
+            var m = v==="yes"?["yes","✓"]:v==="no"?["no","✗"]:v==="maybe"?["mb","?"]:["nr","—"];
+            return '<span class="avcell '+m[0]+'" title="'+esc(CG.fmtTime(g.at))+' · '+v+'">'+m[1]+'</span>';
+          }).join("")+'</span>';
         }
         var noteN = CG.WEEK8.nights.filter(function(n){ return av.nights[n.key] && av.nights[n.key].note; })[0];
         var note = noteN ? av.nights[noteN.key].note : "";
@@ -420,39 +458,52 @@ CG.hubAvailability = function(){
           '<td class="tleft small" style="color:var(--steel);max-width:220px">'+esc(note)+'</td>'+
           '<td class="tnum" style="font-size:11px">'+(silent?'<span class="chip chip-loss" style="font-size:9px">no response</span>':CG.fmtDay(av.at))+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">✓ available · ✗ unavailable · ? maybe · L late · U until a time · E emergency only · — no response. Opponents never see this grid — they only see your finalized lineup.</span></div></div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">One mark per game, in puck-drop order: ✓ available · ✗ not available · — no answer (? = an older per-night answer). Notes are per night. Opponents never see this grid — they only see your finalized lineup.</span></div></div>';
   }
   return h + form + grid;
 };
 CG.AFTER._availability = function(){
   var me = CG.me(); if (!me) return;
+  /* v2.44: picks are per GAME — picks[nightKey][gameId] = "yes" | "no" */
   var picks = {};
   var mine = CG.availGet(me.id);
-  if (mine) Object.keys(mine.nights).forEach(function(k){ picks[k]=mine.nights[k].st; });
-  var NIGHTS = ((CG.WEEK8 && CG.WEEK8.nights) || []).map(function(n){ return n.key; });
+  var NIGHTS = ((CG.WEEK8 && CG.WEEK8.nights) || []);
+  var GAMES = {};   /* nightKey -> [gameId, …] for this club */
+  NIGHTS.forEach(function(n){
+    GAMES[n.key] = (CG.clubGamesOnNight ? CG.clubGamesOnNight(me.team, n) : []).map(function(g){ return String(g.id); });
+    picks[n.key] = {};
+    GAMES[n.key].forEach(function(gid){ var v = CG.avGame ? CG.avGame(mine||{nights:{}}, n.key, gid) : "nr"; if (v==="yes"||v==="no") picks[n.key][gid] = v; });
+  });
+  var TOTAL = NIGHTS.reduce(function(a,n){ return a + GAMES[n.key].length; }, 0);
+  function answered(){ return NIGHTS.reduce(function(a,n){ return a + Object.keys(picks[n.key]).length; }, 0); }
   function refreshCount(){
-    var n = NIGHTS.filter(function(k){ return picks[k]; }).length;
-    var el = $("#avCount"); if (el) el.textContent = n+"/"+NIGHTS.length+" night"+(NIGHTS.length===1?"":"s")+" answered";
+    var el = $("#avCount"); if (el) el.textContent = answered()+"/"+TOTAL+" game"+(TOTAL===1?"":"s")+" answered";
   }
   $$(".av-opt").forEach(function(grp){
     grp.addEventListener("click", function(e){
       var b = e.target.closest("[data-av]"); if (!b || b.disabled) return;
       $$("button",grp).forEach(function(x){ x.className=""; });
       var v = b.getAttribute("data-av");
-      b.className = "on "+(v==="yes"?"yes":v==="no"?"no":"");
-      picks[grp.getAttribute("data-night")] = v;
+      b.className = "on "+v;
+      var nk = grp.getAttribute("data-night"), gid = grp.getAttribute("data-game");
+      if (!picks[nk]) picks[nk] = {};
+      picks[nk][gid] = v;
       refreshCount();
     });
   });
   var sub = $("#avSubmit");
   if (sub) sub.addEventListener("click", function(){
-    var missing = NIGHTS.filter(function(k){ return !picks[k]; });
-    if (missing.length){
-      CG.toast("Answer all "+NIGHTS.length+" night"+(NIGHTS.length===1?"":"s")+" before submitting","err"); return;
+    var missing = TOTAL - answered();
+    if (missing > 0){
+      CG.toast("Answer all "+TOTAL+" game"+(TOTAL===1?"":"s")+" before submitting","err"); return;
     }
     var entry = { at: CG.now(), nights:{} };
-    NIGHTS.forEach(function(k){
-      entry.nights[k] = { st:picks[k], note: ($("[data-note="+k+"]")||{}).value||"" };
+    NIGHTS.forEach(function(n){
+      var k = n.key, games = picks[k] || {}, ids = Object.keys(games);
+      var yes = ids.filter(function(g){ return games[g]==="yes"; }).length;
+      /* the night summary rides along for every reader of the old shape (grid, dashboard, builder) */
+      var st = !ids.length ? "nr" : yes===ids.length ? "yes" : yes===0 ? "no" : "part";
+      entry.nights[k] = { games: games, st: st, note: ($("[data-note="+k+"]")||{}).value||"" };
     });
     CG.availSave(entry, function(ok){
       if (!ok) return;
@@ -463,13 +514,54 @@ CG.AFTER._availability = function(){
   });
   var cp = $("#avCopy");
   if (cp) cp.addEventListener("click", function(){
-    picks = {}; NIGHTS.forEach(function(k){ picks[k] = "yes"; });
+    NIGHTS.forEach(function(n){ picks[n.key] = {}; GAMES[n.key].forEach(function(gid){ picks[n.key][gid] = "yes"; }); });
     $$(".av-opt").forEach(function(grp){
       $$("button",grp).forEach(function(x){ x.className = x.getAttribute("data-av")==="yes"?"on yes":""; });
     });
-    refreshCount(); CG.toast("Marked available for all "+NIGHTS.length+" night"+(NIGHTS.length===1?"":"s"));
+    refreshCount(); CG.toast("Marked available for all "+TOTAL+" game"+(TOTAL===1?"":"s"));
   });
   refreshCount();
+};
+
+/* ---------- this week's lineups — read-only, for the whole roster (v2.44) ----------
+   Every rostered member sees which six are dressed for each of the club's games this week, as
+   management sets them. The page reads the same game_lineups rows the builder writes (via
+   plannedLineup / the _pubLineups cache) and never guesses: a game with no row says "Not set yet",
+   one the loader has not answered for yet says "Loading". Management still builds in Team HQ. */
+CG.hubWeekLineups = function(){
+  var me = CG.me(), lg = CG.lg, club = me && me.team;
+  var nights = (CG.WEEK8 && CG.WEEK8.open && CG.WEEK8.nights) || [];
+  var head = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc((CG.TEAM[club]||{}).name||"Your club")+' · '+esc(CG.WEEK8.label)+'</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">This week’s lineups</h1>'+
+    '<p class="lede" style="margin-top:8px">Who is dressed for each of your club’s games this week, as your management sets them. Lineups lock 30 minutes before puck drop (Rule 5.3); until then your GM can still change them.</p></div>';
+  if (!nights.length) return head + '<div class="card"><div class="card-b"><div class="empty"><b>No game week scheduled yet</b><p>Lineups appear here once the schedule is posted and your management dresses them.</p></div></div></div>';
+  var POS = ["LW","C","RW","LD","RD","G"];
+  var name = function(id){ var p = id && CG.playerById(lg, id); return p ? p.tag : null; };
+  var h = head;
+  nights.forEach(function(n, i){
+    var games = CG.clubGamesOnNight ? CG.clubGamesOnNight(club, n) : [];
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+esc(CG.fmtDay(n.at))+'</h3><span class="chip">Game night '+(i+1)+' · '+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
+    if (!games.length){ h += '<div class="card-b"><p class="caption">No games for your club this night.</p></div></div>'; return; }
+    h += games.map(function(g, gi){
+      var opp = g.home===club ? 'vs '+((CG.TEAM[g.away]||{}).name||g.away) : '@ '+((CG.TEAM[g.home]||{}).name||g.home);
+      var row = CG._pubLineups ? CG._pubLineups[club+":"+g.id] : undefined;
+      if (row === undefined && lg._lineups) row = lg._lineups[club+":"+g.id];
+      var locked = CG.now() >= g.at - 30*60000, final = g.status==="final";
+      var status = final ? '<span class="chip">Final</span>' : locked ? '<span class="chip chip-warn">Locked</span>' : row ? '<span class="chip chip-win">Set</span>' : row===null ? '<span class="chip chip-loss">Not set yet</span>' : '<span class="chip">Loading</span>';
+      var slots = row ? CG.plannedLineup(g, club) : null;
+      var meIn = slots && POS.some(function(ps){ return slots[ps]===me.id; });
+      var six = slots ? '<div style="display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:8px">'+POS.map(function(ps){
+          var id = slots[ps], nm = name(id);
+          return '<span class="small"><span class="caption" style="margin-right:6px">'+ps+'</span>'+(nm ? '<b'+(id===me.id?' style="background:var(--chrome-tint);padding:1px 6px;border-radius:6px"':'')+'>'+esc(nm)+(id===me.id?' <span class="caption">you</span>':'')+'</b>' : '<span style="color:var(--steel)">—</span>')+'</span>';
+        }).join("")+'</div>' : '';
+      return '<div class="card-b" style="border-top:'+(gi?"1px solid var(--line-soft)":"1px solid var(--line)")+'">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'+
+        '<span><b class="num">'+CG.fmtTime(g.at)+'</b> <span class="caption">· Game '+(gi+1)+'</span> <span class="small">'+esc(opp)+'</span>'+(meIn?' <span class="chip chip-win" style="font-size:9px;padding:1px 7px">you’re dressed</span>':'')+'</span>'+
+        '<span style="display:flex;gap:8px;align-items:center">'+status+'<a class="btn btn-ghost btn-sm" href="#/matchup/'+esc(g.id)+'">Matchup ›</a></span></div>'+six+'</div>';
+    }).join("");
+    h += '</div>';
+  });
+  return h;
 };
 
 /* ---------- lineup builder ---------- */
@@ -696,8 +788,9 @@ CG.hubLineup = function(qs){
   var bench = '<div class="card"><div class="card-h"><h3>Bench — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
     '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p){
       var av = CG.avFor(p.id);
-      var avKey = CG.nightAvKey(game);   /* the availability answer for THIS game's night, not always Wednesday's */
-      var un = avKey && av.nights[avKey] && av.nights[avKey].st==="no";
+      var avKey = CG.nightAvKey(game);   /* the availability night this game falls on */
+      /* v2.44: the answer for THIS game (a legacy per-night answer still counts for every game that night) */
+      var un = !!(avKey && CG.avGame && CG.avGame(av, avKey, game.id)==="no");
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
       var reason = dis ? "Suspended (Rule 7.4)" : un ? "Marked unavailable" : "";
@@ -758,7 +851,7 @@ CG.AFTER._lineup = function(){
     if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
-    if (avNightKey && (CG.avFor(p.id).nights[avNightKey]||{}).st==="no") return p.tag+" is marked unavailable for this night.";
+    if (avNightKey && CG.avGame && CG.avGame(CG.avFor(p.id), avNightKey, game.id)==="no") return p.tag+" is marked not available for this game.";
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
     return null;
   }
@@ -2193,6 +2286,7 @@ CG.hubSettings = function(){
 };
 CG.AFTER.hub = function(param, qs){
   if (param==="availability") CG.AFTER._availability();
+  if ((param==="lineups" || param==="") && CG.loadMyWeekLineups) CG.loadMyWeekLineups();
   if (param==="roster") CG.AFTER._roster();
   if (param==="tradehub") CG.AFTER._tradehub(qs);
   if (param==="lineup") CG.AFTER._lineup();
