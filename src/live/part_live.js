@@ -1815,7 +1815,7 @@ CG._wrapHubDashboard = function(){
             it.href && it.cta ? '<a class="btn btn-chrome btn-sm" style="margin-left:auto" href="'+esc(it.href)+'"'+(it.ext?' target="_blank" rel="noopener"':'')+'>'+esc(it.cta)+'</a>' : "";
           return '<div style="display:flex;align-items:center;gap:12px">'+mark+'<span style="flex:1;'+(it.done?'color:var(--steel)':'font-weight:600')+'">'+esc(it.label)+'</span>'+cta+'</div>';
         }).join("")+'</div>'+
-        '<p class="caption" style="margin-top:12px">All three and you’re in the pool: randomly assigned for the pre-season, then the draft.</p></div></div>';
+        '<p class="caption" style="margin-top:12px">All three and you’re in the pool: randomly assigned for the pre-season, then the draft. Leaving the Discord withdraws a pending sign-up (Rule 1.1).</p></div></div>';
     }
     /* 1 · registration status */
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
@@ -2725,7 +2725,7 @@ CG.ROUTES.register = function(){
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
-    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1). By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
 };
@@ -5287,9 +5287,9 @@ CG.admPreseason = function(){
       '<div class="card-b"'+(anyShort?' style="border-top:1px solid var(--line)"':'')+'><span class="caption">Rule 2.8 obliges management to spread pre-season ice time so every randomly assigned player can reach '+CG.PRESEASON_MIN_GP+' games. '+
       '“Can’t reach '+CG.PRESEASON_MIN_GP+'” means the club has fewer pre-season games left than the player still needs — those need attention now.</span></div></div>';
   }
-  /* archive of the retired automatic-withdrawal rule (removed 2026-09-14). Filled async from
-     the season_registration_removals table; the card stays hidden when there is nothing to show. */
-  h+='<div class="card" style="margin-top:18px;display:none" id="psWithdrawn"><div class="card-h"><h3>Withdrawn sign-ups</h3><span class="chip">archive · retired rule</span></div><div class="card-b" id="psWithdrawnB"></div></div>';
+  /* sign-ups withdrawn automatically (left the Discord — Rule 1.1). Filled async from the
+     archive; the card stays hidden when there is nothing to show. */
+  h+='<div class="card" style="margin-top:18px;display:none" id="psWithdrawn"><div class="card-h"><h3>Withdrawn sign-ups</h3><span class="chip">left the Discord · Rule 1.1</span></div><div class="card-b" id="psWithdrawnB"></div></div>';
   /* per-club roster ledger — expand a club to see and remove its players (capacity stays visible while assigning) */
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
     '<div class="card-b club-led">'+
@@ -5404,7 +5404,7 @@ CG.AFTER._preseason = function(){
   document.querySelectorAll("[data-reg-remove]").forEach(function(b){ b.addEventListener("click", function(){
     CG.removeFromRoster(this.getAttribute("data-reg-remove"), this.getAttribute("data-club"), this.getAttribute("data-name"), this.getAttribute("data-mgmt")==="1");
   }); });
-  /* the archive of the retired automatic-withdrawal rule (removed 2026-09-14) — RLS office-only */
+  /* the archive behind Rule 1.1's automatic withdrawal — RLS shows it to the office only */
   CG.sb.from("season_registration_removals").select("gamertag,removed_at,reason,registration")
     .order("removed_at",{ascending:false}).limit(100).then(function(r){
     var rows=(r&&r.data)||[];
@@ -5417,9 +5417,9 @@ CG.AFTER._preseason = function(){
       rows.map(function(x){ var reg=x.registration||{};
         return '<tr><td class="tleft"><span class="nm">'+esc(x.gamertag||"—")+'</span></td>'+
           '<td class="tnum">'+d(reg.created_at)+'</td><td class="tnum">'+d(x.removed_at)+'</td>'+
-          '<td class="tleft"><span class="caption">'+(x.reason==="left_discord"?"left the Discord (retired rule)":esc(x.reason||"—"))+'</span></td></tr>'; }).join("")+
+          '<td class="tleft"><span class="caption">'+(x.reason==="left_discord"?"left the Discord (automatic, Rule 1.1)":esc(x.reason||"—"))+'</span></td></tr>'; }).join("")+
       '</tbody></table></div>'+
-      '<p class="caption" style="margin-top:10px">Historical archive of the automatic-withdrawal rule, which was retired on Sep 14, 2026 — leaving the Discord no longer touches the sign-up board. The full registration is kept with its original sign-up date, so the office can restore any of these by hand.</p>';
+      '<p class="caption" style="margin-top:10px">Withdrawn automatically after a day out of the server. The full registration is archived with its original sign-up date, so the office can restore one that was removed in error; otherwise the member simply rejoins and signs up again.</p>';
     card.style.display="";
   });
 };
@@ -9531,6 +9531,9 @@ CG.AFTER._admAutomations = function(){
       tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
       var res = results[a.key];
       var failed = res && res.ok === false;
+      /* the departure rule's visible pulse: how many sign-ups the last sweep withdrew */
+      if (a.key === "discord-sync" && res && res.signupsRemoved > 0 && tsEl)
+        tsEl.textContent += " · withdrew " + res.signupsRemoved + " sign-up" + (res.signupsRemoved === 1 ? "" : "s");
       /* Each job declares its own cadence one line above, so grade against THAT. One flat
          30-minute threshold marked a healthy daily briefing and a healthy Monday job amber
          every single day — which teaches the operator that amber means nothing. */
@@ -11704,10 +11707,11 @@ CG.renderDiscordAccounts = function(d){
   var h='<p class="small" style="color:var(--steel)">The league follows <b>'+esc((curA&&curA.username)||(CG.auth.profile&&CG.auth.profile.discord_username)||"this account")+'</b>'+(cur?' <span class="caption">('+esc(cur)+')</span>':'')+'.</p>';
   var invite=d.invite||(CG._siteCfg&&CG._siteCfg.discord_invite)||null;
   /* Auto-join is retired (sign-in asks Discord for `identify` only), so the member joins the
-     server themselves — the same invite + re-check the register page uses. This stays loud
-     because Discord roles cannot follow an account that never joins the server. */
+     server themselves — the same invite + re-check the register page uses. This has to be loud:
+     Rule 1.1 withdraws a pending sign-up after about a day out of the server, and a member who
+     switches to an account that never joins is exactly the case that clock was built for. */
   if (!inGuild) h+='<div class="note red" style="margin-top:10px"><b>This account isn’t in the league Discord yet.</b> Your site roles have moved to it, but Discord roles can’t follow until it joins the server'+
-     ' — join now so your roles come across.'+
+     ' — and a pending sign-up is withdrawn after about a day out of the server (Rule 1.1), so join now.'+
      '<div style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
      (invite?'<a class="btn btn-sm" style="background:#5865F2;color:#fff" href="'+esc(invite)+'" target="_blank" rel="noopener">Join the server with this account</a>':'<span class="caption">Ask a commissioner for the invite.</span>')+
      '<button class="btn btn-ghost btn-sm" id="dcRecheck">I’ve joined — re-check</button></div></div>';
