@@ -31,7 +31,7 @@ A("the server is pinged so roles move in seconds, not on the next sweep", /if \(
 console.log("— honesty about the server");
 A("the chip distinguishes in-server from not-yet", /"In the server" : "Not in the server yet"/.test(live));
 A("a not-yet account gets the INVITE and a re-check — never the retired sign-out-and-back-in advice", /Join the server with this account/.test(live) && /id="dcRecheck"/.test(live) && !/Sign out and back in with it and you’ll be added/.test(live));
-A("...and is warned that a pending sign-up is withdrawn after a day out of the server (Rule 1.1)", /withdrawn after about a day out of the server \(Rule 1\.1\)/.test(live));
+A("...and is told to join so their roles come across (the withdraw-on-leave rule is retired)", /join now so your roles come across/.test(live) && !/withdrawn after about a day out of the server/.test(live));
 A("the re-check reads presence from the database, not the cached profile", /CG\.sb\.rpc\("my_discord_accounts"\)\.then\(function\(r\)\{\s*var dd=/.test(live));
 A("the card says the league name follows the new account's display name", /Your league name follows the new account’s Discord display name/.test(live));
 A("the old account's roles are promised within a couple of minutes, not instantly", /the old account’s league roles come off in the same sweep/.test(live) && !/the old account keeps nothing/.test(live));

@@ -1,0 +1,8 @@
+[{"code":"BOS","name":"Bruins","city":"Boston","division":"East","color":"#ffb81c","color2":"#010101","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/bos-1785112766990.webp"},
+{"code":"DET","name":"Red Wings","city":"Detroit","division":"East","color":"#ce1126","color2":"#ffffff","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/det-1788735897202.webp"},
+{"code":"NYI","name":"Islanders","city":"New York","division":"East","color":"#00539b","color2":"#fc4c01","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/nyi-1786219337123.webp"},
+{"code":"PIT","name":"Penguins","city":"Pittsburgh","division":"East","color":"#fcb514","color2":"#010101","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/pit-1785286854257.webp"},
+{"code":"DAL","name":"Stars","city":"Dallas","division":"West","color":"#006847","color2":"#8f8f8c","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/dal-1785371394790.webp"},
+{"code":"SEA","name":"Kraken","city":"Seattle","division":"West","color":"#99d9d9","color2":"#001628","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/sea-1786634575288.webp"},
+{"code":"UTA","name":"Mammoth","city":"Utah","division":"West","color":"#71afe5","color2":"#ffffff","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/uta-1785338793980.webp"},
+{"code":"VAN","name":"Canucks","city":"Vancouver","division":"West","color":"#00205b","color2":"#00843d","logo_url":"https://bzbuyclwdhmhdzujxeqd.supabase.co/storage/v1/object/public/team-logos/van-1785415837835.webp"}]

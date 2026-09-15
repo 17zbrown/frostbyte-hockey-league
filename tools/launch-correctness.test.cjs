@@ -23,10 +23,10 @@ console.log("— the draft board's eligibility matches the DB (no offer the serv
   A("...and eligOf no longer hardcodes ok:true", !/return \{ vet:vet, gp:gp, ok: true \};/.test(live));
 }
 
-console.log("\n— the availability deadline is 8pm ET across the DST change");
+console.log("\n— the availability deadline is 7:30pm ET across the DST change");
 {
   A("it builds the deadline through CG.etISO, not a hardcoded -04:00 offset",
-    /deadline: Date\.parse\(CG\.etISO\(dlDay, "20:00"\)\)/.test(live) && !/deadline: Date\.parse\(dlDay\+"T20:00:00-04:00"\)/.test(live));
+    /deadline: Date\.parse\(CG\.etISO\(dlDay, "19:30"\)\)/.test(live) && !/deadline: Date\.parse\(dlDay\+"T[0-9:]+-04:00"\)/.test(live));
 }
 
 console.log("\n— the EA auto-import only attaches to an open fixture");

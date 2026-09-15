@@ -32,3 +32,7 @@ redesign-preview.html
 
 # Plugin session state — churns every session, never part of the site
 **/.claude-flow/
+tools/demo/_guide_bundle.js
+tools/guides/shots/
+docs/guides/_shots-*.json
+docs/guides/_report.json

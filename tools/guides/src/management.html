@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Run your front office — CGHL member guide</title>
+<link rel="stylesheet" href="../guide.css">
+<style>
+  .stack{display:grid;gap:22px}
+  .modes{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:22px 0 6px}
+  .modes .m{border:1.5px solid var(--line);border-radius:10px;background:var(--paper);padding:15px 18px}
+  .modes .m b{font-family:var(--f-disp);font-weight:800;font-size:20px;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+  .modes .m p{margin:6px 0 0;font-size:18px;color:var(--ink-2);line-height:1.42}
+  .modes .sw{display:inline-block;width:15px;height:15px;border-radius:4px;flex:none}
+  .sw.full{background:var(--ink)} .sw.appr{background:var(--chrome);border:1px solid var(--chrome-deep)} .sw.hid{background:var(--steel)}
+  .legend-chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+  /* the permissions section stacks a step over a full-width matrix; a plain block lets the
+     frame fill the width (a two-child 1fr grid was collapsing the shot to min-content) */
+  .sec.wide{display:block}
+  .sec.wide .shot{margin-top:28px}
+  .sec.wide{outline:4px solid red}
+  .sec.wide > .shot{outline:4px solid blue}
+  .sec.wide > .shot > .frame{outline:4px solid green}
+</style></head>
+<body><main class="poster">
+
+<header class="band">
+  <div class="copy">
+    <div>
+      <span class="eyebrow chr">Team HQ · How-to · 09</span>
+      <h1>Run your front office<small>The Owner holds the seats and sets access — the league office approves every appointment</small></h1>
+      <p class="lede">Team HQ → Management is your desk: fill the GM and AGM seats, decide what each may do, and clear the moves they send you.</p>
+    </div>
+    <div class="meta"><span class="tag chr">Club Owner</span><span class="tag k">Team HQ → Management</span><span class="tag">Rule 2.6</span><span class="tag">Rule 2.8</span></div>
+  </div>
+  <div class="art"><img src="../art/management.jpg" alt=""></div>
+</header>
+
+<section class="body">
+
+  <div class="sec-h"><div><span class="eyebrow chr">Where it lives</span><h2>Open the front office</h2></div><p>Management sits in the Team HQ group. The badge on it counts the moves waiting on you.</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck">1</div><div><h3>Open Team HQ → Management</h3><p>Sign in with Discord, then use <span class="ui">Management</span> under <b>Team HQ</b> in the hub sidebar. The yellow badge is the number of your managers' moves waiting on your approval.</p><p class="path">#/hub/management</p></div></div>
+      <div class="step"><div class="puck">2</div><div><h3>Read the three seats</h3><p>The <b>Front office</b> table is one row per seat — <span class="ui">Owner</span>, <span class="ui">General Manager</span>, <span class="ui">Assistant GM</span> — with its holder, its status and your action. A held seat reads <span class="ui">Confirmed</span>; an empty one reads <span class="ui">Vacant — required</span>.</p></div></div>
+    </div>
+    <div class="shot stack">
+      <div class="frame" style="width:38%"><img src="../shots/management/owner-sidebar-badge.png" alt="The Team HQ sidebar with Management selected and a yellow 3 badge"><span class="mark" style="left:70%;top:49.5%">1</span><div class="cap">Sidebar · badge = moves waiting</div></div>
+      <div class="frame"><img src="../shots/management/owner-front-office-table.png" alt="The Front office table with all three seats filled"><span class="mark" style="left:44%;top:62%">2</span><div class="cap">Front office · seat · holder · status · action</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">The seats are yours</span><h2>Fill a seat, or clear one</h2></div><p>Only the Owner touches these seats. A GM or AGM nominates and removes nobody (Rule 2.6).</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck">3</div><div><h3>Nominate into a vacant seat</h3><p>On a vacant row press <span class="ui chr">Nominate</span>. Pick any player signed up for the season in <span class="ui">Player</span> — start typing a gamertag — add a line in <span class="ui">Why them? (optional)</span>, then send <span class="ui chr">Submit nomination</span>.</p><p>The league office's reviewers vote. The seat reads <span class="ui">Pending reviewer vote</span> until they decide, and you can withdraw while it waits — a nomination is not yet an appointment.</p></div></div>
+      <div class="step"><div class="puck">4</div><div><h3>Remove a sitting manager</h3><p>Press <span class="ui">Remove</span> on a held seat and confirm. It takes effect at once: the seat falls vacant, their $3,000,000 management contract ends with it, and the league office is told. Nominate a successor next.</p></div></div>
+      <div class="note chr"><span class="lab">Order matters</span>You cannot nominate over a held seat — <span class="ui">Nominate</span> only shows on a vacant row. Remove the sitting manager first, then nominate the successor. <span class="rule">Rule 2.8</span></div>
+    </div>
+    <div class="shot stack">
+      <div class="frame"><img src="../shots/management/owner-vacant-seat-table.png" alt="The Front office table with the GM seat Vacant — required next to a Nominate button"><span class="mark" style="left:80%;top:62%">3</span><div class="cap">A vacant seat shows Nominate</div></div>
+      <div class="frame" style="width:74%"><img src="../shots/management/owner-nominate-typeahead.png" alt="The Nominate a General Manager box searching a gamertag"><div class="cap">Nominate · type a gamertag, pick the player</div></div>
+      <div class="frame" style="width:74%"><img src="../shots/management/owner-remove-confirm.png" alt="Confirm box: Remove Mr. Plow as General Manager?"><span class="mark" style="left:78%;top:78%">4</span><div class="cap">Remove · immediate, the office is told</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">Permissions</span><h2>Set what each seat may do</h2></div><p>Page by page, per seat. Nothing changes until you save.</p></div>
+  <div class="sec wide">
+    <div class="step"><div class="puck">5</div><div><h3>Give a page, gate a page, or hold it back</h3><p>For every Team HQ page set the GM and the AGM to <span class="ui">Full access</span>, <span class="ui">Owner approves</span> or <span class="ui">Hidden</span>. Flip a cell and the footer reads <b>Unsaved changes.</b> — your edits are a draft until <span class="ui chr">Save permissions</span>. <span class="ui">Discard changes</span> throws them away.</p>
+      <div class="modes">
+        <div class="m"><b><span class="sw full"></span>Full access</b><p>The seat acts freely — the move is live the moment they make it.</p></div>
+        <div class="m"><b><span class="sw appr"></span>Owner approves</b><p>They see the page, but every move on it waits in your queue until you approve it.</p></div>
+        <div class="m"><b><span class="sw hid"></span>Hidden</b><p>The page is withheld and its moves refused. Your own seat is never limited.</p></div>
+      </div>
+      <p>Everything starts at full access except this Management page, which is yours alone unless you open it. Game stats and Management carry no roster or cap moves, so they are open or hidden only — never Owner approves.</p>
+    </div>
+    <div class="shot">
+      <div class="frame"><img src="../shots/management/owner-permissions-unsaved.png" alt="The Management permissions matrix with the AGM's Trade Hub set to Owner approves and Save permissions lit"><span class="mark" style="left:76%;top:57%">5</span><span class="ring" style="left:2%;top:88.5%;width:46%;height:9%"></span><div class="cap">Management permissions · flip a cell, and the footer lights up to save</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">Approvals</span><h2>Clear the queue</h2></div><p>Moves from a seat you set to Owner approves land here. Approving runs the move; denying tells them why.</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck">6</div><div><h3>Approve or deny each move</h3><p>Every row names the move, who sent it and from which page. <span class="ui chr">Approve</span> opens a note box and <span class="ui chr">Approve and make it</span> runs it through the league's usual checks. <span class="ui">Deny</span> changes nothing and tells your manager why.</p><p>A move approved too late — a locked lineup, a withdrawn offer — reads <span class="ui">Could not be made</span> with the reason in red, rather than half-applying.</p>
+        <div class="legend-chips"><span class="chip grn">Approved</span><span class="chip">Denied</span><span class="chip red">Could not be made</span></div></div></div>
+    </div>
+    <div class="shot stack">
+      <div class="frame"><img src="../shots/management/owner-approvals-card.png" alt="The Approvals card with three moves waiting, each with Approve and Deny"><span class="mark" style="left:80%;top:14%">6</span><div class="cap">Approvals · 3 waiting, above recent decisions</div></div>
+      <div class="frame" style="width:70%"><img src="../shots/management/owner-approve-modal.png" alt="Approve — accept the trade offer from Red Wings confirm box"><div class="cap">Approve · add a note, then make it</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">For the front office</span><h2>GM &amp; AGM: sent, not made</h2></div><p>On a page the Owner set to Owner approves, your work is sent for approval — it is not live yet.</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck ink">7</div><div><h3>Your move is sent, not made</h3><p>A banner at the top of the page names the Owner and the rule. Make your move as usual and you get the toast <b>“Sent to the Owner for approval — …”</b>; it lands in the Owner's queue as <span class="ui">Waiting</span>. You are told when they decide either way.</p></div></div>
+      <div class="step"><div class="puck ink">8</div><div><h3>Withdraw before they decide</h3><p>Press <span class="ui">Withdraw</span> on your waiting move to pull it back — <b>“It comes off the Owner's queue and nothing changes.”</b> Your waiting moves also show on your dashboard's <b>Management tasks</b> card.</p></div></div>
+      <div class="note"><span class="lab">Heads up</span>The Management page is hidden from the GM and AGM until the Owner opens it — until then your waiting moves live in the page banner, not there.</div>
+    </div>
+    <div class="shot stack">
+      <div class="frame"><img src="../shots/management/gm-owner-approves-banner.png" alt="The Owner-approves banner on the GM's Roster page, with a waiting move and Withdraw"><span class="mark ink" style="left:5%;top:61%">7</span><span class="mark ink" style="left:88%;top:61%">8</span><div class="cap">Roster · the Owner-approves banner</div></div>
+      <div class="frame" style="width:56%"><img src="../shots/management/gm-queued-toast.png" alt="Toast: Sent to the Owner for approval — waive Dangle Dan"><div class="cap">The toast, not the move</div></div>
+      <div class="frame"><img src="../shots/management/agm-hidden-empty.png" alt="The refusal: You don't have access to this area"><div class="cap">A hidden page · refused with Rule 2.6</div></div>
+    </div>
+  </div>
+
+  <div class="sec wide">
+    <div class="notes two">
+      <div class="note red"><span class="lab">Watch out</span>Under <b>Owner approves</b> your move is not made when you click — the toast reads “Sent to the Owner for approval,” and it sits in the Owner's queue until they decide. A move approved too late reads <b>Could not be made</b>. And the Management page is hidden from the GM and AGM until the Owner opens it (Rule 2.6).</div>
+      <div class="note chr"><span class="lab">Good to know</span>A nomination is a reviewer vote, not an appointment — the seat reads <b>Pending reviewer vote</b> until the league office decides, and you can withdraw while it waits. Removing a manager is immediate and ends their $3,000,000 contract. The Owner's own moves never queue, and every club must hold all three seats before the entry draft begins (Rule 2.8).</div>
+    </div>
+  </div>
+
+</section>
+
+<footer class="foot">
+  <div class="lock"><img src="../../../chel-gaming-logo-1024.png" alt=""><div><b>CHEL GAMING</b><span>Hockey League</span></div></div>
+  <div class="where"><b>chelgamingleague.com</b> · Team HQ → Management · #/hub/management<br>Rulebook 2.6 · 2.8 · site v2.42 · September 2026</div>
+</footer>
+</main></body></html>

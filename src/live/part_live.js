@@ -660,7 +660,7 @@ CG.buildLiveLeague = async function(){
   }
 
   /* ---- availability window from the REAL schedule (replaces the prototype's
-     hardcoded "Week 8") — the next week with games; deadline Sunday 8 PM ET ---- */
+     hardcoded "Week 8") — the next week with games; deadline Wednesday 7:30 PM ET ---- */
   var futureG = schedule.filter(function(g){ return g.status!=="final" && g.at > CG.now()-6*3600000; })
     .sort(function(a,b){ return a.at-b.at; });
   if (futureG.length){
@@ -675,15 +675,14 @@ CG.buildLiveLeague = async function(){
        from. A three-night week silently lost its Friday: players could not mark it, and Rule 5.1
        asks them to cover all three games of at least two nights. */
     var nights = Object.keys(byNight).sort().map(function(k){ return byNight[k]; });
-    var dl = new Date(nights[0]);
-    for (var di=0; di<8; di++){
-      if (new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short"}).format(dl)==="Sun") break;
-      dl = new Date(dl.getTime()-86400000);
-    }
-    var dlDay = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(dl);
+    /* Deadline: the first game night's own day at 7:30 PM ET — a normal week opens Wednesday, so
+       that is Wednesday 7:30 PM ET, 90 minutes before the 9:00 PM puck drop (and before the T-30
+       lineup lock, Rule 5.3). A holiday-shifted week keeps the same rule against its own first
+       night. (Was Sunday 8 PM ET through v2.42.) */
+    var dlDay = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(nights[0]));
     CG.WEEK8 = { key:(avStage==="preseason"?"pre":avStage==="playoff"?"po":"w")+avWk,
       label:(avStage==="preseason"?"Pre-season week ":avStage==="playoff"?"Playoff week ":"Week ")+avWk,
-      deadline: Date.parse(CG.etISO(dlDay, "20:00")),   /* 8pm ET, correct across EDT/EST */
+      deadline: Date.parse(CG.etISO(dlDay, "19:30")),   /* 7:30pm ET, correct across EDT/EST */
       nights: nights.map(function(at, i){ return { key:"n"+(i+1), at:at }; }), open:true };
   } else {
     /* No unplayed games — off-season, or before a schedule exists. Without this the prototype
@@ -1776,7 +1775,7 @@ CG._wrapHubDashboard = function(){
             it.href && it.cta ? '<a class="btn btn-chrome btn-sm" style="margin-left:auto" href="'+esc(it.href)+'"'+(it.ext?' target="_blank" rel="noopener"':'')+'>'+esc(it.cta)+'</a>' : "";
           return '<div style="display:flex;align-items:center;gap:12px">'+mark+'<span style="flex:1;'+(it.done?'color:var(--steel)':'font-weight:600')+'">'+esc(it.label)+'</span>'+cta+'</div>';
         }).join("")+'</div>'+
-        '<p class="caption" style="margin-top:12px">All three and you’re in the pool: randomly assigned for the pre-season, then the draft. Leaving the Discord withdraws a pending sign-up (Rule 1.1).</p></div></div>';
+        '<p class="caption" style="margin-top:12px">All three and you’re in the pool: randomly assigned for the pre-season, then the draft.</p></div></div>';
     }
     /* 1 · registration status */
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
@@ -2686,7 +2685,7 @@ CG.ROUTES.register = function(){
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
-    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1). By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
 };
@@ -5229,9 +5228,9 @@ CG.admPreseason = function(){
       '<div class="card-b"'+(anyShort?' style="border-top:1px solid var(--line)"':'')+'><span class="caption">Rule 2.8 obliges management to spread pre-season ice time so every randomly assigned player can reach five games. '+
       '“Can’t reach 5” means the club has fewer pre-season games left than the player still needs — those need attention now.</span></div></div>';
   }
-  /* sign-ups withdrawn automatically (left the Discord — Rule 1.1). Filled async from the
-     archive; the card stays hidden when there is nothing to show. */
-  h+='<div class="card" style="margin-top:18px;display:none" id="psWithdrawn"><div class="card-h"><h3>Withdrawn sign-ups</h3><span class="chip">left the Discord · Rule 1.1</span></div><div class="card-b" id="psWithdrawnB"></div></div>';
+  /* archive of the retired automatic-withdrawal rule (removed 2026-09-14). Filled async from
+     the season_registration_removals table; the card stays hidden when there is nothing to show. */
+  h+='<div class="card" style="margin-top:18px;display:none" id="psWithdrawn"><div class="card-h"><h3>Withdrawn sign-ups</h3><span class="chip">archive · retired rule</span></div><div class="card-b" id="psWithdrawnB"></div></div>';
   /* per-club roster ledger — expand a club to see and remove its players (capacity stays visible while assigning) */
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
     '<div class="card-b club-led">'+
@@ -5346,7 +5345,7 @@ CG.AFTER._preseason = function(){
   document.querySelectorAll("[data-reg-remove]").forEach(function(b){ b.addEventListener("click", function(){
     CG.removeFromRoster(this.getAttribute("data-reg-remove"), this.getAttribute("data-club"), this.getAttribute("data-name"), this.getAttribute("data-mgmt")==="1");
   }); });
-  /* the archive behind Rule 1.1's automatic withdrawal — RLS shows it to the office only */
+  /* the archive of the retired automatic-withdrawal rule (removed 2026-09-14) — RLS office-only */
   CG.sb.from("season_registration_removals").select("gamertag,removed_at,reason,registration")
     .order("removed_at",{ascending:false}).limit(100).then(function(r){
     var rows=(r&&r.data)||[];
@@ -5359,9 +5358,9 @@ CG.AFTER._preseason = function(){
       rows.map(function(x){ var reg=x.registration||{};
         return '<tr><td class="tleft"><span class="nm">'+esc(x.gamertag||"—")+'</span></td>'+
           '<td class="tnum">'+d(reg.created_at)+'</td><td class="tnum">'+d(x.removed_at)+'</td>'+
-          '<td class="tleft"><span class="caption">'+(x.reason==="left_discord"?"left the Discord (automatic, Rule 1.1)":esc(x.reason||"—"))+'</span></td></tr>'; }).join("")+
+          '<td class="tleft"><span class="caption">'+(x.reason==="left_discord"?"left the Discord (retired rule)":esc(x.reason||"—"))+'</span></td></tr>'; }).join("")+
       '</tbody></table></div>'+
-      '<p class="caption" style="margin-top:10px">Withdrawn automatically after a day out of the server. The full registration is archived with its original sign-up date, so the office can restore one that was removed in error; otherwise the member simply rejoins and signs up again.</p>';
+      '<p class="caption" style="margin-top:10px">Historical archive of the automatic-withdrawal rule, which was retired on Sep 14, 2026 — leaving the Discord no longer touches the sign-up board. The full registration is kept with its original sign-up date, so the office can restore any of these by hand.</p>';
     card.style.display="";
   });
 };
@@ -5388,8 +5387,8 @@ CG.preseasonRandomAssign = function(){
   var pool=(lg._registrationsRaw||[]).filter(function(r){ return (!r.season_id || r.season_id===s.id) && !rosteredIds[r.profile_id] && r.status!=="declined"; });
   if (!pool.length){ CG.toast("Everyone registered is already on a club","err"); return; }
   CG.confirm("Randomly assign "+pool.length+" players for the pre-season?",
-    "Every unrostered registration is placed by the league office by position group — nine forwards, six defensemen, two goaltenders per club — so each club gets its goaltenders and defensemen before any club gets a spare, and a club short of left defensemen takes an extra right defenseman (Rule 2.1). Every open active-roster seat in the league is filled before anyone goes to camp: a player whose group is full everywhere is loaned into another group's open seat, and only then to training camp, spread evenly at random (Rule 0.4). "+
-    "They are released back to the draft pool automatically when the final pre-season game ends.",
+    "Every unrostered registration is placed by the league office by position group — nine forwards, six defensemen, two goaltenders per club — so each club gets its goaltenders and defensemen before any club gets a spare, and a club short of left defensemen takes an extra right defenseman (Rule 2.1). Every open active-roster seat in the league is filled first: a player whose group is full everywhere is loaned into another group's open seat, and once every seat is taken the rest are loaned out too, spread evenly — so every registered player gets a club for the pre-season, with no cap on how many pre-season loans a club carries (Rule 0.4). "+
+    "Loans count against no roster limit and are released back to the draft pool automatically when the final pre-season game ends.",
     "Assign randomly", function(){
     /* v2.35: the placement runs inside the database (preseason_random_assign → _assign_reg_random),
        the same position-aware placer post-draft placement uses. The old browser-side spread was
@@ -5398,7 +5397,7 @@ CG.preseasonRandomAssign = function(){
     CG.sb.rpc("preseason_random_assign").then(function(r){
       if (r.error){ CG.toast("Assignment stopped: "+r.error.message,"err"); CG.reloadLeague(); return; }
       var d=r.data||{}, n=d.placed||0, left=(d.skipped||0)+(d.errors||0);
-      CG.toast(n+" players randomly assigned"+(d.out_of_position?" · "+d.out_of_position+" loaned across position groups to fill open seats":"")+(d.camp?" · "+d.camp+" to camp":"")+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:" (every seat and camp spot is taken)"):""), left?"err":"ok");
+      CG.toast(n+" players randomly assigned"+(d.out_of_position?" · "+d.out_of_position+" loaned across position groups to fill open seats":"")+(d.overflow?" · "+d.overflow+" loaned as extra pre-season depth":"")+(left?" · "+left+" left out"+(d.last_error?" — "+d.last_error:""):""), left?"err":"ok");
       CG.reloadLeague();
     });
   });
@@ -7942,7 +7941,9 @@ CG.mgmtSeatsTable = function(m){
   }
   return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px">'+
     '<div class="card-h"><h3>Front office</h3>'+(m.isOwner?'<span class="chip chip-xs">You own this club</span>':'<span class="chip chip-xs">The Owner decides these seats</span>')+'</div>'+
-    '<div class="tblwrap"><table class="tbl compact"><thead><tr>'+
+    /* three fixed seats, and the last header cell already carries the Action column's buttons —
+       the per-column funnel (CG.tableFilters) would filter nothing and only clutter the header */
+    '<div class="tblwrap"><table class="tbl compact" data-nofilter><thead><tr>'+
       '<th class="tleft">Seat</th><th class="tleft">Holder</th><th class="tleft">Status</th><th class="tleft" style="text-align:right">Action</th>'+
     '</tr></thead><tbody>'+
       row("owner","Owner",true)+row("gm","General Manager",true)+row("agm","Assistant GM",true)+
@@ -7995,7 +7996,8 @@ CG.mgmtPermissionsCard = function(m){
       '<button class="btn btn-chrome" id="permSave" disabled>Save permissions</button><button class="btn btn-ghost" id="permReset" disabled>Discard changes</button>'+
       '<span class="caption" id="permStatus">'+(CG.lg&&CG.lg._mgmtPolicyAt?'Last saved '+esc(CG.fmtAgo(Date.parse(CG.lg._mgmtPolicyAt)))+'.':'Defaults: full access everywhere, and this Management page is yours alone.')+'</span></div>':'';
   return '<div class="card" style="--tc:'+esc(m.t.color||"#8899A6")+';margin-bottom:18px" id="permCard">'+head+intro+
-    '<div class="tblwrap"><table class="tbl compact perm-tbl"><thead><tr><th class="tleft">Page</th>'+seatHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+foot+'</div>';
+    /* every cell is a segmented control, not text — a column filter here has nothing to match */
+    '<div class="tblwrap"><table class="tbl compact perm-tbl" data-nofilter><thead><tr><th class="tleft">Page</th>'+seatHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+foot+'</div>';
 };
 CG.hubManagement = function(){
   var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
@@ -9470,9 +9472,6 @@ CG.AFTER._admAutomations = function(){
       tsEl.textContent = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
       var res = results[a.key];
       var failed = res && res.ok === false;
-      /* the departure rule's visible pulse: how many sign-ups the last sweep withdrew */
-      if (a.key === "discord-sync" && res && res.signupsRemoved > 0 && tsEl)
-        tsEl.textContent += " · withdrew " + res.signupsRemoved + " sign-up" + (res.signupsRemoved === 1 ? "" : "s");
       /* Each job declares its own cadence one line above, so grade against THAT. One flat
          30-minute threshold marked a healthy daily briefing and a healthy Monday job amber
          every single day — which teaches the operator that amber means nothing. */
@@ -11644,11 +11643,10 @@ CG.renderDiscordAccounts = function(d){
   var h='<p class="small" style="color:var(--steel)">The league follows <b>'+esc((curA&&curA.username)||(CG.auth.profile&&CG.auth.profile.discord_username)||"this account")+'</b>'+(cur?' <span class="caption">('+esc(cur)+')</span>':'')+'.</p>';
   var invite=d.invite||(CG._siteCfg&&CG._siteCfg.discord_invite)||null;
   /* Auto-join is retired (sign-in asks Discord for `identify` only), so the member joins the
-     server themselves — the same invite + re-check the register page uses. This has to be loud:
-     Rule 1.1 withdraws a pending sign-up after about a day out of the server, and a member who
-     switches to an account that never joins is exactly the case that clock was built for. */
+     server themselves — the same invite + re-check the register page uses. This stays loud
+     because Discord roles cannot follow an account that never joins the server. */
   if (!inGuild) h+='<div class="note red" style="margin-top:10px"><b>This account isn’t in the league Discord yet.</b> Your site roles have moved to it, but Discord roles can’t follow until it joins the server'+
-     ' — and a pending sign-up is withdrawn after about a day out of the server (Rule 1.1), so join now.'+
+     ' — join now so your roles come across.'+
      '<div style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
      (invite?'<a class="btn btn-sm" style="background:#5865F2;color:#fff" href="'+esc(invite)+'" target="_blank" rel="noopener">Join the server with this account</a>':'<span class="caption">Ask a commissioner for the invite.</span>')+
      '<button class="btn btn-ghost btn-sm" id="dcRecheck">I’ve joined — re-check</button></div></div>';

@@ -1116,6 +1116,9 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
 .ovrbox{display:inline-grid;place-items:center;min-width:40px;height:30px;border-radius:7px;
   font-family:var(--f-disp);font-weight:800;font-size:15px;background:var(--bc);color:var(--chrome);padding:0 7px}
 .ovrbox.mid{background:var(--bc3)} .ovrbox.low{background:#5C6B75}
+/* the provisional-OVR note under a badge: light-card token by default, on-dark on the
+   profile hero — the surface decides, so no call site has to pass a colour */
+.ovr-prov{color:var(--steel)} .hero-ovr .ovr-prov{color:var(--on-ink-dim)}
 .gamecard{display:grid;grid-template-columns:74px 1fr auto;gap:16px;align-items:center;background:var(--paper);
   border:1.5px solid var(--line);border-radius:var(--r-m);padding:14px 18px;cursor:pointer;
   transition:transform .15s,border-color .15s,box-shadow .15s}
@@ -1278,6 +1281,14 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .kpi:hover{border-color:var(--ink)}
 .kpi b{display:block;font-family:var(--f-disp);font-weight:900;font-size:30px;letter-spacing:-.02em}
 .kpi span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+/* the caption rule above is for a KPI's own label — a .chip dropped into a KPI is its own component
+   and keeps its variant color (steel-on-red made the free-agency window chip unreadable). Every
+   variant is restated here at .kpi-level specificity, and the inner spans (.live-dot paints from
+   currentColor) inherit it. */
+.kpi .chip{font-size:11px;letter-spacing:.06em;color:var(--steel)}
+.kpi .chip-ink{color:var(--on-ink)} .kpi .chip-chrome{color:#101519} .kpi .chip-live{color:#fff}
+.kpi .chip-win{color:var(--green-ink)} .kpi .chip-loss{color:var(--red-ink)} .kpi .chip-warn{color:var(--amber-ink)}
+.kpi .chip span{color:inherit;font-size:inherit;letter-spacing:inherit}
 .kpi.alert{border-color:var(--red);background:var(--red-tint)}
 .kpi.ok{border-color:#BFE3CE}
 .tasklist .titem{display:flex;gap:12px;align-items:center;padding:12px 18px;border-top:1px solid var(--line-soft);font-size:14px}
@@ -1323,6 +1334,9 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .lc-pc .two{display:flex;flex-direction:column;min-width:0;flex:1;text-align:left;gap:1px}
 .lc-pc .two b{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lc-pc .two .ps{font-family:var(--f-mono);font-size:9px;letter-spacing:.08em;color:var(--steel);text-transform:uppercase}
+/* position + line chips share the row UNDER the gamertag: beside it they squeezed the name to
+   an ellipsis on a three-column board (the shell is capped, so no viewport is wide enough) */
+.lc-pc .two .ln2{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0}
 .lc-pc .ov{font-family:var(--f-mono);font-size:10px;color:var(--steel)}
 .lc-pc.sel{outline:2px solid var(--chrome-deep);border-radius:var(--r-s)}
 .lc-pc.dis{opacity:.45;cursor:not-allowed}

@@ -133,7 +133,10 @@ CG.hubNav = function(section){
   function render(items){
     return items.map(function(it){
       var badge = "";
-      if (it[0]==="availability" && CG.WEEK8 && CG.WEEK8.open && !CG.availGet((CG.me()||{}).id)) badge = '<span class="hs-n">due</span>';
+      /* only a rostered member can owe an availability answer — a seat with no roster spot
+         (an Owner who does not play) has nothing to submit, so it must never be badged "due" */
+      var meNav = CG.me && CG.me();
+      if (it[0]==="availability" && meNav && CG.WEEK8 && CG.WEEK8.open && !CG.availGet(meNav.id)) badge = '<span class="hs-n">due</span>';
       if (it[0]==="tradehub" && CG.incomingCount()) badge = '<span class="hs-n">'+CG.incomingCount()+'</span>';
       if (it[0]==="management" && CG.mgmtPendingCount && CG.mgmtPendingCount()) badge = '<span class="hs-n">'+CG.mgmtPendingCount()+'</span>';
       if (it[0]==="notifications" && CG.unreadCount()) badge = '<span class="hs-n">'+CG.unreadCount()+'</span>';
@@ -156,7 +159,10 @@ CG.unauthorized = function(need){
   return '<section class="sec"><div class="shell"><div class="empty" style="padding:70px 20px">'+
     '<div class="e-art">'+CG.ic("lock",22)+'</div><b>You don’t have access to this area</b>'+
     '<p>'+esc(need||"This area is limited to signed-in league members with the right role.")+'</p>'+
-    '<a class="btn btn-ink" href="#/signin" style="margin-top:18px">Sign in</a></div></div></section>';
+    /* a member who is already signed in is not short a session — telling them to sign in
+       contradicts the refusal (their Owner withheld the page, Rule 2.6) */
+    ((CG.auth && CG.auth.user) ? "" : '<a class="btn btn-ink" href="#/signin" style="margin-top:18px">Sign in</a>')+
+    '</div></div></section>';
 };
 
 CG.ROUTES.hub = function(param, qs){
@@ -253,10 +259,10 @@ CG.hubDashboard = function(){
     }
     /* Availability only carries urgency when a game week is actually open. Pre-season (no
        scheduled week) shows a calm "opens when the schedule posts" state instead of a red
-       "Due Sunday 8 PM ET" for a week that doesn't exist. */
+       "Due Wed 7:30 PM ET" for a week that doesn't exist. */
     if (CG.WEEK8 && CG.WEEK8.open){
       cards.push('<div class="card" '+(av?"":'style="border-color:var(--chrome-deep);background:var(--chrome-tint)"')+'>'+
-        '<div class="card-h"><h3>'+esc(CG.WEEK8.label)+' availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Sunday 8 PM ET")+'</span></div>'+
+        '<div class="card-h"><h3>'+esc(CG.WEEK8.label)+' availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Wed 7:30 PM ET")+'</span></div>'+
         '<div class="card-b">'+(av
           ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+'. You can edit until the deadline.</p>'
           : '<p class="small" style="color:var(--steel)">Your club’s management builds lineups from this — 30 seconds now saves a scramble later.</p>')+
@@ -310,6 +316,9 @@ CG.hubDashboard = function(){
   /* notifications preview for everyone signed in */
   var notifs = CG.baseNotifs().slice(0,3);
   cards.push('<div class="card"><div class="card-h"><h3>Latest alerts</h3><a class="sec-link" href="#/hub/notifications">All</a></div>'+
+    /* an empty bell is a real state (a brand-new member, a quiet week) — say so, because a card
+       with a header and nothing under it reads as a page that failed to load */
+    (notifs.length ? "" : '<div class="card-b"><span class="caption">No alerts yet — roster moves, lineups, trades and league notices land here.</span></div>')+
     notifs.map(function(n){
       return '<div class="notif'+(CG.store.get("read")[n.id]?"":" unread")+'" data-notif="'+n.id+'" data-route="'+esc(n.route||"")+'">'+
         '<span class="nf-ic">'+CG.ic(n.icon||"bell",15)+'</span><span style="min-width:0"><b>'+esc(n.title)+'</b><p>'+esc(n.body)+'</p></span></div>';
@@ -447,7 +456,7 @@ CG.AFTER._availability = function(){
     });
     CG.availSave(entry, function(ok){
       if (!ok) return;
-      CG.pushNotif("check","Availability submitted",CG.WEEK8.label+" — logged "+CG.fmtFull(entry.at)+". You can edit until Sunday 8 PM ET.","#/hub/availability");
+      CG.pushNotif("check","Availability submitted",CG.WEEK8.label+" — logged "+CG.fmtFull(entry.at)+". You can edit until the deadline (Wednesday 7:30 PM ET).","#/hub/availability");
       CG.toast(CG.WEEK8.label+" availability submitted","ok");
       CG.renderChrome(); CG.router();
     });
@@ -710,7 +719,7 @@ CG.luSlot = function(pos, pid, locked){
   var p = pid && CG.playerById(CG.lg, pid);
   return '<div class="slot'+(p?" filled":"")+'" data-slot="'+pos+'" '+(locked?"":'tabindex="0" role="button" aria-label="'+CG.POS_NAME[pos]+' slot"')+'>'+
     '<div class="sl-pos">'+CG.POS_NAME[pos]+'</div>'+
-    (p?'<div class="sl-name">'+esc(p.tag)+'</div><div class="sl-sub">OVR '+CG.lg.ratings[p.id].ovr+' · tap to clear</div>'
+    (p?'<div class="sl-name">'+esc(p.tag)+'</div><div class="sl-sub">OVR '+CG.lg.ratings[p.id].ovr+(locked?' · locked':' · tap to clear')+'</div>'
       :'<div class="sl-sub" style="margin-top:14px">Empty — assign from the bench</div>')+'</div>';
 };
 CG.AFTER._lineup = function(){
@@ -1046,8 +1055,8 @@ CG.hubLines = function(qs){
           return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
             (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
             CG.lcAv(p,34)+
-            '<span class="two"><b>'+esc(p.tag)+'</b><span class="ps">'+CG.POS_NAME[p.pos]+'</span></span>'+
-            (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
+            '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">'+CG.POS_NAME[p.pos]+'</span>'+
+              (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+'</span></span>'+
             (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
             '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
         }).join("")+'</div>';
@@ -1058,8 +1067,8 @@ CG.hubLines = function(qs){
         return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
           (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', training camp">'+
           CG.lcAv(p,34)+
-          '<span class="two"><b>'+esc(p.tag)+'</b><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span></span>'+
-          (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
+          '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
+            (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+'</span></span>'+
           (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
           '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
       }).join("")+'</div>' : "")+
@@ -1550,8 +1559,11 @@ CG.hubRoster = function(qs){
   };
   var rows = contracted.map(rowFor).join("") +
     (loans.length ? '<tr class="loan-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
-  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !CG.isWaived(p.id); });
-  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !CG.isWaived(p.id); });
+  /* the 9/6/2 shape is CONTRACTED players only; pre-season loans ride the active roster without
+     counting against it (Rule 2.1) and are shown as their own tally */
+  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !isLoan(p) && !CG.isWaived(p.id); });
+  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !isLoan(p) && !CG.isWaived(p.id); });
+  var loanSq = loans.filter(function(p){ return p.spotId && !CG.isWaived(p.id); });
   if (roster.some(function(p){ return p.spotId; })){
     /* Rule 2.1 (v2.41): the active roster is shaped by position GROUP — 9 forwards / 6 defensemen /
        2 goaltenders; the exact split is shown for balance, not enforced. */
@@ -1563,11 +1575,12 @@ CG.hubRoster = function(qs){
         '<span class="caption" style="display:block">'+label+'</span></div>';
     }
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
-      '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp</span></div><div class="card-b">'+
+      '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp'+(loanSq.length?' · '+loanSq.length+' loaned':'')+'</span></div><div class="card-b">'+
       '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),CG.ROSTER_QUOTA.F)+
       meter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),CG.ROSTER_QUOTA.D)+
-      meter("goaltenders",grpN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+'</div>'+
-      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 9 forwards (centers and wings in any mix), 6 defensemen (either side) and 2 goaltenders, the one position locked to its exact role; training camp holds up to 3 players. '+
+      meter("goaltenders",grpN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+
+      (loanSq.length?meter("pre-season loans",loanSq.length,null):"")+'</div>'+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 9 forwards (centers and wings in any mix), 6 defensemen (either side) and 2 goaltenders, the one position locked to its exact role; training camp holds up to 3 players. Randomly assigned pre-season players ride the active roster as loans and don’t count against the 9/6/2 shape — a club can hold as many as it is sent, so everyone gets a club for the pre-season (Rule 2.1); they return to the draft pool when it ends. '+
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
         : 'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). ')+

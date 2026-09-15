@@ -231,48 +231,11 @@ async function announceDepartures(gone, profByDiscord, codeByTeam, registered, s
   }
 }
 
-/* ---- a sign-up does not survive leaving the server ---------------------------------------
-   Registering requires being in the Discord (require_guild_membership blocks the INSERT), so the
-   list has to hold the same way on the way out. The removal itself is one SECURITY DEFINER RPC:
-   pending sign-ups only (never a drafted player's), archived to season_registration_removals
-   before deletion, and the member gets a site notification whose click is the server invite.
-   The grace window exists for the same reason trackDepartures has its census guards — a
-   kick-and-rejoin or a bad read must never cost anyone their sign-up date. */
-const SIGNUP_REMOVAL_GRACE_HOURS = 24;
-async function removeDepartedSignups(sum) {
-  let removed = [];
-  try {
-    removed = (await sbPost("rpc/remove_departed_signups",
-      { p_grace_hours: SIGNUP_REMOVAL_GRACE_HOURS }, "return=representation")) || [];
-  } catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); return; }
-  if (!removed.length) return;
-  sum.signupsRemoved = removed.map((r) => r.gamertag || r.profile_id);
-  const chId = sum.__departChanId;
-  if (!chId) return;
-  /* Discord caps an embed description at 4096 chars, and the big batches land exactly when the
-     record matters most (first tick against a backlog). Chunk the names so no batch size can
-     400 the whole announcement away; each chunk posts independently. */
-  const blurb = "\n\nOut of the server for over " + SIGNUP_REMOVAL_GRACE_HOURS + " hours while still on the " +
-    "sign-up board — the registration was archived and removed from the pool, and the member " +
-    "was told on the site how to come back. Re-registering after a rejoin counts as a fresh sign-up.";
-  const chunks = [];
-  let cur = [], len = 0;
-  for (const n of sum.signupsRemoved) {
-    const line = "• **" + n + "**";
-    if (cur.length && len + line.length + blurb.length + 64 > 4096) { chunks.push(cur); cur = []; len = 0; }
-    cur.push(line); len += line.length + 1;
-  }
-  if (cur.length) chunks.push(cur);
-  for (let i = 0; i < chunks.length; i++) {
-    try {
-      await dApi("POST", `/channels/${chId}/messages`, { embeds: [{
-        title: "📋 Sign-up" + (sum.signupsRemoved.length === 1 ? "" : "s") + " withdrawn" +
-          (chunks.length > 1 ? " (" + (i + 1) + "/" + chunks.length + ")" : ""),
-        description: chunks[i].join("\n") + (i === chunks.length - 1 ? blurb : ""),
-        color: 0xC2410C, timestamp: new Date().toISOString() }], allowed_mentions: { parse: [] } });
-    } catch (e) { sum.errors.push({ signupRemovalPost: String(e.message || e) }); }
-  }
-}
+/* A sign-up used to be withdrawn automatically once its owner had been out of the server past a
+   grace window (remove_departed_signups). That rule was removed 2026-09-14 at the league's
+   direction: leaving the Discord no longer touches the sign-up board. The SECURITY DEFINER RPC
+   and its season_registration_removals archive remain in the database as an office-only manual
+   tool, but no sweep calls it. */
 
 async function sbUpsertCfg(key, value) {
   await rfetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
@@ -804,7 +767,7 @@ async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
         if (existing) trole = existing.id;
         else {
           const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
-          const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: false });
+          const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: true });
           if (cr && cr.id) { trole = cr.id; guildRoles.push(cr); sum.clubRolesCreated = (sum.clubRolesCreated || 0) + 1; }
         }
         if (trole) { await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole }); t.discord_role_id = trole; }
@@ -1493,7 +1456,7 @@ export default async (req) => {
             if (existing) trole = existing.id;
             else {
               const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
-              const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: false });
+              const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: true });
               if (cr && cr.id) { trole = cr.id; out.createdRoles.push(t.name); }
             }
             if (trole) await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole });
@@ -1719,6 +1682,7 @@ export default async (req) => {
   const guildRoles = await dApi("GET", `/guilds/${GUILD}/roles`);
   const roleNameById = Object.fromEntries(guildRoles.map((r) => [r.id, r.name]));
   const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
+  const roleMentionableById = Object.fromEntries(guildRoles.map((r) => [r.id, !!r.mentionable]));
   const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
   const roleId = {};
   for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
@@ -2045,6 +2009,15 @@ export default async (req) => {
         if (wantColor != null && roleColorById[t.discord_role_id] !== wantColor) {
           patch.color = wantColor; sum.roleRecolored = (sum.roleRecolored || 0) + 1;
         }
+        /* Club roles are MENTIONABLE (2026-09-14): a club's management rallies its room with an
+           @Club ping — in the team channel and in any channel they can post in — and Discord's only
+           other way to let someone ping a non-mentionable role is MENTION_EVERYONE, which is the
+           server-wide megaphone enforceMentionPolicy exists to keep with the league office. A role
+           ping reaches only that club's members, so it needs none of that. Reconciled here every
+           sweep so a hand-edit in the UI cannot quietly switch it back off. */
+        if (roleMentionableById[t.discord_role_id] !== true) {
+          patch.mentionable = true; sum.clubRoleMentionable = (sum.clubRoleMentionable || 0) + 1;
+        }
         if (Object.keys(patch).length) await dApi("PATCH", `/guilds/${GUILD}/roles/${t.discord_role_id}`, patch);
       }
       const wantSlug = slug(t.name);
@@ -2190,15 +2163,6 @@ export default async (req) => {
   try { await trackDepartures(memberById, memberListOk, links, teams, sum); }
   catch (e) { sum.errors.push({ departures: String(e.message || e) }); }
 
-  /* Sign-ups whose owner has been out of the server past the grace window are withdrawn.
-     Deliberately RIGHT after the census lands: the role passes below can take minutes of
-     rate-limited Discord calls, and a member whose grace expires this tick but who rejoins
-     during that stretch should not be caught by a stale read. Candidates were flagged whole
-     ticks ago (the grace is measured in hours), so this never needs the passes below to run
-     first. */
-  try { await removeDepartedSignups(sum); }
-  catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
-
   if (!inputsOk) sum.errors.push({ inputs: "load failed (" + inputsErr.join("; ") + ") — managed roles left untouched this run" });
   for (const m of links) {
     if (!m.discord_id) continue;
@@ -2307,7 +2271,6 @@ export default async (req) => {
         unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
-        signupsRemoved: (sum.signupsRemoved || []).length,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
         automodExempted: sum.automodExempted || 0, automodChannels: sum.automodChannels || 0,
@@ -2349,5 +2312,4 @@ export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy
   enforceReadOnlyCategories, READ_ONLY_CATEGORIES, INFO_EVERYONE_ALLOW, INFO_EVERYONE_DENY, INFO_POSTER_ALLOW, THREAD_BITS,
   CREATE_INSTANT_INVITE, POST_DENY, POST_ALLOW_STATIC, MIN_VERIFICATION_LEVEL,
   trackDepartures, announceDepartures, ensureDeparturesChannel, DEPART_SANITY,
-  removeDepartedSignups, SIGNUP_REMOVAL_GRACE_HOURS,
   enforceMentionPolicy, MENTION_EVERYONE, MENTION_ALLOWED };

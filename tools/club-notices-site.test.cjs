@@ -12,6 +12,6 @@ A("...and shows the registered position when he is listed elsewhere for the pre-
 A("the bot has a club-notices lane with a catch-up", /sb\.channel\("club-notices"\)/.test(bot) && /CLUB\.catchUp\(\)/.test(bot) && /clubNoticesLive/.test(bot));
 A("the sweep is the backstop, under the same claim", /async function flushClubNotices\(sum\)/.test(sync) && /kind: "club", ref/.test(sync) && /clubNoticesPosted: sum\.clubNoticesPosted \|\| 0/.test(sync));
 const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
-A("changelog 2.42", rb.changelog[0].version === "2.42" && /Owner, GM and AGM/.test(rb.changelog[0].summary) && /one summary per club/.test(rb.changelog[0].summary));
+A("changelog 2.42", (function(){ var e=rb.changelog.find(function(c){return c.version==="2.42";}); return !!e && /Owner, GM and AGM/.test(e.summary) && /one summary per club/.test(e.summary); })());
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

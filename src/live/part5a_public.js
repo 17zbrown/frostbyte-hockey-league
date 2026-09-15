@@ -2542,7 +2542,9 @@ CG.ovrNote = function(pid, style){
   var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games";
   if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + txt + '</span>';
   if (style === "title") return "Provisional — " + txt + " played. Overalls open at 70 and settle onto the real rating over five games.";
-  return '<span class="caption" style="display:block;margin-top:4px;color:var(--on-ink)">Provisional · ' + txt + '</span>';
+  /* the colour follows the SURFACE, not the call site: .caption is the light-card token and
+     .hero-ovr .ovr-prov re-points it on the dark profile hero (part1_head.html) */
+  return '<span class="caption ovr-prov" style="display:block;margin-top:4px">Provisional · ' + txt + '</span>';
 };
 /* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
 CG.skaterDNA = function(s){
