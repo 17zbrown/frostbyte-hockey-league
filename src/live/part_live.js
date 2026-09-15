@@ -966,7 +966,7 @@ CG.teardownDMs = function(){
   if(CG._dm.channel){ try{ CG.sb.removeChannel(CG._dm.channel); }catch(e){} CG._dm.channel=null; }
 };
 /* re-map the draft board/pool with the same maps the adapter built */
-/* ---- Road to 5 (Rule 2.8): who still needs pre-season games to stay draft-eligible ----
+/* ---- Road to 3 (Rule 2.8): who still needs pre-season games to stay draft-eligible ----
    Pure: takes the league object, returns classified rows, so Team HQ, Pre-season Central and the
    tests all read the SAME arithmetic. A player is exempt when returning (drafted before, prior
    roster, or 5+ career games — mirrors is_draft_eligible in the DB); everyone else needs
@@ -2696,7 +2696,7 @@ CG.ROUTES.register = function(){
         ((reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
           ? 'You registered after the draft-eligibility deadline ('+dlText+'), so you’re not in the draft — you’re placed on a club automatically once it concludes (Rule 2.2). You’ll be notified.'
           : dlPast
-          ? 'You registered in time: you’re in the pre-season, and five pre-season games make you draft-eligible (Rule 2.8). If you’re not drafted you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'
+          ? 'You registered in time: you’re in the pre-season, and three pre-season games make you draft-eligible (Rule 2.8). If you’re not drafted you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'
           : 'Register by '+dlText+' and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'))+' Update your details below any time.'+
       (reg && (reg.status==="pending"||!reg.status) && !onRoster
         ? ' <button class="btn btn-ghost btn-sm" id="regWithdraw" style="color:var(--red);margin-left:6px">Withdraw my sign-up</button>'
@@ -3033,7 +3033,7 @@ CG.ROUTES.brand = function(){
       '<h2 class="h-sec">Broadcast-grade, player-run</h2>'+
       '<p class="lede" style="color:var(--on-ink-dim)">Write from the reader’s side of the screen. Plain and specific, active voice, real numbers. A control says exactly what it does; an error says how to fix it.</p></div></div></div>'+
     '<div class="shell"><div class="grid g2">'+
-      [["“Unlock your competitive journey today!”","“Register to play — sign-ups close the Monday before the pre-season.”"],
+      [["“Unlock your competitive journey today!”","“Register to play — sign-ups close at 11:59 PM ET the Thursday before the draft.”"],
        ["“An error occurred.”","“Couldn’t save — your sign-in expired. Sign out and back in, then retry.”"],
        ["“96 players and counting 🔥”","“Rosters fill through the draft.”"],
        ["“Admin backend”","“Control Center” · “the league office”"]
@@ -3627,7 +3627,7 @@ CG.ROUTES.draft = function(){
            returning player) — a late registrant with five games used to read ELIGIBLE here */
         var el = CG.eligOf(pr.profileId);
         var eligChip = el.vet ? "" : (el.ok ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
-                                    : el.gp>=5 ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
+                                    : el.gp>=CG.PRESEASON_MIN_GP ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
                                                : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF 5</span>');
         return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
           '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+' · '+preLine+'</small></span>'+
@@ -3914,7 +3914,7 @@ CG.draftCurPick = function(){
   return CG.draftPicksCur().find(function(p){ return p.overall===st.current_overall && !p.used && !p.skipped; }) || null;
 };
 CG.eligOf = function(pid){
-  /* Rule 2.8 (v2.22): draft-eligible = a returning player OR five pre-season appearances. `ok`
+  /* Rule 2.8 (v2.22, three games since v2.46): draft-eligible = a returning player OR PRESEASON_MIN_GP pre-season appearances. `ok`
      mirrors CG.isDraftEligible, the same predicate the DB enforces in draft_make_pick, so the
      board and auto-pick can never offer a player the server will refuse on the clock. */
   var vet = CG.lg.isVeteran && CG.lg.isVeteran(pid);
@@ -4044,7 +4044,7 @@ CG.draftPickModalLive = function(pickId, forCode){
   CG.modal("Draft a player"+(forCode?" — "+esc(forCode):""),
     '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
     '<div id="modPickList" style="max-height:320px;overflow:auto">'+rows("")+'</div>'+
-    '<p class="caption" style="margin-top:10px">A randomly assigned player needs five pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).</p>',
+    '<p class="caption" style="margin-top:10px">A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button>');
   function wire(){
     document.querySelectorAll("[data-modpick]").forEach(function(b){ b.addEventListener("click", function(){
@@ -4235,7 +4235,7 @@ CG.hubDraftLive = function(){
     [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the league auto-drafts your top available board player — never a player you didn’t rank, unless your board runs dry."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
      ["Skipped picks aren’t lost","If a pick gets skipped, it stays yours — use it any time before the draft ends from the Make-up card."],
-     ["Eligibility","Registered by the deadline and, for randomly assigned first-years, at least 5 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of five still plays — placed on a club under Rule 2.2."]
+     ["Eligibility","Registered by 11:59 PM ET the Thursday before the draft and, for randomly assigned first-years, at least 3 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of three still plays — placed on a club under Rule 2.2."]
     ].map(function(kv){ return '<div><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">'+kv[0]+'</b><p class="small" style="color:var(--steel);line-height:1.6">'+kv[1]+'</p></div>'; }).join("")+
     '</div></div></div>';
   return h;
@@ -5096,9 +5096,9 @@ CG.AFTER.messages = function(param){
 /* Rule 2.8 (v2.22): the pre-season appearance requirement, mirrored from the database's
    is_draft_eligible() so the site never offers a player the draft would refuse. A returning
    player (drafted before, rostered a prior season, or 5+ career games) is exempt; everyone else
-   needs five pre-season appearances. Management never reaches this test — they hold a roster
+   needs PRESEASON_MIN_GP pre-season appearances. Management never reaches this test — they hold a roster
    spot, so they are out of the pool entirely. */
-CG.PRESEASON_MIN_GP = 5;
+CG.PRESEASON_MIN_GP = 3;   /* Rule 2.8 — three pre-season appearances (was five through v2.45) */
 CG.isDraftEligible = function(pid){
   /* Rule 2.8 P3, first test (v2.33): only a registration filed by the draft-eligibility deadline is
      ever in the pool, however many pre-season games its owner plays. Mirrors the database's
@@ -5188,7 +5188,7 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs five pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. Free agency runs a full week for players whose contracts have ended; puck drop waits for it to close.</p></div>'
+      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. Free agency runs a full week for players whose contracts have ended; puck drop waits for it to close.</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions (pool + dl are defined once near the top of this function) */
@@ -5228,7 +5228,7 @@ CG.admPreseason = function(){
                 : seatHolder?'<span class="chip chip-chrome" style="font-size:9px">Management — exempt</span>'
                 : late?'<span class="chip chip-warn">Late — random-assigned</span>'
                 : lg.isVeteran(r.profile_id)?'<span class="chip">Veteran</span>'
-                : !CG.isDraftEligible(r.profile_id)?'<span class="chip chip-warn" title="Rule 2.8: five pre-season appearances, or a returning player">Needs pre-season games ('+(pre.gp||0)+'/5)</span>'
+                : !CG.isDraftEligible(r.profile_id)?'<span class="chip chip-warn" title="Rule 2.8: '+CG.PRESEASON_MIN_GP+' pre-season appearances, or a returning player">Needs pre-season games ('+(pre.gp||0)+'/'+CG.PRESEASON_MIN_GP+')</span>'
                 : '<span class="chip chip-win">Draft-eligible</span>';   /* v2.22: Rule 2.8 */
         /* status uses the lifecycle classifier: rostered/mgmt keep their combined badge; every
            unrostered registrant gets its true state (Signed up / Free agent / Undrafted FA / …) */
@@ -5253,9 +5253,9 @@ CG.admPreseason = function(){
           '<td class="tright reg-act">'+actions+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div id="regEmpty" class="card-b" style="display:none;border-top:1px solid var(--line)"><span class="caption">No registrations match this filter.</span></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (a returning player whose contract has ended) or <b>Awaiting placement</b> (undrafted — placed on a club automatically ten minutes after the draft). A randomly assigned player needs five pre-season appearances to reach the draft (Rule 2.8); returning players are exempt, and anyone short is placed on a club automatically instead. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Filter with the tabs or KPI tiles; search matches gamertag or EA ID. Set a scouted overall to rank the draft pool. Status reflects the lifecycle: <b>Signed up</b> before the draft (a prospect in the pool), then <b>Free agent</b> (a returning player whose contract has ended) or <b>Awaiting placement</b> (undrafted — placed on a club automatically ten minutes after the draft). A randomly assigned player needs three pre-season appearances to reach the draft (Rule 2.8); returning players are exempt, and anyone short is placed on a club automatically instead. <b>Unsigned</b> — pick a club and hit Assign, or Decline to keep a banned/duplicate account out of the pool. <b>Rostered</b> — Remove from roster waives the player back to the pool (their spot and cap hit clear; they stay registered). For a manager this removes only their player spot; their Owner/GM/AGM seat is set under Teams.</span></div>'
       :'<div class="card-b"><p class="caption">No registrations yet — they appear here as members register for the season.</p></div>')+'</div>';
-  /* Road to 5 (Rule 2.8): the office's obligation-tracker — which clubs are leaving randomly
+  /* Road to 3 (Rule 2.8): the office's obligation-tracker — which clubs are leaving randomly
      assigned players short of draft eligibility. Only alive while the pre-season is deciding it. */
   var draftDone = !!(lg.draftState && String(lg.draftState.status)==="complete");
   if (!draftDone && randomN > 0){
@@ -5271,12 +5271,12 @@ CG.admPreseason = function(){
     atRisk.sort(function(a,b){ return (b.stuck-a.stuck) || (b.short-a.short); });
     var anyShort = atRisk.some(function(c){ return c.short>0; });
     var nShort = atRisk.reduce(function(n,c){ return n+c.short; },0);
-    h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Road to 5 — draft eligibility</h3>'+
+    h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Road to '+CG.PRESEASON_MIN_GP+' — draft eligibility</h3>'+
       (anyShort?'<span class="chip chip-warn">'+nShort+' player'+(nShort===1?'':'s')+' short</span>'
                :'<span class="chip chip-win">everyone eligible or exempt</span>')+'</div>'+
       (anyShort
-        ? '<div class="tblwrap"><table class="tbl compact"><caption class="sr">Players short of five pre-season games, by club</caption>'+
-          '<thead><tr><th class="tleft">Club</th><th>Assigned</th><th>Short of 5</th><th>Can’t reach 5</th><th class="tleft">Who</th></tr></thead><tbody>'+
+        ? '<div class="tblwrap"><table class="tbl compact"><caption class="sr">Players short of '+CG.PRESEASON_MIN_GP+' pre-season games, by club</caption>'+
+          '<thead><tr><th class="tleft">Club</th><th>Assigned</th><th>Short of '+CG.PRESEASON_MIN_GP+'</th><th>Can’t reach '+CG.PRESEASON_MIN_GP+'</th><th class="tleft">Who</th></tr></thead><tbody>'+
           atRisk.filter(function(c){ return c.short>0; }).map(function(c){
             return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(c.code,18)+'<span class="mono" style="font-size:11px">'+esc(c.code)+'</span></span></td>'+
               '<td class="tnum">'+c.total+'</td><td class="tnum">'+c.short+'</td>'+
@@ -5284,8 +5284,8 @@ CG.admPreseason = function(){
               '<td class="tleft caption">'+esc(c.names)+(c.short>4?'…':'')+'</td></tr>';
           }).join("")+'</tbody></table></div>'
         : '')+
-      '<div class="card-b"'+(anyShort?' style="border-top:1px solid var(--line)"':'')+'><span class="caption">Rule 2.8 obliges management to spread pre-season ice time so every randomly assigned player can reach five games. '+
-      '“Can’t reach 5” means the club has fewer pre-season games left than the player still needs — those need attention now.</span></div></div>';
+      '<div class="card-b"'+(anyShort?' style="border-top:1px solid var(--line)"':'')+'><span class="caption">Rule 2.8 obliges management to spread pre-season ice time so every randomly assigned player can reach '+CG.PRESEASON_MIN_GP+' games. '+
+      '“Can’t reach '+CG.PRESEASON_MIN_GP+'” means the club has fewer pre-season games left than the player still needs — those need attention now.</span></div></div>';
   }
   /* archive of the retired automatic-withdrawal rule (removed 2026-09-14). Filled async from
      the season_registration_removals table; the card stays hidden when there is nothing to show. */
@@ -10014,7 +10014,7 @@ CG.roadAheadCard = function(s, opts){
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
     [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
-    [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with five pre-season appearances (Rule 2.8). Undrafted players are placed on clubs automatically ten minutes after it concludes."],
+    [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with three pre-season appearances (Rule 2.8). Undrafted players are placed on clubs automatically ten minutes after it concludes."],
     [s.free_agency_opens_at, "Free agency opens", "One week for players whose contracts have ended to take offers from any club (Rule 2.2) — in a first season, nobody: undrafted players are placed, not signed."],
     [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
   ].filter(function(st){ return st[0]; });
@@ -10527,7 +10527,7 @@ CG.admRatingsLive = function(){
         '<td class="tnum">'+p.pos+'</td><td class="tleft">'+esc(CG.TEAM[p.team].code)+'</td><td>'+(s?s.gp:0)+'</td>'+
         '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 and blend onto their computed rating across their first five games (overall_breakdown returns a provisional flag until then). The formula lives in the database (compute_overall) and reruns after every final. A commissioner CAN override a single rating from Users &amp; roles; nothing else hand-edits one.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 and blend onto their computed rating across their first three games (overall_breakdown returns a provisional flag until then). The formula lives in the database (compute_overall) and reruns after every final. A commissioner CAN override a single rating from Users &amp; roles; nothing else hand-edits one.</span></div></div>';
 };
 
 /* ================================================================
@@ -10608,7 +10608,7 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||17)+'"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
-    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, sign-ups closing as those weeks end, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday, a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays, so the dates it writes are dates the generator can actually use. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
+    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday — with sign-ups open until 11:59 PM ET the Thursday before it — a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays, so the dates it writes are dates the generator can actually use. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
   document.getElementById("ssSpace").addEventListener("click", function(){
     /* Two ways in. Give the off-season start (the first midnight after last season's final
@@ -10625,17 +10625,19 @@ CG.seasonForm = function(id){
     if (offDay){
       darkEnd = CG.dayAdd(offDay, CG.OFFSEASON_DARK_DAYS-1);    /* 2 weeks, no on-ice activity */
       pre = CG.gameNights(CG.dayAdd(darkEnd,1), CG.PRESEASON_WEEKS, shpS.nights, hKeys); /* pre-season the next week */
-      regDl = CG.etISO(darkEnd,"20:00");                        /* sign-ups close ending the 2 weeks */
       ownDl = CG.etISO(CG.dayAdd(offDay,6),"20:00");            /* week 1 takes apps, week 2 seats them */
     } else {
       pre = CG.gameNights(preV.slice(0,10), CG.PRESEASON_WEEKS, shpS.nights, hKeys);
     }
     var preStart = pre.nights[0].wed, preFinal = pre.nights[CG.PRESEASON_WEEKS-1].fri;
     if (!offDay){
-      regDl = CG.etISO(CG.dayAdd(preStart,-2),"20:00");         /* the Monday before */
       ownDl = CG.etISO(CG.dayAdd(preStart,-7),"20:00");
     }
     var draftDay = CG.dayAdd(preFinal,1);                       /* Saturday draft night */
+    /* Sign-ups stay open through the pre-season: the draft-eligibility cutoff is 11:59 PM ET on the
+       Thursday before the draft (v2.46) — late enough that a Thursday sign-up can still play the
+       final Friday's three games and reach the Rule 2.8 minimum. */
+    regDl = CG.etISO(CG.dayAdd(draftDay,-2),"23:59");
     var faOpenDay  = CG.dayAdd(draftDay,1);                     /* 24h after draft night */
     var faCloseDay = CG.dayAdd(faOpenDay,CG.FA_WINDOW_DAYS);    /* a full week of free agency */
     /* Puck drop waits for free agency to close, so every club starts game 1 settled. */

@@ -17,7 +17,7 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 const ctx = { console, Math, Object, Array, String, Number, Boolean, JSON, Date, Intl,
   parseFloat, parseInt, isFinite, isNaN, Infinity, encodeURIComponent };
-ctx.window = ctx; ctx.globalThis = ctx; ctx.CG = { PRESEASON_MIN_GP: 5 };
+ctx.window = ctx; ctx.globalThis = ctx; ctx.CG = { PRESEASON_MIN_GP: 3 };   /* v2.46 — three pre-season games */
 ctx.esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 vm.createContext(ctx);
 {
@@ -61,11 +61,11 @@ console.log("— Road to 5: the classification every surface shares");
   A("only randomly assigned players are gated", rows.length === 4 && !rows.some(r => r.pid === "signed"));
   const by = {}; rows.forEach(r => by[r.pid] = r);
   A("a returning player is exempt and done", by.vet.exempt && by.vet.done);
-  A("five games is done", by.done.done && by.done.need === 0);
-  A("3 of 5 with 3 games left is reachable", !by.close.done && by.close.need === 2 && by.close.reachable);
-  A("0 of 5 with 3 games left cannot reach five", !by.stuck.done && !by.stuck.reachable);
+  A("five games is done (over the three-game minimum)", by.done.done && by.done.need === 0);
+  A("3 games is exactly the minimum: done", by.close.done && by.close.need === 0);
+  A("0 of 3 with 3 games left can still reach three (reachable, not done)", !by.stuck.done && by.stuck.need === 3 && by.stuck.reachable);
   A("the players in danger sort first, most behind on top",
-    rows[0].pid === "stuck" && rows[1].pid === "close", rows.map(r => r.pid).join(","));
+    rows[0].pid === "stuck", rows.map(r => r.pid).join(","));
   A("an unknown club returns an empty list, never throws", CG.roadToFive(lg, "XXX").length === 0);
   A("a missing league object returns an empty list", CG.roadToFive(null, "SEA").length === 0);
 }
@@ -156,9 +156,9 @@ console.log("\n— draft spectator mode wiring");
 
 console.log("\n— the two Road-to-5 surfaces and the checklist are rendered and wired");
 {
-  A("Team HQ roster page carries the club tracker", /Road to 5 — draft eligibility/.test(hub));
-  A("...with the can't-reach flag", /can’t reach 5/.test(hub));
-  A("Pre-season Central carries the office view", /Road to 5 — draft eligibility/.test(live) && /Can’t reach 5/.test(live));
+  A("Team HQ roster page carries the club tracker", /Road to '\+CG\.PRESEASON_MIN_GP\+' — draft eligibility/.test(hub));
+  A("...with the can't-reach flag", /can’t reach '\+CG\.PRESEASON_MIN_GP\+'/.test(hub));
+  A("Pre-season Central carries the office view", /Road to '\+CG\.PRESEASON_MIN_GP\+' — draft eligibility/.test(live) && /Can’t reach '\+CG\.PRESEASON_MIN_GP\+'/.test(live));
   A("the hub dashboard renders the checklist off the shared helper", /CG\.setupChecklist\(p, reg, !!s\.registration_open\)/.test(live));
   A("...and its EA button is actually bound", /clEaBtn[\s\S]{0,120}CG\.promptEaId/.test(live));
   A("the draft desk carries the coverage meter", /Board coverage/.test(live) && /CG\.boardCoverage\(board, pool, picks\.length \? remainingMine : null\)/.test(live));

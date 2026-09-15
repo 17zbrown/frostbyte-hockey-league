@@ -25,19 +25,19 @@ console.log("— the progress helper, driven");
     if (!m) { A("located CG." + fn, false); process.exit(1); }
     vm.runInContext(m[0], ctx);
   }
-  A("the threshold matches the database's five", ctx.CG.OVR_SETTLE_GP === 5);
+  A("the threshold matches the database's three (v2.46)", ctx.CG.OVR_SETTLE_GP === 3);
   const at = (gp) => { ctx.CG.lg = { careerGp: { p: gp } }; return ctx.CG.ovrProgress("p"); };
-  A("zero games: provisional, five to go", at(0).provisional && at(0).need === 5);
-  A("three games: provisional, two to go", at(3).provisional && at(3).need === 2);
-  A("five games: settled", at(5).provisional === false && at(5).need === 0);
+  A("zero games: provisional, three to go", at(0).provisional && at(0).need === 3);
+  A("two games: provisional, one to go", at(2).provisional && at(2).need === 1);
+  A("three games: settled", at(3).provisional === false && at(3).need === 0);
   A("more than five stays settled", at(40).provisional === false);
   A("an unknown player is treated as zero, not as settled", (() => {
     ctx.CG.lg = { careerGp: {} }; return ctx.CG.ovrProgress("nobody").provisional === true;
   })());
-  A("no league object never throws", (() => { ctx.CG.lg = null; return ctx.CG.ovrProgress("p").need === 5; })());
+  A("no league object never throws", (() => { ctx.CG.lg = null; return ctx.CG.ovrProgress("p").need === 3; })());
 
   ctx.CG.lg = { careerGp: { p: 2 } };
-  A("the note counts up, not down — '2 of 5 games'", /2 of 5 games/.test(ctx.CG.ovrNote("p")));
+  A("the note counts up, not down — '2 of 3 games'", /2 of 3 games/.test(ctx.CG.ovrNote("p")));
   A("...and says the word provisional", /Provisional/.test(ctx.CG.ovrNote("p")));
   A("...the chip form is compact", /chip-warn/.test(ctx.CG.ovrNote("p", "chip")));
   A("...the title form explains WHY it is 70", /open at 70 and settle/.test(ctx.CG.ovrNote("p", "title")));
@@ -58,7 +58,7 @@ console.log("\n— the copy no longer claims it is a scouting number");
 {
   A("the false 'scouting number from registration' line is gone", !/staff scouting number from registration/.test(pub));
   A("...and the other one too", !/The overall itself is the staff scouting number/.test(pub));
-  A("the directory explains the real rule", /Overalls open at 70 and settle onto a player's real rating over his first five games/.test(pub));
+  A("the directory explains the real rule", /Overalls open at 70 and settle onto a player's real rating over his first three games/.test(pub));
   A("the profile says it is recomputed after every final", /recomputed after every final/.test(pub));
   A("the Control Center no longer claims nothing hand-edits a rating",
     !/the site never hand-edits a rating/.test(live) && /A commissioner CAN override a single rating/.test(live));

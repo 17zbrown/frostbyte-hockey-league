@@ -2128,7 +2128,7 @@ CG.ROUTES.players = function(param, qs){
   var nRostered = lg.players.length;
   var head = CG.pageHead("Player directory","Every skater. Every tendy.",
     esc((nRostered+unrostered.length)+" players — "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
-      "Overalls open at 70 and settle onto a player's real rating over his first five games; games, points, and save percentage come straight from EA box scores."));
+      "Overalls open at 70 and settle onto a player's real rating over his first three games; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
     '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+
@@ -2257,7 +2257,7 @@ CG.ROUTES.player = function(pid, qs){
           (canSeeAvail?'<span class="chip '+(CG.availGet(p.id)?"chip-win":"chip-warn")+'">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
       /* OVR comes from profiles.overall, which the database recomputes after every final
-         (compute_overall). It OPENS at 70 and blends onto the real rating across five games, so
+         (compute_overall). It OPENS at 70 and blends onto the real rating across three games, so
          until then the badge is shown with how far along it is rather than bare — see CG.ovrNote. */
       '<div class="hero-ovr" style="text-align:center" title="'+esc(CG.ovrNote(p.id,"title"))+'">'+
         '<span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
@@ -2290,7 +2290,7 @@ CG.ROUTES.player = function(pid, qs){
       : (anyGp===0
         ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
           '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
-          'The '+r.ovr+' overall is recomputed after every final; it opens at 70 and settles onto the real rating across five games. Production, defense, and discipline bars '+
+          'The '+r.ovr+' overall is recomputed after every final; it opens at 70 and settles onto the real rating across three games. Production, defense, and discipline bars '+
           'appear here once box scores exist.</p></div></div>'
         : '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
         Object.keys(r.parts).map(function(k){
@@ -2323,7 +2323,7 @@ CG.ROUTES.player = function(pid, qs){
       (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
            : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
         .map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating. A returning player is draft-eligible on registration; a first-year needs five pre-season appearances to enter the draft (Rule 2.8), and is placed on a club automatically otherwise.</p></div></div>' : '';
+      '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating. A returning player is draft-eligible on registration; a first-year needs three pre-season appearances to enter the draft (Rule 2.8), and is placed on a club automatically otherwise.</p></div></div>' : '';
     /* Empty-state cleanup: a first-year (or just-signed) player with no games at any stage gets a
        single broadcast "fresh sheet" panel instead of a wall of twelve zeroes. The pristine-ice
        still (Higgsfield soul_location) carries the moment; the rating breakdown is dropped as
@@ -2523,13 +2523,13 @@ CG.posGroupLabel = function(grp){
   return grp === "G" ? "goaltenders" : grp === "D" ? "defensemen" : "forwards";
 };
 /* How settled is a player's overall? The database blends it toward the real computed rating over
-   the first five games — overall_breakdown() returns exactly
-       70 * (1 - gp/5)  +  computed * (gp/5)
-   and flags provisional while gp < 5. Until then the number leans on the 70 everyone opens at, so
+   the first three games — overall_breakdown() returns exactly
+       70 * (1 - gp/3)  +  computed * (gp/3)
+   and flags provisional while gp < 3. Until then the number leans on the 70 everyone opens at, so
    showing it bare invites the reader to treat a placeholder as a scouting verdict. We keep the
    number (it is real, and it moves) and say how far along it is. Counted over every final game,
    the same way the database counts it. */
-CG.OVR_SETTLE_GP = 5;
+CG.OVR_SETTLE_GP = 3;   /* the database blends 70 → computed over this many games (was 5 through v2.45) */
 CG.ovrProgress = function(pid){
   var gp = ((CG.lg && CG.lg.careerGp) || {})[pid] || 0;
   var need = Math.max(0, CG.OVR_SETTLE_GP - gp);
@@ -2541,7 +2541,7 @@ CG.ovrNote = function(pid, style){
   if (!pr.provisional) return "";
   var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games";
   if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + txt + '</span>';
-  if (style === "title") return "Provisional — " + txt + " played. Overalls open at 70 and settle onto the real rating over five games.";
+  if (style === "title") return "Provisional — " + txt + " played. Overalls open at 70 and settle onto the real rating over three games.";
   /* the colour follows the SURFACE, not the call site: .caption is the light-card token and
      .hero-ovr .ovr-prov re-points it on the dark profile hero (part1_head.html) */
   return '<span class="caption ovr-prov" style="display:block;margin-top:4px">Provisional · ' + txt + '</span>';

@@ -28,8 +28,8 @@ console.log("— the rulebook says what the announcement says");
      here to prove v2.22's rules are recorded — not to pin the newest release forever */
   A("the changelog records v2.22", rb.changelog.some((c) => c.version === "2.22"));
   A("...and the newest entry sits first", rb.changelog[0].version >= "2.22", rb.changelog[0].version);
-  A("Rule 2.8 carries the five-game pre-season requirement",
-    /at least five \(5\) pre-season games to remain draft-eligible/.test(sec("2.8")));
+  A("Rule 2.8 carries the three-game pre-season requirement (v2.46)",
+    /at least three \(3\) pre-season games to remain draft-eligible/.test(sec("2.8")));
   A("...with returning players and management exempt",
     /Returning players and club management are exempt/.test(sec("2.8")));
   A("...and the management obligation to spread ice time",
@@ -67,7 +67,7 @@ console.log("\n— the code agrees with the rulebook");
   A("...frozen seeds are validated against that field size", /v\.length===CG\.playoffFieldSize\(\)/.test(live));
   A("...round 1 is derived per division, not hardcoded to four", /CG\.playoffRound1\(seedCodes\.slice/.test(live));
   A("...and the round names are derived too", /CG\.playoffRoundName = function/.test(live));
-  A("the pre-season requirement is mirrored client-side", /CG\.PRESEASON_MIN_GP = 5/.test(live));
+  A("the pre-season requirement is mirrored client-side", /CG\.PRESEASON_MIN_GP = 3/.test(live));
   A("...the draft desk filters the pool by it", /pool\.filter\(function\(r\)\{ return CG\.isDraftEligible\(r\.profile_id\); \}\)/.test(live));
   A("...and says the DB is the authority", /is_draft_eligible, enforced inside/.test(live));
   A("no surface still claims there is no games-played minimum",

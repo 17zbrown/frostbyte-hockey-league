@@ -3,7 +3,7 @@
 Everything you need to run your club. All times Eastern. Full rules: chelgamingleague.com/#/rulebook
 
 **📅 THE CALENDAR**
-• Sign-ups close: **Mon Sept 14, 8:00 PM**
+• Sign-ups close: **Thu Sept 24, 11:59 PM** (the Thursday before the draft — the draft-eligibility cutoff)
 • Pre-season: Wed Sept 16 to Fri Sept 25
 • **Draft night: Sat Sept 26, 7:00 PM**
 • Free agency: Sun Sept 27 to Sun Oct 4
@@ -41,7 +41,7 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 Your management group plays for your own club. Every other registered player is spread randomly and evenly across the eight clubs for two weeks of real games.
 
-**Any randomly assigned player who is not already on a full time roster must play at least 5 pre-season games to stay draft eligible.**
+**Any randomly assigned player who is not already on a full time roster must play at least 3 pre-season games to stay draft eligible** — a player who signs up as late as Thursday night can still reach three on the final Friday.
 
 Returning players and club management are not required to play. They are welcome to if they want to.
 

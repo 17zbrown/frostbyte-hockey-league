@@ -38,9 +38,9 @@ console.log("\n— the EA auto-import only attaches to an open fixture");
 console.log("\n— stale rules copy is corrected");
 {
   A("the profile no longer claims 'no games-played requirement'", !/there is no games-played requirement/.test(pub));
-  A("...and states the five-game rule instead", /a first-year needs five pre-season appearances to enter the draft \(Rule 2\.8\)/.test(pub));
+  A("...and states the three-game rule instead", /a first-year needs three pre-season appearances to enter the draft \(Rule 2\.8\)/.test(pub));
   A("the road-ahead draft step cites Rule 2.8, not 'everyone who registered'",
-    /returning players and first-years with five pre-season appearances \(Rule 2\.8\)/.test(live) &&
+    /returning players and first-years with three pre-season appearances \(Rule 2\.8\)/.test(live) &&
     !/every player who registered by the deadline is draft-eligible/.test(live));
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const sec06 = (() => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === "0.6") return s; })();

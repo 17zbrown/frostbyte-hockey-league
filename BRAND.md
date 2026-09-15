@@ -145,7 +145,7 @@ Write from the reader's side of the screen.
 
 | Don't | Do |
 |---|---|
-| "Unlock your competitive journey today!" | "Register to play — sign-ups close the Monday before the pre-season." |
+| "Unlock your competitive journey today!" | "Register to play — sign-ups close at 11:59 PM ET the Thursday before the draft." |
 | "An error occurred." | "Couldn't save — your sign-in expired. Sign out and back in, then retry." |
 | "96 players and counting 🔥" | "Eight clubs. Rosters fill through the draft." |
 | "Admin backend" | "Control Center" · "the league office" |
