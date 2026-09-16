@@ -240,10 +240,12 @@ console.log("\n— goaltending: the weekly cap sets the line limit, by format (v
     /fits\(X, p2\) \|\| goalieCapped\(X, p2, b\)/.test(src6) && /fits\(Y, p1\) \|\| goalieCapped\(Y, p1, a\)/.test(src6));
   A("...counting draft state, target line excluded", /function gLines\(pid, exceptLine\)/.test(src6));
 
-  /* basic (the league standard, v2.48): a 3-game goalie week is ONE line — gMax = 1 */
+  /* basic (the league standard; v2.51 layout): everyone — goaltenders included — may play six
+     (6) games a week, so a goaltender covers TWO lines (two nights); v2.48–v2.50 capped him at 3
+     and gMax was 1 */
   delete CG.SEASON.format;
-  A("basic: CG.weeklyCap({pos:G}) is 3, so gMax is 1 (one line, one night)",
-    CG.weeklyCap({ pos: "G" }) === 3 && Math.max(1, Math.floor(CG.weeklyCap({ pos: "G" }) / 3)) === 1,
+  A("basic: CG.weeklyCap({pos:G}) is 6, so gMax is 2 (two lines, two nights — v2.51)",
+    CG.weeklyCap({ pos: "G" }) === 6 && Math.max(1, Math.floor(CG.weeklyCap({ pos: "G" }) / 3)) === 2,
     String(CG.weeklyCap({ pos: "G" })));
 
   /* full (shelved): a 6-game goalie week is TWO lines — gMax = 2, matching the message this test

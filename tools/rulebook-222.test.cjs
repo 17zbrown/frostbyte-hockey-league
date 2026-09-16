@@ -10,6 +10,7 @@ const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const html = R("index.html");
 const content = R("src/live/part3_content.js");
 const live = R("src/live/part_live.js");
+const fmtBlockOf = (src) => src.slice(src.indexOf("CG.FORMAT_RULES = {"), src.indexOf("CG.FORMAT_NAME"));
 const engine = R("src/live/part2_engine.js");
 const hub = R("src/live/part6_hub.js");
 
@@ -61,7 +62,9 @@ console.log("— the rulebook says what the announcement says");
     /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")));
   A("...and the shelved full-format text still holds the top four, eight-club field",
     /top four \(4\) clubs in each division/.test(secFull("8.1")) && /eight-club field/.test(secFull("8.1")));
-  A("Rule 2.1 caps training camp at three", /up to three \(3\) training-camp players/.test(sec("2.1")));
+  A("Rule 2.1 (basic, v2.51) leaves training camp unlimited unless the commissioner publishes a camp limit",
+    /may carry any number of training-camp players/.test(sec("2.1")) && !/up to three \(3\) training-camp players/.test(sec("2.1")));
+  A("...while the shelved full-format text still caps camp at three", /up to three \(3\) training-camp players/.test(secFull("2.1")));
   A("Rule 2.4 (basic) puts the deadline at midnight Friday of the fourth game week",
     /closes at midnight Eastern Time at the end of the Friday of the fourth \(4th\) game-week/.test(sec("2.4")));
   A("...and the shelved full-format text still says midnight Friday of the deadline week",
@@ -91,15 +94,19 @@ console.log("\n— the code agrees with the rulebook");
   A("no surface still claims there is no games-played minimum",
     !/no games-played minimum/.test(live) && !/no games-played minimum/.test(hub) &&
     !/there is no games-played requirement \(Rule 2\.8\)/.test(live));
-  /* v2.48: the caption no longer hardcodes "3 and 6" — both numbers are now format-dependent
-     (basic caps the goaltender at 3 too; full still caps it at 6), so it reads them live from
-     CG.weeklyCap instead of stating either format's numbers as a literal. */
-  A("the playoff caps caption reads its numbers live from CG.weeklyCap, not a hardcoded literal",
-    /a skater may be dressed in at most '\+CG\.weeklyCap\(\{ pos:"C" \}\)\+' games of a series and a goaltender in at most '\+CG\.weeklyCap\(\{ pos:"G" \}\)\+'/.test(hub) &&
+  /* v2.48: the caption no longer hardcodes "3 and 6" — both numbers are format-dependent, so it
+     reads them live. v2.51: the playoff figure is its own rule (Rule 8.3's series cap — 4 for
+     everyone in basic), so the caption reads CG.seriesCap, which falls back to the playoff-stage
+     weekly cap where a format sets no series cap of its own (full). */
+  A("the playoff caps caption reads its numbers live from CG.seriesCap, not a hardcoded literal",
+    /a skater may be dressed in at most '\+CG\.seriesCap\(\{ pos:"C" \}\)\+' games of a series and a goaltender in at most '\+CG\.seriesCap\(\{ pos:"G" \}\)/.test(hub) &&
+    /every player may be dressed in at most '\+CG\.seriesCap\(\{ pos:"C" \}\)\+' games of a series/.test(hub) &&
     !/goaltenders are exempt and can play all seven/.test(hub));
-  const fmtBlock = live.slice(live.indexOf("CG.FORMAT_RULES = {"), live.indexOf("CG.FORMAT_NAME"));
-  A("...which gives 3 and 3 in basic",
-    /basic: \{[\s\S]*?cap_skater:3, cap_goalie:3,/.test(fmtBlock));
+  A("...and CG.seriesCap gives 4 in basic (Rule 8.3, v2.51)",
+    /series_cap:4,/.test(fmtBlockOf(live)) && /CG\.seriesCap = function/.test(live));
+  const fmtBlock = fmtBlockOf(live);
+  A("...which gives 6 and 6 in basic (v2.51: one six-game week for everyone)",
+    /basic: \{[\s\S]*?cap_skater:6, cap_goalie:6,/.test(fmtBlock));
   A("...and 3 and 6 in the shelved full format",
     /full: *\{[\s\S]*?cap_skater:3, cap_goalie:6,/.test(fmtBlock));
 }

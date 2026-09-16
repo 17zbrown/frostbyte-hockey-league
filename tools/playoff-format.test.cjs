@@ -55,8 +55,9 @@ console.log("\n— the config and copy agree on best-of-7");
 console.log("\n— the series-cap flag uses the right cap per position, by format (v2.48)");
 {
   /* the cap used to be a hardcoded isGoalie?6:3; it now rides CG.weeklyCap, which is
-     format-aware — basic (the league standard): skater 3 / goalie 3; full (shelved): skater 3 /
-     goalie 6, the value this test used to pin as the ONLY behavior */
+     format-aware — basic (the league standard, v2.51): skater 6 / goalie 6 (one six-game week for
+     everyone); full (shelved): skater 3 / goalie 6, the value this test used to pin as the ONLY
+     behavior. (In the playoffs basic's Rule 8.3 series cap of 4 governs via CG.seriesCap.) */
   A("the flag reads CG.weeklyCap by position, not a hardcoded number",
     /var cap = CG\.weeklyCap\(\{ pos: isGoalie \? "G" : "C", stage:"playoff" \}\);/.test(pub2));
   A("...flagging strictly ABOVE the cap", /return n>cap \?/.test(pub2));
@@ -64,12 +65,10 @@ console.log("\n— the series-cap flag uses the right cap per position, by forma
   A("the old flat 'more than four' flag is gone", !/n>4 \?/.test(pub2) && !/5TH GAME/.test(pub2));
   A("the old hardcoded isGoalie?6:3 is gone (replaced by the format-aware call)", !/var cap = isGoalie \? 6 : 3;/.test(pub2));
 
-  const FORMAT_RULES = JSON.parse((() => {
-    const m = live.match(/CG\.FORMAT_RULES\s*=\s*(\{[\s\S]*?\});/);
-    return m[1];
-  })().replace(/(\w+):/g, '"$1":').replace(/'/g, '"'));
-  A("basic (the league standard): skater cap 3, goalie cap 3",
-    FORMAT_RULES.basic.cap_skater === 3 && FORMAT_RULES.basic.cap_goalie === 3,
+  /* the table carries a prose comment since v2.51, so evaluate the literal instead of regex-quoting it */
+  const FORMAT_RULES = new Function("return (" + live.match(/CG\.FORMAT_RULES\s*=\s*(\{[\s\S]*?\n\});/)[1] + ")")();
+  A("basic (the league standard, v2.51): skater cap 6, goalie cap 6, series cap 4",
+    FORMAT_RULES.basic.cap_skater === 6 && FORMAT_RULES.basic.cap_goalie === 6 && FORMAT_RULES.basic.series_cap === 4,
     JSON.stringify({ skater: FORMAT_RULES.basic.cap_skater, goalie: FORMAT_RULES.basic.cap_goalie }));
   A("full (shelved): skater cap 3, goalie cap 6 — the old pinned '6 : 3' behavior",
     FORMAT_RULES.full.cap_skater === 3 && FORMAT_RULES.full.cap_goalie === 6,

@@ -38,8 +38,9 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
   const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
   const r21 = sec("2.1"), r21f = secFull("2.1");
-  A("camp is carried outside the active roster, in addition to it (basic, v2.50 season-settings text)",
-    /A club may carry up to three \(3\) training-camp players in addition to its active roster/.test(r21) &&
+  A("camp is carried outside the active roster, in addition to it — and unlimited unless a camp limit is published (basic, v2.51)",
+    /A club may carry any number of training-camp players in addition to its active roster/.test(r21) &&
+    /the commissioner may publish a camp limit as a season setting, and where none is published camp is unlimited/.test(r21) &&
     /camp is carried outside the active roster, not outside the payroll/.test(r21));
   A("...and the active-roster shape is now a season setting the commissioner publishes, by position group",
     /commissioner shall determine, for each season, the size of the active roster and its composition by position group/.test(r21) &&
@@ -77,8 +78,8 @@ console.log("\n— the roster size fallbacks tell the truth (format-derived, not
      which is 18 in basic (the league standard) and 17 in the shelved full format. */
   A("ROSTER_MAX derives from the season's format via CG.fmt, not a hardcoded 17",
     /CG\.ROSTER_MAX = \(season && season\.roster_max\) \|\| CG\.fmt\("roster_max", season\);/.test(live));
-  A("...and the basic default is eighteen, the full default seventeen",
-    /basic: \{[\s\S]*?roster_max:18,/.test(live) && /full: *\{[\s\S]*?roster_max:17,/.test(live));
+  A("...and the basic default is fifteen (v2.51: two full lines plus three flex), the full default seventeen",
+    /basic: \{[\s\S]*?roster_max:15,/.test(live) && /full: *\{[\s\S]*?roster_max:17,/.test(live));
   A("the public blurb quotes the live, format-derived number",
     /\(CG\.ROSTER_MAX\|\|CG\.fmt\("roster_max"\)\)\+"-player roster/.test(pub));
 }
@@ -116,7 +117,7 @@ console.log("\n— training-camp salaries COUNT against the cap (Rule 2.5, commi
   }
   A("Rule 2.5 says a camp salary IS part of the payroll",
     /salary forms part of that payroll/.test(sec("2.5")) && /but not outside the cap/.test(sec("2.5")));
-  A("Rule 2.1 agrees", /salaries count against the club's salary cap exactly as an active/.test(sec("2.1")));
+  A("Rule 2.1 agrees", /salary counts against the club's salary cap exactly as an active/.test(sec("2.1")));
   A("...and camp still does not consume an active roster spot",
     /carried outside the active roster, not outside the payroll/.test(sec("2.1")));
 }
@@ -131,7 +132,7 @@ console.log("\n— the rulebook carries the cap ruling, and the reversal is on t
     /from the moment he is placed there/.test(sec("2.5")) &&
     /recalling him to the active roster changes nothing about his cost/.test(sec("2.5")));
   A("Rule 2.1 repeats it where camp is defined",
-    /salaries count against the club's salary cap exactly as an active player's does/.test(sec("2.1")));
+    /salary counts against the club's salary cap exactly as an active player's does/.test(sec("2.1")));
   A("no paragraph anywhere still claims the exemption",
     !rb.chapters.some((ch) => ch.sections.some((x) => {
       const t = x.paragraphs.join(" ");

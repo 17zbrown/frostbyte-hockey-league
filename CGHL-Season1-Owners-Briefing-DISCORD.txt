@@ -71,13 +71,13 @@ Tampering with another club's rostered players is a discipline matter.
 
 **👥 ROSTER AND LINEUPS**
 
-**The roster size and shape are a season setting** the league office publishes before the draft (Rule 2.1); the working shape on the site is 18 players — 9 forwards, 6 defensemen, 3 goalies — **with your Owner, GM and AGM counted inside it** in their own position groups, and the final figures will be confirmed before draft night. Team HQ enforces whatever is published and refuses anything that breaks it. Depth placements sit on top of the roster.
+**Roster: 15 players — two full lines plus three players of any position — with your Owner, GM and AGM counted inside it.** In practice that means at most 9 forwards, 7 defensemen or 5 goalies, and never more than 15 in total; Team HQ enforces it and refuses anything that breaks it. **Everyone else goes to training camp, which is unlimited.** Camp players can dress at any position, up to 3 games a week. Depth placements (undrafted and late sign-ups) sit on top of the roster.
 
 **Positions work by group.** Any forward can dress at C, LW or RW. Any defenseman can dress at LD or RD. Goalies dress only in goal. One exception: training-camp players fill any position (Rules 2.1 and 5.2).
 
-**Weekly cap: everyone plays at most 3 games a week — skaters and goalies alike.** An over-cap lineup is simply refused. Nine games a week: plan your goaltending by night. If a goalie is out for a night, a camp player can play goal, or ask the league office for an emergency goalie signing (Rules 2.4 and 5.2).
+**Weekly cap: an active-roster player can play up to 6 games a week — skaters and goalies alike — and a camp player up to 3.** That's the only availability rule: there's no minimum number of games a player has to mark available. An over-cap lineup is simply refused.
 
-**Training camp is capped at 3 players.** Those 3 can be dressed at any position, up to 3 games a week each.
+**The playoffs have a floor: a player needs 18 regular-season games to dress in the playoffs**, and in a series everyone is capped at 4 games. Team HQ's **Road to 18** card shows every player's count and how many club games are left — spread the games so the players you want in the postseason get there (Rule 8.3).
 
 **Cap is $50,000,000 hard.** Minimum salary $750,000, and every salary in the league moves in $250,000 steps — $750K, $1M, $1.25M, $1.5M and up. Anything off that lattice is refused when you type it. **Every contract runs one season** — no extensions, no re-signings, no held rights; everyone goes back into next season's draft. Owner counts $0 against the cap, GM $3M, AGM $3M. A manager cannot be waived or traded while holding the seat. Cap and contract details stay inside your management group.
 
@@ -85,7 +85,7 @@ Tampering with another club's rostered players is a discipline matter.
 
 **🔁 SETTING YOUR LINES**
 
-Set your lines at #/hub/lines. Three lines across all six positions, and you can dress the whole week at once. A goalie's 3-game week is one night, so each goalie backstops one line.
+Set your lines at #/hub/lines. Three lines across all six positions, and you can dress the whole week at once. A goalie's 6-game week is two nights, so a goalie can backstop two lines.
 
 **Lineups lock 30 minutes before puck drop.** The game code goes out at that same mark, to management and the players dressed that night.
 
@@ -129,7 +129,7 @@ Two other things happen at the deadline: automatic placement of new players stop
 
 Clubs are seeded 1 to 3 inside their own division. **The 1 seed rests through the opening round** while the 2 seed plays the 3 seed; the winner meets the 1 seed for the division title; the two division champions meet in the final. Three rounds, three game weeks.
 
-Series are best of seven, played inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday. **Per series caps are the same as the weekly ones: every player plays at most 3 games of a series.**
+Series are best of seven, played inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday. **Every player is capped at 4 games per series, and only players with 18 regular-season games can dress** (Rule 8.3).
 
 ════════════════════════════════════════
 
@@ -163,8 +163,9 @@ Series are best of seven, played inside one game week — 2 games Wednesday, 2 T
 
 • **6 weeks, 9 games a week, 54 games**
 • **Wednesday, Thursday, Friday at 9:00, 9:35 and 10:10 PM ET**
-• **Roster size and shape: published before the draft (working figure 18: 9 F, 6 D, 3 G, management inside it).** Training camp capped at 3
-• **Weekly cap (regular season and playoffs): everyone 3 games, goalies included**
+• **Roster 15: two full lines plus three of any position, management inside it.** Training camp unlimited
+• **Weekly cap: active players 6 games, camp players 3 — no availability minimum**
+• **Playoffs: 18 regular-season games to be eligible; 4 games per player per series**
 • **Cap $50M, minimum $750K, every contract one season**
 • **Draft: random snake order, rounds published before draft night (working figure 15); everyone registered by Thursday is in**
 • **Lines lock 30 minutes before puck drop. 1 penalty per player changed after**

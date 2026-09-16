@@ -83,7 +83,8 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("[full] 2.2 no longer promises a league-office confirmation", !/only once the league office confirms it/.test(secFull("2.2")));
   A("[full] 2.3: the department may send a trade back", /transactions department may review any completed trade/.test(secFull("2.3")));
   A("[full] 2.3: ...and cannot once a piece has moved on", /cannot be reversed once a player or pick in it has moved on/.test(secFull("2.3")));
-  A("5.2: the cap is regular season and playoffs", /weekly appearance cap in the regular season and the playoffs/.test(sec("5.2")));
+  A("5.2: the weekly cap is a regular-season cap (v2.51) and 8.3's series cap applies in its place in the playoffs",
+    /weekly appearance cap in the regular season, counted across the game-week/.test(sec("5.2")) && /In the playoffs the cap of Rule 8\.3 applies in its place/.test(sec("5.2")));
   A("[full] 5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(secFull("5.2")));
   /* BASIC format is now the live standard: waived-player signing, players-only trades */
   A("[basic] 2.2: no free-agency period or open market", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));

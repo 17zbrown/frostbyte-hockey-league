@@ -22,7 +22,9 @@ const CG = ctx.CG;
 const dbRules = {};
 for (const f of ["basic", "full"]) {
   /* the literal ends at the closing brace right before ::jsonb — the quota object nests one level */
-  const m = sql.match(new RegExp('\\{"format":"' + f + '"[\\s\\S]*?\\}\'::jsonb'));
+  /* the migration file records every version of the table — the LAST literal is the one in force */
+  const all = [...sql.matchAll(new RegExp('\\{"format":"' + f + '"[\\s\\S]*?\\}\'::jsonb', 'g'))];
+  const m = all.length ? all[all.length - 1] : null;
   A("the SQL records the " + f + " rules", !!m);
   if (m) dbRules[f] = JSON.parse(m[0].slice(0, -"'::jsonb".length).replace(/\s+/g, ""));
 }
@@ -32,33 +34,38 @@ for (const f of ["basic", "full"]) {
   A(f + ": the client and database key sets match", JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()), JSON.stringify(Object.keys(b).sort()));
   A(f + ": every value matches", keys.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])), keys.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).join(","));
 }
-A("basic is the standard: 18 = 9 F / 6 D / 3 G, $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
-  CG.FORMAT_RULES.basic.roster_max === 18 && CG.FORMAT_RULES.basic.quota.G === 3 && CG.FORMAT_RULES.basic.salary_cap === 50000000 && CG.FORMAT_RULES.basic.weeks === 6 &&
+A("basic is the standard (v2.51 layout): 15 = two lines + three flex (caps 9 F / 7 D / 5 G), camp unlimited, everyone 6 a week (camp 3), 4 a series, 18-GP floor, $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
+  CG.FORMAT_RULES.basic.roster_max === 15 && CG.FORMAT_RULES.basic.lines === 2 && CG.FORMAT_RULES.basic.flex === 3 && CG.FORMAT_RULES.basic.quota.F === 9 && CG.FORMAT_RULES.basic.quota.D === 7 && CG.FORMAT_RULES.basic.quota.G === 5 &&
+  CG.FORMAT_RULES.basic.camp_max === 999 && CG.FORMAT_RULES.basic.cap_skater === 6 && CG.FORMAT_RULES.basic.cap_camp === 3 && CG.FORMAT_RULES.basic.series_cap === 4 && CG.FORMAT_RULES.basic.playoff_min_gp === 18 &&
+  CG.FORMAT_RULES.basic.salary_cap === 50000000 && CG.FORMAT_RULES.basic.weeks === 6 &&
   CG.FORMAT_RULES.basic.trade_deadline_week === 4 && CG.FORMAT_RULES.basic.draft_rounds === 15 && CG.FORMAT_RULES.basic.draft_snake === true && CG.FORMAT_RULES.basic.max_contract_years === 1 &&
   !CG.FORMAT_RULES.basic.extensions && !CG.FORMAT_RULES.basic.rights && !CG.FORMAT_RULES.basic.pick_trades && !CG.FORMAT_RULES.basic.preseason && !CG.FORMAT_RULES.basic.fa_window &&
-  CG.FORMAT_RULES.basic.playoff_per_div === 3 && CG.FORMAT_RULES.basic.playoff_best_of === 7 && CG.FORMAT_RULES.basic.cap_goalie === 3);
+  CG.FORMAT_RULES.basic.playoff_per_div === 3 && CG.FORMAT_RULES.basic.playoff_best_of === 7 && CG.FORMAT_RULES.basic.cap_goalie === 6);
 A("full is the shelf: 17 = 9/6/2, $40M, 8 weeks, deadline week 6, 14 linear rounds, 3-season deals, goaltenders 6, top 4",
   CG.FORMAT_RULES.full.roster_max === 17 && CG.FORMAT_RULES.full.quota.G === 2 && CG.FORMAT_RULES.full.salary_cap === 40000000 && CG.FORMAT_RULES.full.weeks === 8 &&
   CG.FORMAT_RULES.full.trade_deadline_week === 6 && CG.FORMAT_RULES.full.draft_rounds === 14 && !CG.FORMAT_RULES.full.draft_snake && CG.FORMAT_RULES.full.max_contract_years === 3 &&
-  CG.FORMAT_RULES.full.cap_goalie === 6 && CG.FORMAT_RULES.full.playoff_per_div === 4);
-A("the roster shape adds up to roster_max in both formats", ["basic", "full"].every((f) => { const r = CG.FORMAT_RULES[f]; return r.quota.F + r.quota.D + r.quota.G === r.roster_max; }));
-A("basic goaltending covers a nine-game week exactly (3 G x 3 games)", CG.FORMAT_RULES.basic.quota.G * CG.FORMAT_RULES.basic.cap_goalie === 9);
+  CG.FORMAT_RULES.full.cap_goalie === 6 && CG.FORMAT_RULES.full.playoff_per_div === 4 && CG.FORMAT_RULES.full.series_cap === null && CG.FORMAT_RULES.full.playoff_min_gp === 0);
+A("full: the roster shape adds up to roster_max", (function(){ const r = CG.FORMAT_RULES.full; return r.quota.F + r.quota.D + r.quota.G === r.roster_max; })());
+A("basic: two lines plus three flex fit inside every group cap (6+3 F, 4+3 D, 2+3 G) and the total binds", (function(){ const r = CG.FORMAT_RULES.basic; return r.quota.F === 3*r.lines+r.flex && r.quota.D === 2*r.lines+r.flex && r.quota.G === r.lines+r.flex && r.roster_max === 6*r.lines+r.flex; })());
+A("basic goaltending covers a nine-game week with room (2 G x 6 games)", CG.FORMAT_RULES.basic.lines * CG.FORMAT_RULES.basic.cap_goalie >= 9);
+A("the series cap and the floor read through the helpers", CG.seriesCap({ pos:"G", season:{ format:"basic" } }) === 4 && CG.seriesCap({ squad:"tc", season:{ format:"basic" } }) === 4 && CG.seriesCap({ pos:"G", season:{ format:"full" } }) === 6 && CG.seriesCap({ pos:"C", season:{ format:"full" } }) === 3 && CG.playoffMinGp({ format:"basic" }) === 18 && CG.playoffMinGp({ format:"full" }) === 0);
+A("the composition in words", CG.rosterShapeWords({ format:"basic" }) === "two full lines plus three players of any position" && CG.rosterShapeWords({ format:"full" }) === "9 F / 6 D / 2 G");
 
 console.log("\n— the helpers");
 A("anything but 'full' is basic", CG.seasonFormat({}) === "basic" && CG.seasonFormat({ format: "basic" }) === "basic" && CG.seasonFormat({ format: "full" }) === "full" && CG.seasonFormat(null) === "basic");
-A("CG.fmt reads the season passed in", CG.fmt("roster_max", { format: "full" }) === 17 && CG.fmt("roster_max", { format: "basic" }) === 18);
-A("weeklyCap: basic 3/3/3", CG.weeklyCap({ pos: "G", season: { format: "basic" } }) === 3 && CG.weeklyCap({ pos: "C", season: { format: "basic" } }) === 3 && CG.weeklyCap({ squad: "tc", season: { format: "basic" } }) === 3);
+A("CG.fmt reads the season passed in", CG.fmt("roster_max", { format: "full" }) === 17 && CG.fmt("roster_max", { format: "basic" }) === 15);
+A("weeklyCap: basic 6/6/3", CG.weeklyCap({ pos: "G", season: { format: "basic" } }) === 6 && CG.weeklyCap({ pos: "C", season: { format: "basic" } }) === 6 && CG.weeklyCap({ squad: "tc", season: { format: "basic" } }) === 3);
 A("weeklyCap: full 3 skater / 6 goalie / 3 camp / uncapped pre-season", CG.weeklyCap({ pos: "G", season: { format: "full" } }) === 6 && CG.weeklyCap({ pos: "C", season: { format: "full" } }) === 3 && CG.weeklyCap({ squad: "tc", pos: "G", season: { format: "full" } }) === 3 && CG.weeklyCap({ pos: "G", stage: "preseason", season: { format: "full" } }) === Infinity);
-A("...and the basic pre-season is not a thing (no exemption)", CG.weeklyCap({ pos: "G", stage: "preseason", season: { format: "basic" } }) === 3);
+A("...and the basic pre-season is not a thing (no exemption)", CG.weeklyCap({ pos: "G", stage: "preseason", season: { format: "basic" } }) === 6);
 A("spots outside the shape: loans (full) and depth (basic), never management", CG.spotOutsideShape({ origin: "depth_random" }) && CG.spotOutsideShape({ origin: "preseason_random" }) && CG.spotOutsideShape({ origin: "latecomer_random" }) && !CG.spotOutsideShape({ origin: "assigned" }) && !CG.spotOutsideShape({ origin: "depth_random", mgmt: "gm" }));
-A("the default quota before a season loads is the standard's", CG.ROSTER_QUOTA.G === 3 && CG.CAMP_MAX === 3);
+A("the default quota before a season loads is the standard's", CG.ROSTER_QUOTA.G === 5 && CG.CAMP_MAX === 999);
 
 console.log("\n— every reader goes through the format (no stray literals)");
 A("the season load derives cap / roster / quota / camp from the format", /CG\.CAP = \(season && season\.salary_cap\) \? season\.salary_cap : CG\.fmt\("salary_cap", season\);/.test(live) && /CG\.ROSTER_QUOTA = Object\.assign\(\{\}, CG\.fmt\("quota", season\)\);/.test(live) && /CG\.CAMP_MAX = CG\.fmt\("camp_max", season\);/.test(live));
 A("no `|| 17` roster fallback survives in the live client", !/\|\|\s*17\b/.test(live + hub + pub + pub2));
 A("no `? 6 : 3` goalie cap survives", !/\? 6 : 3/.test(live + hub + pub + pub2));
 A("the Squad Room reads the quota and camp size", /cap = CG\.ROSTER_QUOTA\[grp\]/.test(hub) && /< CG\.CAMP_MAX;/.test(hub) && !/CG\.SQUAD_CAPS/.test(hub));
-A("the Squads meter caps camp at CG.CAMP_MAX and goaltenders at the quota", /meter\("training camp",tcSq\.length,CG\.CAMP_MAX\)/.test(hub) && /meter\("goaltenders",grpN\("G"\),qG\)/.test(hub));
+A("the Squads meter caps camp at CG.CAMP_MAX and goaltenders at the quota", /meter\("training camp",tcSq\.length,CG\.CAMP_MAX>=999\?null:CG\.CAMP_MAX\)/.test(hub) && /meter\("goaltenders",grpN\("G"\),qG\)/.test(hub) && /meter\("active roster",proSq\.length,CG\.ROSTER_MAX\)/.test(hub));
 A("the line creator's goalie rule follows the weekly cap", /var gMax = Math\.max\(1, Math\.floor\(CG\.weeklyCap\(\{ pos:"G" \}\) \/ 3\)\);/.test(hub));
 A("the playoff series flag follows the weekly cap", /CG\.weeklyCap\(\{ pos: isGoalie \? "G" : "C", stage:"playoff" \}\)/.test(pub2));
 A("playoffs: per-division and series length are the format's in basic", /if \(CG\.isBasic\(\)\) return CG\.fmt\("playoff_per_div"\);/.test(live) && /if \(CG\.isBasic\(\)\) return CG\.fmt\("playoff_best_of"\);/.test(live));
@@ -100,9 +107,10 @@ A("2.5: one-season deals, no extensions, no held rights, the cap year is the sea
 A("2.6: a manager holds a roster spot in the published composition", /holds one of the club's active-roster spots in his own position group within the published composition \(Rule 2\.1\)/.test(sec("2.6")));
 A("2.9: the sign-up cutoff", /Position changes close at the sign-up cutoff/.test(sec("2.9")));
 A("3.1 stored clause states the live shape (six weeks, 54)", /runs six \(6\) game-weeks/.test(sec("3.1")) && /for 54 games per club/.test(sec("3.1")));
-A("5.2: everyone three, roster shaped to cover the week", /No player — skater or goaltender — may be dressed in more than three \(3\) games in a game-week/.test(sec("5.2")) && /the roster composition published under Rule 2\.1 is sized so that a full active roster covers a full week within the cap/.test(sec("5.2")));
+A("5.2: active players six a week, camp three, the playoff cap takes over in the playoffs", /No active-roster player — skater or goaltender — may be dressed in more than six \(6\) games in a game-week/.test(sec("5.2")) && /Training-camp players are subject to a cap of three \(3\) games in a game-week/.test(sec("5.2")) && /In the playoffs the cap of Rule 8\.3 applies in its place/.test(sec("5.2")));
+A("5.1: no availability quota", /The league sets no weekly availability quota beyond the appearance cap of Rule 5\.2/.test(sec("5.1")) && !/at least six \(6\) of the week/.test(sec("5.1")));
 A("8.1: top three, six-club field, the first seed byes", /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")) && /first seed receives a bye through the opening round/.test(sec("8.1")));
-A("8.3: best-of-seven 2-2-3, three a series for everyone, byes", /best-of-seven series played within a single game-week in a 2-2-3 format/.test(sec("8.3")) && /no player, skater or goaltender, may be dressed in more than three \(3\) games of a series/.test(sec("8.3")) && /first seed plays no series in the opening week/.test(sec("8.3")));
+A("8.3: best-of-seven 2-2-3, three a series for everyone, byes", /best-of-seven series played within a single game-week in a 2-2-3 format/.test(sec("8.3")) && /no player — skater, goaltender or training-camp player — may be dressed in more than four \(4\) games of a single series/.test(sec("8.3")) && /appeared in at least eighteen \(18\) regular-season games/.test(sec("8.3")) && /first seed plays no series in the opening week/.test(sec("8.3")));
 A("0.4/0.6 carry their shelved titles", find("0.4").fullTitle === "Step three — the pre-season" && find("0.6").fullTitle === "Step five — rookie placement and free agency" && find("0.4").title === "Step three — draft week");
 A("10.1 defines Season format and Depth", /“Season format” means/.test(sec("10.1")) && /“Depth” or “depth placement” means/.test(sec("10.1")));
 A("the 2.48 changelog entry exists and the head is at least 2.48", (() => { const e = rb.changelog.find((c) => c.version === "2.48"); return !!e && /Saturday September 19/.test(e.summary) && /puck drop Wednesday September 23/.test(e.summary) && /playoffs from November 4/.test(e.summary) && parseFloat(rb.changelog[0].version) >= 2.48; })());

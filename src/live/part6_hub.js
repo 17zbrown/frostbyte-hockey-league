@@ -299,6 +299,13 @@ CG.hubDashboard = function(){
           '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+setN+' of '+wk.length+' game'+(wk.length===1?"":"s")+' set so far'+(inN?' · you’re dressed for '+inN:'')+'. Your management can change a lineup until 30 minutes before puck drop (Rule 5.3).</span></div></div>');
       }
     }
+    if (CG.playoffMinGp && CG.playoffMinGp() && me.spotId){
+      var myGp = (lg.pstats[me.id]||{}).gp||0, myMin = CG.playoffMinGp(), myLeft = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===me.team || g.away===me.team); }).length;
+      cards.push('<div class="card"><div class="card-h"><h3>Playoff eligibility</h3>'+(myGp>=myMin?'<span class="chip chip-win">eligible</span>':(myMin-myGp)<=myLeft?'<span class="chip chip-warn">'+(myMin-myGp)+' to go</span>':'<span class="chip chip-loss">out of reach</span>')+'</div><div class="card-b">'+
+        '<div style="display:flex;align-items:center;gap:12px"><b class="num" style="font-size:26px">'+myGp+'<span class="caption" style="font-size:12px"> / '+myMin+'</span></b>'+
+        '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+Math.round(Math.min(1,myGp/myMin)*100)+'%;background:'+(myGp>=myMin?"var(--green)":"var(--chrome)")+'"></i></span></div>'+
+        '<p class="caption" style="margin-top:10px">'+(myGp>=myMin?'You have the '+myMin+' regular-season games the playoffs need (Rule 8.3).':'You need '+myMin+' regular-season games to dress in the playoffs (Rule 8.3) — '+(myMin-myGp)+' more, with '+myLeft+' club game'+(myLeft===1?'':'s')+' left. Mark yourself available and talk to your GM.')+'</p></div></div>');
+    }
     if (lg.pstats[me.id].gp){
       var last3 = lg.glog[me.id].slice(-3).reverse();
       cards.push('<div class="card"><div class="card-h"><h3>My last three games</h3><a class="sec-link" href="'+CG.playerRoute(me)+'">Full log</a></div>'+
@@ -1677,9 +1684,11 @@ CG.hubRoster = function(qs){
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp'+(loanSq.length?' · '+loanSq.length+' loaned':'')+(depthSq.length?' · '+depthSq.length+' depth':'')+'</span></div><div class="card-b">'+
       '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),CG.ROSTER_QUOTA.F)+
       meter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),CG.ROSTER_QUOTA.D)+
-      meter("goaltenders",grpN("G"),qG)+meter("training camp",tcSq.length,CG.CAMP_MAX)+
+      meter("goaltenders",grpN("G"),qG)+(CG.isBasic()?meter("active roster",proSq.length,CG.ROSTER_MAX):"")+meter("training camp",tcSq.length,CG.CAMP_MAX>=999?null:CG.CAMP_MAX)+
       (loanSq.length?meter("pre-season loans",loanSq.length,null):"")+(depthSq.length?meter("depth",depthSq.length,null):"")+'</div>'+
-      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is '+CG.ROSTER_QUOTA.F+' forwards (centers and wings in any mix), '+CG.ROSTER_QUOTA.D+' defensemen (either side) and '+qG+' goaltenders, the one position locked to its exact role'+(CG.isBasic()?', with your Owner, GM and AGM inside those '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' spots':'')+'; training camp holds up to '+CG.CAMP_MAX+' players. '+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — '+(CG.isBasic()
+        ? 'the active roster is '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' players: '+CG.rosterShapeWords()+' (at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen or '+qG+' goaltenders), with your Owner, GM and AGM inside those spots; training camp is unlimited. '
+        : 'the active roster is '+CG.ROSTER_QUOTA.F+' forwards (centers and wings in any mix), '+CG.ROSTER_QUOTA.D+' defensemen (either side) and '+qG+' goaltenders, the one position locked to its exact role; training camp holds up to '+CG.CAMP_MAX+' players. ')+
       (CG.isBasic()
         ? 'Players the league office places after the draft — anyone undrafted, and late sign-ups — join as depth: real one-season contracts you can dress, trade or waive, that never count against the '+CG.ROSTER_QUOTA.F+'/'+CG.ROSTER_QUOTA.D+'/'+qG+' shape (Rule 2.8). '
         : 'Randomly assigned pre-season players ride the active roster as loans and don’t count against the '+CG.ROSTER_QUOTA.F+'/'+CG.ROSTER_QUOTA.D+'/'+qG+' shape — a club can hold as many as it is sent, so everyone gets a club for the pre-season (Rule 2.1); they return to the draft pool when it ends. ')+
@@ -1716,20 +1725,42 @@ CG.hubRoster = function(qs){
         'The club has '+((r5[0]&&r5[0].clubGamesLeft)||0)+' pre-season game'+(((r5[0]&&r5[0].clubGamesLeft)||0)===1?'':'s')+' left.</p></div></div>';
     }
   }
-  /* v2.7: the 30% playoff floor is abolished — every rostered player is playoff-eligible. The
-     card now states the caps that DO exist rather than a floor that doesn't. */
+  /* v2.51 (Rule 8.3): the playoff games-played floor — management's tracker for who is eligible and who
+     needs games, so the preferred players get their minimum before the postseason */
+  if (CG.playoffRoad && CG.playoffMinGp()){
+    var pr18 = CG.playoffRoad(lg, club), min18 = CG.playoffMinGp();
+    var short18 = pr18.filter(function(r){ return !r.done; }), left18 = pr18.length ? pr18[0].left : 0;
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+min18+' — playoff eligibility</h3>'+
+      (short18.length ? '<span class="chip chip-warn">'+short18.length+' still short</span>' : '<span class="chip chip-win">everyone eligible</span>')+'</div><div class="card-b">'+
+      (pr18.length ? '<div class="stack" style="gap:9px">'+pr18.map(function(r){
+          var pct = Math.round(Math.min(1, r.gp/min18)*100), danger = !r.reachable;
+          return '<div style="display:flex;align-items:center;gap:12px">'+
+            '<span style="flex:0 0 140px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b style="font-size:13px">'+esc(r.tag)+'</b> <small class="caption">'+esc(r.pos||"")+(r.squad==="tc"?" · camp":"")+'</small></span>'+
+            '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+pct+'%;background:'+(r.done?"var(--green)":danger?"var(--red)":"var(--chrome)")+'"></i></span>'+
+            '<span class="num" style="flex:0 0 52px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / '+min18+'</span>'+
+            (r.done?'<span class="chip chip-win" style="font-size:9px">eligible</span>':danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+min18+'</span>':'<span class="caption">needs '+r.need+'</span>')+
+          '</div>';
+        }).join("")+'</div>' : '<p class="caption">No roster yet.</p>')+
+      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+min18+' regular-season games to be dressed in the playoffs. The club has '+left18+' regular-season game'+(left18===1?'':'s')+' left; a player who can no longer reach '+min18+' is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
+  }
+  /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
+     The card states the caps that DO exist. */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
     '<span class="chip chip-win">every rostered player is playoff-eligible</span></div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
       '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
       '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"G" })+'</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
       '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ squad:"tc" })+'</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
-      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
+      '<div><b class="num" style="font-size:22px">'+CG.seriesCap({ pos:"C" })+'</b><span class="caption" style="display:block">of a playoff series'+(CG.seriesCap({ pos:"C" })===CG.seriesCap({ pos:"G" })?'':' — skaters')+'</span></div>'+
+      (CG.playoffMinGp()?'<div><b class="num" style="font-size:22px">'+CG.playoffMinGp()+'</b><span class="caption" style="display:block">regular-season games to be playoff-eligible</span></div>':'')+'</div>'+
     '<p class="caption" style="margin-top:12px">'+
     (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
       ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
       : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
-    'In the playoffs the same caps apply per series: a skater may be dressed in at most '+CG.weeklyCap({ pos:"C" })+' games of a series and a goaltender in at most '+CG.weeklyCap({ pos:"G" })+' (Rule 8.3).</p></div></div>';
+    (CG.seriesCap({ pos:"C" })===CG.seriesCap({ pos:"G" })
+      ? 'In the playoffs every player may be dressed in at most '+CG.seriesCap({ pos:"C" })+' games of a series'
+      : 'In the playoffs a skater may be dressed in at most '+CG.seriesCap({ pos:"C" })+' games of a series and a goaltender in at most '+CG.seriesCap({ pos:"G" }))+
+    (CG.playoffMinGp()?', and only a player with '+CG.playoffMinGp()+' regular-season games can be dressed at all — the Road to '+CG.playoffMinGp()+' card above tracks it':'')+' (Rule 8.3).</p></div></div>';
   var loanN = loans.length;
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+

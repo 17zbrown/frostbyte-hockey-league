@@ -729,3 +729,28 @@ select public._splice_fn('public.announce_lifecycle()',
 -- 5. select public.generate_draft_board(1, 15, 'as_drawn');   -- 120 picks, order NYI,VAN,PIT,DAL,SEA,BOS,UTA,DET kept, even rounds reversed
 -- 6. 216 regular-season games inserted from tools/season-games.cjs (input: starts_at Wed 2026-09-23 21:00 ET, weeks 6, three nights, three slots)
 -- Season 2 (a7c6a1ef-…): still to convert — see the changelog / memory note (280 full-format fixtures to clear, row to re-space, 216 games to insert).
+
+-- ===================================================================
+-- ===== F. v2.51 (2026-09-16) — the temporary player-availability layout (applied live, gated) =====
+-- basic: 15 = two full lines plus three players of any position (group caps overlap; the total binds),
+-- camp unlimited at 3 games/week, every active player 6 games/week, a 4-game series cap, an 18-game
+-- regular-season floor for the playoffs. Keys added to format_rules: lines, flex, series_cap, playoff_min_gp.
+create or replace function public.format_rules(p_format text)
+returns jsonb language sql immutable as $$
+  select case when p_format = 'full' then
+    '{"format":"full","roster_max":17,"quota":{"F":9,"D":6,"G":2},"lines":null,"flex":null,"camp_max":3,"cap_skater":3,"cap_goalie":6,"cap_camp":3,"series_cap":null,"playoff_min_gp":0,
+      "salary_cap":40000000,"weeks":8,"trade_deadline_week":6,"draft_rounds":14,"draft_snake":false,"max_contract_years":3,
+      "extensions":true,"rights":true,"pick_trades":true,"preseason":true,"fa_window":true,"playoff_per_div":4,"playoff_best_of":7}'::jsonb
+  else
+    '{"format":"basic","roster_max":15,"quota":{"F":9,"D":7,"G":5},"lines":2,"flex":3,"camp_max":999,"cap_skater":6,"cap_goalie":6,"cap_camp":3,"series_cap":4,"playoff_min_gp":18,
+      "salary_cap":50000000,"weeks":6,"trade_deadline_week":4,"draft_rounds":15,"draft_snake":true,"max_contract_years":1,
+      "extensions":false,"rights":false,"pick_trades":false,"preseason":false,"fa_window":false,"playoff_per_div":3,"playoff_best_of":7}'::jsonb
+  end $$;
+-- helpers: series_cap(season, squad, pos) → format series_cap else weekly_cap(…,'playoff'); playoff_min_gp(season);
+-- regular_gp(season, profile) = distinct final, non-voided regular-season games in game_stats.
+-- guard_season_format: roster_max must equal the format's roster_max (the group caps no longer sum to it).
+-- check_roster_structure: per-group caps AND total ≤ roster_max (counted rows only).
+-- place_new_roster_spot: parks in camp when the group OR the total is full; camp_max 999 = unlimited.
+-- set_game_lineup (playoff): refuses a player with regular_gp < playoff_min_gp (a goaltender seated after the
+-- movement deadline is exempt — Rule 2.4's emergency provision) and applies series_cap in place of the weekly cap.
+-- check_playoff_violations audits against series_cap. seasons.roster_max = 15 for Seasons 1 and 2.

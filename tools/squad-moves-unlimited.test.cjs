@@ -16,7 +16,7 @@ const p21 = sec["2.1"].paragraphs.join(" "), p24 = sec["2.4"].paragraphs.join(" 
 console.log("— the rulebook says it");
 A("Rule 2.1 states squad changes are unlimited", /move a player between the active roster and training camp at any time and without limit, in either direction/.test(p21));
 A("...and no longer caps them at three", !/three \(3\) times/.test(p21) && !/swap cap/.test(p21));
-A("...while camp itself is still capped at three", /carries no more than three players in camp/.test(p21));
+A("...and camp itself is unlimited unless a camp limit is published (v2.51)", /may carry any number of training-camp players/.test(p21) && !/carries no more than three players in camp/.test(p21));
 A("Rule 2.4 says the deadline never touches roster<->camp moves", /is not restricted by the deadline \(Rule 2\.1\)/.test(p24));
 A("a v2.30 changelog entry exists (pinned by version, never by index)", rb.changelog.some(e => e.version === "2.30" && /unlimited/.test(e.summary)));
 
@@ -25,10 +25,10 @@ A("no 'Squad locked' button", !/Squad locked/.test(hub));
 A("no 'of 3 squad changes left' tooltip", !/of 3 squad changes left/.test(hub) && !/squadMovesLeft/.test(hub));
 A("the squad button says changes are unlimited", /Squad changes are unlimited all season \(Rule 2\.1\)/.test(hub));
 A("the Squads card copy says so too", /there is no limit on squad changes \(Rule 2\.1\)/.test(hub));
-/* v2.48: the camp cap is no longer a hardcoded 3 in the meter — it reads CG.CAMP_MAX, which the
-   format table still sets to 3 in both basic and full, so the meter still reads 3 in practice. */
-A("...and the camp meter reads the format's camp cap (CG.CAMP_MAX), not a hardcoded 3",
-  /meter\("training camp",tcSq\.length,CG\.CAMP_MAX\)/.test(hub));
+/* v2.48: the camp cap is no longer a hardcoded 3 in the meter — it reads CG.CAMP_MAX. v2.51: basic
+   camp is unlimited (CAMP_MAX 999), so the meter draws no cap at all rather than "of 999". */
+A("...and the camp meter reads the format's camp cap (CG.CAMP_MAX), not a hardcoded 3 — and no cap when camp is unlimited",
+  /meter\("training camp",tcSq\.length,CG\.CAMP_MAX>=999\?null:CG\.CAMP_MAX\)/.test(hub));
 A("no comment still claims a 3-swaps ceiling or the pre-v2.7 2/4/6 shape", !/3-swaps-a-season|2\/4\/6|2 G \/ 4 D \/ 6 F/.test(live + hub));
 A("the Swap tooltip does not nest parentheses", !/\('\+title\+'\)/.test(hub) && /of the same position\. '\+title\+'"/.test(hub));
 

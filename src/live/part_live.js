@@ -89,10 +89,13 @@ CG.now = function(){ return Date.now(); };
    tools/season-format.test.cjs pins the two together. Every format-dependent number is read
    through CG.fmt(key) so it never lives in two places again. */
 CG.FORMAT_RULES = {
-  basic: { format:"basic", roster_max:18, quota:{ F:9, D:6, G:3 }, camp_max:3, cap_skater:3, cap_goalie:3, cap_camp:3,
+  /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
+     the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and an
+     18-game regular-season floor for the playoffs */
+  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:18,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
-  full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3,
+  full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0,
            salary_cap:40000000, weeks:8, trade_deadline_week:6, draft_rounds:14, draft_snake:false, max_contract_years:3,
            extensions:true, rights:true, pick_trades:true, preseason:true, fa_window:true, playoff_per_div:4, playoff_best_of:7 }
 };
@@ -105,6 +108,29 @@ CG.weeklyCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat
   if (o.stage === "preseason" && r.preseason) return Infinity;
   if (o.squad === "tc") return r.cap_camp;
   return o.pos === "G" ? r.cap_goalie : r.cap_skater; };
+/* Rule 8.3: the cap on one player's appearances in one playoff series — the format's own figure where it
+   sets one, otherwise the weekly cap serves (mirrors public.series_cap()) */
+CG.seriesCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat(o.season)];
+  return r.series_cap != null ? r.series_cap : CG.weeklyCap(Object.assign({}, o, { stage:"playoff" })); };
+/* Rule 8.3: regular-season games a player needs to be playoff-eligible (0 = no floor) */
+CG.playoffMinGp = function(s){ return CG.fmt("playoff_min_gp", s) || 0; };
+/* a club's published composition in words: "two full lines plus three players of any position" or "9 F / 6 D / 2 G" */
+CG.rosterShapeWords = function(s){ var r = CG.FORMAT_RULES[CG.seasonFormat(s)];
+  var w = ["zero","one","two","three","four","five","six"];
+  return r.lines ? (w[r.lines]||r.lines)+" full lines plus "+(w[r.flex]||r.flex)+" players of any position" : r.quota.F+" F / "+r.quota.D+" D / "+r.quota.G+" G"; };
+/* the road to the playoff floor for every rostered player of a club (Rule 8.3) — GP counted from the
+   regular-season record, games left from the club's unplayed regular-season schedule */
+CG.playoffRoad = function(lg, clubCode){
+  var min = CG.playoffMinGp(), out = [];
+  if (!min || !lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
+  var left = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===clubCode || g.away===clubCode); }).length;
+  (lg.byTeam[clubCode]||[]).forEach(function(pl){
+    if (!pl.spotId) return;
+    var gp = ((lg.pstats||{})[pl.id]||{}).gp || 0, need = Math.max(0, min - gp);
+    out.push({ pid:pl.id, tag:pl.tag, pos:pl.pos, squad:pl.squad, gp:gp, need:need, done:need===0, reachable:need <= left, left:left });
+  });
+  return out.sort(function(a,b){ return (a.done?1:0)-(b.done?1:0) || (b.need-a.need) || String(a.tag).localeCompare(String(b.tag)); });
+};
 /* roster rows that ride the active roster WITHOUT counting against the shape (Rule 2.1): the full
    format's pre-season loans and the basic format's league-office depth placements — mirrors the
    origin list in check_roster_structure / place_new_roster_spot */
@@ -357,7 +383,7 @@ CG.buildLiveLeague = async function(){
     if (CG.reloadLeague) setTimeout(function(){ CG.reloadLeague(); }, 0);
   }
   CG.CAP = (season && season.salary_cap) ? season.salary_cap : CG.fmt("salary_cap", season);
-  CG.ROSTER_MAX = (season && season.roster_max) || CG.fmt("roster_max", season);   /* Rule 2.1: 9 F / 6 D / 3 G (basic) or 9 F / 6 D / 2 G (full) */
+  CG.ROSTER_MAX = (season && season.roster_max) || CG.fmt("roster_max", season);   /* Rule 2.1: 15 = two full lines + three flex (basic) or 17 = 9 F / 6 D / 2 G (full) */
   CG.ROSTER_QUOTA = Object.assign({}, CG.fmt("quota", season));
   CG.CAMP_MAX = CG.fmt("camp_max", season);
   var seasonId = season ? season.id : null;
@@ -9020,11 +9046,17 @@ CG.overviewCharts = function(){
   var GRPS = ["F","D","G"], POSN = ["C","LW","RW","LD","RD","G"];
   var clubs = (CG.TEAMS||[]).length || 10;
   var spotsAt = function(g){ return (CG.ROSTER_QUOTA[g]||0) * clubs; };
+  /* v2.51: in the basic format the group figures are ceilings that overlap (9 F / 7 D / 5 G on a
+     15-man roster — two full lines plus three of any position), so the league's TOTAL spots are
+     roster_max × clubs, not the sum of the ceilings; the full format's 9/6/2 still sums exactly. */
+  var perClub = CG.ROSTER_MAX || CG.fmt("roster_max");
+  var quotaSum = GRPS.reduce(function(s,g){ return s + (CG.ROSTER_QUOTA[g]||0); }, 0);
+  var overlapping = quotaSum > perClub;
   var byPos = {}, byGrp = {};
   regs.forEach(function(r){ if (r.position){ byPos[r.position] = (byPos[r.position]||0) + 1; var g = CG.posGroup(r.position); byGrp[g] = (byGrp[g]||0) + 1; } });
   if (Object.keys(byPos).length){
-    var totalSpots = GRPS.reduce(function(s,g){ return s + spotsAt(g); }, 0);
-    var covered = GRPS.reduce(function(s,g){ return s + Math.min(byGrp[g]||0, spotsAt(g)); }, 0);
+    var totalSpots = overlapping ? perClub * clubs : GRPS.reduce(function(s,g){ return s + spotsAt(g); }, 0);
+    var covered = Math.min(totalSpots, GRPS.reduce(function(s,g){ return s + Math.min(byGrp[g]||0, spotsAt(g)); }, 0));
     /* the thinnest group by coverage share is the one the commissioner recruits for */
     var thin = GRPS.reduce(function(b,g){
       return ((byGrp[g]||0)/spotsAt(g)) < ((byGrp[b]||0)/spotsAt(b)) ? g : b; }, GRPS[0]);
@@ -9032,7 +9064,9 @@ CG.overviewCharts = function(){
       .map(function(g){ return CG.GROUP_NAME[g].toLowerCase()+" are over ("+byGrp[g]+" for "+spotsAt(g)+")"; });
     var split = POSN.filter(function(p){ return byPos[p]; }).map(function(p){ return byPos[p]+" "+(CG.POS_NAME[p]||p).toLowerCase(); }).join(", ");
     out.push(CG.viz.card({ title:"Sign-ups against the league's roster spots",
-      sub: clubs+" clubs × "+CG.ROSTER_QUOTA.F+" forwards, "+CG.ROSTER_QUOTA.D+" defensemen, "+CG.ROSTER_QUOTA.G+" goaltenders (Rule 2.1)",
+      sub: overlapping
+        ? clubs+" clubs × "+perClub+" spots — at most "+CG.ROSTER_QUOTA.F+" forwards, "+CG.ROSTER_QUOTA.D+" defensemen, "+CG.ROSTER_QUOTA.G+" goaltenders each (Rule 2.1)"
+        : clubs+" clubs × "+CG.ROSTER_QUOTA.F+" forwards, "+CG.ROSTER_QUOTA.D+" defensemen, "+CG.ROSTER_QUOTA.G+" goaltenders (Rule 2.1)",
       value: regs.length+" / "+totalSpots,
       body: CG.viz.hbars(GRPS.map(function(g){ return { k:CG.GROUP_NAME[g], v:byGrp[g]||0, pos:g, cap:spotsAt(g) }; }),
         { sort:false, fmt:function(v,r){ return v+" / "+spotsAt(r.pos); },
@@ -10063,7 +10097,7 @@ CG.roadAheadCard = function(s, opts){
     [s.registration_deadline, "Sign-up cutoff", "Register by now to enter the draft — everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
     [s.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
     [s.starts_at, "Puck drop", "The regular season opens the Wednesday after the draft — "+perClub+" games over "+(CG.seasonShape?CG.seasonShape(s).weeks:6)+" weeks, every stat imported automatically from EA."],
-    [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven (Rule 8.1)."]
+    [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven. You need "+CG.playoffMinGp(s)+" regular-season games to dress in it (Rule 8.3)."]
   ] : [
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
@@ -10681,7 +10715,7 @@ CG.seasonForm = function(id){
     if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; }
     ["ssOff","ssPre","ssFaOpen","ssFaClose"].forEach(function(id){ var el = document.getElementById(id); el.disabled = (f==="basic"); if (f==="basic") el.value = ""; el.closest("label").style.opacity = f==="basic" ? ".45" : ""; });
     document.getElementById("ssFormatNote").textContent = f==="basic"
-      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", an "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), everyone "+r.cap_skater+" games a week, $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs."
+      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+") with unlimited camp, everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a "+r.playoff_min_gp+"-game floor and a "+r.series_cap+"-game series cap."
       : "The richer model on the shelf: two dark weeks, a two-week pre-season with random loans, a "+r.draft_rounds+"-round linear draft, a free-agency week, "+r.weeks+" weeks, a "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), goaltenders "+r.cap_goalie+" games a week, $"+(r.salary_cap/1e6)+"M cap, multi-season contracts, extensions and pick trading.";
     document.getElementById("ssSpaceHelp").textContent = f==="basic"
       ? "Give “Draft night” a Saturday and Auto-space fills the rest: sign-ups open until 11:59 PM ET the Thursday before it, puck drop the Wednesday after, this season’s run of regular-season weeks, and playoffs the game week after the last one. Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is placed on a club as depth after the draft. Nothing saves until you hit Save."
