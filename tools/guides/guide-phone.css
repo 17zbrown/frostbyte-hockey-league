@@ -68,12 +68,13 @@ html,body{font-size:19px;line-height:1.5}
 .foot .lock b{font-size:19px}
 .foot .where{text-align:left;font-size:12px;line-height:1.7}
 
-/* ---------- the rules posters (loadout): one card per row, the icon a little smaller ---------- */
-.xf,.xf.two{grid-template-columns:1fr;max-width:none;gap:12px}
-.xf .card{grid-template-columns:96px 1fr;gap:16px;padding:18px 18px 16px}
-.xf .card img{width:96px;height:96px}
-.xf .card b{font-size:24px} .xf .card small{font-size:11.5px}
-.xf .card .ban{font-size:10.5px;top:10px;right:10px}
-.also,.cons{grid-template-columns:1fr;gap:12px}
+/* ---------- the rules posters (loadout): one card per row, three tier icons across ---------- */
+.xf{grid-template-columns:1fr;gap:12px}
+.xf .card{padding:16px 16px 14px}
+.xf .card b{font-size:23px} .xf .card .ban{font-size:10px}
+.xf .tiers{gap:8px} .xf .tiers img{width:100px;height:100px} .xf .tiers small{font-size:10.5px}
+.xf .card.one .tiers{grid-template-columns:100px 1fr;gap:14px} .xf .card.one .tiers p{font-size:16px}
+.builds,.also,.cons{grid-template-columns:1fr;gap:12px}
+.builds li{font-size:12.5px;padding:6px 9px} .builds li b{font-size:13.5px} .builds .legal{font-size:16px}
 .also .col p{font-size:17px} .also .col h4{font-size:20px}
 .cons div{padding:16px 18px} .cons b{font-size:20px} .cons p{font-size:16.5px}

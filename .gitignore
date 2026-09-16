@@ -40,3 +40,5 @@ tools/guides/shots-phone/
 docs/guides/phone/_render-*.json
 docs/guides/phone/_report.json
 tools/guides/src-phone/
+docs/guides/pages/_shots-*.json
+docs/guides/pages/_report.json

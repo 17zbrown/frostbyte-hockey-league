@@ -218,7 +218,13 @@ s.save(out)`, file, ...parts]);
         marks[k] = { left: f(m.left, l, w), top: f(m.top, t, h), width: +(m.width / w * 100).toFixed(2), height: +(m.height / h * 100).toFixed(2), cx: f(m.cx, l, w), cy: f(m.cy, t, h) }; });
     }
   }
-  return { file, bytes: fs.statSync(file).size, pageErrors: errs, clipCss: clipCssMeta || (params.clip ? { width: Math.round(params.clip.width), height: Math.round(params.clip.height) } : { width, height }), marks };
+  /* "cuts": a selector — the report lists the top edge (device px, in THIS capture) of every
+     match, so a tall poster can be sliced into pages on section boundaries afterwards */
+  let cuts = null;
+  if (shot.cuts && params.clip) {
+    cuts = await cdp.eval(`(function(){ var c=${JSON.stringify({ y: params.clip.y })}; return [].slice.call(document.querySelectorAll(${q(shot.cuts)})).map(function(el){ var r=el.getBoundingClientRect(); return { sel: el.className, y: Math.round((r.top + window.scrollY - c.y) * ${scale}) }; }); })()`);
+  }
+  return { file, bytes: fs.statSync(file).size, pageErrors: errs, cuts, clipCss: clipCssMeta || (params.clip ? { width: Math.round(params.clip.width), height: Math.round(params.clip.height) } : { width, height }), marks };
 }
 
 (async () => {

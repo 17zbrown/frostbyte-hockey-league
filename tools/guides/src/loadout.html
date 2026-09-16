@@ -2,16 +2,30 @@
 <html lang="en"><head><meta charset="utf-8"><title>Banned X-Factors — CGHL rules</title>
 <link rel="stylesheet" href="../guide.css">
 <style>
-  /* the banned grid: one dark card per ability, EA's own gold icon, the tier it is banned at */
-  .xf{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-  .xf.two{grid-template-columns:repeat(2,1fr);max-width:66%}
-  .xf .card{position:relative;background:var(--bc);color:var(--on-ink);border-radius:var(--r);padding:26px 24px 22px;display:grid;grid-template-columns:120px 1fr;gap:20px;align-items:center;box-shadow:var(--sh)}
-  .xf .card img{width:120px;height:120px;display:block}
-  .xf .card b{font-family:var(--f-disp);font-weight:800;font-size:28px;letter-spacing:-.015em;line-height:1.05;display:block;text-wrap:balance}
-  .xf .card small{font-family:var(--f-mono);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--on-ink-dim);display:block;margin-top:8px}
-  .xf .card .ban{position:absolute;top:14px;right:14px;font-family:var(--f-mono);font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;padding:5px 10px;border-radius:999px;background:var(--red);color:#fff}
+  /* the banned grid: one dark card per ability — EA's own icon in every tier it is banned at */
+  .xf{display:grid;grid-template-columns:repeat(2,1fr);gap:22px}
+  .xf .card{position:relative;background:var(--bc);color:var(--on-ink);border-radius:var(--r);padding:24px 24px 22px;box-shadow:var(--sh)}
+  .xf .card .hd{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:14px}
+  .xf .card b{font-family:var(--f-disp);font-weight:800;font-size:30px;letter-spacing:-.015em;line-height:1.05;display:block;text-wrap:balance}
+  .xf .card .ban{font-family:var(--f-mono);font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;padding:5px 10px;border-radius:999px;background:var(--red);color:#fff;white-space:nowrap;flex:none}
   .xf .card .ban.tier{background:var(--chrome);color:var(--ink)}
-  /* the two other bans, as the site's own note cards but heavier */
+  .xf .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .xf .tiers div{display:grid;justify-items:center;gap:6px}
+  .xf .tiers img{width:118px;height:118px;display:block}
+  .xf .tiers small{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--on-ink-dim)}
+  .xf .card.one .tiers{grid-template-columns:118px 1fr;align-items:center;justify-items:start;gap:18px}
+  .xf .card.one .tiers p{margin:0;font-size:18px;color:#D7DEDA;line-height:1.45}
+  .xf .card.one .tiers small{display:block;margin-top:4px}
+  /* builds: what each position may not use */
+  .builds{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .builds .col .k{font-family:var(--f-mono);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);display:block;margin-bottom:10px}
+  .builds .col h4{margin-bottom:12px}
+  .builds ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+  .builds li{font-family:var(--f-mono);font-size:14px;font-weight:600;letter-spacing:.06em;padding:7px 11px;border-radius:8px;border:1.5px solid var(--line);background:var(--ice);color:var(--ink)}
+  .builds li b{font-family:var(--f-disp);font-size:15px;letter-spacing:0;margin-right:6px}
+  .builds .legal{margin-top:14px;font-size:18px;color:var(--ink-2)}
+  .builds .legal b{color:var(--green-ink)}
+  /* the two other bans */
   .also{display:grid;grid-template-columns:1fr 1fr;gap:22px}
   .also .col h4{margin-bottom:8px}
   .also .col p{margin:0;font-size:20px;color:var(--ink-2)}
@@ -28,57 +42,69 @@
   <div class="copy">
     <div>
       <span class="eyebrow chr">League rules · Rule 4.5</span>
-      <h1>Banned X‑Factors<small>Skill, not loadout. Six abilities are out at every tier; two more are out at Red tier.</small></h1>
-      <p class="lede">Dress a banned ability, a pre-built loadout or a special-character cosmetic and the lineup is ineligible — the game is a forfeit. Check your build before every lock.</p>
+      <h1>Banned X‑Factors<small>Skill, not loadout. Six abilities are out at every tier; two more are out at Red tier only.</small></h1>
+      <p class="lede">Load into a game with a banned ability, build, loadout or cosmetic and the game is restarted — and you take a penalty at the start of it. Check your build before every lock.</p>
     </div>
-    <div class="meta"><span class="tag chr">Every player · every game</span><span class="tag k">NHL 27</span><span class="tag">Rule 4.5</span><span class="tag">Rule 5.2</span></div>
+    <div class="meta"><span class="tag chr">Every player · every game</span><span class="tag k">NHL 27</span><span class="tag">Rule 4.5</span><span class="tag">Rule 5.3</span></div>
   </div>
   <div class="art"><img src="../art/loadout.jpg" alt=""></div>
 </header>
 
 <section class="body">
 
-  <div class="sec-h"><div><span class="eyebrow chr">At every tier</span><h2>Banned outright</h2></div><p>These six may not be equipped in any slot, at any tier the game offers them. The icons are EA’s own, so you can match them in the menu.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">At every tier</span><h2>Banned outright</h2></div><p>These six may not be equipped in any slot at any tier — Specialist, All-Star or Elite. The icons are EA’s own, in every color they come in, so you can match them in the menu.</p></div>
   <div class="sec wide">
     <div class="xf">
-      <div class="card"><img src="../art/xf/truculence.png" alt=""><span><b>Truculence</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
-      <div class="card"><img src="../art/xf/spark_plug.png" alt=""><span><b>Spark Plug</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
-      <div class="card"><img src="../art/xf/hipster.png" alt=""><span><b>Hipster</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
-      <div class="card"><img src="../art/xf/pressure_plus.png" alt=""><span><b>Pressure+</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
-      <div class="card"><img src="../art/xf/unstoppable.png" alt=""><span><b>Unstoppable Force</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
-      <div class="card"><img src="../art/xf/big_rig.png" alt=""><span><b>Big Rig</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+      <div class="card"><div class="hd"><b>Truculence</b><span class="ban">Banned · all tiers</span></div><div class="tiers"><div><img src="../art/xf/truculence_gold.png" alt=""><small>Specialist</small></div><div><img src="../art/xf/truculence_blue.png" alt=""><small>All-Star</small></div><div><img src="../art/xf/truculence_red.png" alt=""><small>Elite · Red</small></div></div></div>
+      <div class="card"><div class="hd"><b>Spark Plug</b><span class="ban">Banned · all tiers</span></div><div class="tiers"><div><img src="../art/xf/spark_plug_gold.png" alt=""><small>Specialist</small></div><div><img src="../art/xf/spark_plug_blue.png" alt=""><small>All-Star</small></div><div><img src="../art/xf/spark_plug_red.png" alt=""><small>Elite · Red</small></div></div></div>
+      <div class="card"><div class="hd"><b>Hipster</b><span class="ban">Banned · all tiers</span></div><div class="tiers"><div><img src="../art/xf/hipster_gold.png" alt=""><small>Specialist</small></div><div><img src="../art/xf/hipster_blue.png" alt=""><small>All-Star</small></div><div><img src="../art/xf/hipster_red.png" alt=""><small>Elite · Red</small></div></div></div>
+      <div class="card"><div class="hd"><b>Pressure+</b><span class="ban">Banned · all tiers</span></div><div class="tiers"><div><img src="../art/xf/pressure_plus_gold.png" alt=""><small>Specialist</small></div><div><img src="../art/xf/pressure_plus_blue.png" alt=""><small>All-Star</small></div><div><img src="../art/xf/pressure_plus_red.png" alt=""><small>Elite · Red</small></div></div></div>
+      <div class="card"><div class="hd"><b>Unstoppable Force</b><span class="ban">Banned · all tiers</span></div><div class="tiers"><div><img src="../art/xf/unstoppable_gold.png" alt=""><small>Specialist</small></div><div><img src="../art/xf/unstoppable_blue.png" alt=""><small>All-Star</small></div><div><img src="../art/xf/unstoppable_red.png" alt=""><small>Elite · Red</small></div></div></div>
+      <div class="card"><div class="hd"><b>Big Rig</b><span class="ban">Banned · all tiers</span></div><div class="tiers"><div><img src="../art/xf/big_rig_gold.png" alt=""><small>Specialist</small></div><div><img src="../art/xf/big_rig_blue.png" alt=""><small>All-Star</small></div><div><img src="../art/xf/big_rig_red.png" alt=""><small>Elite · Red</small></div></div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Red tier only</span><h2>Also banned at Red tier</h2></div><p>Two more abilities are legal at the lower tiers but may not be equipped at Red. If it shows red in the menu, it does not dress.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Red tier only</span><h2>Banned only at Red tier</h2></div><p>Two more abilities are legal at Specialist and All-Star but may not be equipped at Elite — the red version. If it shows red in the menu, it does not dress.</p></div>
   <div class="sec wide">
-    <div class="xf two">
-      <div class="card"><img src="../art/xf/stick_em_up.png" alt=""><span><b>Stick ’Em Up</b><small>Banned · Red tier</small></span><span class="ban tier">Red tier</span></div>
-      <div class="card"><img src="../art/xf/big_tipper.png" alt=""><span><b>Big Tipper</b><small>Banned · Red tier</small></span><span class="ban tier">Red tier</span></div>
+    <div class="xf">
+      <div class="card one"><div class="hd"><b>Stick ’Em Up</b><span class="ban tier">Red tier only</span></div><div class="tiers"><div><img src="../art/xf/stick_em_up_red.png" alt=""><small>Elite · Red</small></div><p>Banned at the Elite (red) tier. The Specialist and All-Star versions may be equipped.</p></div></div>
+      <div class="card one"><div class="hd"><b>Big Tipper</b><span class="ban tier">Red tier only</span></div><div class="tiers"><div><img src="../art/xf/big_tipper_red.png" alt=""><small>Elite · Red</small></div><p>Banned at the Elite (red) tier. The Specialist and All-Star versions may be equipped.</p></div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Also out</span><h2>Loadouts and cosmetics</h2></div><p>The league is played on standard created players, built by hand and locked to their position group.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Builds</span><h2>Locked to your position</h2></div><p>Defensemen play defense builds, forwards play forward builds, and nobody plays an enforcer build. Everything else in the menu is yours.</p></div>
+  <div class="sec wide">
+    <div class="builds">
+      <div class="col"><span class="k">Forwards may not use</span><h4>No enforcer, no defense build</h4>
+        <ul><li><b>ENF</b>Enforcer</li><li><b>DD</b>Defensive D</li><li><b>OD</b>Offensive D</li><li><b>EFD</b>Enforcer D</li><li><b>TWD</b>Two-Way D</li><li><b>PMD</b>Puck-Moving D</li></ul>
+        <p class="legal">Legal for a forward: <b>Sniper · Playmaker · Grinder · Power Forward · Two-Way Forward · Dangler</b></p></div>
+      <div class="col"><span class="k">Defensemen may not use</span><h4>No enforcer, no forward build</h4>
+        <ul><li><b>ENFD</b>Enforcer D</li><li><b>GRN</b>Grinder</li><li><b>PLY</b>Playmaker</li><li><b>SNP</b>Sniper</li><li><b>PWF</b>Power Forward</li><li><b>TWF</b>Two-Way F</li><li><b>ENF</b>Enforcer</li><li><b>DNG</b>Dangler</li></ul>
+        <p class="legal">Legal for a defenseman: <b>Defensive D · Offensive D · Two-Way D · Puck-Moving D</b></p></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">Also out</span><h2>Loadouts and cosmetics</h2></div><p>The league is played on standard created players, built by hand.</p></div>
   <div class="sec wide">
     <div class="also">
-      <div class="col"><span class="k">Pre-built loadouts</span><h4>Every pre-built loadout is banned</h4><p>The game’s ready-made builds may not be dressed. Build your player yourself, on a legal build for your position — a forward on a forward build, a defenseman on a defense build.</p></div>
+      <div class="col"><span class="k">Pre-built loadouts</span><h4>Every pre-built loadout is banned</h4><p>The game’s ready-made builds may not be dressed. Build your player yourself, on a legal build for your position.</p></div>
       <div class="col"><span class="k">Special characters</span><h4>Special-character classes and cosmetics are banned</h4><p>No special or mascot character may be dressed, and none of their cosmetics may be worn. Standard created players only, at every position.</p></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">If you dress one</span><h2>What happens</h2></div><p>Responsibility sits with the player and his club’s management. The lineup tools cannot see your build — you have to.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">If you load in with one</span><h2>What happens</h2></div><p>Responsibility sits with the player and his club’s management. The lineup tools cannot see your build — you have to.</p></div>
   <div class="sec wide">
     <div class="cons">
-      <div><b>The game is forfeit</b><p>A banned ability, loadout or cosmetic makes the lineup ineligible under Rule 5.2 — the game is lost where it stands.</p></div>
-      <div><b>Discipline can follow</b><p>A forfeit is without prejudice to further discipline under Chapter 7, for the player and for the club that iced him.</p></div>
-      <div><b>Check before the lock</b><p>Managers confirm every dressed player’s build and abilities before lineups lock, 30 minutes before puck drop (Rule 5.3).</p></div>
+      <div><b>The game is restarted</b><p>Load into a game with a banned ability, build, loadout or cosmetic and the game does not count as loaded — either club calls it, and it restarts.</p></div>
+      <div><b>You take a penalty</b><p>The offending player serves one minor penalty at the start of the restarted game. Refuse to restart and your club forfeits (Rule 3.2).</p></div>
+      <div><b>Check before the lock</b><p>Managers confirm every dressed player’s build and abilities before lineups lock, 30 minutes before puck drop (Rule 5.3). Repeat offenders are reviewed under Chapter 7.</p></div>
     </div>
   </div>
 
   <div class="sec wide">
     <div class="notes two">
       <div class="note red"><span class="lab">Watch out</span>The list is written against NHL 27 and the league office may add to it as the game is patched or the meta shifts. Any change is posted with that week’s schedule and in the changelog — the rulebook’s Rule 4.5 is always the definitive list.</div>
-      <div class="note chr"><span class="lab">Good to know</span>Builds are locked to their position group: a forward may not use the Enforcer build or any defenseman build; a defenseman may not use the Enforcer Defenseman build or any forward build. The full legal set is in Rule 4.5.</div>
+      <div class="note chr"><span class="lab">Good to know</span>Tier colors follow EA’s menu: Specialist is gold, All-Star is blue, Elite is red. “Red tier” on this poster always means the Elite version of an ability.</div>
     </div>
   </div>
 
@@ -86,6 +112,6 @@
 
 <footer class="foot">
   <div class="lock"><img src="../../../chel-gaming-logo-1024.png" alt=""><div><b>CHEL GAMING</b><span>Hockey League</span></div></div>
-  <div class="where"><b>chelgamingleague.com</b> · Rulebook · #/rulebook<br>Rulebook 4.5 · 5.2 · 5.3 · site v2.53 · September 2026</div>
+  <div class="where"><b>chelgamingleague.com</b> · Rulebook · #/rulebook<br>Rulebook 4.5 · 3.2 · 5.3 · site v2.53 · September 2026</div>
 </footer>
 </main><script src="../guide.js"></script></body></html>

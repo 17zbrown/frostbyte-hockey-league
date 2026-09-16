@@ -83,9 +83,9 @@ After the lock you can only substitute for a genuine emergency (a disconnect, a 
 
 The 10 minute forfeit can only be waived by a staff member who is not involved in that game. The two clubs cannot waive it between themselves. If you know you cannot field six, concede before puck drop rather than making the other club wait out the clock.
 
-**Illegal builds forfeit the game.** Banned X-Factors: Truculence, Big Tipper, Hipster, Pressure+, Spark Plug, Unstoppable, Big Rig, Wheels, plus every Elite tier ability. No special or mascot classes. Forwards build as Sniper, Playmaker, Grinder, Power Forward, Two-Way or Dangler. Defensemen build as Defensive, Offensive, Two-Way or Puck-Moving.
+**Illegal builds restart the game.** Banned at every tier: Truculence, Spark Plug, Hipster, Pressure+, Unstoppable Force, Big Rig. Banned only at Red tier: Stick 'Em Up, Big Tipper. No pre-built loadouts, no special or mascot classes and none of their cosmetics, no enforcer build at either position. Forwards build as Sniper, Playmaker, Grinder, Power Forward, Two-Way or Dangler. Defensemen build as Defensive, Offensive, Two-Way or Puck-Moving. A player who loads in with a banned ability, build, loadout or cosmetic restarts the game and serves a minor penalty at the start of the restarted game; a club that refuses to restart forfeits.
 
-**These lists were written against NHL 26 and apply as written until the league office reissues them for NHL 27.** Any change is posted in the rulebook changelog — check it before week 1.
+**These lists are written against NHL 27 (Rule 4.5).** Any change is posted in the rulebook changelog and with that week's schedule — check it before week 1.
 
 ## 🔌 DISCONNECTS AND RESCHEDULES
 
