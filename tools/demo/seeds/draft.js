@@ -32,10 +32,12 @@
      above the $750K minimum (Rule 2.5), so the club's own money reads right wherever it shows */
   (lg.byTeam[me]||[]).forEach(function(p){ if (!p.mgmt && p.salary) p.salary = Math.max(CG.MIN_SALARY, Math.round(p.salary/CG.SALARY_STEP)*CG.SALARY_STEP); });
 
-  /* the eight real clubs in a Season 1 order: a pure random draw (nhl_lottery falls back to random
-     with no history) — the Bruins drafted fourth */
+  /* the eight real clubs in a Season 1 order: the commissioner's random draw (Rule 2.8) — the
+     Bruins drew fourth. BASIC format (v2.51): the rounds are the season setting the commissioner
+     publishes (CG.fmt("draft_rounds") is the working figure) and the order SNAKES — even rounds run
+     in reverse. */
   var order = ["SEA","DET","UTA",me,"VAN","PIT","NYI","DAL"];
-  var ROUNDS = 14;
+  var ROUNDS = CG.fmt("draft_rounds");
 
   /* ---- the registered player pool: 24 prospects with their pre-season lines ---- */
   /* [tag, pos, ovr, gp, g, a, veteran] — gp < 5 and not a veteran = not draft-eligible yet (Rule 2.8) */
@@ -62,10 +64,10 @@
   var prevVet = lg.isVeteran;
   lg.isVeteran = function(pid){ return !!vets[pid] || !!(prevVet && prevVet(pid)); };
 
-  /* ---- the pick order: fourteen rounds, the same order every round (never a snake) ---- */
+  /* ---- the pick order: the published rounds, snaking (Rule 2.8 basic) ---- */
   function buildPicks(){
     var picks = [], ov = 0;
-    for (var r = 1; r <= ROUNDS; r++) order.forEach(function(c){
+    for (var r = 1; r <= ROUNDS; r++) (r % 2 ? order : order.slice().reverse()).forEach(function(c){
       ov++;
       picks.push({ id:"pk"+ov, season:1, round:r, overall:ov, skipped:false, ownerCode:c, origCode:c,
                    playerId:null, playerName:null, used:false, pickedAt:null });
@@ -94,20 +96,22 @@
   }
 
   if (st === "locked"){
-    /* before the pre-season: nothing to rank yet, no pick order — the board card is locked */
+    /* before the pool is published: nothing to rank yet, no pick order — the board card is locked */
     lg.draftPool = []; lg.draftPicks = []; lg.draftState = null; lg._myBoard = [];
-    CG.SEASON.preseason_starts_at = "2026-07-20T21:00:00-04:00";
-    CG.SEASON.draft_at = "2026-08-01T19:00:00-04:00";
+    CG.SEASON.preseason_starts_at = null;
+    CG.SEASON.registration_deadline = "2026-07-23T23:59:00-04:00";
+    CG.SEASON.draft_at = "2026-07-25T19:00:00-04:00";
     return;
   }
 
   lg.draftPool = pool.slice();
   lg.draftPicks = buildPicks();
   lg.draftState = { season_number:1, status:"setup", current_overall:0, pick_seconds:120, clock_ends_at:null, paused_remaining:null,
-                    order_meta:{ style:"nhl_lottery", fallback:"random", rounds:ROUNDS, codes:order.slice() } };
-  /* the Bruins' private board: six eligible targets plus one (ClapBomb, 3 GP) who is not draft-eligible yet */
+                    order_meta:{ style:"as_drawn", fallback:"random", rounds:ROUNDS, snake:true, codes:order.slice() } };
+  /* the Bruins' private board: seven targets (everyone registered by the cutoff is eligible — Rule 2.8) */
   lg._myBoard = ["r1","r3","r4","r7","r9","r10","r13"];
-  CG.SEASON.preseason_starts_at = "2026-07-01T21:00:00-04:00";
+  CG.SEASON.preseason_starts_at = null;
+  CG.SEASON.registration_deadline = "2026-07-16T23:59:00-04:00";
   CG.SEASON.draft_at = "2026-07-18T19:00:00-04:00";
 
   /* the pick RPC, so the one-click and modal picks behave like the real desk: the toast fires, the

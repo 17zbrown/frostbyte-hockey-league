@@ -1877,7 +1877,7 @@ CG._wrapHubDashboard = function(){
             it.href && it.cta ? '<a class="btn btn-chrome btn-sm" style="margin-left:auto" href="'+esc(it.href)+'"'+(it.ext?' target="_blank" rel="noopener"':'')+'>'+esc(it.cta)+'</a>' : "";
           return '<div style="display:flex;align-items:center;gap:12px">'+mark+'<span style="flex:1;'+(it.done?'color:var(--steel)':'font-weight:600')+'">'+esc(it.label)+'</span>'+cta+'</div>';
         }).join("")+'</div>'+
-        '<p class="caption" style="margin-top:12px">All three and you’re in the pool: randomly assigned for the pre-season, then the draft. Leaving the Discord withdraws a pending sign-up (Rule 1.1).</p></div></div>';
+        '<p class="caption" style="margin-top:12px">All three and you’re in the pool'+(CG.isBasic(s) ? ': register by the cutoff and you’re in the draft. ' : ': randomly assigned for the pre-season, then the draft. ')+'Leaving the Discord withdraws a pending sign-up (Rule 1.1).</p></div></div>';
     }
     /* 1 · registration status */
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
@@ -1889,7 +1889,7 @@ CG._wrapHubDashboard = function(){
                has since passed — otherwise an on-time registrant's card flips to "placed
                automatically" the instant the deadline arrives. */
             (!s.registration_deadline || (reg.created_at && Date.parse(reg.created_at) <= Date.parse(s.registration_deadline)))
-            ? 'You registered in time — you’ll be randomly assigned for the pre-season, then enter the draft.'
+            ? (CG.isBasic(s) ? 'You registered in time — you’re in the draft pool.' : 'You registered in time — you’ll be randomly assigned for the pre-season, then enter the draft.')
             : 'You registered after the sign-up deadline, so you’ll be placed on a club automatically — watch your notifications.')+'</p>'+
           (!p.ea_id?'<div class="note red" style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">Your <b>EA ID</b> is missing — stats can’t link to you without it.</span><button class="btn btn-ghost btn-sm" id="hubEaBtn">Add EA ID</button></div>':"")
         : (s.registration_open
@@ -2717,9 +2717,13 @@ CG.ROUTES.register = function(){
   var dlIso = s.signup_deadline_at || s.registration_deadline || null, dlMs = dlIso ? Date.parse(dlIso) : NaN;
   var dlPast = !isNaN(dlMs) && dlMs < CG.now(), dlText = isNaN(dlMs) ? "the deadline" : CG.fmtFull(dlMs);
   var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
-    "Register for the season", dlPast
-      ? "The draft-eligibility deadline passed "+dlText+". You can still register — you're placed on a club with an open spot automatically after the draft; you just won't be in the draft itself (Rule 2.2)."
-      : "One form puts you in the player pool. Sign up by "+dlText+" to enter the pre-season and the draft; after it — or if you join mid-season — you're placed on a club with an open spot automatically (Rule 2.2).");
+    "Register for the season", CG.isBasic(s)
+      ? (dlPast
+        ? "The sign-up cutoff passed "+dlText+". You can still register — you're placed on a club as depth after the draft, on a one-season deal at the league minimum; you just won't be in the draft itself (Rule 2.8)."
+        : "One form puts you in the player pool. Sign up by "+dlText+" and you're in the draft; after the cutoff — or if you join mid-season — you're placed on a club as depth automatically, up until the movement deadline (Rule 2.8).")
+      : (dlPast
+        ? "The draft-eligibility deadline passed "+dlText+". You can still register — you're placed on a club with an open spot automatically after the draft; you just won't be in the draft itself (Rule 2.2)."
+        : "One form puts you in the player pool. Sign up by "+dlText+" to enter the pre-season and the draft; after it — or if you join mid-season — you're placed on a club with an open spot automatically (Rule 2.2)."));
   if (!CG.auth.profile){
     /* site_config is anon-readable, so guests get the real join link at the exact moment they're
        told they need it — the site cannot add them to the server on their behalf */
@@ -2756,7 +2760,13 @@ CG.ROUTES.register = function(){
       ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
       : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. '+
         ((reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
-          ? 'You registered after the draft-eligibility deadline ('+dlText+'), so you’re not in the draft — you’re placed on a club automatically once it concludes (Rule 2.2). You’ll be notified.'
+          ? (CG.isBasic(s)
+              ? 'You registered after the sign-up cutoff ('+dlText+'), so you’re not in the draft — you’re placed on a club as depth once it concludes (Rule 2.8). You’ll be notified.'
+              : 'You registered after the draft-eligibility deadline ('+dlText+'), so you’re not in the draft — you’re placed on a club automatically once it concludes (Rule 2.2). You’ll be notified.')
+          : CG.isBasic(s)
+          ? (dlPast
+              ? 'You registered in time: you’re in the draft pool (Rule 2.8). If you’re not drafted you’re placed on a club as depth ten minutes after it concludes. You’ll be notified either way.'
+              : 'You’re in the draft pool — the cutoff is '+dlText+' (Rule 2.8). If you’re not drafted you’re placed on a club as depth once it concludes. You’ll be notified either way.')
           : dlPast
           ? 'You registered in time: you’re in the pre-season, and three pre-season games make you draft-eligible (Rule 2.8). If you’re not drafted you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'
           : 'Register by '+dlText+' and you enter the pre-season and the draft; after it you’re placed on a club automatically (Rule 2.2). You’ll be notified either way.'))+' Update your details below any time.'+
@@ -3985,6 +3995,7 @@ CG.eligOf = function(pid){
   return { vet:vet, gp:gp, ok: CG.isDraftEligible ? CG.isDraftEligible(pid) : true };
 };
 CG.eligChipD = function(pid){
+  if (!CG.fmt("preseason")) return '';   /* basic: registration by the cutoff is the whole test (Rule 2.8) */
   var e = CG.eligOf(pid);
   if (e.vet) return '<span class="chip" style="font-size:9px">VETERAN</span>';
   return e.gp ? '<span class="chip" style="font-size:9px">'+e.gp+' PRE-SEASON GP</span>' : '';
@@ -4207,10 +4218,14 @@ CG.hubDraftLive = function(){
      can change hands right up until a pick is used. The board and the clock follow the pick's
      CURRENT owner automatically over the realtime channel, so a deal lands the moment it is
      accepted — no refresh, no commissioner step. */
-  if (live){
+  if (live && CG.fmt("pick_trades")){
     h += '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("swap",15)+
       '<span style="flex:1"><b style="font-family:var(--f-disp)">Trading is open all night.</b> Deal picks — including the one on the clock — or players from the '+
       '<a href="#/hub/tradehub" style="font-weight:700;border-bottom:2px solid var(--chrome)">Trade Hub</a>. A traded pick belongs to its new club the moment the other side accepts.</span></div>';
+  } else if (live){
+    /* basic format (Rule 2.3): picks are not trade assets — the order stands as drawn all night */
+    h += '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("lock",15)+
+      '<span style="flex:1"><b style="font-family:var(--f-disp)">The order stands.</b> Draft picks are not trade assets this season — every club picks in the drawn snake order, and trades are players-only (Rule 2.3).</span></div>';
   }
 
   /* make-up picks (skipped but recoverable) */
@@ -4226,13 +4241,16 @@ CG.hubDraftLive = function(){
   /* MY BOARD */
   if (!unlocked){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>My draft board</h3><span class="chip">locked</span></div>'+
-      '<div class="card-b"><div class="empty" style="padding:40px 20px"><div class="e-art">'+CG.ic("lock",22)+'</div><b>Boards unlock with the pre-season</b>'+
-      '<p>Once pre-season opens'+(CG.SEASON&&CG.SEASON.preseason_starts_at?' ('+CG.fmtDay(Date.parse(CG.SEASON.preseason_starts_at))+')':'')+' the registered player pool appears here — watch the games, rank your targets, and your board is ready for draft night.</p></div></div></div>';
+      (CG.fmt("preseason")
+        ? '<div class="card-b"><div class="empty" style="padding:40px 20px"><div class="e-art">'+CG.ic("lock",22)+'</div><b>Boards unlock with the pre-season</b>'+
+          '<p>Once pre-season opens'+(CG.SEASON&&CG.SEASON.preseason_starts_at?' ('+CG.fmtDay(Date.parse(CG.SEASON.preseason_starts_at))+')':'')+' the registered player pool appears here — watch the games, rank your targets, and your board is ready for draft night.</p></div></div></div>'
+        : '<div class="card-b"><div class="empty" style="padding:40px 20px"><div class="e-art">'+CG.ic("lock",22)+'</div><b>Boards unlock when the pool is published</b>'+
+          '<p>Every player registered by the sign-up cutoff'+(CG.SEASON&&(CG.SEASON.signup_deadline_at||CG.SEASON.registration_deadline)?' ('+CG.fmtDay(Date.parse(CG.SEASON.signup_deadline_at||CG.SEASON.registration_deadline))+')':'')+' is in the draft (Rule 2.8). The pool appears here as sign-ups come in — rank your targets, and your board is ready for draft night.</p></div></div></div>');
   } else {
     var boarded = {}; board.forEach(function(pid){ boarded[pid]=true; });
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>My draft board</h3><span class="chip chip-chrome">private to your club</span></div>';
     h += board.length ? '<div class="tblwrap"><table class="tbl keepcols"><caption>Your ranked targets</caption>'+
-      '<thead><tr><th>#</th><th class="tleft">Player</th><th>Pos</th><th>Pre-season</th><th>Eligibility</th><th class="tleft">Status</th><th class="tright">Order</th></tr></thead><tbody>'+
+      '<thead><tr><th>#</th><th class="tleft">Player</th><th>Pos</th>'+(CG.fmt("preseason")?'<th>Pre-season</th><th>Eligibility</th>':'')+'<th class="tleft">Status</th><th class="tright">Order</th></tr></thead><tbody>'+
       board.map(function(pid, i){
         var p = pool.find(function(x){ return x.profileId===pid; });
         var fate = CG.draftPlayerFate(pid);
@@ -4246,8 +4264,8 @@ CG.hubDraftLive = function(){
         return '<tr'+(fate.taken?' style="opacity:.55"':'')+'><td class="num">'+(i+1)+'</td>'+
           '<td class="tleft"><b'+(fate.taken&&fate.code!==myCode?' style="text-decoration:line-through"':'')+'>'+esc(name)+'</b></td>'+
           '<td class="mono" style="font-size:11px">'+esc(pos||"—")+'</td>'+
-          '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td>'+
-          '<td>'+CG.eligChipD(pid)+'</td><td class="tleft">'+status+'</td>'+
+          (CG.fmt("preseason") ? '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td>'+
+          '<td>'+CG.eligChipD(pid)+'</td>' : '')+'<td class="tleft">'+status+'</td>'+
           '<td class="tright"><span style="display:inline-flex;gap:4px">'+
             '<button class="btn btn-ghost btn-sm" data-b-top="'+pid+'" title="Move to #1" aria-label="Move '+esc(name)+' to the top"'+(i===0?" disabled":"")+'>'+CG.ic("up",12)+CG.ic("up",12)+'</button>'+
             '<button class="btn btn-ghost btn-sm" data-b-up="'+pid+'" title="Move up" aria-label="Move '+esc(name)+' up"'+(i===0?" disabled":"")+'>'+CG.ic("up",12)+'</button>'+
@@ -4318,8 +4336,8 @@ CG._bdPoolRows = function(pool, boarded, q, posF){
     var pre = (CG.lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft)">'+
       '<b style="font-size:13.5px">'+esc(p.tag)+'</b>'+
-      '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+' · '+pre.gp+'gp '+pre.g+'g '+pre.a+'a</span>'+
-      CG.eligChipD(p.profileId)+
+      '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+(CG.fmt("preseason")?' · '+pre.gp+'gp '+pre.g+'g '+pre.a+'a':'')+'</span>'+
+      (CG.fmt("preseason") ? CG.eligChipD(p.profileId) : '')+
       '<button class="btn btn-ghost btn-sm" style="margin-left:auto" data-bd-add="'+p.profileId+'">'+CG.ic("plus",12)+'Add</button></div>';
   }).join("");
 };
@@ -4478,11 +4496,11 @@ CG.admDraftLive = function(){
     var inelig = pool.length - eligible.length;
 
     h += '<div class="tblwrap"><table class="tbl keepcols"><caption>Available players</caption>'+
-      '<thead><tr><th class="tleft">Player</th><th>Pos</th><th>Pre-season</th><th class="tleft">Eligibility</th></tr></thead><tbody>'+
+      '<thead><tr><th class="tleft">Player</th><th>Pos</th>'+(CG.fmt("preseason")?'<th>Pre-season</th><th class="tleft">Eligibility</th>':'')+'</tr></thead><tbody>'+
       pool.slice(0,60).map(function(p){
         var pre = (lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
         return '<tr><td class="tleft"><b>'+esc(p.tag)+'</b></td><td class="mono" style="font-size:11px">'+esc(p.pos||"?")+'</td>'+
-          '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td><td class="tleft">'+CG.eligChipD(p.profileId)+'</td></tr>';
+          (CG.fmt("preseason") ? '<td class="mono" style="font-size:11px">'+pre.gp+'gp '+pre.g+'g '+pre.a+'a</td><td class="tleft">'+CG.eligChipD(p.profileId)+'</td>' : '')+'</tr>';
       }).join("")+'</tbody></table></div>'+
       (pool.length>60?'<div class="card-b"><span class="caption">Showing 60 of '+pool.length+' — the full pool lives in Pre-season Central.</span></div>':'');
   } else {
@@ -10093,7 +10111,10 @@ CG.roadAheadCard = function(s, opts){
   /* read the season's real length rather than restating one — this line said "54 games" for as long
      as the league had been playing 72, because a hard-coded figure has no way to notice */
   var perClub = (CG.seasonShape ? CG.seasonShape(s).perClub : CG.GAMES_PER_CLUB);
-  var steps = CG.isBasic(s) ? [
+  /* both lists drop the dates a season does not carry yet (a basic season has no pre-season or
+     free-agency date; a freshly created one may lack a playoff date) — the filter has to wrap
+     the conditional, or the basic list reaches fmtFull with a null and the dashboard errors out */
+  var steps = (CG.isBasic(s) ? [
     [s.registration_deadline, "Sign-up cutoff", "Register by now to enter the draft — everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
     [s.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
     [s.starts_at, "Puck drop", "The regular season opens the Wednesday after the draft — "+perClub+" games over "+(CG.seasonShape?CG.seasonShape(s).weeks:6)+" weeks, every stat imported automatically from EA."],
@@ -10105,7 +10126,7 @@ CG.roadAheadCard = function(s, opts){
     [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with three pre-season appearances (Rule 2.8). Undrafted players are placed on clubs automatically ten minutes after it concludes."],
     [s.free_agency_opens_at, "Free agency opens", "One week for players whose contracts have ended to take offers from any club (Rule 2.2) — in a first season, nobody: undrafted players are placed, not signed."],
     [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
-  ].filter(function(st){ return st[0]; });
+  ]).filter(function(st){ return st[0]; });
   if (!steps.length) return "";
   var nowT = CG.now(), nextIdx = steps.findIndex(function(st){ return Date.parse(st[0]) > nowT; });
   return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The road ahead</h3><span class="chip">'+(opts.chip||"what registering starts")+'</span></div>'+
@@ -11973,18 +11994,20 @@ CG.hubFreeAgents = function(){
     return ps==="free_agent" || ps==="rfa";
   }).sort(byOvr);
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Free agents</h1>'+
-    '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>';
+    '<h1 class="h-sec" style="margin-top:8px">'+(basicFA?'Waived players':'Free agents')+'</h1>'+
+    (basicFA
+      ? '<p class="lede" style="margin-top:8px">Every waived player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends him the one deal the basic format allows — the league minimum, $750K, to the end of the season — which he accepts or declines from his dashboard. He joins your roster the moment he accepts; the league office confirms nothing (Rule 2.2).</p></div>'
+      : '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>');
   h+='<div class="grid g3" style="margin-bottom:18px">'+
-    '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>free agents</span></div>'+
+    '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>'+(basicFA?'waived players':'free agents')+'</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num">'+rosterN+' / '+rosterMax+'</b><span>your roster</span></div>'+
     '<div class="kpi" style="cursor:default;justify-content:center;display:flex;align-items:center">'+winChip+'</div></div>';
   h+='<div class="card"><div class="card-h"><h3>The board</h3><span class="chip">'+pool.length+'</span></div>'+
     (pool.length?'<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Signable free agents</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th>Scout OVR</th><th>Pre-season</th><th class="tleft">Background</th><th class="tright">Actions</th></tr></thead><tbody>'+
+      '<th class="tleft">Player</th><th>POS</th><th>Scout OVR</th>'+(basicFA?'':'<th>Pre-season</th>')+'<th class="tleft">Background</th><th class="tright">Actions</th></tr></thead><tbody>'+
       pool.map(function(r){
         var prof=r.profiles||{}, pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0};
-        var bg = lg.isVeteran(r.profile_id) ? '<span class="chip">Veteran</span>' : '<span class="chip chip-win">'+pre.gp+' pre-season games</span>';
+        var bg = basicFA ? '<span class="chip chip-warn">Waived</span>' : lg.isVeteran(r.profile_id) ? '<span class="chip">Veteran</span>' : '<span class="chip chip-win">'+pre.gp+' pre-season games</span>';
         var full = rosterN>=rosterMax;
         /* v2.34: his old club holds his rights until free agency opens — nobody else may approach */
         var rh = CG.rightsHeldContractOf ? CG.rightsHeldContractOf(r.profile_id) : null;
@@ -11994,7 +12017,7 @@ CG.hubFreeAgents = function(){
         return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td>'+
           '<td class="tnum">'+(r.scout_ovr==null?'<span class="caption">—</span>':r.scout_ovr)+'</td>'+
-          '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
+          (basicFA?'':'<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>')+
           '<td class="tleft">'+bg+'</td>'+
           '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
             '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'"'+(held?' disabled title="Exclusive to '+esc(rhCode)+' until free agency opens — approaching him is tampering (Rule 2.2)"':'')+'>Approach</button>'+
@@ -12002,8 +12025,12 @@ CG.hubFreeAgents = function(){
               (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="Offers open with free agency"':full?' title="Your roster is full"':'')+'>Offer</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">You offer, the player decides (Rule 2.2). Send terms and the player accepts, counters, or declines from his dashboard — the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room, and the window are checked again both when you send and when he accepts.</span></div>'
-    :'<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Free agency is for players whose contracts have ended. Undrafted players are placed on clubs automatically, so in a first season this board stays empty until deals expire.</p></div></div>')+'</div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(basicFA
+        ? 'You offer, the player decides (Rule 2.2). The deal is fixed — $750K to the end of the season — so he accepts or declines from his dashboard; the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room (including his position group) and the movement deadline are checked again both when you send and when he accepts.'
+        : 'You offer, the player decides (Rule 2.2). Send terms and the player accepts, counters, or declines from his dashboard — the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room, and the window are checked again both when you send and when he accepts.')+'</span></div>'
+    :(basicFA
+      ? '<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No waived players right now</b><p>This board lists players a club has waived. Undrafted and late-registering players are placed on clubs by the league office, not signed here (Rule 2.8) — so it fills only when a club lets someone go.</p></div></div>'
+      : '<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Free agency is for players whose contracts have ended. Undrafted players are placed on clubs automatically, so in a first season this board stays empty until deals expire.</p></div></div>'))+'</div>';
 
   return h;
 };
@@ -12025,12 +12052,18 @@ CG.AFTER._hubFreeAgents = function(){
     var t=(CG.TEAMS||[]).find(function(x){ return uid&&(x.owner===uid||x.gm===uid||x.agm===uid); });
     var used=t?CG.teamPayroll(CG.lg, t.code):0;   /* includes unsigned-contract dead cap (Rule 2.5) */
     var space=Math.max(0,(CG.CAP||60000000)-used);
+    var basicOffer = CG.isBasic();
     CG.modal("Offer terms to "+esc(name),
-      '<label class="fld"><span>Salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.25" value="0.75"></label>'+
-      '<label class="fld"><span>Term (seasons)</span><select id="faYears">'+
-        [1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      (basicOffer
+        ? '<label class="fld"><span>Salary</span><input id="faSal" type="number" value="0.75" readonly style="opacity:.7"></label>'+
+          '<p class="caption" style="margin-top:-6px">$750K to the end of the season — the one deal a waived player can sign in the basic format (Rule 2.2).</p>'
+        : '<label class="fld"><span>Salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.25" value="0.75"></label>'+
+          '<label class="fld"><span>Term (seasons)</span><select id="faYears">'+
+            [1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>')+
       '<label class="fld"><span>Note to the player (optional)</span><input id="faNote" placeholder="Why he fits your club…"></label>'+
-      '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b> · league minimum $0.75M, in $0.25M steps (Rule 2.5). He can accept, counter, or decline — nothing moves until he accepts, and then he is on your roster immediately (Rule 2.2). A new offer to the same player replaces your previous one.</p>',
+      (basicOffer
+        ? '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b>. He accepts or declines from his dashboard — nothing moves until he accepts, and then he is on your roster immediately (Rule 2.2). A new offer to the same player replaces your previous one.</p>'
+        : '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b> · league minimum $0.75M, in $0.25M steps (Rule 2.5). He can accept, counter, or decline — nothing moves until he accepts, and then he is on your roster immediately (Rule 2.2). A new offer to the same player replaces your previous one.</p>'),
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="faSignGo">Send offer</button>');
     document.getElementById("faSignGo").addEventListener("click", function(){
       var v=parseFloat(document.getElementById("faSal").value);
@@ -12088,7 +12121,7 @@ CG.hubTradeHubLive = function(qs){
   }
   var h='<div style="margin-bottom:18px"><span class="eyebrow chr">'+esc(t.name)+' · club management</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Trade Hub</h1>'+
-    '<p class="lede" style="margin-top:8px">Offer players and draft picks, review incoming offers, and propose deals — all live. Nothing changes hands until the other club accepts.</p></div>';
+    '<p class="lede" style="margin-top:8px">Offer players'+(CG.fmt("pick_trades")?' and draft picks':'')+', review incoming offers, and propose deals — all live. Nothing changes hands until the other club accepts.</p></div>';
   h+='<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Confidential to management.</b> Offers and notes are visible to your Owner, GM, and AGM (Rule 2.3).</span></div>';
   var inc='<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
   if(incoming.length){
@@ -12125,8 +12158,8 @@ CG.hubTradeHubLive = function(qs){
   var build='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Build a trade</h3>'+((d.offP.length||d.reqP.length||d.offK.length||d.reqK.length)?'<button class="btn btn-ghost btn-sm" id="tradeClear">Clear</button>':'<span class="chip chip-chrome">Draft</span>')+'</div><div class="card-b">'+
     '<label class="fld" style="max-width:340px"><span>Trade partner</span><select id="tradePartner"><option value="">Choose a club…</option>'+others.map(function(c){ return '<option value="'+c+'"'+(d.partner===c?" selected":"")+'>'+esc(CG.TEAM[c].name)+'</option>'; }).join("")+'</select></label>'+
     '<div class="grid g2" style="gap:16px;margin-top:14px;align-items:start">'+
-      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(t.name)+' send</b>'+sideList(d.offP,d.offK,"off")+'<button class="btn btn-ghost btn-sm" id="tradeAddOff" style="margin-top:12px">'+CG.ic("plus",13)+'Add player / pick</button></div>'+
-      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(partnerName)+' send</b>'+sideList(d.reqP,d.reqK,"req")+'<button class="btn btn-ghost btn-sm" id="tradeAddReq"'+(d.partner?"":" disabled")+' style="margin-top:12px">'+CG.ic("plus",13)+'Add player / pick</button></div>'+
+      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(t.name)+' send</b>'+sideList(d.offP,d.offK,"off")+'<button class="btn btn-ghost btn-sm" id="tradeAddOff" style="margin-top:12px">'+CG.ic("plus",13)+(CG.fmt("pick_trades")?'Add player / pick':'Add player')+'</button></div>'+
+      '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(partnerName)+' send</b>'+sideList(d.reqP,d.reqK,"req")+'<button class="btn btn-ghost btn-sm" id="tradeAddReq"'+(d.partner?"":" disabled")+' style="margin-top:12px">'+CG.ic("plus",13)+(CG.fmt("pick_trades")?'Add player / pick':'Add player')+'</button></div>'+
     '</div>'+
     '<label class="fld" style="margin-top:14px"><span>Note to the other club (optional)</span><input id="tradeNote" placeholder="Why this works for both sides…"></label>'+
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
@@ -12175,7 +12208,7 @@ CG.proposeTrade = function(){
 };
 /* reloadLeague, not refreshTrades: the latter reloads only the trade lists, so the accepting GM
    kept building his next deal against the PRE-trade roster and cap sheet. */
-CG.acceptTrade = function(id){ CG.confirm("Accept this trade?","The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.","Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed — rosters updated for both clubs","ok"); CG.loadTrades().then(function(){ CG.reloadLeague(); }); }); }); }); };
+CG.acceptTrade = function(id){ CG.confirm("Accept this trade?",(CG.fmt("pick_trades")?"The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.":"The players change hands immediately and it’s logged. Make sure the deal clears your cap and your roster shape."),"Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed — rosters updated for both clubs","ok"); CG.loadTrades().then(function(){ CG.reloadLeague(); }); }); }); }); };
 /* .select() on both: an RLS-refused update returns 0 rows and NO error, and the old success toast
    told a manager an offer was declined that the other club still saw live (the false-success class). */
 CG.declineTrade = function(id){ CG.mgmtQueue("trade_decline",{ p_trade:id }, "decline the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t decline — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); }); };

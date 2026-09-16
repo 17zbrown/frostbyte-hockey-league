@@ -163,12 +163,39 @@ async function shoot(cdp, shot) {
     params.clip = { x: 0, y: 0, width, height, scale: 1 };
   }
   const clipCssMeta = params._clipCss; delete params._clipCss;
-  const shotRes = await cdp.send("Page.captureScreenshot", params);
   const file = path.join(OUT, shot.name + ".png");
-  fs.writeFileSync(file, Buffer.from(shotRes.data, "base64"));
+  /* Chrome never returns a single capture much taller than ~12,000 device px (the call simply
+     hangs), so a tall full-page poster is captured in tiles and stitched with PIL */
+  const TILE = 4000;
+  if (params.clip && params.clip.height * scale > 12000) {
+    const parts = [];
+    for (let y0 = 0; y0 < params.clip.height; y0 += TILE) {
+      const hPart = Math.min(TILE, params.clip.height - y0);
+      const r = await cdp.send("Page.captureScreenshot", { ...params, clip: { ...params.clip, y: params.clip.y + y0, height: hPart } });
+      const pf = path.join(OUT, `${shot.name}.part${parts.length}.png`);
+      fs.writeFileSync(pf, Buffer.from(r.data, "base64")); parts.push(pf);
+    }
+    const st = spawnSync("python3", ["-c", `from PIL import Image; import sys; out=sys.argv[1]; ims=[Image.open(p) for p in sys.argv[2:]]; W=max(i.width for i in ims); H=sum(i.height for i in ims); s=Image.new("RGB",(W,H),"white"); y=0
+for i in ims: s.paste(i,(0,y)); y+=i.height
+s.save(out)`, file, ...parts]);
+    if (st.status !== 0) throw new Error("tile stitch failed: " + String(st.stderr));
+    parts.forEach((pf) => fs.rmSync(pf, { force: true }));
+  } else {
+    const shotRes = await cdp.send("Page.captureScreenshot", params);
+    fs.writeFileSync(file, Buffer.from(shotRes.data, "base64"));
+  }
   if (fixedCrop) {
     const r = spawnSync("python3", ["-c", `from PIL import Image; import sys; im=Image.open(sys.argv[1]); s=float(sys.argv[6]); x,y,w,h=[float(v)*s for v in sys.argv[2:6]]; im.crop((int(x),int(y),int(x+w),int(y+h))).save(sys.argv[1])`, file, String(fixedCrop.x), String(fixedCrop.y), String(fixedCrop.w), String(fixedCrop.h), String(scale)]);
     if (r.status !== 0) throw new Error("fixed crop failed: " + String(r.stderr));
+  }
+  /* "crop": [left%, top%, width%, height%] — trim the finished capture (a masthead's right half,
+     a page's central column) so a poster can show the control large instead of the whole width;
+     marks below are reported against the trimmed image */
+  let cropPct = null;
+  if (shot.crop) {
+    cropPct = shot.crop;
+    const r = spawnSync("python3", ["-c", `from PIL import Image; import sys; im=Image.open(sys.argv[1]); W,H=im.size; l,t,w,h=[float(v)/100 for v in sys.argv[2:6]]; im.crop((int(W*l),int(H*t),int(W*(l+w)),int(H*(t+h)))).save(sys.argv[1])`, file, ...cropPct.map(String)]);
+    if (r.status !== 0) throw new Error("crop failed: " + String(r.stderr));
   }
   const errs = await cdp.eval(`(window.__shootErrors||[]).slice(0,5)`);
   /* "marks": { "1": "#avSubmit", … } → where each element sits inside THIS capture, in % of the
@@ -181,6 +208,12 @@ async function shoot(cdp, shot) {
         var x=r.left+(fixed?0:window.scrollX), y=r.top+(fixed?0:window.scrollY);
         out[k]={ left:+((x-c.x)/c.w*100).toFixed(2), top:+((y-c.y)/c.h*100).toFixed(2), width:+(r.width/c.w*100).toFixed(2), height:+(r.height/c.h*100).toFixed(2), cx:+((x+r.width/2-c.x)/c.w*100).toFixed(2), cy:+((y+r.height/2-c.y)/c.h*100).toFixed(2) }; });
       return out; })()`);
+    if (cropPct && marks) {
+      const [l, t, w, h] = cropPct;
+      Object.keys(marks).forEach((k) => { const m = marks[k]; if (!m) return;
+        const f = (v, o, sc) => +((v - o) / sc * 100).toFixed(2);
+        marks[k] = { left: f(m.left, l, w), top: f(m.top, t, h), width: +(m.width / w * 100).toFixed(2), height: +(m.height / h * 100).toFixed(2), cx: f(m.cx, l, w), cy: f(m.cy, t, h) }; });
+    }
   }
   return { file, bytes: fs.statSync(file).size, pageErrors: errs, clipCss: clipCssMeta || (params.clip ? { width: Math.round(params.clip.width), height: Math.round(params.clip.height) } : { width, height }), marks };
 }

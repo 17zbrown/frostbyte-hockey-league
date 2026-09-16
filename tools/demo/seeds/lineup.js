@@ -1,6 +1,6 @@
 /* seed: lineup — the Lineup builder (#/hub/lines), the per-game page (#/hub/lineup), the
    dashboard cards and the matchup "Confirmed lineups" card, populated the way a club sees them
-   mid-season (Week 7: Wed Jul 15 @ Kraken, Sat Jul 18 vs Mammoth). Source of the shapes:
+   mid-season (Week 7: a basic-format week — Wed Jul 15, Thu 16, Fri 17, three games a night). Source of the shapes:
    part_live.js loadManagerData (:1135-1143 — game_lineups → _lineups, team_lines → _teamLines,
    team_line_plan → _linePlan), plannedLineup (:1443-1450), WEEK8 (:662-698); part6_hub.js
    hubLines / hubLineup / gmTasksCard / tonightCard.
@@ -10,7 +10,7 @@
    released states pin 8:45 PM ET.
 
    ?state=… variants (one seed, many screens):
-     (none)     saved lines + night plan, nothing dressed yet, 7:30 PM ET
+     (none)     saved lines + night plan, nothing dressed yet, 7:45 PM ET
      fresh      a club that has not built anything — three empty lines, no plan
      dressed    tonight's game already dressed from the plan ("1 / 1 dressed", "Redress")
      preseason  every game ahead is a pre-season game (management may sit anywhere on a line)
@@ -24,7 +24,7 @@
   var lg = CG.lg, club = t.code, st = (window.GUIDE.qs.get("state") || "");
   var late = (st === "locked" || st === "emergency" || st === "penalized" || st === "released");
   /* the clock — a ticking pin, so countdowns and "ago" labels keep behaving */
-  var base = Date.parse(late ? "2026-07-15T20:45:00-04:00" : "2026-07-15T19:30:00-04:00"), epoch = Date.now();
+  var base = Date.parse(late ? "2026-07-15T20:45:00-04:00" : "2026-07-15T19:45:00-04:00"), epoch = Date.now();
   CG.now = function(){ return base + (Date.now() - epoch); };
   var now = CG.now();
   function at(iso){ return Date.parse(iso); }
@@ -33,15 +33,35 @@
   var played = {}; (lg.results||[]).forEach(function(r){ played[r.id] = true; });
   (lg.schedule||[]).forEach(function(g){ if (played[g.id]) g.status = "final"; });
 
-  /* the current game week, exactly as part_live derives it mid-week (Week 7: Wed + Sat, the
-     Sunday-8-PM deadline already behind us) — this is what makes the bench's availability chips
-     and the "no Week 7 response" task row real */
-  CG.WEEK8 = { key:"w7", label:"Week 7", deadline: at("2026-07-12T20:00:00-04:00"),
-    nights:[ { key:"n1", at: at("2026-07-15T21:00:00-04:00") }, { key:"n2", at: at("2026-07-18T21:00:00-04:00") } ], open:true };
+  /* the current game week the way the BASIC format plays it (v2.51, Rule 5.2): Wednesday,
+     Thursday and Friday nights, three club games a night at 9:00 / 9:40 / 10:20 PM ET — nine
+     games, each locking on its own puck drop. The prototype books one game on two nights, so the
+     club's prototype games from tonight on are replaced by this week and the next. */
+  var DAYS = ["2026-07-15","2026-07-16","2026-07-17"], NEXT = ["2026-07-22","2026-07-23","2026-07-24"];
+  var others = CG.TEAMS.map(function(x){ return x.code; }).filter(function(c){ return c !== club; });
+  lg.schedule = (lg.schedule||[]).filter(function(g){ return !((g.home===club||g.away===club) && g.at >= at("2026-07-15T00:00:00-04:00")); });
+  lg.tonight = (lg.tonight||[]).filter(function(g){ return g.home!==club && g.away!==club; });
+  function book(days, week, prefix){
+    days.forEach(function(d, ni){
+      ["21:00","21:40","22:20"].forEach(function(hm, gi){
+        var opp = others[(ni*3 + gi + (week===8?4:0)) % others.length];
+        var g = { id:prefix+"-n"+(ni+1)+"-"+(gi+1), week:week, night:["Wed","Thu","Fri"][ni], stage:"regular", status:"scheduled",
+          home: gi%2 ? opp : club, away: gi%2 ? club : opp, at: Date.parse(CG.etISO(d, hm)), code:null, server:null };
+        lg.schedule.push(g);
+        if (week===7 && ni===0) lg.tonight.push(g);
+      });
+    });
+  }
+  book(DAYS, 7, "lu"); book(NEXT, 8, "lu8");
+  lg.tonight.sort(function(a,b){ return a.at-b.at; });
+  CG.WEEK8 = { key:"w7", label:"Week 7", deadline: at("2026-07-15T19:30:00-04:00"),
+    nights: DAYS.map(function(d, i){ return { key:"n"+(i+1), at: Date.parse(CG.etISO(d, "21:00")), day:d }; }), open:true };
   CG._avail = CG._avail || {};
-  /* the signed-in member answered last Sunday (a rostered persona only — a seat with no roster
+  /* the signed-in member answered every game (a rostered persona only — a seat with no roster
      spot has nothing to answer) */
-  CG._avail[CG.WEEK8.key+":"+uid] = { at: at("2026-07-12T14:10:00-04:00"), nights:{ n1:{ st:"yes", note:"" }, n2:{ st:"yes", note:"" } } };
+  var mine = { at: at("2026-07-13T14:10:00-04:00"), nights:{} };
+  DAYS.forEach(function(d, ni){ var games = {}; [1,2,3].forEach(function(gi){ games["lu-n"+(ni+1)+"-"+gi] = "yes"; }); mine.nights["n"+(ni+1)] = { st:"yes", note:"", games:games }; });
+  CG._avail[CG.WEEK8.key+":"+uid] = mine;
 
   /* the club's players, by id — the engine builds them in position order (LW LW C C RW RW LD LD RD RD G G) */
   var R = lg.byTeam[club] || [];
@@ -58,7 +78,7 @@
     2:{ slot:2, name:"Energy",   lw:LW2, center:C1, rw:RW2, ld:LD2, rd:RD1, goalie:G1 },
     3:{ slot:3, name:"Shutdown", lw:LW1, center:C2, rw:RW2, ld:LD1, rd:RD1, goalie:G2 }
   };
-  if (st !== "fresh"){ lg._teamLines = LINES; lg._linePlan = { wed:1, sat:2 }; }
+  if (st !== "fresh"){ lg._teamLines = LINES; lg._linePlan = { wed:1, thu:2, fri:3 }; }
   else { lg._teamLines = {}; lg._linePlan = {}; }
   lg._lineups = {};
   var TOP = { lw:LW1, center:C2, rw:RW1, ld:LD1, rd:RD2, goalie:G2 };
@@ -97,7 +117,7 @@
   function gameLine(g){ var o = g.home===club ? g.away : g.home;
     return nightLabel(g)+" "+(g.home===club ? "vs " : "at ")+CG.TEAM[o].name+" · "+CG.fmtTime(g.at); }
   var nextTwo = (lg.schedule||[]).filter(function(g){ return (g.home===club||g.away===club) && g.at >= now - 3*3600000; })
-    .sort(function(a,b){ return a.at-b.at; }).slice(0,2);
+    .sort(function(a,b){ return a.at-b.at; }).slice(0,3);
   var weekLine = nextTwo.map(gameLine).join(" · ");
   var lastG = (lg.results||[]).filter(function(r){ return (r.home===club||r.away===club) && r.score; })
     .sort(function(a,b){ return (a.at||0)-(b.at||0); }).pop();
@@ -115,10 +135,10 @@
     { id:"nf-week", icon:"cal", title:CG.WEEK8.label+" is on the board", body:weekLine+".", route:"#/team/"+club, t: now - 20*3600000 },
     finalAlert,
     { id:"nf-av-open", icon:"users", title:CG.WEEK8.label+" availability is open",
-      body:"Answer for both nights before Sunday 8:00 PM ET — your club builds its lines from it.", route:"#/hub/availability", t: now - 80*3600000 }
+      body:"Answer every game before Wednesday 7:30 PM ET — your club builds its lines from it.", route:"#/hub/availability", t: now - 80*3600000 }
   ] : [
     { id:"nf-av-w7", icon:"users", title:CG.WEEK8.label+" availability — "+answered+" of "+R.length+" answered",
-      body: outs.length ? outs.join(", ")+" marked unavailable for "+(nightLabel(tonight)||"the first night")+"." : "The whole club has answered for both nights.",
+      body: outs.length ? outs.join(", ")+" marked unavailable for "+(nightLabel(tonight)||"the first night")+"." : "The whole club has answered for all three nights.",
       route:"#/hub/availability", t: now - 3*3600000 },
     { id:"nf-sched-w7", icon:"cal", title:CG.WEEK8.label+" schedule posted", body:weekLine+".", route:"#/hub/schedule", t: now - 26*3600000 },
     finalAlert

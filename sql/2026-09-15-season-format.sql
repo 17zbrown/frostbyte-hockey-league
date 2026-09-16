@@ -754,3 +754,16 @@ returns jsonb language sql immutable as $$
 -- set_game_lineup (playoff): refuses a player with regular_gp < playoff_min_gp (a goaltender seated after the
 -- movement deadline is exempt — Rule 2.4's emergency provision) and applies series_cap in place of the weekly cap.
 -- check_playoff_violations audits against series_cap. seasons.roster_max = 15 for Seasons 1 and 2.
+
+-- ===== G. (v2.51, 2026-09-16) Rule 2.2 basic: a waived player signs at the league minimum =====
+-- Applied live through execute_sql in one gated transaction (rehearsed with a rollback first).
+-- offer_free_agent: after v_salary is snapped to the lattice —
+--   if public.season_is_basic(v_season.id) and v_salary <> 750000 then
+--     raise exception 'A waived player signs at the league minimum in the basic format — $750,000 to the end of the season (Rule 2.2).';
+--   end if;
+-- respond_offer ('edit' branch): after p_salary is snapped —
+--   if public.season_is_basic(public.current_season_id()) and p_salary <> 750000 then
+--     raise exception '… there is nothing to counter on money (Rule 2.2).';
+--   end if;
+-- The client mirrors it: the Free agents page is titled "Waived players" in basic, the offer
+-- dialog fixes the salary at $750K with no term picker (every deal ends with the season).

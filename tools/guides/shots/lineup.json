@@ -1,0 +1,348 @@
+{
+ "base": "file:///private/tmp/claude-501/-Users-zackbrown-Desktop-Frostbyte-Hockey-League/dbd49986-190e-47ac-82c7-1268ec57ce75/scratchpad/guides/demo.html",
+ "out": "/Users/zackbrown/Desktop/Frostbyte Hockey League/tools/guides/shots/lineup",
+ "shots": [
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "sidebar-team-hq-lineup-builder",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "clip": ".hub-side",
+   "pad": 12,
+   "marks": {
+    "1": ".hub-side a[href='#/hub/lines']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-board-seeded-grid",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "eval": "document.querySelector('.lc-grid').closest('.card').id='shotGrid'"
+    }
+   ],
+   "clip": "#shotGrid",
+   "pad": 0,
+   "marks": {
+    "2": ".lc-slot[data-line='1'][data-slot='LW']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-select-player-roster",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "click": "[data-rcard][aria-label^='BreakawayBex']",
+     "after": 250
+    },
+    {
+     "eval": "document.querySelector('.lc-board').closest('.card').id='shotRoster'"
+    }
+   ],
+   "clip": "#shotRoster",
+   "pad": 0,
+   "marks": {
+    "3": "[data-rcard][aria-label^='BreakawayBex']"
+   },
+   "crop": [
+    0,
+    56,
+    100,
+    44
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-select-player-msg",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "click": "[data-rcard][aria-label^='BreakawayBex']",
+     "after": 250
+    },
+    {
+     "eval": "document.querySelector('.lc-grid').closest('.card').id='shotGrid'"
+    }
+   ],
+   "clip": "#shotGrid",
+   "pad": 0,
+   "marks": {
+    "3": "#lcMsg"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-position-refused",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "click": "[data-rcard][aria-label^='IronWall_31']",
+     "after": 250
+    },
+    {
+     "click": ".lc-slot[data-line='2'][data-slot='LW']",
+     "after": 300
+    },
+    {
+     "eval": "document.querySelector('.lc-grid').closest('.card').id='shotGrid'"
+    }
+   ],
+   "clip": "#shotGrid",
+   "pad": 0,
+   "marks": {
+    "4": "#lcMsg"
+   },
+   "crop": [
+    0,
+    62,
+    100,
+    38
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-assign-unsaved-bar",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "click": "[data-rcard][aria-label^='BreakawayBex']",
+     "after": 250
+    },
+    {
+     "click": ".lc-slot[data-line='3'][data-slot='RW']",
+     "after": 300
+    },
+    {
+     "eval": "document.querySelector('main .note').id='shotBar'"
+    },
+    {
+     "scroll": 0,
+     "after": 150
+    }
+   ],
+   "clip": "#shotBar",
+   "pad": 0,
+   "marks": {
+    "3": "#lcSaveAll"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-board-seeded-nightplan",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Night plan') h.closest('.card').id='shotPlan'; })"
+    }
+   ],
+   "clip": "#shotPlan",
+   "pad": 0,
+   "marks": {
+    "5": "select.lc-night[data-night='wed']",
+    "6": "#lcDressWeek"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-night-select-toast",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "height": 900,
+   "steps": [
+    {
+     "eval": "var s=document.querySelector(\"select.lc-night[data-night='thu']\"); s.value='3'; s.dispatchEvent(new Event('change',{bubbles:true}));",
+     "after": 500
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lines-dress-week-confirm",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
+   "steps": [
+    {
+     "click": "#lcDressWeek",
+     "after": 400
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "6": "#overlay-root .modal .btn-chrome"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-per-game-chips",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lineup?game=lu-n1-1",
+   "steps": [
+    {
+     "eval": "var h=document.querySelector('main h1'); var w=h.parentElement; w.id='shotHead';"
+    }
+   ],
+   "clip": "#shotHead",
+   "pad": 0,
+   "crop": [
+    0,
+    0,
+    64,
+    100
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-per-game-autofill-rink",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lineup?game=lu-n1-1",
+   "steps": [
+    {
+     "click": "#luFromPlan",
+     "after": 400
+    },
+    {
+     "click": "#luAuto",
+     "after": 400
+    },
+    {
+     "eval": "var bar=document.getElementById('luSubmit').closest('.note'); var col=bar.parentElement; var rink=col.querySelector('.grid.g5x7').firstElementChild.firstElementChild; var w=document.createElement('div'); w.id='shotRink'; col.insertBefore(w, bar); w.appendChild(bar); w.appendChild(rink); rink.style.marginTop='14px';"
+    },
+    {
+     "scroll": 0,
+     "after": 150
+    }
+   ],
+   "clip": "#shotRink",
+   "pad": 0,
+   "marks": {
+    "7": "#luFromPlan",
+    "8": "#luSubmit",
+    "9": "#luWholeNight"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-per-game-submit-confirm",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lineup?game=lu-n1-1",
+   "steps": [
+    {
+     "click": "#luAuto",
+     "after": 400
+    },
+    {
+     "click": "#luSubmit",
+     "after": 500
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "8": "#overlay-root .modal .btn-chrome"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-per-game-locked-bar",
+   "url": "?as=owner&theme=light&seed=lineup,roster&state=locked#/hub/lineup?game=lu-n1-1",
+   "steps": [
+    {
+     "eval": "var bar=[...document.querySelectorAll('main .note')].find(function(n){ return /Status:/.test(n.textContent); }); bar.id='shotLocked';"
+    }
+   ],
+   "clip": "#shotLocked",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-emergency-mode-note",
+   "url": "?as=owner&theme=light&seed=lineup,roster&state=emergency#/hub/lineup?game=lu-n1-1",
+   "steps": [
+    {
+     "eval": "var n=[...document.querySelectorAll('main .note')].find(function(x){ return /emergency/i.test(x.textContent); }); n.id='shotEm';"
+    }
+   ],
+   "clip": "#shotEm",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-emergency-submit-confirm",
+   "url": "?as=owner&theme=light&seed=lineup,roster&state=emergency#/hub/lineup?game=lu-n1-1",
+   "steps": [
+    {
+     "eval": "var b=[...document.querySelectorAll('main button')].find(function(x){ return /Submit emergency/i.test(x.textContent); }); b.id='shotEmBtn';"
+    },
+    {
+     "click": "#shotEmBtn",
+     "after": 400
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "10": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "lineup-per-game-fill-toast",
+   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lineup?game=lu-n1-1",
+   "clip": ".toast",
+   "pad": 22,
+   "height": 900,
+   "steps": [
+    {
+     "click": "#luFromPlan",
+     "after": 300
+    },
+    {
+     "scroll": 0,
+     "after": 150
+    }
+   ],
+   "beforeShot": 0,
+   "fixed": true
+  }
+ ]
+}

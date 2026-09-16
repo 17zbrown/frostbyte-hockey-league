@@ -19,7 +19,7 @@ if (!names.length) { console.error("no posters to build"); process.exit(2); }
 const list = {
   base: "file://" + SRC + "/",
   out: OUT,
-  shots: names.map((n) => ({ name: n, url: n + ".html", width: 1600, height: 900, scale: 1.5, settle: 1500, full: true, maxHeight: 9000, colorScheme: "light" })),
+  shots: names.map((n) => ({ name: n, url: n + ".html", width: 1600, height: 900, scale: 1.5, settle: 1500, full: true, maxHeight: 12000, colorScheme: "light" })),
 };
 const listPath = path.join(OUT, "_shots-" + (process.env.SHOOT_PORT || "9345") + ".json");
 fs.writeFileSync(listPath, JSON.stringify(list, null, 1));

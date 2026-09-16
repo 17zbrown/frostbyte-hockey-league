@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Waive a player — CGHL management guide</title>
+<link rel="stylesheet" href="../guide.css">
+<style>
+  .stack{display:grid;gap:22px}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  /* what a waiver does, in three beats */
+  .beats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}
+  .beats div{background:var(--paper);border:1.5px solid var(--line);border-radius:10px;padding:14px 16px}
+  .beats b{font-family:var(--f-disp);font-weight:800;font-size:20px;letter-spacing:-.01em;display:block;margin-bottom:4px}
+  .beats span{font-size:17px;line-height:1.4;color:var(--steel);display:block}
+</style></head>
+<body><main class="poster">
+
+<header class="band">
+  <div class="copy">
+    <div>
+      <span class="eyebrow chr">Management guide · 03</span>
+      <h1>Waive a player<small>Immediate and final. He leaves your roster, his cap hit clears, and any club may sign him at the league minimum.</small></h1>
+      <p class="lede">One button on the Roster page, one confirm. Then the player sits on the Waived players board until a club with room signs him — or until the movement deadline closes it.</p>
+    </div>
+    <div class="meta"><span class="tag chr">Owner · GM · AGM</span><span class="tag k">Team HQ → Roster</span><span class="tag">Rules 2.2 · 2.4 · 2.5</span></div>
+  </div>
+  <div class="art"><img src="../art/waive.jpg" alt=""></div>
+</header>
+
+<section class="body">
+
+  <div class="sec-h"><div><span class="eyebrow chr">Where it lives</span><h2>The Roster page, one row at a time</h2></div><p>Every player you may move has four buttons on his row. The management seats have none — they cannot be waived, traded or blocked.</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck">1</div><div><h3>Open Team HQ → Roster</h3><p>From any hub page, open the <b>Team HQ</b> group in the left sidebar and pick <span class="ui">Roster</span>. The page is confidential to your front office: salaries, cap space and block status live here.</p><p class="path">#/hub/roster</p></div></div>
+      <div class="step"><div class="puck">2</div><div><h3>Find the row, press Waive</h3><p>Each rostered player’s row ends in <span class="ui">To camp</span> · <span class="ui">To block</span> · <span class="ui">Trade</span> · <span class="ui">Waive</span>. Camp players and depth placements have the same buttons. Your Owner, GM and AGM read <b>Management contract — protected</b> instead. <span class="rule">Rule 2.6</span></p></div></div>
+    </div>
+    <div class="shot stack">
+      <div class="frame" style="width:40%"><img src="../shots/waive/sidebar-roster.png" alt="The Team HQ sidebar with Roster highlighted"><span class="mark" style="left:88%;top:56%">1</span><div class="cap">Sidebar · Team HQ → Roster</div></div>
+      <div class="frame"><img src="../shots/waive/roster-rows.png" alt="Three roster rows: a protected GM, and two players with To camp, To block, Trade and Waive"><span class="mark" style="left:93.5%;top:66%">2</span><div class="cap">Roster rows · Waive sits at the end of the row</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">The waiver</span><h2>Confirm, and he’s gone</h2></div><p>The confirm dialog says exactly what happens. There is no league-office step and no undo.</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck">3</div><div><h3>Read the confirm, then Waive player</h3><p>The dialog reads: <b>“They come off your roster immediately, their cap hit clears, and any club with room in their position group can sign them at the league minimum until the movement deadline (Rule 2.2). The move is logged for the whole league.”</b> Press <span class="ui">Waive player</span>.</p></div></div>
+      <div class="step"><div class="puck">4</div><div><h3>What changes, right away</h3><p>The toast reads <b>“‹player› waived — any club may sign him now.”</b> The Squads card drops to <b>14 pro</b>, the row is gone, and your cap space grows by his full salary. The transaction log posts the move to the league on its own.</p>
+        <div class="beats">
+          <div><b>Roster</b><span>15 / 15 becomes 14 / 15 — a spot opens in his position group</span></div>
+          <div><b>Cap</b><span>his whole cap hit clears the moment you confirm (Rule 2.5)</span></div>
+          <div><b>Him</b><span>he keeps his season stats and lands on the Waived players board</span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="shot stack">
+      <div class="frame" style="width:82%"><img src="../shots/waive/waive-confirm.png" alt="The Waive FigurItOwt25? confirm dialog"><span class="mark" style="left:82%;top:64%">3</span><div class="cap">The confirm · the whole rule in one paragraph</div></div>
+      <div class="frame" style="width:70%"><img src="../shots/waive/waive-toast.png" alt="Toast: FigurItOwt25 waived — any club may sign him now"><span class="mark" style="left:6%;top:50%">4</span><div class="cap">The toast</div></div>
+      <div class="frame"><img src="../shots/waive/squads-after.png" alt="The Squads card after the waiver: 14 pro, 14 / 15 active roster"><div class="cap">Squads · 14 pro, 14 / 15 after the waiver</div></div>
+      <div class="frame"><img src="../shots/waive/cap-tiles-after.png" alt="The cap tiles after the waiver: payroll down, cap space up"><div class="cap">Cap tiles · his hit is gone, the space is yours</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">The other side</span><h2>Signing a waived player</h2></div><p>The same board serves every club. A waived player is signable by any club with room in his position group, at the league minimum, until the movement deadline.</p></div>
+  <div class="sec flip">
+    <div class="shot stack">
+      <div class="frame"><img src="../shots/waive/board-kpis.png" alt="The Waived players page tiles: 1 waived player, 14 / 15 your roster, signable until the movement deadline"><div class="cap">Team HQ → Free agents · the Waived players board</div></div>
+      <div class="frame"><img src="../shots/waive/board-waived.png" alt="The board with one waived player, Approach and Offer"><span class="mark" style="left:68%;top:46%">5</span><span class="mark" style="left:96%;top:20%">6</span><div class="cap">The board · Approach to talk, Offer to sign</div></div>
+      <div class="pair">
+        <div class="frame"><img src="../shots/waive/offer-modal.png" alt="The Offer terms dialog: $750K, fixed, to the end of the season"><span class="mark" style="left:88%;top:76%">6</span><div class="cap">Offer · the salary is fixed, the note is yours</div></div>
+        <div class="frame"><img src="../shots/waive/offer-toast.png" alt="Toast: Offer sent — $750K for 1 season. He decides."><div class="cap">Sent · he accepts or declines from his dashboard</div></div>
+      </div>
+    </div>
+    <div class="txt steps">
+      <div class="step"><div class="puck">5</div><div><h3>Open Team HQ → Free agents</h3><p>In this format the page is the <b>Waived players</b> board: every player a club has let go. <span class="ui">Approach</span> opens a direct message so you can talk it over first. The <span class="ui chr">Offer</span> button stays grey while your roster is full — waive or trade to make room.</p></div></div>
+      <div class="step"><div class="puck">6</div><div><h3>Offer — the deal is fixed</h3><p>Press <span class="ui chr">Offer</span>. The salary reads <b>$750K</b> and cannot be changed; the deal runs to the end of the season. Add a note if you like and press <span class="ui chr">Send offer</span>. He accepts or declines from his own dashboard — the moment he accepts he is on your roster, and the league office confirms nothing. <span class="rule">Rule 2.2</span></p></div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">For the Owner</span><h2>When a seat needs sign-off</h2></div><p>An Owner can set a GM’s or AGM’s Roster page to <b>Owner approves</b>. Then a waiver queues instead of acting.</p></div>
+  <div class="sec">
+    <div class="txt steps">
+      <div class="step"><div class="puck ink">7</div><div><h3>Queued, then decided</h3><p>The manager sees a banner — <b>“ItzPeakz approves roster moves”</b> — and his waiver waits under it with <span class="ui">Withdraw</span>. The Owner decides at <b>Team HQ → Management → Approvals</b>: <span class="ui chr">Approve</span> runs the waiver on the spot; <span class="ui">Deny</span> closes it with a note. <span class="rule">Rule 2.6</span></p></div></div>
+    </div>
+    <div class="shot stack">
+      <div class="frame"><img src="../shots/waive/gm-approve-banner.png" alt="The Owner-approves banner a GM sees, with a waiver waiting"><span class="mark ink" style="left:6%;top:18%">7</span><div class="cap">The manager’s view · the waiver waits</div></div>
+      <div class="frame"><img src="../shots/waive/owner-approvals-queue.png" alt="The Owner’s Approvals queue with a waiver waiting"><div class="cap">The Owner’s view · Approve runs it, Deny closes it</div></div>
+    </div>
+  </div>
+
+  <div class="sec wide">
+    <div class="notes two">
+      <div class="note red"><span class="lab">Watch out</span>Waiving is immediate and final — there is no waiver window, no claim order and no league-office step. The moment you confirm, the player is off your roster and any club may sign him, including the one you play tomorrow. Check the Road to 18 card first: the games he has played stay with him, and if he is short of 18 that is his problem on a new club, not yours.</div>
+      <div class="note chr"><span class="lab">Good to know</span>All movement — waivers and the signing of waived players included — closes at midnight at the end of the Friday of week 4, the movement deadline; after that rosters freeze through the playoffs (Rule 2.4). Moving a player to training camp is not a waiver: he stays yours, his salary still counts, and you can call him back up at any time (Rule 2.1).</div>
+    </div>
+  </div>
+
+</section>
+
+<footer class="foot">
+  <div class="lock"><img src="../../../chel-gaming-logo-1024.png" alt=""><div><b>CHEL GAMING</b><span>Hockey League</span></div></div>
+  <div class="where"><b>chelgamingleague.com</b> · Team HQ → Roster · #/hub/roster<br>Rulebook 2.2 · 2.4 · 2.5 · 2.6 · site v2.51 · September 2026</div>
+</footer>
+</main><script src="../guide.js"></script></body></html>

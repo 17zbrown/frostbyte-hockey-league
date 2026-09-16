@@ -1,0 +1,264 @@
+{
+ "base": "file:///private/tmp/claude-501/-Users-zackbrown-Desktop-Frostbyte-Hockey-League/dbd49986-190e-47ac-82c7-1268ec57ce75/scratchpad/guides/demo.html",
+ "out": "/Users/zackbrown/Desktop/Frostbyte Hockey League/tools/guides/shots/waive",
+ "shots": [
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "sidebar-roster",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "clip": ".hub-side",
+   "pad": 12,
+   "marks": {
+    "1": ".hub-side a[href='#/hub/roster']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "roster-rows",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "steps": [
+    {
+     "eval": "var rows=[...document.querySelectorAll('table.roster-tbl tbody tr')]; var a=rows.find(function(r){ return /FigurItOwt25/.test(r.textContent); }); var b=rows.find(function(r){ return /OneTimerOtto/.test(r.textContent); }); var m=rows.find(function(r){ return /Mr\\. Plow/.test(r.textContent); }); var w=document.createElement('tbody'); w.id='shotRows'; a.parentNode.insertBefore(w,a); w.appendChild(m); w.appendChild(a); w.appendChild(b); a.id='shotRow';"
+    }
+   ],
+   "clip": "#shotRows",
+   "pad": 6,
+   "marks": {
+    "2": "#shotRow [data-waive]"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "waive-confirm",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "steps": [
+    {
+     "eval": "var rows=[...document.querySelectorAll('table.roster-tbl tbody tr')]; var a=rows.find(function(r){ return /FigurItOwt25/.test(r.textContent); }); var b=rows.find(function(r){ return /OneTimerOtto/.test(r.textContent); }); var m=rows.find(function(r){ return /Mr\\. Plow/.test(r.textContent); }); var w=document.createElement('tbody'); w.id='shotRows'; a.parentNode.insertBefore(w,a); w.appendChild(m); w.appendChild(a); w.appendChild(b); a.id='shotRow';"
+    },
+    {
+     "click": "#shotRow [data-waive]",
+     "after": 450
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "3": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "waive-toast",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "height": 900,
+   "steps": [
+    {
+     "eval": "var rows=[...document.querySelectorAll('table.roster-tbl tbody tr')]; var a=rows.find(function(r){ return /FigurItOwt25/.test(r.textContent); }); var b=rows.find(function(r){ return /OneTimerOtto/.test(r.textContent); }); var m=rows.find(function(r){ return /Mr\\. Plow/.test(r.textContent); }); var w=document.createElement('tbody'); w.id='shotRows'; a.parentNode.insertBefore(w,a); w.appendChild(m); w.appendChild(a); w.appendChild(b); a.id='shotRow';"
+    },
+    {
+     "click": "#shotRow [data-waive]",
+     "after": 450
+    },
+    {
+     "click": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink",
+     "after": 600
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "squads-after",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "steps": [
+    {
+     "eval": "window.GUIDE_RPC.waive_player({ p_profile:'p5' }); CG.router();",
+     "after": 600
+    },
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Squads') h.closest('.card').id='shotSq'; })"
+    }
+   ],
+   "clip": "#shotSq",
+   "pad": 0,
+   "crop": [
+    0,
+    0,
+    100,
+    58
+   ],
+   "marks": {
+    "4": "#shotSq .card-h .chip"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "cap-tiles-after",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "steps": [
+    {
+     "eval": "window.GUIDE_RPC.waive_player({ p_profile:'p5' }); CG.router();",
+     "after": 600
+    },
+    {
+     "eval": "var k=document.querySelector('main .kpi'); k.parentElement.id='shotKpi';"
+    }
+   ],
+   "clip": "#shotKpi",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "board-waived",
+   "url": "?as=owner&theme=light&seed=roster#/hub/freeagents",
+   "steps": [
+    {
+     "eval": "window.GUIDE_RPC.waive_player({ p_profile:'p5' }); CG.router();",
+     "after": 600
+    },
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='The board') h.closest('.card').id='shotBoard'; })"
+    }
+   ],
+   "clip": "#shotBoard",
+   "pad": 0,
+   "marks": {
+    "5": "[data-fa-sign]",
+    "6": "[data-fa-dm]"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "board-kpis",
+   "url": "?as=owner&theme=light&seed=roster#/hub/freeagents",
+   "steps": [
+    {
+     "eval": "window.GUIDE_RPC.waive_player({ p_profile:'p5' }); CG.router();",
+     "after": 600
+    },
+    {
+     "eval": "var k=document.querySelector('main .kpi'); k.parentElement.id='shotKpi';"
+    }
+   ],
+   "clip": "#shotKpi",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "offer-modal",
+   "url": "?as=owner&theme=light&seed=roster#/hub/freeagents",
+   "steps": [
+    {
+     "eval": "window.GUIDE_RPC.waive_player({ p_profile:'p5' }); CG.router();",
+     "after": 600
+    },
+    {
+     "click": "[data-fa-sign]",
+     "after": 450
+    },
+    {
+     "type": [
+      "#faNote",
+      "Righty D with a real shot \u2014 we need you on the second pair."
+     ]
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "5": "#faSignGo"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "offer-toast",
+   "url": "?as=owner&theme=light&seed=roster#/hub/freeagents",
+   "height": 900,
+   "steps": [
+    {
+     "eval": "window.GUIDE_RPC.waive_player({ p_profile:'p5' }); CG.router();",
+     "after": 600
+    },
+    {
+     "click": "[data-fa-sign]",
+     "after": 450
+    },
+    {
+     "click": "#faSignGo",
+     "after": 600
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "gm-approve-banner",
+   "url": "?as=gm&theme=light&seed=roster#/hub/roster",
+   "steps": [
+    {
+     "eval": "var n=[...document.querySelectorAll('main .note')].find(function(x){ return /approv/i.test(x.textContent); }); n.id='shotBanner';"
+    }
+   ],
+   "clip": "#shotBanner",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "owner-approvals-queue",
+   "url": "?as=owner&theme=light&seed=roster#/hub/management",
+   "steps": [
+    {
+     "eval": "var h=[...document.querySelectorAll('.card h3')].find(function(x){ return /approval|waiting|queue/i.test(x.textContent); }); if(h) h.closest('.card').id='shotQueue';"
+    }
+   ],
+   "clip": "#shotQueue",
+   "pad": 0,
+   "crop": [
+    0,
+    0,
+    100,
+    60
+   ]
+  }
+ ]
+}

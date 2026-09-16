@@ -1,0 +1,242 @@
+{
+ "base": "file:///private/tmp/claude-501/-Users-zackbrown-Desktop-Frostbyte-Hockey-League/dbd49986-190e-47ac-82c7-1268ec57ce75/scratchpad/guides/demo.html",
+ "out": "/Users/zackbrown/Desktop/Frostbyte Hockey League/tools/guides/shots/draft",
+ "shots": [
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "sidebar_draft_item",
+   "url": "?as=owner&theme=light&seed=draft#/hub/draft",
+   "clip": ".hub-side",
+   "pad": 12,
+   "marks": {
+    "1": ".hub-side a[href='#/hub/draft']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_ready_strip",
+   "url": "?as=owner&theme=light&seed=draft#/hub/draft",
+   "steps": [
+    {
+     "eval": "var k=document.querySelector('main .kpi'); k.parentElement.id='shotStrip';"
+    }
+   ],
+   "clip": "#shotStrip",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_locked_board",
+   "url": "?as=owner&theme=light&seed=draft&state=locked#/hub/draft",
+   "steps": [
+    {
+     "eval": "GUIDE_SHOT.card('My draft board','shotLocked')"
+    }
+   ],
+   "clip": "#shotLocked",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_add_and_rank",
+   "url": "?as=owner&theme=light&seed=draft#/hub/draft",
+   "steps": [
+    {
+     "type": [
+      "#bdSearch",
+      "blue"
+     ]
+    },
+    {
+     "eval": "GUIDE_SHOT.card('My draft board','shotBoard')"
+    }
+   ],
+   "clip": "#shotBoard",
+   "pad": 0,
+   "marks": {
+    "4": "[data-bd-add]",
+    "5": "[data-b-up='r3']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_ready_coverage",
+   "url": "?as=owner&theme=light&seed=draft#/hub/draft",
+   "steps": [
+    {
+     "eval": "GUIDE_SHOT.card('Board coverage','shotCov')"
+    }
+   ],
+   "clip": "#shotCov",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_covered",
+   "url": "?as=owner&theme=light&seed=draft&state=covered#/hub/draft",
+   "steps": [
+    {
+     "eval": "GUIDE_SHOT.card('Board coverage','shotCov')"
+    }
+   ],
+   "clip": "#shotCov",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_order_snake",
+   "url": "?as=owner&theme=light&seed=draft#/hub/draft",
+   "steps": [
+    {
+     "eval": "GUIDE_SHOT.cutAtRound('The draft, pick by pick','shotOrder',3)"
+    }
+   ],
+   "clip": "#shotOrder",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_onclock_top",
+   "url": "?as=owner&theme=light&seed=draft&state=onclock#/hub/draft",
+   "steps": [
+    {
+     "eval": "var k=document.querySelector('main .kpi'); k.parentElement.id='shotStrip';"
+    },
+    {
+     "eval": "var c=[...document.querySelectorAll('main .card')].find(function(x){ return /You\u2019re on the clock/.test(x.textContent); }); GUIDE_SHOT.wrap('#shotStrip', '#'+(c.id||(c.id='shotClock')), 'shotOnClock');"
+    }
+   ],
+   "clip": "#shotOnClock",
+   "pad": 0,
+   "marks": {
+    "7": "[data-quickpick]",
+    "8": "[data-openpick]"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_pick_modal",
+   "url": "?as=owner&theme=light&seed=draft&state=onclock#/hub/draft",
+   "steps": [
+    {
+     "click": "[data-openpick]",
+     "after": 500
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "crop": [
+    0,
+    0,
+    100,
+    62
+   ],
+   "marks": {
+    "8": "[data-modpick='r4']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_quick_pick_toast",
+   "url": "?as=owner&theme=light&seed=draft&state=onclock#/hub/draft",
+   "height": 900,
+   "steps": [
+    {
+     "click": "[data-quickpick]",
+     "after": 700
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_live_strip",
+   "url": "?as=owner&theme=light&seed=draft&state=live#/hub/draft",
+   "steps": [
+    {
+     "eval": "var k=document.querySelector('main .kpi'); k.parentElement.id='shotStrip';"
+    }
+   ],
+   "clip": "#shotStrip",
+   "pad": 0,
+   "marks": {
+    "9": "#shotStrip .kpi:nth-child(2)"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "desk_makeup",
+   "url": "?as=owner&theme=light&seed=draft&state=makeup#/hub/draft",
+   "steps": [
+    {
+     "eval": "GUIDE_SHOT.card('Make-up picks','shotMakeup')"
+    }
+   ],
+   "clip": "#shotMakeup",
+   "pad": 0,
+   "marks": {
+    "10": "[data-openpick]"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "room_spectator_clock",
+   "url": "?as=player&theme=light&seed=draft&state=onclock#/draft",
+   "steps": [
+    {
+     "eval": "var k=document.querySelector('main .card'); k.id='shotRoomTop'; GUIDE_SHOT.card('Latest picks','shotLatest'); GUIDE_SHOT.wrap('#shotRoomTop','#shotLatest','shotRoom');"
+    }
+   ],
+   "clip": "#shotRoom",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1800,
+   "name": "how_night_runs",
+   "url": "?as=owner&theme=light&seed=draft#/hub/draft",
+   "steps": [
+    {
+     "eval": "GUIDE_SHOT.card('How draft night runs','shotHow')"
+    }
+   ],
+   "clip": "#shotHow",
+   "pad": 0
+  }
+ ]
+}

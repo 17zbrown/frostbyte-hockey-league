@@ -1,93 +1,116 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Draft your team — CGHL member guide</title>
+<html lang="en"><head><meta charset="utf-8"><title>Draft your team — CGHL management guide</title>
 <link rel="stylesheet" href="../guide.css">
 <style>
   .stack{display:grid;gap:22px}
-  .goal{font-family:var(--f-mono);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--green-ink);margin-top:12px}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  /* the night in four figures */
+  .lim{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}
+  .lim div{background:var(--paper);border:1.5px solid var(--line);border-radius:10px;padding:14px 16px}
+  .lim b{font-family:var(--f-disp);font-weight:900;font-size:40px;letter-spacing:-.03em;display:block;line-height:1}
+  .lim span{font-family:var(--f-mono);font-size:13.5px;letter-spacing:.04em;color:var(--steel);display:block;margin-top:8px;line-height:1.35}
 </style></head>
 <body><main class="poster">
 
 <header class="band">
   <div class="copy">
     <div>
-      <span class="eyebrow chr">Team HQ · How-to · 10</span>
-      <h1>Draft your team<small>Owner, GM or AGM only · fourteen rounds · 120 seconds a pick</small></h1>
-      <p class="lede">Rank a private board before the night. On the clock, one click takes your top target — miss the clock and the league drafts from your board for you.</p>
+      <span class="eyebrow chr">Management guide · 04</span>
+      <h1>Draft your team<small>Owner, GM or AGM · a snake draft, live on the site · 120 seconds a pick</small></h1>
+      <p class="lede">Rank your board before the night, then pick from it in one click when your clock runs. Everyone registered by the sign-up cutoff is in the pool — no pre-season, no eligibility test.</p>
     </div>
-    <div class="meta"><span class="tag chr">Owner · GM · AGM</span><span class="tag k">Team HQ → Draft</span><span class="tag">Rule 2.8</span></div>
+    <div class="meta"><span class="tag chr">Owner · GM · AGM</span><span class="tag k">Team HQ → Draft</span><span class="tag">Rules 2.8 · 2.6</span></div>
   </div>
   <div class="art"><img src="../art/draft.jpg" alt=""></div>
 </header>
 
 <section class="body">
 
-  <div class="sec-h"><div><span class="eyebrow chr">Where it lives</span><h2>The war room</h2></div><p>The Draft desk lives in Team HQ. It builds your board before the night and runs your picks during it — only your club's Owner, GM and AGM can open it.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Where it lives</span><h2>The war room</h2></div><p>The Draft desk lives in Team HQ. It builds your board before the night and runs your picks during it. The public draft room is for everyone else.</p></div>
   <div class="sec">
     <div class="txt steps">
-      <div class="step"><div class="puck">1</div><div><h3>Open the Draft desk</h3><p>Sign in with Discord, then open <span class="ui">Draft</span> at the bottom of the <b>Team HQ</b> group in the hub sidebar. The desk opens under <b>Draft desk</b> with your board, the pool, and the pick-by-pick table.</p><p class="path">#/hub/draft</p></div></div>
-      <div class="step"><div class="puck">2</div><div><h3>Read the status strip</h3><p>Five tiles run across the top: <b>draft status</b>, the <b>pick clock</b>, who is <b>on the clock</b>, <b>your next pick</b>, and how many players are <b>on your board</b>. Before draft night the status reads <b>Board set — not started</b> and the clock shows dashes; it flips to <b>LIVE</b> when the draft opens.</p></div></div>
+      <div class="step"><div class="puck">1</div><div><h3>Open the Draft desk</h3><p>Sign in with Discord, then open <span class="ui">Draft</span> at the bottom of the <b>Team HQ</b> group in the hub sidebar. Only the club’s Owner, GM and AGM see it.</p><p class="path">#/hub/draft</p></div></div>
+      <div class="step"><div class="puck">2</div><div><h3>Read the status strip</h3><p>Five tiles run across the top: <b>draft status</b>, the <b>pick clock</b>, who is <b>on the clock</b>, <b>your next pick</b>, and how many <b>players are on your board</b>. Before the night it reads <span class="ui">Board set — not started</span>.</p></div></div>
     </div>
     <div class="shot stack">
-      <div class="frame" style="width:34%"><img src="../shots/draft/sidebar_draft_item.png" alt="The Team HQ sidebar with Draft at the bottom"><span class="mark" style="left:88%;top:89%">1</span><div class="cap">Hub sidebar · Team HQ → Draft</div></div>
-      <div class="frame"><img src="../shots/draft/desk_ready_strip.png" alt="The five-tile draft status strip before the draft starts"><span class="mark" style="left:1%;top:40%">2</span><div class="cap">Draft desk · the status strip</div></div>
+      <div class="frame" style="width:34%"><img src="../shots/draft/sidebar_draft_item.png" alt="The Team HQ sidebar with Draft at the bottom"><span class="mark" style="left:88%;top:95%">1</span><div class="cap">Sidebar · Team HQ → Draft</div></div>
+      <div class="frame"><img src="../shots/draft/desk_ready_strip.png" alt="The five-tile draft status strip before the draft starts"><span class="mark" style="left:30%;top:22%">2</span><div class="cap">The status strip · before the night</div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Before the night</span><h2>Rank your board</h2></div><p>Boards unlock when the pre-season opens. Add players and drag them into order — there is no Save button; every change saves on its own.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Before the night</span><h2>Rank your board</h2></div><p>Every player who registers is in the pool; the sign-up cutoff — 11:59 PM ET on the Thursday before the draft — closes it. Add players and drag them into order. There is no wrong answer, only an empty one.</p></div>
   <div class="sec">
     <div class="txt steps">
-      <div class="step"><div class="puck">3</div><div><h3>Boards unlock with the pre-season</h3><p>Until the pre-season opens the board is <span class="ui">LOCKED</span>. Once it does, the registered player pool appears here — watch the games, then rank your targets. The board is <b>private to your club</b>: only your management and the league office ever see it.</p></div></div>
-      <div class="step"><div class="puck">4</div><div><h3>Search the pool, then Add</h3><p>Type a gamertag in <span class="ui">Search the pool…</span> or filter by position — <span class="ui">ALL</span> <span class="ui">C</span> <span class="ui">LW</span> <span class="ui">RW</span> <span class="ui">LD</span> <span class="ui">RD</span> <span class="ui">G</span>. Press <span class="ui">Add</span> and the player drops onto the bottom of your board.</p></div></div>
-      <div class="step"><div class="puck">5</div><div><h3>Rank with the arrows</h3><p>Move a target up, down, or straight to #1, or <span class="ui">×</span> to drop him. Rows renumber at once and each change saves — there is no Save button. Only a failure speaks up: <b>“The board didn’t save…”</b>, and the board re-syncs.</p></div></div>
-      <div class="step"><div class="puck">6</div><div><h3>Watch Board coverage</h3><p>The <b>Board coverage</b> chip grades your list against your remaining picks. <b>Covered</b> (green) means three names to spare; <b>short</b> (red) means that if your clock runs out past your board, the league picks best-available <b>overall</b> — so rank more. Players who aren't draft-eligible yet don't count. <span class="rule">Rule 2.8</span></p></div></div>
+      <div class="step"><div class="puck">3</div><div><h3>The board unlocks with the pool</h3><p>Until sign-ups come in the board is <span class="ui">Locked</span>. As the pool fills, <span class="ui">My draft board</span> opens — private to your club, and never seen by another front office.</p></div></div>
+      <div class="step"><div class="puck">4</div><div><h3>Search, filter, Add</h3><p>Type a gamertag in <span class="ui">Search the pool</span> or tap a position filter — <span class="ui">C · LW · RW · LD · RD · G</span> — then press <span class="ui">Add</span>. He lands at the bottom of your list.</p></div></div>
+      <div class="step"><div class="puck">5</div><div><h3>Order it</h3><p>The arrows move a player up, down or straight to #1; <span class="ui">✕</span> drops him. Your top available player is the one the one-click pick offers you on the night — and the one the league takes for you if your clock runs out.</p></div></div>
+      <div class="step"><div class="puck">6</div><div><h3>Watch Board coverage</h3><p>The <b>Board coverage</b> chip grades your list against your remaining picks. <b>Short</b> (amber) means you have fewer names than picks — the league would draft best-available overall once your board runs dry. <b>Covered</b> (green) means you are set for the whole night.</p></div></div>
     </div>
     <div class="shot stack">
-      <div class="frame"><img src="../shots/draft/desk_locked_board.png" alt="The draft board card locked before the pre-season"><span class="mark" style="left:83%;top:11%">3</span><div class="cap">My draft board · locked until pre-season</div></div>
-      <div class="frame"><img src="../shots/draft/desk_add_and_rank.png" alt="The ranked board with search, position filters and the Add button"><span class="mark" style="left:73%;top:20%">5</span><span class="mark" style="left:78%;top:86%">4</span><div class="cap">My draft board · search, add &amp; rank</div></div>
-      <div class="frame"><img src="../shots/draft/desk_ready_coverage.png" alt="The Board coverage card reading short — 6 ranked for 14 picks"><span class="mark" style="left:68%;top:20%">6</span><div class="cap">Board coverage · short vs covered</div></div>
+      <div class="frame" style="width:86%"><img src="../shots/draft/desk_locked_board.png" alt="The draft board card locked before the pool exists"><span class="mark" style="left:86%;top:12%">3</span><div class="cap">My draft board · locked until the pool exists</div></div>
+      <div class="frame"><img src="../shots/draft/desk_add_and_rank.png" alt="The ranked board with search, position filters and the Add button"><span class="mark" style="left:82%;top:86.5%">4</span><span class="mark" style="left:78%;top:28.2%">5</span><div class="cap">My draft board · rank, search, Add</div></div>
+      <div class="pair">
+        <div class="frame"><img src="../shots/draft/desk_ready_coverage.png" alt="The Board coverage card reading short"><span class="mark" style="left:10%;top:22%">6</span><div class="cap">Coverage · short — rank more</div></div>
+        <div class="frame"><img src="../shots/draft/desk_covered.png" alt="The Board coverage card reading covered"><div class="cap">Coverage · covered for the night</div></div>
+      </div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Draft night</span><h2>On the clock</h2></div><p>When your turn comes the on-the-clock tile turns red and you get 120 seconds. Take your top target in one click, or open the pool and choose anyone.</p></div>
-  <div class="sec">
-    <div class="txt steps">
-      <div class="step"><div class="puck">7</div><div><h3>Draft your top target in one click</h3><p>The amber card names your highest-ranked player still available: <span class="ui chr">Draft [name] (board #1)</span>. One click and it's done — <b>“[name] drafted — welcome aboard.”</b></p></div></div>
-      <div class="step"><div class="puck">8</div><div><h3>Or choose anyone from the pool</h3><p>Press <span class="ui">Choose from the pool</span> for the <b>Draft a player</b> window. Eligible prospects list best-overall-first; type in <span class="ui">Start typing a gamertag…</span> to narrow it, then press <span class="ui chr">Draft</span>.</p></div></div>
-      <div class="step"><div class="puck">9</div><div><h3>Miss the clock? The board picks for you</h3><p>Each club gets 120 seconds. Run the clock to 0:00 and the league auto-drafts your top available board player — never someone you didn't rank, unless your board runs dry. Keep one tab open: the desk re-reads the draft every ten seconds, so you never need to refresh.</p></div></div>
-      <div class="step"><div class="puck">10</div><div><h3>A skipped pick is still yours</h3><p>A pick your clock ran past isn't lost. It waits under <b>Make-up picks</b>, and <span class="ui chr">Use this pick</span> opens the same pool window for it, any time before the draft ends.</p></div></div>
-    </div>
-    <div class="shot stack">
-      <div class="frame"><img src="../shots/draft/desk_onclock_top.png" alt="The on-the-clock tile red, with the one-click draft button"><span class="mark" style="left:49%;top:65%">7</span><div class="cap">Your turn · one-click your #1</div></div>
-      <div class="frame" style="width:58%"><img src="../shots/draft/desk_pick_modal.png" alt="The Draft a player window listing eligible prospects"><span class="mark" style="left:78%;top:32%">8</span><div class="cap">Draft a player · anyone in the pool</div></div>
-      <div class="frame"><img src="../shots/draft/desk_live_strip.png" alt="The live status strip with the pick clock and next-pick countdown"><span class="mark" style="left:22%;top:56%">9</span><div class="cap">Live · the pick clock ticking down</div></div>
-      <div class="frame"><img src="../shots/draft/desk_makeup.png" alt="The Make-up picks card with a skipped pick still available"><span class="mark" style="left:80%;top:74%">10</span><div class="cap">Make-up picks · a skipped pick, still yours</div></div>
-    </div>
-  </div>
-
-  <div class="sec-h"><div><span class="eyebrow chr">All night</span><h2>Trade the picks</h2></div><p>Picks are club assets. Trade them before and during the draft from the Trade Hub — a traded pick, even the one on the clock, changes hands the moment the other side accepts.</p></div>
-  <div class="sec">
-    <div class="txt steps">
-      <div class="step"><div class="puck">11</div><div><h3>Trade picks from the Trade Hub</h3><p>In the <b>Trade Hub</b>, build an offer with <span class="ui">Add player / pick</span> → <b>Draft picks</b>, where each round is a selectable asset (<span class="ui">’1 R1 pick</span>). Send it, or take an incoming one with <span class="ui chr">Accept</span> — <b>“Accept this trade?”</b> confirms it and it must clear your cap. A used pick can't be traded; a skipped make-up pick can. <span class="rule">Rule 2.3</span></p></div></div>
-    </div>
+  <div class="sec-h"><div><span class="eyebrow chr">The order</span><h2>Drawn at random, then it snakes</h2></div><p>The commissioner draws the order before the night and publishes it. Odd rounds run in the drawn order, even rounds in reverse — pick last in round one, pick first in round two.</p></div>
+  <div class="sec flip">
     <div class="shot">
-      <div class="frame"><img src="../shots/draft/tradehub_incoming_offer.png" alt="An incoming pick trade with Counter, Decline and Accept"><span class="mark" style="left:90%;top:57%">11</span><div class="cap">Trade Hub · an incoming pick offer</div></div>
+      <div class="frame"><img src="../shots/draft/desk_order_snake.png" alt="The pick-by-pick card: round 1 in the drawn order, round 2 reversed"><div class="cap">The draft, pick by pick · your rows are tinted</div></div>
+    </div>
+    <div class="txt steps">
+      <div class="step"><div class="puck ink">7</div><div><h3>Find your rows</h3><p><b>The draft, pick by pick</b> lists every pick of the night with your club’s rows tinted — so you can see exactly when you are up. The number of rounds is a season setting the commissioner publishes before the draft; the desk is built to it. Picks cannot be traded this season, so the order you see is the order the night runs. <span class="rule">Rules 2.3 · 2.8</span></p></div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">For everyone</span><h2>The draft room</h2></div><p>Every member and guest watches the same picks land live in the draft room — no management access needed.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Draft night</span><h2>On the clock</h2></div><p>Every club gets 120 seconds a pick. When the strip turns red, it is you.</p></div>
   <div class="sec">
     <div class="txt steps">
-      <div class="step"><div class="puck ink">12</div><div><h3>Watch it live at the draft room</h3><p>Open <span class="ui">The draft room</span> for the live clock, the <b>Latest picks</b> ticker, and the full board. Each pick shows its round price — <b>$4M · set by round</b> for a first-rounder, down to the $750K minimum in round 14. Spectators never see the prospect pool: <b>what you see is what the league sees.</b> Managers get a <span class="ui">Draft a player</span> button here too when their club is up.</p><p class="path">#/draft</p></div></div>
+      <div class="step"><div class="puck">8</div><div><h3>One click from your board</h3><p>Your tile turns red and a bar reads <b>“You’re on the clock.”</b> Press <span class="ui chr">Draft ‹your #1› (board #1)</span> and he is yours — the toast confirms it and the clock passes to the next club.</p></div></div>
+      <div class="step"><div class="puck">9</div><div><h3>Or choose from the pool</h3><p><span class="ui">Choose from the pool</span> opens the whole pool with a search box. Press <span class="ui chr">Draft</span> beside any name. Players already taken are struck off your board live — <b>GONE · UTA</b> — so you never draft a ghost.</p></div></div>
+      <div class="step"><div class="puck">10</div><div><h3>Miss the clock? The board picks for you</h3><p>Run the clock to 0:00 and the league auto-drafts the top available player from your board. No board? Best available overall. The strip keeps counting down to your next pick all night.</p></div></div>
+      <div class="step"><div class="puck">11</div><div><h3>A skipped pick is still yours</h3><p>If a pick has to be skipped, it waits under <b>Make-up picks</b>. <span class="ui chr">Use this pick</span> opens the pool for it any time before the draft ends.</p></div></div>
     </div>
+    <div class="shot stack">
+      <div class="frame"><img src="../shots/draft/desk_onclock_top.png" alt="The on-the-clock strip and bar, with the one-click draft button"><span class="mark" style="left:50%;top:81.7%">8</span><span class="mark" style="left:80.5%;top:81.7%">9</span><div class="cap">On the clock · one click, or the pool</div></div>
+      <div class="pair">
+        <div class="frame"><img src="../shots/draft/desk_pick_modal.png" alt="The Draft a player window listing the pool"><span class="mark" style="left:82%;top:66%">9</span><div class="cap">The pool · Draft beside any name</div></div>
+        <div class="frame"><img src="../shots/draft/desk_quick_pick_toast.png" alt="Toast confirming the pick"><div class="cap">The pick lands</div></div>
+      </div>
+      <div class="frame"><img src="../shots/draft/desk_live_strip.png" alt="The live status strip with the pick clock and next-pick countdown"><span class="mark" style="left:20%;top:50%">10</span><div class="cap">Live · the clock and your next pick, always in view</div></div>
+      <div class="frame"><img src="../shots/draft/desk_makeup.png" alt="The Make-up picks card with a skipped pick still available"><span class="mark" style="left:84%;top:71%">11</span><div class="cap">Make-up picks · still yours</div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">For everyone</span><h2>The draft room</h2></div><p>Every member and guest watches the same picks land live in the draft room — no management access needed — and in #draft-hub on the Discord.</p></div>
+  <div class="sec flip">
     <div class="shot">
-      <div class="frame"><img src="../shots/draft/room_spectator_clock.png" alt="The public draft room clock and Latest picks ticker"><span class="mark ink" style="left:74%;top:9%">12</span><div class="cap">The draft room · live for all members</div></div>
+      <div class="frame"><img src="../shots/draft/room_spectator_clock.png" alt="The public draft room: the clock, the club on the clock and the Latest picks ticker"><span class="mark ink" style="left:6%;top:8%">12</span><div class="cap">The draft room · #/draft</div></div>
+    </div>
+    <div class="txt steps">
+      <div class="step"><div class="puck ink">12</div><div><h3>Watch it live</h3><p>Open <span class="ui">The draft room</span> for the live clock, the club on the clock, the <b>Latest picks</b> ticker and the full board. Players see their own name land the moment it is called; the same pick posts to #draft-hub. Once the draft concludes, anyone still undrafted is placed on a club as depth ten minutes later — nobody is left out. <span class="rule">Rule 2.8</span></p></div></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">The numbers</span><h2>What a pick costs</h2></div><p>Every drafted player signs a one-season deal at a salary fixed by his round. The first round pays the most; each round down is $250K less, to the $750K minimum in the last round.</p></div>
+  <div class="sec wide">
+    <div class="txt">
+      <div class="lim">
+        <div><b>120</b><span>seconds on the clock, every pick</span></div>
+        <div><b>15</b><span>active-roster spots to fill — two full lines plus three of any position (Rule 2.1)</span></div>
+        <div><b>1</b><span>season on every contract — everyone re-enters next year’s draft (Rule 2.5)</span></div>
+        <div><b>$750K</b><span>the league minimum, and the pay of the last round and every depth placement</span></div>
+      </div>
     </div>
   </div>
 
   <div class="sec wide">
     <div class="notes two">
-      <div class="note red"><span class="lab">Watch out</span>The draft can't start until every club has an Owner, a GM and an AGM (Rule 2.6) and every pre-season loan is released — the league office seats and releases these, not you. A loaned player needs five pre-season appearances to be draft-eligible, so spread the ice time: watch <b>Road to 5</b> on your Roster page. Ranking an ineligible player is allowed but useless — the one-click button skips him and the auto-pick refuses him.</div>
-      <div class="note chr"><span class="lab">Good to know</span>Picks pay by round: a first-rounder signs at $4M, each round down is $250K less, to the $750K minimum in round 14. If your Owner set Draft to <b>Owner approves</b>, your board saves and picks go to them first; set to hidden, you won't see the desk at all (Rule 2.6). Skipped picks stay usable until the commissioner concludes the draft; ten minutes later, everyone still unpicked is placed on a club at random.</div>
+      <div class="note red"><span class="lab">Watch out</span>The draft can’t start until every club has an Owner, a GM and an AGM (Rule 2.6) — the league office seats an empty post first. Draft to the shape: at most 9 forwards, 7 defensemen or 5 goaltenders fit on a 15-man roster, and the desk refuses a pick that would break it. And bring a full board: a short board plus a dropped connection is how you end up with three goalies.</div>
+      <div class="note chr"><span class="lab">Good to know</span>Your board is never sent to another club, and the auto-pick reads it exactly as you ordered it — so order matters more than length. If your Owner set Draft to <b>Owner approves</b>, board saves queue for approval; on the night, picks themselves are always immediate (Rule 2.6). Puck drop is the Wednesday after the draft — your first lineups are due that afternoon.</div>
     </div>
   </div>
 
@@ -95,6 +118,6 @@
 
 <footer class="foot">
   <div class="lock"><img src="../../../chel-gaming-logo-1024.png" alt=""><div><b>CHEL GAMING</b><span>Hockey League</span></div></div>
-  <div class="where"><b>chelgamingleague.com</b> · Team HQ → Draft · #/hub/draft<br>Rulebook 2.8 · 2.6 · 2.3 · site v2.42 · September 2026</div>
+  <div class="where"><b>chelgamingleague.com</b> · Team HQ → Draft · #/hub/draft<br>Rulebook 2.1 · 2.3 · 2.5 · 2.6 · 2.8 · site v2.51 · September 2026</div>
 </footer>
-</main></body></html>
+</main><script src="../guide.js"></script></body></html>

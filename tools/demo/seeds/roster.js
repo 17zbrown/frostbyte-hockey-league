@@ -1,12 +1,14 @@
 /* seed: roster — Team HQ → Roster (#/hub/roster) and the Owner's approval queue (#/hub/management)
-   populated the way the Bruins' front office sees them mid-season: an 18-man club (16 active +
-   2 in camp) on the $250K salary lattice, real contracts (final-season chips, one signed
-   extension), one player on the trade block, the four-season cap outlook, the Owner's permission
-   policy (the GM's roster moves need approval) and a queue of pending / decided moves. The CG.sb
+   populated the way the Bruins' front office sees them mid-season in the BASIC format (v2.51): a
+   15-man active roster (two full lines plus three flex, management inside) plus two in camp, on
+   the $250K salary lattice, one-season contracts, one player on the trade block, the cap outlook,
+   the Owner's permission policy (the GM's roster moves need approval) and a queue of pending /
+   decided moves. Games played are spread around the 18-game playoff floor (Rule 8.3) so the Road
+   to 18 card shows a player already there, players who can still get there, and one who cannot. The CG.sb
    stub is taught the roster RPCs so a click really moves, waives, queues or approves in memory.
    Shapes: part_live.js rows (:340-370), team_cap_outlook (part6_hub.js:1633), mgmt moves (:7952).
    Variants (?state=):
-     campfull   — three forwards in camp, so every active row offers "Swap…" (the picker)
+     campfull   — (full format only: camp is unlimited in basic) three forwards in camp
      preseason  — a pre-season snapshot: five loans (one out of position), Road to 5, future
                   pre-season games, and the page's pre-season wording
      hidden     — the Owner withheld Roster from the AGM seat (?as=agm): the URL is refused */
@@ -21,22 +23,21 @@
   function proto(pos, depth){ return rs.filter(function(p){ return p.pos===pos && p.depth===depth; })[0]; }
   /* [prototype slot or null, id (new only), tag, pos, salary, end_season, squad, ovr (new only), regular-season GP] */
   var plan = [
-    [proto("RW",1), null,  "ItzPeakz",       "RW", 0,       1, "pro", null, 12],   /* Owner  — $0 (Rule 2.6) */
-    [proto("C",1),  null,  "Mr. Plow",       "C",  3.0*M,   1, "pro", null, 12],   /* GM     — flat $3.0M   */
-    [proto("LD",1), null,  "Jugg_PRKz",      "LD", 3.0*M,   1, "pro", null, 11],   /* AGM    — flat $3.0M   */
-    [proto("LW",1), null,  "Frostbyte",      "LW", 3.75*M,  2, "pro", null, 12],
-    [proto("LW",2), null,  "SnipeShowVI",    "LW", 2.25*M,  1, "pro", null, 11],   /* final season, already re-signed */
-    [proto("C",2),  null,  "TopShelfTy",     "C",  3.25*M,  3, "pro", null, 12],
-    [proto("RW",2), null,  "FigurItOwt25",   "RW", 1.5*M,   1, "pro", null, 7],    /* the GM's queued waiver names him */
-    [proto("LD",2), null,  "Dangle Dan",     "LD", 2.5*M,   1, "pro", null, 10],
-    [proto("RD",1), null,  "GlassEater",     "RD", 3.0*M,   2, "pro", null, 12],
-    [proto("RD",2), null,  "CellyKing",      "RD", 1.75*M,  1, "pro", null, 9],    /* on the trade block */
-    [proto("G",1),  null,  "IronWall_31",    "G",  3.5*M,   2, "pro", null, 10],
-    [proto("G",2),  null,  "StonewallSt4n",  "G",  1.25*M,  1, "pro", null, 3],
-    [null, "bx1",  "SauceBoss77",    "C",  2.0*M,   2, "pro", 79, 11],
-    [null, "bx2",  "OneTimerOtto",   "RW", 1.5*M,   1, "pro", 74, 9],
-    [null, "bx3",  "BodycheckBruno", "LD", 1.75*M,  3, "pro", 76, 12],
-    [null, "bx4",  "PointShotPico",  "RD", 1.25*M,  2, "pro", 72, 8],
+    [proto("RW",1), null,  "ItzPeakz",       "RW", 0,       1, "pro", null, 22],   /* Owner  — $0 (Rule 2.6) */
+    [proto("C",1),  null,  "Mr. Plow",       "C",  3.0*M,   1, "pro", null, 20],   /* GM     — flat $3.0M   */
+    [proto("LD",1), null,  "Jugg_PRKz",      "LD", 3.0*M,   1, "pro", null, 19],   /* AGM    — flat $3.0M   */
+    [proto("LW",1), null,  "Frostbyte",      "LW", 3.75*M,  1, "pro", null, 21],
+    [proto("LW",2), null,  "SnipeShowVI",    "LW", 2.25*M,  1, "pro", null, 18],   /* exactly at the floor */
+    [proto("C",2),  null,  "TopShelfTy",     "C",  3.25*M,  1, "pro", null, 20],
+    [proto("RW",2), null,  "FigurItOwt25",   "RW", 1.5*M,   1, "pro", null, 7],    /* the GM's queued waiver names him; cannot reach 18 */
+    [proto("LD",2), null,  "Dangle Dan",     "LD", 2.5*M,   1, "pro", null, 14],
+    [proto("RD",1), null,  "GlassEater",     "RD", 3.0*M,   1, "pro", null, 21],
+    [proto("RD",2), null,  "CellyKing",      "RD", 1.75*M,  1, "pro", null, 12],   /* on the trade block */
+    [proto("G",1),  null,  "IronWall_31",    "G",  3.5*M,   1, "pro", null, 19],
+    [proto("G",2),  null,  "StonewallSt4n",  "G",  1.25*M,  1, "pro", null, 9],
+    [null, "bx1",  "SauceBoss77",    "C",  2.0*M,   1, "pro", 79, 16],
+    [null, "bx2",  "OneTimerOtto",   "RW", 1.5*M,   1, "pro", 74, 11],
+    [null, "bx3",  "BodycheckBruno", "LD", 1.75*M,  1, "pro", 76, 20],
     [null, "bx5",  "BreakawayBex",   "LW", 0.75*M,  1, "tc",  68, 3],
     [null, "bx6",  "HipCheckHank",   "RD", 0.75*M,  1, "tc",  66, 2]
   ];
@@ -53,7 +54,7 @@
       if (lg.glog) lg.glog[p.id] = [];
       lg.players.push(p);
     }
-    if (row[8] != null) lg.pstats[p.id].gp = row[8];   /* mid-season games played, week 6 of 10 */
+    if (row[8] != null) lg.pstats[p.id].gp = row[8];   /* regular-season games played so far, around the 18-game floor */
     p.tag = row[2]; p.pos = row[3]; p.salary = row[4]; p.term = row[5]; p.squad = row[6];
     p.spotId = "spot-"+p.id; p.onBlock = false; p.origin = undefined; p.team = club;
     if (p.mgmt==="owner"||p.mgmt==="gm") p.mgmtSalary = true;
@@ -101,17 +102,22 @@
         home:i%2?o[0]:club, away:i%2?club:o[0], at: now + o[1]*86400000 + 15*60000 });
     });
   }
-  /* the six others keep the prototype's names; only this club is rewritten */
+  /* the six others keep the prototype's names; only this club is rewritten — except that the
+     prototype's name pool hands some of THESE tags to other clubs too, and a trade offer that
+     reads "you receive BreakawayBex" while a BreakawayBex sits in your own camp is a puzzle, so
+     any collision on another club takes a spare name */
+  var SPARES = ["SaucerPassSam","OneTouchOwen","BigBodyBrent","PointShotPaz","BreakoutBella","HipCheckHugo","GloveSideGus","WristerWes","DekeDoctorDee","CrashTheNetCal","FlowSeasonFinn","TopCheeseTy"];
+  var mine = {}; roster.forEach(function(p){ mine[p.tag] = 1; });
+  (lg.players||[]).forEach(function(p){ if (p.team !== club && mine[p.tag] && SPARES.length) p.tag = SPARES.shift(); });
   lg.byTeam[club] = roster;
   var ids = {}; roster.forEach(function(p){ ids[p.id] = 1; });
   lg.players = lg.players.filter(function(p){ return p.team!==club || ids[p.id]; });
 
-  /* ---- 2. contracts (final-season chip, Extend button, Signed-thru chip) ---- */
+  /* ---- 2. contracts (every deal runs to the end of this season — basic format, Rule 2.5) ---- */
   lg._contractsRaw = roster.filter(function(p){ return !p.origin; }).map(function(p){
     return { id:"c-"+p.id, profile_id:p.id, team_id:t.id, status:"active", is_manager:!!p.mgmt,
              start_season:1, end_season:p.term, salary:p.salary };
   });
-  if (byTag("SnipeShowVI")) lg._contractsRaw.push({ id:"c-ext-p1", profile_id:byTag("SnipeShowVI").id, team_id:t.id, status:"signed", is_manager:false, start_season:2, end_season:2, salary:2.5*M });
 
   /* ---- 3. what the CG.sb stub answers: the roster_spots rows (the block toggle's select) ---- */
   window.GUIDE_TABLES = window.GUIDE_TABLES || {};
@@ -125,7 +131,7 @@
   lg._mgmtMoves = [
     { id:"m1", team_id:t.id, page:"tradehub",   action:"accept_trade",     status:"pending",  requested_by:"u-gm",  requester:{ gamertag:names["u-gm"] },  summary:"accept the trade offer from Red Wings", created_at:ago(0.4) },
     { id:"m2", team_id:t.id, page:"roster",     action:"waive_player",     status:"pending",  requested_by:"u-gm",  requester:{ gamertag:names["u-gm"] },  summary:"waive FigurItOwt25", created_at:ago(3) },
-    { id:"m3", team_id:t.id, page:"freeagents", action:"offer_free_agent", status:"pending",  requested_by:"u-agm", requester:{ gamertag:names["u-agm"] }, summary:"offer Lemieux4ever $1,250,000 × 2 seasons", created_at:ago(5) },
+    { id:"m3", team_id:t.id, page:"freeagents", action:"offer_free_agent", status:"pending",  requested_by:"u-agm", requester:{ gamertag:names["u-agm"] }, summary:"sign waived player Lemieux4ever at $750,000", created_at:ago(5) },
     { id:"m4", team_id:t.id, page:"roster",     action:"roster_block",     status:"approved", requested_by:"u-gm",  requester:{ gamertag:names["u-gm"] },  summary:"put CellyKing on the trade block", created_at:ago(30), decided_at:ago(28), note:"Go ahead" },
     { id:"m5", team_id:t.id, page:"lines",      action:"set_game_lineup",  status:"failed",   requested_by:"u-agm", requester:{ gamertag:names["u-agm"] }, summary:"dress Line 1 vs Kraken · Tue Jul 14 9:00 PM ET", created_at:ago(50), decided_at:ago(47), result:"That game is final; its lineup can no longer be changed." },
     { id:"m6", team_id:t.id, page:"tradehub",   action:"trade_propose",    status:"denied",   requested_by:"u-gm",  requester:{ gamertag:names["u-gm"] },  summary:"propose a trade to Islanders (2 for 1)", created_at:ago(70), decided_at:ago(69), note:"Not for a first-rounder." }
@@ -169,6 +175,18 @@
     return { data:id, error:null };
   };
   window.GUIDE_RPC.mgmt_withdraw_move = function(a){ lg._mgmtMoves.forEach(function(m){ if (m.id===a.p_id){ m.status="withdrawn"; m.decided_at=new Date(now).toISOString(); } }); return { data:true, error:null }; };
+  /* ---- 6. the waived-players board (Rule 2.2, basic): one player another club let go, signable
+     at the league minimum until the movement deadline — what Team HQ → Free agents shows ---- */
+  lg.draftState = lg.draftState || { status:"complete", season_number:1 };
+  lg._registrationsRaw = (lg._registrationsRaw||[]).concat([{ id:"reg-lem", profile_id:"u-p2", season_id:CG.SEASON.id, position:"RD", status:"assigned", scout_ovr:78,
+    created_at:new Date(now - 900*3600000).toISOString(), profiles:{ id:"u-p2", gamertag:names["u-p2"] } }]);
+  lg._profilesRaw = (lg._profilesRaw||[]).concat([{ id:"u-p2", gamertag:names["u-p2"], display_name:names["u-p2"] }]);
+  lg.preGp = lg.preGp || {};
+  var waivedIds = { "u-p2":1 };
+  var prevRet = lg.isReturning, prevVet = lg.isVeteran;
+  lg.isReturning = function(pid){ return !!waivedIds[pid] || (prevRet ? prevRet(pid) : false); };
+  lg.isVeteran = function(pid){ return !!waivedIds[pid] || (prevVet ? prevVet(pid) : false); };
+  window.GUIDE_RPC.offer_free_agent = function(a){ return { data:"offer-demo", error:null }; };
   window.GUIDE_RPC.mgmt_decide_move = function(a){
     var m = lg._mgmtMoves.filter(function(x){ return x.id===a.p_id; })[0];
     if (!m) return { data:null, error:{ message:"No such move" } };

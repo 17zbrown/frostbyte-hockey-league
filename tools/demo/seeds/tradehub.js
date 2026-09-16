@@ -17,14 +17,14 @@
      $3.0M apiece (seasons.owner_salary/gm_salary/agm_salary, default 3/3/3) — and every player deal
      sits on the $250K lattice above the $750K minimum (Rule 2.5, v2.31). The prototype engine pays
      the Owner and GM $0 and leaves the rest off the lattice, so both are re-cut here, and each club
-     is scaled to sit just under the $40M cap the way a club does in mid-season. */
+     is scaled to sit just under the cap the way a club does in mid-season. */
   var MGMT_PAY = 3000000, STEP = CG.SALARY_STEP || 250000, MIN = CG.MIN_SALARY || 750000;
   var snap = function(v){ return Math.max(MIN, Math.round(v/STEP)*STEP); };
   CG.TEAMS.forEach(function(x, i){
     var all = lg.byTeam[x.code] || [];
     var mgmt = all.filter(function(p){ return p.mgmt; }), sk = all.filter(function(p){ return !p.mgmt; });
     mgmt.forEach(function(p){ p.salary = MGMT_PAY; p.mgmtSalary = true; });
-    var target = x.code === my ? 38500000 : 38600000 - i*400000;
+    var target = x.code === my ? 47250000 : 47500000 - i*400000;   /* just under the basic format's $50M cap */
     var room = target - mgmt.length*MGMT_PAY, sum = sk.reduce(function(s,p){ return s+(p.salary||0); }, 0) || 1;
     sk.forEach(function(p){ p.salary = snap(p.salary * room/sum); });
     /* the lattice rounds each deal up or down, so walk the biggest contracts back a step at a time
@@ -66,26 +66,25 @@
   var ownPick = function(id, code){ var k = lg.draftPicks.find(function(x){ return x.id===id; }); if (k) k.ownerCode = code; };
   ownPick("pk-NYI-2", my); ownPick("pk-"+my+"-4", "NYI");
 
-  /* a signed extension travels with the Red Wings winger being offered (the chip on the card) */
-  var extP = roster("DET","LW")[0];
-  lg._contractsRaw = extP ? [{ id:"c-ext-1", profile_id:extP.id, team_id:tid("DET"), status:"signed", is_manager:false, start_season:2, end_season:3, salary:4250000 }] : [];
+  /* basic format (v2.51): every deal is a one-season contract — no extension rides with anyone */
+  lg._contractsRaw = [];
 
   /* two incoming offers and one out */
   lg._myTrades = [
     { id:"tr1", season_id:CG.SEASON.id, status:"proposed", from_team_id:tid("DET"), to_team_id:tid(my),
-      offered_profile_ids:pid("DET","LW"), requested_profile_ids:pid(my,"RD"), offered_pick_ids:["pk-DET-2"], requested_pick_ids:[],
-      note:"We’re loaded up front and thin on the back end — a scorer and a second-rounder for your righty D.", created_at:ago(4) },
+      offered_profile_ids:pid("DET","LW"), requested_profile_ids:pid(my,"RD"), offered_pick_ids:[], requested_pick_ids:[],
+      note:"We’re loaded up front and thin on the back end — a scorer for your righty D.", created_at:ago(4) },
     { id:"tr2", season_id:CG.SEASON.id, status:"proposed", from_team_id:tid("SEA"), to_team_id:tid(my),
       offered_profile_ids:pid("SEA","C"), requested_profile_ids:pid(my,"LW",1), offered_pick_ids:[], requested_pick_ids:[],
       note:"Depth-for-depth — a center for a winger, dollar for dollar on the cap.", created_at:ago(27) },
     { id:"tr3", season_id:CG.SEASON.id, status:"proposed", from_team_id:tid(my), to_team_id:tid("PIT"),
-      offered_profile_ids:pid(my,"C"), requested_profile_ids:pid("PIT","G"), offered_pick_ids:["pk-"+my+"-3"], requested_pick_ids:[],
+      offered_profile_ids:pid(my,"C"), requested_profile_ids:pid("PIT","G"), offered_pick_ids:[], requested_pick_ids:[],
       note:null, created_at:ago(9) }
   ];
   /* ?state=twoout — a second offer out (Mammoth), so withdrawing one leaves the list populated */
   if (st === "twoout") lg._myTrades.push({ id:"tr4", season_id:CG.SEASON.id, status:"proposed", from_team_id:tid(my), to_team_id:tid("UTA"),
-      offered_profile_ids:pid(my,"RD",1), requested_profile_ids:pid("UTA","LD"), offered_pick_ids:[], requested_pick_ids:["pk-UTA-4"],
-      note:"Righty for lefty, and we'll take your fourth to balance it.", created_at:ago(31) });
+      offered_profile_ids:pid(my,"RD",1), requested_profile_ids:pid("UTA","LD"), offered_pick_ids:[], requested_pick_ids:[],
+      note:"Righty for lefty, straight up.", created_at:ago(31) });
   if (st === "quiet") lg._myTrades = [];
   CG._trades = lg._myTrades.slice();
 
@@ -101,7 +100,7 @@
   lg._mgmtMoves = [
     { id:"m1", team_id:t.id, page:"tradehub", action:"accept_trade", status:"pending", requested_by:"u-gm", requester:{ gamertag:names["u-gm"] }, summary:"accept the trade offer from Red Wings", created_at:ago(0.4) },
     { id:"m2", team_id:t.id, page:"roster", action:"waive_player", status:"pending", requested_by:"u-gm", requester:{ gamertag:names["u-gm"] }, summary:"waive "+(waiveP?waiveP.tag:"a player"), created_at:ago(3) },
-    { id:"m3", team_id:t.id, page:"freeagents", action:"offer_free_agent", status:"pending", requested_by:"u-agm", requester:{ gamertag:names["u-agm"] }, summary:"offer Lemieux4ever $1,250,000 × 2 seasons", created_at:ago(5) },
+    { id:"m3", team_id:t.id, page:"freeagents", action:"offer_free_agent", status:"pending", requested_by:"u-agm", requester:{ gamertag:names["u-agm"] }, summary:"sign waived player Lemieux4ever at $750,000", created_at:ago(5) },
     { id:"m4", team_id:t.id, page:"roster", action:"roster_block", status:"approved", requested_by:"u-gm", requester:{ gamertag:names["u-gm"] }, summary:"put "+blockP.tag+" on the trade block", created_at:ago(30), decided_at:ago(28), note:"Go ahead" },
     { id:"m5", team_id:t.id, page:"lines", action:"set_game_lineup", status:"failed", requested_by:"u-agm", requester:{ gamertag:names["u-agm"] }, summary:"dress Line 1 vs Stars · Mon Jul 13 9:00 PM ET", created_at:ago(50), decided_at:ago(46), result:"That game is final; its lineup can no longer be changed." },
     { id:"m6", team_id:t.id, page:"tradehub", action:"trade_propose", status:"denied", requested_by:"u-gm", requester:{ gamertag:names["u-gm"] }, summary:"propose a trade to Canucks (2 for 1)", created_at:ago(70), decided_at:ago(69), note:"Not for a first-rounder." }

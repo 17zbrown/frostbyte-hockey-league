@@ -1,0 +1,276 @@
+{
+ "base": "file:///private/tmp/claude-501/-Users-zackbrown-Desktop-Frostbyte-Hockey-League/dbd49986-190e-47ac-82c7-1268ec57ce75/scratchpad/guides/demo.html",
+ "out": "/Users/zackbrown/Desktop/Frostbyte Hockey League/tools/guides/shots/tradehub",
+ "shots": [
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-sidebar-badge",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "clip": ".hub-side",
+   "pad": 12,
+   "marks": {
+    "1": ".hub-side a[href='#/hub/tradehub']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-incoming-offer-card",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Incoming offers') h.closest('.card').id='shotInc'; })"
+    }
+   ],
+   "clip": "#shotInc",
+   "pad": 0,
+   "marks": {
+    "2": "[data-trade-accept='tr2']",
+    "7": "[data-trade-counter='tr2']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-builder-empty",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Build a trade') h.closest('.card').id='shotBuild'; })"
+    }
+   ],
+   "clip": "#shotBuild",
+   "pad": 0,
+   "marks": {
+    "3": "#tradePartner",
+    "4": "#tradeAddOff"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-picker-modal-mine",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "eval": "var sel=document.getElementById('tradePartner'); sel.value=[...sel.options].find(function(o){ return /Kraken/.test(o.textContent); }).value; sel.dispatchEvent(new Event('change',{bubbles:true}));",
+     "after": 300
+    },
+    {
+     "click": "#tradeAddOff",
+     "after": 400
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "4": "#overlay-root .modal [data-tpick-p='p9']"
+   },
+   "crop": [
+    0,
+    0,
+    100,
+    62
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-builder-filled",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "eval": "var sel=document.getElementById('tradePartner'); sel.value=[...sel.options].find(function(o){ return /Kraken/.test(o.textContent); }).value; sel.dispatchEvent(new Event('change',{bubbles:true}));",
+     "after": 300
+    },
+    {
+     "click": "#tradeAddOff",
+     "after": 350
+    },
+    {
+     "click": "#overlay-root .modal [data-tpick-p='p9']",
+     "after": 250
+    },
+    {
+     "click": "#tradeAddReq",
+     "after": 350
+    },
+    {
+     "eval": "document.querySelector('#overlay-root .modal [data-tpick-p]').click();",
+     "after": 250
+    },
+    {
+     "type": [
+      "#tradeNote",
+      "Righty D for your winger \u2014 cap-neutral."
+     ]
+    },
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Build a trade') h.closest('.card').id='shotBuild'; })"
+    }
+   ],
+   "clip": "#shotBuild",
+   "pad": 0,
+   "marks": {
+    "5": "#tradePropose"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-proposed-toast",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "height": 900,
+   "steps": [
+    {
+     "eval": "var sel=document.getElementById('tradePartner'); sel.value=[...sel.options].find(function(o){ return /Kraken/.test(o.textContent); }).value; sel.dispatchEvent(new Event('change',{bubbles:true}));",
+     "after": 300
+    },
+    {
+     "click": "#tradeAddOff",
+     "after": 350
+    },
+    {
+     "click": "#overlay-root .modal [data-tpick-p='p9']",
+     "after": 250
+    },
+    {
+     "click": "#tradeAddReq",
+     "after": 350
+    },
+    {
+     "eval": "document.querySelector('#overlay-root .modal [data-tpick-p]').click();",
+     "after": 250
+    },
+    {
+     "click": "#tradePropose",
+     "after": 500
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-sent-offers-card",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Offers you\u2019ve sent') h.closest('.card').id='shotSent'; })"
+    }
+   ],
+   "clip": "#shotSent",
+   "pad": 0,
+   "marks": {
+    "6": "[data-trade-cancel='tr3']"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-accept-confirm",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "click": "[data-trade-accept='tr2']",
+     "after": 450
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-accepted-toast",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "height": 900,
+   "steps": [
+    {
+     "click": "[data-trade-accept='tr2']",
+     "after": 450
+    },
+    {
+     "click": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink",
+     "after": 500
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-counter-loaded",
+   "url": "?as=owner&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "click": "[data-trade-counter='tr1']",
+     "after": 500
+    },
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Build a trade') h.closest('.card').id='shotBuild'; })"
+    }
+   ],
+   "clip": "#shotBuild",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "roster-trade-block-toggle",
+   "url": "?as=owner&theme=light&seed=roster#/hub/roster",
+   "steps": [
+    {
+     "eval": "var tr=[...document.querySelectorAll('table.roster-tbl tbody tr')].find(function(r){ return /GlassEater/.test(r.textContent); }); tr.id='shotRow'; var tr2=[...document.querySelectorAll('table.roster-tbl tbody tr')].find(function(r){ return /CellyKing/.test(r.textContent); }); var w=document.createElement('tbody'); w.id='shotRows'; tr.parentNode.insertBefore(w, tr); w.appendChild(tr); w.appendChild(tr2);"
+    }
+   ],
+   "clip": "#shotRows",
+   "pad": 6,
+   "marks": {
+    "8": "#shotRow button[data-block], #shotRow button:nth-of-type(2)"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1600,
+   "name": "tradehub-gm-owner-approves-banner",
+   "url": "?as=gm&theme=light&seed=roster,tradehub#/hub/tradehub",
+   "steps": [
+    {
+     "eval": "var n=[...document.querySelectorAll('main .note')].find(function(x){ return /approv/i.test(x.textContent); }); n.id='shotBanner';"
+    }
+   ],
+   "clip": "#shotBanner",
+   "pad": 0
+  }
+ ]
+}

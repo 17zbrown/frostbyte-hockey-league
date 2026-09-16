@@ -1,0 +1,233 @@
+{
+ "base": "file:///private/tmp/claude-501/-Users-zackbrown-Desktop-Frostbyte-Hockey-League/dbd49986-190e-47ac-82c7-1268ec57ce75/scratchpad/guides/demo.html",
+ "out": "/Users/zackbrown/Desktop/Frostbyte Hockey League/tools/guides/shots/availability",
+ "shots": [
+  {
+   "name": "dash_card",
+   "url": "?as=player&theme=light&seed=availability#/hub",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(/ availability$/i.test(h.textContent.trim())) h.closest('.card').id='shotAvailCard'; })"
+    }
+   ],
+   "clip": "#shotAvailCard",
+   "pad": 0,
+   "marks": {
+    "1": "#shotAvailCard .chip",
+    "2": "#shotAvailCard .btn"
+   }
+  },
+  {
+   "name": "sidebar",
+   "url": "?as=player&theme=light&seed=availability#/hub",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "clip": ".hub-side",
+   "pad": 12,
+   "marks": {
+    "1": ".hub-side a[href='#/hub/availability']"
+   }
+  },
+  {
+   "name": "page_top",
+   "url": "?as=player&theme=light&seed=availability#/hub/availability",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "height": 760,
+   "marks": {
+    "1": ".hub-side a[href='#/hub/availability']",
+    "2": "#avSubmit"
+   }
+  },
+  {
+   "name": "form_filled",
+   "url": "?as=player&theme=light&seed=availability#/hub/availability",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "click": ".av-opt[data-night='n1'][data-game='avg-n1-1'] button[data-av='yes']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n1'][data-game='avg-n1-2'] button[data-av='yes']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n1'][data-game='avg-n1-3'] button[data-av='yes']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n2'][data-game='avg-n2-1'] button[data-av='yes']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n2'][data-game='avg-n2-2'] button[data-av='no']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n2'][data-game='avg-n2-3'] button[data-av='yes']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n3'][data-game='avg-n3-1'] button[data-av='no']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n3'][data-game='avg-n3-2'] button[data-av='no']",
+     "after": 60
+    },
+    {
+     "click": ".av-opt[data-night='n3'][data-game='avg-n3-3'] button[data-av='no']",
+     "after": 60
+    },
+    {
+     "type": [
+      "input[data-note='n2']",
+      "on at 9:30 after work"
+     ]
+    },
+    {
+     "eval": "document.getElementById('avSubmit').closest('.card').id='shotForm'"
+    },
+    {
+     "scroll": 0,
+     "after": 150
+    }
+   ],
+   "clip": "#shotForm",
+   "pad": 0,
+   "marks": {
+    "1": ".av-opt[data-night='n1'][data-game='avg-n1-1'] button[data-av='yes']",
+    "2": ".av-opt[data-night='n2'][data-game='avg-n2-2'] button[data-av='no']",
+    "3": "input[data-note='n2']",
+    "4": "#avSubmit",
+    "5": "#avCount",
+    "6": "#avCopy"
+   }
+  },
+  {
+   "name": "toast_err",
+   "url": "?as=player&theme=light&seed=availability#/hub/availability",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "click": ".av-opt[data-night='n1'][data-game='avg-n1-1'] button[data-av='yes']"
+    },
+    {
+     "click": ".av-opt[data-night='n1'][data-game='avg-n1-2'] button[data-av='yes']"
+    },
+    {
+     "click": ".av-opt[data-night='n1'][data-game='avg-n1-3'] button[data-av='yes']"
+    },
+    {
+     "click": "#avSubmit",
+     "after": 100
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "pad": 22,
+   "fixed": true,
+   "height": 880
+  },
+  {
+   "name": "submitted",
+   "url": "?as=player&theme=light&seed=availability&state=submitted#/hub/availability",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "eval": "document.getElementById('avSubmit').closest('.card').id='shotForm'"
+    }
+   ],
+   "clip": "#shotForm",
+   "pad": 0,
+   "marks": {
+    "1": "#avSubmit",
+    "2": "#shotForm .card-h .chip"
+   }
+  },
+  {
+   "name": "dash_submitted",
+   "url": "?as=player&theme=light&seed=availability&state=submitted#/hub",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(/ availability$/i.test(h.textContent.trim())) h.closest('.card').id='shotAvailCard'; })"
+    }
+   ],
+   "clip": "#shotAvailCard",
+   "pad": 0,
+   "marks": {
+    "1": "#shotAvailCard .chip",
+    "2": "#shotAvailCard .btn"
+   }
+  },
+  {
+   "name": "closed",
+   "url": "?as=player&theme=light&seed=availability&state=closed#/hub/availability",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "eval": "var e=document.querySelector('.empty'); if(e) e.closest('.card').id='shotClosed'; else document.querySelector('.card').id='shotClosed';"
+    }
+   ],
+   "clip": "#shotClosed",
+   "pad": 0
+  },
+  {
+   "name": "mgmt_tasks",
+   "url": "?as=owner&theme=light&seed=availability#/hub",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "eval": "document.querySelector('.tasklist').closest('.card').id='shotTasks'"
+    }
+   ],
+   "clip": "#shotTasks",
+   "pad": 0,
+   "marks": {
+    "1": ".tasklist a[href='#/hub/availability']"
+   }
+  },
+  {
+   "name": "grid",
+   "url": "?as=owner&theme=light&seed=availability#/hub/availability",
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "steps": [
+    {
+     "eval": "document.querySelector('table.tbl.keepcols').closest('.card').id='shotGrid'"
+    }
+   ],
+   "clip": "#shotGrid",
+   "pad": 0,
+   "marks": {
+    "1": "#shotGrid .chip",
+    "2": "table.tbl.keepcols tbody tr:nth-child(4)",
+    "3": "table.tbl.keepcols thead th:nth-child(7)"
+   }
+  }
+ ]
+}

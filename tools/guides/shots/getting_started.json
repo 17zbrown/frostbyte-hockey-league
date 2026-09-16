@@ -1,0 +1,245 @@
+{
+ "base": "file:///private/tmp/claude-501/-Users-zackbrown-Desktop-Frostbyte-Hockey-League/dbd49986-190e-47ac-82c7-1268ec57ce75/scratchpad/guides/demo.html",
+ "out": "/Users/zackbrown/Desktop/Frostbyte Hockey League/tools/guides/shots/getting_started",
+ "shots": [
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "masthead_guest",
+   "url": "?as=player&theme=light&seed=getting_started&state=guest#/home",
+   "clip": "#masthead",
+   "pad": 0,
+   "marks": {
+    "1": "#masthead a.btn"
+   },
+   "crop": [
+    42,
+    0,
+    58,
+    100
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "signin_guest_card",
+   "url": "?as=player&theme=light&seed=getting_started&state=guest#/signin",
+   "steps": [
+    {
+     "eval": "document.getElementById('dcSignIn').closest('.card, section').id='shotSignin'"
+    }
+   ],
+   "clip": "#shotSignin",
+   "pad": 0,
+   "marks": {
+    "1": "#dcSignIn"
+   },
+   "crop": [
+    18,
+    0,
+    64,
+    100
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "masthead_signed_in",
+   "url": "?as=player&theme=light&seed=getting_started#/hub",
+   "clip": "#masthead",
+   "pad": 0,
+   "marks": {
+    "2": "#bellBtn"
+   },
+   "crop": [
+    42,
+    0,
+    58,
+    100
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "dashboard_get_set_up_0of3_card",
+   "url": "?as=player&theme=light&seed=getting_started&state=new0#/hub",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Get set up') h.closest('.card').id='shotSetup'; })"
+    }
+   ],
+   "clip": "#shotSetup",
+   "pad": 0,
+   "marks": {
+    "3": "#shotSetup .card-h .chip",
+    "4": "#shotSetup a.btn"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "ea_id_modal_card",
+   "url": "?as=player&theme=light&seed=getting_started&state=new0#/hub",
+   "steps": [
+    {
+     "click": "#clEaBtn",
+     "after": 250
+    },
+    {
+     "type": [
+      "#eaInput",
+      "RookieRhys"
+     ]
+    }
+   ],
+   "clip": "#overlay-root .modal",
+   "fixed": true,
+   "pad": 0,
+   "marks": {
+    "5": "#eaSave"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "register_needs_discord_and_ea_notes",
+   "url": "?as=player&theme=light&seed=getting_started&state=new0#/register",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Register') h.closest('.card').id='shotReg'; })"
+    }
+   ],
+   "clip": "#shotReg",
+   "pad": 0
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "register_form_open_card",
+   "url": "?as=player&theme=light&seed=getting_started&state=new2#/register",
+   "steps": [
+    {
+     "click": "button[data-regpos='LW']",
+     "after": 150
+    },
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Register') h.closest('.card').id='shotReg'; })"
+    }
+   ],
+   "clip": "#shotReg",
+   "pad": 0,
+   "marks": {
+    "7": "button[data-regpos='LW']",
+    "8": "#regSubmit"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "register_submitted_toast",
+   "url": "?as=player&theme=light&seed=getting_started&state=new2#/register",
+   "height": 900,
+   "steps": [
+    {
+     "click": "button[data-regpos='LW']",
+     "after": 150
+    },
+    {
+     "click": "#regSubmit",
+     "after": 400
+    },
+    {
+     "scroll": 0,
+     "after": 200
+    }
+   ],
+   "beforeShot": 0,
+   "clip": ".toast",
+   "fixed": true,
+   "pad": 22
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "register_status_registered",
+   "url": "?as=player&theme=light&seed=getting_started&state=registered#/register",
+   "steps": [
+    {
+     "eval": "var n=document.querySelector('main .note, main .pg p.small'); document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='Update registration') h.closest('.card').id='shotReg'; }); var el=document.getElementById('shotReg'); var w=document.createElement('div'); w.id='shotRegWrap'; el.parentNode.insertBefore(w, el); var st=[...document.querySelectorAll('main *')].find(function(e){ return e.children.length<4 && /You\u2019re registered for Season 1\\. Position on file/.test(e.textContent) && e.textContent.length<600; }); if(st) w.appendChild(st); w.appendChild(el);"
+    }
+   ],
+   "clip": "#shotRegWrap",
+   "pad": 0,
+   "marks": {
+    "9": "#shotReg .card-h .chip",
+    "10": "#regWithdraw"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "settings_league_profile",
+   "url": "?as=player&theme=light&seed=getting_started#/hub/settings",
+   "steps": [
+    {
+     "eval": "document.querySelectorAll('.card h3').forEach(function(h){ if(h.textContent.trim()==='League profile') h.closest('.card').id='shotProf'; })"
+    }
+   ],
+   "clip": "#shotProf",
+   "pad": 0,
+   "marks": {
+    "10": "#shotProf button.btn-chrome, #shotProf .btn-ink, #shotProf button"
+   }
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "bell_drawer",
+   "url": "?as=player&theme=light&seed=getting_started#/hub",
+   "steps": [
+    {
+     "click": "#bellBtn",
+     "after": 350
+    }
+   ],
+   "clip": "#overlay-root .drawer",
+   "fixed": true,
+   "pad": 0,
+   "crop": [
+    0,
+    0,
+    100,
+    60
+   ]
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "sidebar_my_hub",
+   "url": "?as=player&theme=light&seed=getting_started#/hub",
+   "clip": ".hub-side",
+   "pad": 12
+  },
+  {
+   "colorScheme": "light",
+   "scale": 2,
+   "settle": 1500,
+   "name": "sidebar_team_hq",
+   "url": "?as=owner&theme=light&seed=getting_started#/hub",
+   "clip": ".hub-side",
+   "pad": 12
+  }
+ ]
+}

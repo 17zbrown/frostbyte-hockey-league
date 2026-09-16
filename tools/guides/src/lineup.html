@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Build and dress the lineup — CGHL member guide</title>
+<html lang="en"><head><meta charset="utf-8"><title>Set your lineups — CGHL management guide</title>
 <link rel="stylesheet" href="../guide.css">
 <style>
   .stack{display:grid;gap:22px}
@@ -9,17 +9,22 @@
   .grp b{font-family:var(--f-disp);font-weight:800;font-size:20px;letter-spacing:-.01em;display:block;margin-bottom:3px}
   .grp span{font-family:var(--f-mono);font-size:14px;letter-spacing:.04em;color:var(--steel)}
   .pair{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  /* the limits, as four figures */
+  .lim{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}
+  .lim div{background:var(--paper);border:1.5px solid var(--line);border-radius:10px;padding:14px 16px}
+  .lim b{font-family:var(--f-disp);font-weight:900;font-size:40px;letter-spacing:-.03em;display:block;line-height:1}
+  .lim span{font-family:var(--f-mono);font-size:13.5px;letter-spacing:.04em;color:var(--steel);display:block;margin-top:8px;line-height:1.35}
 </style></head>
 <body><main class="poster">
 
 <header class="band">
   <div class="copy">
     <div>
-      <span class="eyebrow chr">Team HQ · How-to · 03</span>
-      <h1>Build and dress the lineup<small>Owner, GM or AGM. Each game locks 30 minutes before puck drop.</small></h1>
-      <p class="lede">Save up to three lines, point each game night at one, and dress it in a click. Fine-tune any single game until it locks.</p>
+      <span class="eyebrow chr">Management guide · 01</span>
+      <h1>Set your lineups<small>Owner, GM or AGM. Nine games a week, and each one locks 30 minutes before puck drop.</small></h1>
+      <p class="lede">Save up to three lines, point each game night at one, and dress the whole week in a click. Fine-tune any single game until it locks.</p>
     </div>
-    <div class="meta"><span class="tag chr">Owner · GM · AGM</span><span class="tag k">Team HQ → Lineup builder</span><span class="tag">Rules 5.2 · 5.3</span></div>
+    <div class="meta"><span class="tag chr">Owner · GM · AGM</span><span class="tag k">Team HQ → Lineup builder</span><span class="tag">Rules 5.2 · 5.3 · 8.3</span></div>
   </div>
   <div class="art"><img src="../art/lineup.jpg" alt=""></div>
 </header>
@@ -30,27 +35,27 @@
   <div class="sec">
     <div class="txt steps">
       <div class="step"><div class="puck">1</div><div><h3>Open Team HQ → Lineup builder</h3><p><span class="ui">Lineup builder</span> sits under <b>Team HQ</b> in the sidebar. It is the only lineup page in the nav; the per-game page comes later, from its own links.</p><p class="path">#/hub/lines</p></div></div>
-      <div class="step"><div class="puck">2</div><div><h3>Read the board before you build</h3><p>Three lines — <b>Top Six</b>, <b>Energy</b>, <b>Shutdown</b> — run across the six slots, each with its OVR and the nights it dresses.</p>
+      <div class="step"><div class="puck">2</div><div><h3>Read the board before you build</h3><p>Three lines — <b>Top Six</b>, <b>Energy</b>, <b>Shutdown</b> — run across the six slots, each with its OVR and the night it dresses.</p>
         <dl class="dl">
           <dt>Lines</dt><dd>Up to three saved combinations you name yourself.</dd>
-          <dt>Roster</dt><dd>Every rostered player, with the lines they already sit on.</dd>
-          <dt>Night plan</dt><dd>Point each game night at one line, then dress it.</dd>
+          <dt>Roster</dt><dd>Every rostered player, with the lines he already sits on. Camp players sit at the bottom and may fill any slot.</dd>
+          <dt>Night plan</dt><dd>Point each of the three game nights at a line, then dress it.</dd>
         </dl>
       </div></div>
     </div>
     <div class="shot">
-      <div class="frame" style="width:44%"><img src="../shots/lineup/sidebar-team-hq-lineup-builder.png" alt="The Team HQ sidebar with Lineup builder highlighted"><span class="mark" style="left:88%;top:76.5%">1</span><div class="cap">Sidebar · Team HQ → Lineup builder</div></div>
+      <div class="frame" style="width:44%"><img src="../shots/lineup/sidebar-team-hq-lineup-builder.png" alt="The Team HQ sidebar with Lineup builder highlighted"><span class="mark" style="left:90%;top:75.5%">1</span><div class="cap">Sidebar · Team HQ → Lineup builder</div></div>
     </div>
   </div>
   <div class="sec wide">
-    <div class="frame"><img src="../shots/lineup/lines-board-seeded-grid.png" alt="The line grid: three named lines across the six slots"><span class="mark" style="left:5.5%;top:16%">2</span><div class="cap">The board · Left Wing · Center · Right Wing · Left Defense · Right Defense · Goaltender</div></div>
+    <div class="frame"><img src="../shots/lineup/lines-board-seeded-grid.png" alt="The line grid: three named lines across the six slots"><span class="mark" style="left:9%;top:23.7%">2</span><div class="cap">The board · Left Wing · Center · Right Wing · Left Defense · Right Defense · Goaltender</div></div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Build a line</span><h2>Click a player, then a slot</h2></div><p>Click a roster card, then the slot — or drag one onto another to swap. Groups bind: forwards fill the wings and center, defensemen the blue line, the goalie the crease.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Build a line</span><h2>Click a player, then a slot</h2></div><p>Click a roster card, then the slot — or drag one onto another to swap. Groups bind: forwards fill the wings and center, defensemen the blue line, the goalie the crease. A camp player fills anything.</p></div>
   <div class="sec">
     <div class="txt steps">
       <div class="step"><div class="puck">3</div><div><h3>Click a player, then a slot</h3><p>Click a card and the message reads <b>“Now click the slot for <span style="white-space:nowrap">&lt;player&gt;</span> — any line, any matching position.”</b> Click the slot to fill it; drag a filled slot onto another to swap, or back onto the roster to clear. Then press <span class="ui chr">Save changes</span> — a toast reads <b>“1 line saved.”</b></p></div></div>
-      <div class="step"><div class="puck">4</div><div><h3>The groups bind</h3><p>Aim a player at the wrong group and it refuses in red: <b>“OneTimerOtto is a Goaltender — Left Wing needs a forward.”</b> A player may sit on more than one line; the weekly limits are checked later, when a lineup is dressed. <span class="rule">Rule 5.2</span></p>
+      <div class="step"><div class="puck">4</div><div><h3>The groups bind</h3><p>Aim a player at the wrong group and it refuses in red: <b>“IronWall_31 is a Goaltender — Left Wing needs a forward.”</b> A player may sit on all three lines; the weekly limits are checked later, when a lineup is dressed. <span class="rule">Rule 5.2</span></p>
         <div class="grp">
           <div><b>Forward</b><span>LW · C · RW</span></div>
           <div><b>Defenseman</b><span>LD · RD</span></div>
@@ -59,81 +64,70 @@
       </div></div>
     </div>
     <div class="shot stack">
-      <div class="frame"><img src="../shots/lineup/lines-select-player-roster.png" alt="The roster board with SnipeShowVI selected"><span class="mark" style="left:32.5%;top:43%">3</span><div class="cap">Roster · a card selected, ready for a slot</div></div>
-      <div class="frame"><img src="../shots/lineup/lines-position-refused.png" alt="A red position refusal under the line grid"><span class="mark" style="left:40%;top:89%">4</span><div class="cap">Wrong group · refused in red</div></div>
-      <div class="frame"><img src="../shots/lineup/lines-assign-unsaved-bar.png" alt="The status bar showing unsaved changes and Save changes"><div class="cap">Unsaved · the bar tracks it, Save changes lights up</div></div>
+      <div class="frame"><img src="../shots/lineup/lines-select-player-roster.png" alt="The roster board with a camp player selected"><span class="mark" style="left:36%;top:82.4%">3</span><div class="cap">Roster · a camp player selected, ready for a slot</div></div>
+      <div class="frame"><img src="../shots/lineup/lines-position-refused.png" alt="A red position refusal under the line grid"><span class="mark" style="left:40%;top:78.7%">4</span><div class="cap">Wrong group · refused in red</div></div>
+      <div class="frame"><img src="../shots/lineup/lines-assign-unsaved-bar.png" alt="The status bar showing unsaved changes and Save changes"><span class="mark" style="left:74%;top:50%">3</span><div class="cap">Unsaved · the bar tracks it, Save changes lights up</div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Dress it</span><h2>Saving a line dresses nobody</h2></div><p>A saved line is a plan. A game gets a lineup only when you dress it — and that is where the league’s checks run: weekly caps, suspensions, and each game’s 30-minute lock.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Dress it</span><h2>Saving a line dresses nobody</h2></div><p>A saved line is a plan. A game gets a lineup only when you dress it — and that is where the league’s checks run: the weekly cap, suspensions, availability, and each game’s 30-minute lock.</p></div>
   <div class="sec">
     <div class="txt steps">
-      <div class="step"><div class="puck">5</div><div><h3>Point each game night at a line</h3><p>In the Night plan, use each night’s <span class="ui">Dresses</span> picker. A toast confirms it — <b>“Saturday dresses Energy.”</b> Empty lines stay disabled until you fill them.</p></div></div>
-      <div class="step"><div class="puck">6</div><div><h3>Dress the night, or the whole week</h3><p><span class="ui">Dress 1 game</span> files that night; <span class="ui chr">Dress the week (2)</span> files them all. Confirm, and each dressing runs the checks — anything refused is reported by night and the rest still land. Toast: <b>“Week dressed — 2 games.”</b> <span class="rule">Rule 5.2</span></p></div></div>
+      <div class="step"><div class="puck">5</div><div><h3>Point each game night at a line</h3><p>In the Night plan, use each night’s <span class="ui">Dresses</span> picker — Wednesday, Thursday and Friday, three games each. A toast confirms it: <b>“Thursday dresses Shutdown.”</b> Empty lines stay disabled until you fill them.</p></div></div>
+      <div class="step"><div class="puck">6</div><div><h3>Dress the night, or the whole week</h3><p><span class="ui">Dress 3 games</span> files that night; <span class="ui chr">Dress the week (3)</span> files all nine. Confirm, and each dressing runs the checks — anything refused is reported by night and the rest still land. <b>Redress</b> any night to change it before its lock. <span class="rule">Rule 5.2</span></p></div></div>
     </div>
     <div class="shot stack">
-      <div class="frame" style="width:56%"><img src="../shots/lineup/lines-board-seeded-nightplan.png" alt="The Night plan card"><span class="mark" style="left:82%;top:27%">5</span><div class="cap">Night plan · point each night, then dress</div></div>
-      <div class="frame" style="width:82%"><img src="../shots/lineup/lines-dress-week-confirm.png" alt="The Dress the week confirmation dialog"><span class="mark" style="left:69%;top:80%">6</span><div class="cap">Dress the week · the checks run here</div></div>
+      <div class="frame" style="width:60%"><img src="../shots/lineup/lines-board-seeded-nightplan.png" alt="The Night plan card: three nights, each pointed at a line"><span class="mark" style="left:40%;top:19.8%">5</span><span class="mark" style="left:52%;top:5%">6</span><div class="cap">Night plan · point each night, then dress</div></div>
+      <div class="frame" style="width:82%"><img src="../shots/lineup/lines-dress-week-confirm.png" alt="The Dress the week confirmation dialog"><span class="mark" style="left:82%;top:64%">6</span><div class="cap">Dress the week · the checks run here</div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">Per-game</span><h2>One game, one lineup</h2></div><p>The per-game page (unlisted) adjusts a single night. Reach it from the builder’s links or the game chips. Fill it from your plan, auto-fill, or set it by hand.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">Per-game</span><h2>One game, one lineup</h2></div><p>The per-game page adjusts a single game. Reach it from the builder’s links or the game chips. Fill it from your plan, auto-fill, or set it by hand — then submit.</p></div>
   <div class="sec flip">
     <div class="txt steps">
-      <div class="step"><div class="puck">7</div><div><h3>Open the game and fill it</h3><p>Each game has its own chip, so games that lock at different times are reachable on their own. <span class="ui">Fill from Top Six</span> drops in the line the plan points at, <span class="ui">Auto-fill best available</span> takes each player at his own position first, and <span class="ui">Clear</span> empties it.</p><p class="path">#/hub/lineup</p></div></div>
+      <div class="step"><div class="puck">7</div><div><h3>Open the game and fill it</h3><p>Nine chips, one per game, so games that lock at different times are reachable on their own. <span class="ui">Fill from Top Six</span> drops in the line the plan points at — a player who marked himself out is skipped and named. <span class="ui">Auto-fill best available</span> takes each player at his own position first, and <span class="ui">Clear</span> empties it.</p><p class="path">#/hub/lineup</p></div></div>
       <div class="step"><div class="puck">8</div><div><h3>Submit the six</h3><p>All six slots are required — miss one and you get <b>“Fill every slot first — missing …”</b> Press <span class="ui chr">Submit lineup</span>: your starters go to the league office and release to the opponent at the lock. You can resubmit until then.</p></div></div>
+      <div class="step"><div class="puck">9</div><div><h3>Or the whole night at once</h3><p>Tick <span class="ui">whole night (3 games)</span> before you submit and the same six go into every game of that night that has not locked yet.</p></div></div>
     </div>
     <div class="shot stack">
       <div class="frame"><img src="../shots/lineup/lineup-per-game-chips.png" alt="The per-game page header with one chip per game"><div class="cap">Per-game · reach each game by its chip</div></div>
+      <div class="frame"><img src="../shots/lineup/lineup-per-game-autofill-rink.png" alt="The filled rink, six slots, with the fill and submit controls"><span class="mark" style="left:27%;top:15.8%">7</span><span class="mark" style="left:82%;top:15.8%">8</span><span class="mark" style="left:68%;top:15.8%">9</span><div class="cap">Filled · tap a slot to clear</div></div>
       <div class="pair">
-        <div class="frame"><img src="../shots/lineup/lineup-per-game-autofill-rink.png" alt="The filled rink, six slots"><span class="mark" style="left:20%;top:15%">7</span><div class="cap">Filled · tap a slot to clear</div></div>
-        <div class="frame"><img src="../shots/lineup/lineup-per-game-submit-confirm.png" alt="The Submit this lineup dialog"><span class="mark" style="left:66%;top:80%">8</span><div class="cap">Submit · releases at the lock</div></div>
+        <div class="frame"><img src="../shots/lineup/lineup-per-game-fill-toast.png" alt="Toast: Filled, except a player marked not available"><div class="cap">Fill from plan · the unavailable are skipped and named</div></div>
+        <div class="frame"><img src="../shots/lineup/lineup-per-game-submit-confirm.png" alt="The Submit this lineup dialog"><span class="mark" style="left:88%;top:34%">8</span><div class="cap">Submit · releases at the lock</div></div>
       </div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">After the lock</span><h2>Emergency call-up only</h2></div><p>Each game locks 30 minutes before puck drop. After that only management can change it, and only as an emergency call-up — every player swapped costs the club one in-game penalty.</p></div>
+  <div class="sec-h"><div><span class="eyebrow chr">After the lock</span><h2>Emergency call-up only</h2></div><p>Each game locks 30 minutes before its puck drop. After that only management can change it, and only as an emergency call-up — every player swapped costs the club one in-game penalty.</p></div>
   <div class="sec">
     <div class="txt steps">
-      <div class="step"><div class="puck">9</div><div><h3>The game locks at puck drop minus 30</h3><p>The bar turns to <b>“Status: Locked · locked 8:30 PM ET (Rule 5.3).”</b> Every slot reads <b>OVR · locked</b>, and the only control left is <span class="ui">Emergency call-up</span>. <span class="rule">Rule 5.3</span></p></div></div>
-      <div class="step"><div class="puck">10</div><div><h3>Swap the no-show, then submit</h3><p>Enable the call-up, change the one player, and press <span class="ui chr">Submit emergency call-up</span>. <b>Each player changed costs the club one in-game penalty</b>, served in that game — and the opponent already sees your locked sheet. Change only who you must.</p></div></div>
+      <div class="step"><div class="puck">10</div><div><h3>The game locks at puck drop minus 30</h3><p>The bar turns to <b>“Status: Locked · locked 8:30 PM ET (Rule 5.3).”</b> Every slot reads <b>OVR · locked</b>, and the only control left is <span class="ui">Emergency call-up</span>. <span class="rule">Rule 5.3</span></p></div></div>
+      <div class="step"><div class="puck">11</div><div><h3>Swap the no-show, then submit</h3><p>Enable the call-up, change the one player, and press <span class="ui chr">Submit emergency call-up</span>. <b>Each player changed costs the club one in-game penalty</b>, served in that game — and the opponent already sees your locked sheet. Change only who you must.</p></div></div>
     </div>
     <div class="shot stack">
-      <div class="frame"><img src="../shots/lineup/lineup-per-game-locked-bar.png" alt="The locked status bar with the Emergency call-up button"><div class="cap">Locked · Emergency call-up is the only door</div></div>
-      <div class="frame"><img src="../shots/lineup/lineup-emergency-mode-note.png" alt="The red emergency call-up note"><div class="cap">The rule, in red</div></div>
-      <div class="frame" style="width:82%"><img src="../shots/lineup/lineup-emergency-submit-confirm.png" alt="The Confirm emergency call-up dialog"><span class="mark" style="left:54%;top:80%">10</span><div class="cap">Confirm · one penalty per player changed</div></div>
+      <div class="frame"><img src="../shots/lineup/lineup-per-game-locked-bar.png" alt="The locked status bar with the Emergency call-up button"><span class="mark" style="left:70%;top:50%">10</span><div class="cap">Locked · Emergency call-up is the only door</div></div>
+      <div class="frame"><img src="../shots/lineup/lineup-emergency-mode-note.png" alt="The red emergency call-up note"><div class="cap">Call-up enabled · the bar turns red and the controls come back</div></div>
+      <div class="frame" style="width:82%"><img src="../shots/lineup/lineup-emergency-submit-confirm.png" alt="The Confirm emergency call-up dialog"><span class="mark" style="left:78%;top:64%">11</span><div class="cap">Confirm · one penalty per player changed</div></div>
     </div>
   </div>
 
-  <div class="sec-h"><div><span class="eyebrow chr">For the front office</span><h2>The Owner decides who can touch it</h2></div><p>The Owner sets each seat’s access to this page: full, Owner approves, or hidden. The Owner’s own moves never wait.</p></div>
-  <div class="sec">
-    <div class="txt steps">
-      <div class="step"><div class="puck ink">11</div><div><h3>Owner approves, or hidden</h3><p>Under <b>Owner approves</b>, every save, night-plan change and dressing is queued to the Owner — a banner says so, and you can <span class="ui">Withdraw</span> a waiting move. Set to <b>hidden</b>, the page and its nav item disappear for that seat. <span class="rule">Rule 2.6</span></p></div></div>
-    </div>
-    <div class="shot stack">
-      <div class="frame"><img src="../shots/lineup/lines-owner-approves-banner.png" alt="The Owner-approves banner a GM sees"><div class="cap">Owner approves · every move is queued</div></div>
-      <div class="frame" style="width:38%"><img src="../shots/lineup/lines-hidden-for-seat-sidebar.png" alt="A sidebar with no Lineup builder under Team HQ"><span class="mark ink" style="left:60%;top:51%">11</span><div class="cap">Hidden · gone from Team HQ</div></div>
-    </div>
-  </div>
-
-  <div class="sec-h"><div><span class="eyebrow chr">For the players</span><h2>You just check you’re in</h2></div><p>A rostered player builds nothing. The site tells you only when you ARE in a confirmed lineup — a scratch is never announced, so check your dashboard.</p></div>
-  <div class="sec">
-    <div class="txt steps">
-      <div class="step"><div class="puck ink">12</div><div><h3>Tonight’s slate, then the matchup</h3><p>Your dashboard’s <span class="ui">Tonight’s slate</span> marks your game. When a real lineup includes you it says <b>“You’re in the confirmed lineup at Left Wing.”</b> The matchup page keeps both sheets <b>sealed</b> until the lock, then <b>releases</b> them together. <span class="rule">Rule 5.3</span></p></div></div>
-    </div>
-    <div class="shot stack">
-      <div class="frame"><img src="../shots/lineup/player-dashboard-tonight-card.png" alt="A player's Tonight's slate card with the confirmed-lineup line"><span class="mark ink" style="left:80%;top:89%">12</span><div class="cap">Dashboard · Tonight’s slate</div></div>
-      <div class="pair">
-        <div class="frame"><img src="../shots/lineup/matchup-lineups-sealed.png" alt="The matchup Confirmed lineups card, sealed"><div class="cap">Matchup · sealed until 8:30 PM ET</div></div>
-        <div class="frame"><img src="../shots/lineup/matchup-lineups-released.png" alt="The matchup Confirmed lineups card, released"><div class="cap">Matchup · both sheets release together</div></div>
+  <div class="sec-h"><div><span class="eyebrow chr">The limits</span><h2>Spread the games</h2></div><p>The weekly cap is the only weekly rule, and it is a ceiling, not a quota. The number that matters most is 18 — the games a player needs to be dressed in the playoffs.</p></div>
+  <div class="sec wide">
+    <div class="txt">
+      <div class="lim">
+        <div><b>6</b><span>games a week — every active-roster player, skater or goaltender (Rule 5.2)</span></div>
+        <div><b>3</b><span>games a week — a training-camp player, at any position (Rule 5.2)</span></div>
+        <div><b>4</b><span>games of a playoff series — every player (Rule 8.3)</span></div>
+        <div><b>18</b><span>regular-season games to be dressed in the playoffs — the Road to 18 card on your Roster page tracks it (Rule 8.3)</span></div>
       </div>
     </div>
   </div>
 
   <div class="sec wide">
     <div class="notes two">
-      <div class="note red"><span class="lab">Watch out</span>After the lock the opponent already sees your sheet. An emergency call-up costs one in-game penalty <b>per player changed, per submission</b> — swap two and that is two penalties (Rule 5.3). With several games on a night, each locks on its own puck drop: games two and three can lock before game one is done, so reach them by their own chip.</div>
-      <div class="note chr"><span class="lab">Good to know</span>Weekly caps — three games for a skater, six for a goalie — are checked when a lineup is <b>dressed</b>, not when a line is saved, so a player can sit on all three lines. Server picks and lobby codes are not here; they live on the Schedule desk and the matchup page. In the pre-season there are no caps and your Owner, GM and AGM may dress at any position (Rules 0.4, 5.2).</div>
+      <div class="note red"><span class="lab">Watch out</span>After the lock the opponent already sees your sheet. An emergency call-up costs one in-game penalty <b>per player changed, per submission</b> — swap two and that is two penalties (Rule 5.3). With three games a night, each locks on its own puck drop: games two and three can lock before game one is done, so reach them by their own chip.</div>
+      <div class="note chr"><span class="lab">Good to know</span>The six-game week is checked when a lineup is <b>dressed</b>, not when a line is saved, so a player can sit on all three lines and you dress the mix. A playoff lineup with a player short of 18 games is refused outright, so use the regular season to get your preferred players there. Server picks and lobby codes are not here; they live on the Schedule desk and the matchup page.</div>
     </div>
   </div>
 
@@ -141,6 +135,6 @@
 
 <footer class="foot">
   <div class="lock"><img src="../../../chel-gaming-logo-1024.png" alt=""><div><b>CHEL GAMING</b><span>Hockey League</span></div></div>
-  <div class="where"><b>chelgamingleague.com</b> · Team HQ → Lineup builder · #/hub/lines<br>Rulebook 5.2 · 5.3 · 2.6 · site v2.42 · September 2026</div>
+  <div class="where"><b>chelgamingleague.com</b> · Team HQ → Lineup builder · #/hub/lines<br>Rulebook 5.2 · 5.3 · 8.3 · site v2.51 · September 2026</div>
 </footer>
-</main></body></html>
+</main><script src="../guide.js"></script></body></html>

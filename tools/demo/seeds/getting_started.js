@@ -15,15 +15,16 @@
   var now = CG.now();
   var INVITE = "https://discord.gg/chelgaming";
 
-  /* ---- season taking sign-ups: dates just past the fixed clock, on the real cadence
-     (Sunday deadline → two-week pre-season → Saturday draft → one week of FA → puck drop) ---- */
+  /* ---- season taking sign-ups: dates just past the fixed clock, on the BASIC-format cadence
+     (v2.51: Thursday 11:59 PM ET cutoff → Saturday draft → puck drop the Wednesday after; no
+     pre-season and no free-agency week — Chapter 0) ---- */
   Object.assign(CG.SEASON, {
-    id:"S1", number:1, registration_open:true,
-    registration_deadline:"2026-07-26T23:59:00-04:00",
-    preseason_starts_at:"2026-08-03T21:00:00-04:00",
-    draft_at:"2026-08-15T20:00:00-04:00",
-    free_agency_opens_at:"2026-08-16T12:00:00-04:00",
-    starts_at:"2026-08-24T21:00:00-04:00"
+    id:"S1", number:1, registration_open:true, format:"basic",
+    registration_deadline:"2026-07-23T23:59:00-04:00",
+    preseason_starts_at:null,
+    draft_at:"2026-07-25T19:00:00-04:00",
+    free_agency_opens_at:null,
+    starts_at:"2026-07-29T21:00:00-04:00"
   });
   if (CG.NAV && !CG.NAV.some(function(n){ return n[1]==="#/register"; })) CG.NAV.push(["Register","#/register"]);
   /* the availability seed opens a generic "Week 3"; this topic also shows the game log (Wk 6/5/4)
@@ -86,7 +87,7 @@
     newMember({ profile:{ in_guild:true, ea_id:"RookieRhys", platform:"PS5" },
       registration:{ season_id:"S1", profile_id:"u-new", position:"LW", note:"Available most weeknights after 9 PM ET.", status:"pending", created_at:"2026-07-14T19:32:00-04:00" } });
     CG._notifs = [
-      { id:"gs-reg", t: now - 25*36e5, icon:"check", title:"You’re registered for Season 1", body:"Position on file: Left Wing. Register by Sun, Jul 26 and you enter the pre-season and the draft.", read:false, route:"#/register" },
+      { id:"gs-reg", t: now - 25*36e5, icon:"check", title:"You’re registered for Season 1", body:"Position on file: Left Wing. You’re in the draft pool — the draft is Sat, Jul 25 at 7:00 PM ET.", read:false, route:"#/register" },
       welcome ];
     setRead(["gs-welcome"]);
     return;
@@ -100,7 +101,7 @@
        Owner has one GM move waiting so the Team HQ sidebar shows the Management badge */
     CG.auth.registration = { season_id:"S1", profile_id:uid, position:"C", status:"assigned", created_at:"2026-05-18T20:10:00-04:00" };
     CG.lg._mgmtMoves = [{ id:"mv-gs1", status:"pending", page:"roster", action:"sign_free_agent", requested_by:"u-gm",
-      summary:"Sign free agent CrossbarCzar (RD) — $1.25M · 1 yr", created_at:new Date(now - 3*36e5).toISOString() }];
+      summary:"Sign waived player CrossbarCzar (RD) — $750K · to season end", created_at:new Date(now - 3*36e5).toISOString() }];
     return;
   }
   CG.auth.registration = { season_id:"S1", profile_id:uid, position:me.pos, status:"assigned", created_at:"2026-05-18T20:10:00-04:00" };
@@ -111,7 +112,7 @@
     myGame ? { id:"gs-lineup", t: now - 2*36e5, icon:"grid", title:"Lineup posted — "+t.name+(myGame.home===t.code?" vs ":" at ")+CG.TEAM[opp].name,
       body:"You’re in tonight’s confirmed lineup at "+CG.POS_NAME[me.pos]+". The private game code goes live at "+CG.fmtTime(myGame.at-30*60000)+" — open the matchup to grab it.", read:false, route:"#/matchup/"+myGame.id } : null,
     { id:"gs-avail", t: now - 26*36e5, icon:"flag", title:CG.WEEK8.label+" availability is open",
-      body:"Due Sunday 8 PM ET — your club’s management builds lineups from it. 30 seconds now saves a scramble later.", read:false, route:"#/hub/availability" },
+      body:"Due Wednesday 7:30 PM ET — your club’s management builds lineups from it. 30 seconds now saves a scramble later.", read:false, route:"#/hub/availability" },
     last ? { id:"gs-final", t: now - 3*864e5, icon:"chart", title:"Box score imported — "+t.name+" vs "+CG.TEAM[last.opp].name,
       body:"Your line from Week "+last.week+": "+(last.line.goalie ? last.line.sv+" saves, "+last.line.ga+" GA" : last.line.g+"G "+last.line.a+"A, "+last.line.shots+" shots")+". Stats and your overall are updated.", read:true, route:"#/matchup/"+last.game } : null,
     Object.assign({}, welcome, { t: now - 58*864e5, read:true })

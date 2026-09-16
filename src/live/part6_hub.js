@@ -1746,7 +1746,7 @@ CG.hubRoster = function(qs){
   /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
      The card states the caps that DO exist. */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
-    '<span class="chip chip-win">every rostered player is playoff-eligible</span></div><div class="card-b">'+
+    (CG.playoffMinGp() ? '<span class="chip">'+CG.playoffMinGp()+' games to be playoff-eligible</span>' : '<span class="chip chip-win">every rostered player is playoff-eligible</span>')+'</div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
       '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
       '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"G" })+'</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
@@ -1773,7 +1773,7 @@ CG.hubRoster = function(qs){
         var oo = (CG._clubOffers||[]).filter(function(o){ return o.player_id===r.id && !o.immediate; })[0];
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1"><b>'+esc(r.tag)+'</b> <span class="caption">was '+CG.fmtMoney(r.salary)+' through Season '+r.end+'</span>'+(oo?' <span class="chip chip-live">'+(CG.offerAwaitsClub(oo)?'His ask':'Offer out')+'</span>':'')+'</span>'+
           '<button class="btn btn-chrome btn-sm" data-extend="'+esc(r.id)+'">Re-sign</button></div>'; }).join("")+'</div></div>' : '')+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him to the free-agent pool immediately and clears his cap hit; any club may then sign him under the free-agency rules (Rule 2.2).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(CG.playoffMinGp() ? 'A player needs '+CG.playoffMinGp()+' regular-season games to be dressed in the playoffs — the Road to '+CG.playoffMinGp()+' card tracks it (Rule 8.3). ' : 'Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). ')+'Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him immediately and clears his cap hit; '+(CG.isBasic() ? 'any club with room in his position group may then sign him at the league minimum, on a deal to the end of the season, until the movement deadline (Rule 2.2).' : 'any club may then sign him under the free-agency rules (Rule 2.2).')+'</span></div></div>';
   return h;
 };
 CG.renderCapOutlook = function(rows){
@@ -1853,12 +1853,12 @@ CG.AFTER._roster = function(){
     if (CG.LIVE_MODE){
       var sx = CG.signedExtensionOf ? CG.signedExtensionOf(pid) : null;
       CG.confirm("Waive "+p.tag+"?",
-        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and they return to the free-agent pool where any club can sign them (Rule 2.5)."+(sx?" His signed extension through Season "+sx.end_season+" is voided with the waiver.":"")+" The move is logged for the whole league.",
+        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and "+(CG.isBasic() ? "any club with room in their position group can sign them at the league minimum until the movement deadline (Rule 2.2)." : "they return to the free-agent pool where any club can sign them (Rule 2.5).")+(sx?" His signed extension through Season "+sx.end_season+" is voided with the waiver.":"")+" The move is logged for the whole league.",
         "Waive player", function(){
         CG.mgmtQueue("waive_player", { p_profile:pid }, "waive "+p.tag).then(function(q){ if (q) return;
         CG.sb.rpc("waive_player",{ p_profile:pid }).then(function(r){
           if (r.error){ CG.toast("Couldn’t waive: "+r.error.message,"err"); return; }
-          CG.toast(String(r.data||p.tag)+" waived — back in the free-agent pool","ok");
+          CG.toast(String(r.data||p.tag)+(CG.isBasic() ? " waived — any club may sign him now" : " waived — back in the free-agent pool"),"ok");
           CG.reloadLeague();
         });
         });
