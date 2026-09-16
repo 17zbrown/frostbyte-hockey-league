@@ -781,7 +781,7 @@ CG.hubLineup = function(qs){
   var bar = '<div class="note '+(emergency?"red":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">Status: '+(emergency?"Emergency call-up":(rawLocked?"Locked":status))+'</b>'+
     (rawLocked&&!emergency?'<span class="caption">locked '+CG.fmtTime(lockAt)+' (Rule 5.3)</span>':(saved&&saved.at?'<span class="caption">last saved '+CG.fmtFull(saved.at)+'</span>':""))+
-    '<span style="margin-left:auto;display:flex;gap:9px">'+
+    '<span style="margin-left:auto;display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;min-width:0">'+
     (!rawLocked ? editControls
       : emergency ? editControls+'<button class="btn btn-ghost btn-sm" id="luEmCancel">Cancel</button>'
       : '<span class="lock">'+CG.ic("lock",14)+'Locked</span><button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the deadline for an emergency call-up">Emergency call-up</button>')+

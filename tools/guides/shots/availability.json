@@ -16,8 +16,7 @@
    "clip": "#shotAvailCard",
    "pad": 0,
    "marks": {
-    "1": "#shotAvailCard .chip",
-    "2": "#shotAvailCard .btn"
+    "1": "#shotAvailCard .chip"
    }
   },
   {
@@ -29,7 +28,7 @@
    "clip": ".hub-side",
    "pad": 12,
    "marks": {
-    "1": ".hub-side a[href='#/hub/availability']"
+    "2": ".hub-side a[href='#/hub/availability']"
    }
   },
   {
@@ -104,12 +103,9 @@
    "clip": "#shotForm",
    "pad": 0,
    "marks": {
-    "1": ".av-opt[data-night='n1'][data-game='avg-n1-1'] button[data-av='yes']",
-    "2": ".av-opt[data-night='n2'][data-game='avg-n2-2'] button[data-av='no']",
-    "3": "input[data-note='n2']",
-    "4": "#avSubmit",
-    "5": "#avCount",
-    "6": "#avCopy"
+    "3": ".av-opt[data-night='n2'][data-game='avg-n2-2'] button[data-av='no']",
+    "4": "input[data-note='n2']",
+    "5": "#avSubmit"
    }
   },
   {
@@ -157,8 +153,7 @@
    "clip": "#shotForm",
    "pad": 0,
    "marks": {
-    "1": "#avSubmit",
-    "2": "#shotForm .card-h .chip"
+    "6": "#shotForm .card-h .chip"
    }
   },
   {
@@ -191,7 +186,10 @@
     }
    ],
    "clip": "#shotClosed",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "7": "#shotClosed .card-h .chip"
+   }
   },
   {
    "name": "mgmt_tasks",

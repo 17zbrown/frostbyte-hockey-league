@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Banned X-Factors — CGHL rules</title>
+<link rel="stylesheet" href="../guide.css">
+<style>
+  /* the banned grid: one dark card per ability, EA's own gold icon, the tier it is banned at */
+  .xf{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .xf.two{grid-template-columns:repeat(2,1fr);max-width:66%}
+  .xf .card{position:relative;background:var(--bc);color:var(--on-ink);border-radius:var(--r);padding:26px 24px 22px;display:grid;grid-template-columns:120px 1fr;gap:20px;align-items:center;box-shadow:var(--sh)}
+  .xf .card img{width:120px;height:120px;display:block}
+  .xf .card b{font-family:var(--f-disp);font-weight:800;font-size:28px;letter-spacing:-.015em;line-height:1.05;display:block;text-wrap:balance}
+  .xf .card small{font-family:var(--f-mono);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--on-ink-dim);display:block;margin-top:8px}
+  .xf .card .ban{position:absolute;top:14px;right:14px;font-family:var(--f-mono);font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;padding:5px 10px;border-radius:999px;background:var(--red);color:#fff}
+  .xf .card .ban.tier{background:var(--chrome);color:var(--ink)}
+  /* the two other bans, as the site's own note cards but heavier */
+  .also{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .also .col h4{margin-bottom:8px}
+  .also .col p{margin:0;font-size:20px;color:var(--ink-2)}
+  .also .col .k{font-family:var(--f-mono);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);display:block;margin-bottom:10px}
+  /* consequences */
+  .cons{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .cons div{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r);padding:22px 24px}
+  .cons b{font-family:var(--f-disp);font-weight:800;font-size:24px;letter-spacing:-.015em;display:block;margin-bottom:8px}
+  .cons p{margin:0;font-size:19px;color:var(--ink-2)}
+</style></head>
+<body><main class="poster">
+
+<header class="band">
+  <div class="copy">
+    <div>
+      <span class="eyebrow chr">League rules · Rule 4.5</span>
+      <h1>Banned X‑Factors<small>Skill, not loadout. Six abilities are out at every tier; two more are out at Red tier.</small></h1>
+      <p class="lede">Dress a banned ability, a pre-built loadout or a special-character cosmetic and the lineup is ineligible — the game is a forfeit. Check your build before every lock.</p>
+    </div>
+    <div class="meta"><span class="tag chr">Every player · every game</span><span class="tag k">NHL 27</span><span class="tag">Rule 4.5</span><span class="tag">Rule 5.2</span></div>
+  </div>
+  <div class="art"><img src="../art/loadout.jpg" alt=""></div>
+</header>
+
+<section class="body">
+
+  <div class="sec-h"><div><span class="eyebrow chr">At every tier</span><h2>Banned outright</h2></div><p>These six may not be equipped in any slot, at any tier the game offers them. The icons are EA’s own, so you can match them in the menu.</p></div>
+  <div class="sec wide">
+    <div class="xf">
+      <div class="card"><img src="../art/xf/truculence.png" alt=""><span><b>Truculence</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+      <div class="card"><img src="../art/xf/spark_plug.png" alt=""><span><b>Spark Plug</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+      <div class="card"><img src="../art/xf/hipster.png" alt=""><span><b>Hipster</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+      <div class="card"><img src="../art/xf/pressure_plus.png" alt=""><span><b>Pressure+</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+      <div class="card"><img src="../art/xf/unstoppable.png" alt=""><span><b>Unstoppable Force</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+      <div class="card"><img src="../art/xf/big_rig.png" alt=""><span><b>Big Rig</b><small>Banned · all tiers</small></span><span class="ban">Banned</span></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">Red tier only</span><h2>Also banned at Red tier</h2></div><p>Two more abilities are legal at the lower tiers but may not be equipped at Red. If it shows red in the menu, it does not dress.</p></div>
+  <div class="sec wide">
+    <div class="xf two">
+      <div class="card"><img src="../art/xf/stick_em_up.png" alt=""><span><b>Stick ’Em Up</b><small>Banned · Red tier</small></span><span class="ban tier">Red tier</span></div>
+      <div class="card"><img src="../art/xf/big_tipper.png" alt=""><span><b>Big Tipper</b><small>Banned · Red tier</small></span><span class="ban tier">Red tier</span></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">Also out</span><h2>Loadouts and cosmetics</h2></div><p>The league is played on standard created players, built by hand and locked to their position group.</p></div>
+  <div class="sec wide">
+    <div class="also">
+      <div class="col"><span class="k">Pre-built loadouts</span><h4>Every pre-built loadout is banned</h4><p>The game’s ready-made builds may not be dressed. Build your player yourself, on a legal build for your position — a forward on a forward build, a defenseman on a defense build.</p></div>
+      <div class="col"><span class="k">Special characters</span><h4>Special-character classes and cosmetics are banned</h4><p>No special or mascot character may be dressed, and none of their cosmetics may be worn. Standard created players only, at every position.</p></div>
+    </div>
+  </div>
+
+  <div class="sec-h"><div><span class="eyebrow chr">If you dress one</span><h2>What happens</h2></div><p>Responsibility sits with the player and his club’s management. The lineup tools cannot see your build — you have to.</p></div>
+  <div class="sec wide">
+    <div class="cons">
+      <div><b>The game is forfeit</b><p>A banned ability, loadout or cosmetic makes the lineup ineligible under Rule 5.2 — the game is lost where it stands.</p></div>
+      <div><b>Discipline can follow</b><p>A forfeit is without prejudice to further discipline under Chapter 7, for the player and for the club that iced him.</p></div>
+      <div><b>Check before the lock</b><p>Managers confirm every dressed player’s build and abilities before lineups lock, 30 minutes before puck drop (Rule 5.3).</p></div>
+    </div>
+  </div>
+
+  <div class="sec wide">
+    <div class="notes two">
+      <div class="note red"><span class="lab">Watch out</span>The list is written against NHL 27 and the league office may add to it as the game is patched or the meta shifts. Any change is posted with that week’s schedule and in the changelog — the rulebook’s Rule 4.5 is always the definitive list.</div>
+      <div class="note chr"><span class="lab">Good to know</span>Builds are locked to their position group: a forward may not use the Enforcer build or any defenseman build; a defenseman may not use the Enforcer Defenseman build or any forward build. The full legal set is in Rule 4.5.</div>
+    </div>
+  </div>
+
+</section>
+
+<footer class="foot">
+  <div class="lock"><img src="../../../chel-gaming-logo-1024.png" alt=""><div><b>CHEL GAMING</b><span>Hockey League</span></div></div>
+  <div class="where"><b>chelgamingleague.com</b> · Rulebook · #/rulebook<br>Rulebook 4.5 · 5.2 · 5.3 · site v2.53 · September 2026</div>
+</footer>
+</main><script src="../guide.js"></script></body></html>

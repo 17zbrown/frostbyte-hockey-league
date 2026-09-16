@@ -33,9 +33,7 @@
    ],
    "clip": "#shotSignin",
    "pad": 0,
-   "marks": {
-    "1": "#dcSignIn"
-   },
+   "marks": {},
    "crop": [
     18,
     0,
@@ -116,7 +114,10 @@
     }
    ],
    "clip": "#shotReg",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "6": "#shotReg .note, #shotReg .card-h"
+   }
   },
   {
    "colorScheme": "light",
@@ -180,8 +181,7 @@
    "clip": "#shotRegWrap",
    "pad": 0,
    "marks": {
-    "9": "#shotReg .card-h .chip",
-    "10": "#regWithdraw"
+    "8": "#shotReg .card-h .chip"
    }
   },
   {
@@ -198,7 +198,7 @@
    "clip": "#shotProf",
    "pad": 0,
    "marks": {
-    "10": "#shotProf button.btn-chrome, #shotProf .btn-ink, #shotProf button"
+    "9": "#shotProf button.btn-chrome, #shotProf .btn-ink, #shotProf button"
    }
   },
   {
@@ -211,6 +211,9 @@
     {
      "click": "#bellBtn",
      "after": 350
+    },
+    {
+     "eval": "var b=[...document.querySelectorAll('#overlay-root .drawer button')].find(function(x){ return /Mark all/i.test(x.textContent); }); if(b) b.id='shotMarkAll';"
     }
    ],
    "clip": "#overlay-root .drawer",
@@ -221,7 +224,10 @@
     0,
     100,
     60
-   ]
+   ],
+   "marks": {
+    "10": "#shotMarkAll"
+   }
   },
   {
    "colorScheme": "light",
@@ -230,7 +236,10 @@
    "name": "sidebar_my_hub",
    "url": "?as=player&theme=light&seed=getting_started#/hub",
    "clip": ".hub-side",
-   "pad": 12
+   "pad": 12,
+   "marks": {
+    "11": ".hub-side a[href='#/hub/availability']"
+   }
   },
   {
    "colorScheme": "light",
@@ -239,7 +248,10 @@
    "name": "sidebar_team_hq",
    "url": "?as=owner&theme=light&seed=getting_started#/hub",
    "clip": ".hub-side",
-   "pad": 12
+   "pad": 12,
+   "marks": {
+    "12": ".hub-side a[href='#/hub/management']"
+   }
   }
  ]
 }

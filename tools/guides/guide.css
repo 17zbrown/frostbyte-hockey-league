@@ -15,6 +15,8 @@
   --sh:0 2px 4px rgba(16,21,25,.06),0 24px 48px -18px rgba(16,21,25,.25);
 }
 *{box-sizing:border-box}
+/* copy that differs between the desktop and phone editions: .dsk shows here, .ph on the phone sheet */
+.ph{display:none}
 html,body{margin:0;background:var(--ice);color:var(--ink);font-family:var(--f-body);font-size:22px;line-height:1.55;-webkit-font-smoothing:antialiased}
 .poster{width:var(--W);background:var(--ice);overflow:hidden}
 img{display:block;max-width:100%}

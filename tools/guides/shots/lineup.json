@@ -187,6 +187,10 @@
    "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
    "steps": [
     {
+     "eval": "document.getElementById('toast-root').innerHTML='';",
+     "after": 100
+    },
+    {
      "click": "#lcDressWeek",
      "after": 400
     }
@@ -195,7 +199,7 @@
    "fixed": true,
    "pad": 0,
    "marks": {
-    "6": "#overlay-root .modal .btn-chrome"
+    "6": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
    }
   },
   {
@@ -261,6 +265,10 @@
      "after": 400
     },
     {
+     "eval": "document.getElementById('toast-root').innerHTML='';",
+     "after": 100
+    },
+    {
      "click": "#luSubmit",
      "after": 500
     }
@@ -269,7 +277,7 @@
    "fixed": true,
    "pad": 0,
    "marks": {
-    "8": "#overlay-root .modal .btn-chrome"
+    "8": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
    }
   },
   {
@@ -284,7 +292,10 @@
     }
    ],
    "clip": "#shotLocked",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "10": "#shotLocked a.btn, #shotLocked .btn"
+   }
   },
   {
    "colorScheme": "light",
@@ -311,6 +322,10 @@
      "eval": "var b=[...document.querySelectorAll('main button')].find(function(x){ return /Submit emergency/i.test(x.textContent); }); b.id='shotEmBtn';"
     },
     {
+     "eval": "document.getElementById('toast-root').innerHTML='';",
+     "after": 100
+    },
+    {
      "click": "#shotEmBtn",
      "after": 400
     }
@@ -319,7 +334,7 @@
    "fixed": true,
    "pad": 0,
    "marks": {
-    "10": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
+    "11": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
    }
   },
   {

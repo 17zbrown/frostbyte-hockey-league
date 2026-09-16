@@ -28,8 +28,9 @@
    "clip": "#shotInc",
    "pad": 0,
    "marks": {
-    "2": "[data-trade-accept='tr2']",
-    "7": "[data-trade-counter='tr2']"
+    "7": "[data-trade-counter='tr2']",
+    "8": "[data-trade-decline='tr2']",
+    "9": "[data-trade-accept='tr2']"
    }
   },
   {
@@ -69,9 +70,7 @@
    "clip": "#overlay-root .modal",
    "fixed": true,
    "pad": 0,
-   "marks": {
-    "4": "#overlay-root .modal [data-tpick-p='p9']"
-   },
+   "marks": {},
    "crop": [
     0,
     0,
@@ -195,7 +194,10 @@
    ],
    "clip": "#overlay-root .modal",
    "fixed": true,
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "9": "#overlay-root .modal .btn-ink, #overlay-root .modal .btn-chrome"
+   }
   },
   {
    "colorScheme": "light",
@@ -255,7 +257,7 @@
    "clip": "#shotRows",
    "pad": 6,
    "marks": {
-    "8": "#shotRow button[data-block], #shotRow button:nth-of-type(2)"
+    "10": "#shotRow button[data-block], #shotRow button:nth-of-type(2)"
    }
   },
   {
@@ -270,7 +272,10 @@
     }
    ],
    "clip": "#shotBanner",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "12": "#shotBanner b, #shotBanner"
+   }
   }
  ]
 }

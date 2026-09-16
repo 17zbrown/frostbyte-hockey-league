@@ -36,3 +36,7 @@ tools/demo/_guide_bundle.js
 tools/guides/shots/
 docs/guides/_shots-*.json
 docs/guides/_report.json
+tools/guides/shots-phone/
+docs/guides/phone/_render-*.json
+docs/guides/phone/_report.json
+tools/guides/src-phone/

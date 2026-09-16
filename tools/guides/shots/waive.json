@@ -105,9 +105,7 @@
     100,
     58
    ],
-   "marks": {
-    "4": "#shotSq .card-h .chip"
-   }
+   "marks": {}
   },
   {
    "colorScheme": "light",
@@ -145,8 +143,8 @@
    "clip": "#shotBoard",
    "pad": 0,
    "marks": {
-    "5": "[data-fa-sign]",
-    "6": "[data-fa-dm]"
+    "5": "[data-fa-dm]",
+    "6": "[data-fa-sign]"
    }
   },
   {
@@ -193,7 +191,7 @@
    "fixed": true,
    "pad": 0,
    "marks": {
-    "5": "#faSignGo"
+    "6": "#faSignGo"
    }
   },
   {
@@ -238,7 +236,10 @@
     }
    ],
    "clip": "#shotBanner",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "7": "#shotBanner b, #shotBanner"
+   }
   },
   {
    "colorScheme": "light",

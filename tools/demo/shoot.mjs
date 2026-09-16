@@ -109,6 +109,9 @@ async function runStep(cdp, step) {
 async function shoot(cdp, shot) {
   const width = shot.width || 1440, height = shot.height || 1000, scale = shot.scale || 2;
   await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: !!shot.mobile });
+  /* a phone shot is a touch device too: the site's pointer:coarse rules (tap targets, the rail
+     hints) only apply with touch emulation on, and Chrome reports pointer:coarse from it */
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: !!shot.mobile, maxTouchPoints: shot.mobile ? 5 : 1 });
   if (shot.colorScheme) await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: shot.colorScheme }] });
   const url = /^[a-z]+:/.test(shot.url) ? shot.url : list.base + shot.url;
   /* every shot starts clean: what a previous shot saved in this origin's storage must not leak

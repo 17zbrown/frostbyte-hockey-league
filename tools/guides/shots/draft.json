@@ -26,7 +26,10 @@
     }
    ],
    "clip": "#shotStrip",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "2": "#shotStrip .kpi:first-child"
+   }
   },
   {
    "colorScheme": "light",
@@ -40,7 +43,10 @@
     }
    ],
    "clip": "#shotLocked",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "3": "#shotLocked .card-h .chip"
+   }
   },
   {
    "colorScheme": "light",
@@ -78,7 +84,10 @@
     }
    ],
    "clip": "#shotCov",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "6": "#shotCov .card-h .chip, #shotCov .chip"
+   }
   },
   {
    "colorScheme": "light",
@@ -125,8 +134,8 @@
    "clip": "#shotOnClock",
    "pad": 0,
    "marks": {
-    "7": "[data-quickpick]",
-    "8": "[data-openpick]"
+    "8": "[data-quickpick]",
+    "9": "[data-openpick]"
    }
   },
   {
@@ -151,7 +160,7 @@
     62
    ],
    "marks": {
-    "8": "[data-modpick='r4']"
+    "9": "[data-modpick='r4']"
    }
   },
   {
@@ -190,7 +199,7 @@
    "clip": "#shotStrip",
    "pad": 0,
    "marks": {
-    "9": "#shotStrip .kpi:nth-child(2)"
+    "10": "#shotStrip .kpi:nth-child(2)"
    }
   },
   {
@@ -207,7 +216,7 @@
    "clip": "#shotMakeup",
    "pad": 0,
    "marks": {
-    "10": "[data-openpick]"
+    "11": "[data-openpick]"
    }
   },
   {
@@ -222,7 +231,10 @@
     }
    ],
    "clip": "#shotRoom",
-   "pad": 0
+   "pad": 0,
+   "marks": {
+    "12": "#shotRoom .chip-live, #shotRoom .chip"
+   }
   },
   {
    "colorScheme": "light",

@@ -72,8 +72,15 @@ console.log("— the rulebook says what the announcement says");
   A("Rule 3.2 lets only an uninvolved staff member waive the ten-minute forfeit",
     /waived by a member of league staff who is not playing in, managing, or otherwise involved/.test(sec("3.2")) &&
     !/is a hard rule and is not waivable/.test(sec("3.2")));
-  A("Rule 4.5 says the ban lists apply as written until reissued for NHL 27 (v2.35)",
-    /were written against NHL 26 and apply as written until the league office reissues them for NHL 27/.test(sec("4.5")));
+  /* v2.35 pinned "written against NHL 26 … until reissued for NHL 27"; v2.53 IS that reissue */
+  A("Rule 4.5 carries the NHL 27 list (v2.53): six abilities banned at every tier, two at Red tier only",
+    /written against NHL 27 and apply as written/.test(sec("4.5")) &&
+    /banned at every tier the game offers them: Truculence, Spark Plug, Hipster, Pressure\+, Unstoppable Force and Big Rig/.test(sec("4.5")) &&
+    /banned at the Red tier only — Stick ’Em Up and Big Tipper/.test(sec("4.5")));
+  A("...and bans every pre-built loadout and every special-character cosmetic",
+    /Every pre-built loadout the game offers is banned/.test(sec("4.5")) && /every special-character cosmetic is banned/.test(sec("4.5")));
+  A("...with Wheels and the Elite-tier blanket gone from the binding text",
+    !/Wheels/.test(sec("4.5")) && !/Elite-tier/.test(sec("4.5")));
 }
 
 console.log("\n— the code agrees with the rulebook");
