@@ -131,6 +131,32 @@ CG.playoffRoad = function(lg, clubCode){
   });
   return out.sort(function(a,b){ return (a.done?1:0)-(b.done?1:0) || (b.need-a.need) || String(a.tag).localeCompare(String(b.tag)); });
 };
+/* Rule 5.2 (v2.55): the games already counted against a player's week (or playoff series), the
+   way the database counts them in player_week_games — a final game with a box score counts by the
+   box score (he played it or he did not), every other game by the lineup his club filed. Mirrors
+   the gate in set_game_lineup so the per-game page can say no at assignment time. */
+CG.weekGamesFor = function(pid, game, club, opts){
+  var lg = CG.lg || {}, n = 0, exclude = (opts && opts.excludeGame) || game.id;
+  var stage = game.stage || "regular";
+  (lg.schedule || []).forEach(function(g){
+    if (g.id === exclude || (g.stage || "regular") !== stage || g.week !== game.week || g.voided) return;
+    var res = (lg.allResults || lg.results || []).find(function(r){ return r.id === g.id; });
+    var box = res && res.box, hasBox = !!(box && (Object.keys(box.home||{}).length || Object.keys(box.away||{}).length));
+    if ((g.status === "final" || (res && res.entered)) && hasBox){
+      if ((box.home && box.home[pid]) || (box.away && box.away[pid])) n++;
+      return;
+    }
+    var lu = (lg._lineups || {})[club + ":" + g.id];
+    if (lu && [lu.center, lu.lw, lu.rw, lu.ld, lu.rd, lu.goalie].indexOf(pid) >= 0) n++;
+  });
+  return n;
+};
+/* the cap that applies to one player in one game: the series cap in the playoffs, else the weekly cap */
+CG.gameCapFor = function(p, game){
+  var o = { pos: p.pos, squad: p.squad, stage: game.stage || "regular" };
+  return (game.stage === "playoff") ? CG.seriesCap(o) : CG.weeklyCap(o);
+};
+
 /* roster rows that ride the active roster WITHOUT counting against the shape (Rule 2.1): the full
    format's pre-season loans and the basic format's league-office depth placements — mirrors the
    origin list in check_roster_structure / place_new_roster_spot */

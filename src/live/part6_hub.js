@@ -860,6 +860,10 @@ CG.AFTER._lineup = function(){
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
     if (avNightKey && CG.avGame && CG.avGame(CG.avFor(p.id), avNightKey, game.id)==="no") return p.tag+" is marked not available for this game.";
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
+    /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
+       played games by the box score plus games still to come by the filed lineup */
+    var cap = CG.gameCapFor(p, game), used = CG.weekGamesFor(p.id, game, club);
+    if (used >= cap) return p.tag+" has already played or been dressed in "+used+" games this "+(game.stage==="playoff"?"series":"week")+" — the limit is "+cap+" (Rule "+(game.stage==="playoff"?"8.3":"5.2")+").";
     return null;
   }
   function assign(pid, pos){

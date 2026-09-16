@@ -767,3 +767,18 @@ returns jsonb language sql immutable as $$
 --   end if;
 -- The client mirrors it: the Free agents page is titled "Waived players" in basic, the offer
 -- dialog fixes the salary at $750K with no term picker (every deal ends with the season).
+
+-- ===== H. (v2.55, 2026-09-16) Rule 5.2: the week is counted from the box score =====
+-- Applied live through execute_sql in one gated transaction (rehearsed with a rollback first).
+-- public.player_week_games(p_season, p_stage, p_week, p_profile, p_exclude_game) — the games that
+--   count toward a player's week: a final game WITH a box score counts by the box score (he played
+--   it or he did not); every other game (still to come, or final but not yet imported) counts by
+--   the lineup his club filed; voided games never count.
+-- set_game_lineup: v_dressed := player_week_games(...); the cap is series_cap() for a playoff game
+--   (the gate used weekly_cap = 6 there before — the 4-game series cap now applies at filing) and
+--   weekly_cap() otherwise; the refusal reads "has already played or been dressed in N games this
+--   week/series — the limit is C".
+-- check_weekly_cap_violations() + trg_weekly_cap_violations (AFTER UPDATE OF status ON games):
+--   on a regular-season final, every box-score player is checked — over the weekly count, or not
+--   in the lineup his club filed, or a club that filed none — and flagged to the staff desk
+--   (notify_commissioners 'flag' → transactions) with an admin-log row.
