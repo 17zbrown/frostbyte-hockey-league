@@ -700,17 +700,21 @@ CG.renderChrome = function(){
            once the words are gone, so the accessible name stays complete either way. */
         ? '<a class="btn btn-sm" href="#/signin" aria-label="Join with Discord" style="min-height:42px;background:#5865F2;color:#fff">'+CG.DISCORD_GLYPH+'Join<span class="hide-xs"> with Discord</span></a>'
         : '<button class="avatar" id="avBtn" aria-label="Account menu" title="'+esc(p.tag||"")+'">'+CG.avatarHtml()+'</button>')+
-      '<button class="icon-btn mh-burger" id="burger" aria-label="Menu">'+CG.ic("menu")+'</button>'+
+      '<button class="icon-btn mh-burger" id="burger" aria-label="Open site menu" aria-controls="mobilenav">'+CG.ic("menu")+'</button>'+
     '</div></div>';
   /* mobile nav */
-  /* the mobile menu stays a flat, complete list: top-level + both groups + hub tabs */
-  var mnav = CG.navVisible().concat(
-    (CG.NAV_GROUPS||[]).reduce(function(acc,g){ return acc.concat(g[1].map(function(n){ return [n[0],n[1]]; })); }, []),
-    hubTabs);
-  $("#mobilenav").innerHTML = '<div class="mn-h">'+CG.leagueMark(34)+
+  /* the mobile menu keeps the desktop's structure — the top-level links, then each nav group under
+     its own name, then the dashboards — with search as its first row (v2.49: the phone masthead
+     drops the search button to fit; the palette opens from here instead) */
+  var mnRow = function(n){ return '<a href="'+n[1]+'">'+n[0]+' <span style="color:var(--chrome)">→</span></a>'; };
+  var mnv = $("#mobilenav");
+  mnv.setAttribute("role","dialog"); mnv.setAttribute("aria-label","Site menu"); mnv.setAttribute("aria-modal","true");
+  mnv.innerHTML = '<div class="mn-h">'+CG.leagueMark(34)+
     '<button class="icon-btn" data-mn-close aria-label="Close menu" style="border-color:#39434B;background:transparent;color:#fff">'+CG.ic("x")+'</button></div>'+
-    '<div class="mn-g">League</div>'+
-    mnav.map(function(n){ return '<a href="'+n[1]+'">'+n[0]+' <span style="color:var(--chrome)">→</span></a>'; }).join("")+
+    '<button class="mn-search" type="button" data-mn-search>'+CG.ic("search",16)+'Search the league…</button>'+
+    '<div class="mn-g">League</div>'+CG.navVisible().map(mnRow).join("")+
+    (CG.NAV_GROUPS||[]).map(function(g){ return '<div class="mn-g">'+esc(g[0])+'</div>'+g[1].map(mnRow).join(""); }).join("")+
+    (hubTabs.length ? '<div class="mn-g">Dashboards</div>'+hubTabs.map(mnRow).join("") : "")+
     '<div class="mn-g">Account</div>'+
     (CG.role()==="guest" ? '<a href="#/signin">Sign in</a>' :
       (CG.LIVE_MODE?'<a href="#/hub/messages">Messages</a>':"")+
@@ -1522,7 +1526,8 @@ document.addEventListener("click", function(e){
       '</div>');
     return;
   }
-  if (e.target.closest("#burger")){ var mnv=$("#mobilenav"); try { mnv.inert = false; } catch(e2){} mnv.classList.add("open"); mnv.setAttribute("aria-hidden","false"); var fl=$("#mobilenav a"); if (fl) fl.focus(); return; }
+  if (e.target.closest("#burger")){ var mnv=$("#mobilenav"); try { mnv.inert = false; } catch(e2){} mnv.classList.add("open"); mnv.setAttribute("aria-hidden","false"); document.body.style.overflow="hidden"; var fl=$("#mobilenav a"); if (fl) fl.focus(); return; }
+  if (e.target.closest("[data-mn-search]")){ CG.closeMobileNav(); CG.openPalette(); return; }
   if (e.target.closest("[data-mn-close]")){ CG.closeMobileNav(); return; }
   if (e.target.closest("#mobilenav a")){ CG.closeMobileNav(); return; }
   if (e.target.closest("[data-signout]")){
@@ -1577,6 +1582,7 @@ document.addEventListener("keydown", function(e){
 CG.closeMobileNav = function(){
   var mn = $("#mobilenav");
   if (!mn) return;
+  if (mn.classList.contains("open")) document.body.style.overflow = "";
   mn.classList.remove("open");
   mn.setAttribute("aria-hidden","true");
   /* it is hidden by transform alone, so without this its links stay in the tab order — a keyboard

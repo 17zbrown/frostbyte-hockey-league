@@ -5793,7 +5793,7 @@ CG.admUsersLive = function(){
         '<td class="tleft"><select data-role-for="'+pr.id+'" style="padding:5px;max-width:150px">'+roleOpts(gr)+'</select></td>'+
         '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>'+(mgmt?' <span class="chip chip-chrome" style="font-size:9px">'+esc(mgmt.toUpperCase())+'</span>':""):'<span class="caption">—</span>')+'</td>'+
         '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
-        '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+        '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
           '<button class="btn btn-ghost btn-sm" data-uedit="'+pr.id+'">Edit</button>'+
           (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
               :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
@@ -8088,7 +8088,7 @@ CG.mgmtPermissionsCard = function(m){
       var mode=((pol[sd[0]]||{})[pg[0]])||CG.mgmtDefaultMode(pg[0]);
       if (!pg[3] && mode==="approve") mode="full";
       if (!m.isOwner) return '<td class="tleft"><span class="chip chip-xs'+(mode==="full"?" chip-win":mode==="approve"?" chip-warn":"")+'">'+esc(CG.MGMT_MODES.find(function(x){return x[0]===mode;})[1])+'</span></td>';
-      return '<td class="tleft"><div class="seg" role="radiogroup" aria-label="'+esc(sd[1]+" · "+pg[1])+'">'+CG.MGMT_MODES.filter(function(md){ return pg[3] || md[0]!=="approve"; }).map(function(md){
+      return '<td class="tleft" data-seat="'+esc(sd[1]+(sd[2]&&names[sd[2]]?" · "+names[sd[2]]:""))+'"><div class="seg" role="radiogroup" aria-label="'+esc(sd[1]+" · "+pg[1])+'">'+CG.MGMT_MODES.filter(function(md){ return pg[3] || md[0]!=="approve"; }).map(function(md){
         return '<button type="button" class="seg-b'+(mode===md[0]?" on":"")+'" data-perm-seat="'+sd[0]+'" data-perm-page="'+pg[0]+'" data-perm-mode="'+md[0]+'" aria-pressed="'+(mode===md[0]?"true":"false")+'">'+esc(md[1])+'</button>';
       }).join("")+'</div></td>';
     }).join("");
@@ -11279,7 +11279,7 @@ CG.ROUTES.admin = function(param, qs){
     var fwd = [];
     Object.keys(qs||{}).forEach(function(k){ fwd.push(encodeURIComponent(k)+"="+encodeURIComponent(qs[k])); });
     setTimeout(function(){ location.hash = "#/players" + (fwd.length ? "?"+fwd.join("&") : ""); }, 0);
-    return '<div class="shell" style="padding:60px 0"><p class="caption">Taking you to the players page…</p></div>';
+    return '<div class="shell" style="padding-top:60px;padding-bottom:60px"><p class="caption">Taking you to the players page…</p></div>';
   }
   if (CG.ADMIN_ALIAS[param]){
     var to = CG.ADMIN_ALIAS[param];
@@ -11514,7 +11514,7 @@ CG._gsList = function(el){
           '<td class="tleft"><span class="teamcell">'+CG.crest(opp,20)+'<span class="nm">'+(homeSide?"vs ":"@ ")+esc(opp)+'</span></span>'+
             (g.week!=null?' <span class="caption">'+(g.stage==="preseason"?"PRE":"Wk "+g.week)+'</span>':'')+'</td>'+
           '<td>'+result+'</td><td>'+chip+'</td>'+
-          '<td class="tright mono" style="font-size:11px">'+(lines||"—")+'</td>'+
+          '<td class="tright mono hide-xs-col" style="font-size:11px">'+(lines||"—")+'</td>'+
           '<td class="tright" style="white-space:nowrap">'+(label
             ? '<a class="btn btn-ghost btn-sm" href="#/hub/gamestats?game='+esc(g.id)+'">'+esc(label)+'</a>'
             : '<span class="caption">—</span>')+'</td></tr>';
@@ -11522,7 +11522,7 @@ CG._gsList = function(el){
       el.innerHTML =
         (needsWork ? '<div class="note" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">'+needsWork+' game'+(needsWork===1?"":"s")+' need'+(needsWork===1?"s":"")+' a box score.</b> Open one below to rebuild it from the sittings EA recorded.</div>' : '')+
         '<div class="card"><div class="card-h"><h3>Your games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>'+
-        '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Date</th><th class="tleft">Opponent</th><th>Result</th><th>Box score</th><th class="tright">Lines</th><th class="tright">Manual entry</th></tr></thead>'+
+        '<div class="tblwrap"><table class="tbl keepcols gs-tbl"><thead><tr><th class="tleft">Date</th><th class="tleft">Opponent</th><th>Result</th><th>Box score</th><th class="tright hide-xs-col">Lines</th><th class="tright">Manual entry</th></tr></thead>'+
         '<tbody>'+rows+'</tbody></table></div>'+
         '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Lines” is how many player stat lines the box score holds — a full game is normally 12. A game that lagged out and resumed often imports only its first sitting, which is what the manual rebuild fixes. By league convention, the <b>winning club’s management</b> enters the stats after a forfeit win or a win that followed a disconnect. A game forfeited before its scheduled time, or over a no-show, is ruled by statistics staff (Rule 3.2: recorded 1–0, no player stats).</span></div></div>';
     });
@@ -11741,6 +11741,8 @@ CG.AFTER.hub = function(param, qs){
   /* first, before any of the sub-page early returns: the contract-offer card renders on the
      dashboard, and finding nothing to bind on the other hub pages costs nothing */
   if (CG.wireOfferActions) CG.wireOfferActions();
+  /* v2.49: on a phone the hub sidebar is a one-row rail — keep the current section in view */
+  (function(){ var on = document.querySelector(".hub-side a.on"); if (on && on.scrollIntoView && window.innerWidth <= 720) try { on.scrollIntoView({ inline:"center", block:"nearest" }); } catch(e){} })();
   /* v2.38: the Owner-approves banner's Withdraw buttons, on whichever page it renders */
   document.querySelectorAll("[data-mgmt-withdraw-move]").forEach(function(b){ b.addEventListener("click", function(){
     var id = this.getAttribute("data-mgmt-withdraw-move");
@@ -11960,7 +11962,7 @@ CG.hubFreeAgents = function(){
           '<td class="tnum">'+(r.scout_ovr==null?'<span class="caption">—</span>':r.scout_ovr)+'</td>'+
           '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
           '<td class="tleft">'+bg+'</td>'+
-          '<td class="tright"><span style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
             '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'"'+(held?' disabled title="Exclusive to '+esc(rhCode)+' until free agency opens — approaching him is tampering (Rule 2.2)"':'')+'>Approach</button>'+
             '<button class="btn btn-chrome btn-sm" data-fa-sign="'+r.id+'" data-name="'+esc(prof.gamertag||"this player")+'"'+((canSign&&!full&&!held)?"":" disabled")+
               (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="Offers open with free agency"':full?' title="Your roster is full"':'')+'>Offer</button>'+

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Chel Gaming Hockey League — Competitive 6v6 EA NHL</title>
 <meta name="description" content="A competitive 6v6 EA Sports NHL league playing a full season with live standings, auto-imported stats, trades, free agency, and playoffs. Sign in with Discord to claim your spot.">
 <link rel="canonical" href="https://chelgamingleague.com/">
@@ -175,7 +175,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 tr.loan-row td{background:var(--line-soft)}
 tr.loan-row td:first-child{box-shadow:inset 3px 0 0 var(--steel)}
 tr.loan-head td{background:var(--ice);border-top:2px solid var(--line);padding-top:12px;padding-bottom:10px;line-height:1.45}
-@media (max-width:760px){.seg{flex-wrap:wrap}.seg-b{padding:6px 9px;font-size:11.5px}}
+@media (max-width:760px){.reg-bar .seg{flex-wrap:wrap}.seg-b{padding:6px 9px;font-size:11.5px}}
 .btn[disabled]{opacity:.45;cursor:not-allowed}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:100px;
   font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
@@ -240,7 +240,9 @@ tr.loan-head td{background:var(--ice);border-top:2px solid var(--line);padding-t
   .mh-brand{gap:8px}
   .mh-brand .crest{width:31px;height:31px}
   .mh-brand .wm b{font-size:14px}
-  .mh-brand .wm span{letter-spacing:.18em}
+  .mh-brand .wm span{display:none}
+  .mh-right{gap:6px}
+  #searchBtn{display:none}
 }
 .mh-brand .crest{width:36px;height:36px}
 .mh-brand .wm b{display:block;font-family:var(--f-disp);font-weight:900;font-size:16px;letter-spacing:-.01em;line-height:1}
@@ -273,7 +275,7 @@ tr.loan-head td{background:var(--ice);border-top:2px solid var(--line);padding-t
 .mh-burger{display:none}
 /* drops secondary words from a label on narrow screens; the element keeps its full accessible
    name via aria-label, so only the visual text shortens */
-@media (max-width:520px){ .hide-xs{display:none} }
+@media (max-width:520px){ .hide-xs{display:none} .hide-xs-col{display:none !important} }
 .seasel{font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;border:1.5px solid var(--line);
   background:var(--paper);border-radius:var(--r-s);padding:8px 10px;color:var(--steel);min-height:42px}
 
@@ -1267,6 +1269,9 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 
 /* ---------- hub / admin layout ---------- */
 .hub-grid{display:grid;grid-template-columns:230px 1fr;gap:28px;align-items:start}
+/* the content cell is a bare div: without this, a wide table's min-content width becomes the track width and
+   every sibling card on a phone is clipped at the viewport edge — .tblwrap can only scroll inside an honest column */
+.hub-grid>*{min-width:0}
 .hub-side{position:sticky;top:calc(var(--nav-h) + 18px);display:flex;flex-direction:column;gap:2px}
 .hub-side .hs-group{font-family:var(--f-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
   color:var(--steel-2);padding:14px 10px 5px}
@@ -1504,6 +1509,9 @@ footer.site a.fl:hover{color:var(--chrome)}
 footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-family:var(--f-mono);font-size:11px}
 .protopill{display:inline-flex;align-items:center;gap:7px;border:1px solid #39434B;border-radius:100px;padding:4px 12px;color:var(--chrome);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em}
 
+details.rb-history>summary::-webkit-details-marker{display:none}
+details.rb-history>summary::after{content:"+";font-family:var(--f-mono);font-size:16px;color:var(--steel);margin-left:auto}
+details.rb-history[open]>summary::after{content:"–"}
 /* ---------- print (rulebook) ---------- */
 @media print{ .rb-shelved{page-break-before:always}
   #demobar,#ticker,#masthead,footer.site,.no-print{display:none !important}
@@ -1532,8 +1540,10 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
   #demobar .shell{flex-wrap:wrap;row-gap:2px}
   #demobar .db-roles{margin-left:0;flex-wrap:wrap}
   .seasel{display:none}
-  .statline{flex-wrap:wrap}
-  .statline>div{padding:12px 14px 12px 0;margin-right:14px;border-right:0}
+  .statline{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+  .statline>div{padding:12px 0;margin-right:0;border-right:0}
+  .statline>div:nth-child(n+3){border-top:1px solid var(--line)}
+  .statline b{overflow-wrap:anywhere}
   #demobar .db-lab2{display:none}
   .caro{min-height:400px}
   /* the map keeps the full width on a phone; the caption drops out of the plot box so it stops
@@ -1546,9 +1556,10 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
   .mx-side,.mx-side.away{flex-direction:column;text-align:center;justify-items:center}
   .rk-line{grid-template-columns:1fr}
   .rk-line.d2,.rk-line.g1{max-width:100%}
-  .gamecard{grid-template-columns:60px 1fr}
-  .gamecard .gc-when{padding-right:10px}
-  .gamecard .gc-tag{display:none}
+  .gamecard{grid-template-columns:72px 1fr;grid-template-rows:auto auto;row-gap:6px}
+  .gamecard .gc-when{padding-right:10px;grid-row:1/3}
+  .gamecard .gc-when span{white-space:nowrap}
+  .gamecard .gc-tag{display:inline-flex;grid-column:2;justify-self:start}
   footer.site .ft-top{grid-template-columns:1fr 1fr}
   /* Column hiding is a LAST resort: it makes the hidden data unreachable and unsortable.
      Keep it only for tables that carry a compact summary (standings). Stat-dense tables opt
@@ -1559,12 +1570,14 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
   /* No min-width: .tblwrap already scrolls when the table's natural width exceeds the
      viewport, so forcing a width only made empty tables overflow for no reason. */
   /* scroll affordance: the wrap is scrollable but scrollbars are hidden on iOS */
-  .tblwrap{position:relative}
-  .tblwrap:after{content:"";position:absolute;top:0;right:0;bottom:0;width:26px;pointer-events:none;
-    background:linear-gradient(90deg,transparent,var(--paper))}
+  .tblwrap{position:relative;
+    background:linear-gradient(90deg,var(--paper) 30%,transparent) 0 0/40px 100% no-repeat local,
+      linear-gradient(270deg,var(--paper) 30%,transparent) 100% 0/40px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%,rgba(16,21,25,.18),transparent) 0 0/14px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%,rgba(16,21,25,.18),transparent) 100% 0/14px 100% no-repeat scroll}
+  .tbl th:last-child,.tbl td:last-child{padding-right:14px}
 }
 @media(max-width:430px){
-  footer.site .ft-top{grid-template-columns:1fr}
   .avcell{width:26px;height:26px}
   /* Player/team hero: the middle block had min-width:0 so a long unbreakable gamertag
      overflowed its shrunken flex item straight under the OVR badge ("ZACKBRO|7") instead of
@@ -1594,6 +1607,135 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
      offenders (all within 3px of 16 already, so nothing shifts perceptibly). */
   .tbl tr.tbl-filter input,.lc-nm,.scout-in,.fa-club,#seasonPick{font-size:16px}
 }
+
+/* ---------- the phone layer (v2.49, from the 390×844 audit) ----------
+   Every rule here is scoped to phone widths or to a coarse pointer, so the desktop is untouched. The
+   principle: a phone gets the same information as the desktop, re-flowed — never a shrunken table,
+   never a hidden number, never a control under 44px. */
+@media(pointer:coarse){
+  .icon-btn,.avatar{width:44px;height:44px}
+  .seg-b{min-height:44px}
+  footer.site a.fl{padding:11px 0}
+  /* the ticker: a flickable scoreboard strip, not a marquee nobody can pause */
+  :root{--tick-h:44px}
+  #ticker .tk-track{animation:none;width:auto;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  #ticker .tk-track::-webkit-scrollbar{display:none}
+  #ticker .tk-track>div[aria-hidden]{display:none}
+  .tk-item{scroll-snap-align:start;padding:0 16px}
+  .tk-item .tk-lab{font-size:11px}
+  .tabs button,.filters select,.filters input{min-height:44px}
+}
+@media(max-width:720px){
+  /* the hub rail: one snap-scrolling row with the group names back as inline dividers */
+  .hub-side{flex-wrap:nowrap;overflow-x:auto;gap:6px;margin:0 -16px;padding:2px 16px 10px;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .hub-side::-webkit-scrollbar{display:none}
+  .hub-side a{flex:0 0 auto;min-height:44px;white-space:nowrap;scroll-snap-align:start}
+  .hub-side .hs-group{display:flex;align-items:center;flex:none;padding:0 4px 0 10px;border-left:1.5px solid var(--line);font-size:10px;white-space:nowrap}
+  .hub-side .hs-group:first-child{border-left:0;padding-left:0}
+  /* the footer: two columns under a spanning brand block */
+  footer.site .ft-top{padding:36px 0 24px}
+  footer.site .ft-top>div:first-child{grid-column:1/-1}
+  footer.site h4{font-size:12px}
+  footer.site .ft-base{font-size:12px}
+  /* tabs get the same scroll shadows as tables */
+  .tabs{background:linear-gradient(90deg,var(--ice) 30%,transparent) 0 0/32px 100% no-repeat local,
+    linear-gradient(270deg,var(--ice) 30%,transparent) 100% 0/32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%,rgba(16,21,25,.16),transparent) 0 0/12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%,rgba(16,21,25,.16),transparent) 100% 0/12px 100% no-repeat scroll}
+  /* status chips inside cards and tables never break inside their own pill */
+  .tbl .chip{white-space:nowrap}
+  /* row-action clusters: a 2-up grid, never a one-per-line stack in a table cell */
+  .row-actions{display:grid !important;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+  .row-actions .btn{justify-content:center}
+  /* THE ROSTER LEDGER re-flows into cards: name + OVR, then the mono facts, then status, then actions */
+  .tbl.roster-tbl thead{display:none}
+  .tbl.roster-tbl caption{display:block;width:100%;box-sizing:border-box;padding:12px 16px 6px}
+  .tbl.roster-tbl,.tbl.roster-tbl tbody{display:block}
+  .tbl.roster-tbl tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:12px 16px;border-bottom:1px solid var(--line-soft)}
+  .tbl.roster-tbl tr.loan-head{display:block}
+  .tbl.roster-tbl tr.loan-head td{display:block;padding:0}
+  .tbl.roster-tbl td{display:block;border:0;padding:0;text-align:left;font-size:13.5px;box-shadow:none !important}
+  .tbl.roster-tbl td:first-child{order:0;flex:1 1 calc(100% - 96px);font-size:15px;padding-left:0}
+  .tbl.roster-tbl td:nth-child(3){order:1;flex:0 0 auto}
+  .tbl.roster-tbl td[data-l]::before{content:attr(data-l) " ";font:600 10px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+  .tbl.roster-tbl td:nth-child(2),.tbl.roster-tbl td:nth-child(4),.tbl.roster-tbl td:nth-child(5),.tbl.roster-tbl td:nth-child(6){order:2;flex:0 0 auto}
+  .tbl.roster-tbl td:nth-child(7):not(:last-child){display:block;order:3;flex:1 1 100%;margin-top:2px}
+  .tbl.roster-tbl td:last-child{order:4;flex:1 1 100%;margin-top:6px;padding-right:0}
+  .tbl.roster-tbl td:last-child .caption{display:block}
+  /* the permissions matrix linearizes: one full-width 3-way control per seat */
+  .perm-tbl,.perm-tbl tbody,.perm-tbl tr,.perm-tbl td{display:block}
+  .perm-tbl thead{display:none}
+  .perm-tbl tr{padding:12px 0;border-bottom:1px solid var(--line-soft)}
+  .perm-tbl td{padding:0 16px;border:0;text-align:left}
+  .perm-tbl td[data-seat]::before{content:attr(data-seat);display:block;font:600 10px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--steel);margin:10px 0 5px}
+  .perm-tbl .seg{display:flex;flex-wrap:nowrap;width:100%}
+  .perm-tbl .seg-b{flex:1;text-align:center;min-height:44px;font-size:12.5px;padding:0 6px}
+  /* the line creator re-flows per line: name row, then LW C RW / LD RD G as full-width tap targets */
+  .lc-wrap{overflow:visible}
+  .lc-grid{grid-template-columns:repeat(3,1fr);min-width:0;gap:6px}
+  .lc-gh{display:none}
+  .lc-gut{grid-column:1/-1;flex-direction:row;align-items:center;justify-content:space-between;padding:12px 0 4px;border-top:1px solid var(--line)}
+  .lc-gut:first-of-type{border-top:0}
+  .lc-nm{flex:1;min-width:0}
+  .lc-slot{min-height:64px}
+  .lc-slot[data-slot]::before{content:attr(data-slot);display:block;font:600 9px/1 var(--f-mono);letter-spacing:.1em;color:var(--steel);text-transform:uppercase;margin-bottom:4px}
+  /* KPI tiles pair up instead of stacking as slabs — any grid whose children are all KPI tiles */
+  .kpi-grid,.grid:has(>.kpi:first-child):not(:has(>:not(.kpi))){grid-template-columns:1fr 1fr !important}
+  .grid:has(>.kpi) .kpi .num{font-size:24px}
+  /* the club-page tab labels and the team-stat tiles */
+  .team-stats{grid-template-columns:1fr 1fr !important}
+}
+@media(max-width:560px){
+  /* card headers: the title keeps the line, an over-long chip drops beneath it whole */
+  .card-h{flex-wrap:wrap;row-gap:8px}
+  .card-h h3{flex:1 1 auto;text-wrap:balance}
+  .card-h .chip,.card-h .sec-link{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  /* notification rows: the date sits top-right, the body gets the whole width */
+  .notif{position:relative;padding-right:16px;flex-wrap:wrap}
+  .notif>span:nth-child(2){flex:1;min-width:0}
+  .notif b{padding-right:74px}
+  .notif .nf-t{position:absolute;top:13px;right:16px;margin:0}
+  /* modals become bottom sheets, with room for the keyboard and the home indicator */
+  .modal{top:auto;bottom:0;left:0;right:0;transform:none;width:100%;max-height:92dvh;border-radius:var(--r-l) var(--r-l) 0 0;border-width:2px 0 0;animation:sheetin .22s cubic-bezier(.16,1,.3,1) both}
+  .modal .mo-h{padding:16px 16px}
+  .modal .mo-b{padding:18px 16px}
+  .modal .mo-f{flex-wrap:wrap;padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-radius:0}
+  .modal .mo-f .btn{flex:1 1 auto;justify-content:center}
+  /* the game card: away, then "at" home, each side one unbreakable unit; the score stays with its club */
+  .gamecard .gc-match{flex-direction:column;align-items:flex-start;gap:4px}
+  .gamecard .gc-match .at{display:none}
+  .gamecard .gc-match .side{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;min-width:0}
+  .gamecard .gc-match .side.home::before{content:"at";font:11px var(--f-mono);color:var(--steel);margin-right:2px}
+  /* the approval queue: summary on line one, chip and buttons on line two */
+  .tasklist .titem{flex-wrap:wrap}
+  .tasklist .titem>span:first-child{flex:1 1 100%}
+  .tasklist .titem>.chip{margin-right:auto}
+  /* power-ranking cards: rank + crest + name on row one, the commentary full width beneath */
+  .pr-card{grid-template-columns:40px 56px minmax(0,1fr) !important;gap:12px !important;align-items:center}
+  .pr-card .crest{width:56px !important;height:auto !important}
+  .pr-card .pr-body{grid-column:1/-1}
+  /* the rulebook's contents card stays first; the collapsed version history keeps it short */
+  .rb-page .hub-side .pop-item{min-height:44px}
+  footer.site .ft-base{flex-direction:column;gap:6px}
+  /* the site menu: safe areas, no rubber-banding of the page beneath */
+  #mobilenav{overscroll-behavior:contain;padding-top:calc(20px + env(safe-area-inset-top));padding-bottom:calc(44px + env(safe-area-inset-bottom))}
+  #mobilenav .mn-g{font-size:11px}
+  #mobilenav .mn-search{display:flex;align-items:center;gap:10px;margin:8px 0 6px;padding:0 14px;min-height:48px;border:1.5px solid #39434B;border-radius:var(--r-s);color:var(--on-ink-dim);font-size:15px;background:transparent;width:100%;text-align:left}
+  #toast-root{bottom:calc(22px + env(safe-area-inset-bottom))}
+}
+@media(max-width:430px){
+  /* the season picker in the club hero must never be the widest thing on the page */
+  #seasonPick{min-width:0 !important;flex:1 1 auto;max-width:100%}
+  /* the club hero: crest … rating on row one, the words beneath */
+  .hero-row .crest3d{order:-2}
+  .hero-row .hero-ovr{order:-1;margin-left:auto;display:flex;align-items:center;gap:10px}
+  .hero-row .hero-ovr .caption{margin-top:0 !important}
+}
+@media(max-width:360px){
+  footer.site .ft-top{grid-template-columns:1fr}
+}
+@keyframes sheetin{from{transform:translateY(24px);opacity:0}}
+@media(prefers-reduced-motion:reduce){.modal{animation:none}}
 
 /* mobile menu */
 #mobilenav{position:fixed;inset:0;z-index:100;background:var(--bc);color:var(--on-ink);

@@ -16,7 +16,7 @@ CG.ROUTES.awards = function(param, qs){
   var tabs = '<div class="shell"><div class="tabs" role="tablist">'+
     [["stars","Three Stars"],["board","Stars board"],["potw","Players of the Week"],["season","Season awards"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
-  var body = '<div class="shell" style="padding:22px 0 40px">';
+  var body = '<div class="shell" style="padding-top:22px;padding-bottom:40px">';
   if (tab==="stars"){
     var nights = lg.lastNight.filter(function(r){ return (r.stars||[]).every(function(st){ return CG.playerById(lg, st.pid); }); });
     body += nights.length ? nights.map(function(r){
@@ -139,10 +139,10 @@ CG.ROUTES.rankings = function(){
     });
     var pRows = order.map(function(t, i){
       var r = lg.byTeam[t.code]||[];
-      return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+t.code+'" role="link" tabindex="0"><div class="card-b" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:center">'+
+      return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+t.code+'" role="link" tabindex="0"><div class="card-b pr-card" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:center">'+
         '<div style="text-align:center"><b style="font-family:var(--f-disp);font-weight:900;font-size:34px;letter-spacing:-.02em">'+(i+1)+'</b></div>'+
         CG.crest(t.code,52)+
-        '<div style="min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+        '<div class="pr-body" style="min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
           '<b style="font-family:var(--f-disp);font-size:19px">'+esc(t.name)+'</b>'+
           '<span class="chip">'+esc(t.div)+' Division</span>'+
           '<span class="ovrbox '+CG.ovrClass(lg.teamRatings[t.code].ovr)+'" style="min-width:36px;height:24px;font-size:13px">'+lg.teamRatings[t.code].ovr+'</span></div>'+
@@ -160,11 +160,11 @@ CG.ROUTES.rankings = function(){
     var line = t.name+" sit "+(pr.rank===1?"top of the league":pr.rank<=3?"inside the top three":"at #"+pr.rank)+
       " at "+s.w+"-"+s.l+"-"+s.otl+(s.gf!=null&&s.ga!=null?", "+(s.gf>s.ga?"outscoring opponents "+s.gf+"–"+s.ga:s.gf<s.ga?"outscored "+s.ga+"–"+s.gf:"even on goals at "+s.gf)+" so far":"")+".";
     var top = (lg.byTeam[pr.team]||[]).slice().sort(function(a,b){ return (lg.pstats[b.id]?lg.pstats[b.id].p:0)-(lg.pstats[a.id]?lg.pstats[a.id].p:0); })[0];
-    return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+pr.team+'" role="link" tabindex="0"><div class="card-b" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:start">'+
+    return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+pr.team+'" role="link" tabindex="0"><div class="card-b pr-card" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:start">'+
       '<div style="text-align:center"><b style="font-family:var(--f-disp);font-weight:900;font-size:34px;letter-spacing:-.02em">'+pr.rank+'</b>'+
         '<span style="display:block;margin-top:2px">'+CG.moveArrow(pr.move)+'</span></div>'+
       CG.crest(pr.team,52)+
-      '<div style="min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+      '<div class="pr-body" style="min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
         '<b style="font-family:var(--f-disp);font-size:19px">'+esc(t.name)+'</b>'+
         '<span class="chip">'+s.w+"-"+s.l+"-"+s.otl+'</span><span class="ovrbox '+CG.ovrClass(lg.teamRatings[pr.team].ovr)+'" style="min-width:36px;height:24px;font-size:13px">'+lg.teamRatings[pr.team].ovr+'</span>'+CG.form5(s.last5)+'</div>'+
         '<p class="small" style="color:var(--steel);margin-top:8px;max-width:72ch">'+esc(line)+'</p>'+
@@ -299,10 +299,11 @@ CG.ROUTES.rulebook = function(param, qs){
     rb.chapters.map(function(ch){
       return '<a class="pop-item" href="#/rulebook?rule='+ch.sections[0].id+'" style="font-size:13px"><b class="num" style="font-family:var(--f-mono);color:var(--steel);width:20px">'+ch.num+'</b>'+esc(ch.title)+'</a>';
     }).join("")+'</div></div>'+
-    '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Version history</h3></div>'+
+    /* the changelog is a wall at any width (fifty-plus releases): the latest entry shows, the rest open on demand */
+    '<details class="card rb-history" style="margin-top:16px"><summary class="card-h" style="cursor:pointer;list-style:none"><h3>Version history</h3><span class="chip">'+rb.changelog.length+' releases</span></summary>'+
     rb.changelog.map(function(c){
       return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("doc",14)+'</span><span><b>v'+esc(c.version)+'</b><p>'+esc(c.summary)+'</p></span><span class="nf-t">'+CG.fmtDate(c.dateIso)+'</span></div>';
-    }).join("")+'</div>';
+    }).join("")+'</details>';
   var chaptersHtml = rb.chapters.map(function(ch){
     var secs = ch.sections.filter(function(s){
       if (!q) return true;
@@ -330,7 +331,7 @@ CG.ROUTES.rulebook = function(param, qs){
       }).join("")+'</div></div>';
   }).join("");
   if (q && !chaptersHtml) chaptersHtml = '<div class="empty"><div class="e-art">'+CG.ic("search",22)+'</div><b>No rules match “'+esc(qs.q)+'”</b><p>Try a rule number (like 7.4) or a keyword like “forfeit” or “availability”.</p></div>';
-  return head + '<div class="shell" style="padding-bottom:40px"><div class="grid g32" style="align-items:start">'+
+  return head + '<div class="shell" style="padding-bottom:40px"><div class="grid g32 rb-page" style="align-items:start">'+
     '<div class="hub-side" style="position:static;display:block">'+toc+'</div>'+
     '<div><input type="search" id="rbQ" placeholder="Search the rulebook… (e.g. 7.4, forfeit, overtime)" value="'+esc(qs.q||"")+'" style="margin-bottom:18px" aria-label="Search rulebook">'+chaptersHtml+'</div>'+
   '</div></div>';
@@ -446,7 +447,7 @@ CG.ROUTES.matchup = function(id){
         : '<span>First meeting of the season</span>')+
       (g.feature?'<span style="color:var(--chrome)">MARQUEE GAME</span>':"")+'</div>'+
     '</div></div></section>';
-  var body = '<div class="shell" style="padding:6px 0 40px">';
+  var body = '<div class="shell" style="padding-top:6px;padding-bottom:40px">';
   if (res){
     /* FINAL: box score + stars */
     var starsBlurb = (CG.CONTENT.awards.threeStars.find(function(t){ return t.gameId===id; })||{}).blurb;

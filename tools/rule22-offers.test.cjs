@@ -48,7 +48,7 @@ console.log("\n— the player decides, from his own dashboard");
   A("accept / counter / decline are wired", /data-offer-accept/.test(live) && /data-offer-counter/.test(live) && /data-offer-deny/.test(live));
   /* seven since v2.34: accept/deny/counter on each side, plus the player withdrawing his own ask */
   A("...through respond_offer, from both sides", (live.match(/rpc\("respond_offer"/g)||[]).length === 7);
-  A("...and bound before the hub's sub-page early returns", /if \(CG\.wireOfferActions\) CG\.wireOfferActions\(\);[\s\S]{0,700}?\n  if \(param==="messages"\)/.test(live)   /* v2.38: the approval banner's Withdraw wiring sits between */);
+  A("...and bound before the hub's sub-page early returns", /if \(CG\.wireOfferActions\) CG\.wireOfferActions\(\);[\s\S]{0,1100}?\n  if \(param==="messages"\)/.test(live)   /* v2.38: the approval banner's Withdraw wiring sits between; v2.49 adds the hub-rail scroll */);
   /* v2.31 moved this guard from an inline ">= 0.75" check to the shared CG.salaryProblem(), which
      enforces the league minimum AND the $250K lattice (Rule 2.5). The rule this line exists to
      pin — a counter can never go below the minimum — is unchanged; only its mechanism moved. */

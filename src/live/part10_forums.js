@@ -166,7 +166,7 @@ CG.AFTER.forums = function(){
    boards…" placeholder and then never run CG.AFTER.forums to fill it. Redirect. */
 CG.fxRedirect = function(){
   setTimeout(function(){ location.replace("#/forums"); }, 0);
-  return '<div class="shell" style="padding:40px 0"><p class="caption">Taking you to the forums…</p></div>';
+  return '<div class="shell" style="padding-top:40px;padding-bottom:40px"><p class="caption">Taking you to the forums…</p></div>';
 };
 CG.ROUTES.forum = function(slug){
   if (!slug) return CG.fxRedirect();

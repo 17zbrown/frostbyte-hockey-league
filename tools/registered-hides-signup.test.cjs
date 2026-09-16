@@ -19,7 +19,7 @@ A("CG.navVisible filters the Register item", /n\[1\] !== "#\/register" \|\| !CG\
 
 console.log("\n— the chrome that appears on every page");
 A("desktop nav renders through navVisible", /CG\.navVisible\(\)\.map\(function\(n\)\{ return '<a href="'\+n\[1\]/.test(ui));
-A("mobile nav (the dropdown) renders through navVisible", /var mnav = CG\.navVisible\(\)\.concat\(/.test(ui));
+A("mobile nav (the dropdown) renders through navVisible (v2.49: grouped rows, same source)", /'<div class="mn-g">League<\/div>'\+CG\.navVisible\(\)\.map\(mnRow\)/.test(ui));
 A("the ticker's SIGN UP BY item is gated (and reads the season taking sign-ups, v2.36)", /sR\.registration_deadline && !CG\.isRegisteredNow\(\)/.test(ui));
 A("the footer's Register link is gated", /registration_open && !CG\.isRegisteredNow\(\) \? '<a class="fl" href="#\/register">/.test(ui));
 

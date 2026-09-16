@@ -1099,7 +1099,7 @@ CG.hubLines = function(qs){
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(CG.TEAM[club].name)+' · team HQ</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Lineup builder</h1>'+
-    '<p class="lede" style="margin-top:8px">Three lines — one per game night — and the whole roster. Drag a player onto any slot, or between slots to swap; point each night at a line, then dress the week in one click. Every dressing still runs through the league’s checks.</p></div>';
+    '<p class="lede" style="margin-top:8px">Three lines — one per game night — and the whole roster. '+((window.matchMedia&&matchMedia("(pointer:coarse)").matches)?'Tap a player, then tap the slot to put him there — tap a filled slot to swap':'Drag a player onto any slot, or between slots to swap')+'; point each night at a line, then dress the week in one click. Every dressing still runs through the league’s checks.</p></div>';
 
   var bar = '<div class="note '+(dirtyN?"chr":"grn")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">'+(dirtyN?dirtyN+" line"+(dirtyN===1?"":"s")+" with unsaved changes":"All lines saved")+'</b>'+
@@ -1631,10 +1631,10 @@ CG.hubRoster = function(qs){
     var actions = p.mgmt
       ? '<span class="caption">Management contract — protected</span>'
       : loan
-      ? '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">'+squadBtn(p)+'<span class="caption" title="A loan is not the club’s asset to trade or waive — he is released automatically after the pre-season">On loan</span></div>'
+      ? '<div class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end;align-items:center">'+squadBtn(p)+'<span class="caption" title="A loan is not the club’s asset to trade or waive — he is released automatically after the pre-season">On loan</span></div>'
       : (waived
         ? '<button class="btn btn-ghost btn-sm" data-reinstate="'+p.id+'">Reinstate</button>'
-        : '<div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+        : '<div class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
           extBtn+squadBtn(p)+
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
@@ -1646,11 +1646,11 @@ CG.hubRoster = function(qs){
       : esc(p.pos);
     return '<tr class="'+(loan?"loan-row":"")+'"'+(waived?' style="opacity:.55"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
-      '<td class="tnum">'+posCell+'</td>'+
+      '<td class="tnum" data-l="Pos">'+posCell+'</td>'+
       '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
-      '<td class="tnum" data-v="'+(p.salary||0)+'"><b>'+CG.fmtMoney(p.salary)+'</b></td>'+
-      '<td class="tnum">'+(loan?'<span class="caption">loan</span>':p.term+' yr'+(p.term>1?"s":""))+'</td>'+
-      '<td class="tnum" data-v="'+gp+'">'+gp+'</td>'+
+      '<td class="tnum" data-v="'+(p.salary||0)+'" data-l="Cap">'+'<b>'+CG.fmtMoney(p.salary)+'</b></td>'+
+      '<td class="tnum" data-l="Term">'+(loan?'<span class="caption">loan</span>':p.term+' yr'+(p.term>1?"s":""))+'</td>'+
+      '<td class="tnum" data-v="'+gp+'" data-l="GP">'+gp+'</td>'+
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
   };
@@ -1733,7 +1733,7 @@ CG.hubRoster = function(qs){
   var loanN = loans.length;
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
+    '<div class="tblwrap"><table class="tbl keepcols roster-tbl"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
     '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
     (rightsHeld.length ? '<div class="card-b" style="border-top:1px solid var(--line)"><b style="font-family:var(--f-disp);display:block;margin-bottom:8px">Rights held until free agency opens</b>'+

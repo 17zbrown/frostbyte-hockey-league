@@ -135,11 +135,11 @@ CG.gameCard = function(g){
     '<div class="gc-when"><b>'+esc(wd)+'</b>'+
       '<span style="display:block;font-size:11px;color:var(--ink);margin:2px 0 3px">'+esc(mmdd)+'</span>'+
       '<span>'+CG.fmtTime(g.at)+'</span></div>'+
-    '<div class="gc-match">'+CG.crest(g.away,26)+esc(CG.TEAM[g.away].name)+
-      (res?'<span class="gc-score num">'+res.score[g.away]+'</span>':"")+
+    '<div class="gc-match"><span class="side away">'+CG.crest(g.away,26)+esc(CG.TEAM[g.away].name)+
+      (res?'<span class="gc-score num">'+res.score[g.away]+'</span>':"")+'</span>'+
       '<span class="at">'+(res?"—":"@")+'</span>'+
-      (res?'<span class="gc-score num">'+res.score[g.home]+'</span>':"")+
-      CG.crest(g.home,26)+esc(CG.TEAM[g.home].name)+'</div>'+
+      '<span class="side home">'+CG.crest(g.home,26)+esc(CG.TEAM[g.home].name)+
+      (res?'<span class="gc-score num">'+res.score[g.home]+'</span>':"")+'</span></div>'+
     '<span class="gc-tag">'+tag+'</span></div>';
 };
 
@@ -1998,26 +1998,26 @@ CG.ROUTES.team = function(code, qs){
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+
-    [["roster","Roster & stats"],["games","Schedule & results"],["moves","Transactions & discipline"],["honors","Honors"]].map(function(x){
+    [["roster",'Roster<span class="hide-xs"> &amp; stats</span>'],["games",'Schedule<span class="hide-xs"> &amp; results</span>'],["moves",'Moves<span class="hide-xs"> &amp; discipline</span>'],["honors","Honors"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>';
     }).join("")+'</div></div>';
-  var body = '<div class="shell" style="padding:22px 0 40px">';
+  var body = '<div class="shell" style="padding-top:22px;padding-bottom:40px">';
   if (tab==="roster"){
     var rosterTable = '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Roster — '+esc(SD.label)+'</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th>Pts / Record</th>'+(archived?"":'<th>OVR</th>')+'</tr></thead><tbody>'+
+      '<th class="tleft">Player</th>'+(archived?"":'<th>OVR</th>')+'<th>POS</th><th class="hide-xs-col">#</th><th>GP</th><th>Pts / Record</th></tr></thead><tbody>'+
       roster.map(function(p){
         var ps = SD.pstats[p.id], line;
         if (p.pos==="G") line = ps.w+"-"+ps.l+"-"+ps.otl+" · "+(ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—");
-        else line = ps.p+" pts ("+ps.g+"G "+ps.a+"A)";
+        else line = ps.p+" pts · "+ps.g+"G "+ps.a+"A";
         var route = CG.playerRoute(p)+(archived?"?season="+seasonKey:"");
         return '<tr class="rowlink" style="--tc:'+t.color+'" data-go="'+route+'">'+
           '<td class="tleft"><span class="playercell"><span class="nm">'+esc(p.tag)+'</span>'+(p.rookie?' <span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+
           (p.mgmt?' <span class="chip chip-chrome" style="font-size:9px;padding:1px 7px">'+(p.mgmt==="owner"?"OWNER":p.mgmt==="gm"?"GM":"AGM")+'</span>':"")+'</span></td>'+
-          '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
-          '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px">'+line+'</td>'+
           (archived?"":'<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px"'+
             (CG.ovrProgress(p.id).provisional?' title="'+esc(CG.ovrNote(p.id,"title"))+'"':'')+'>'+lg.ratings[p.id].ovr+
-            (CG.ovrProgress(p.id).provisional?'<span style="opacity:.75">*</span>':'')+'</span></td>')+'</tr>';
+            (CG.ovrProgress(p.id).provisional?'<span style="opacity:.75">*</span>':'')+'</span></td>')+
+          '<td class="tnum">'+p.pos+'</td><td class="tnum hide-xs-col">'+p.jersey+'</td>'+
+          '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px;white-space:nowrap">'+line+'</td></tr>';
       }).join("")+
       (roster.length ? "" : CG.emptyRow(archived?5:6, "No players on this roster yet",
         "Clubs fill up at the draft and in free agency. Signings show here the moment they’re made."))+
@@ -2036,7 +2036,7 @@ CG.ROUTES.team = function(code, qs){
       var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
           _svp = _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
       teamStats = '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
-        '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'+
+        '<div class="grid g4 team-stats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">'+
         [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
          ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_gp).toFixed(1)],
          ["Shots against per game",(s.sa/_gp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
@@ -2291,7 +2291,7 @@ CG.ROUTES.player = function(pid, qs){
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+
     [["overview","Overview"],["pickup","Pickup Stats"],["log","Game log"],["honors","Honors & history"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
-  var body = '<div class="shell" style="padding:22px 0 40px">';
+  var body = '<div class="shell" style="padding-top:22px;padding-bottom:40px">';
   if (tab==="overview"){
     var cells = isG
       ? [["GP",s.gp],["Record",s.w+"-"+s.l+"-"+s.otl],["SV%",s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",s.gp?(s.ga/s.gp).toFixed(2):"—"],["Shutouts",s.so],["Quality starts",s.qs]]
@@ -2814,7 +2814,7 @@ CG.ROUTES.pickup = function(id){
     '<h1 id="pkH1" class="sr-only">Pickup game</h1>'+
     '<div id="pkHero" style="margin-top:16px;min-height:92px"><p class="caption" style="color:var(--on-ink-dim)">Loading the box score…</p></div>'+
     '</div></section>'+
-    '<div class="shell" style="padding:22px 0 40px"><div id="pkBody"></div></div>';
+    '<div class="shell" style="padding-top:22px;padding-bottom:40px"><div id="pkBody"></div></div>';
 };
 CG.AFTER.pickup = function(id){
   id = id || CG._pickupId;
