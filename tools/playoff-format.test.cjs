@@ -52,12 +52,28 @@ console.log("\n— the config and copy agree on best-of-7");
   A("...and win-4-and-advance with the rest canceled", /wins four \(4\) games advances immediately, and the remaining games of the series are canceled/.test(r83));
 }
 
-console.log("\n— the series-cap flag uses the right cap per position");
+console.log("\n— the series-cap flag uses the right cap per position, by format (v2.48)");
 {
-  A("the flag is cap-aware (skater 3, goalie 6)", /var cap = isGoalie \? 6 : 3;/.test(pub2));
+  /* the cap used to be a hardcoded isGoalie?6:3; it now rides CG.weeklyCap, which is
+     format-aware — basic (the league standard): skater 3 / goalie 3; full (shelved): skater 3 /
+     goalie 6, the value this test used to pin as the ONLY behavior */
+  A("the flag reads CG.weeklyCap by position, not a hardcoded number",
+    /var cap = CG\.weeklyCap\(\{ pos: isGoalie \? "G" : "C", stage:"playoff" \}\);/.test(pub2));
   A("...flagging strictly ABOVE the cap", /return n>cap \?/.test(pub2));
   A("...called with isGoalie at both sites", /capFlag\(row\.pid, false\)/.test(pub2) && /capFlag\(gl\.pid, true\)/.test(pub2));
   A("the old flat 'more than four' flag is gone", !/n>4 \?/.test(pub2) && !/5TH GAME/.test(pub2));
+  A("the old hardcoded isGoalie?6:3 is gone (replaced by the format-aware call)", !/var cap = isGoalie \? 6 : 3;/.test(pub2));
+
+  const FORMAT_RULES = JSON.parse((() => {
+    const m = live.match(/CG\.FORMAT_RULES\s*=\s*(\{[\s\S]*?\});/);
+    return m[1];
+  })().replace(/(\w+):/g, '"$1":').replace(/'/g, '"'));
+  A("basic (the league standard): skater cap 3, goalie cap 3",
+    FORMAT_RULES.basic.cap_skater === 3 && FORMAT_RULES.basic.cap_goalie === 3,
+    JSON.stringify({ skater: FORMAT_RULES.basic.cap_skater, goalie: FORMAT_RULES.basic.cap_goalie }));
+  A("full (shelved): skater cap 3, goalie cap 6 — the old pinned '6 : 3' behavior",
+    FORMAT_RULES.full.cap_skater === 3 && FORMAT_RULES.full.cap_goalie === 6,
+    JSON.stringify({ skater: FORMAT_RULES.full.cap_skater, goalie: FORMAT_RULES.full.cap_goalie }));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

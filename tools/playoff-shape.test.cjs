@@ -14,9 +14,17 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 const ctx = { console, Math, Object, Array, String, Number, Boolean, JSON, parseInt, Error };
 ctx.window = ctx; ctx.globalThis = ctx;
-ctx.CG = { DIVISIONS: ["East", "West"], _siteCfg: {} };
+ctx.CG = { DIVISIONS: ["East", "West"], _siteCfg: {}, SEASON: { format: "full" } };
 ctx.esc = (v) => String(v);
 vm.createContext(ctx);
+{
+  /* v2.48 — playoffPerDiv/playoffBestOf now branch on CG.isBasic(); load the format block first
+     so CG.fmt/isBasic exist. The site_config setting only governs the full format now, so the
+     rest of this section runs with SEASON.format = "full" and a dedicated basic section follows. */
+  const fmtBlock = src.slice(src.indexOf("CG.FORMAT_RULES = {"), src.indexOf("CG.GROUP_NAME = {"));
+  if (!fmtBlock || fmtBlock.indexOf("CG.FORMAT_RULES") !== 0) { A("located the format rules block", false); process.exit(1); }
+  vm.runInContext(fmtBlock, ctx);
+}
 /* the default is a plain assignment, not a function — playoffPerDiv falls back to it, so without
    this the fallback tests measure an undefined and pass for the wrong reason */
 {
@@ -24,7 +32,7 @@ vm.createContext(ctx);
   if (!d) { A("located CG.PLAYOFF_PER_DIV_DEFAULT", false); process.exit(1); }
   vm.runInContext(d[0], ctx);
 }
-for (const name of ["playoffDivisions", "playoffPerDiv", "playoffSeeds", "playoffFieldSize",
+for (const name of ["playoffDivisions", "playoffPerDiv", "playoffBestOf", "playoffSeeds", "playoffFieldSize",
                     "playoffRound1", "playoffRounds", "playoffBracketBlurb", "playoffRoundName"]) {
   const m = src.match(new RegExp("CG\\." + name + " = function[\\s\\S]*?\\n\\};"));
   if (!m) { A("located CG." + name, false); process.exit(1); }
@@ -40,6 +48,24 @@ console.log("— the setting is read, and nonsense falls back to four");
   CG._siteCfg.playoff_format = { perDiv: 0 }; A("zero falls back", CG.playoffPerDiv() === 4);
   CG._siteCfg.playoff_format = { perDiv: 99 }; A("out of range falls back", CG.playoffPerDiv() === 4);
   CG._siteCfg.playoff_format = { perDiv: "3" }; A("a string setting still parses", CG.playoffPerDiv() === 3);
+}
+
+console.log("\n— basic format: fixed by the format, site_config is ignored (Rule 8.1)");
+{
+  CG.SEASON = { format: "basic" };
+  CG._siteCfg.playoff_format = { perDiv: 6 };   /* even a live setting must not move basic */
+  A("basic is always top 3 per division", CG.playoffPerDiv() === 3);
+  A("...best-of is always 7", CG.playoffBestOf() === 7);
+  CG._siteCfg.playoff_format = {};
+  A("...still 3 with no setting at all", CG.playoffPerDiv() === 3);
+  /* the round-1 shape and round count for 3 seeds are generic (driven off playoffPerDiv's return
+     value, not the format directly), but basic reaches them through CG.isBasic() — pin the whole
+     chain here so a future divergence between the two paths is caught */
+  const r3 = CG.playoffRound1(Array.from({ length: CG.playoffPerDiv() }, (_, i) => i + 1));
+  A("basic top 3: one pair 2v3, seed 1 rests through round 1",
+    r3.pairs.map((p) => p.join("v")).join(" ") === "2v3" && r3.byes.join(",") === "1");
+  A("basic top 3: three rounds total (play-in counts, then the final)", CG.playoffRounds() === 3);
+  CG.SEASON = { format: "full" };
 }
 
 console.log("\n— round 1 inside one division, for every allowed count");

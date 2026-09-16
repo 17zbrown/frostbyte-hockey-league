@@ -1774,9 +1774,12 @@ export default async (req) => {
        newest row is not it once a next season exists ahead of time — with Season 2 created in
        September, "newest" made every Season 1 roster spot read as PRIOR service and would have
        handed the whole league Restricted Free Agent roles. */
-    const seasonsAll = await sbGet("seasons?select=id,number,status&status=neq.complete&order=number.asc");
+    const seasonsAll = await sbGet("seasons?select=id,number,status,format&status=neq.complete&order=number.asc");
     const curSeason = seasonsAll.find((s) => s.status === "active") || seasonsAll[0] || null;
     const curId = curSeason && curSeason.id, curNum = (curSeason && curSeason.number) || 1;
+    /* v2.48: rights classes exist only in the FULL season format (Rule 2.2). A basic season holds
+       nobody's rights, so the Restricted Free Agent role is never granted while one is in play. */
+    const rightsOn = !!curSeason && curSeason.format === "full";
     const cfgRows = await sbGet("app_config?key=eq.rfa_offseasons&select=value");
     const RFA_YEARS = Math.max(1, parseInt((cfgRows[0] && cfgRows[0].value) || "4", 10) || 4);
 
@@ -1800,12 +1803,12 @@ export default async (req) => {
     }
     for (const pid of Object.keys(priorSeasons)) {
       if (onRosterNow.has(pid) || underContract.has(pid)) continue;   // not a free agent at all
-      if (priorSeasons[pid].size < RFA_YEARS) rfa.add(pid);           // rights still held
+      if (rightsOn && priorSeasons[pid].size < RFA_YEARS) rfa.add(pid);   // rights still held (full format only)
     }
     for (const p of await sbGet("profiles?select=id")) {
       if (!priorSeasons[p.id] && !draftedBefore.has(p.id)) rookies.add(p.id);
     }
-    sum.rights = { rfa: rfa.size, rookies: rookies.size, rfaYears: RFA_YEARS };
+    sum.rights = { rfa: rfa.size, rookies: rookies.size, rfaYears: RFA_YEARS, format: rightsOn ? "full" : "basic" };
   } catch (e) { inputsOk = false; inputsErr.push("rights"); sum.errors.push({ rights: String(e.message || e) }); }
 
   /* @everyone/@here stays with the league office — re-checked every sweep, not just once.

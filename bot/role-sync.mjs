@@ -75,7 +75,7 @@ export function createRoleSyncer(env, opts = {}) {
     if (slow && Date.now() - slowAt < 60_000) return slow;
     const [guildRoles, seasons, rfaCfg] = await Promise.all([
       dApi("GET", `/guilds/${GUILD}/roles`),
-      sbGet("seasons?select=id,number,status,registration_open&status=neq.complete&order=number.asc"),
+      sbGet("seasons?select=id,number,status,registration_open,format&status=neq.complete&order=number.asc"),
       sbGet("app_config?key=eq.rfa_offseasons&select=value"),
     ]);
     if (!Array.isArray(guildRoles)) throw new Error("guild roles unavailable");
@@ -89,7 +89,9 @@ export function createRoleSyncer(env, opts = {}) {
     const regSeason = (seasons || []).filter((s) => s.registration_open).sort((a, b) => (b.number || 0) - (a.number || 0))[0] || curSeason;
     const posSeason = curSeason;
     const rfaYears = Math.max(1, parseInt((rfaCfg && rfaCfg[0] && rfaCfg[0].value) || "4", 10) || 4);
-    slow = { roleId, regSeason, posSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears };
+    /* v2.48: rights classes exist only in the full season format (Rule 2.2) */
+    const rightsOn = !!curSeason && curSeason.format === "full";
+    slow = { roleId, regSeason, posSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears, rightsOn };
     slowAt = Date.now();
     return slow;
   }
@@ -161,7 +163,7 @@ export function createRoleSyncer(env, opts = {}) {
         const cts = await sbGet(`contracts?profile_id=eq.${encodeURIComponent(profileId)}&status=in.(active,signed)&select=is_manager,start_season,end_season`);
         const underContract = (cts || []).some((c) => !c.is_manager && (c.start_season || 1) <= curNum && (c.end_season || 1) >= curNum);
         isRookie = priorSeasons.size === 0 && !draftedBefore;
-        isRfa = priorSeasons.size > 0 && priorSeasons.size < C.rfaYears && !onRosterNow && !underContract;
+        isRfa = C.rightsOn && priorSeasons.size > 0 && priorSeasons.size < C.rfaYears && !onRosterNow && !underContract;
       }
 
       const mem = await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);

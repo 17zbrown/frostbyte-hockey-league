@@ -28,8 +28,15 @@ console.log("— management salaries: Owner $0 / GM $3M / AGM $3M, everywhere");
 
 console.log("\n— new-season defaults match the real league shape");
 {
-  A("a new season defaults to a 17-man roster", /roster_max:17, trade_deadline_week/.test(live) && /\.value,10\)\|\|17/.test(live));
-  A("...and a $40M cap, not $60M", /salary_cap:40000000, roster_max:17/.test(live) && !/salary_cap:60000000/.test(live));
+  /* v2.48: basic is the league standard, so a new season now defaults to basic's numbers —
+     18-man roster, $50M cap, deadline week 4, 6 weeks — read live from CG.FORMAT_RULES.basic
+     rather than hardcoded literals in seasonForm. */
+  A("a new season defaults to CG.FORMAT_RULES.basic's roster shape and trade deadline",
+    /salary_cap:CG\.FORMAT_RULES\.basic\.salary_cap, roster_max:CG\.FORMAT_RULES\.basic\.roster_max,/.test(live) &&
+    /trade_deadline_week:CG\.FORMAT_RULES\.basic\.trade_deadline_week, weeks:CG\.FORMAT_RULES\.basic\.weeks/.test(live));
+  A("...and CG.FORMAT_RULES.basic itself is the 18-man / $50M / week-4 / 6-week shape, not the old 17 / $40M / week-6",
+    /basic: \{[\s\S]*?roster_max:18,[\s\S]*?salary_cap:50000000, weeks:6, trade_deadline_week:4,/.test(live) &&
+    !/salary_cap:60000000/.test(live));
 }
 
 console.log("\n— the dressing rule is group-based");

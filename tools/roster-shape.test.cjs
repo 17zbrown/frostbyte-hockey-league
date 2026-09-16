@@ -31,13 +31,20 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 console.log("— the rulebook is the authority, and it says 'beyond'");
 {
+  /* v2.48: basic is now the league standard, and it carries the EIGHTEEN-man shape
+     (9 F / 6 D / 3 G) — the seventeen-man (9 F / 6 D / 2 G) shape this file used to pin is
+     preserved verbatim as the shelved full-format text (section.full). */
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
-  const r21 = sec("2.1");
-  A("camp is carried BEYOND the seventeen active spots",
-    /up to three \(3\) training-camp players beyond its seventeen active spots/.test(r21));
-  A("...and the active roster is the 17-man shape by GROUP (v2.41): 9 forwards, 6 defensemen, 2 goaltenders",
-    /nine \(9\) forwards — centers, left wings and right wings in any mix/.test(r21) && /six \(6\) defensemen — left or right in any mix/.test(r21) && /two \(2\) goaltenders, the one position locked to its exact role/.test(r21));
+  const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
+  const r21 = sec("2.1"), r21f = secFull("2.1");
+  A("camp is carried BEYOND the eighteen active spots (basic)",
+    /up to three \(3\) training-camp players beyond its eighteen active spots/.test(r21));
+  A("...and the active roster is the 18-man shape by GROUP (v2.48): 9 forwards, 6 defensemen, 3 goaltenders",
+    /nine \(9\) forwards — centers, left wings and right wings in any mix/.test(r21) && /six \(6\) defensemen — left or right in any mix/.test(r21) && /three \(3\) goaltenders, the one position locked to its exact role/.test(r21));
+  A("the shelved full-format text still carries the seventeen-man, 2-goaltender shape (v2.41)",
+    /up to three \(3\) training-camp players beyond its seventeen active spots/.test(r21f) &&
+    /two \(2\) goaltenders, the one position locked to its exact role/.test(r21f));
 }
 
 console.log("\n— every client roster count excludes training camp");
@@ -50,19 +57,28 @@ console.log("\n— every client roster count excludes training camp");
   A("no client site counts the raw roster length against the cap any more",
     !/var rosterN=\(lg\.byTeam(&&lg\.byTeam)?\[[^\]]*\]\|\|\[\]\)\.length/.test(live) &&
     !/counts\[t\.code\]=\(lg\.byTeam\[t\.code\]\|\|\[\]\)\.length;/.test(live));
-  A("the Squad Room already used the real 17-man shape and still does",
-    /cap = grp==="G"\?2:grp==="D"\?6:9/.test(hub));
+  /* v2.48: the shape is no longer a hardcoded 9/6/2 in the Squad Room — it now reads
+     CG.ROSTER_QUOTA (basic 9/6/3, full 9/6/2) and CG.CAMP_MAX so the same code enforces
+     whichever format the season is running. */
+  A("the Squad Room reads the format's shape from CG.ROSTER_QUOTA, not a hardcoded 9/6/2",
+    /cap = CG\.ROSTER_QUOTA\[grp\]/.test(hub));
   A("...counting only pro players toward it", /x\.squad!=="tc" && CG\.posGroup\(x\.pos\)===grp/.test(hub));
-  A("...and camp itself is capped at three", /x\.squad==="tc"; \}\)\.length < 3/.test(hub));
+  A("...and camp itself is capped at CG.CAMP_MAX, not a hardcoded three",
+    /x\.squad==="tc"; \}\)\.length < CG\.CAMP_MAX/.test(hub));
 }
 
-console.log("\n— the roster size fallbacks tell the truth (17, not the pre-v2.7 12/15)");
+console.log("\n— the roster size fallbacks tell the truth (format-derived, not the pre-v2.7 12/15)");
 {
   A("no stale ||15 fallback survives in the live bundle",
     !/roster_max\|\|15/.test(live) && !/ROSTER_MAX\|\|15/.test(live) && !/ROSTER_MAX\|\|15/.test(pub));
-  A("ROSTER_MAX still derives from the season, defaulting to 17",
-    /CG\.ROSTER_MAX = \(season && season\.roster_max\) \|\| 17;/.test(live));
-  A("the public blurb quotes the same number", /\(CG\.ROSTER_MAX\|\|17\)\+"-player roster/.test(pub));
+  /* v2.48: ROSTER_MAX no longer defaults to a literal 17 — it derives from CG.fmt("roster_max"),
+     which is 18 in basic (the league standard) and 17 in the shelved full format. */
+  A("ROSTER_MAX derives from the season's format via CG.fmt, not a hardcoded 17",
+    /CG\.ROSTER_MAX = \(season && season\.roster_max\) \|\| CG\.fmt\("roster_max", season\);/.test(live));
+  A("...and the basic default is eighteen, the full default seventeen",
+    /basic: \{[\s\S]*?roster_max:18,/.test(live) && /full: *\{[\s\S]*?roster_max:17,/.test(live));
+  A("the public blurb quotes the live, format-derived number",
+    /\(CG\.ROSTER_MAX\|\|CG\.fmt\("roster_max"\)\)\+"-player roster/.test(pub));
 }
 
 console.log("\n— the reason each fix exists is written down where the next reader will look");

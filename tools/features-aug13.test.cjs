@@ -25,6 +25,13 @@ vm.createContext(ctx);
   if (!tm) { A("located CG.TX_MOVE_TYPES", false); process.exit(1); }
   vm.runInContext(tm[0], ctx);
 }
+{
+  /* v2.48 — Road to 5 only exists in the full format (CG.fmt("preseason")); load the format
+     block so CG.fmt/isBasic exist before roadToFive runs */
+  const fmtBlock = live.slice(live.indexOf("CG.FORMAT_RULES = {"), live.indexOf("CG.GROUP_NAME = {"));
+  if (!fmtBlock || fmtBlock.indexOf("CG.FORMAT_RULES") !== 0) { A("located the format rules block", false); process.exit(1); }
+  vm.runInContext(fmtBlock, ctx);
+}
 for (const [src, fns] of [[live, ["roadToFive", "setupChecklist", "boardCoverage", "mapDraftData", "dayAdd", "etISO", "etYMD"]],
                           [pub, ["movementDeadlineTs", "deadlineBand", "teamMoves", "txText"]]]) {
   for (const fn of fns) {
@@ -38,6 +45,7 @@ CG.now = () => Date.parse("2026-09-20T18:00:00-04:00");   /* mid-pre-season, fix
 
 console.log("— Road to 5: the classification every surface shares");
 {
+  ctx.CG.SEASON = { format: "full" };   /* Road to 5 is a pre-season (full-format) feature (v2.48) */
   const lg = {
     byTeam: { SEA: [
       { id: "vet", tag: "Old Guard", pos: "C", origin: "preseason_random" },
@@ -68,6 +76,9 @@ console.log("— Road to 5: the classification every surface shares");
     rows[0].pid === "stuck", rows.map(r => r.pid).join(","));
   A("an unknown club returns an empty list, never throws", CG.roadToFive(lg, "XXX").length === 0);
   A("a missing league object returns an empty list", CG.roadToFive(null, "SEA").length === 0);
+  ctx.CG.SEASON = { format: "basic" };
+  A("basic format has no pre-season to gate — always []", CG.roadToFive(lg, "SEA").length === 0);
+  ctx.CG.SEASON = { format: "full" };
 }
 
 console.log("\n— the Get-set-up checklist");
@@ -232,7 +243,9 @@ console.log("\n— the adversarial review's confirmed findings stay fixed");
     /spectate \|\| role==="staff" \? 'the first pick goes' : 'your club/.test(live));
 
   /* 6 · the room is reachable */
-  A("the home timeline's draft-night row goes to the draft room", /\["Draft night", sD\.draft_at, "[^"]*", "#\/draft"\]/.test(pub));
+  A("the home timeline's draft-night row goes to the draft room", /\["Draft night", sD\.draft_at, [\s\S]{0,140}, "#\/draft"\]/.test(pub));
+  A("...and its description is format-aware (snake in basic, no snake in full)",
+    /CG\.fmt\("draft_snake"\) \? "fifteen rounds, snake order, live on the site" : "fourteen rounds, live on the site"/.test(pub));
   A("the command palette knows the draft room", /route:"#\/draft"/.test(ui));
 
   /* 7 · the checklist can no longer offer a dead-end button */

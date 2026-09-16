@@ -1241,16 +1241,17 @@ CG.AFTER._lines = function(qs){
     });
     return c;
   }
-  /* a club carries two goalies and a goalie's six-game week is two nights — two lines is the whole
-     goaltending week, so a third is always a mistake (mirrors set_team_line's own check) */
+  /* a goaltender's weekly cap in NIGHTS: six games is two lines (full format), three games is one
+     line (basic format) — a line beyond that is always a mistake (mirrors set_team_line's check) */
   function goalieCapped(pid, pos, line){
     if (pos!=="G") return null;
-    /* no weekly cap in the pre-season (Rule 5.2, v2.28), so a goaltender may cover every line —
-     the client must not refuse what set_game_lineup now allows */
+    /* no weekly cap in the full format's pre-season (Rule 5.2, v2.28), so a goaltender may cover
+       every line — the client must not refuse what set_game_lineup now allows */
     if (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)) return null;
-    if (gLines(pid, line) >= 2){
+    var gMax = Math.max(1, Math.floor(CG.weeklyCap({ pos:"G" }) / 3));
+    if (gLines(pid, line) >= gMax){
       var p = CG.playerById(lg, pid);
-      return (p?p.tag:"That goaltender")+" already backstops two lines — a goaltender covers at most two (Rule 5.2).";
+      return (p?p.tag:"That goaltender")+" already backstops "+(gMax===1?"a line":gMax+" lines")+" — a goaltender's "+CG.weeklyCap({ pos:"G" })+"-game week is "+(gMax===1?"one night":gMax+" nights")+" (Rule 5.2).";
     }
     return null;
   }
@@ -1532,7 +1533,6 @@ CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||po
    beyond it. Since v2.30 a player may move between the two as often as management likes, all
    season: the database (guard_squad_move) enforces the shape and the camp limit only, and this
    button just keeps the UI honest about which move is currently possible. */
-CG.SQUAD_CAPS = { G:2, D:6, F:9, TC:3 };
 /* How many pro spots a club is using at a player's position group — a one-way move
    into the pro roster (or into camp) is only possible when there is slack. When the
    roster is full at that shape, the only legal move is a same-position swap, so the
@@ -1540,10 +1540,10 @@ CG.SQUAD_CAPS = { G:2, D:6, F:9, TC:3 };
 function squadRoom(club, p){
   var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
   if (p.squad==="tc"){
-    var grp = CG.posGroup(p.pos), cap = grp==="G"?2:grp==="D"?6:9;   /* the 17-man shape: 9 F, 6 D, 2 G (Rule 2.1) */
-    return roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp; }).length < cap;
+    var grp = CG.posGroup(p.pos), cap = CG.ROSTER_QUOTA[grp];   /* the format's shape: 9 F / 6 D / 3 G basic, 9 F / 6 D / 2 G full (Rule 2.1) */
+    return roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp && !CG.spotOutsideShape(x); }).length < cap;
   }
-  return roster.filter(function(x){ return x.squad==="tc"; }).length < 3;
+  return roster.filter(function(x){ return x.squad==="tc"; }).length < CG.CAMP_MAX;
 }
 function squadBtn(p){
   if (!p.spotId) return "";
@@ -1578,7 +1578,7 @@ CG.hubRoster = function(qs){
   /* v2.34 — the cap outlook: this season and the next three, from the same arithmetic every cap
      check uses (team_cap_outlook), so what management plans against is what the guards enforce.
      Filled in AFTER._roster; the placeholder keeps the page from jumping when it lands. */
-  h += '<div class="card" style="margin-bottom:20px" id="capOutlookCard"><div class="card-h"><h3>Cap outlook</h3><span class="chip">This season + 3</span></div>'+
+  h += '<div class="card" style="margin-bottom:20px" id="capOutlookCard"><div class="card-h"><h3>Cap outlook</h3><span class="chip">'+(CG.fmt("extensions")?'This season + 3':'This season')+'</span></div>'+
        '<div class="card-b" id="capOutlookBody"><p class="caption">Loading your commitments…</p></div></div>';
   /* v2.34 — between the rollover and this season's free agency, the players whose deals just ended
      are not on the roster but the club still holds their rights: they can be re-signed from here. */
@@ -1599,6 +1599,9 @@ CG.hubRoster = function(qs){
      apart from the club's own players — their own block, a tinted row, a LOAN chip first, and the
      position they registered when they are listed elsewhere for the pre-season (Rule 0.4). */
   var isLoan = function(p){ return !p.mgmt && (p.origin === "preseason_random" || p.origin === "latecomer_random"); };
+  /* v2.48: basic-format depth — undrafted and late sign-ups placed by the league office. A real
+     one-season contract (trade, waive, dress like anyone) that never counts against the shape. */
+  var isDepth = function(p){ return !p.mgmt && p.origin === "depth_random"; };
   var regPos = {}; (lg._registrationsRaw||[]).forEach(function(r){ if (r.profile_id && r.position) regPos[r.profile_id] = r.position; });
   var contracted = roster.filter(function(p){ return !isLoan(p); }), loans = roster.filter(isLoan);
   var rowFor = function(p){
@@ -1621,6 +1624,7 @@ CG.hubRoster = function(qs){
     else if (expiring) status += ' <span class="chip chip-warn" title="His contract ends after this season (Rule 2.2)">Final season</span>';
     if (openOffer) status += ' <span class="chip chip-live" title="'+(CG.offerAwaitsClub(openOffer)?'His number is waiting for you on your dashboard':'Your offer is waiting on him')+'">'+(CG.offerAwaitsClub(openOffer)?'His ask':'Offer out')+'</span>';
     if (loan) status = '<span class="chip chip-ink" style="--bc:var(--steel)" title="'+(p.origin==="latecomer_random"?"Late sign-up placed for the pre-season":"Randomly assigned for the pre-season")+' — not the club’s asset: no trades, no waivers; he returns to the draft pool when the final pre-season game ends (Rule 0.4)">Loan</span> '+status;
+    if (isDepth(p)) status = '<span class="chip chip-ink" style="--bc:var(--steel)" title="Placed by the league office after the draft (or as a late sign-up) on a one-season deal at the league minimum — the club’s player like any other, but he never counts against the 9/6/3 shape (Rule 2.8)">Depth</span> '+status;
     var extRow = !p.mgmt && !loan && CG.extendableContractOf && CG.extendableContractOf(p.id);
     var extBtn = (extRow && extRow.team_id === (lg._codeToId||{})[club])
       ? '<button class="btn btn-chrome btn-sm" data-extend="'+p.id+'">Extend</button>' : '';
@@ -1654,9 +1658,11 @@ CG.hubRoster = function(qs){
     (loans.length ? '<tr class="loan-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
   /* the 9/6/2 shape is CONTRACTED players only; pre-season loans ride the active roster without
      counting against it (Rule 2.1) and are shown as their own tally */
-  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !isLoan(p) && !CG.isWaived(p.id); });
-  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !isLoan(p) && !CG.isWaived(p.id); });
+  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !isLoan(p) && !isDepth(p) && !CG.isWaived(p.id); });
+  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !isLoan(p) && !isDepth(p) && !CG.isWaived(p.id); });
   var loanSq = loans.filter(function(p){ return p.spotId && !CG.isWaived(p.id); });
+  var depthSq = roster.filter(function(p){ return p.spotId && isDepth(p) && !CG.isWaived(p.id); });
+  var qG = CG.ROSTER_QUOTA.G, gCap = CG.weeklyCap({ pos:"G" }), sCap = CG.weeklyCap({ pos:"C" }), cCap = CG.weeklyCap({ squad:"tc" });
   if (roster.some(function(p){ return p.spotId; })){
     /* Rule 2.1 (v2.41): the active roster is shaped by position GROUP — 9 forwards / 6 defensemen /
        2 goaltenders; the exact split is shown for balance, not enforced. */
@@ -1668,15 +1674,18 @@ CG.hubRoster = function(qs){
         '<span class="caption" style="display:block">'+label+'</span></div>';
     }
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
-      '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp'+(loanSq.length?' · '+loanSq.length+' loaned':'')+'</span></div><div class="card-b">'+
+      '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp'+(loanSq.length?' · '+loanSq.length+' loaned':'')+(depthSq.length?' · '+depthSq.length+' depth':'')+'</span></div><div class="card-b">'+
       '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),CG.ROSTER_QUOTA.F)+
       meter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),CG.ROSTER_QUOTA.D)+
-      meter("goaltenders",grpN("G"),CG.ROSTER_QUOTA.G)+meter("training camp",tcSq.length,3)+
-      (loanSq.length?meter("pre-season loans",loanSq.length,null):"")+'</div>'+
-      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is 9 forwards (centers and wings in any mix), 6 defensemen (either side) and 2 goaltenders, the one position locked to its exact role; training camp holds up to 3 players. Randomly assigned pre-season players ride the active roster as loans and don’t count against the 9/6/2 shape — a club can hold as many as it is sent, so everyone gets a club for the pre-season (Rule 2.1); they return to the draft pool when it ends. '+
+      meter("goaltenders",grpN("G"),qG)+meter("training camp",tcSq.length,CG.CAMP_MAX)+
+      (loanSq.length?meter("pre-season loans",loanSq.length,null):"")+(depthSq.length?meter("depth",depthSq.length,null):"")+'</div>'+
+      '<p class="caption" style="margin-top:12px">Rule 2.1 — the active roster is '+CG.ROSTER_QUOTA.F+' forwards (centers and wings in any mix), '+CG.ROSTER_QUOTA.D+' defensemen (either side) and '+qG+' goaltenders, the one position locked to its exact role'+(CG.isBasic()?', with your Owner, GM and AGM inside those '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' spots':'')+'; training camp holds up to '+CG.CAMP_MAX+' players. '+
+      (CG.isBasic()
+        ? 'Players the league office places after the draft — anyone undrafted, and late sign-ups — join as depth: real one-season contracts you can dress, trade or waive, that never count against the '+CG.ROSTER_QUOTA.F+'/'+CG.ROSTER_QUOTA.D+'/'+qG+' shape (Rule 2.8). '
+        : 'Randomly assigned pre-season players ride the active roster as loans and don’t count against the '+CG.ROSTER_QUOTA.F+'/'+CG.ROSTER_QUOTA.D+'/'+qG+' shape — a club can hold as many as it is sent, so everyone gets a club for the pre-season (Rule 2.1); they return to the draft pool when it ends. ')+
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
-        : 'Camp players may dress in up to 3 games a week at any position; skaters play their own position group, up to 3 games a week (goaltenders up to 6 — Rule 5.2). ')+
+        : 'Camp players may dress in up to '+cCap+' games a week at any position; skaters play their own position group, up to '+sCap+' games a week'+(gCap===sCap?', goaltenders too':' (goaltenders up to '+gCap+')')+' — Rule 5.2. ')+
       'You may move players between the active roster and training camp freely, as often as you like, all season — there is no limit on squad changes (Rule 2.1).</p></div></div>';
   }
   /* Road to 3 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'
@@ -1697,7 +1706,7 @@ CG.hubRoster = function(qs){
             return '<div style="display:flex;align-items:center;gap:12px">'+
               '<span style="flex:0 0 140px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b style="font-size:13px">'+esc(r.tag)+'</b> <small class="caption">'+esc(r.pos||"")+'</small></span>'+
               '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+pct+'%;background:'+(danger?"var(--red)":"var(--chrome)")+'"></i></span>'+
-              '<span class="num" style="flex:0 0 44px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / 5</span>'+
+              '<span class="num" style="flex:0 0 44px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / '+CG.PRESEASON_MIN_GP+'</span>'+
               (danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+CG.PRESEASON_MIN_GP+'</span>':'<span class="caption">needs '+r.need+'</span>')+
             '</div>';
           }).join("")+'</div>'
@@ -1712,15 +1721,15 @@ CG.hubRoster = function(qs){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
     '<span class="chip chip-win">every rostered player is playoff-eligible</span></div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
-      '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
-      '<div><b class="num" style="font-size:22px">6</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
-      '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
-      '<div><b class="num" style="font-size:22px">3</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
+      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
+      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"G" })+'</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
+      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ squad:"tc" })+'</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
+      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">of a playoff series — skaters</span></div></div>'+
     '<p class="caption" style="margin-top:12px">'+
     (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
       ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
       : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
-    'In the playoffs the same caps apply per series: a skater may be dressed in at most three games of a series and a goaltender in at most six (Rule 8.3).</p></div></div>';
+    'In the playoffs the same caps apply per series: a skater may be dressed in at most '+CG.weeklyCap({ pos:"C" })+' games of a series and a goaltender in at most '+CG.weeklyCap({ pos:"G" })+' (Rule 8.3).</p></div></div>';
   var loanN = loans.length;
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
@@ -1739,6 +1748,8 @@ CG.hubRoster = function(qs){
 CG.renderCapOutlook = function(rows){
   var body = document.getElementById("capOutlookBody"); if (!body) return;
   if (!rows || !rows.length){ body.innerHTML = '<p class="caption">No outlook yet — the season has no cap set.</p>'; return; }
+  /* basic format: every contract ends with the season, so only this season's sheet means anything */
+  if (!CG.fmt("extensions")) rows = rows.filter(function(r){ return r.current; });
   var cols = rows.map(function(r){
     var deals = r.deals||[], neg = r.space < 0, ending = deals.filter(function(d){ return d.final; });
     return '<div class="kpi" style="cursor:default;align-items:stretch;text-align:left;padding:14px">'+
@@ -1748,7 +1759,9 @@ CG.renderCapOutlook = function(rows){
       (r.expiring_after>0?'<br><span style="color:var(--steel)">'+CG.fmtMoney(r.expiring_after)+' comes off after this season ('+ending.map(function(d){ return esc(d.name); }).join(", ")+')</span>':'')+'</div></div>';
   }).join("");
   body.innerHTML = '<div class="grid g4" style="gap:12px">'+cols+'</div>'+
-    '<p class="caption" style="margin-top:12px">Each season’s figure counts every deal signed for it — current contracts that run that far, extensions already signed, and the three front-office seats at their fixed values (Rule 2.6). A new deal that starts next season is checked against <b>next</b> season’s space, not this one’s: contracts turn over when a season’s free agency opens, and that is when what is coming off your books comes off (Rule 2.5).</p>';
+    (CG.fmt("extensions")
+      ? '<p class="caption" style="margin-top:12px">Each season’s figure counts every deal signed for it — current contracts that run that far, extensions already signed, and the three front-office seats at their fixed values (Rule 2.6). A new deal that starts next season is checked against <b>next</b> season’s space, not this one’s: contracts turn over when a season’s free agency opens, and that is when what is coming off your books comes off (Rule 2.5).</p>'
+      : '<p class="caption" style="margin-top:12px">Every player deal — your picks, depth placements and any waived player you sign — runs to the end of this season and comes off the books with it; the three front-office seats count at their fixed values (Rule 2.6). Nothing carries into next season: everyone re-enters the draft (Rule 2.5).</p>');
 };
 CG.AFTER._roster = function(){
   (function(){
@@ -1781,7 +1794,7 @@ CG.AFTER._roster = function(){
     CG.modal((CG.playerById(CG.lg, pid)?"Extend ":"Re-sign ")+esc(p.tag),
       (live?'<div class="note" style="margin-bottom:12px">A negotiation with him is already open — '+(CG.offerAwaitsClub(live)?'his ask of '+CG.fmtMoney(live.salary)+' × '+live.years+' is waiting for you on your dashboard.':'your offer of '+CG.fmtMoney(live.salary)+' × '+live.years+' is waiting on him.')+' Sending a new offer replaces it.</div>':'')+
       '<label class="fld"><span>Salary ($M per season)</span><input id="exSal" type="number" min="0.75" step="0.25" value="'+((p.salary||750000)/1e6).toFixed(2)+'"></label>'+
-      '<label class="fld"><span>Term (seasons)</span><select id="exYrs">'+[1,2,3].map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      '<label class="fld"><span>Term (seasons)</span><select id="exYrs">'+[1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
       '<label class="fld"><span>Note (optional)</span><input id="exNote" maxlength="200" placeholder="A word to go with the number"></label>'+
       (function(){ var nx = (CG._capOutlook||[]).filter(function(r){ return r.season===target; })[0];
         return nx ? '<div class="note" style="margin-bottom:12px">Season '+target+' space right now: <b>'+CG.fmtMoney(nx.space)+'</b> ('+CG.fmtMoney(nx.committed)+' already committed). This deal has to fit inside that.</div>' : ''; })()+

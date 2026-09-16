@@ -240,7 +240,7 @@ CG.slideDefs = function(){
   if (divLeaders.length) slides.push({ key:"standings", label:"Standings snapshot", html:
     '<span class="s-cat"><span class="chip chip-chrome">Standings · Week '+curWeek+'</span></span>'+
     '<h2>'+divLeaders.map(function(l){ return esc(l.team.name); }).join(divLeaders.length===2?" and ":", ")+' set'+(divLeaders.length===1?"s":"")+' the pace.</h2>'+
-    '<p class="s-dek">'+divLeaders.map(function(l){ return esc(l.team.name)+' ('+l.w+"-"+l.l+"-"+l.otl+')'; }).join(" · ")+'. Three playoff spots per division — the cutlines are already forming.</p>'+
+    '<p class="s-dek">'+divLeaders.map(function(l){ return esc(l.team.name)+' ('+l.w+"-"+l.l+"-"+l.otl+')'; }).join(" · ")+'. '+({2:"Two",3:"Three",4:"Four",5:"Five",6:"Six"}[CG.playoffPerDiv?CG.playoffPerDiv():4]||"Four")+' playoff spots per division — the cutlines are already forming.</p>'+
     '<div class="s-cta"><a class="btn btn-chrome" href="#/standings">Full standings</a></div>'+
     '<span class="s-date">Updated after last night’s finals</span>' });
   /* admin overrides: hide/reorder */
@@ -270,7 +270,7 @@ CG.seasonTimeline = function(){
     [s.registration_deadline, "Sign-up deadline",
       "Last day to register and be draft-eligible. Late sign-ups still play — they’re placed on clubs automatically after the draft."],
     [s.preseason_starts_at, "Pre-season",
-      "Two weeks of real games on randomly assigned rosters. First-year players need five appearances to enter the draft."],
+      "Two weeks of real games on randomly assigned rosters. First-year players need three appearances to enter the draft."],
     [s.draft_at, "Draft night",
       "Clubs build their rosters live from the eligible pool"+(s.draft_at?", starting "+CG.fmtTime(Date.parse(s.draft_at)):"")+"."],
     [s.free_agency_opens_at, "Free agency",
@@ -739,7 +739,7 @@ CG.homeFigures = function(){
 
   var signed = lg.registrationsCount || (lg._registrationsRaw || []).length || 0;
   var clubs  = (CG.TEAMS || []).length;
-  var spots  = clubs * (s.roster_max || 17);
+  var spots  = clubs * (s.roster_max || CG.fmt("roster_max", s));
   if (signed) fig(signed, "Signed up for Season " + (s.number || 1),
     spots ? signed.toLocaleString() + " of " + spots.toLocaleString() + " roster spots claimed" : "",
     spots ? Math.max(0, Math.min(1, signed / spots)) : null,
@@ -804,9 +804,9 @@ CG.roadModule = function(pre){
          cutoff), so the milestone stays — it just stops sending them back to a form they filled */
       ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff",
         CG.isRegisteredNow() ? "#/hub" : "#/register"],
-      ["Pre-season", sD.preseason_starts_at, "two weeks, own standings", "#/schedule"],
-      ["Draft night", sD.draft_at, "fourteen rounds, live on the site", "#/draft"],
-      ["Puck drop", sD.starts_at, "the regular season begins", "#/schedule"]
+      ["Pre-season", CG.fmt("preseason") ? sD.preseason_starts_at : null, "two weeks, own standings", "#/schedule"],
+      ["Draft night", sD.draft_at, (CG.fmt("draft_snake") ? "fifteen rounds, snake order, live on the site" : "fourteen rounds, live on the site"), "#/draft"],
+      ["Puck drop", sD.starts_at, (CG.isBasic() ? "the Wednesday after the draft" : "the regular season begins"), "#/schedule"]
     ].filter(function(x){ return x[1]; }).map(function(st, i){
       var past = Date.parse(st[1]) < nowMs;
       return '<a class="railgame mag" data-rv="slide" style="--rv-i:'+i+';opacity:'+(past?".55":"1")+'" href="'+st[3]+'">'+
@@ -885,7 +885,7 @@ CG.standingsLadder = function(dv, pre){
   var lg = CG.lg;
   var rows = (CG.TEAMS || []).filter(function(t){ return !dv || t.div === dv; });
   if (!rows.length) return "";
-  var max = (CG.SEASON && CG.SEASON.roster_max) || 17;
+  var max = (CG.SEASON && CG.SEASON.roster_max) || CG.fmt("roster_max");
 
   var scored = rows.map(function(t){
     var rec = (lg.teams && lg.teams[t.code]) || {};
@@ -968,7 +968,7 @@ CG.pulseModule = function(){
   }
 
   /* Roster spots filled league-wide — how much room is left before the draft. */
-  var max = (s.roster_max || 17), spots = teams.length * max;
+  var max = (s.roster_max || CG.fmt("roster_max", s)), spots = teams.length * max;
   var filled = teams.reduce(function(a,t){ return a + (((lg.byTeam||{})[t.code]||[]).length); }, 0);
   if (spots > 0){
     cards.push(V.card({
@@ -1229,7 +1229,12 @@ CG.ROUTES.home = function(){
   /* DEADLINES — real dates only, straight off the season row (next two upcoming milestones) */
   if (CG.modOn("deadlines")){
     var s0 = CG.SEASON||{};
-    var mile = [
+    var mile = (CG.isBasic() ? [
+      [s0.registration_deadline, "Sign-up cutoff", "Register by now and you are in the draft. Later sign-ups still play — they’re placed on a club as depth after it."],
+      [s0.draft_at, "Draft night", "Fifteen rounds in a snake order, live on the site — everyone registered by the cutoff is in the pool."],
+      [s0.starts_at, "Puck drop", "The regular season begins — the Wednesday after the draft."],
+      [s0.playoffs_start_at, "Playoffs begin", "Six of eight qualify: the division winners rest through round one, then the division finals, then the final."]
+    ] : [
       [s0.registration_deadline, "Draft-eligibility deadline", "Register by now to enter the draft. Later sign-ups still play — they’re placed on a club automatically after it."],
       [s0.preseason_starts_at, "Pre-season opens", "Two weeks of real games on randomly assigned rosters."],
       [s0.draft_at, "Draft night", "Clubs pick from the eligible pool live on the site."],
@@ -1237,7 +1242,7 @@ CG.ROUTES.home = function(){
       [s0.free_agency_closes_at, "Free agency closes", "Rosters settle — puck drop is the Wednesday after."],
       [s0.starts_at, "Puck drop", "The regular season begins."],
       [s0.playoffs_start_at, "Playoffs begin", "Top "+(CG.playoffPerDiv?CG.playoffPerDiv():4)+" per division qualify — a divisional bracket to the final."],
-    ].filter(function(m){ return m[0] && Date.parse(m[0]) > CG.now(); }).slice(0,2);
+    ]).filter(function(m){ return m[0] && Date.parse(m[0]) > CG.now(); }).slice(0,2);
     if (mile.length){
       html += '<section class="sec-tight"><div class="shell"><div class="grid g3" data-rv="up">'+
         mile.map(function(m){
@@ -1677,7 +1682,17 @@ CG.playoffBracket = function(){
         if (winner){ if (winner===s.a) s.aw++; else s.bw++; }
       }
     });
-    var roundName = {1:"Quarter-finals",2:"Semi-finals",3:"Final"};
+    /* round names and the round-1 byes come from the same functions the bracket generator uses,
+       so a six-club field shows its division winners resting rather than an empty column */
+    var K = CG.playoffRounds ? CG.playoffRounds() : 3;
+    var roundName = function(rd){ return CG.playoffRoundName ? CG.playoffRoundName(rd) : ({1:"Quarter-finals",2:"Semi-finals",3:"Final"}[rd]||"Round "+rd); };
+    var byeCodes = [];
+    if (CG.frozenSeeds && CG.playoffRound1 && CG.playoffPerDiv){
+      var fz = CG.frozenSeeds(), per = CG.playoffPerDiv();
+      if (fz) for (var b0=0; b0+per<=fz.length; b0+=per) byeCodes = byeCodes.concat(CG.playoffRound1(fz.slice(b0,b0+per)).byes);
+    }
+    var byeCard = function(code){ return '<div data-go="#/team/'+code+'" style="border:1px dashed var(--chrome);border-radius:var(--r-s);padding:11px 13px;display:flex;align-items:center;gap:9px;cursor:pointer">'+CG.crest(code,22)+
+      '<b class="mono" style="font-size:12.5px">'+esc(code)+'</b><span class="chip chip-chrome" style="margin-left:auto;font-size:9px">BYE</span></div>'; };
     var seriesCard = function(s){
       var done = s.aw>=need || s.bw>=need;
       var aWon = s.aw>=need, bWon = s.bw>=need;
@@ -1690,11 +1705,12 @@ CG.playoffBracket = function(){
         '<span class="caption" style="text-align:center">'+(done?"Series won "+Math.max(s.aw,s.bw)+"–"+Math.min(s.aw,s.bw):"Best of "+((need-1)*2+1)+" · "+s.aw+"–"+s.bw)+'</span></div>'; };
     var col = function(rd){
       var list = Object.keys(seriesByRound[rd]||{}).map(function(k){ return seriesByRound[rd][k]; });
-      return '<div><span class="eyebrow" style="display:block;margin-bottom:10px">'+roundName[rd]+'</span>'+
-        (list.length ? '<div class="stack" style="gap:10px">'+list.map(seriesCard).join("")+'</div>'
+      var byes = rd===1 ? byeCodes.map(byeCard).join("") : "";
+      return '<div><span class="eyebrow" style="display:block;margin-bottom:10px">'+esc(roundName(rd))+'</span>'+
+        (list.length || byes ? '<div class="stack" style="gap:10px">'+byes+list.map(seriesCard).join("")+'</div>'
                      : '<div style="border:1px dashed var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><span class="caption">Set from the Control Center once the previous round ends.</span></div>')+'</div>'; };
     var champ = null;
-    (Object.keys(seriesByRound[3]||{})).forEach(function(k){ var s=seriesByRound[3][k]; if(s.aw>=need) champ=s.a; else if(s.bw>=need) champ=s.b; });
+    (Object.keys(seriesByRound[K]||{})).forEach(function(k){ var s=seriesByRound[K][k]; if(s.aw>=need) champ=s.a; else if(s.bw>=need) champ=s.b; });
     return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff bracket</h3>'+
       (champ?'<span class="chip chip-win">'+esc((CG.TEAM[champ]||{}).name||champ)+' — champions</span>':'<span class="chip chip-chrome">Postseason live</span>')+'</div>'+
       '<div class="card-b"><div class="grid g3" style="gap:16px;align-items:start">'+col(1)+col(2)+col(3)+'</div>'+
@@ -1902,7 +1918,7 @@ CG.ROUTES.teams = function(){
       '<div><div style="font-family:var(--f-disp);font-size:16px;line-height:1.1">'+esc(topL.code)+'</div><div class="caption" style="margin-top:3px">Top tier'+(topL.inspiration?' · modeled on the '+esc(topL.inspiration):'')+'</div></div>'+
     '</div>' : "";
   var head = CG.pageHead("The clubs","One trophy. Every club chasing it.",
-    "Every club runs a real room — front office, "+(CG.ROSTER_MAX||17)+"-player roster, and a rivalry waiting to happen.", tierBadge);
+    "Every club runs a real room — front office, "+(CG.ROSTER_MAX||CG.fmt("roster_max"))+"-player roster, and a rivalry waiting to happen.", tierBadge);
   var pr = {}; lg.powerRankings.forEach(function(p){ pr[p.team]=p.rank; });
   var preT = CG.isPreseason();
   var cards = CG.TEAMS.map(function(t){
@@ -2446,6 +2462,7 @@ CG.ROUTES.player = function(pid, qs){
          : p.origin==="preseason_random" ? "Assigned for the pre-season"
          : p.origin==="postdraft_random" ? "Placed by the league office after the draft"
          : p.origin==="latecomer_random" ? "Placed by the league office as a late sign-up"
+         : p.origin==="depth_random" ? "Placed by the league office as depth (Rule 2.8)"
          : "On the "+esc(t.name)+" roster")+'</p></span></div></div>';
   }
   if (tab==="pickup"){

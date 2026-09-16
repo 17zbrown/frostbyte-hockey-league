@@ -229,14 +229,30 @@ console.log("\n— design-doc conformance (the bans that apply to markup)");
   A("interactive slots are keyboard-reachable", /tabindex="0"/.test(h));
 }
 
-console.log("\n— goaltending: two goalies, two lines each, never a third");
+console.log("\n— goaltending: the weekly cap sets the line limit, by format (v2.48)");
 {
-  A("the UI refuses a goalie's third line, in rule terms",
-    /function goalieCapped/.test(src6) && /already backstops two lines — a goaltender covers at most two \(Rule 5\.2\)/.test(src6));
+  A("the UI refuses a goalie's line beyond CG.weeklyCap's derived max, in rule terms",
+    /function goalieCapped/.test(src6) &&
+    /var gMax = Math\.max\(1, Math\.floor\(CG\.weeklyCap\(\{ pos:"G" \}\) \/ 3\)\);/.test(src6) &&
+    /already backstops "\+\(gMax===1\?"a line":gMax\+" lines"\)\+" — a goaltender's "\+CG\.weeklyCap\(\{ pos:"G" \}\)\+"-game week is "\+\(gMax===1\?"one night":gMax\+" nights"\)\+" \(Rule 5\.2\)\."/.test(src6));
   A("...checked on assign", /fits\(pid, pos\) \|\| goalieCapped\(pid, pos, line\)/.test(src6));
   A("...and on BOTH directions of a swap",
     /fits\(X, p2\) \|\| goalieCapped\(X, p2, b\)/.test(src6) && /fits\(Y, p1\) \|\| goalieCapped\(Y, p1, a\)/.test(src6));
   A("...counting draft state, target line excluded", /function gLines\(pid, exceptLine\)/.test(src6));
+
+  /* basic (the league standard, v2.48): a 3-game goalie week is ONE line — gMax = 1 */
+  delete CG.SEASON.format;
+  A("basic: CG.weeklyCap({pos:G}) is 3, so gMax is 1 (one line, one night)",
+    CG.weeklyCap({ pos: "G" }) === 3 && Math.max(1, Math.floor(CG.weeklyCap({ pos: "G" }) / 3)) === 1,
+    String(CG.weeklyCap({ pos: "G" })));
+
+  /* full (shelved): a 6-game goalie week is TWO lines — gMax = 2, matching the message this test
+     used to pin as the ONLY behavior before the format switch */
+  CG.SEASON.format = "full";
+  A("full: CG.weeklyCap({pos:G}) is 6, so gMax is 2 (two lines, two nights — the old pinned behavior)",
+    CG.weeklyCap({ pos: "G" }) === 6 && Math.max(1, Math.floor(CG.weeklyCap({ pos: "G" }) / 3)) === 2,
+    String(CG.weeklyCap({ pos: "G" })));
+  delete CG.SEASON.format;
 }
 
 console.log("\n— edits repaint in place; the page never resets");

@@ -21,20 +21,28 @@ let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
 const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n?$/)[1]).rulebook;
-const sec = (id) => {
-  for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" ");
+const findSec = (id) => {
+  for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s;
   throw new Error("no section " + id);
 };
+const sec = (id) => findSec(id).paragraphs.join(" ");
+const secFull = (id) => { const s = findSec(id); return (s.full || s.paragraphs).join(" "); };
 
 /* pull the two date helpers plus the deadline function out of part_live.js and run them for real */
-const CG = { lg: {}, SEASON: null };
+const CG = { lg: {}, SEASON: { format: "full" } };   /* v2.48: these fixtures model the full-format pre-season path */
 const grab = (name) => {
   const i = live.indexOf("CG." + name + " = function");
   if (i < 0) throw new Error("no CG." + name);
   return live.slice(i, live.indexOf("\nCG.", i + 5));
 };
-vm.runInNewContext(grab("etISO") + "\n" + grab("etYMD") + "\n" + grab("positionChangeDeadline"),
-  { CG, Date, Intl, isNaN, console });
+const runCtx = { CG, Date, Intl, isNaN, console };
+{
+  /* positionChangeDeadline now branches on CG.isBasic() — load the format block first */
+  const fmtBlock = live.slice(live.indexOf("CG.FORMAT_RULES = {"), live.indexOf("CG.GROUP_NAME = {"));
+  if (!fmtBlock || fmtBlock.indexOf("CG.FORMAT_RULES") !== 0) throw new Error("could not locate the format rules block");
+  vm.runInNewContext(fmtBlock, runCtx);
+}
+vm.runInNewContext(grab("etISO") + "\n" + grab("etYMD") + "\n" + grab("positionChangeDeadline"), runCtx);
 
 const etFull = (ts) => new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric",
@@ -108,14 +116,31 @@ console.log("— it follows the schedule, and degrades safely");
   })());
   A("with no pre-season games it falls back to preseason_starts_at", (() => {
     CG.lg = { schedule: [] };
-    CG.SEASON = { preseason_starts_at: CG.etISO("2026-09-16", "21:00") };
-    const r = CG.positionChangeDeadline(); CG.SEASON = null;
+    CG.SEASON = { format: "full", preseason_starts_at: CG.etISO("2026-09-16", "21:00") };
+    const r = CG.positionChangeDeadline(); CG.SEASON = { format: "full" };
     return etFull(r) === "Tue, Sep 15, 11:59 PM";
   })());
   A("with nothing at all it returns null rather than a wrong date", (() => {
-    CG.lg = { schedule: [] }; CG.SEASON = null;
+    CG.lg = { schedule: [] }; CG.SEASON = { format: "full" };
     return CG.positionChangeDeadline() === null;
   })());
+}
+
+console.log("— basic format: the deadline IS the sign-up cutoff (Rule 2.9)");
+{
+  CG.lg = { schedule: [] };
+  CG.SEASON = { format: "basic", signup_deadline_at: "2026-09-25T03:59:00.000Z" };
+  A("basic reads signup_deadline_at directly, ignoring any schedule",
+    CG.positionChangeDeadline() === Date.parse("2026-09-25T03:59:00.000Z"));
+  CG.lg = { schedule: [{ stage: "preseason", at: Date.parse("2026-09-16T01:00:00.000Z") }] };
+  A("...and a pre-season game on the schedule (a full-format leftover) is ignored in basic",
+    CG.positionChangeDeadline() === Date.parse("2026-09-25T03:59:00.000Z"));
+  CG.SEASON = { format: "basic", registration_deadline: "2026-09-25T03:59:00.000Z" };
+  A("...falling back to registration_deadline when signup_deadline_at is unset",
+    CG.positionChangeDeadline() === Date.parse("2026-09-25T03:59:00.000Z"));
+  CG.SEASON = { format: "basic" };
+  A("...and null when the season has neither", CG.positionChangeDeadline() === null);
+  CG.lg = {}; CG.SEASON = { format: "full" };
 }
 
 console.log("— the request form refuses after it");
@@ -136,15 +161,25 @@ console.log("— the rulebook says the same thing");
   A("...carrying dateIso like every other entry", rb.changelog.every((e) => !!e.dateIso));
   A("Rule 2.9 exists and is about position changes",
     rb.chapters.some((c) => c.sections.some((s) => s.id === "2.9" && /Position changes/i.test(s.title))));
-  A("...and states the deadline exactly",
-    /11:59 PM Eastern on the Tuesday before the first pre-season game/.test(sec("2.9")));
+  /* v2.48 — basic has no pre-season, so Rule 2.9's basic text closes position changes at the
+     sign-up cutoff itself (Rule 2.8's deadline); the old "Tuesday before the first pre-season
+     game" wording is preserved verbatim as the full-format variant */
+  A("basic states the deadline is the sign-up cutoff, not a pre-season-relative date",
+    /Position changes close at the sign-up cutoff — 11:59 PM Eastern on the Thursday before the draft/.test(sec("2.9")));
+  A("...(full format) states the old Tuesday-before-pre-season deadline exactly",
+    /11:59 PM Eastern on the Tuesday before the first pre-season game/.test(secFull("2.9")));
   A("...says filing AND approving both close", /no request may be filed, and none may be approved/.test(sec("2.9")));
   A("...but a pending request can still be declined", /may still be declined and closed/.test(sec("2.9")));
-  A("...and that it follows the schedule rather than a fixed date",
-    /follows the published schedule rather than a fixed calendar date/.test(sec("2.9")));
+  A("basic says it follows the published calendar rather than a fixed date",
+    /follows the published calendar rather than a fixed date/.test(sec("2.9")));
+  A("...(full) says it follows the published schedule rather than a fixed calendar date",
+    /follows the published schedule rather than a fixed calendar date/.test(secFull("2.9")));
   A("...and separates 'registered at' from Rule 2.1's 'dressed at'",
     /governs the position a player is registered AT/.test(sec("2.9")));
-  A("Chapter 0.3 warns members at sign-up", /Tuesday before the first pre-season\s*game \(Rule 2\.9\)/.test(sec("0.3")));
+  A("Chapter 0.3 (basic) warns members at sign-up that it closes at the cutoff itself",
+    /can only be changed by request to the league office up to the sign-up cutoff \(Rule 2\.9\)/.test(sec("0.3")));
+  A("...(full) warns members it closes the Tuesday before the first pre-season game",
+    /Tuesday before the first pre-season\s*game \(Rule 2\.9\)/.test(secFull("0.3")));
 }
 
 console.log(ok ? "\nPASS" : "\nFAIL");

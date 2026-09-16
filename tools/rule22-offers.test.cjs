@@ -74,15 +74,22 @@ console.log("\n— the rulebook says what the site does (v2.28)");
 {
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const sec = (id) => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
-  A("2.2: acceptance is the signing", /the signing takes effect the moment the player accepts/.test(sec("2.2")));
-  A("2.2: the league office confirms nothing", /league office confirms nothing and has no say/.test(sec("2.2")));
-  A("2.2: the counter loop is described", /counter with his own number/.test(sec("2.2")));
-  A("2.2: accepting one offer withdraws the rest", /accepting one offer withdraws every other offer he holds/.test(sec("2.2")));
-  A("2.2 no longer promises a league-office confirmation", !/only once the league office confirms it/.test(sec("2.2")));
-  A("2.3: the department may send a trade back", /transactions department may review any completed trade/.test(sec("2.3")));
-  A("2.3: ...and cannot once a piece has moved on", /cannot be reversed once a player or pick in it has moved on/.test(sec("2.3")));
+  const secFull = (id) => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
+  /* FULL format: the open-market negotiation, preserved word for word in Appendix A */
+  A("[full] 2.2: acceptance is the signing", /the signing takes effect the moment the player accepts/.test(secFull("2.2")));
+  A("[full] 2.2: the league office confirms nothing", /league office confirms nothing and has no say/.test(secFull("2.2")));
+  A("[full] 2.2: the counter loop is described", /counter with his own number/.test(secFull("2.2")));
+  A("[full] 2.2: accepting one offer withdraws the rest", /accepting one offer withdraws every other offer he holds/.test(secFull("2.2")));
+  A("[full] 2.2 no longer promises a league-office confirmation", !/only once the league office confirms it/.test(secFull("2.2")));
+  A("[full] 2.3: the department may send a trade back", /transactions department may review any completed trade/.test(secFull("2.3")));
+  A("[full] 2.3: ...and cannot once a piece has moved on", /cannot be reversed once a player or pick in it has moved on/.test(secFull("2.3")));
   A("5.2: the cap is regular season and playoffs", /weekly appearance cap in the regular season and the playoffs/.test(sec("5.2")));
-  A("5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(sec("5.2")));
+  A("[full] 5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(secFull("5.2")));
+  /* BASIC format is now the live standard: waived-player signing, players-only trades */
+  A("[basic] 2.2: no free-agency period or open market", /In the basic format there is no free-agency period and no open market/.test(sec("2.2")));
+  A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /league office confirms nothing and has no say/.test(sec("2.2")));
+  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the moment the draft concludes until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player at the league minimum/.test(sec("2.2")));
+  A("[basic] 2.3: trades are players only — no pick is a trade asset", /Draft picks are not trade assets in the basic format — a trade is players for players, and an offer carrying a pick is refused where it is built/.test(sec("2.3")));
   /* by version, not by position: pinning changelog[0] made every LATER rulebook change fail this
      unrelated test (v2.29 did exactly that) */
   A("the changelog records v2.28", rb.changelog.some((e) => e.version === "2.28" && e.dateIso === "2026-08-29"));

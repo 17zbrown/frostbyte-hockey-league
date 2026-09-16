@@ -257,13 +257,43 @@ CG.rulebookShapeSync = function(rb){
   return rb;
 };
 
+/* ---- the two formats, one book (v2.48) ----
+   Each format-dependent section carries its BASIC text in `paragraphs` (the league standard) and,
+   where the two differ, its FULL text in `full`. The book renders the format in force for the
+   current season as binding law and appends the other as "Appendix A", so nothing is lost and a
+   switch back is a decision, not a rewrite. PURE: returns a new rulebook, never mutates CONTENT
+   (the shape sync below writes into whatever it is handed, and CONTENT is shared). */
+CG.rulebookForFormat = function(rb, fmt){
+  fmt = fmt === "full" ? "full" : "basic";
+  var shelved = [];
+  var chapters = (rb.chapters||[]).map(function(ch){
+    return Object.assign({}, ch, { sections: (ch.sections||[]).map(function(s){
+      var binding = (fmt === "full" && s.full) ? s.full : s.paragraphs;
+      var other = fmt === "full" ? (s.full ? s.paragraphs : null) : (s.full || null);
+      var title = (fmt === "full" && s.fullTitle) ? s.fullTitle : s.title;
+      if (other) shelved.push({ id:"A."+s.id, of:s.id, title:(fmt === "full" ? s.title : (s.fullTitle || s.title)), paragraphs: other.slice() });
+      return Object.assign({}, s, { title:title, paragraphs: binding.slice() });
+    }) });
+  });
+  if (shelved.length){
+    chapters.push({ num:"A", shelved:true,
+      title: fmt === "full" ? "The basic format — the league standard, shelved for this season" : "The full format — on the shelf",
+      intro: fmt === "full"
+        ? "This season runs the full format. The basic format — the league standard — is preserved here section by section, numbered A.x to match the chapter it replaces, so the league can return to it without rewriting anything."
+        : "This season runs the basic format. The full format — the richer model with a pre-season, a free-agency week, multi-season contracts, extensions, held rights and pick trading — is preserved here section by section, numbered A.x to match the chapter it replaces, so nothing is lost when the league grows into it. Nothing in this appendix is in force this season.",
+      sections: shelved });
+  }
+  return Object.assign({}, rb, { chapters: chapters, format: fmt });
+};
 CG.ROUTES.rulebook = function(param, qs){
-  var rb = CG.rulebookShapeSync(CG.CONTENT.rulebook);
+  var fmt = CG.seasonFormat ? CG.seasonFormat() : "basic";
+  var rb = CG.rulebookShapeSync(CG.rulebookForFormat(CG.CONTENT.rulebook, fmt));
   var q = (qs.q||"").toLowerCase();
   var target = qs.rule||"";
   var edits = CG.store.get("rbEdits")||{};
-  var head = CG.pageHead("Official rulebook · v"+rb.changelog[0].version+" · effective "+CG.fmtDate(rb.changelog[0].dateIso),
-    "CGHL Rulebook","Start with Chapter 0 — how the season works, step by step. Searchable, versioned, and linkable — cite a rule by its number anywhere in the league.",
+  var fmtName = (CG.FORMAT_NAME||{})[fmt] || "Basic format";
+  var head = CG.pageHead("Official rulebook · v"+rb.changelog[0].version+" · effective "+CG.fmtDate(rb.changelog[0].dateIso)+" · "+fmtName,
+    "CGHL Rulebook","Start with Chapter 0 — how the season works, step by step. "+(fmt==="full"?"This season runs the full format; the basic format is preserved in Appendix A.":"This season runs the basic format — the league standard; the full format is preserved in Appendix A.")+" Searchable, versioned, and linkable — cite a rule by its number anywhere in the league.",
     '<div style="display:flex;gap:9px;align-self:flex-end"><button class="btn btn-ghost btn-sm" id="rbPrint">'+CG.ic("doc",14)+'Print view</button></div>');
   var toc = '<div class="card"><div class="card-h"><h3>Contents</h3></div><div style="padding:8px 0">'+
     rb.chapters.map(function(ch){
@@ -279,7 +309,8 @@ CG.ROUTES.rulebook = function(param, qs){
       return (s.id+" "+s.title+" "+s.paragraphs.join(" ")).toLowerCase().indexOf(q)>=0;
     });
     if (!secs.length) return "";
-    return '<div class="card" style="margin-bottom:18px" id="ch'+ch.num+'"><div class="card-h"><h3>Chapter '+ch.num+' — '+esc(ch.title)+'</h3></div><div class="card-b">'+
+    return '<div class="card'+(ch.shelved?' rb-shelved':'')+'" style="margin-bottom:18px" id="ch'+ch.num+'"><div class="card-h"><h3>'+(ch.shelved?'Appendix '+ch.num:'Chapter '+ch.num)+' — '+esc(ch.title)+'</h3>'+(ch.shelved?'<span class="chip">not in force</span>':'')+'</div><div class="card-b">'+
+      (ch.intro ? '<div class="note" style="margin-bottom:12px">'+esc(ch.intro)+'</div>' : '')+
       secs.map(function(s){
         var text = edits[s.id] ? edits[s.id] : s.paragraphs.join("\n\n");
         /* Season settings the commissioner controls are written as tokens, not
@@ -292,6 +323,7 @@ CG.ROUTES.rulebook = function(param, qs){
           '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:13px;color:var(--steel)">'+s.id+'</b>'+
           '<b style="font-family:var(--f-disp);font-size:16px">'+esc(s.title)+'</b>'+
           '<button class="chip" data-copyrule="'+s.id+'" title="Copy a direct link to this rule" style="cursor:pointer">Link</button>'+
+          (ch.shelved?'<span class="chip chip-warn" title="The other format’s text for Rule '+esc(s.of||s.id)+' — preserved, not in force">Shelved</span>':'')+
           (edits[s.id]?'<span class="chip chip-warn">Amended v-next (draft)</span>':"")+'</div>'+
           text.split("\n\n").map(function(pp){ return '<p class="small" style="color:var(--ink-3);margin-top:9px;line-height:1.65;max-width:76ch">'+esc(pp)+'</p>'; }).join("")+
         '</div>';
@@ -431,7 +463,7 @@ CG.ROUTES.matchup = function(id){
         && [x.home,x.away].sort().join("~")===seriesKey && x.at<=g.at; }) : [];
     function capFlag(pid, isGoalie){
       if (g.stage!=="playoff") return "";
-      var cap = isGoalie ? 6 : 3;   /* Rule 8.3 series caps: a skater 3 games, a goaltender 6 */
+      var cap = CG.weeklyCap({ pos: isGoalie ? "G" : "C", stage:"playoff" });   /* Rule 8.3: the weekly cap serves as the series cap, by format */
       var n=0; seriesGames.forEach(function(x){
         var r2=(lg.allResults||[]).find(function(q){ return q.id===x.id; });
         if (r2 && ((r2.box[x.home]&&r2.box[x.home][pid])||(r2.box[x.away]&&r2.box[x.away][pid]))) n++;

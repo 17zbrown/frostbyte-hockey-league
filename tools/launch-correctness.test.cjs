@@ -14,13 +14,33 @@ console.log("— the draft board's eligibility matches the DB (no offer the serv
   const ctx = { console, Math, Object, Array, String, Number, JSON }; ctx.window = ctx; ctx.globalThis = ctx;
   ctx.CG = { PRESEASON_MIN_GP: 5 };
   vm.createContext(ctx);
+  {
+    /* v2.48 — isDraftEligible now checks CG.isBasic(season) before counting pre-season games;
+       load the format block so CG.fmt/isBasic exist */
+    const fmtBlock = live.slice(live.indexOf("CG.FORMAT_RULES = {"), live.indexOf("CG.GROUP_NAME = {"));
+    if (!fmtBlock || fmtBlock.indexOf("CG.FORMAT_RULES") !== 0) { A("located the format rules block", false); process.exit(1); }
+    vm.runInContext(fmtBlock, ctx);
+  }
   vm.runInContext(live.match(/CG\.isDraftEligible = function[\s\S]*?\n\};/)[0], ctx);
   vm.runInContext(live.match(/CG\.eligOf = function[\s\S]*?\n\};/)[0], ctx);
   ctx.CG.lg = { isVeteran: (id) => id === "vet", preGp: { some: { gp: 3 }, most: { gp: 6 } } };
+  ctx.CG.SEASON = { format: "full" };   /* this scenario models the full-format pre-season-games rule */
   A("a returning player is eligible", ctx.CG.eligOf("vet").ok === true);
   A("a first-year with 5+ pre-season games is eligible", ctx.CG.eligOf("most").ok === true);
   A("a first-year short of five is NOT eligible (was always-true under v2.7)", ctx.CG.eligOf("some").ok === false);
   A("...and eligOf no longer hardcodes ok:true", !/return \{ vet:vet, gp:gp, ok: true \};/.test(live));
+
+  console.log("— basic format: registered by the cutoff is the whole test (no pre-season to count)");
+  ctx.CG.SEASON = { format: "basic", signup_deadline_at: "2026-09-25T03:59:00Z" };
+  ctx.CG.lg = {
+    isVeteran: () => false, preGp: {},
+    _registrationsRaw: [{ profile_id: "newbie", status: "pending", created_at: "2026-09-20T00:00:00Z" }],
+  };
+  A("an on-time first-year with 0 pre-season games is eligible in basic",
+    ctx.CG.eligOf("newbie").ok === true, JSON.stringify(ctx.CG.eligOf("newbie")));
+  ctx.CG.lg._registrationsRaw = [{ profile_id: "late", status: "pending", created_at: "2026-09-26T00:00:00Z" }];
+  A("...but a late registrant is still refused, even in basic (the cutoff still binds)",
+    ctx.CG.eligOf("late").ok === false);
 }
 
 console.log("\n— the availability deadline is 7:30pm ET across the DST change");
@@ -44,7 +64,11 @@ console.log("\n— stale rules copy is corrected");
     !/every player who registered by the deadline is draft-eligible/.test(live));
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const sec06 = (() => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === "0.6") return s; })();
-  A("rulebook 0.6 no longer carries its duplicated free-agency paragraph", sec06.paragraphs.length === 1);
+  /* v2.48 split 0.6 into a basic `paragraphs` (binding) and a `full` array for the shelved
+     format — neither carries the same paragraph twice within itself */
+  A("rulebook 0.6 (basic) no longer carries its duplicated free-agency paragraph",
+    new Set(sec06.paragraphs).size === sec06.paragraphs.length);
+  A("...nor does its full-format counterpart", new Set(sec06.full).size === sec06.full.length);
 }
 
 console.log("\n— the hub registration copy branches on WHEN you registered");

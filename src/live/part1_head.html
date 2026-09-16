@@ -1505,7 +1505,7 @@ footer.site .ft-base{border-top:1px solid #2A343B;padding:18px 0;display:flex;ju
 .protopill{display:inline-flex;align-items:center;gap:7px;border:1px solid #39434B;border-radius:100px;padding:4px 12px;color:var(--chrome);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em}
 
 /* ---------- print (rulebook) ---------- */
-@media print{
+@media print{ .rb-shelved{page-break-before:always}
   #demobar,#ticker,#masthead,footer.site,.no-print{display:none !important}
   body{background:#fff}
   .card{border:1px solid #999;break-inside:avoid}

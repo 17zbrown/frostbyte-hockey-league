@@ -284,7 +284,9 @@ console.log("\n— rights classes ride on the ctx sets (the bot must pass these 
 
   const botSrc = fs.readFileSync(new URL("../bot/role-sync.mjs", import.meta.url), "utf8");
   A("the bot computes rookie/RFA for the profile", /isRookie = priorSeasons\.size === 0 && !draftedBefore/.test(botSrc) &&
-    /isRfa = priorSeasons\.size > 0 && priorSeasons\.size < C\.rfaYears/.test(botSrc));
+    /isRfa = C\.rightsOn && priorSeasons\.size > 0 && priorSeasons\.size < C\.rfaYears/.test(botSrc));
+  A("...and rights classes exist only in the full season format (v2.48, Rule 2.2)",
+    /const rightsOn = !!curSeason && curSeason\.format === "full";/.test(botSrc) && /registration_open,format&status=neq\.complete/.test(botSrc));
   A("...and passes them into desiredRolesFor", /rfa: isRfa \? new Set\(\[profileId\]\) : new Set\(\)/.test(botSrc) &&
     /rookies: isRookie \? new Set\(\[profileId\]\) : new Set\(\)/.test(botSrc));
   A("...reading the same rfa_offseasons threshold the site uses", /app_config\?key=eq\.rfa_offseasons/.test(botSrc));

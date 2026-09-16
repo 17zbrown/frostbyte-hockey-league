@@ -79,7 +79,40 @@ CG.now = function(){ return Date.now(); };
 /* Rule 2.1 (v2.41): the active roster is shaped by position GROUP — nine forwards (centers and
    wings in any mix), six defensemen (either side), two goaltenders. Only the goaltender is locked to
    an exact position. The database (check_roster_structure, place_new_roster_spot) enforces the same. */
-CG.ROSTER_QUOTA = { F:9, D:6, G:2 };
+/* ================= THE SEASON FORMAT (v2.48) =================
+   Two formats, one switch: seasons.format. BASIC is the league standard — no pre-season, a
+   fifteen-round snake draft, an 18-man roster (9 F / 6 D / 3 G) with management inside it, everyone
+   capped at three games a week, a $50M cap, six weeks, the movement deadline after week four,
+   players-only trades, one-season contracts, and a six-club playoff with byes for the division
+   winners. FULL is the richer model, kept on the shelf for when the league grows. The database's
+   public.format_rules() is the source of truth; this table mirrors it and
+   tools/season-format.test.cjs pins the two together. Every format-dependent number is read
+   through CG.fmt(key) so it never lives in two places again. */
+CG.FORMAT_RULES = {
+  basic: { format:"basic", roster_max:18, quota:{ F:9, D:6, G:3 }, camp_max:3, cap_skater:3, cap_goalie:3, cap_camp:3,
+           salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
+           extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
+  full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3,
+           salary_cap:40000000, weeks:8, trade_deadline_week:6, draft_rounds:14, draft_snake:false, max_contract_years:3,
+           extensions:true, rights:true, pick_trades:true, preseason:true, fa_window:true, playoff_per_div:4, playoff_best_of:7 }
+};
+CG.FORMAT_NAME = { basic:"Basic format", full:"Full format" };
+CG.seasonFormat = function(s){ s = s || CG.SEASON || {}; return s.format === "full" ? "full" : "basic"; };
+CG.isBasic = function(s){ return CG.seasonFormat(s) === "basic"; };
+CG.fmt = function(key, s){ return CG.FORMAT_RULES[CG.seasonFormat(s)][key]; };
+/* Rule 5.2: the weekly appearance cap for one player — mirrors public.weekly_cap() */
+CG.weeklyCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat(o.season)];
+  if (o.stage === "preseason" && r.preseason) return Infinity;
+  if (o.squad === "tc") return r.cap_camp;
+  return o.pos === "G" ? r.cap_goalie : r.cap_skater; };
+/* roster rows that ride the active roster WITHOUT counting against the shape (Rule 2.1): the full
+   format's pre-season loans and the basic format's league-office depth placements — mirrors the
+   origin list in check_roster_structure / place_new_roster_spot */
+CG.OUTSIDE_SHAPE_ORIGINS = { preseason_random:1, latecomer_random:1, depth_random:1 };
+CG.spotOutsideShape = function(p){ return !!p && !p.mgmt && !!CG.OUTSIDE_SHAPE_ORIGINS[p.origin]; };
+/* the shape and camp size for the CURRENT season — rewritten from the format on every league load */
+CG.ROSTER_QUOTA = Object.assign({}, CG.FORMAT_RULES.basic.quota);
+CG.CAMP_MAX = CG.FORMAT_RULES.basic.camp_max;
 CG.GROUP_NAME = { F:"Forwards", D:"Defensemen", G:"Goaltenders" };
 
 /* format a time-on-ice value (seconds) as m:ss for box scores / stat lines */
@@ -323,8 +356,10 @@ CG.buildLiveLeague = async function(){
     CG._seasonHintFixed = true;
     if (CG.reloadLeague) setTimeout(function(){ CG.reloadLeague(); }, 0);
   }
-  CG.CAP = (season && season.salary_cap) ? season.salary_cap : 40000000;
-  CG.ROSTER_MAX = (season && season.roster_max) || 17;   /* Rule 2.1 (v2.7): 3C+3LW+3RW+3LD+3RD+2G */
+  CG.CAP = (season && season.salary_cap) ? season.salary_cap : CG.fmt("salary_cap", season);
+  CG.ROSTER_MAX = (season && season.roster_max) || CG.fmt("roster_max", season);   /* Rule 2.1: 9 F / 6 D / 3 G (basic) or 9 F / 6 D / 2 G (full) */
+  CG.ROSTER_QUOTA = Object.assign({}, CG.fmt("quota", season));
+  CG.CAMP_MAX = CG.fmt("camp_max", season);
   var seasonId = season ? season.id : null;
 
   /* ---- players from roster_spots (+ profile + contract) ---- */
@@ -973,6 +1008,7 @@ CG.teardownDMs = function(){
    PRESEASON_MIN_GP appearances, and "reachable" is honest about how many club games remain. */
 CG.roadToFive = function(lg, clubCode){
   var out = [];
+  if (!CG.fmt("preseason")) return out;   /* basic format: no pre-season, nothing to reach (Rule 2.8) */
   if (!lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
   var min = CG.PRESEASON_MIN_GP || 5;
   /* "reachable" assumes a player may be dressed in EVERY remaining pre-season game. That is true
@@ -1713,7 +1749,7 @@ CG.wireClubOfferActions = function(){
     var sal=parseInt(this.getAttribute("data-sal"),10)||750000, yrs=parseInt(this.getAttribute("data-yrs"),10)||1;
     CG.modal("Revise your offer to "+esc(nm),
       '<label class="fld"><span>Salary ($M per season)</span><input id="coSal" type="number" min="0.75" step="0.25" value="'+(sal/1e6).toFixed(2)+'"></label>'+
-      '<label class="fld"><span>Term (seasons)</span><select id="coYrs">'+[1,2,3].map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      '<label class="fld"><span>Term (seasons)</span><select id="coYrs">'+[1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
       '<p class="caption">He sees the new terms and can accept, counter again, or decline. League minimum $0.75M, and salaries move in $0.25M steps (Rule 2.5).</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="coGo">Send revised offer</button>');
     document.getElementById("coGo").addEventListener("click", function(){
@@ -1766,7 +1802,7 @@ CG.wireOfferActions = function(){
     var sal=parseInt(this.getAttribute("data-sal"),10)||750000, yrs=parseInt(this.getAttribute("data-yrs"),10)||1;
     CG.modal("Counter the offer",
       '<label class="fld"><span>Salary you want ($M per season)</span><input id="ocSal" type="number" min="0.75" step="0.25" value="'+(sal/1e6).toFixed(2)+'"></label>'+
-      '<label class="fld"><span>Term (seasons)</span><select id="ocYrs">'+[1,2,3].map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      '<label class="fld"><span>Term (seasons)</span><select id="ocYrs">'+[1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'"'+(y===yrs?" selected":"")+'>'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
       '<p class="caption">The club sees your number and can accept it, come back again, or walk away. League minimum $0.75M, and salaries move in $0.25M steps (Rule 2.5).</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ocGo">Send counter</button>');
     document.getElementById("ocGo").addEventListener("click", function(){
@@ -3624,11 +3660,11 @@ CG.ROUTES.draft = function(){
         var ps=(CG.lg.preGp||{})[pr.profileId], vet=CG.lg.isVeteran&&CG.lg.isVeteran(pr.profileId);
         var preLine = ps&&ps.gp ? ps.gp+" GP · "+ps.g+"G "+ps.a+"A pre-season" : "no pre-season games";
         /* v2.35: the same predicate the pick RPC enforces (deadline first, then five games or a
-           returning player) — a late registrant with five games used to read ELIGIBLE here */
+           returning player; in the basic format the cutoff alone) — a late registrant with games used to read ELIGIBLE here */
         var el = CG.eligOf(pr.profileId);
         var eligChip = el.vet ? "" : (el.ok ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
                                     : el.gp>=CG.PRESEASON_MIN_GP ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
-                                               : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF 5</span>');
+                                               : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF '+CG.PRESEASON_MIN_GP+'</span>');
         return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
           '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+' · '+preLine+'</small></span>'+
           '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
@@ -3892,7 +3928,8 @@ CG.DRAFT_STYLES = [
   ["reverse_standings","Reverse pre-season standings","Worst pre-season record picks first \u2014 the classic worst-to-first order, computed from the standings."],
   ["lottery","Weighted lottery","Every club can win pick one, but the worst record holds the most tickets (8\u00b77\u00b76\u20261). The drawn order is published."],
   ["random","Pure random","A straight shuffle \u2014 every club has equal odds at every slot."],
-  ["manual","Manual order","You arrange the clubs yourself; the board builds from your order."]
+  ["manual","Manual order","You arrange the clubs yourself; the board builds from your order."],
+  ["as_drawn","Keep the drawn order","Rebuild the board on the order already drawn for this season \u2014 for a new round count or pattern \u2014 without redrawing it. Its original style and any fallback are kept."]
 ];
 /* The style a generated board was ACTUALLY built with — order_meta.fallback wins over
    order_meta.style (Season 1's nhl_lottery falls back to a pure random draw). */
@@ -4210,7 +4247,7 @@ CG.hubDraftLive = function(){
     var rounds = {};
     picks.forEach(function(p){ (rounds[p.round]=rounds[p.round]||[]).push(p); });
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The draft, pick by pick</h3>'+
-      (st&&st.order_meta?'<span class="chip">'+esc(CG.dStyleName(st.order_meta))+'</span>':"")+'</div>'+
+      (st&&st.order_meta?'<span class="chip">'+esc(CG.dStyleName(st.order_meta))+(st.order_meta.snake?' · snake order':'')+'</span>':"")+'</div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>Every pick, live</caption>'+
       '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th class="tleft">Status</th></tr></thead><tbody>'+
       Object.keys(rounds).sort(function(a,b){return a-b;}).map(function(rn){
@@ -4344,7 +4381,7 @@ CG.admDraftLive = function(){
   if (!running && canSetup){
     var meta = st && st.order_meta;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
-      (meta?'<span class="chip chip-win">'+(meta.fallback?'order set — random draw (no prior season)':'order set — '+esc(CG.dStyleName(meta)))+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
+      (meta?'<span class="chip chip-win">'+(meta.fallback?'order set — random draw (no prior season)':'order set — '+esc(CG.dStyleName(meta)))+(meta.snake?' · snake':'')+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
       (function(){ var g=CG.draftSeatGaps(); return g.length ? '<div class="note" style="margin-bottom:14px"><b>The draft cannot start yet</b> — every club needs an Owner, GM and AGM (Rule 2.8). Still open: '+g.map(function(x){ return esc(x.code)+' ('+x.missing.join(", ")+')'; }).join("; ")+'.</div>' : ''; })()+
       '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
       CG.DRAFT_STYLES.map(function(s){
@@ -4355,12 +4392,12 @@ CG.admDraftLive = function(){
       }).join("")+'</div>'+
       '<div id="dManualWrap" style="display:none;margin-bottom:14px"><span class="eyebrow" style="display:block;margin-bottom:8px">Arrange the order — first pick at the top</span><div id="dManualList"></div></div>'+
       '<div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">'+
-      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+((meta&&meta.rounds)||14)+'"></label>'+
+      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+CG.fmt("draft_rounds")+'" readonly title="Set by the season format (Rule 2.8)"></label>'+
       '<button class="btn btn-chrome" id="dGenerate">'+CG.ic("grid",15)+(hasPicks?"Regenerate the board":"Generate the board")+'</button>'+
       (meta?'<button class="btn btn-ghost" id="dAnnounce">Announce the order</button>':"")+
       '</div>'+
       (hasPicks?'<p class="caption" style="margin-top:10px">Regenerating replaces every pick — it’s blocked once any pick has been made (reverse them first). '+picks.length+' picks exist now.</p>'
-               :'<p class="caption" style="margin-top:10px">Fourteen rounds, the same order every round (like the NHL — never a snake). The pick order publishes to the clubs the moment you generate.</p>')+
+               :'<p class="caption" style="margin-top:10px">'+(CG.fmt("draft_snake")?'Fifteen rounds in a snake — even rounds run in reverse, so the club picking last in round one picks first in round two (Rule 2.8).':'Fourteen rounds, the same order every round (like the NHL — never a snake).')+' The round count is set by the season format. The pick order publishes to the clubs the moment you generate.</p>')+
       (meta&&meta.codes?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">'+meta.codes.map(function(c,i){ return '<span class="chip'+(i===0?" chip-chrome":"")+'" style="font-size:10px">'+(i+1)+' · '+esc(c)+'</span>'; }).join("")+'</div>':"")+
       '</div></div>';
   }
@@ -4466,11 +4503,11 @@ CG.AFTER._admDraft = function(){
   renderManual();
   var gen = document.getElementById("dGenerate");
   if (gen) gen.addEventListener("click", function(){
-    var rounds = parseInt((document.getElementById("dRounds")||{}).value,10)||14;
+    var rounds = CG.fmt("draft_rounds");   /* Rule 2.8: the round count is the format's — the database refuses any other */
     var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===style;})||["","?"])[1];
     var manualIds = style==="manual" ? CG._manualOrder.map(function(c){ return (CG.lg._codeToId||{})[c]; }) : null;
     CG.confirm("Generate the draft board?",
-      rounds+" rounds, the same order every round, "+CG.dStyleInSentence(styleName)+". This replaces the existing board — every club sees the new order immediately.",
+      rounds+" rounds, "+(CG.fmt("draft_snake")?"snaking — even rounds in reverse, ":"the same order every round, ")+(style==="as_drawn"?"on the order already drawn":CG.dStyleInSentence(styleName))+". This replaces the existing board — every club sees the new order immediately.",
       "Generate the board", function(){
       CG.sb.rpc("generate_draft_board",{ p_season_number: sn, p_rounds: rounds, p_style: style, p_manual: manualIds }).then(function(r){
         if(r.error){ CG.toast(r.error.message,"err"); return; }
@@ -4490,7 +4527,8 @@ CG.AFTER._admDraft = function(){
     CG.confirm("Announce the draft order?","Publishes a newsroom story with the round-one order — it posts to Discord automatically.","Publish it", function(){
       var body = "The Season "+sn+" draft order is set — decided by "+decided+".\n\n"+
         codes.map(function(c,i){ return (i+1)+". "+((CG.TEAM[c]||{}).name||c); }).join("\n")+
-        "\n\nThe order holds for every round \u2014 no snake. "+(meta.rounds||14)+" rounds on the night, and clubs can trade picks right through the draft.";
+        (meta.snake ? "\n\nThe order snakes \u2014 even rounds run in reverse. "+(meta.rounds||CG.fmt("draft_rounds"))+" rounds on the night."
+                    : "\n\nThe order holds for every round \u2014 no snake. "+(meta.rounds||CG.fmt("draft_rounds"))+" rounds on the night, and clubs can trade picks right through the draft.");
       CG.sb.from("news").insert({ season_id: CG.SEASON.id, category:"League News", title:"The draft order is set",
         author:"CGHL Wire", published_at:new Date().toISOString(), body: body }).then(function(r){
         if(r.error){ CG.toast("Couldn’t publish: "+r.error.message,"err"); return; }
@@ -5107,6 +5145,8 @@ CG.isDraftEligible = function(pid){
   var _reg = ((CG.lg && CG.lg._registrationsRaw) || []).find(function(r){ return r.profile_id===pid && r.status!=="declined" && (!r.season_id || !_sR.id || r.season_id===_sR.id); });
   var _dl = _sR.signup_deadline_at || _sR.registration_deadline || null;
   if (_reg && _dl && _reg.created_at && Date.parse(_reg.created_at) > Date.parse(_dl)) return false;
+  /* basic format (Rule 2.8): registered by the cutoff is the whole test — no pre-season to count */
+  if (CG.isBasic(_sR)) return true;
   var lg = CG.lg || {};
   if (lg.isVeteran && lg.isVeteran(pid)) return true;
   return ((((lg.preGp||{})[pid])||{}).gp || 0) >= CG.PRESEASON_MIN_GP;
@@ -5145,7 +5185,7 @@ CG.poolState = function(pid){
      club holds his rights when the contract ends, until he has accrued CG.rfaOffseasons() of
      them. Only then is he unrestricted for good. */
   var served = lg.serviceSeasons ? lg.serviceSeasons(pid) : 0;
-  if (served > 0 && served < CG.rfaOffseasons())
+  if (CG.fmt("rights") && served > 0 && served < CG.rfaOffseasons())
     return { key:"rfa", label:"Restricted free agent", chip:"chip-warn" };
   if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
   return { key:"undrafted_fa", label:"Awaiting placement", chip:"chip-warn" };   /* v2.33: placed automatically ten minutes after the draft (Rule 2.8) */
@@ -5160,15 +5200,17 @@ CG.rfaOffseasons = function(){
 CG.admPreseason = function(){
   var lg=CG.lg, s=CG.SEASON||{};
   var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[], sapps=lg._staffApps||[];
-  var rosterMax=s.roster_max||17, rosteredIds=lg._rosteredIds||{};
+  var rosterMax=s.roster_max||CG.fmt("roster_max"), rosteredIds=lg._rosteredIds||{};
   var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
   var pendingApps=apps.filter(function(a){ return a.status==="pending"; }).length;
   var playerById={}; (lg.players||[]).forEach(function(p){ playerById[p.id]=p; });
   var pool=regs.filter(function(r){ return !rosteredIds[r.profile_id] && r.status!=="declined"; });
   var faN=pool.length, decN=regs.filter(function(r){ return r.status==="declined"; }).length;
   var dl=s.signup_deadline_at || s.registration_deadline;
-  var h='<div style="margin-bottom:18px"><h2 class="h-sec">Pre-season central</h2>'+
-    '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>';
+  var basicS = CG.isBasic(s);
+  var h='<div style="margin-bottom:18px"><h2 class="h-sec">'+(basicS?'Draft &amp; placement':'Pre-season central')+'</h2>'+
+    '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>'+
+    (basicS ? '<div class="note" style="margin-bottom:18px"><b>'+CG.FORMAT_NAME.basic+'</b> — this season has no pre-season and no pre-season loans. Everyone registered by the cutoff enters the draft; ten minutes after it concludes, anyone undrafted is placed on a club as depth at the league minimum, and late sign-ups are placed the same way until the movement deadline (Rule 2.8). The loan tools below are inert here.</div>' : '');
   var kpis=[[regs.length,"Registered players","",""],
     [faN,"Unsigned · need a club","","fa"],
     [assigned+" / "+regs.length,"Rostered","","ros"],
@@ -5188,7 +5230,9 @@ CG.admPreseason = function(){
     '<a class="sec-link" href="#/admin/seasons">Edit in Seasons</a></div>'+
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
-      '<p class="caption" style="margin-top:12px">The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. Free agency runs a full week for players whose contracts have ended; puck drop waits for it to close.</p></div>'
+      '<p class="caption" style="margin-top:12px">'+(basicS
+        ? 'The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are placed on clubs as depth until the movement deadline, after which new arrivals wait for the next season. Everyone registered by the cutoff is in the draft (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. There is no free-agency week: puck drop is the Wednesday after the draft, and waived players can be signed from the moment the draft concludes until the movement deadline (Rule 2.2).'
+        : 'The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. Free agency runs a full week for players whose contracts have ended; puck drop waits for it to close.')+'</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
   /* lifecycle actions (pool + dl are defined once near the top of this function) */
@@ -5197,7 +5241,7 @@ CG.admPreseason = function(){
   var lateN = pool.filter(function(r){ return dl && r.created_at && Date.parse(r.created_at) > Date.parse(dl); }).length;
   h+='<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pre-season lifecycle</h3></div><div class="card-b">'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
-    '<button class="btn btn-chrome" id="preAssignAll"'+(pool.length?"":" disabled")+'>Randomly assign unrostered ('+pool.length+')</button>'+
+    '<button class="btn btn-chrome" id="preAssignAll"'+((pool.length && !basicS)?"":" disabled")+(basicS?' title="No pre-season loans in the basic format"':'')+'>Randomly assign unrostered ('+pool.length+')</button>'+
     '<button class="btn btn-ghost" id="preReleaseNow"'+(randomN?"":" disabled")+'>Release random assignments ('+randomN+')</button>'+
     '<button class="btn btn-ghost" id="preRookies"'+(rookies.length?"":" disabled")+'>Place everyone unplaced ('+rookies.length+')</button>'+
     '<button class="btn btn-ghost" id="preLatecomers"'+(lateN?"":" disabled")+'>Assign late sign-ups ('+lateN+')</button></div>'+
@@ -7927,7 +7971,7 @@ CG.teamOverviewCard = function(mt){
      never count against the active roster. */
   var rosterN=(lg.byTeam&&lg.byTeam[code]||[]).filter(function(p){ return p.squad!=="tc"; }).length,
       campN=(lg.byTeam&&lg.byTeam[code]||[]).filter(function(p){ return p.squad==="tc"; }).length,
-      rosterMax=CG.ROSTER_MAX||17;
+      rosterMax=CG.ROSTER_MAX||CG.fmt("roster_max");
   var pay=(CG.teamPayroll?CG.teamPayroll(lg,code):0), cap=CG.CAP||60000000;
   var payPct=cap?Math.min(100,Math.round(pay/cap*100)):0, over=pay>cap;
   var played=(rec.w+rec.l+rec.otl)>0||lg.prManual;
@@ -9198,7 +9242,7 @@ CG.admOverviewLive = function(){
   var actions = [];
   if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
   if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
-  if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason","Pre-season"]);
+  if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason",(CG.isBasic()?"Draft & placement":"Pre-season")]);
   if (openCases.length) actions.push([openCases.length+' complaint'+(openCases.length===1?"":"s / requests")+' open in the league office',"#/admin/complaints","Case queue"]);
   if (draftSt && draftSt!=="complete") actions.push(["The draft is "+draftSt,"#/draft","Draft room"]);
   h += '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>Needs your attention</h3>'+(actions.length?'<span class="chip chip-warn">'+actions.length+'</span>':'<span class="chip chip-win">All clear</span>')+'</div>'+
@@ -9259,7 +9303,7 @@ CG.capYearOpensAt = function(){
   var s = CG.SEASON || {}; var iso = s.free_agency_opens_at || s.starts_at || null;
   return iso ? Date.parse(iso) : null;
 };
-CG.extensionWindowOpen = function(){ var t = CG.capYearOpensAt(); return t === null ? true : Date.now() >= t; };
+CG.extensionWindowOpen = function(){ if (CG.isBasic()) return false; /* Rule 2.5: no extensions in the basic format */ var t = CG.capYearOpensAt(); return t === null ? true : Date.now() >= t; };
 CG.contractOf = function(pid){
   var sn = (CG.SEASON && CG.SEASON.number) || 1;
   return ((CG.lg && CG.lg._contractsRaw) || []).find(function(c){
@@ -9270,6 +9314,7 @@ CG.contractOf = function(pid){
 CG.rightsHeldContractOf = function(pid){
   /* keyed on free_agency_opens_at alone, exactly as the database's rights branch is — no puck-drop
      fallback here, because a season with no free-agency date has no rights window to speak of */
+  if (CG.isBasic()) return null;   /* Rule 2.2: no held rights in the basic format */
   var sn = (CG.SEASON && CG.SEASON.number) || 1, fa = CG.SEASON && CG.SEASON.free_agency_opens_at ? Date.parse(CG.SEASON.free_agency_opens_at) : null;
   if (!fa || Date.now() >= fa) return null;
   return ((CG.lg && CG.lg._contractsRaw) || []).find(function(c){
@@ -9301,6 +9346,7 @@ CG.signedExtensionOf = function(pid){
 };
 /* final season of the deal AND nothing signed beyond it */
 CG.isExpiring = function(pid){
+  if (CG.isBasic()) return false;   /* every deal ends with the season — "final season" would mark the whole roster */
   var c = CG.contractOf(pid), sn = (CG.SEASON && CG.SEASON.number) || 1;
   return !!c && (c.end_season||1) === sn && !CG.signedExtensionOf(pid);
 };
@@ -9377,7 +9423,7 @@ CG.wireExtensionCard = function(){
     var target = rights ? sn : sn + 1;
     CG.modal("Ask "+esc(club)+" to re-sign you",
       '<label class="fld"><span>Salary you want ($M per season)</span><input id="rsSal" type="number" min="0.75" step="0.25" value="'+((c.salary||750000)/1e6).toFixed(2)+'"></label>'+
-      '<label class="fld"><span>Term (seasons)</span><select id="rsYrs">'+[1,2,3].map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+      '<label class="fld"><span>Term (seasons)</span><select id="rsYrs">'+[1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
       '<label class="fld"><span>Note (optional)</span><input id="rsNote" maxlength="200" placeholder="Anything you want management to know"></label>'+
       '<p class="caption">Your number goes to management as your opening ask for a deal starting Season '+target+(rights?' — this season, taking effect the moment they accept and checked against their space now.':' — it is checked against the cap space the club will have then, not now.')+' They can accept it, come back with their own, or walk away. Salaries move in $0.25M steps (Rule 2.5).</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="rsGo">Send my ask</button>');
@@ -10013,10 +10059,15 @@ CG.roadAheadCard = function(s, opts){
   /* read the season's real length rather than restating one — this line said "54 games" for as long
      as the league had been playing 72, because a hard-coded figure has no way to notice */
   var perClub = (CG.seasonShape ? CG.seasonShape(s).perClub : CG.GAMES_PER_CLUB);
-  var steps = [
+  var steps = CG.isBasic(s) ? [
+    [s.registration_deadline, "Sign-up cutoff", "Register by now to enter the draft — everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
+    [s.draft_at, "Draft night", "Fifteen rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
+    [s.starts_at, "Puck drop", "The regular season opens the Wednesday after the draft — "+perClub+" games over "+(CG.seasonShape?CG.seasonShape(s).weeks:6)+" weeks, every stat imported automatically from EA."],
+    [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven (Rule 8.1)."]
+  ] : [
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
-    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need five appearances to be draft-eligible."],
+    [s.preseason_starts_at, "Pre-season opens", "You’re randomly assigned to a club for two weeks of real games. First-year players need three appearances to be draft-eligible."],
     [s.draft_at, "Draft night", "Clubs pick from the pool — returning players and first-years with three pre-season appearances (Rule 2.8). Undrafted players are placed on clubs automatically ten minutes after it concludes."],
     [s.free_agency_opens_at, "Free agency opens", "One week for players whose contracts have ended to take offers from any club (Rule 2.2) — in a first season, nobody: undrafted players are placed, not signed."],
     [s.starts_at, "Puck drop", "The regular season starts once free agency closes — "+perClub+" games, every stat imported automatically from EA."]
@@ -10057,6 +10108,11 @@ CG.etYMD = function(iso){ return new Intl.DateTimeFormat("en-CA",{timeZone:"Amer
    only so the form can say no before a member types out a request nobody can act on. */
 CG.positionChangeDeadline = function(){
   var lg = CG.lg || {}, first = null;
+  /* basic format (no pre-season): the sign-up cutoff is the deadline — mirrors position_change_deadline() */
+  if (CG.isBasic()){
+    var s0 = CG.SEASON || {}, dl0 = s0.signup_deadline_at || s0.registration_deadline;
+    return dl0 ? Date.parse(dl0) : null;
+  }
   (lg.schedule||[]).forEach(function(g){
     if (g.stage==="preseason" && g.at && (first===null || g.at < first)) first = g.at;
   });
@@ -10521,7 +10577,7 @@ CG.declareForfeitPrompt = function(id){
 CG.admRatingsLive = function(){
   var lg = CG.lg;
   var list = lg.players.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr||0)-(lg.ratings[a.id].ovr||0); });
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from EA box scores after every final, position-weighted, regressed while samples are small. Pre-season scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">Pre-season Central</a>.</p></div>'+
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from EA box scores after every final, position-weighted, regressed while samples are small. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
     '<div class="card"><div class="card-h"><h3>Current overalls</h3><span class="chip">'+list.length+' rostered</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>Rostered players by overall</caption><thead><tr><th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>GP</th><th>OVR</th></tr></thead><tbody>'+
     list.map(function(p){ var s=lg.pstats[p.id];
@@ -10579,8 +10635,9 @@ CG.seasonForm = function(id){
   /* one season takes sign-ups at a time (Rule 1.1; enforced by the seasons_one_registering index):
      a new season defaults to closed while another is open, and opens at the movement deadline */
   var anotherOpen = (CG._seasonsRaw||[]).some(function(x){ return x.registration_open && x.status!=="complete"; });
-  s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:!anotherOpen,
-             salary_cap:40000000, roster_max:17, trade_deadline_week:6, moves_lock_override:"auto" };
+  s = s || { name:"Season "+(maxN+1), number:maxN+1, status:"upcoming", registration_open:!anotherOpen, format:"basic",
+             salary_cap:CG.FORMAT_RULES.basic.salary_cap, roster_max:CG.FORMAT_RULES.basic.roster_max,
+             trade_deadline_week:CG.FORMAT_RULES.basic.trade_deadline_week, weeks:CG.FORMAT_RULES.basic.weeks, moves_lock_override:"auto" };
   function dt(v){ /* ISO -> datetime-local in ET */
     if (!v) return "";
     var p = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date(v));
@@ -10589,6 +10646,8 @@ CG.seasonForm = function(id){
   }
   CG.modal(isNew?"New season":"Season settings — "+esc(s.name||""),
     '<div class="grid g2" style="gap:12px">'+
+    '<label class="fld" style="grid-column:1/-1"><span>Season format</span><select id="ssFormat">'+["basic","full"].map(function(f){ return '<option value="'+f+'"'+(CG.seasonFormat(s)===f?" selected":"")+'>'+CG.FORMAT_NAME[f]+(f==="basic"?" — the league standard":" — on the shelf")+'</option>'; }).join("")+'</select>'+
+      '<span class="caption" id="ssFormatNote" style="text-transform:none;letter-spacing:0;margin-top:4px"></span></label>'+
     '<label class="fld"><span>Name</span><input id="ssName" value="'+esc(s.name||"")+'" placeholder="e.g. Season 2"></label>'+
     '<label class="fld"><span>Number</span><input id="ssNum" type="number" min="1" value="'+(s.number||1)+'"></label>'+
     '<label class="fld"><span>Status</span><select id="ssStatus">'+["upcoming","active","complete"].map(function(x){ return '<option'+(s.status===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
@@ -10604,17 +10663,58 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Season starts (ET)</span><input type="datetime-local" id="ssStarts" value="'+dt(s.starts_at)+'"></label>'+
     '<label class="fld"><span>Season ends (ET)</span><input type="datetime-local" id="ssEnds" value="'+dt(s.ends_at)+'"></label>'+
     '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
-    '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||40000000)/1e6)+'"></label>'+
+    '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||CG.fmt("salary_cap", s))/1e6)+'"></label>'+
     '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?0:s.owner_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?3000000:s.gm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?3000000:s.agm_salary))/1e6)+'"></label>'+
-    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||17)+'"></label>'+
-    '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||6)+'"></label>'+
+    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||CG.fmt("roster_max", s))+'" readonly title="Set by the season format (Rule 2.1): 18 basic, 17 full"></label>'+
+    '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||CG.fmt("trade_deadline_week", s))+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
-    '</div><p class="caption">Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday — with sign-ups open until 11:59 PM ET the Thursday before it — a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays, so the dates it writes are dates the generator can actually use. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Every field stays editable; nothing saves until you hit Save.</p>',
+    '</div><p class="caption" id="ssSpaceHelp"></p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ssGo">'+(isNew?"Create season":"Save settings")+'</button>');
+  var fmtSel = document.getElementById("ssFormat");
+  /* the fields that only exist in one format follow the selector; the help text says which
+     spacing Auto-space will run */
+  function syncFormat(){
+    var f = fmtSel.value, r = CG.FORMAT_RULES[f];
+    document.getElementById("ssRoster").value = r.roster_max;
+    if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; }
+    ["ssOff","ssPre","ssFaOpen","ssFaClose"].forEach(function(id){ var el = document.getElementById(id); el.disabled = (f==="basic"); if (f==="basic") el.value = ""; el.closest("label").style.opacity = f==="basic" ? ".45" : ""; });
+    document.getElementById("ssFormatNote").textContent = f==="basic"
+      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", an "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), everyone "+r.cap_skater+" games a week, $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs."
+      : "The richer model on the shelf: two dark weeks, a two-week pre-season with random loans, a "+r.draft_rounds+"-round linear draft, a free-agency week, "+r.weeks+" weeks, a "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), goaltenders "+r.cap_goalie+" games a week, $"+(r.salary_cap/1e6)+"M cap, multi-season contracts, extensions and pick trading.";
+    document.getElementById("ssSpaceHelp").textContent = f==="basic"
+      ? "Give “Draft night” a Saturday and Auto-space fills the rest: sign-ups open until 11:59 PM ET the Thursday before it, puck drop the Wednesday after, this season’s run of regular-season weeks, and playoffs the game week after the last one. Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is placed on a club as depth after the draft. Nothing saves until you hit Save."
+      : "Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday — with sign-ups open until 11:59 PM ET the Thursday before it — a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Nothing saves until you hit Save.";
+  }
+  fmtSel.addEventListener("change", syncFormat); syncFormat();
   document.getElementById("ssSpace").addEventListener("click", function(){
-    /* Two ways in. Give the off-season start (the first midnight after last season's final
+    var shpS = CG.seasonShape(Object.assign({}, s, { weeks: s.weeks || CG.FORMAT_RULES[fmtSel.value].weeks })), hKeys = CG.seasonHolidayKeys(CG.SEASON);
+    function put(id, iso){ document.getElementById(id).value = dt(iso); }
+    if (fmtSel.value === "basic"){
+      /* BASIC: everything spaces from draft night. Cutoff 11:59 PM ET the Thursday before; puck
+         drop the first Wednesday after the draft; the format's weeks; playoffs the week after. */
+      var drV = document.getElementById("ssDraft").value;
+      if (!drV){ CG.toast("Give “Draft night” a date — everything spaces from it","err"); return; }
+      var draftDay = drV.slice(0,10);
+      var dow = CG.dayOfWeek(draftDay);                     /* 0=Sun … 6=Sat */
+      var cutoffDay = CG.dayAdd(draftDay, -(((dow - 4) + 7) % 7 || 7));   /* the Thursday strictly before */
+      var wedDay = CG.dayAdd(draftDay, ((3 - dow) + 7) % 7 || 7);         /* the Wednesday strictly after */
+      var regB = CG.gameNights(wedDay, shpS.weeks, shpS.nights, hKeys);
+      var regStartB = regB.nights[0].wed, regEndB = regB.nights[regB.nights.length-1].fri;
+      var poB = CG.gameNights(CG.dayAdd(regEndB,1), 1, shpS.nights, hKeys);
+      put("ssDraft",    CG.etISO(draftDay,"19:00"));
+      put("ssRegDl",    CG.etISO(cutoffDay,"23:59"));
+      put("ssStarts",   CG.etISO(regStartB,"21:00"));
+      put("ssEnds",     CG.etISO(regEndB,"23:59"));
+      put("ssPlayoffs", CG.etISO(poB.nights[0].wed,"21:00"));
+      if (!document.getElementById("ssOwnDl").value) put("ssOwnDl", CG.etISO(CG.dayAdd(cutoffDay,-7),"20:00"));
+      var skippedB = regB.skipped.concat(poB.skipped);
+      CG.toast("Timeline spaced: cutoff "+cutoffDay+" → draft "+draftDay+" → puck drop "+regStartB+" → playoffs "+poB.nights[0].wed+
+        (skippedB.length?" · holiday week"+(skippedB.length===1?"":"s")+" skipped: "+skippedB.join(", "):""),"ok");
+      return;
+    }
+    /* FULL. Two ways in. Give the off-season start (the first midnight after last season's final
        playoff game) and the two dark weeks + sign-up deadline space themselves too; give only
        a pre-season date and we start there. */
     var offV = document.getElementById("ssOff").value;
@@ -10623,7 +10723,6 @@ CG.seasonForm = function(id){
     var offDay = offV ? offV.slice(0,10) : null, darkEnd = null, ownDl, regDl;
     /* every leg of the spacer walks the same nights-per-week and the same observed holidays as the
        generator, so the dates it writes are dates the generator will actually be able to use */
-    var shpS = CG.seasonShape(CG.SEASON), hKeys = CG.seasonHolidayKeys(CG.SEASON);
     var pre;
     if (offDay){
       darkEnd = CG.dayAdd(offDay, CG.OFFSEASON_DARK_DAYS-1);    /* 2 weeks, no on-ice activity */
@@ -10647,7 +10746,6 @@ CG.seasonForm = function(id){
     var reg = CG.gameNights(CG.dayAdd(faCloseDay,1), Math.ceil(shpS.perClub/shpS.perNight/shpS.nights), shpS.nights, hKeys);
     var regStart = reg.nights[0].wed, regEnd = reg.nights[reg.nights.length-1].fri;
     var po = CG.gameNights(CG.dayAdd(regEnd,1), 1, shpS.nights, hKeys);
-    function put(id, iso){ document.getElementById(id).value = dt(iso); }
     if (offDay) put("ssOff", CG.etISO(offDay,"00:00"));
     put("ssPre",      CG.etISO(preStart,"21:00"));
     put("ssDraft",    CG.etISO(draftDay,"19:00"));
@@ -10673,22 +10771,25 @@ CG.seasonForm = function(id){
     var otherOpen=(CG._seasonsRaw||[]).find(function(x){ return x.registration_open && x.status!=="complete" && (!id || x.id!==id); });
     if(document.getElementById("ssRegOpen").value==="1" && otherOpen){ CG.toast("Sign-ups are already open for "+(otherOpen.name||"another season")+" — one season takes sign-ups at a time (Rule 1.1). Close that one first.","err"); return; }
     function iso(elId){ var v=document.getElementById(elId).value; return v ? CG.etISO(v.slice(0,10), v.slice(11,16)) : null; }
-    var cap=Math.round(parseFloat(document.getElementById("ssCap").value||"40")*1e6);
-    var rec={ name:name, number:num, status:document.getElementById("ssStatus").value,
+    var fmtV=document.getElementById("ssFormat").value, fr=CG.FORMAT_RULES[fmtV];
+    var cap=Math.round(parseFloat(document.getElementById("ssCap").value||String(fr.salary_cap/1e6))*1e6);
+    if (fmtV==="basic" && (iso("ssPre")||iso("ssFaOpen")||iso("ssFaClose"))){ CG.toast("A basic-format season has no pre-season or free-agency window — clear those dates or pick the full format","err"); return; }
+    var rec={ name:name, number:num, status:document.getElementById("ssStatus").value, format:fmtV,
       registration_open: document.getElementById("ssRegOpen").value==="1",
       starts_at:iso("ssStarts"), ends_at:iso("ssEnds"), registration_deadline:iso("ssRegDl"),
       signup_deadline_at:iso("ssRegDl"), offseason_starts_at:iso("ssOff"),
       owner_app_deadline:iso("ssOwnDl"), draft_at:iso("ssDraft"),
       preseason_starts_at:iso("ssPre"), free_agency_opens_at:iso("ssFaOpen"),
       free_agency_closes_at:iso("ssFaClose"), playoffs_start_at:iso("ssPlayoffs"),
-      salary_cap:cap, roster_max:parseInt(document.getElementById("ssRoster").value,10)||17,
+      salary_cap:cap, roster_max:fr.roster_max,   /* Rule 2.1: the shape is the format's (the database refuses anything else) */
       /* fixed management salaries — Owner/GM/AGM roster spots and contracts are pinned to
          these three numbers by the database (protect_manager_spot) */
       owner_salary:Math.round(parseFloat(document.getElementById("ssOwnSal").value||"0")*1e6),
       gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"3")*1e6),
       agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"3")*1e6),
-      trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||6,
+      trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||fr.trade_deadline_week,
       moves_lock_override:document.getElementById("ssMoves").value };
+    if (isNew) rec.weeks = fr.weeks;
     var btn=this; btn.disabled=true;
     var q = isNew ? CG.sb.from("seasons").insert(rec).select("id") : CG.sb.from("seasons").update(rec).eq("id",id).select("id");
     q.then(function(r){
@@ -10790,6 +10891,9 @@ CG.playoffDivisions = function(){
   return CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
 };
 CG.playoffPerDiv = function(){
+  /* basic format: fixed by the format (Rule 8.1 — top three per division, the winners rest through
+     round 1). full format: the Control Center setting. Mirrors public.playoff_per_div(). */
+  if (CG.isBasic()) return CG.fmt("playoff_per_div");
   var v = parseInt((CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.perDiv), 10);
   return (v >= 1 && v <= 8) ? v : CG.PLAYOFF_PER_DIV_DEFAULT;
 };
@@ -10852,7 +10956,7 @@ CG.playoffRoundName = function(round){
        : back === 3 ? "Division quarter-finals"
        : "Division round " + round;
 };
-CG.playoffBestOf = function(){ return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 7; };
+CG.playoffBestOf = function(){ if (CG.isBasic()) return CG.fmt("playoff_best_of"); return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 7; };
 /* seeds are FROZEN when the quarter-finals are generated — later rounds must
    never re-derive them from a table that can still move (a late-ingested
    regular-season final would otherwise rewrite the bracket mid-playoffs) */
@@ -10878,10 +10982,11 @@ CG.admPlayoffsLive = function(){
 
   /* series length control — locked once any playoff game exists so a live
      series can't be stranded by a mid-round change */
-  var poLive = pog.length>0;
+  var poLive = pog.length>0, fmtLocked = CG.isBasic();
+  if (fmtLocked) h += '<div class="note" style="margin-bottom:18px"><b>'+CG.FORMAT_NAME.basic+'</b> — the bracket is set by the format (Rule 8.1): the top three in each division, a first-round bye for the division winners, every series a best-of-seven inside one game week. The controls below are read-only; switch the season to the full format in Seasons to change them.</div>';
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Series length</h3><span class="chip">Best of '+bestOf+'</span></div><div class="card-b">'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[3,5,7].map(function(n){
-      return '<button class="btn '+(n===bestOf?"btn-chrome":"btn-ghost")+' btn-sm" data-bestof="'+n+'"'+(poLive?" disabled":"")+'>Best of '+n+'</button>'; }).join("")+'</div>'+
+      return '<button class="btn '+(n===bestOf?"btn-chrome":"btn-ghost")+' btn-sm" data-bestof="'+n+'"'+((poLive||fmtLocked)?" disabled":"")+'>Best of '+n+'</button>'; }).join("")+'</div>'+
     '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series, and each series runs inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday, higher seed home Wednesday and Friday (Rule 8.3). '+
     (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round.')+'</p></div></div>';
 
@@ -10893,7 +10998,7 @@ CG.admPlayoffsLive = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Qualifiers</h3><span class="chip">Top '+per+' per division</span></div><div class="card-b">'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[1,2,3,4,5,6].map(function(n){
       var tooBig = n>minDiv;
-      return '<button class="btn '+(n===per?"btn-chrome":"btn-ghost")+' btn-sm" data-perdiv="'+n+'"'+((poLive||tooBig)?" disabled":"")+
+      return '<button class="btn '+(n===per?"btn-chrome":"btn-ghost")+' btn-sm" data-perdiv="'+n+'"'+((poLive||tooBig||fmtLocked)?" disabled":"")+
         (tooBig?' title="A division only has '+minDiv+' clubs"':'')+'>Top '+n+'</button>'; }).join("")+'</div>'+
     '<p class="caption" style="margin-top:10px">'+esc(CG.playoffBracketBlurb())+' That is a '+CG.playoffFieldSize()+'-club field over '+CG.playoffRounds()+' round'+(CG.playoffRounds()===1?"":"s")+'.</p>'+
     '<p class="caption" style="margin-top:6px"><b>This is published law.</b> Rule 8.1 states the number, so change it here and amend the rulebook to match. '+
@@ -11797,15 +11902,20 @@ CG.hubFreeAgents = function(){
   var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;
   var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
   var nowMs = Date.now();
-  var canSign = !!(faO && nowMs >= faO);   /* signable during the window and after it, never before */
-  var winChip = !faO ? '<span class="chip chip-warn">No free-agency dates set yet</span>'
+  /* basic format (Rule 2.2): no free-agency week — signings open when the draft concludes (and from
+     puck drop regardless) and run to the movement deadline; mirrors public.fa_open() */
+  var basicFA = CG.isBasic(), draftDoneFA = !!(lg.draftState && String(lg.draftState.status)==="complete");
+  var canSign = basicFA ? (draftDoneFA || !!(s.starts_at && nowMs >= Date.parse(s.starts_at)))
+                        : !!(faO && nowMs >= faO);   /* full: signable during the window and after it, never before */
+  var winChip = basicFA ? (canSign ? '<span class="chip chip-win">Waived players signable until the movement deadline</span>' : '<span class="chip chip-warn">Opens the moment the draft concludes</span>')
+    : !faO ? '<span class="chip chip-warn">No free-agency dates set yet</span>'
     : nowMs < faO ? '<span class="chip chip-warn">Opens '+CG.fmtFull(faO)+'</span>'
     : (faC && nowMs < faC) ? '<span class="chip chip-live"><span class="live-dot"></span>Window open — closes '+CG.fmtFull(faC)+'</span>'
     : '<span class="chip chip-win">Window closed — free agents stay signable</span>';
   /* Rule 2.1: camp players are carried beyond the seventeen active spots, so they never
      consume one — counting them here disabled the Sign button three players early. */
   var rosterN=(lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }).length,
-      rosterMax=s.roster_max||17;
+      rosterMax=s.roster_max||CG.fmt("roster_max");
   var rosteredIds=lg._rosteredIds||{}, faHeld=CG.contractHeldIds();
   /* Two tracks (Rule 2.2): RETURNING players (drafted/rostered before) sign through open free agency
      here; undrafted first-years are placed on clubs ten minutes after the draft, never on any bidding
@@ -11815,7 +11925,7 @@ CG.hubFreeAgents = function(){
       !rosteredIds[r.profile_id] && !faHeld[r.profile_id];
   };
   var byOvr=function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); };
-  /* ONE board (v2.33). Rookie bidding is abolished: a fourteen-round draft fills every active
+  /* ONE board (v2.33). Rookie bidding is abolished: the draft (fifteen rounds basic, fourteen full) fills every active
      spot outright, so there is no post-draft rookie class to auction. Anyone still without a
      club — first-year or veteran — is signed here by offer and acceptance (Rule 2.2). */
   /* v2.35: only the players free agency is FOR — a deal that has ended (Rule 2.2). Before the
@@ -11882,7 +11992,7 @@ CG.AFTER._hubFreeAgents = function(){
     CG.modal("Offer terms to "+esc(name),
       '<label class="fld"><span>Salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.25" value="0.75"></label>'+
       '<label class="fld"><span>Term (seasons)</span><select id="faYears">'+
-        [1,2,3].map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
+        [1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>'+
       '<label class="fld"><span>Note to the player (optional)</span><input id="faNote" placeholder="Why he fits your club…"></label>'+
       '<p class="caption">Your cap space: <b>'+CG.fmtMoney(space)+'</b> · league minimum $0.75M, in $0.25M steps (Rule 2.5). He can accept, counter, or decline — nothing moves until he accepts, and then he is on your roster immediately (Rule 2.2). A new offer to the same player replaces your previous one.</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="faSignGo">Send offer</button>');
@@ -11918,6 +12028,8 @@ CG.tPick = function(kid){ return (CG.lg.draftPicks||[]).find(function(p){ return
 /* a pre-season loan is not the club's asset to trade — he is released after the pre-season */
 CG.tRoster = function(code){ return (CG.lg.byTeam[code]||[]).filter(function(p){ return !p.mgmt && p.origin!=="preseason_random"; }); };
 CG.tPicks = function(code){
+  /* basic format (Rule 2.3): players only — no pick is ever a trade asset */
+  if (!CG.fmt("pick_trades")) return [];
   /* Skipped make-up picks stay tradeable (Rule 2.8, and accept_trade allows them); scope to the
      current draft's season the same way draftPicksCur does. */
   var dsn = (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number);
@@ -11982,7 +12094,7 @@ CG.hubTradeHubLive = function(qs){
     '</div>'+
     '<label class="fld" style="margin-top:14px"><span>Note to the other club (optional)</span><input id="tradeNote" placeholder="Why this works for both sides…"></label>'+
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
-    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.</p>'+
+    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
   '</div></div>';
   return h+inc+outCard+build;
 };
@@ -11994,14 +12106,16 @@ CG.tradePicker = function(side){
   var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
   var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b><span class="caption" style="display:block">'+p.pos+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
   var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
-  CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players</span>'+(pHtml||'<span class="caption">none available</span>')+'<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');
+  CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players</span>'+(pHtml||'<span class="caption">none available</span>')+
+    (CG.fmt("pick_trades") ? '<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>') : '<span class="caption" style="margin-top:8px">Players only — draft picks are not traded in the basic format (Rule 2.3).</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');
   document.querySelectorAll("[data-tpick-p]").forEach(function(b){ b.addEventListener("click", function(){ (side==="off"?d.offP:d.reqP).push(this.getAttribute("data-tpick-p")); if(CG.closeOverlay)CG.closeOverlay(); CG.router(); }); });
   document.querySelectorAll("[data-tpick-k]").forEach(function(b){ b.addEventListener("click", function(){ (side==="off"?d.offK:d.reqK).push(this.getAttribute("data-tpick-k")); if(CG.closeOverlay)CG.closeOverlay(); CG.router(); }); });
 };
 CG.proposeTrade = function(){
   var d=CG.liveTrade(), club=CG.myClub();
   if(!d.partner){ CG.toast("Choose a partner club","err"); return; }
-  if((!d.offP.length&&!d.offK.length)||(!d.reqP.length&&!d.reqK.length)){ CG.toast("Add at least one player or pick on each side","err"); return; }
+  if(!CG.fmt("pick_trades") && (d.offK.length||d.reqK.length)){ CG.toast("Draft picks are not traded in the basic format — trade players only (Rule 2.3)","err"); return; }
+  if((!d.offP.length&&!d.offK.length)||(!d.reqP.length&&!d.reqK.length)){ CG.toast("Add at least one player"+(CG.fmt("pick_trades")?" or pick":"")+" on each side","err"); return; }
   var payload={ season_id:CG.SEASON.id, from_team_id:CG.lg._codeToId[club], to_team_id:CG.lg._codeToId[d.partner], from_profile_id:CG.auth.user.id,
     offered_profile_ids:d.offP, requested_profile_ids:d.reqP, offered_pick_ids:d.offK, requested_pick_ids:d.reqK, retention:d.ret||{}, note:((document.getElementById("tradeNote")||{}).value||"").trim()||null };
   var tsum = "propose a trade to "+CG.TEAM[d.partner].name+" ("+(d.offP.length+d.offK.length)+" for "+(d.reqP.length+d.reqK.length)+")";
@@ -12139,7 +12253,7 @@ CG.bootLive = async function(){
         ["eastats","EA stats","chart"]
       ]],
       ["Clubs & members", [
-        ["preseason","Pre-season","users"],
+        ["preseason",(CG.isBasic&&CG.isBasic()?"Draft & placement":"Pre-season"),"users"],
         ["users","Users & roles","users"],
         ["clubs","Teams & tiers","grid"],
         ["complaints","Complaints","flag"]

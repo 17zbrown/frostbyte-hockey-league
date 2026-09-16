@@ -72,15 +72,19 @@ const clauseOf = (rb) => {
   return found;
 };
 const fresh = () => JSON.parse(JSON.stringify(CG.CONTENT.rulebook));
-const LIVE = { weeks: 8, nights_per_week: 3, night_slots: "21:00,21:35,22:10" };
+/* v2.48: basic is now the league standard, and Season 1's actual shape is six game-weeks,
+   three nights a week, three games a night — 54 games per club. The stored 3.1 sentence
+   was rewritten to match (the old eight-week/72-game text is preserved verbatim as the
+   FULL-format shelf copy, section.full). */
+const LIVE = { weeks: 6, nights_per_week: 3, night_slots: "21:00,21:35,22:10" };
 
 console.log("— the stored document states the live shape, without relying on the rewrite");
 {
   const stored = clauseOf(CG.CONTENT.rulebook);
-  A("it is not the retired six-week claim", !/six \(6\) game-weeks/.test(stored));
-  A("...nor fifty-four games", !/fifty-four/.test(stored), stored.slice(0, 120));
-  A("it states eight game-weeks", /eight \(8\) game-weeks/.test(stored));
-  A("...and 72 games per club", /for 72 games per club/.test(stored));
+  A("it states six game-weeks, the current basic-format shape", /six \(6\) game-weeks/.test(stored));
+  A("...and 54 games per club", /for 54 games per club/.test(stored), stored.slice(0, 120));
+  A("it is not the shelved eight-week claim", !/eight \(8\) game-weeks/.test(stored));
+  A("...nor 72 games", !/for 72 games per club/.test(stored));
   CG.SEASON = { ...LIVE, id: "s" };
   A("and the rewrite leaves it untouched, because it already agrees",
     clauseOf(CG.rulebookShapeSync(fresh())) === stored);
@@ -92,18 +96,18 @@ console.log("\n— the numbers come from the season, not the text");
   A("six weeks reads six and 54", /six \(6\) game-weeks/.test(shapeFor({ weeks: 6 })) &&
     /for 54 games per club/.test(shapeFor({ weeks: 6 })));
   A("four nights reads four, names Saturday, and gives 96",
-    /four nights a week, Wednesday, Thursday, Friday and Saturday/.test(shapeFor({ nights_per_week: 4 })) &&
-    /for 96 games per club/.test(shapeFor({ nights_per_week: 4 })));
+    /four nights a week, Wednesday, Thursday, Friday and Saturday/.test(shapeFor({ weeks: 8, nights_per_week: 4 })) &&
+    /for 96 games per club/.test(shapeFor({ weeks: 8, nights_per_week: 4 })));
   A("two slots a night halves the count",
-    /two games a night/.test(shapeFor({ night_slots: "21:00,21:35" })) &&
-    /for 48 games per club/.test(shapeFor({ night_slots: "21:00,21:35" })));
+    /two games a night/.test(shapeFor({ weeks: 8, night_slots: "21:00,21:35" })) &&
+    /for 48 games per club/.test(shapeFor({ weeks: 8, night_slots: "21:00,21:35" })));
 }
 
 console.log("\n— the rewrite stops at the SECOND dash (v2.14 put a third in this paragraph)");
 {
-  CG.SEASON = { ...LIVE, weeks: 6, id: "s" };          // force an actual rewrite
+  CG.SEASON = { ...LIVE, weeks: 8, id: "s" };          // force an actual rewrite (stored text is now six weeks)
   const out = clauseOf(CG.rulebookShapeSync(fresh()));
-  A("the rewrite did happen", /six \(6\) game-weeks/.test(out));
+  A("the rewrite did happen", /eight \(8\) game-weeks/.test(out));
   A("the binding sentence after the clause survives", /binding on all clubs/.test(out));
   A("...the holiday sentence survives", /does not shorten the season/.test(out));
   A("...and the playoff sentence, which carries the third dash", /playoffs open the game week/.test(out));
@@ -113,7 +117,7 @@ console.log("\n— the rewrite stops at the SECOND dash (v2.14 put a third in th
 
 console.log("\n— rewriting in place is idempotent (it once grew a duplicate per render)");
 {
-  CG.SEASON = { ...LIVE, weeks: 6, id: "s" };
+  CG.SEASON = { ...LIVE, weeks: 8, id: "s" };          // force an actual rewrite (stored text is now six weeks)
   const rb = fresh();
   const a = clauseOf(CG.rulebookShapeSync(rb));
   const b = clauseOf(CG.rulebookShapeSync(rb));

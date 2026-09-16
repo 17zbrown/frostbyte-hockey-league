@@ -29,6 +29,10 @@ const sec = (id) => {
   for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" ");
   throw new Error("no section " + id);
 };
+const secFull = (id) => {
+  for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" ");
+  throw new Error("no section " + id);
+};
 
 /* the engine's salary helpers, evaluated on their own so the test exercises the real code */
 const CG = {};
@@ -119,22 +123,32 @@ console.log("— the rulebook says the same thing");
     /refused where it is entered rather than quietly rounded/.test(sec("2.5")));
   A("Rule 2.8 pays by round, not by pick", /paid by the round in which he is selected/.test(sec("2.8")));
   {
-    /* the prose spells all ten figures out by hand; check every one against the computed scale
-       rather than spot-checking the ends, which is where a typo would hide */
-    const words = ["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen"];
+    /* basic (15 rounds) — the prose spells all fifteen figures out by hand; check every one
+       against the computed scale rather than spot-checking the ends, which is where a typo
+       would hide */
+    const words = ["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen"];
     const text = sec("2.8");
     const missing = words.filter((w, i) =>
-      !new RegExp("round " + w + " \\$" + CG.draftRoundSalary(i + 1, 14).toLocaleString("en-US")).test(text));
-    A("...and all fourteen published round figures match the computed scale",
+      !new RegExp("round " + w + " \\$" + CG.draftRoundSalary(i + 1, 15).toLocaleString("en-US")).test(text));
+    A("...and all fifteen published round figures (basic) match the computed scale",
       missing.length === 0, "wrong or missing: " + missing.join(", "));
+
+    /* full (14 rounds, shelved) — same check against the full-format text */
+    const wordsFull = words.slice(0, 14);
+    const textFull = secFull("2.8");
+    const missingFull = wordsFull.filter((w, i) =>
+      !new RegExp("round " + w + " \\$" + CG.draftRoundSalary(i + 1, 14).toLocaleString("en-US")).test(textFull));
+    A("...and all fourteen published round figures (full) match the computed scale",
+      missingFull.length === 0, "wrong or missing: " + missingFull.join(", "));
   }
-  A("...states the scale follows the round count rather than assuming ten",
-    /set by the number of rounds the commissioner calls/.test(sec("2.8")));
+  A("...states the scale follows the round count rather than assuming ten (full)",
+    /set by the number of rounds the commissioner calls/.test(secFull("2.8")));
   A("...and covers a clock expiry, not just a club picking for itself",
     /clock expires and the league picks from its board/.test(sec("2.8")));
   A("...states every pick in a round costs the same",
     /identical cap hit/.test(sec("2.8")));
-  A("...and prices the full class", /\$33,250,000/.test(sec("2.8")));
+  A("...and prices the full class (basic: $37,500,000)", /\$37,500,000/.test(sec("2.8")));
+  A("...and prices the full class (full: $33,250,000)", /\$33,250,000/.test(secFull("2.8")));
   A("Chapter 0.5 tells new members the draft pays by round", /set by the round he goes in/.test(sec("0.5")));
   A("Rule 2.2 no longer describes a rookie auction (v2.33)", !/rookie bidding|live auction/i.test(sec("2.2")));
   A("no rulebook section still promises the old $100,000 step",
@@ -150,9 +164,9 @@ console.log("— the owners' briefings, the documents owners actually work from"
     A(`${f}: states the $250,000 step`, /every salary in the league moves in \$250,000\s*steps/.test(b));
     A(`${f}: says an off-lattice figure is refused`, /refused when you type it/.test(b));
     A(`${f}: still states the $750,000 minimum`, /Minimum salary \$750,000/.test(b));
-    A(`${f}: tells owners what a pick costs`, /round 14 pays the\s*\$750,000 league minimum/.test(b));
-    A(`${f}: ...and that round 1 is $4,000,000`, /round 1 is \$4,000,000/.test(b));
-    A(`${f}: ...and that a full class is $33,250,000`, /\$33,250,000/.test(b));
+    A(`${f}: tells owners what a pick costs (v2.48 basic: fifteen rounds)`, /round 15 pays the\s*\$750,000 league minimum/.test(b));
+    A(`${f}: ...and that round 1 is $4,250,000`, /round 1 is \$4,250,000/.test(b));
+    A(`${f}: ...and that a full class is $37,500,000`, /\$37,500,000/.test(b));
     A(`${f}: ...and that an expired clock signs at the same price`, /if your clock expires/.test(b));
   }
 }

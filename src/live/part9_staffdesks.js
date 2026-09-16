@@ -622,7 +622,7 @@ CG.deskTransactions = function(){
   Object.keys(byClub).forEach(function(c){ byClub[c].used = CG.teamPayroll(lg, c) || 0; });
   var clubs = Object.keys(byClub).sort();
   var over = clubs.filter(function(c){ return byClub[c].used > cap; });
-  var rosterMax = (CG.SEASON && CG.SEASON.roster_max) || 17;
+  var rosterMax = (CG.SEASON && CG.SEASON.roster_max) || CG.fmt("roster_max");
   var short = clubs.filter(function(c){ return byClub[c].n < rosterMax; });
 
   /* deskHead escapes the eyebrow and title — pass raw text, not pre-escaped entities. */

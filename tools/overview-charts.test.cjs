@@ -109,15 +109,18 @@ assert("funnel: 15 placed (registered AND rostered, not 16)", /Placed on a club<
 assert("funnel flags the 52 waiting", out.includes("52 registered players still waiting on a club"));
 assert("funnel flags the roster spot with no registration", /1 holds a roster spot without registering/.test(out));
 
-// 3 — sign-ups vs the league's roster spots (Rule 2.1, v2.41: by GROUP — 9 forwards / 6 defensemen /
-//     2 goaltenders per club × 10 clubs = 90 / 60 / 20; the exact split rides in the note)
+// 3 — sign-ups vs the league's roster spots (Rule 2.1, v2.41: by GROUP; v2.48: the basic format
+//     is the league standard — 9 forwards / 6 defensemen / 3 goaltenders (CG.ROSTER_QUOTA.G)
+//     per club × 10 clubs = 90 / 60 / 30; the exact split rides in the note. CG.SEASON carries no
+//     format here, and CG.seasonFormat treats anything but "full" as basic, so this is the
+//     no-season-loaded-yet default too.)
 const grpOrder = [...out.matchAll(/<em>(Forwards|Defensemen|Goaltenders)<\/em>/g)].map((m)=>m[1]);
 assert("groups stay in ice order, not sorted by count", grpOrder.join(",") === "Forwards,Defensemen,Goaltenders", grpOrder.join(","));
 assert("forwards show 40 / 90 (9 spots x 10 clubs)", /Forwards<\/em><\/span><span class="vz-hbv">40 \/ 90</.test(out));
 assert("defensemen show 15 / 60 (6 spots x 10 clubs)", /Defensemen<\/em><\/span><span class="vz-hbv">15 \/ 60</.test(out));
-assert("goaltenders show 12 / 20 (2 spots x 10 clubs)", /Goaltenders<\/em><\/span><span class="vz-hbv">12 \/ 20</.test(out));
-assert("corner value is signups over total spots", out.includes("67 / 170"));
-assert("note reports coverage and the thinnest group", /67 of 170 active-roster spots have a registrant/.test(out) && /thinnest among defensemen \(15 for 60\)/.test(out));
+assert("goaltenders show 12 / 30 (3 basic-format spots x 10 clubs)", /Goaltenders<\/em><\/span><span class="vz-hbv">12 \/ 30</.test(out));
+assert("corner value is signups over total spots", out.includes("67 / 180"));
+assert("note reports coverage and the thinnest group", /67 of 180 active-roster spots have a registrant/.test(out) && /thinnest among defensemen \(15 for 60\)/.test(out));
 assert("...and the exact-position split, for balance", /by position: 15 center, 13 left wing, 12 right wing, 8 left defense, 7 right defense, 12 goaltender/.test(out));
 assert("no stale per-club framing", !/ \/ 10</.test(out) && !out.includes("starting jobs"));
 // the bar FILL is the true ratio against each row's own capacity, not the series max
@@ -126,10 +129,21 @@ const rowWidth = (label) => {
   return m ? +m[1] : null;
 };
 assert("forwards 40 / 90 fill 44%", rowWidth("Forwards") === 44, rowWidth("Forwards") + "%");
-assert("goaltenders 12 / 20 fill 60%", rowWidth("Goaltenders") === 60, rowWidth("Goaltenders") + "%");
+assert("goaltenders 12 / 30 fill 40%", rowWidth("Goaltenders") === 40, rowWidth("Goaltenders") + "%");
 assert("defensemen 15 / 60 fill 25%", rowWidth("Defensemen") === 25, rowWidth("Defensemen") + "%");
 assert("a full club (DAL 3 / 3) fills 100%", rowWidth("DAL") === 100, rowWidth("DAL") + "%");
 assert("a 1 / 3 club fills a third", rowWidth("VAN") === 33, rowWidth("VAN") + "%");
+
+// v2.48: the shelved full format still carries 2 goaltender spots per club. CG.overviewCharts
+// reads CG.ROSTER_QUOTA directly (set from CG.fmt("quota", season) when a season loads, not
+// re-derived per call), so exercise it the same way loadLeague does: swap the quota object itself.
+const quotaWasBasic = Object.assign({}, CG.ROSTER_QUOTA);
+CG.ROSTER_QUOTA = Object.assign({}, CG.FORMAT_RULES.full.quota);
+const outFull = CG.overviewCharts();
+CG.ROSTER_QUOTA = quotaWasBasic;
+assert("full format: goaltenders show 12 / 20 (2 spots x 10 clubs, the old pinned value)",
+  /Goaltenders<\/em><\/span><span class="vz-hbv">12 \/ 20</.test(outFull));
+assert("full format: corner value is signups over 170 total spots (90 + 60 + 20)", outFull.includes("67 / 170"));
 
 // 4 — front-office seats
 assert("seats corner value 16 / 30", out.includes("16 / 30"));

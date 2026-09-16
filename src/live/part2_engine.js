@@ -293,7 +293,7 @@ CG.salaryProblem = function(dollars){
 };
 
 /* Rule 2.8 (v2.31): drafted players are paid by round. The last round pays the league minimum
-   and every round above it adds one step, so a fourteen-round draft runs $750K (R14) to $4.0M (R1). */
+   and every round above it adds one step, so a fifteen-round draft runs $750K (R15) to $4.25M (R1) and a fourteen-round one $750K to $4.0M. */
 CG.draftRoundSalary = function(round, rounds){
   var n = Math.max(1, rounds || 10);
   var r = Math.max(1, Math.min(round || 1, n));

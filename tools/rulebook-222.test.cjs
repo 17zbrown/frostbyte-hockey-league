@@ -21,6 +21,13 @@ const sec = (id) => {
   for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" ");
   throw new Error("no section " + id);
 };
+/* v2.48: basic is the league standard and `paragraphs` now carries its text; the FULL-format
+   wording this file used to pin lives verbatim in `full` (or, for a section the format split
+   never touched, `full` is absent and paragraphs still carries it). */
+const secFull = (id) => {
+  for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" ");
+  throw new Error("no section " + id);
+};
 
 console.log("— the rulebook says what the announcement says");
 {
@@ -28,26 +35,37 @@ console.log("— the rulebook says what the announcement says");
      here to prove v2.22's rules are recorded — not to pin the newest release forever */
   A("the changelog records v2.22", rb.changelog.some((c) => c.version === "2.22"));
   A("...and the newest entry sits first", rb.changelog[0].version >= "2.22", rb.changelog[0].version);
-  A("Rule 2.8 carries the three-game pre-season requirement (v2.46)",
-    /at least three \(3\) pre-season games to remain draft-eligible/.test(sec("2.8")));
+  /* v2.48: basic abolished the pre-season outright (Rule 0.4 basic: "There is no pre-season in
+     the basic format"), so the three-game requirement is FULL-format-only now — shelved, not
+     retired. Pin it there, and pin the basic replacement: registered by the cutoff is the test. */
+  A("Rule 2.8 (full format, shelved) still carries the three-game pre-season requirement (v2.46)",
+    /at least three \(3\) pre-season games to remain draft-eligible/.test(secFull("2.8")));
   A("...with returning players and management exempt",
-    /Returning players and club management are exempt/.test(sec("2.8")));
+    /Returning players and club management are exempt/.test(secFull("2.8")));
   A("...and the management obligation to spread ice time",
-    /obligated to distribute pre-season appearances as widely as it can/.test(sec("2.8")));
-  A("Chapter 0.4 no longer sweeps management into the random assignment",
-    !/management included in the split/.test(sec("0.4")) &&
-    /management group plays for its own club/.test(sec("0.4")));
+    /obligated to distribute pre-season appearances as widely as it can/.test(secFull("2.8")));
+  A("Rule 2.8 (basic) has no pre-season requirement — registered by the cutoff is the whole test",
+    /There is no appearance requirement and no exemption: registered by the cutoff is the whole test/.test(sec("2.8")));
+  A("Chapter 0.4 (basic) has no pre-season at all",
+    /There is no pre-season in the basic format/.test(sec("0.4")));
+  A("...and the shelved full-format text no longer sweeps management into the random assignment",
+    !/management included in the split/.test(secFull("0.4")) &&
+    /management group plays for its own club/.test(secFull("0.4")));
   A("Rule 8.1 orders the table by total points",
     /ordered by total points earned/.test(sec("8.1")) &&
     !/ordered by points percentage/.test(sec("8.1")));
   A("...and says games in hand are not adjusted for",
     /not adjusted for games in hand/.test(sec("8.1")));
   A("...and scores a forfeit as an ordinary result", /forfeit counts for points exactly as an ordinary result/.test(sec("8.1")));
-  A("Rule 8.1 takes the top four in each division",
-    /top four \(4\) clubs in each division/.test(sec("8.1")) && /eight-club field/.test(sec("8.1")));
+  A("Rule 8.1 (basic) takes the top three in each division, a six-club field",
+    /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")));
+  A("...and the shelved full-format text still holds the top four, eight-club field",
+    /top four \(4\) clubs in each division/.test(secFull("8.1")) && /eight-club field/.test(secFull("8.1")));
   A("Rule 2.1 caps training camp at three", /up to three \(3\) training-camp players/.test(sec("2.1")));
-  A("Rule 2.4 puts the deadline at midnight Friday",
-    /midnight at the end of the Friday of the league-posted deadline week/.test(sec("2.4")));
+  A("Rule 2.4 (basic) puts the deadline at midnight Friday of the fourth game week",
+    /midnight at the end of the Friday of the fourth game week, the league-posted deadline week/.test(sec("2.4")));
+  A("...and the shelved full-format text still says midnight Friday of the deadline week",
+    /midnight at the end of the Friday of the league-posted deadline week/.test(secFull("2.4")));
   A("Rule 3.2 lets only an uninvolved staff member waive the ten-minute forfeit",
     /waived by a member of league staff who is not playing in, managing, or otherwise involved/.test(sec("3.2")) &&
     !/is a hard rule and is not waivable/.test(sec("3.2")));
@@ -73,9 +91,17 @@ console.log("\n— the code agrees with the rulebook");
   A("no surface still claims there is no games-played minimum",
     !/no games-played minimum/.test(live) && !/no games-played minimum/.test(hub) &&
     !/there is no games-played requirement \(Rule 2\.8\)/.test(live));
-  A("the playoff caps caption states 3 and 6, not 4 and exempt",
-    /at most three games of a series and a goaltender in at most six/.test(hub) &&
+  /* v2.48: the caption no longer hardcodes "3 and 6" — both numbers are now format-dependent
+     (basic caps the goaltender at 3 too; full still caps it at 6), so it reads them live from
+     CG.weeklyCap instead of stating either format's numbers as a literal. */
+  A("the playoff caps caption reads its numbers live from CG.weeklyCap, not a hardcoded literal",
+    /a skater may be dressed in at most '\+CG\.weeklyCap\(\{ pos:"C" \}\)\+' games of a series and a goaltender in at most '\+CG\.weeklyCap\(\{ pos:"G" \}\)\+'/.test(hub) &&
     !/goaltenders are exempt and can play all seven/.test(hub));
+  const fmtBlock = live.slice(live.indexOf("CG.FORMAT_RULES = {"), live.indexOf("CG.FORMAT_NAME"));
+  A("...which gives 3 and 3 in basic",
+    /basic: \{[\s\S]*?cap_skater:3, cap_goalie:3,/.test(fmtBlock));
+  A("...and 3 and 6 in the shelved full format",
+    /full: *\{[\s\S]*?cap_skater:3, cap_goalie:6,/.test(fmtBlock));
 }
 
 console.log("\n— the bundle still boots with these changes in it");

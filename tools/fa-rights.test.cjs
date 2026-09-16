@@ -22,13 +22,18 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 console.log("— the rulebook defines the classes, because this is a rule before it is a role");
 {
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
-  const sec = (id) => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
+  const findSec = (id) => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === id) return s; throw new Error("no " + id); };
+  const sec = (id) => findSec(id).paragraphs.join(" ");
+  const secFull = (id) => { const s = findSec(id); return (s.full || s.paragraphs).join(" "); };
   const r22 = sec("2.2");
-  A("Rule 2.2 names the unrestricted class", /never completed a season on a club's roster is an UNRESTRICTED free agent/.test(r22));
-  A("...and the restricted one", /RESTRICTED free agent until he has accrued four \(4\) off-seasons of service/.test(r22));
-  A("...with the former club's rights acknowledged and the match mechanism left to the office (v2.35)", /his rights stay with that club when his contract ends/.test(r22) && /exercises those rights when another club makes him an offer is set by the league office/.test(r22));
-  A("...and says why Season 1 has none", /every registered player begins unrestricted/.test(r22));
-  A("...and that the count is a setting, published before signings", /is a league-office setting/.test(r22));
+  const r22full = secFull("2.2");
+  A("Rule 2.2 basic says there are no rights classes", /There are no rights classes in the basic format/.test(r22));
+  A("...and that no club holds a player's rights once his season ends", /no club holds a player's rights once his season ends, and no player is restricted/.test(r22));
+  A("...(full format) names the unrestricted class", /never completed a season on a club's roster is an UNRESTRICTED free agent/.test(r22full));
+  A("...(full) and the restricted one", /RESTRICTED free agent until he has accrued four \(4\) off-seasons of service/.test(r22full));
+  A("...(full) with the former club's rights acknowledged and the match mechanism left to the office (v2.35)", /his rights stay with that club when his contract ends/.test(r22full) && /exercises those rights when another club makes him an offer is set by the league office/.test(r22full));
+  A("...(full) and says why Season 1 has none", /every registered player begins unrestricted/.test(r22full));
+  A("...(full) and that the count is a setting, published before signings", /is a league-office setting/.test(r22full));
   A("the changelog records v2.25", rb.changelog.some((c) => c.version === "2.25" && /restricted free agent/i.test(c.summary)));
 }
 
@@ -36,8 +41,15 @@ console.log("\n— the accrual boundary, driven");
 {
   const ctx = { console, Math, Object, Array, String, Number, JSON, parseInt };
   ctx.window = ctx; ctx.globalThis = ctx;
-  ctx.CG = { _siteCfg: {}, TEAMS: [], contractHeldIds: () => ({}), isDraftEligible: () => true };
+  ctx.CG = { _siteCfg: {}, TEAMS: [], contractHeldIds: () => ({}), isDraftEligible: () => true, SEASON: { format: "full" } };
   vm.createContext(ctx);
+  /* the RFA/rights machinery only exists in the full format (CG.fmt("rights")) — load the format
+     block first so CG.fmt/isBasic exist, then exercise poolState with SEASON.format = "full" */
+  {
+    const fmtBlock = live.slice(live.indexOf("CG.FORMAT_RULES = {"), live.indexOf("CG.GROUP_NAME = {"));
+    if (!fmtBlock || fmtBlock.indexOf("CG.FORMAT_RULES") !== 0) { A("located the format rules block", false); process.exit(1); }
+    vm.runInContext(fmtBlock, ctx);
+  }
   /* the default is a plain assignment, not a function — rfaOffseasons falls back to it, so without
      loading it the fallback cases measure an `undefined` and pass for the wrong reason (the same
      trap playoff-shape.test.cjs documents for PLAYOFF_PER_DIV_DEFAULT) */
@@ -81,6 +93,12 @@ console.log("\n— the accrual boundary, driven");
     ctx.CG.lg = { _rosteredIds: {}, _registrationsRaw: [{ profile_id: "p", status: "pending" }], serviceSeasons: () => 2, isReturning: () => true };
     const k = ctx.CG.poolState("p").key; ctx.CG.contractHeldIds = () => ({}); return k === "under_contract";
   })());
+
+  console.log("\n— basic format has no rights classes at all (CG.fmt(\"rights\") is false)");
+  ctx.CG.SEASON = { format: "basic" };
+  A("service never produces rfa in basic — a one-season veteran is just a free agent", state(1, true) === "free_agent");
+  A("...nor does heavy service", state(3, true) === "free_agent");
+  ctx.CG.SEASON = { format: "full" };
 }
 
 console.log("\n— the Discord side grants from the same rule");
@@ -99,7 +117,9 @@ console.log("\n— the Discord side grants from the same rule");
   A("the sweep computes service from DISTINCT PRIOR seasons, excluding the current one",
     /if \(!r\.profile_id \|\| !r\.season_id \|\| r\.season_id === curId\) continue;/.test(sync));
   A("...counts a player restricted only below the threshold",
-    /if \(priorSeasons\[pid\]\.size < RFA_YEARS\) rfa\.add\(pid\);/.test(sync));
+    /if \(rightsOn && priorSeasons\[pid\]\.size < RFA_YEARS\) rfa\.add\(pid\);/.test(sync));
+  A("...and only when the CURRENT season is the full format — basic holds nobody's rights",
+    /const rightsOn = !!curSeason && curSeason\.format === "full";/.test(sync));
   A("...and never calls a rostered or contracted player a free agent",
     /if \(onRosterNow\.has\(pid\) \|\| underContract\.has\(pid\)\) continue;/.test(sync));
   A("the threshold is the same setting the site reads", /rfa_offseasons/.test(sync) && /rfa_offseasons/.test(live));

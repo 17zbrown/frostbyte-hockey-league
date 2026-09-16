@@ -25,7 +25,10 @@ A("no 'Squad locked' button", !/Squad locked/.test(hub));
 A("no 'of 3 squad changes left' tooltip", !/of 3 squad changes left/.test(hub) && !/squadMovesLeft/.test(hub));
 A("the squad button says changes are unlimited", /Squad changes are unlimited all season \(Rule 2\.1\)/.test(hub));
 A("the Squads card copy says so too", /there is no limit on squad changes \(Rule 2\.1\)/.test(hub));
-A("...and the camp meter is still 3", /meter\("training camp",tcSq\.length,3\)/.test(hub));
+/* v2.48: the camp cap is no longer a hardcoded 3 in the meter — it reads CG.CAMP_MAX, which the
+   format table still sets to 3 in both basic and full, so the meter still reads 3 in practice. */
+A("...and the camp meter reads the format's camp cap (CG.CAMP_MAX), not a hardcoded 3",
+  /meter\("training camp",tcSq\.length,CG\.CAMP_MAX\)/.test(hub));
 A("no comment still claims a 3-swaps ceiling or the pre-v2.7 2/4/6 shape", !/3-swaps-a-season|2\/4\/6|2 G \/ 4 D \/ 6 F/.test(live + hub));
 A("the Swap tooltip does not nest parentheses", !/\('\+title\+'\)/.test(hub) && /of the same position\. '\+title\+'"/.test(hub));
 
