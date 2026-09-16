@@ -66,7 +66,7 @@ A("Road to N is empty without a pre-season; eligibility is the cutoff alone in b
 A("rights classes only exist in full", /if \(CG\.fmt\("rights"\) && served > 0/.test(live));
 A("trades: picks are not assets in basic", /if \(!CG\.fmt\("pick_trades"\)\) return \[\];/.test(live) && /Draft picks are not traded in the basic format — trade players only \(Rule 2\.3\)/.test(live));
 A("term selects follow the format", (live.match(/\[1,2,3\]\.slice\(0, CG\.fmt\("max_contract_years"\)\)/g) || []).length === 4 && /\[1,2,3\]\.slice\(0, CG\.fmt\("max_contract_years"\)\)/.test(hub));
-A("the draft board is built to the format's round count, snake copy gated", /var rounds = CG\.fmt\("draft_rounds"\);/.test(live) && /\["as_drawn","Keep the drawn order"/.test(live) && /CG\.fmt\("draft_snake"\)\?'Fifteen rounds in a snake/.test(live));
+A("the draft board is built to the format's round count, snake copy gated", /var rounds = CG\.fmt\("draft_rounds"\);/.test(live) && /\["as_drawn","Keep the drawn order"/.test(live) && /CG\.fmt\("draft_snake"\)\?CG\.fmt\("draft_rounds"\)\+' rounds in a snake/.test(live));
 A("Rule 2.9 in basic is the sign-up cutoff", /if \(CG\.isBasic\(\)\)\{\s*var s0 = CG\.SEASON \|\| \{\}, dl0 = s0\.signup_deadline_at \|\| s0\.registration_deadline;/.test(live));
 
 console.log("\n— the Seasons editor");
@@ -84,31 +84,28 @@ const sec = (id) => find(id).paragraphs.join(" "), secFull = (id) => (find(id).f
 const shelved = ["0.2","0.3","0.4","0.5","0.6","0.7","0.8","0.9","1.1","2.1","2.2","2.3","2.4","2.5","2.6","2.8","2.9","3.1","5.2","8.1","8.3"];
 A("every format-dependent section carries a full variant", shelved.every((id) => Array.isArray(find(id).full) && find(id).full.length > 0), shelved.filter((id) => !find(id).full).join(","));
 A("...and no other section does", rb.chapters.every((c) => c.sections.every((s) => shelved.includes(s.id) || !s.full)));
-A("0.1 explains the two formats and Appendix A", /BASIC format is the league standard/.test(sec("0.1")) && /FULL format/.test(sec("0.1")) && /Appendix A/.test(sec("0.1")));
-A("2.1: eighteen, 9/6/3, management inside, depth outside the shape", /eighteen \(18\) players/.test(sec("2.1")) && /three \(3\) goaltenders/.test(sec("2.1")) && /counted inside those eighteen spots/.test(sec("2.1")) && /rides the active roster as depth/.test(sec("2.1")));
+A("0.1 explains the two formats and Appendix A", /basic format is the league standard/.test(sec("0.1")) && /full format/.test(sec("0.1")) && /Appendix A/.test(sec("0.1")));
+A("2.1: season-settings roster shape, management inside, depth outside the shape", /determine, for each season, the size of the active roster and its composition by position group/.test(sec("2.1")) && /shall publish these figures to the clubs before that season's draft/.test(sec("2.1")) && /counted within the published composition in their own position groups/.test(sec("2.1")) && /counts against neither the published composition nor any roster limit/.test(sec("2.1")));
 A("2.1 (shelved): seventeen, two goaltenders, loans", /seventeen \(17\) players/.test(secFull("2.1")) && /two \(2\) goaltenders/.test(secFull("2.1")) && /Pre-season loans are the one exception/.test(secFull("2.1")));
-A("2.8: fifteen rounds, snake, random every season, cutoff is the whole test, no pick trading, depth placement", /fifteen \(15\) rounds in a snake order/.test(sec("2.8")) && /bears no relation to the previous season/.test(sec("2.8")) && /registered by the cutoff is the whole test/.test(sec("2.8")) && /Draft picks are not club assets in the basic format/.test(sec("2.8")) && /as depth \(Rule 2\.1\)/.test(sec("2.8")));
-/* the pay table: fifteen rounds on the $250K lattice from the $750K floor */
-const money = (n) => "$" + n.toLocaleString("en-US");
-const words = ["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen"];
-const scale = (r, rounds) => 750000 + (rounds - r) * 250000;
-A("...and every one of the fifteen published figures matches the scale", words.every((w, i) => sec("2.8").includes("round " + w + " " + money(scale(i + 1, 15)))), words.filter((w, i) => !sec("2.8").includes("round " + w + " " + money(scale(i + 1, 15)))).join(","));
-A("...class $37,500,000, $43,500,000 of the $50,000,000 cap", /\$37,500,000/.test(sec("2.8")) && /\$43,500,000 of the \$50,000,000 cap/.test(sec("2.8")));
+A("2.8: rounds a season setting, snake, random every season, cutoff is the whole test, no pick trading, depth placement", /commissioner shall determine the number of rounds for each season's draft/.test(sec("2.8")) && /bears no relation to the previous season/.test(sec("2.8")) && /registration by the cutoff is the sole test/.test(sec("2.8")) && /Draft picks are not club assets under the basic format/.test(sec("2.8")) && /as depth \(Rule 2\.1\)/.test(sec("2.8")));
+/* the pay scale is now a formula, not fifteen fixed figures — the round count itself is a season setting */
+A("...the draft pay scale is a formula on the $750K floor and $250K increment, published with the round count", /round N pays \$750,000 and round one pays \$750,000 plus \$250,000 multiplied by \(N − 1\)/.test(sec("2.8")) && /league minimum salary is \$750,000/.test(sec("2.5")) && /multiple of \$250,000 above it/.test(sec("2.5")) && /published with the round count/.test(sec("2.8")));
+A("...every selection in a round carries an identical cap hit", /Every selection in a round carries an identical cap hit/.test(sec("2.8")));
 A("2.8 (shelved) keeps fourteen rounds, the lottery and pick trading, with the five-game slip corrected", /fourteen \(14\) rounds/.test(secFull("2.8")) && /NHL-style draft lottery/.test(secFull("2.8")) && /Draft picks are club assets/.test(secFull("2.8")) && !/five-game/.test(secFull("2.8")) && /three-game/.test(secFull("2.8")));
 A("0.6 (shelved) also corrected", !/five-game/.test(secFull("0.6")));
-A("2.2: no market, waived players signable from the draft's conclusion, no rights classes", /no free-agency period and no open market/.test(sec("2.2")) && /From the moment the draft concludes until the movement deadline/.test(sec("2.2")) && /There are no rights classes in the basic format/.test(sec("2.2")));
-A("2.3: players only", /Draft picks are not trade assets in the basic format/.test(sec("2.3")));
-A("2.4: midnight after the Friday of the fourth game week; registration for the next season opens", /Friday of the fourth game week/.test(sec("2.4")) && /Registration for the following season opens the moment the deadline passes/.test(sec("2.4")));
-A("2.5: one-season deals, no extensions, no held rights, the cap year is the season", /term of exactly one season/.test(sec("2.5")) && /no extensions, no re-signings and no held rights/.test(sec("2.5")) && /The cap year is the season/.test(sec("2.5")) && /\{\{CAP\}\}/.test(sec("2.5")));
-A("2.6: a manager holds one of the eighteen spots", /holds one of the club's eighteen active spots/.test(sec("2.6")));
+A("2.2: no market, waived players signable from the draft's conclusion, no rights classes", /no free-agency period and no open market/.test(sec("2.2")) && /From the conclusion of the draft until the movement deadline/.test(sec("2.2")) && /The basic format recognizes no classes of player rights/.test(sec("2.2")));
+A("2.3: players only", /Draft picks are not tradeable assets in the basic format/.test(sec("2.3")));
+A("2.4: midnight after the Friday of the fourth game week; registration for the next season opens", /Friday of the fourth \(4th\) game-week/.test(sec("2.4")) && /Registration for the following season opens when the deadline passes/.test(sec("2.4")));
+A("2.5: one-season deals, no extensions, no held rights, the cap year is the season", /term of one \(1\) season/.test(sec("2.5")) && /no contract extension, no re-signing and no retained player rights/.test(sec("2.5")) && /The cap year is the season/.test(sec("2.5")) && /\{\{CAP\}\}/.test(sec("2.5")));
+A("2.6: a manager holds a roster spot in the published composition", /holds one of the club's active-roster spots in his own position group within the published composition \(Rule 2\.1\)/.test(sec("2.6")));
 A("2.9: the sign-up cutoff", /Position changes close at the sign-up cutoff/.test(sec("2.9")));
 A("3.1 stored clause states the live shape (six weeks, 54)", /runs six \(6\) game-weeks/.test(sec("3.1")) && /for 54 games per club/.test(sec("3.1")));
-A("5.2: everyone three, goaltenders too", /Every player — skater or goaltender — may be dressed in at most three \(3\) games in a week/.test(sec("5.2")) && /three goaltenders exactly cover its nine games/.test(sec("5.2")));
-A("8.1: top three, six-club field, the first seed rests", /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")) && /first seed rests through the opening round/.test(sec("8.1")));
-A("8.3: best-of-seven 2-2-3, three a series for everyone, byes", /best-of-seven series played inside a single game week in a 2-2-3 format/.test(sec("8.3")) && /every player, skater or goaltender, may be dressed in at most three \(3\) games of a series/.test(sec("8.3")) && /first seed plays no series in the opening week/.test(sec("8.3")));
+A("5.2: everyone three, roster shaped to cover the week", /No player — skater or goaltender — may be dressed in more than three \(3\) games in a game-week/.test(sec("5.2")) && /the roster composition published under Rule 2\.1 is sized so that a full active roster covers a full week within the cap/.test(sec("5.2")));
+A("8.1: top three, six-club field, the first seed byes", /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")) && /first seed receives a bye through the opening round/.test(sec("8.1")));
+A("8.3: best-of-seven 2-2-3, three a series for everyone, byes", /best-of-seven series played within a single game-week in a 2-2-3 format/.test(sec("8.3")) && /no player, skater or goaltender, may be dressed in more than three \(3\) games of a series/.test(sec("8.3")) && /first seed plays no series in the opening week/.test(sec("8.3")));
 A("0.4/0.6 carry their shelved titles", find("0.4").fullTitle === "Step three — the pre-season" && find("0.6").fullTitle === "Step five — rookie placement and free agency" && find("0.4").title === "Step three — draft week");
-A("10.1 defines Season format and Depth", /“Season format” means/.test(sec("10.1")) && /“Depth” means/.test(sec("10.1")));
-A("the changelog head is 2.48 and states the Season 1 calendar", rb.changelog[0].version === "2.48" && /Saturday September 19/.test(rb.changelog[0].summary) && /puck drop Wednesday September 23/.test(rb.changelog[0].summary) && /playoffs from November 4/.test(rb.changelog[0].summary));
+A("10.1 defines Season format and Depth", /“Season format” means/.test(sec("10.1")) && /“Depth” or “depth placement” means/.test(sec("10.1")));
+A("the 2.48 changelog entry exists and the head is at least 2.48", (() => { const e = rb.changelog.find((c) => c.version === "2.48"); return !!e && /Saturday September 19/.test(e.summary) && /puck drop Wednesday September 23/.test(e.summary) && /playoffs from November 4/.test(e.summary) && parseFloat(rb.changelog[0].version) >= 2.48; })());
 A("American spelling throughout the basic text", !/practis|colour|centre|organis|defence|favour/i.test(shelved.map(sec).join(" ") + sec("0.1") + sec("10.1")));
 
 console.log("\n— the renderer: pure, and the appendix carries the other format");
@@ -120,13 +117,13 @@ A("the input rulebook is never mutated", JSON.stringify(rb) === before);
 const appx = (b) => b.chapters.find((c) => c.num === "A");
 A("basic: chapters 0–10 bind, Appendix A holds the full variants", basicBook.format === "basic" && appx(basicBook) && appx(basicBook).shelved && appx(basicBook).sections.length === shelved.length && /full format — on the shelf/.test(appx(basicBook).title));
 A("...numbered A.<id> with the shelved text", appx(basicBook).sections.every((s) => /^A\./.test(s.id)) && appx(basicBook).sections.find((s) => s.of === "2.1").paragraphs.join(" ").includes("seventeen (17) players"));
-A("...and the binding 2.1 is the basic one", basicBook.chapters[2].sections.find((s) => s.id === "2.1").paragraphs.join(" ").includes("eighteen (18) players"));
-A("full: the roles swap — 2.1 binds with seventeen, Appendix A holds the basic text", fullBook.format === "full" && fullBook.chapters[2].sections.find((s) => s.id === "2.1").paragraphs.join(" ").includes("seventeen (17) players") && appx(fullBook).sections.find((s) => s.of === "2.1").paragraphs.join(" ").includes("eighteen (18) players") && /basic format/.test(appx(fullBook).title));
+A("...and the binding 2.1 is the basic one", basicBook.chapters[2].sections.find((s) => s.id === "2.1").paragraphs.join(" ").includes("determine, for each season, the size of the active roster"));
+A("full: the roles swap — 2.1 binds with seventeen, Appendix A holds the basic text", fullBook.format === "full" && fullBook.chapters[2].sections.find((s) => s.id === "2.1").paragraphs.join(" ").includes("seventeen (17) players") && appx(fullBook).sections.find((s) => s.of === "2.1").paragraphs.join(" ").includes("determine, for each season, the size of the active roster") && /basic format/.test(appx(fullBook).title));
 A("...with the shelved titles restored for the full book", fullBook.chapters[0].sections.find((s) => s.id === "0.4").title === "Step three — the pre-season");
 A("the page head names the format and the appendix", /This season runs the basic format — the league standard; the full format is preserved in Appendix A\./.test(pub2) && /rb-shelved/.test(pub2));
 
 console.log("\n— the public surfaces follow the format");
-A("home: the timeline drops the pre-season row and says snake in basic", /CG\.fmt\("preseason"\) \? sD\.preseason_starts_at : null/.test(pub) && /fifteen rounds, snake order, live on the site/.test(pub));
+A("home: the timeline drops the pre-season row and says snake in basic", /CG\.fmt\("preseason"\) \? sD\.preseason_starts_at : null/.test(pub) && /CG\.fmt\("draft_snake"\) \? CG\.fmt\("draft_rounds"\)\+" rounds, snake order, live on the site"/.test(pub));
 A("standings hero: the spots-per-division is read, not stated", /playoff spots per division/.test(pub) && !/Three playoff spots per division/.test(pub));
 A("the live bracket names rounds from the generator's function and shows byes", /CG\.playoffRoundName\(rd\)/.test(pub) && /BYE<\/span>/.test(pub));
 

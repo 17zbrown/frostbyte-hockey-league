@@ -27,7 +27,7 @@ console.log("— the rulebook defines the classes, because this is a rule before
   const secFull = (id) => { const s = findSec(id); return (s.full || s.paragraphs).join(" "); };
   const r22 = sec("2.2");
   const r22full = secFull("2.2");
-  A("Rule 2.2 basic says there are no rights classes", /There are no rights classes in the basic format/.test(r22));
+  A("Rule 2.2 basic says there are no rights classes", /The basic format recognizes no classes of player rights/.test(r22));
   A("...and that no club holds a player's rights once his season ends", /no club holds a player's rights once his season ends, and no player is restricted/.test(r22));
   A("...(full format) names the unrestricted class", /never completed a season on a club's roster is an UNRESTRICTED free agent/.test(r22full));
   A("...(full) and the restricted one", /RESTRICTED free agent until he has accrued four \(4\) off-seasons of service/.test(r22full));

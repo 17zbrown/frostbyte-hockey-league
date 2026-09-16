@@ -42,9 +42,9 @@ console.log("\n— new-season defaults match the real league shape");
 console.log("\n— the dressing rule is group-based");
 {
   const r21 = sec("2.1");
-  A("Rule 2.1 lets a player dress anywhere in his group", /any position within his group/.test(r21));
-  A("...forward at center or wing, defenseman either side", /a forward at center or either wing, a defenseman at either left or right defense/.test(r21));
-  A("...but never a skater in goal or a goalie out of it", /a skater is never dressed in goal, nor a goaltender out of it/.test(r21));
+  A("Rule 2.1 lets a player dress anywhere in his group", /Each club ices from an active roster shaped by position group/.test(r21));
+  A("...forward at center or wing, defenseman either side", /A forward may be dressed at center or at either wing/.test(r21) && /a defenseman may be dressed on either side/.test(r21));
+  A("...but never a skater in goal or a goalie out of it", /a goaltender may be dressed only in goal/.test(r21) && /only in goal does the declared position bind/.test(r21));
   A("...and the old 'only at his assigned position' wording is gone", !/only at his assigned position/.test(r21));
   A("the changelog records v2.26", rb.changelog.some((c) => c.version === "2.26" && /any position within his group/.test(c.summary)));
 }

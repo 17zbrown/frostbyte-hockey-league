@@ -35,13 +35,13 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 ## 📋 DRAFT NIGHT: SAT SEPT 19, 7:00 PM
 
-**15 rounds in a snake order**, live on the site on a pick clock. The order was drawn at random and is published in the draft room: it runs first to last in round one, reverses for round two, and alternates from there — the club picking last in round one picks first in round two. Every season's order is drawn fresh; it has nothing to do with how the previous season finished.
+**A snake-order draft**, live on the site on a pick clock. The number of rounds is a season setting the league office publishes before draft night (Rule 2.8) — the working figure on the site is 15 rounds in a snake order, and the final number will be confirmed before Saturday. The order was drawn at random and is published in the draft room: it runs first to last in round one, reverses for round two, and alternates from there — the club picking last in round one picks first in round two. Every season's order is drawn fresh; it has nothing to do with how the previous season finished.
 
 **Everyone who signed up by the Thursday cutoff is in the pool.** There is no pre-season and no appearance requirement — registered on time is the whole test (Rule 2.8).
 
 **Build your board in advance.** It is private to your management group. If your clock runs out, the league takes the best available player off your own board, so an absent manager never costs the club a pick or lands someone you never ranked.
 
-**What a pick costs.** Draft salaries are set by round, not negotiated: round 15 pays the $750,000 league minimum and every round above it adds $250,000, so round 1 is $4,250,000. Every pick in a round costs the same — first overall and eighth overall are identical against the cap — and a full 15-pick class costs $37,500,000. With your GM and AGM at $3M each that is $43.5M of a $50M cap. The same scale applies if your clock expires and the league picks off your board.
+**What a pick costs.** Draft salaries are set by round, not negotiated: the last round pays the $750,000 league minimum and every round above it adds $250,000 (so with 15 rounds, round 1 is $4,250,000 and a full class is $37,500,000 — $43.5M of the $50M cap with your GM and AGM). The scale follows whatever round count is published, and the draft room shows it. Every pick in a round costs the same, and the same scale applies if your clock expires and the league picks off your board.
 
 **Draft picks cannot be traded.** Trades are players for players (Rule 2.3).
 
@@ -57,11 +57,11 @@ Tampering with another club's rostered players is a discipline matter.
 
 ## 👥 ROSTER AND LINEUPS
 
-**18 players: 9 forwards, 6 defensemen, 3 goalies — and your Owner, GM and AGM are three of those 18**, counted in their own position groups. Team HQ enforces the shape and refuses anything that breaks it. Depth placements sit on top of the 18.
+**The roster size and shape are a season setting** the league office publishes before the draft (Rule 2.1); the working shape on the site is 18 players — 9 forwards, 6 defensemen, 3 goalies — **with your Owner, GM and AGM counted inside it** in their own position groups, and the final figures will be confirmed before draft night. Team HQ enforces whatever is published and refuses anything that breaks it. Depth placements sit on top of the roster.
 
 **Positions work by group.** Any forward can dress at C, LW or RW. Any defenseman can dress at LD or RD. Goalies dress only in goal. One exception: training-camp players fill any position (Rules 2.1 and 5.2).
 
-**Weekly cap: everyone plays at most 3 games a week — skaters and goalies alike.** An over-cap lineup is simply refused. Nine games a week, three goalies at three games each: plan your goaltending by night. If a goalie is out for a night, a camp player can play goal, or ask the league office for an emergency goalie signing (Rules 2.4 and 5.2).
+**Weekly cap: everyone plays at most 3 games a week — skaters and goalies alike.** An over-cap lineup is simply refused. Nine games a week: plan your goaltending by night. If a goalie is out for a night, a camp player can play goal, or ask the league office for an emergency goalie signing (Rules 2.4 and 5.2).
 
 **Training camp is capped at 3 players.** Those 3 can be dressed at any position, up to 3 games a week each.
 
@@ -135,10 +135,10 @@ Series are best of seven, played inside one game week — 2 games Wednesday, 2 T
 
 • **6 weeks, 9 games a week, 54 games**
 • **Wednesday, Thursday, Friday at 9:00, 9:35 and 10:10 PM ET**
-• **Roster 18: 9 F, 6 D, 3 G — your Owner, GM and AGM are inside it.** Training camp capped at 3
+• **Roster size and shape: published before the draft (working figure 18: 9 F, 6 D, 3 G, management inside it).** Training camp capped at 3
 • **Weekly cap (regular season and playoffs): everyone 3 games, goalies included**
 • **Cap $50M, minimum $750K, every contract one season**
-• **Draft: 15 rounds, random snake, everyone registered by Thursday is in; round 1 costs $4.25M**
+• **Draft: random snake order, rounds published before draft night (working figure 15); everyone registered by Thursday is in**
 • **Lines lock 30 minutes before puck drop. 1 penalty per player changed after**
 • **Late: 5 min is 1 penalty, 8 min is 2, 10 min is a forfeit**
 • **Standings on total points. Forfeits count as normal wins and losses**

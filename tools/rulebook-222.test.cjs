@@ -45,9 +45,9 @@ console.log("— the rulebook says what the announcement says");
   A("...and the management obligation to spread ice time",
     /obligated to distribute pre-season appearances as widely as it can/.test(secFull("2.8")));
   A("Rule 2.8 (basic) has no pre-season requirement — registered by the cutoff is the whole test",
-    /There is no appearance requirement and no exemption: registered by the cutoff is the whole test/.test(sec("2.8")));
+    /There is no appearance requirement and no exemption: registration by the cutoff is the sole test/.test(sec("2.8")));
   A("Chapter 0.4 (basic) has no pre-season at all",
-    /There is no pre-season in the basic format/.test(sec("0.4")));
+    /The basic format has no pre-season/.test(sec("0.4")));
   A("...and the shelved full-format text no longer sweeps management into the random assignment",
     !/management included in the split/.test(secFull("0.4")) &&
     /management group plays for its own club/.test(secFull("0.4")));
@@ -56,14 +56,14 @@ console.log("— the rulebook says what the announcement says");
     !/ordered by points percentage/.test(sec("8.1")));
   A("...and says games in hand are not adjusted for",
     /not adjusted for games in hand/.test(sec("8.1")));
-  A("...and scores a forfeit as an ordinary result", /forfeit counts for points exactly as an ordinary result/.test(sec("8.1")));
+  A("...and scores a forfeit as an ordinary result", /A forfeit counts for points as an ordinary result/.test(sec("8.1")));
   A("Rule 8.1 (basic) takes the top three in each division, a six-club field",
     /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")));
   A("...and the shelved full-format text still holds the top four, eight-club field",
     /top four \(4\) clubs in each division/.test(secFull("8.1")) && /eight-club field/.test(secFull("8.1")));
   A("Rule 2.1 caps training camp at three", /up to three \(3\) training-camp players/.test(sec("2.1")));
   A("Rule 2.4 (basic) puts the deadline at midnight Friday of the fourth game week",
-    /midnight at the end of the Friday of the fourth game week, the league-posted deadline week/.test(sec("2.4")));
+    /closes at midnight Eastern Time at the end of the Friday of the fourth \(4th\) game-week/.test(sec("2.4")));
   A("...and the shelved full-format text still says midnight Friday of the deadline week",
     /midnight at the end of the Friday of the league-posted deadline week/.test(secFull("2.4")));
   A("Rule 3.2 lets only an uninvolved staff member waive the ten-minute forfeit",

@@ -171,7 +171,7 @@ console.log("— the offer cards tell the truth about extensions");
 console.log("— the rulebook says the same thing");
 {
   A("the changelog records v2.34, with nothing older above it", rb.changelog.some(function(c){ return c.version === "2.34" && /Contract extensions/.test(c.summary); }) && rb.changelog[0].version >= "2.34");
-  A("the changelog head is now v2.48, the season-format switch", rb.changelog[0].version === "2.48" && /season format/i.test(rb.changelog[0].summary));
+  A("the changelog head is now v2.48 or later, the season-format switch", rb.changelog.some(function(c){ return c.version === "2.48" && /season format/i.test(c.summary); }) && rb.changelog[0].version >= "2.48");
   /* FULL format: extensions, rights, and multi-season deals still live word for word in Appendix A */
   A("[full] Rule 2.5 describes the extension", /A club re-signs its own player through an extension/.test(secFull("2.5")));
   A("[full] ...opening with the final season's free agency, for the whole season", /at any point in the final season of his deal — from the day that season's free agency opens/.test(secFull("2.5")));
@@ -200,10 +200,10 @@ console.log("— the rulebook says the same thing");
     A(`${f}: ...while the shelved edition still tells owners how re-signing works`, (function(){ const s = R(f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt")); return /Re-signing your own players/.test(s) && /Cap outlook/.test(s) && /you still hold his rights until then/.test(s); })());
   }
   /* BASIC format is now the live standard: one-season deals, no extensions, no held rights */
-  A("[basic] Rule 2.5 says no extensions, no re-signings and no held rights", /There are no extensions, no re-signings and no held rights in the basic format/.test(sec("2.5")));
-  A("[basic] ...and every contract runs a term of exactly one season", /a term of exactly one season — the season it is signed in/.test(sec("2.5")));
-  A("[basic] ...so a club cannot claim a player for a future season", /A club cannot offer a player anything for a future season, and nothing a club does this season gives it a claim on a player for the next/.test(sec("2.5")));
-  A("[basic] Rule 2.2 has no free-agency period or open market", /In the basic format there is no free-agency period and no open market/.test(sec("2.2")));
-  A("[basic] ...and there are no rights classes", /There are no rights classes in the basic format: no club holds a player's rights once his season ends, and no player is restricted/.test(sec("2.2")));
+  A("[basic] Rule 2.5 says no extensions, no re-signings and no held rights", /The basic format provides for no contract extension, no re-signing and no retained player rights/.test(sec("2.5")));
+  A("[basic] ...and every contract runs a term of exactly one season", /a term of one \(1\) season — the season in which it is signed/.test(sec("2.5")));
+  A("[basic] ...so a club cannot claim a player for a future season", /A club may not offer a player terms for a future season, and nothing a club does in a season confers any claim on a player for the next/.test(sec("2.5")));
+  A("[basic] Rule 2.2 has no free-agency period or open market", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));
+  A("[basic] ...and there are no rights classes", /The basic format recognizes no classes of player rights: no club holds a player's rights once his season ends, and no player is restricted/.test(sec("2.2")));
 }
 console.log(ok ? "\nPASS" : "\nFAIL"); process.exit(ok ? 0 : 1);

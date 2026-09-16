@@ -4397,7 +4397,7 @@ CG.admDraftLive = function(){
       (meta?'<button class="btn btn-ghost" id="dAnnounce">Announce the order</button>':"")+
       '</div>'+
       (hasPicks?'<p class="caption" style="margin-top:10px">Regenerating replaces every pick — it’s blocked once any pick has been made (reverse them first). '+picks.length+' picks exist now.</p>'
-               :'<p class="caption" style="margin-top:10px">'+(CG.fmt("draft_snake")?'Fifteen rounds in a snake — even rounds run in reverse, so the club picking last in round one picks first in round two (Rule 2.8).':'Fourteen rounds, the same order every round (like the NHL — never a snake).')+' The round count is set by the season format. The pick order publishes to the clubs the moment you generate.</p>')+
+               :'<p class="caption" style="margin-top:10px">'+(CG.fmt("draft_snake")?CG.fmt("draft_rounds")+' rounds in a snake — even rounds run in reverse, so the club picking last in round one picks first in round two (Rule 2.8).':'Fourteen rounds, the same order every round (like the NHL — never a snake).')+' The round count is set by the season format. The pick order publishes to the clubs the moment you generate.</p>')+
       (meta&&meta.codes?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">'+meta.codes.map(function(c,i){ return '<span class="chip'+(i===0?" chip-chrome":"")+'" style="font-size:10px">'+(i+1)+' · '+esc(c)+'</span>'; }).join("")+'</div>':"")+
       '</div></div>';
   }
@@ -10061,7 +10061,7 @@ CG.roadAheadCard = function(s, opts){
   var perClub = (CG.seasonShape ? CG.seasonShape(s).perClub : CG.GAMES_PER_CLUB);
   var steps = CG.isBasic(s) ? [
     [s.registration_deadline, "Sign-up cutoff", "Register by now to enter the draft — everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
-    [s.draft_at, "Draft night", "Fifteen rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
+    [s.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
     [s.starts_at, "Puck drop", "The regular season opens the Wednesday after the draft — "+perClub+" games over "+(CG.seasonShape?CG.seasonShape(s).weeks:6)+" weeks, every stat imported automatically from EA."],
     [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven (Rule 8.1)."]
   ] : [

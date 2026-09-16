@@ -14,10 +14,10 @@ const sec = {}; rb.chapters.forEach(c => c.sections.forEach(s => { sec[s.id] = s
 const p21 = sec["2.1"].paragraphs.join(" "), p24 = sec["2.4"].paragraphs.join(" ");
 
 console.log("— the rulebook says it");
-A("Rule 2.1 states squad changes are unlimited", /There is no limit on how many times a player may change squads/.test(p21));
+A("Rule 2.1 states squad changes are unlimited", /move a player between the active roster and training camp at any time and without limit, in either direction/.test(p21));
 A("...and no longer caps them at three", !/three \(3\) times/.test(p21) && !/swap cap/.test(p21));
 A("...while camp itself is still capped at three", /carries no more than three players in camp/.test(p21));
-A("Rule 2.4 says the deadline never touches roster<->camp moves", /the deadline does not restrict it \(Rule 2\.1\)/.test(p24));
+A("Rule 2.4 says the deadline never touches roster<->camp moves", /is not restricted by the deadline \(Rule 2\.1\)/.test(p24));
 A("a v2.30 changelog entry exists (pinned by version, never by index)", rb.changelog.some(e => e.version === "2.30" && /unlimited/.test(e.summary)));
 
 console.log("\n— Team HQ no longer rations moves");

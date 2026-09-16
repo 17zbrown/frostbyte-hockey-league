@@ -53,7 +53,7 @@ console.log("\n— the snake is now format-gated, not gone (v2.48: basic IS a sn
   A("the sixth style, as_drawn, offers keeping the drawn order", /\["as_drawn",\s*"Keep the drawn order"/.test(live));
   A("draft_snake is true for basic, false for full", /basic:\s*\{[\s\S]{0,400}?draft_snake:true/.test(live) && /full:\s*\{[\s\S]{0,400}?draft_snake:false/.test(live));
   A("the generate caption is gated on CG.fmt(\"draft_snake\")",
-    /CG\.fmt\("draft_snake"\)\?'Fifteen rounds in a snake[\s\S]{0,200}?:'Fourteen rounds, the same order every round \(like the NHL — never a snake\)\.'/.test(live));
+    /CG\.fmt\("draft_snake"\)\?CG\.fmt\("draft_rounds"\)\+' rounds in a snake[\s\S]{0,200}?:'Fourteen rounds, the same order every round \(like the NHL — never a snake\)\.'/.test(live));
   A("the start-draft copy is gated on CG.fmt(\"draft_snake\") too",
     /CG\.fmt\("draft_snake"\)\?"snaking — even rounds in reverse, ":"the same order every round, "/.test(live));
   A("the announce body branches on meta.snake — snake copy AND no-snake copy both present",
@@ -97,11 +97,11 @@ console.log("\n— the rulebook states all of it (v2.27)");
   const r28 = sec("2.8"), r28f = secFull("2.8");
 
   console.log("  (basic — the league standard: a random snake with no relation to the previous season)");
-  A("Rule 2.8 (basic): a snake order that reverses each round", /in a snake order — the drawn order runs first to last in round one, reverses for round two/.test(r28));
-  A("...drawn fresh at random each season, no relation to the previous season's standings", /Every season's order is drawn fresh and bears no relation to the previous season's standings/.test(r28));
-  A("...draft picks are not club assets and may not be traded", /Draft picks are not club assets in the basic format and may not be traded \(Rule 2\.3\)/.test(r28));
+  A("Rule 2.8 (basic): a snake order that reverses each round", /in a snake order — the drawn order is followed in the first round, reversed in the second and alternated thereafter/.test(r28));
+  A("...drawn fresh at random each season, no relation to the previous season's standings", /Each season's order is drawn afresh and bears no relation to the previous season's standings, playoffs or champion/.test(r28));
+  A("...draft picks are not club assets and may not be traded", /Draft picks are not club assets under the basic format and may not be traded \(Rule 2\.3\)/.test(r28));
   A("...and states the expansion-club treatment", /an expansion club enters the draw on equal terms with every other/.test(r28));
-  A("Chapter 0.5 (basic) describes a random snake, not the NHL lottery", /Why a random snake and not a lottery: in the basic format the draft has no memory/.test(sec("0.5")) && !/by default through an NHL-style lottery/.test(sec("0.5")));
+  A("Chapter 0.5 (basic) describes a random snake, not the NHL lottery", /The order is drawn at random for each season and bears no relation to the previous season's standings, playoffs or champion/.test(sec("0.5")) && !/NHL-style lottery/.test(sec("0.5")));
 
   console.log("  (full — shelved: the NHL lottery / linear order / tradeable picks)");
   A("Rule 2.8 (full): the same order in every round, never reversing", /same order in every round — the order never reverses/.test(r28f));

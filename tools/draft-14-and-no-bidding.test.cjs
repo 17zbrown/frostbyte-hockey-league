@@ -15,13 +15,12 @@ const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n?$/)[1]).rul
 const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
 const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
 
-console.log("— fifteen rounds (basic, now the league standard)");
-A("Rule 2.8 says fifteen (15) rounds", /over fifteen \(15\) rounds/.test(sec("2.8")));
-A("Chapter 0.5 says fifteen", /over fifteen rounds in a snake order/.test(sec("0.5")));
-A("the pay table is the fifteen-round one, ending at $750,000", /round fifteen \$750,000/.test(sec("2.8")));
-A("...opening at $4,250,000", /round one \$4,250,000/.test(sec("2.8")));
-A("...and prices the class at $37,500,000", /\$37,500,000/.test(sec("2.8")));
-A("...and discloses the cap consequence", /\$43,500,000 of the \$50,000,000 cap/.test(sec("2.8")));
+console.log("— round count is now a season setting (basic, v2.50)");
+A("Rule 2.8 makes the round count a season setting", /The commissioner shall determine the number of rounds for each season's draft and shall publish it to the clubs/.test(sec("2.8")));
+A("Chapter 0.5 defers to the number of rounds published for the season", /over the number of rounds published for the season \(Rule 2\.8\)/.test(sec("0.5")));
+A("the pay table is a formula on the $750,000 minimum and $250,000 increment", /round N pays \$750,000 and round one pays \$750,000 plus \$250,000 multiplied by \(N − 1\)/.test(sec("2.8")));
+A("...and says the scale follows the published round count", /the scale follows the number of rounds published for the season/.test(sec("2.8")));
+A("...and the full scale is published with the round count", /The full scale for the season is published with the round count, before the draft/.test(sec("2.8")));
 
 console.log("— fourteen rounds (full format, shelved)");
 A("Rule 2.8 (full) says fourteen (14) rounds", /over fourteen \(14\) rounds/.test(secFull("2.8")));
@@ -34,7 +33,7 @@ A("...and discloses the cap consequence", /within \$750,000 of the cap/.test(sec
 
 console.log("— a complete front office before the draft");
 A("Rule 2.8 requires Owner, GM and AGM", /must hold an Owner, a General Manager and an Assistant General Manager/.test(sec("2.8")));
-A("...and says the draft will not start while a seat is empty", /will not start while a seat is empty/.test(sec("2.8")));
+A("...and says the draft will not start while a seat is empty", /the draft does not start while a seat is vacant/.test(sec("2.8")));
 A("Rule 2.6 cross-references it", /all three seats before the entry draft begins/.test(sec("2.6")));
 A("the draft room asks the database before confirming", /CG\.sb\.rpc\("draft_management_gaps"\)/.test(live));
 A("...and names who is short", /The draft can’t start yet/.test(live) && /Still open:/.test(live));
@@ -43,9 +42,9 @@ A("...shown on the Build-the-board card too", /The draft cannot start yet<\/b> �
 
 console.log("— rookie bidding is gone");
 for (const id of ["0.6", "2.2", "2.5"]) A(`section ${id} no longer mentions rookie bidding`, !/rookie bidding/i.test(sec(id)));
-A("basic Rule 2.2 says there is no free-agency period at all", /In the basic format there is no free-agency period and no open market/.test(sec("2.2")));
+A("basic Rule 2.2 says there is no free-agency period at all", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));
 A("...every leftover and late registrant is placed as depth, not signed", /is placed on a club by the league office as depth at the league minimum/.test(sec("2.2")));
-A("...and there are no rights classes in the basic format", /There are no rights classes in the basic format/.test(sec("2.2")) && /no player is restricted/.test(sec("2.2")));
+A("...and there are no rights classes in the basic format", /The basic format recognizes no classes of player rights/.test(sec("2.2")) && /no player is restricted/.test(sec("2.2")));
 A("(full) Rule 2.2 says free agency is for ended contracts, not rookies", /for players whose contracts have ended/.test(secFull("2.2")) && /It is not for rookies/.test(secFull("2.2")));
 A("...and states the exclusive re-signing window as a tampering rule with a start AND an end", /may negotiate only with the club that holds it — either side may open the conversation — at any point in that season, from the day its free agency opens until the free-agency period that FOLLOWS his contract's final season opens/.test(secFull("2.2")) && /is tampering under the paragraph above/.test(secFull("2.2")));
 A("...says the club's right survives the rollover", /survives the contract's expiry at the season rollover/.test(secFull("2.2")));
@@ -58,13 +57,13 @@ A("no surviving copy still routes undrafted players to bidding", !/go to free ag
 A("the Draft Room channel topic no longer promises a bidding board", !/bidding board/.test(R("shared/roles.mjs")));
 
 console.log("— post-draft placement (v2.33)");
-A("Rule 2.8 P7 says everyone unplaced is seated ten minutes after the draft", /ten-minute countdown, after which every registered player still without a club/.test(sec("2.8")));
-A("...in random order, no club choosing", /in random order/.test(sec("2.8")) && /No club chooses/.test(sec("2.8")));
-A("...as a one-season contract", /on a one-season contract \(Rule 2\.5\)/.test(sec("2.8")));
-A("...and guarantees nobody is left without a club (basic has no unseatable case)", /No club chooses, and no registered player is left without a club/.test(sec("2.8")));
-A("Rule 2.8 P3 makes the sign-up cutoff an explicit test", /A registration filed after the cutoff is never in the pool/.test(sec("2.8")));
-A("Rule 2.5 says every contract has a term of exactly one season", /a term of exactly one season — the season it is signed in/.test(sec("2.5")) && /A drafted player's contract runs at the salary Rule 2\.8 fixes for his round/.test(sec("2.5")));
-A("Chapter 0.6 says there is no free-agency week at all", /There is no free-agency week/.test(sec("0.6")));
+A("Rule 2.8 P7 says everyone unplaced is seated ten minutes after the draft", /a ten \(10\) minute period, after which every registered player still without a club/.test(sec("2.8")));
+A("...in random order, no club choosing", /in random order/.test(sec("2.8")) && /No club selects/.test(sec("2.8")));
+A("...as a one-season contract", /on a contract for the season \(Rule 2\.5\)/.test(sec("2.8")));
+A("...and guarantees nobody is left without a club (basic has no unseatable case)", /No club selects, and no registered player is left without a club/.test(sec("2.8")));
+A("Rule 2.8 P3 makes the sign-up cutoff an explicit test", /A registration filed after the cutoff does not enter the pool/.test(sec("2.8")));
+A("Rule 2.5 says every contract has a term of exactly one season", /a term of one \(1\) season — the season in which it is signed/.test(sec("2.5")) && /A drafted player's contract carries the salary fixed for his round by Rule 2\.8/.test(sec("2.5")));
+A("Chapter 0.6 says there is no free-agency week at all", /The basic format has no free-agency period/.test(sec("0.6")));
 A("(full) ...as a one-season contract, unseatable reported not dropped", /The placement is a one-season contract/.test(secFull("2.8")) && /is reported to the commissioners rather than left in silence/.test(secFull("2.8")));
 A("(full) Rule 2.8 P3 makes the deadline an explicit test", /a registration filed after it is never in the pool, however many pre-season games/.test(secFull("2.8")));
 A("(full) Rule 2.5 says a first contract runs one season", /runs exactly one season at the salary Rule 2\.8 fixes/.test(secFull("2.5")));
@@ -87,12 +86,12 @@ console.log("— the record and the briefings");
 }
 for (const f of ["CGHL-Season1-Owners-Briefing.md", "CGHL-Season1-Owners-Briefing-DISCORD.txt"]) {
   const b = R(f);
-  A(`${f}: 15 rounds in a snake (v2.48 basic format)`, /\*\*15 rounds in a snake order\*\*/.test(b) && !/^10 rounds,/m.test(b) && !/^14 rounds,/m.test(b));
+  A(`${f}: 15 rounds in a snake (v2.48 basic format)`, /the working figure on the site is 15 rounds in a snake order/.test(b) && !/^10 rounds,/m.test(b) && !/^14 rounds,/m.test(b));
   A(`${f}: no rookie bidding, no free agency`, /There is no free agency/.test(b) && !/go to rookie bidding/.test(b) && !/rookie bidding/.test(b));
   A(`${f}: says the unplaced are placed, not signed`, /placed on one by the league office at \$750K/.test(b) && !/signs in open free agency like everyone else/.test(b));
   A(`${f}: says ten clubs, not twelve`, !/twelve clubs/.test(b));
   A(`${f}: front office must be complete`, /Your front office must be complete/.test(b));
-  A(`${f}: the cap consequence is spelled out`, /\$43\.5M of a \$50M cap/.test(b));
+  A(`${f}: the cap consequence is spelled out`, /\$43\.5M of the \$50M cap/.test(b));
   A(`${f}: the full-format edition is shelved beside it, not deleted`, /\$39\.25M of a \$40M cap/.test(R(f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt"))));
 }
 console.log(ok ? "\nPASS" : "\nFAIL"); process.exit(ok ? 0 : 1);

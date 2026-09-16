@@ -38,10 +38,12 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
   const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
   const r21 = sec("2.1"), r21f = secFull("2.1");
-  A("camp is carried BEYOND the eighteen active spots (basic)",
-    /up to three \(3\) training-camp players beyond its eighteen active spots/.test(r21));
-  A("...and the active roster is the 18-man shape by GROUP (v2.48): 9 forwards, 6 defensemen, 3 goaltenders",
-    /nine \(9\) forwards — centers, left wings and right wings in any mix/.test(r21) && /six \(6\) defensemen — left or right in any mix/.test(r21) && /three \(3\) goaltenders, the one position locked to its exact role/.test(r21));
+  A("camp is carried outside the active roster, in addition to it (basic, v2.50 season-settings text)",
+    /A club may carry up to three \(3\) training-camp players in addition to its active roster/.test(r21) &&
+    /camp is carried outside the active roster, not outside the payroll/.test(r21));
+  A("...and the active-roster shape is now a season setting the commissioner publishes, by position group",
+    /commissioner shall determine, for each season, the size of the active roster and its composition by position group/.test(r21) &&
+    /A forward may be dressed at center or at either wing/.test(r21) && /a defenseman may be dressed on either side/.test(r21) && /a goaltender may be dressed only in goal/.test(r21));
   A("the shelved full-format text still carries the seventeen-man, 2-goaltender shape (v2.41)",
     /up to three \(3\) training-camp players beyond its seventeen active spots/.test(r21f) &&
     /two \(2\) goaltenders, the one position locked to its exact role/.test(r21f));
@@ -113,10 +115,10 @@ console.log("\n— training-camp salaries COUNT against the cap (Rule 2.5, commi
       `${ctx.CG.teamPayroll(lg, "X")}`);
   }
   A("Rule 2.5 says a camp salary IS part of the payroll",
-    /salary is part of that payroll/.test(sec("2.5")) && /but not outside the cap/.test(sec("2.5")));
+    /salary forms part of that payroll/.test(sec("2.5")) && /but not outside the cap/.test(sec("2.5")));
   A("Rule 2.1 agrees", /salaries count against the club's salary cap exactly as an active/.test(sec("2.1")));
   A("...and camp still does not consume an active roster spot",
-    /carried beyond the active roster, not beyond the payroll/.test(sec("2.1")));
+    /carried outside the active roster, not outside the payroll/.test(sec("2.1")));
 }
 
 console.log("\n— the rulebook carries the cap ruling, and the reversal is on the record");
@@ -124,10 +126,10 @@ console.log("\n— the rulebook carries the cap ruling, and the reversal is on t
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
   A("Rule 2.5 says a camp salary IS part of the payroll",
-    /training-camp player's salary is part of that payroll/.test(sec("2.5")));
+    /training-camp player's salary forms part of that payroll/.test(sec("2.5")));
   A("...and that it counts from placement, not from call-up",
     /from the moment he is placed there/.test(sec("2.5")) &&
-    /calling him up to the active roster changes nothing about what he costs/.test(sec("2.5")));
+    /recalling him to the active roster changes nothing about his cost/.test(sec("2.5")));
   A("Rule 2.1 repeats it where camp is defined",
     /salaries count against the club's salary cap exactly as an active player's does/.test(sec("2.1")));
   A("no paragraph anywhere still claims the exemption",

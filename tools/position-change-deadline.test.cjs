@@ -165,19 +165,19 @@ console.log("— the rulebook says the same thing");
      sign-up cutoff itself (Rule 2.8's deadline); the old "Tuesday before the first pre-season
      game" wording is preserved verbatim as the full-format variant */
   A("basic states the deadline is the sign-up cutoff, not a pre-season-relative date",
-    /Position changes close at the sign-up cutoff — 11:59 PM Eastern on the Thursday before the draft/.test(sec("2.9")));
+    /Position changes close at the sign-up cutoff — 11:59 PM Eastern Time on the Thursday preceding the draft/.test(sec("2.9")));
   A("...(full format) states the old Tuesday-before-pre-season deadline exactly",
     /11:59 PM Eastern on the Tuesday before the first pre-season game/.test(secFull("2.9")));
-  A("...says filing AND approving both close", /no request may be filed, and none may be approved/.test(sec("2.9")));
-  A("...but a pending request can still be declined", /may still be declined and closed/.test(sec("2.9")));
+  A("...says filing AND approving both close", /no request may be filed and none may be approved/.test(sec("2.9")));
+  A("...but a pending request can still be declined", /already pending may be declined and closed/.test(sec("2.9")));
   A("basic says it follows the published calendar rather than a fixed date",
     /follows the published calendar rather than a fixed date/.test(sec("2.9")));
   A("...(full) says it follows the published schedule rather than a fixed calendar date",
     /follows the published schedule rather than a fixed calendar date/.test(secFull("2.9")));
   A("...and separates 'registered at' from Rule 2.1's 'dressed at'",
-    /governs the position a player is registered AT/.test(sec("2.9")));
+    /governs the position at which a player is registered; Rule 2\.1 governs where a rostered player may be dressed/.test(sec("2.9")));
   A("Chapter 0.3 (basic) warns members at sign-up that it closes at the cutoff itself",
-    /can only be changed by request to the league office up to the sign-up cutoff \(Rule 2\.9\)/.test(sec("0.3")));
+    /may be changed only by request to the league office filed before the sign-up cutoff \(Rule 2\.9\)/.test(sec("0.3")));
   A("...(full) warns members it closes the Tuesday before the first pre-season game",
     /Tuesday before the first pre-season\s*game \(Rule 2\.9\)/.test(secFull("0.3")));
 }

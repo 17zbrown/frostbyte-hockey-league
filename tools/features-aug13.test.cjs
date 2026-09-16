@@ -243,9 +243,9 @@ console.log("\n— the adversarial review's confirmed findings stay fixed");
     /spectate \|\| role==="staff" \? 'the first pick goes' : 'your club/.test(live));
 
   /* 6 · the room is reachable */
-  A("the home timeline's draft-night row goes to the draft room", /\["Draft night", sD\.draft_at, [\s\S]{0,140}, "#\/draft"\]/.test(pub));
+  A("the home timeline's draft-night row goes to the draft room", /\["Draft night", sD\.draft_at, [\s\S]{0,220}, "#\/draft"\]/.test(pub));
   A("...and its description is format-aware (snake in basic, no snake in full)",
-    /CG\.fmt\("draft_snake"\) \? "fifteen rounds, snake order, live on the site" : "fourteen rounds, live on the site"/.test(pub));
+    /CG\.fmt\("draft_snake"\) \? CG\.fmt\("draft_rounds"\)\+" rounds, snake order, live on the site" : CG\.fmt\("draft_rounds"\)\+" rounds, live on the site"/.test(pub));
   A("the command palette knows the draft room", /route:"#\/draft"/.test(ui));
 
   /* 7 · the checklist can no longer offer a dead-end button */

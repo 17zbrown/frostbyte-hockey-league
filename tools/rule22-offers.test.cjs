@@ -86,10 +86,10 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("5.2: the cap is regular season and playoffs", /weekly appearance cap in the regular season and the playoffs/.test(sec("5.2")));
   A("[full] 5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(secFull("5.2")));
   /* BASIC format is now the live standard: waived-player signing, players-only trades */
-  A("[basic] 2.2: no free-agency period or open market", /In the basic format there is no free-agency period and no open market/.test(sec("2.2")));
-  A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /league office confirms nothing and has no say/.test(sec("2.2")));
-  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the moment the draft concludes until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player at the league minimum/.test(sec("2.2")));
-  A("[basic] 2.3: trades are players only — no pick is a trade asset", /Draft picks are not trade assets in the basic format — a trade is players for players, and an offer carrying a pick is refused where it is built/.test(sec("2.3")));
+  A("[basic] 2.2: no free-agency period or open market", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));
+  A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /the league office confirms nothing and has no part in the move/.test(sec("2.2")));
+  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player at the league minimum salary/.test(sec("2.2")));
+  A("[basic] 2.3: trades are players only — no pick is a trade asset", /Draft picks are not tradeable assets in the basic format: a trade consists of players for players, and an offer that includes a draft pick is refused at the point of entry/.test(sec("2.3")));
   /* by version, not by position: pinning changelog[0] made every LATER rulebook change fail this
      unrelated test (v2.29 did exactly that) */
   A("the changelog records v2.28", rb.changelog.some((e) => e.version === "2.28" && e.dateIso === "2026-08-29"));

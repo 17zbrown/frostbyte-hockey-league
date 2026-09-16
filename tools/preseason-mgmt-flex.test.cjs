@@ -32,7 +32,7 @@ console.log("\n— the rulebook says it (rendered JSON)");
   A("[full] 5.2: the exception ends with the pre-season and a saved line will not dress into a regular-season game", /the exception ends with the pre-season, and a saved line that carries a manager out of his group will not dress into a regular-season or playoff game/.test(secFull("5.2")));
   A("5.2: groups are applied when a lineup is filed, not only when built", /apply these groups when a lineup is filed, not only when it is built/.test(sec("5.2")));
   /* BASIC format has no pre-season, so management gets no dressing exception — camp is the only one */
-  A("[basic] 2.1: exactly one exception to the groups — training camp", /There is one exception: a training-camp player may be dressed at any position for as long as he is carried in camp/.test(sec("2.1")));
+  A("[basic] 2.1: exactly one exception to the groups — training camp", /The sole exception is a training-camp player, who may be dressed at any position for as long as he is carried in camp/.test(sec("2.1")));
   const cl239 = rb.changelog.find((c) => c.version === "2.39");
   A("changelog 2.39", !!cl239 && /Pre-season flexibility for management/.test(cl239.summary));
   A("...American spelling", !/practis|colour|centre|organis|defence/i.test((cl239 ? cl239.summary : "") + sec("5.2") + sec("2.1") + secFull("5.2") + secFull("2.1")));

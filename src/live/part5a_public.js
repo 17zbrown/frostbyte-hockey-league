@@ -805,7 +805,7 @@ CG.roadModule = function(pre){
       ["Sign-up deadline", sD.registration_deadline, "draft-eligibility cutoff",
         CG.isRegisteredNow() ? "#/hub" : "#/register"],
       ["Pre-season", CG.fmt("preseason") ? sD.preseason_starts_at : null, "two weeks, own standings", "#/schedule"],
-      ["Draft night", sD.draft_at, (CG.fmt("draft_snake") ? "fifteen rounds, snake order, live on the site" : "fourteen rounds, live on the site"), "#/draft"],
+      ["Draft night", sD.draft_at, (CG.fmt("draft_snake") ? CG.fmt("draft_rounds")+" rounds, snake order, live on the site" : CG.fmt("draft_rounds")+" rounds, live on the site"), "#/draft"],
       ["Puck drop", sD.starts_at, (CG.isBasic() ? "the Wednesday after the draft" : "the regular season begins"), "#/schedule"]
     ].filter(function(x){ return x[1]; }).map(function(st, i){
       var past = Date.parse(st[1]) < nowMs;
@@ -1231,7 +1231,7 @@ CG.ROUTES.home = function(){
     var s0 = CG.SEASON||{};
     var mile = (CG.isBasic() ? [
       [s0.registration_deadline, "Sign-up cutoff", "Register by now and you are in the draft. Later sign-ups still play — they’re placed on a club as depth after it."],
-      [s0.draft_at, "Draft night", "Fifteen rounds in a snake order, live on the site — everyone registered by the cutoff is in the pool."],
+      [s0.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds in a snake order, live on the site — everyone registered by the cutoff is in the pool."],
       [s0.starts_at, "Puck drop", "The regular season begins — the Wednesday after the draft."],
       [s0.playoffs_start_at, "Playoffs begin", "Six of eight qualify: the division winners rest through round one, then the division finals, then the final."]
     ] : [
