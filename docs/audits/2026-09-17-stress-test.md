@@ -69,8 +69,17 @@ the registration to `assigned` and logs a "League-office placement" transaction.
 before Saturday. Its four callers (`preseason_random_assign`, `auto_assign_latecomers`,
 `distribute_unproven_rookies`, `trg_autoassign_new_reg`) are all SECURITY DEFINER and owned by
 `postgres`, so revoking the public grant changes nothing for them.
+Today 144 of the 167 registrants are unrostered and draft-eligible; the same call works live
+during the draft to pre-empt a pick. (For an anon caller the registration's `status` flip is
+silently reverted by the column guard, so the board keeps saying "pending" while the player is
+seated — an inconsistency, not a mitigation.) Same pattern, smaller door: `auto_assign_latecomers`
+and `distribute_unproven_rookies` guard with `auth.uid() is not null and not is_commissioner()`,
+which lets anon through to their own stage gates.
 Fix: `revoke execute on function public._assign_reg_random(uuid,text,boolean,text) from public, anon, authenticated;`
 and a defense-in-depth guard at the top (`if not (is_commissioner() or trusted_writer()) …`).
+To stop the class recurring: `alter default privileges in schema public revoke execute on functions from public;`
+and a release-suite check that fails on any SECURITY DEFINER function with anon/authenticated
+EXECUTE and no auth reference in its body (the query this audit used).
 
 **P0-3 · Game nights and draft day will overload the database as the site is built today (see §1).**
 Three things compound: the compute tier (≈10 PostgREST connections), the league-live "rebuild
