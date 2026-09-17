@@ -318,3 +318,45 @@ serial role-sync drain stalls on one hung socket.
 6. The rest of the P2 list through the first week; P3 as time allows.
 
 Reproduce the measurements: `SB_KEY=$(grep -o 'CG.SB_KEY = "[^"]*"' src/live/part_live.js | cut -d'"' -f2) node tools/loadtest.mjs boot|draft|herd` (`TABS=40` scales the herd).
+
+## 5. Status — fixed the same day (v2.57, September 17, 2026)
+
+Everything below was applied live and is recorded in `sql/2026-09-17-audit-fixes.sql`,
+`sql/2026-09-17-audit-fixes-b.sql` and commits `2207142` … `6dfa6e2`. Three rulings from the
+commissioner shaped the fixes: in the basic format a waived player is **signed outright by a club**
+(no offer, no acceptance — clubs move players, players are not asked); lobby codes are released
+**30 minutes before the night's first game, to the two clubs' rosters and front offices only**;
+every **post-lock lineup change is told to the opponent** so the penalties can be coordinated.
+
+| Finding | Fix |
+|---|---|
+| P0-1 `respond_offer` ungranted | Granted (the shelved full format). In basic seasons the board's **Offer** became **Sign** — `sign_free_agent` at $750K outright, through the Owner-approval queue where set; offer/extension cards hidden. Rule 2.2 rewritten. |
+| P0-2 `_assign_reg_random` public | Revoked from PUBLIC/anon/authenticated (with `preseason_release_loans`, `_mgmt_move_send`, `lfg_form_lobby`, `lfg_open_lobby`, `lineup_camp_warnings`). Default privileges for new functions no longer include PUBLIC or anon. `tools/sql/grant-audit.sql` is the standing check. |
+| P0-3 the herd | League-live is a **delta**: a games event re-reads `games` + that game's box score + the codes view (3 requests, not 19), after a random 1–9 s. Re-measured at 40 tabs: p95 ≈ 250 ms, 0 errors (was 25% errors, 13 s median). `resolve_due_servers` moved to `pg_cron` (every 2 min, watched). Compute upgrade still recommended — the user's call. |
+| P1-1 trade assets | `guard_trade_assets` BEFORE UPDATE trigger: assets, retention and parties are fixed once proposed. |
+| P1-2 roster row identity | `guard_roster_identity`: `profile_id`, `season_id`, `origin` pinned. |
+| P1-3 lobby codes | `games.game_code` / `server` no longer granted to the API roles; the client selects named columns and reads codes through `games_public` (owner-run view) masked by the night-based `can_see_match`. Rule 4.2 rewritten; matchup page, hub card and notification copy updated. |
+| P1-4 emergency call-ups | Accepted until 10 minutes after puck drop, then refused; penalties counted per **player** changed; `_post_lock_notices` tells the opposing front office (site + club room), the commissioners and the officials desk who came out / went in / penalties owed, logs it, posts to #management-moves; the matchup page shows "Changed after lock · serves N". Rule 5.3 rewritten. |
+| P1-5 forfeit erased by merge | Management merges refuse forfeit-ruled games; no ingest path writes `forfeit_team_id`. |
+| P1-6 `waive_player` dead guard | `get diagnostics` now reads the DELETE; the registration flip runs under `app.role_grant` so a real waiver updates the registration. |
+| P1-7 sign-up backdating | `guard_registration_columns` is BEFORE INSERT too: `created_at = now()`, `status = pending`, `scout_ovr = null` for members. |
+| P1-8 `preseason_release_loans` | Revoked (see P0-2). |
+| P2-0 dead sync door / killed passes | `discord-ops` HTTP function (key or member session; `/api/discord-ops`); the sweep has an 18-s member-pass budget with `partial`/`membersLeft`, a start stamp, cheap steps first; the site's ping and Run now use the door; Run now hidden for scheduled functions. |
+| P2-1 lineups world-readable | `game_lineups_read` = own club, office, or after the game's lock. |
+| P2-2 / P2-3 public helpers | Revoked (see P0-2). |
+| P2-4 `game_stats` unique key | `game_stats_one_row_per_player` expression index; ingest treats 23505 as "another writer filed first". |
+| P2-5 waived players dressed | `clear_lineups_on_roster_remove` AFTER DELETE / team change: empties his slots in upcoming filed lineups and tells the club. |
+| P2-6 review once | `review_game_records(p_game)` runs on the final flip **and** on every `game_stats` insert (statement trigger), deduplicated per finding through `admin_audit`. |
+| P2-7 weekly-cap race | `pg_advisory_xact_lock` per club-week in `set_game_lineup`. |
+| P2-8 renamed forum duplicated | Forums and Team Management rooms are adopted by stored id first; config repointed at `#mgnt-faq`, the empty duplicate deleted, the waivers and lineups guides reissued there. |
+| P2-9 role bits | Every owned role stripped of CREATE_EVENTS / CREATE_GUILD_EXPRESSIONS / thread creation (Staff, Commissioner, managed roles kept); @everyone lost thread creation; DISBOARD lost MANAGE_CHANNELS; new roles are born correct; Team Management rooms and the post-only feeds reconciled every sweep. |
+| P2-10 staff move rosters | `set_roster_squad` / `swap_roster_squad` require the transactions department. |
+| P2-11 registrant notes | `registration_notes` table (self + office RLS); the column is moved there by trigger; 51 notes migrated. |
+| P2-12 / P2-13 / P2-14 | Timeouts on every Discord/Supabase call in the sweep and the bot; message POSTs are one-shot and claims are kept after delivery; nickname sync skips case-insensitive collisions; `discord-join` requires a session (POST) or the ops key (GET). |
+| P2-15 poller dies with the gateway | `bot/ea-poll-service.mjs` + `chel-ea-poll.service` — its own unit, live on the VM. |
+| P3 | `resolve_game_server` guarded; `is_admin` pinned; staff department self-edit removed from the UI; availability server-stamped with `late`/`late_at`, the form no longer hard-locks; penalties per player; ingest batch prefetch + archive-before-file; poller abort = unknown; `INGEST_KEY` preferred when set. |
+
+Still open, and why: the compute tier (billing — recommend Small for the season); `INGEST_KEY` is
+supported but not set (needs the Netlify env + `/etc/chel-bot.env`); a commissioner who also holds a
+club seat still passes `mgmt_gate` as office (three grandfathered conflicts); the page weight
+(2.1 MB, not a defect).
