@@ -329,6 +329,55 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
   }
 }
 
+/* The two FAQ forums (2026-09-17): where the league office posts the how-to guides — one thread
+   per guide — and members ask under them. #management-faq sits in Team Management for the front
+   office; #player-faq sits in General for every member (the sign-up guide is for people who are
+   not rostered yet). Only the office opens posts; everyone who can see the forum may reply in a
+   thread and react. Idempotent: creates what is missing and reconciles the overwrites every run,
+   so a hand-edit that reopens posting to everyone self-corrects. */
+const FAQ_VIEW = 1024n | 65536n;                                   /* VIEW + READ_HISTORY */
+const FAQ_MEMBER_ALLOW = FAQ_VIEW | 64n | (1n << 38n);              /* + ADD_REACTIONS + SEND_IN_THREADS */
+const FAQ_MEMBER_DENY = 2048n | (1n << 35n) | (1n << 36n);          /* no posts of their own (SEND, CREATE_*_THREADS) */
+const FAQ_OFFICE_ALLOW = FAQ_VIEW | 2048n | 16384n | 32768n | 8192n | (1n << 34n) | (1n << 35n) | (1n << 36n) | (1n << 38n);
+                                                                   /* + SEND + EMBED + ATTACH + MANAGE_MESSAGES + MANAGE_THREADS + every thread bit */
+async function ensureFaqForums(guildChannels, roleId, sum) {
+  const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
+  const front = ["owner", "general manager", "assistant general manager"].map((n) => roleId[n]).filter(Boolean);
+  if (office.length < 2 || front.length < 3) return;             /* roles not provisioned yet — next run */
+  const cat = (name) => (guildChannels || []).find((c) => c.type === 4 && (c.name || "").toLowerCase() === name);
+  const mgmtCat = cat("team management"), genCat = cat("general");
+  const overwrites = (everyoneAllow, everyoneDeny, memberRoles) => [
+    { id: GUILD, type: 0, allow: String(everyoneAllow), deny: String(everyoneDeny) },
+    ...memberRoles.map((id) => ({ id, type: 0, allow: String(FAQ_MEMBER_ALLOW), deny: String(FAQ_MEMBER_DENY) })),
+    ...office.map((id) => ({ id, type: 0, allow: String(FAQ_OFFICE_ALLOW), deny: "0" })),
+  ];
+  const FORUMS = [
+    { name: "management-faq", parent: mgmtCat, ow: overwrites(0n, 1024n, front),
+      topic: "How-to guides for the front office — lineups, trades, waivers, the draft, the banned-ability list. One post per guide, kept current by the league office. Ask under the guide it belongs to; for anything else, #management-help.",
+      tags: [{ name: "Lineups" }, { name: "Trades" }, { name: "Waivers" }, { name: "Draft" }, { name: "Rules" }] },
+    { name: "player-faq", parent: genCat, ow: overwrites(FAQ_MEMBER_ALLOW, FAQ_MEMBER_DENY, []),
+      topic: "How-to guides for every player — signing up, availability, the banned-ability list. One post per guide, kept current by the league office. Ask under the guide it belongs to.",
+      tags: [{ name: "Getting started" }, { name: "Availability" }, { name: "Rules" }] },
+  ];
+  const same = (a, b) => JSON.stringify((a || []).map((o) => [o.id, String(BigInt(o.allow || "0")), String(BigInt(o.deny || "0"))]).sort())
+                       === JSON.stringify((b || []).map((o) => [o.id, String(BigInt(o.allow || "0")), String(BigInt(o.deny || "0"))]).sort());
+  for (const f of FORUMS) {
+    if (!f.parent) continue;
+    let ch = (guildChannels || []).find((c) => c.name === f.name && c.parent_id === f.parent.id);
+    try {
+      if (!ch) {
+        ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: f.name, type: 15, parent_id: f.parent.id, topic: f.topic,
+          permission_overwrites: f.ow, available_tags: f.tags, default_sort_order: 0 });
+        guildChannels.push(ch); sum.faqForumsCreated = (sum.faqForumsCreated || 0) + 1;
+      } else if (!same(ch.permission_overwrites, f.ow)) {
+        await dApi("PATCH", `/channels/${ch.id}`, { permission_overwrites: f.ow });
+        ch.permission_overwrites = f.ow; sum.faqForumsHealed = (sum.faqForumsHealed || 0) + 1;
+      }
+      if (ch && ch.id) await sbUpsertCfg("discord_" + f.name.replace(/-/g, "_") + "_channel_id", ch.id).catch(() => {});
+    } catch (e) { sum.errors.push({ faqForum: f.name, error: String(e.message || e) }); }
+  }
+}
+
 // Club rooms and roles are created once and then left alone, which meant a club that rebranded or
 // relocated kept its old Discord identity forever — the site said Canucks, Discord still said
 // Senators. Reconcile the name, colour and topic against the DB every run, PATCHing in place so the
@@ -2158,6 +2207,7 @@ export default async (req) => {
   } catch (e) { sum.errors.push({ roleIdMap: String(e.message || e) }); }
   // the Team Management category + its rooms (private to the front office)
   try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
+  try { await ensureFaqForums(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ faqForums: String(e.message || e) }); }
   try { await ensureAnnouncements(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ announcements: String(e.message || e) }); }
   try { await ensureCommunityChannels(guildChannels, teams, roleId, sum); } catch (e) { sum.errors.push({ communityChannels: String(e.message || e) }); }
   /* after the Team Rooms category is in place: give any club still missing a role or room one
