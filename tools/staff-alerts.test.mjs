@@ -65,7 +65,10 @@ console.log("\n— the complaint body never appears in Discord");
 const CHAN = { applications: "chan-apps", officiating: "chan-off", statistics: "chan-stats", community: "chan-comm" };
 const ROLE = { applications: "role-apps", officiating: "role-off", statistics: "role-stats", community: "role-comm" };
 let posts, claimed, released, failChannel, claimStatus;
-function reset() { posts = []; claimed = []; released = []; failChannel = null; claimStatus = 201; }
+/* fiveHundredChannel answers 500 (delivery unknown); hangChannel never answers; rateLimitOnce
+   answers one 429 then accepts; postAttempts counts every POST /messages */
+let fiveHundredChannel, hangChannel, rateLimitOnce, postAttempts;
+function reset() { posts = []; claimed = []; released = []; failChannel = null; claimStatus = 201; fiveHundredChannel = null; hangChannel = null; rateLimitOnce = false; postAttempts = 0; }
 reset();
 
 globalThis.fetch = async (url, opts = {}) => {
@@ -84,6 +87,10 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   const mm = u.match(/channels\/([\w-]+)\/messages/);
   if (mm && m === "POST") {
+    postAttempts++;
+    if (mm[1] === hangChannel) return new Promise(() => {});
+    if (mm[1] === fiveHundredChannel) return J({ message: "upstream" }, 500);
+    if (rateLimitOnce) { rateLimitOnce = false; return new Response(JSON.stringify({ retry_after: 0.01 }), { status: 429, headers: { "retry-after": "0.01" } }); }
     if (mm[1] === failChannel) return J({ message: "Unknown Channel" }, 404);
     posts.push({ channel: mm[1], body: JSON.parse(opts.body) });
     return J({ id: "msg" + posts.length });
@@ -162,6 +169,29 @@ console.log("\n— failures never pretend to have delivered");
   A("an unmatched import reaches the stats room", posts.length === 1 && posts[0].channel === "chan-stats");
   A("...naming the match id", /9911/.test(text(posts[0])));
   A("...claimed under its real key, not `undefined`", claimed[0] === "ea_ingest_log:9911:statistics");
+}
+
+console.log("\n— an unknown outcome keeps its claim; a rejection is retried (audit 2026-09-17, P2-12)");
+{
+  reset(); fiveHundredChannel = "chan-apps";
+  const S = createStaffAlerter(ENV);
+  const r = await S.announce("owner_applications", { id: "u1", profile_id: "p1" });
+  A("a 5xx is not counted as announced", r === "no-op" && S.sum.announced === 0);
+  A("...sent exactly ONCE", postAttempts === 1);
+  A("...and the claim is NOT released — a 5xx used to be treated as provable, the one double-post door here", released.length === 0 && claimed.length === 1);
+  A("...counted as unconfirmed, and as a lane error", S.sum.unconfirmed === 1 && S.sum.errors === 1 && S.sum.lastErrorAt > 0);
+
+  reset(); hangChannel = "chan-apps";
+  const S2 = createStaffAlerter(ENV, { discordTimeoutMs: 25 });
+  const t0 = Date.now();
+  const r2 = await S2.announce("owner_applications", { id: "u2", profile_id: "p1" });
+  A("a socket that never answers is abandoned at the deadline", r2 === "no-op" && Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  A("...sent once, claim kept, tagged as a timeout", postAttempts === 1 && released.length === 0 && /timed out after 25 ms/.test(S2.errors[0]), S2.errors.join(" | "));
+
+  reset(); rateLimitOnce = true;
+  const S3 = createStaffAlerter(ENV);
+  const r3 = await S3.announce("owner_applications", { id: "u3", profile_id: "p1" });
+  A("a 429 is waited out and the alert lands — a rejection is the one safe retry", r3 === "announced" && posts.length === 1 && postAttempts === 2);
 }
 
 console.log("\n— table identity matches the real schema");

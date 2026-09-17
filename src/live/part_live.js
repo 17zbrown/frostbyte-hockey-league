@@ -34,7 +34,17 @@ CG.ensureSb = function(){
 CG.pingDiscordSync = function(){
   if (CG._pingedAt && Date.now() - CG._pingedAt < 5000) return;   /* client-side coalesce */
   CG._pingedAt = Date.now();
-  try { fetch("/.netlify/functions/discord-sync", { method:"POST", keepalive:true, mode:"no-cors", cache:"no-store" }).catch(function(){}); } catch(e){}
+  /* v2.57: discord-sync is a scheduled function and Netlify refuses HTTP calls to those (the ping
+     had been answering 403 for weeks); discord-ops is its HTTP door and takes the member's own
+     session as the credential. Still fire-and-forget. */
+  try {
+    if (!CG.sb || !CG.auth.user) return;
+    CG.sb.auth.getSession().then(function(sess){
+      var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+      if (!tok) return;
+      return fetch("/api/discord-ops?run=now", { method:"POST", keepalive:true, cache:"no-store", headers:{ "Authorization":"Bearer "+tok } });
+    }).catch(function(){});
+  } catch(e){}
 };
 /* RPCs that change who someone is (site role, club seat, roster spot, ban) — i.e. what Discord
    roles they should be wearing. Anything added here is picked up automatically. */
@@ -9621,12 +9631,12 @@ CG.AUTOMATIONS = [
   /* window-aware: 20 minutes DURING the game window (Wed 18:00 - Sat 02:00 ET), where a dead
      poller means no scores all night; a day outside it, where not running is correct */
   { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; asks EA only while a fixture’s game window is open", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves. It asks EA only while a fixture’s game window is open (10 minutes before puck drop to 3 hours after, plus a short grace so a game that ends at the buzzer is still collected), only for the clubs in those fixtures, and hands everything it finds to the importer — which files only a match between the two scheduled clubs that ended inside that window, merges a lag-out replay into the game it continues (Rule 4.3), and archives the rest. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
-  { key:"ea-poll", staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min; same fixture-window rule; stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
-  { key:"twitch-live-sync", staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
+  { key:"ea-poll", noRun:true, staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min; same fixture-window rule; stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
+  { key:"twitch-live-sync", noRun:true, staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
-  { key:"discord-welcome", staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
-  { key:"discord-scheduler", staleAfterMin:20,name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
-  { key:"lfg-timers", staleAfterMin:15,       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
+  { key:"discord-welcome", noRun:true, staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
+  { key:"discord-scheduler", noRun:true, staleAfterMin:20,name:"Discord scheduler",         every:"Every 5 min",  desc:"Posts scheduled league updates to Discord." },
+  { key:"lfg-timers", noRun:true, staleAfterMin:15,       name:"Pickup lobby clock",        every:"Every 2 min",  desc:"Runs each pickup signup’s own 30-minute hold: pings a player before their spot lapses, takes them off the board when it does, and hands a full lobby its captains if nobody volunteers within 5 minutes." },
   { key:"gateway-bot",      name:"Gateway bot (always on)",   every:"Continuously, from its own server", desc:"A live Discord connection — welcomes and departure logs land in about a second instead of on the next sweep. The sweeps above stay on as its safety net, so “never ran” here just means the bot’s server isn’t set up yet.", noRun:true },
   { key:"rookie-distribution", staleAfterMin:15, name:"Post-draft placement",   every:"Every 2 min inside the database", desc:"Ten minutes after the draft concludes, places every registered player still without a club — the draft’s leftovers and anyone short of five pre-season games — at the league minimum, in random order (Rule 2.8). Reports anyone it cannot seat.", rpc:"distribute_unproven_rookies" },
   { key:"lifecycle-announcements", staleAfterMin:20, name:"Lifecycle announcements", every:"Every 5 min inside the database", desc:"Posts registration, pre-season, draft-night, free-agency, puck-drop, and playoff reminders to Discord — each exactly once.", rpc:"announce_lifecycle_guarded" },
@@ -9763,7 +9773,13 @@ CG.AFTER._admAutomations = function(){
       });
       return;
     }
-    fetch("/.netlify/functions/"+key, { method:"GET" }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
+    /* Netlify refuses HTTP calls to SCHEDULED functions, so only discord-sync has a door
+       (discord-ops, v2.57); the rest of the scheduled jobs list noRun above. */
+    var url = key === "discord-sync" ? "/api/discord-ops?run=now" : "/.netlify/functions/"+key;
+    CG.sb.auth.getSession().then(function(sess){
+      var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+      return fetch(url, { method: key === "discord-sync" ? "POST" : "GET", headers: tok ? { "Authorization": "Bearer "+tok } : {} });
+    }).then(function(r){ return r.json().catch(function(){ return {status:r.status}; }); })
       .then(function(out){
         btn.disabled=false; btn.textContent="Run now";
         CG.toast(key+": "+JSON.stringify(out).slice(0,140),"ok");

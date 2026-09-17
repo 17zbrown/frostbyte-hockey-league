@@ -12,6 +12,10 @@ Netlify sweep.
   department or sign-up), from `public.member_league_card`, the same card the sweep reads.
 - Heartbeats every minute into the same Automations panel + watchdog as every other job.
 
+**A second unit on the same VM, `chel-ea-poll`,** runs the EA score poller (`ea-poll-service.mjs`)
+as its own process. It shares the env file and nothing else: the gateway bot exits on purpose
+when Discord closes the connection unrecoverably, and the box-score import must not die with it.
+
 **What it deliberately does NOT do:** replace the Netlify sweeps. They keep running at their
 current (free-tier) cadences as the reconciliation backstop. Both lanes write the same
 ledgers (`welcomed_members`, `guild_members.present`), so whichever lane acts first, the
@@ -64,32 +68,51 @@ Then fill in `/etc/chel-bot.env` — the same four values the Netlify functions 
 `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — and:
 
 ```bash
-sudo systemctl start chel-bot
-journalctl -u chel-bot -f    # watch it connect
+sudo systemctl start chel-bot chel-ea-poll
+journalctl -u chel-bot -u chel-ea-poll -f    # watch them come up
 ```
 
 ### 4. Verify
-- The journal shows `gateway-bot: connected as <bot tag>`.
+- The journal shows `gateway-bot: connected as <bot tag>` and
+  `ea-poll-service: EA score poller running`.
 - Within a minute, **Control Center → Automations** shows the *Gateway bot* row green
-  ("Running", "just now"). The database watchdog arms itself on that first heartbeat — from
-  then on, a silent VM pages the commissioners within ~25 minutes.
+  ("Running", "just now"), and *EA score poller (bot server)* alongside it. The database
+  watchdog arms itself on that first heartbeat — from then on, a silent VM pages the
+  commissioners within ~25 minutes.
 - Leave/rejoin the server with a test account: the departure post and the welcome should
   both land in about a second.
+
+### Upgrading a VM set up before `chel-ea-poll` existed (before 2026-09-17)
+Nothing to do by hand: `update.sh` installs and starts any unit under `bot/deploy/` that systemd
+does not have yet, on every 5-minute tick, before it pulls. The tick that pulls this change still
+runs the old script (which only restarts `chel-bot`), so there is one tick — up to five minutes —
+during which no process polls EA; the next tick starts `chel-ea-poll`. To close that gap right
+away, or to check it happened:
+
+```bash
+sudo bash /opt/chel-gaming/bot/deploy/update.sh      # pulls, installs the unit, starts it
+systemctl status chel-bot chel-ea-poll               # both active (running)
+journalctl -u chel-ea-poll -n 20                     # "ea-poll-service: EA score poller running"
+```
 
 ---
 
 ## Operations
 
 - **Deploys are automatic.** A systemd timer pulls `origin/main` every 5 minutes and
-  restarts the bot only when something under `bot/` changed — push to main to ship, same as
-  the site.
-- **Logs:** `journalctl -u chel-bot -f`
-- **Restart:** `sudo systemctl restart chel-bot`
-- **If Discord says the bot is offline:** the sweeps are still covering everything; check
-  `systemctl status chel-bot`, then the journal. The watchdog will already have posted to
-  the ops channel if the heartbeat went stale.
+  restarts both services only when something under `bot/` or `shared/` changed — push to main
+  to ship, same as the site. Unit files under `bot/deploy/` are installed/refreshed by the same
+  tick, so a new or changed unit ships by push too.
+- **Logs:** `journalctl -u chel-bot -f` (gateway) · `journalctl -u chel-ea-poll -f` (EA poller)
+- **Restart:** `sudo systemctl restart chel-bot` · `sudo systemctl restart chel-ea-poll`
+- **If Discord says the bot is offline:** the sweeps are still covering everything and the EA
+  poller is unaffected (its own unit); check `systemctl status chel-bot`, then the journal. The
+  watchdog will already have posted to the ops channel if the heartbeat went stale.
+- **If box scores stop importing:** `systemctl status chel-ea-poll`, then
+  `journalctl -u chel-ea-poll -n 50`; the Automations panel's *EA score poller (bot server)*
+  row goes stale after 10 minutes without a cycle.
 - **Token rotation:** update `/etc/chel-bot.env` AND Netlify's env (same token), then
-  `sudo systemctl restart chel-bot`.
+  `sudo systemctl restart chel-bot` (the poller does not use the Discord token; no restart needed).
 
 ## Architecture notes
 
@@ -105,8 +128,21 @@ journalctl -u chel-bot -f    # watch it connect
 - Burst guards mirror the sweeps: >15 welcomes or departures inside 10 minutes are
   recorded silently instead of mass-pinging (raid / outage protection).
 - Heartbeat: `rl_gateway-bot` (+ `rl_gateway-bot_result`) in `app_config`, watched by
-  `automation_watchdog` with a 10-minute max age.
-- **EA score poller (primary lane):** `ea-poll.mjs`, tested by `tools/ea-poll-vm.test.mjs`.
+  `automation_watchdog` with a 10-minute max age. The result row carries every instant lane's
+  counters; a lane failure inside the last hour (a role PATCH that failed, a club-room post that
+  did not deliver) flips `ok:false` with the reason in `lastError`, the same grade the sweep
+  gives itself — `laneErrors` is the running count, `laneErrorsRecent` the lanes still red.
+- **Transport:** every Discord and Supabase call the gateway bot's lanes make carries a deadline
+  — 15 s Discord, 10 s Supabase — through one helper (`timedFetch` in `handlers.mjs`); a
+  timed-out call fails like any other and never hangs a lane. (`ea-poll.mjs` carries its own EA
+  and ingest deadlines.) `POST /channels/…/messages` is sent once (a 429 is
+  waited out, since nothing was stored): a timeout or 5xx is an *unknown* outcome, so the lane
+  keeps its `discord_post_log` claim and does not re-send — and once Discord has accepted a
+  message, the bookkeeping stamp is retried three times and the claim is kept regardless.
+  Role-sync gives every member's sync its own deadline and re-queues a failed one on a bounded
+  backoff ladder (5 s, 30 s, 2 min), so one hung member never stalls the queue.
+- **EA score poller (primary lane):** `ea-poll.mjs`, tested by `tools/ea-poll-vm.test.mjs`;
+  run by `ea-poll-service.mjs` under its own unit, `chel-ea-poll` (`tools/ea-poll-service.test.mjs`).
   EA's Pro Clubs API answers this VM but blocks Netlify's address, so the box-score import runs
   here: a 60-second cycle that stamps `rl_ea-poll-vm`, asks EA only while a fixture's game window
   (`shared/game-window.cjs`: puck drop − 10 min to + 3 h, plus a 15-min fetching grace) is open,
@@ -119,4 +155,3 @@ journalctl -u chel-bot -f    # watch it connect
 ## Phase 2 candidates (not built yet)
 
 - Second-resolution pickup lobby timers (currently the 2-min `lfg-timers` sweep).
-- Instant role sync on site changes (currently within ~2 min via `discord-sync`).

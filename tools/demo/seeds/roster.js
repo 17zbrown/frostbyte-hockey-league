@@ -187,6 +187,8 @@
   lg.isReturning = function(pid){ return !!waivedIds[pid] || (prevRet ? prevRet(pid) : false); };
   lg.isVeteran = function(pid){ return !!waivedIds[pid] || (prevVet ? prevVet(pid) : false); };
   window.GUIDE_RPC.offer_free_agent = function(a){ return { data:"offer-demo", error:null }; };
+  /* v2.57: the basic format signs a waived player outright — the real RPC returns "name → CODE" */
+  window.GUIDE_RPC.sign_free_agent = function(a){ return { data:names["u-p2"]+" → "+club, error:null }; };
   window.GUIDE_RPC.mgmt_decide_move = function(a){
     var m = lg._mgmtMoves.filter(function(x){ return x.id===a.p_id; })[0];
     if (!m) return { data:null, error:{ message:"No such move" } };

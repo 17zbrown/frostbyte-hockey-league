@@ -25,6 +25,10 @@ const world = {
   /* channels the cache still knows about but that Discord has since deleted — the real race
      between resolving a channel and posting into it */
   deadPostChannels: new Set(),
+  /* transport faults: a POST /messages whose socket never answers, a Supabase GET that never
+     answers, a welcomed_members write that fails N times before it lands; postAttempts counts
+     every POST /messages so "sent once" is provable */
+  hangDiscordPosts: false, hangSupabaseGets: false, failMarkTimes: 0, postAttempts: 0,
 };
 const events = [];           // ordered log of writes, for interlock-order assertions
 const cfg = {};              // app_config upserts (heartbeat etc.)
@@ -36,6 +40,8 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("discord.com")) {
     if (u.includes(`/guilds/G1/channels`)) return J(world.channels);
     if (/\/channels\/\w+\/messages$/.test(u) && m === "POST") {
+      world.postAttempts++;
+      if (world.hangDiscordPosts) return new Promise(() => {});
       if (world.failDiscordPosts) return J({ message: "boom" }, 500);
       /* Discord 404s a post to a channel that no longer exists — the stub has to model that or
          the delivered-vs-attempted assertions below would pass against a fiction. */
@@ -48,6 +54,7 @@ globalThis.fetch = async (url, opts = {}) => {
     return J({});
   }
   /* Supabase */
+  if (world.hangSupabaseGets && m === "GET") return new Promise(() => {});
   if (u.includes("app_config") && m === "GET") {
     if (u.includes("welcome_seeded")) return J(world.seeded ? [{ value: world.seeded }] : []);
     if (u.includes("discord_welcome_channel_id")) return J(world.welcomeOverride ? [{ value: world.welcomeOverride }] : []);
@@ -59,6 +66,7 @@ globalThis.fetch = async (url, opts = {}) => {
     return J(world.welcomed.has(id) ? [{ discord_id: id }] : []);
   }
   if (u.includes("welcomed_members") && m === "POST") {
+    if (world.failMarkTimes > 0) { world.failMarkTimes--; return new Response("db hiccup", { status: 503 }); }
     for (const r of JSON.parse(opts.body)) { world.welcomed.add(r.discord_id); events.push({ welcomedMark: r.discord_id }); }
     return J(null);
   }
@@ -225,6 +233,80 @@ console.log("\n— a post that didn't deliver is never recorded as delivered");
   A("...the row is still written so the census won't re-announce it", events.some((e) => e.departure));
   A("...and it surfaces as an error for the watchdog", H.errors.some((e) => /depart-post/.test(e.error)));
   world.deadPostChannels.clear();
+}
+
+console.log("\n— a message is sent ONCE: an unknown outcome is never re-sent (audit 2026-09-17, P2-12)");
+{
+  world.failDiscordPosts = true; world.postAttempts = 0;
+  const H = mk();
+  const r = await H.onMemberAdd(member("once"));
+  world.failDiscordPosts = false;
+  A("a 5xx on the greeting is an error, not a retry loop", r === "error" && world.postAttempts === 1, `attempts=${world.postAttempts}`);
+  A("...tagged as an unknown outcome", /delivery unknown/.test(H.errors[H.errors.length - 1].error));
+  A("...and the member stays unrecorded, so the sweep (not this lane) decides", !world.welcomed.has("once"));
+}
+{
+  /* the socket never answers: the 15-second deadline (25 ms here) ends it, and it is sent once */
+  world.hangDiscordPosts = true; world.postAttempts = 0;
+  const H = mk({ discordTimeoutMs: 25 });
+  const t0 = Date.now();
+  const r = await H.onMemberAdd(member("hung"));
+  world.hangDiscordPosts = false;
+  A("a POST /messages that never answers is abandoned at the deadline", r === "error" && Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  A("...sent exactly once", world.postAttempts === 1);
+  A("...and recorded as a timeout", /timed out after 25 ms/.test(H.errors[H.errors.length - 1].error), H.errors[H.errors.length - 1].error);
+}
+{
+  /* Supabase stops answering: the handler fails inside the deadline instead of hanging forever
+     (an idempotent GET is not retried on a timeout — three stacked deadlines would stall the lane) */
+  world.hangSupabaseGets = true;
+  const H = mk({ sbTimeoutMs: 25 });
+  const t0 = Date.now();
+  const r = await H.onMemberRemove(member("sbdown"));
+  world.hangSupabaseGets = false;
+  A("a Supabase call that never answers fails at its deadline", r === "error" && Date.now() - t0 < 500, `${Date.now() - t0} ms`);
+  A("...named in the error", /guild_members.*timed out after 25 ms/.test(H.errors[H.errors.length - 1].error), H.errors[H.errors.length - 1].error);
+}
+
+console.log("\n— after Discord has the greeting, the record is retried, then reported");
+{
+  world.failMarkTimes = 2;             // two hiccups, then it writes
+  const H = mk();
+  events.length = 0;
+  const r = await H.onMemberAdd(member("retried"));
+  A("a record that fails twice still lands on the third try", r === "welcomed" && world.welcomed.has("retried") && H.errors.length === 0);
+  world.failMarkTimes = 99;            // the database is not coming back
+  const r2 = await H.onMemberAdd(member("unrecorded"));
+  world.failMarkTimes = 0;
+  A("a record that will not write is reported, not retried forever", r2 === "welcomed-unrecorded" && !world.welcomed.has("unrecorded"));
+  A("...as a loud error naming the consequence", /greeted, unrecorded/.test(H.errors[H.errors.length - 1].error));
+  A("...and the greeting itself was counted (it did go out)", H.sum.welcomed === 2);
+}
+
+console.log("\n— instant-lane failures reach the heartbeat (audit 2026-09-17)");
+{
+  const H = mk();
+  const roles = { synced: 3, patched: 1, errors: 0, lastErrorAt: null, lastError: null };
+  const club = { announced: 2, errors: 0, lastErrorAt: null, lastError: null };
+  const lanes = [{ key: "role-sync", sum: roles }, { key: "club-notices", sum: club }];
+  await H.beat({ lanes });
+  let res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("clean lanes: ok, zero lane errors", res.ok === true && res.laneErrors === 0 && res.laneErrorsRecent === 0);
+  roles.errors = 1; roles.lastErrorAt = Date.now() - 5000; roles.lastError = "p9 (teams:update): PATCH /guilds/G1/members/d9 -> 403 Missing Permissions";
+  await H.beat({ lanes });
+  res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("a failed role PATCH flips ok:false, with no handler error of its own", res.ok === false && res.laneErrors === 1 && res.laneErrorsRecent === 1);
+  A("...and names the lane and the failure", /^role-sync: p9 .*403/.test(res.lastError), res.lastError);
+  club.errors = 2; club.lastErrorAt = Date.now(); club.lastError = "club:n7: delivery unconfirmed";
+  await H.beat({ lanes });
+  res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("the most recent lane failure wins lastError; the count sums every lane", /^club-notices: club:n7/.test(res.lastError) && res.laneErrors === 3 && res.laneErrorsRecent === 2);
+  roles.lastErrorAt = Date.now() - 2 * 3600e3; club.lastErrorAt = Date.now() - 2 * 3600e3;
+  await H.beat({ lanes });
+  res = JSON.parse(cfg["rl_gateway-bot_result"]);
+  A("an hour later the row is green again, the counts still there", res.ok === true && res.laneErrors === 3 && res.laneErrorsRecent === 0 && res.lastError === null);
+  const src = (await import("node:fs")).readFileSync(new URL("../bot/chel-bot.mjs", import.meta.url), "utf8");
+  A("chel-bot wires every instant lane into the heartbeat's lanes", /lanes: LANES/.test(src) && /key: "role-sync", sum: RS\.sum/.test(src) && /key: "club-notices", sum: CLUB\.sum/.test(src) && /key: "incidents", sum: INC\.sum/.test(src) && /key: "staff-alerts", sum: DESK\.sum/.test(src));
 }
 
 console.log("\n— the heartbeat reports the GATEWAY, not the timer");

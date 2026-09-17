@@ -8,6 +8,12 @@
 // All real logic lives in handlers.mjs (testable without discord.js). This file only maps
 // discord.js events onto it, heartbeats every minute, and dies loudly so systemd restarts it.
 //
+// NOT in this process, on purpose: the EA score poller. It ran here until 2026-09-17, which
+// meant the exit below on an unrecoverable gateway close took the league's only working
+// box-score importer down with it (audit P2-15). It is its own systemd unit now —
+// ea-poll-service.mjs / deploy/chel-ea-poll.service — with its own heartbeat (rl_ea-poll-vm),
+// so a Discord-side outage on a game night costs welcomes, not box scores.
+//
 // Env (same four the Netlify functions use):
 //   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
@@ -16,7 +22,6 @@ import { createHandlers } from "./handlers.mjs";
 import { createIncidentNotifier } from "./incidents.mjs";
 import { createStaffAlerter } from "./staff-alerts.mjs";
 import { createRoleSyncer } from "./role-sync.mjs";
-import { createEaPoller } from "./ea-poll.mjs";
 import { createClubNotices } from "./club-notices.mjs";
 import { createClient } from "@supabase/supabase-js";
 
@@ -31,14 +36,6 @@ if (missing.length) {
   console.error(`gateway-bot: missing env (${missing.join(", ")}) — check /etc/chel-bot.env`);
   process.exit(1);
 }
-
-/* ---- EA score poller, VM lane ----
-   Netlify's address is Akamai-blocked and the residential proxy has lapsed; this VM reaches EA
-   directly, so it is the primary lane for box scores now. Same due gate and the same
-   /api/ingest-stats hand-off as the Netlify poller, which stays deployed as the backstop.
-   Independent of the gateway: it runs whether or not Discord is connected. */
-const EA = createEaPoller(env, { log: console.log });
-EA.start();
 
 /* The heartbeat must answer "is this bot hearing Discord", not "is this process running".
    Without this the timer below keeps stamping a healthy row while the gateway is dead, and
@@ -227,11 +224,19 @@ if (env.SB_URL && env.SB_KEY) {
 
 // The heartbeat is the watchdog's view of this process: rl_gateway-bot every minute, and the
 // per-run result alongside it. Stop beating and the automation_watchdog pages within ~25 min.
-setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced,
-    deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed,
-    roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched,
+// `lanes` is what lets a failed role PATCH or club-room post flip ok:false — each lane counts its
+// own failures (sum.errors / lastErrorAt / lastError) and beat() grades the last hour of them.
+const LANES = [
+  { key: "role-sync", sum: RS.sum }, { key: "club-notices", sum: CLUB.sum },
+  { key: "incidents", sum: INC.sum }, { key: "staff-alerts", sum: DESK.sum },
+];
+setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced, incidentErrors: INC.sum.errors,
+    deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed, deskErrors: DESK.sum.errors,
+    roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched, roleErrors: RS.sum.errors,
+    roleRetried: RS.sum.retried, roleDropped: RS.sum.dropped, roleTimedOut: RS.sum.timedOut,
     clubNoticesLive, clubNotices: CLUB.sum.announced, clubNoticesFailed: CLUB.sum.failed,
-    eaPoll: EA.sum } })
+    clubNoticesUnconfirmed: CLUB.sum.unconfirmed, clubNoticesUnstamped: CLUB.sum.stampFailed, clubNoticeErrors: CLUB.sum.errors },
+  lanes: LANES })
   .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

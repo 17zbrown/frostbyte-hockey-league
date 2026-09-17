@@ -1,0 +1,25 @@
+# Chel Gaming EA score poller — systemd unit. Installed by setup.sh (and kept current by
+# update.sh) to /etc/systemd/system/. Its own process on purpose: the gateway bot exits on an
+# unrecoverable Discord close, and the box-score import must not die with it (audit 2026-09-17,
+# P2-15). Same env file as chel-bot; only the two SUPABASE_* values are read. Restart=always
+# covers a crash; a missing env exits 1 repeatedly and trips the start limit instead of spinning.
+[Unit]
+Description=Chel Gaming EA score poller
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/chel-gaming/bot
+EnvironmentFile=/etc/chel-bot.env
+ExecStart=/usr/bin/node ea-poll-service.mjs
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -58,6 +58,7 @@ const PROFILES = {
 
 let UID = "bos-gm";
 let LOG = [];
+let FORFEIT = null;                                // games.forfeit_team_id — a Rule 3.2 ruling by statistics staff
 const writes = { statDeletes: 0, statRows: [], gamePatches: [], logPatches: [], webhooks: [], teamPatches: [], logInserts: [] };
 const reset = () => { writes.statDeletes = 0; writes.statRows = []; writes.gamePatches = []; writes.logPatches = []; writes.webhooks = []; writes.teamPatches = []; writes.logInserts = []; };
 
@@ -71,7 +72,7 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u.includes("proclubs.ea.com") && u.includes("clubs/search")) return J(EA_SEARCH);
   if (u.includes("proclubs.ea.com") && u.includes("clubs/matches")) return J(EA_MATCHES);
-  if (u.includes("/rest/v1/games?id=eq.g1") && m === "GET") return J([GAME]);
+  if (u.includes("/rest/v1/games?id=eq.g1") && m === "GET") return J([{ ...GAME, forfeit_team_id: FORFEIT }]);
   if (u.includes("/rest/v1/teams?id=in.")) return J(u.includes("owner_profile_id") ? SEATS : eaTeams());
   if (u.includes("/rest/v1/teams?id=eq.") && m === "GET") {
     const id = u.match(/id=eq\.([^&]+)/)[1];
@@ -190,6 +191,72 @@ console.log("\n— the protections that already existed still hold for managers"
   A("nothing was written by either refusal", writes.statDeletes === 0 && writes.gamePatches.length === 0);
 }
 
+console.log("\n— a Rule 3.2 forfeit ruling is statistics staff's: a club cannot merge over it, and no merge clears it");
+{
+  /* the forfeiting club's own GM used to be able to merge the real sittings onto the game and
+     have the merge write forfeit_team_id: null — undoing a staff ruling against itself */
+  FORFEIT = "T1";                                  // BOS was ruled to have forfeited
+  LOG = twoSittings(); reset(); UID = "bos-gm";
+  const cand = JSON.parse((await call({ leagueCandidates: { gameId: "g1" } })).body);
+  A("the desk is told up front that the game carries a ruling", cand.game && cand.game.forfeit === true, JSON.stringify(cand.game));
+  const r = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
+  const mgmt = JSON.parse(r.body);
+  A("the forfeiting club's management is refused, by name", r.statusCode === 422 && mgmt.error === "This game carries a forfeit ruling — statistics staff can merge it.", mgmt.error);
+  UID = "tor-agm";
+  A("...and so is the other club's", (await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).statusCode === 422);
+  A("...with nothing written by either", writes.statDeletes === 0 && writes.gamePatches.length === 0 && writes.logPatches.length === 0);
+
+  reset(); UID = "statsguy";
+  const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("statistics staff may still merge the sittings for the record", staff.ok === true && staff.score === "3-1", staff.error);
+  A("...and even THEIR merge leaves the ruling exactly as it was (forfeit_team_id is not in the PATCH at all)",
+    writes.gamePatches.length === 1 && !("forfeit_team_id" in writes.gamePatches[0]), JSON.stringify(writes.gamePatches[0]));
+  FORFEIT = null;
+  reset(); UID = "bos-gm";
+  const clean = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("without a ruling the club merges as before", clean.ok === true);
+  A("...and its PATCH carries no forfeit_team_id either — the key is absent, not null", !("forfeit_team_id" in writes.gamePatches[0]));
+}
+
+console.log("\n— the archive is written before the game is touched, so a merge that dies mid-flight is never unattributed");
+{
+  LOG = twoSittings(); reset(); UID = "bos-gm";
+  const order = [];
+  const inner = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url), m = opts.method || "GET";
+    if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") order.push("provenance");
+    if (u.includes("/rest/v1/game_stats") && m === "DELETE") order.push("stats-delete");
+    if (u.includes("/rest/v1/game_stats") && m === "POST") order.push("stats-post");
+    if (u.includes("/rest/v1/games?id=eq.") && m === "PATCH") order.push("game-patch");
+    return inner(url, opts);
+  };
+  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  globalThis.fetch = inner;
+  A("the merge succeeds", res.ok === true);
+  A("both provenance rows land BEFORE the box score is deleted and the game is patched",
+    order.indexOf("stats-delete") > order.lastIndexOf("provenance") && order.indexOf("game-patch") > order.indexOf("stats-post") && order.filter((x) => x === "provenance").length === 2,
+    order.join(" → "));
+}
+
+console.log("\n— a box score another writer filed at the same moment is not overwritten");
+{
+  /* game_stats is unique per (game, club, player); PostgREST answers the collision with 409 and
+     Postgres's 23505. The other poll lane or the desk got there first — say so, do not clobber. */
+  LOG = twoSittings(); reset(); UID = "bos-gm";
+  const inner = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url), m = opts.method || "GET";
+    if (u.includes("/rest/v1/game_stats") && m === "POST")
+      return new Response(JSON.stringify({ code: "23505", message: "duplicate key value violates unique constraint \"game_stats_one_row_per_player\"" }), { status: 409 });
+    return inner(url, opts);
+  };
+  const r = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
+  globalThis.fetch = inner;
+  A("the merge answers 409 and names the reason", r.statusCode === 409 && /same moment/.test(JSON.parse(r.body).error), r.body);
+  A("...and the game row was not patched", writes.gamePatches.length === 0);
+}
+
 console.log("\n— the live-EA fallback: search, link, fetch");
 {
   EA_SEARCH = [{ clubId: 900111, name: "Chel Bruins", memberCount: 14 }, { clubId: 900999, name: "Chel Bruins Alumni", memberCount: 6 }];
@@ -236,7 +303,7 @@ console.log("\n— one linked side is enough: the opponent is derived, then prov
   A("the one-sided merge succeeds", mg.ok === true && mg.score === "3-1", mg.error);
   A("the merge PROVES the opponent's EA club and links it", EA_LINK.T2 === "222" && writes.teamPatches.some((tp) => tp.id === "T2" && tp.body.ea_club_id === "222"));
   A("...and tells staff about the evidence linkage", writes.webhooks.some((w) => /linked by evidence/.test(w.content)));
-  A("a merge clears any forfeit ruling", writes.gamePatches[0] && writes.gamePatches[0].forfeit_team_id === null);
+  A("a merge never writes forfeit_team_id — a ruling is not the merge's to clear", writes.gamePatches[0] && !("forfeit_team_id" in writes.gamePatches[0]));
 }
 {
   EA_LINK = { T1: "111", T2: null };

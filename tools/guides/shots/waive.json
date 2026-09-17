@@ -169,7 +169,7 @@
    "colorScheme": "light",
    "scale": 2,
    "settle": 1600,
-   "name": "offer-modal",
+   "name": "sign-confirm",
    "url": "?as=owner&theme=light&seed=roster#/hub/freeagents",
    "steps": [
     {
@@ -179,26 +179,20 @@
     {
      "click": "[data-fa-sign]",
      "after": 450
-    },
-    {
-     "type": [
-      "#faNote",
-      "Righty D with a real shot \u2014 we need you on the second pair."
-     ]
     }
    ],
    "clip": "#overlay-root .modal",
    "fixed": true,
    "pad": 0,
    "marks": {
-    "6": "#faSignGo"
+    "6": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
    }
   },
   {
    "colorScheme": "light",
    "scale": 2,
    "settle": 1600,
-   "name": "offer-toast",
+   "name": "sign-toast",
    "url": "?as=owner&theme=light&seed=roster#/hub/freeagents",
    "height": 900,
    "steps": [
@@ -211,7 +205,7 @@
      "after": 450
     },
     {
-     "click": "#faSignGo",
+     "click": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink",
      "after": 600
     },
     {

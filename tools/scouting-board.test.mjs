@@ -38,6 +38,9 @@ const ROLE = { owner: "r-own", "general manager": "r-gm", "assistant general man
   commissioner: "r-comm", staff: "r-staff", player: "r-play", "free agent": "r-fa", media: "r-media",
   "not signed up": "r-nsu" };
 const VIEW = 1024n, SEND = 2048n, HIST = 65536n, EMBED = 16384n, ATTACH = 32768n;
+const PUB_THREADS = 1n << 35n, PRIV_THREADS = 1n << 36n;
+/* the exact @everyone deny the board carries since 2026-09-17: no messages, no threads beneath it */
+const EV_DENY = String(SEND | PUB_THREADS | PRIV_THREADS);
 const chan = (ow = []) => ([{ id: "c-scout", name: "scouting-links", type: 0, permission_overwrites: ow }]);
 const owOf = (body, id) => (body.permission_overwrites || []).find((o) => o.id === id);
 
@@ -50,6 +53,8 @@ console.log("— the board is readable by everyone and writable only by manageme
   A("@everyone can see it", (BigInt(ev.allow) & VIEW) === VIEW);
   A("...and read its history", (BigInt(ev.allow) & HIST) === HIST);
   A("...but cannot post", (BigInt(ev.deny) & SEND) === SEND);
+  A("...nor open a thread beneath it (the side door a post-only board used to leave open)",
+    (BigInt(ev.deny) & (PUB_THREADS | PRIV_THREADS)) === (PUB_THREADS | PRIV_THREADS));
   for (const [label, rid] of [["Owner", ROLE.owner], ["GM", ROLE["general manager"]], ["AGM", ROLE["assistant general manager"]]]) {
     const o = owOf(patched[0].body, rid);
     A(`${label} can post`, o && (BigInt(o.allow) & SEND) === SEND);
@@ -64,7 +69,7 @@ console.log("\n— it is idempotent, and preserves overwrites it did not set");
 {
   patched = [];
   const correct = [
-    { id: GUILD, type: 0, allow: "66560", deny: "2048" },
+    { id: GUILD, type: 0, allow: "66560", deny: EV_DENY },
     { id: ROLE.owner, type: 0, allow: "51200", deny: "0" },
     { id: ROLE["general manager"], type: 0, allow: "51200", deny: "0" },
     { id: ROLE["assistant general manager"], type: 0, allow: "51200", deny: "0" },
@@ -88,6 +93,16 @@ console.log("\n— a tampered board is repaired");
   await I.enforcePostOnlyBoards(chan([{ id: GUILD, type: 0, allow: "68608", deny: "0" }]), ROLE, { errors: [] });
   A("@everyone being able to post is corrected", (BigInt(owOf(patched[0].body, GUILD).deny) & SEND) === SEND);
   A("...and the allow no longer carries SEND", (BigInt(owOf(patched[0].body, GUILD).allow) & SEND) === 0n);
+
+  patched = [];
+  /* the pre-09-17 shape: SEND denied but threads open — re-locked once, then stable */
+  const oldShape = chan([{ id: GUILD, type: 0, allow: "66560", deny: "2048" },
+    ...["owner", "general manager", "assistant general manager"].map((n) => ({ id: ROLE[n], type: 0, allow: "51200", deny: "0" }))]);
+  await I.enforcePostOnlyBoards(oldShape, ROLE, { errors: [] });
+  A("a board locked under the old shape (threads open) is re-locked", patched.length === 1 && owOf(patched[0].body, GUILD).deny === EV_DENY);
+  patched = [];
+  await I.enforcePostOnlyBoards(oldShape, ROLE, { errors: [] });
+  A("...and then left alone", patched.length === 0);
 
   patched = [];
   /* and the opposite: someone hides the channel from the league */
@@ -118,6 +133,36 @@ console.log("\n— AutoMod lets the recruitment post through IN THAT CHANNEL");
   A("an already-correct pair needs no write", patched.length === 0);
 }
 
+console.log("\n— the post-only feeds: #transactions and #game-scores (2026-09-17)");
+{
+  /* webhook-fed by the database, so nobody needs SEND: everyone reads, no member opens a thread
+     beneath a feed, the commissioners keep the Information lock's poster grant */
+  const INFO_POSTER = I.INFO_POSTER_ALLOW;
+  const feeds = () => ([
+    { id: "c-tx", name: "transactions", type: 0, parent_id: "cat-games", permission_overwrites: [] },
+    { id: "c-scores", name: "game-scores", type: 5, parent_id: "cat-games", permission_overwrites: [{ id: GUILD, type: 0, allow: "68608", deny: "0" }] },
+    /* the Transactions DEPARTMENT room once carried the plain name — a private room is never a feed */
+    { id: "cat-staff", name: "Staff", type: 4, permission_overwrites: [] },
+    { id: "c-staff-tx", name: "transactions", type: 0, parent_id: "cat-staff", permission_overwrites: [{ id: GUILD, type: 0, allow: "0", deny: "1024" }] },
+  ]);
+  patched = [];
+  const sum = { errors: [] };
+  await I.enforcePostOnlyBoards(feeds(), ROLE, sum);
+  const ids = patched.map((p) => p.id).sort().join(",");
+  A("both public feeds are locked, the staff room is not touched", ids === "c-scores,c-tx", ids);
+  for (const p of patched) {
+    const ev = owOf(p.body, GUILD), cm = owOf(p.body, ROLE.commissioner);
+    A(`${p.id}: @everyone reads`, ev && (BigInt(ev.allow) & (VIEW | HIST)) === (VIEW | HIST));
+    A(`${p.id}: ...cannot send or open a thread`, ev && (BigInt(ev.deny) & (SEND | PUB_THREADS | PRIV_THREADS)) === (SEND | PUB_THREADS | PRIV_THREADS));
+    A(`${p.id}: the commissioners may post a correction`, cm && BigInt(cm.allow) === INFO_POSTER && BigInt(cm.deny) === 0n);
+    A(`${p.id}: club management is not a poster here`, !owOf(p.body, ROLE.owner));
+  }
+  A("counted as feeds, separately from the boards", sum.feedsLocked === 2 && !sum.boardsLocked, JSON.stringify([sum.feedsLocked, sum.boardsLocked]));
+  A("an announcement-type channel (type 5) qualifies as a feed", patched.some((p) => p.id === "c-scores"));
+  A("the two feeds are declared with the commissioners as their posters",
+    JSON.stringify(I.POST_ONLY_FEEDS) === JSON.stringify({ "transactions": ["commissioner"], "game-scores": ["commissioner"] }));
+}
+
 console.log("\n— wired into the sweep, after its bindings exist");
 {
   const fs = await import("node:fs");
@@ -132,6 +177,7 @@ console.log("\n— wired into the sweep, after its bindings exist");
   A("...and after `guildChannels`", boardCall > chanLine, `chans ${chanLine + 1}, call ${boardCall + 1}`);
   A("automod now receives the channel list too", amCall > chanLine);
   A("the result reports both", /boardsLocked: sum\.boardsLocked/.test(src) && /automodChannels: sum\.automodChannels/.test(src));
+  A("...and the feeds", /feedsLocked: sum\.feedsLocked/.test(src));
   A("only management is listed as a poster",
     JSON.stringify(I.POST_ONLY_BOARDS["scouting-links"]) ===
     JSON.stringify(["owner", "general manager", "assistant general manager"]),

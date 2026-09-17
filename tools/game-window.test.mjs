@@ -56,7 +56,7 @@ const { ingestOne, normalizeMatch } = await import("../netlify/functions/ingest-
 
 const TEAMS = [{ id: "tA", ea_club_id: 111 }, { id: "tB", ea_club_id: 222 }, { id: "tC", ea_club_id: 333 }];
 const world = { open: [], finals: [], logs: [] };
-let seenLog = false;   // does ea_ingest_log already hold the match? (drives archive-vs-touch)
+let seenLog = false;   // does ea_ingest_log already hold the match's payload? (drives archive-vs-touch)
 const writes = { gamePatches: [], statPosts: [], logPosts: [], logPatches: [] };
 const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
 const NIL = () => new Response(null, { status: 204 });
@@ -64,7 +64,12 @@ const pairOf = (u) => { const m = u.match(/home_team_id\.eq\.([^,)]+),away_team_
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = opts.method || "GET";
   if (u.includes("proclubs.ea.com")) throw new Error("the importer must never call EA in this test");
-  if (u.includes("/rest/v1/games?ea_match_id=eq.")) return J([]);                 // never seen before
+  /* the batch context: one prefetch each for games.ea_match_id and the archive (rows WITH a payload) */
+  if (u.includes("/rest/v1/games?ea_match_id=in.")) return J([]);                 // never filed before
+  if (u.includes("/rest/v1/ea_ingest_log?ea_match_id=in.") && u.includes("payload=not.is.null")) {
+    const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
+    return J(seenLog ? ids.map((id) => ({ ea_match_id: id, status: "unmatched", game_id: null })) : []);
+  }
   const pairRows = (rows, u) => { const p = pairOf(u); return rows.filter((g) => p && ((g.home_team_id === p[0] && g.away_team_id === p[1]) || (g.home_team_id === p[1] && g.away_team_id === p[0]))); };
   if (u.includes("/rest/v1/games?") && u.includes("status=eq.final")) {
     /* the resume-candidate query: finals only, never ruled or voided */
@@ -88,12 +93,10 @@ globalThis.fetch = async (url, opts = {}) => {
     return J(TEAMS.filter((t) => ids.includes(String(t.ea_club_id))));
   }
   if (u.includes("/rest/v1/teams?id=in.")) { const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(","); return J(TEAMS.filter((t) => ids.includes(t.id)).map((t) => ({ ...t, name: t.id, code: t.id }))); }
-  if (u.includes("/rest/v1/ea_ingest_log?ea_match_id=eq.") && u.includes("status=eq.merged")) return J([]);
-  if (u.includes("/rest/v1/ea_ingest_log?ea_match_id=eq.") && u.includes("select=status")) return J(seenLog ? [{ status: "unmatched" }] : []);
   if (u.includes("/rest/v1/ea_ingest_log?or=")) return J(world.logs);
   if (u.includes("/rest/v1/ea_ingest_log") && m === "POST") { writes.logPosts.push(JSON.parse(opts.body)); return NIL(); }
   if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") { writes.logPatches.push(JSON.parse(opts.body)); return NIL(); }
-  if (u.includes("/rest/v1/game_stats?ea_player_id=")) return J([]);
+  if (u.includes("/rest/v1/game_stats?ea_player_id=in.")) return J([]);          // the roster's prior links, one query
   if (u.includes("/rest/v1/game_stats") && m === "DELETE") return NIL();
   if (u.includes("/rest/v1/game_stats") && m === "POST") { writes.statPosts.push(JSON.parse(opts.body)); return NIL(); }
   if (u.includes("/rest/v1/profiles?")) return J([]);
@@ -262,9 +265,14 @@ console.log("— refusals are archived once, then only touched (EA re-serves the
   reset(); world.open = [G900];
   const raw = ea("t1", at(-240), 111, 222);
   await run(raw);
-  const firstPosts = writes.logPosts.length;
+  const first = writes.logPosts[writes.logPosts.length - 1][0];
+  A("the first sighting uploads the payload", writes.logPosts.length === 1 && first.payload && first.payload.matchId === "t1" && first.status === "unmatched");
   seenLog = true; await run(raw); seenLog = false;
-  A("the second sighting is a status touch, not a payload upload", writes.logPosts.length === firstPosts && writes.logPatches.length === 1, `posts=${writes.logPosts.length} patches=${writes.logPatches.length}`);
+  const touch = writes.logPosts[writes.logPosts.length - 1][0];
+  A("the second sighting is a status touch, not a payload upload", writes.logPosts.length === 2 && !("payload" in touch) && touch.status === "unmatched" && touch.ea_match_id === "t1", JSON.stringify(touch));
+  /* an upsert on the match id, never a PATCH: a PATCH on a row that is not there affects nothing
+     and says nothing, so a status could go unrecorded for good */
+  A("...as an upsert keyed on the match id, never a PATCH", writes.logPatches.length === 0);
 }
 
 console.log("— the commissioner's re-ingest is deliberately relaxed to a day either side");

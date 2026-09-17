@@ -5,6 +5,11 @@
 // score into Supabase. Idempotent: a match whose id already lives on a game (games.ea_match_id)
 // is skipped. Anything that fits no fixture is archived, never guessed onto one.
 //
+// Write order, every filing path: the EA payload is archived in ea_ingest_log BEFORE a single
+// game_stats or games row is touched. EA serves each club's last few matches only, so a filed
+// game whose payload was never archived (an invocation killed between the writes) could never be
+// replayed, re-merged or audited. The archive row is the durable thing; the game rows are derived.
+//
 // Auth: the fetcher must send  x-ingest-key: <INGEST_KEY>  — OR the SUPABASE_SERVICE_ROLE_KEY,
 // which the always-on VM poller (bot/ea-poll.mjs) already holds, so it needs no second secret.
 // Either value is compared timing-safely; a missing header fails closed. Writes use the Supabase
@@ -46,6 +51,10 @@ async function sbSend(method, path, body, prefer) {
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
+/* PostgREST answers a unique-index collision with 409 and Postgres's own code in the body.
+   game_stats is unique per (game, club, player), so a collision on a box-score POST has exactly
+   one meaning: another writer filed this game between our DELETE and our POST. */
+const isUniqueViolation = (e) => /"code":\s*"23505"/.test(String((e && e.message) || e));
 
 // ---- ET calendar day (matches the site's Eastern game-day convention) ----
 const etFmt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -249,36 +258,110 @@ async function fuzzyProfile(gt) {
   return null;
 }
 
-async function resolveProfile(entry, seasonId, cache) {
-  if (cache.has(entry.ea_player_id)) return cache.get(entry.ea_player_id);
+/* The EA name as the exact-match steps see it. `*` is PostgREST's LIKE wildcard, `%,()` and `"`
+   are its filter syntax — none of them belongs in a gamertag, and one in a pattern would either
+   widen the match or break the query. Both lookup sources clean the name the same way, so a
+   player resolves identically whether he is looked up alone or with his whole box score. */
+const cleanTag = (gamertag) => String(gamertag || "").replace(/[%,()*"]/g, "").trim();
+/* `_` is a single-character WILDCARD in LIKE/ILIKE, and gamertags are full of underscores:
+   "Dangle_47" matched "DangleX47" just as happily. The exact-match steps escape the
+   metacharacters and refuse when two people match rather than taking whichever row the database
+   happened to return first — a stat line welded to the wrong human is nearly impossible to spot
+   later. */
+const likeSafe = (v) => v.replace(/([\\%_])/g, "\\$1");
+const uniq = (xs) => [...new Set(xs)];
+
+/* The three exact-match lookups, asked ONE PLAYER AT A TIME. This is the source for a lone
+   resolve (the exported resolveProfile, the tests); a whole box score uses gameLookups below. */
+function liveLookups(seasonId) {
+  return {
+    // 1) prior link by EA persona id
+    prior: async (eaPlayerId) => {
+      const prev = await sbGet(`game_stats?ea_player_id=eq.${encodeURIComponent(eaPlayerId)}&profile_id=not.is.null&select=profile_id&limit=1`);
+      return prev[0] ? prev[0].profile_id : null;
+    },
+    // 2) site gamertag — exact (case-insensitive), and never a guess between two people
+    gamertag: async (gt) =>
+      uniq(((await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`)) || []).map((r) => r.id)),
+    // 3) EA id captured at signup for this season — same rule
+    regEaId: async (gt) => seasonId
+      ? uniq(((await sbGet(`season_registrations?season_id=eq.${seasonId}&ea_id=ilike.${encodeURIComponent(likeSafe(gt))}&select=profile_id&limit=2`)) || []).map((r) => r.profile_id))
+      : [],
+  };
+}
+
+/* The same three lookups, prefetched for a WHOLE GAME'S roster in one query each and answered
+   from memory. Twelve players used to cost up to thirty-six round trips of the same three
+   queries; now a box score costs at most three, and each is fetched only the first time a
+   player needs that step (a roster of returning players never asks for gamertags at all). The
+   ILIKE-or list keeps step 2 and 3 case-insensitive exactly as the per-player query is — a plain
+   `in.()` would be case-sensitive, and EA's spelling of a tag and the site's often differ only
+   there. Rows come back for the whole list, so each is attributed to its name in memory by
+   case-folded equality; the ambiguity rule (two people → nobody) is applied per name, as before. */
+function gameLookups(entries, seasonId) {
+  const eaIds = uniq(entries.map((e) => e.ea_player_id).filter(Boolean).map(String));
+  const names = uniq(entries.map((e) => cleanTag(e.gamertag)).filter(Boolean));
+  const orIlike = (col, vals) => `or=(${vals.map((v) => `${col}.ilike.${encodeURIComponent(likeSafe(v))}`).join(",")})`;
+  const groupByName = (rows, nameCol, idCol) => {
+    const m = new Map();
+    for (const r of rows || []) {
+      const k = String(r[nameCol] || "").toLowerCase();
+      if (!m.has(k)) m.set(k, new Set());
+      m.get(k).add(r[idCol]);
+    }
+    return m;
+  };
+  let priorP = null, tagP = null, regP = null;
+  return {
+    prior: async (eaPlayerId) => {
+      if (!eaIds.length) return null;
+      priorP ||= sbGet(`game_stats?ea_player_id=in.(${eaIds.map(encodeURIComponent).join(",")})&profile_id=not.is.null&select=ea_player_id,profile_id`)
+        .then((rows) => {
+          const m = new Map();   // first row per persona, as the per-player limit=1 query took it
+          for (const r of rows || []) if (!m.has(String(r.ea_player_id))) m.set(String(r.ea_player_id), r.profile_id);
+          return m;
+        });
+      return (await priorP).get(String(eaPlayerId)) || null;
+    },
+    gamertag: async (gt) => {
+      if (!names.length) return [];
+      tagP ||= sbGet(`profiles?${orIlike("gamertag", names)}&select=id,gamertag`).then((rows) => groupByName(rows, "gamertag", "id"));
+      return [...((await tagP).get(gt.toLowerCase()) || [])];
+    },
+    regEaId: async (gt) => {
+      if (!seasonId || !names.length) return [];
+      regP ||= sbGet(`season_registrations?season_id=eq.${seasonId}&${orIlike("ea_id", names)}&select=profile_id,ea_id`).then((rows) => groupByName(rows, "ea_id", "profile_id"));
+      return [...((await regP).get(gt.toLowerCase()) || [])];
+    },
+  };
+}
+
+/* The lookup chain — one implementation, whichever source feeds it. `cache` spans the caller's
+   batch (keyed by season + persona, so a batch that straddles two seasons cannot cross-link);
+   `src` is gameLookups for a whole box score, or the per-player live source when omitted. */
+async function resolveProfile(entry, seasonId, cache, src) {
+  const key = `${seasonId || ""}|${entry.ea_player_id}`;
+  if (cache.has(key)) return cache.get(key);
+  const L = src || liveLookups(seasonId);
   let pid = null;
-  const gt = (entry.gamertag || "").replace(/[%,()*]/g, "").trim();
-  /* `_` is a single-character WILDCARD in LIKE/ILIKE, and gamertags are full of underscores:
-     "Dangle_47" matched "DangleX47" just as happily. These two steps are meant to be EXACT
-     matches, so escape the metacharacters and refuse when two people match rather than taking
-     whichever row the database happened to return first — a stat line welded to the wrong human
-     is nearly impossible to spot later. */
-  const likeSafe = (v) => v.replace(/([\\%_])/g, "\\$1");
+  const gt = cleanTag(entry.gamertag);
   if (gt) {
     // 1) prior link by EA persona id
-    const prev = await sbGet(`game_stats?ea_player_id=eq.${encodeURIComponent(entry.ea_player_id)}&profile_id=not.is.null&select=profile_id&limit=1`);
-    if (prev[0]) pid = prev[0].profile_id;
+    pid = await L.prior(entry.ea_player_id);
     // 2) site gamertag — exact, and never a guess between two people
     if (!pid) {
-      const pr = await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`);
-      const ids = [...new Set((pr || []).map((r) => r.id))];
+      const ids = await L.gamertag(gt);
       if (ids.length === 1) pid = ids[0];
     }
     // 3) EA id captured at signup for this season — same rule
     if (!pid && seasonId) {
-      const rg = await sbGet(`season_registrations?season_id=eq.${seasonId}&ea_id=ilike.${encodeURIComponent(likeSafe(gt))}&select=profile_id&limit=2`);
-      const ids = [...new Set((rg || []).map((r) => r.profile_id))];
+      const ids = await L.regEaId(gt);
       if (ids.length === 1) pid = ids[0];
     }
     // 4) squashed-pattern fallback across every name field a player owns
     if (!pid) pid = await fuzzyProfile(gt);
   }
-  cache.set(entry.ea_player_id, pid);
+  cache.set(key, pid);
   return pid;
 }
 
@@ -296,47 +379,128 @@ async function logAttempt(norm, raw, status, reason, gameId) {
     return true;
   } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); return false; }
 }
-/* Archive a refusal without re-uploading a payload that is already archived: EA re-serves the same
-   recent matches on every poll (every ~2 min on the VM lane), so a scrimmage would otherwise be
-   re-sent ~100 times a night. First sighting stores the payload; later ones touch the status. */
-async function logRefusal(norm, raw, status, reason) {
-  const seen = await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=status&limit=1`).catch(() => []);
-  if (seen && seen[0]) return touchAttempt(norm.ea_match_id, status, reason);
-  return logAttempt(norm, raw, status, reason);
-}
-
 /* Status-only touch for a match whose payload is ALREADY archived. EA re-serves the same recent
-   matches on every 5-minute poll, so the dedupe path re-uploaded a full match body dozens of
-   times per game; this PATCHes the row instead of re-sending it. */
+   matches on every poll, so the dedupe path re-uploaded a full match body dozens of times per
+   game; this sends the status columns only. It is an UPSERT on the match id, not a PATCH: a PATCH
+   on a row that is not there affects nothing and says nothing, which is how a status could go
+   unrecorded for good. Upserting the same columns lands whether or not the row exists (a row
+   born this way has no payload, and the next batch's prefetch — which counts only rows WITH a
+   payload as archived — uploads it). */
 async function touchAttempt(eaMatchId, status, reason, gameId) {
   try {
-    await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(eaMatchId)}`,
-      { status, reason: reason || null, game_id: gameId || null, last_attempt_at: new Date().toISOString() },
-      "return=minimal");
-  } catch (e) { console.log("ea_ingest_log touch failed:", String(e.message || e)); }
+    await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", [{
+      ea_match_id: eaMatchId, status, reason: reason || null, game_id: gameId || null,
+      last_attempt_at: new Date().toISOString()
+    }], "resolution=merge-duplicates,return=minimal");
+    return true;
+  } catch (e) { console.log("ea_ingest_log touch failed:", String(e.message || e)); return false; }
 }
 
-export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame, resolveProfile };
+/* ---- The batch context: what the archive and the schedule already know about every match in
+   this delivery, fetched ONCE per batch instead of once (or twice) per match. Two prefetches
+   replace two lookups per match, and a match that is already filed then costs nothing further —
+   on a game night EA re-serves each club's last few matches on every ~2-minute poll, and nearly
+   all of them are already done.
+     filed    ea_match_id → game id, from games.ea_match_id (the dedupe the whole pipeline keys on)
+     log      ea_match_id → {status, game_id} for every match whose PAYLOAD is archived. A row with
+              no payload is not an archive (see touchAttempt), so it is deliberately not counted.
+     profiles the resolveProfile cache, batch-wide — a replay sitting shares its roster with the
+              first sitting, and the same twelve players play every game of a series.
+   Kept current as the batch writes (a filing adds itself to `filed` and `log`), so a match that
+   is delivered twice in one body is still filed once. Built for a single match when a caller
+   (the commissioner re-ingest, the tests) runs ingestOne on its own. ---- */
+async function batchContext(norms) {
+  const ctx = { filed: new Map(), log: new Map(), profiles: new Map() };
+  const ids = uniq((norms || []).map((n) => n && n.ea_match_id).filter(Boolean).map(String));
+  if (!ids.length) return ctx;
+  const q = ids.map(encodeURIComponent).join(",");
+  const [games, logRows] = await Promise.all([
+    sbGet(`games?ea_match_id=in.(${q})&select=id,ea_match_id`),
+    sbGet(`ea_ingest_log?ea_match_id=in.(${q})&payload=not.is.null&select=ea_match_id,status,game_id`)
+  ]);
+  for (const g of games || []) ctx.filed.set(String(g.ea_match_id), g.id);
+  for (const r of logRows || []) ctx.log.set(String(r.ea_match_id), { status: r.status, game_id: r.game_id || null });
+  return ctx;
+}
+
+/* Archive an outcome, uploading the payload only when the archive does not hold it yet. First
+   sighting stores the payload; every later one (a scrimmage is re-served ~100 times a night)
+   touches the status. The context remembers a successful upload so the same batch never sends
+   the body twice. Returns whether the archive row landed — the callers whose next-poll dedupe
+   READS that row (the merge) must fail loud when it did not. */
+async function archive(ctx, norm, raw, status, reason, gameId) {
+  const id = String(norm.ea_match_id);
+  const landed = ctx.log.has(id)
+    ? await touchAttempt(id, status, reason, gameId)
+    : await logAttempt(norm, raw, status, reason, gameId);
+  if (landed) ctx.log.set(id, { status, game_id: gameId || null });
+  return landed;
+}
+
+/* ARCHIVE BEFORE FILING. Called on the way into every automatic filing (a fresh box score, a
+   Rule 4.3 resume), before the first game_stats or games row is touched: an invocation killed
+   mid-write may leave a half-filed game, but never a filed game whose payload is gone when EA's
+   short history rolls over. Nothing to do when the payload is archived already.
+   The row is written as `unmatched`, which is literally true until the game row is stamped. If
+   the filing dies, that word and this reason are what the statistics desk sees, and the next
+   poll (the game does not carry the match id yet) files it again. Should the other poll lane
+   have archived AND filed this very match in the moment since our prefetch, this write briefly
+   reads `unmatched` over its `ingested`; the next poll finds the game filed and puts the row
+   right (the dedupe branch in ingestOne). Nothing here throws quietly: a failed stage write
+   fails the match, because filing without the archive is the one outcome this exists to prevent. */
+async function stagePayload(ctx, norm, raw, gameId) {
+  const id = String(norm.ea_match_id);
+  if (ctx.log.has(id)) return;
+  await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", [{
+    ea_match_id: id, payload: raw, et_day: norm.et_day,
+    ea_club_ids: norm.clubs.map((c) => c.ea_club_id),
+    status: "unmatched", game_id: null,
+    reason: `archived ahead of filing on game ${gameId} — if this row still reads this way, the filing was interrupted; the next poll retries it, or file it by hand`,
+    last_attempt_at: new Date().toISOString()
+  }], "resolution=merge-duplicates,return=minimal");
+  ctx.log.set(id, { status: "unmatched", game_id: null });
+}
+
+/* The box-score POST, with the one collision that is not an error: game_stats is unique per
+   (game, club, player), so a duplicate-key answer means another writer — the other poll lane,
+   the fixture desk — filed this game between our DELETE and our POST. Their rows stand; ours
+   are dropped; the caller skips the game rather than failing the batch. */
+async function postBoxScore(rows) {
+  try { await sbSend("POST", "game_stats", rows, "return=minimal"); return true; }
+  catch (e) { if (isUniqueViolation(e)) return false; throw e; }
+}
+
+export const _internals = { normalizeMatch, mergeSegments, segElapsed, isStatsStaff, authForGame, resolveProfile, gameLookups, batchContext };
 
 // ---- Ingest ONE normalized match ----
 // opts.relaxed (commissioner re-ingest of an archived payload only): the fixture window widens to
 // a day either side, because the commissioner is deliberately replaying something the robot
 // refused. Every automatic path runs strict.
+// opts.ctx: the batch context (batchContext) shared by every match of one delivery; a lone call
+// builds its own.
 async function ingestOne(norm, raw, summary, batch, opts = {}) {
+  const ctx = opts.ctx || await batchContext([norm]);
   const winBefore = opts.relaxed ? 86400000 : undefined, winAfter = opts.relaxed ? 86400000 : undefined;
   // dedupe — a match that owns a game, or was merged into one as a resume segment, is done.
   // Without the second check every later poll would re-merge the resume segment and double it.
-  const dup = await sbGet(`games?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&select=id&limit=1`);
-  if (dup[0]) {
+  const filedOn = ctx.filed.get(String(norm.ea_match_id));
+  if (filedOn) {
     summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already ingested" });
-    /* The payload was archived the first time this match was seen. EA returns the same few recent
-       matches on every 5-minute poll, so re-uploading the full raw object here re-sent the entire
-       match body dozens of times per game for nothing. Touch the status only. */
-    await touchAttempt(norm.ea_match_id, "ingested", "already ingested (dedupe)", dup[0].id);
+    /* A filed match costs nothing further — EA returns the same few recent matches on every poll,
+       and this branch used to touch the archive row on each of them (before that, re-upload the
+       whole body). The one exception is an archive row that disagrees with the game: no payload
+       archived at all, or a status left behind by an interrupted filing or a lost race with the
+       other lane. One write puts it right, and from then on the match is free again. */
+    const row = ctx.log.get(String(norm.ea_match_id));
+    if (!row) await archive(ctx, norm, raw, "ingested", "already ingested (dedupe) — payload archived late", filedOn);
+    else if (row.status !== "ingested" || row.game_id !== filedOn) {
+      await touchAttempt(norm.ea_match_id, "ingested", "already ingested (dedupe)", filedOn);
+      ctx.log.set(String(norm.ea_match_id), { status: "ingested", game_id: filedOn });
+    }
     return;
   }
-  const mdup = await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(norm.ea_match_id)}&status=eq.merged&select=game_id&limit=1`);
-  if (mdup[0]) {
+  const row = ctx.log.get(String(norm.ea_match_id));
+  if (row && row.status === "merged") {
     summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already merged into a resumed game" });
     return;
   }
@@ -356,11 +520,11 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
     if (nearby.length || opts.relaxed) {
       const why = "one club is not linked to an EA club (teams.ea_club_id) — if this is the scheduled game, link the club's EA id and file it from the fixture desk";
       summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-      await logRefusal(norm, raw, "unmatched", why);
+      await archive(ctx, norm, raw, "unmatched", why);
     } else {
       const why = "a match against a club outside the league, with no fixture for the known club in this window — not a league game";
       summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: why });
-      await logRefusal(norm, raw, "ignored", why);
+      await archive(ctx, norm, raw, "ignored", why);
     }
     return;
   }
@@ -392,7 +556,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
     // that cannot be placed in time is never guessed onto a fixture.
     const why = "EA gave this match no end time — it cannot be placed in a game window; file it by hand if it was the league game";
     summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-    await logAttempt(norm, raw, "unmatched", why);
+    await archive(ctx, norm, raw, "unmatched", why);
     return;
   }
   // A playoff series plays the SAME two clubs twice or three times on one night (2-2-3, Rule 8.3),
@@ -412,7 +576,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   // end of regulation). A complete game is never resumed. When an open sibling slot could ALSO
   // take this match (a 2-2-3 playoff night after a short first game), nobody can tell a lag-out
   // replay from the next game — that case goes to statistics staff, never guessed.
-  const cont = await ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, winAfter, game);
+  const cont = await ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBefore, winAfter, game);
   if (cont.done) return;
   if (!game) {
     const endIso = new Date(matchEndMs).toISOString();
@@ -424,13 +588,13 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
       // a scheduled matchup, but this match is not it (or ran past the window): staff should look
       const why = `no open fixture between these clubs has a game window containing ${endIso} (windows run ${describeWindow(winBefore, winAfter)}) — not the scheduled game, or played outside its window; file it by hand if it was`;
       summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-      await logRefusal(norm, raw, "unmatched", why);
+      await archive(ctx, norm, raw, "unmatched", why);
     } else {
       // two league clubs that are not scheduled against each other in this window: a scrimmage,
       // never staff work — archived (replayable by a commissioner), not flagged
       const why = `not a scheduled matchup — no fixture between these clubs has a game window containing ${endIso}`;
       summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: why });
-      await logRefusal(norm, raw, "ignored", why);
+      await archive(ctx, norm, raw, "ignored", why);
     }
     return;
   }
@@ -440,39 +604,27 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   const homeScore = clubByTeam[game.home_team_id].score;
   const awayScore = clubByTeam[game.away_team_id].score;
 
+  /* WRITE ORDER: (1) the payload into the archive, (2) the box score, (3) the game row — which
+     fires notify_discord_game_final and updates standings, so it goes LAST — then (4) the
+     archive row's final status. See the header: the archive is the durable record. */
+  await stagePayload(ctx, norm, raw, game.id);
   // build box-score rows (EA data supersedes any prior manual entry for this game)
-  const cache = new Map();
-  const rows = [];
-  for (const tid of [game.home_team_id, game.away_team_id]) {
-    const c = clubByTeam[tid];
-    for (const e of c.players) {
-      const profile_id = await resolveProfile(e, game.season_id, cache);
-      rows.push({
-        game_id: game.id, team_id: tid, profile_id, skater_name: e.gamertag, position: e.position,
-        goals: e.goals, assists: e.assists, shots: e.shots, hits: e.hits, pim: e.pim, is_goalie: e.is_goalie,
-        saves: e.saves, shots_against: e.shots_against, goals_against: e.goals_against,
-        ea_player_id: e.ea_player_id, plus_minus: e.plus_minus, takeaways: e.takeaways, giveaways: e.giveaways,
-        faceoffs_won: e.faceoffs_won, faceoffs_lost: e.faceoffs_lost, time_on_ice_seconds: e.time_on_ice_seconds,
-        pp_goals: e.pp_goals, sh_goals: e.sh_goals, gwg: e.gwg,
-        blocked_shots: e.blocked_shots, interceptions: e.interceptions,
-        passes_completed: e.passes_completed, passes_attempted: e.passes_attempted,
-        shot_attempts: e.shot_attempts, possession_seconds: e.possession_seconds,
-        penalties_drawn: e.penalties_drawn, deflections: e.deflections, saucer_passes: e.saucer_passes,
-        offense_rating: e.offense_rating, defense_rating: e.defense_rating, team_play_rating: e.team_play_rating,
-        breakaway_shots: e.breakaway_shots, breakaway_saves: e.breakaway_saves,
-        poke_checks: e.poke_checks, shutout: e.shutout
-      });
-    }
-  }
+  const rows = await leagueBoxRows(game, clubByTeam, ctx.profiles);
   await sbSend("DELETE", `game_stats?game_id=eq.${game.id}`);
-  if (rows.length) await sbSend("POST", "game_stats", rows, "return=minimal");
-  // flip the game to final LAST — this fires notify_discord_game_final + updates standings
+  if (rows.length && !(await postBoxScore(rows))) {
+    /* the other lane (or the fixture desk) filed this game first; its rows stand, and the next
+       poll finds the game carrying a match id and skips it for good */
+    summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "another writer filed this game first — left to it" });
+    console.log(`ingest: game ${game.id} was filed by another writer while match ${norm.ea_match_id} was being written — skipped`);
+    return;
+  }
   const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
   await sbSend("PATCH", `games?id=eq.${game.id}`,
     { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id,
       went_ot: !!norm.went_ot,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
+  ctx.filed.set(String(norm.ea_match_id), game.id);
 
   const linked = rows.filter((r) => r.profile_id).length;
   // Your night: every linked player gets their own line back, with a link to the box score.
@@ -481,7 +633,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   await postGameRecaps(game, rows, homeScore, awayScore, summary).catch((e) =>
     console.warn("recap notifications failed (the import itself is unaffected):", String(e && e.message || e)));
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: game.id, score: `${homeScore}-${awayScore}`, players: rows.length, linked });
-  await logAttempt(norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id);
+  await archive(ctx, norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id);
 }
 
 // ---- "Your night": one notification per linked player, carrying their own stat line ----
@@ -545,7 +697,7 @@ async function postGameRecaps(game, rows, homeScore, awayScore, summary) {
 //      IS full length (or one period), so its length is no longer evidence against a merge.
 // Returns { done, sawFixture }: done = the match was handled here (merged, or refused for the
 // record when not probing); sawFixture = a same-pair final existed in the window at all.
-async function ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, winAfter, sibling = null) {
+async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBefore, winAfter, sibling = null) {
   const probe = !!sibling;   // an open same-pair fixture could take this match instead
   const orC = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
   // a forfeit-ruled or voided game is never a resume target (Rule 3.2 / 4.3 P7: the ruling stands)
@@ -561,7 +713,7 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, 
   const refuse = async (why) => {
     if (probe) return R(false);
     summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-    await logAttempt(norm, raw, "unmatched", why);
+    await archive(ctx, norm, raw, "unmatched", why);
     return R(true);
   };
   /* 1. the candidate is the nearest same-pair final in window that is still UNFINISHED. A game is
@@ -599,7 +751,7 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, 
     const slotEt = new Date(sibling.scheduled_at).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
     const why = `could be the Rule 4.3 replay of the unfinished ${cand.id} game or the ${slotEt} ET game between the same clubs — assign it by hand (merge it, or file it on the ${slotEt} slot) from the Stats manager`;
     summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
-    await logRefusal(norm, raw, "unmatched", why);
+    await archive(ctx, norm, raw, "unmatched", why);
     return R(true);
   }
 
@@ -645,35 +797,22 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, 
   const homeClub = clubByTeam[cand.home_team_id], awayClub = clubByTeam[cand.away_team_id];
   if (!homeClub || !awayClub) {
     summary.errors.push({ ea_match_id: norm.ea_match_id, error: "resume merge could not map clubs to teams" });
-    await logAttempt(norm, raw, "error", "resume merge could not map clubs to teams");
+    await archive(ctx, norm, raw, "error", "resume merge could not map clubs to teams");
     return R(true);
   }
 
-  const cache = new Map();
-  const rows = [];
-  for (const tid of [cand.home_team_id, cand.away_team_id]) {
-    const c = clubByTeam[tid];
-    for (const e of c.players) {
-      const profile_id = await resolveProfile(e, cand.season_id, cache);
-      rows.push({
-        game_id: cand.id, team_id: tid, profile_id, skater_name: e.gamertag, position: e.position,
-        goals: e.goals, assists: e.assists, shots: e.shots, hits: e.hits, pim: e.pim, is_goalie: e.is_goalie,
-        saves: e.saves, shots_against: e.shots_against, goals_against: e.goals_against,
-        ea_player_id: e.ea_player_id, plus_minus: e.plus_minus, takeaways: e.takeaways, giveaways: e.giveaways,
-        faceoffs_won: e.faceoffs_won, faceoffs_lost: e.faceoffs_lost, time_on_ice_seconds: e.time_on_ice_seconds,
-        pp_goals: e.pp_goals, sh_goals: e.sh_goals, gwg: e.gwg,
-        blocked_shots: e.blocked_shots, interceptions: e.interceptions,
-        passes_completed: e.passes_completed, passes_attempted: e.passes_attempted,
-        shot_attempts: e.shot_attempts, possession_seconds: e.possession_seconds,
-        penalties_drawn: e.penalties_drawn, deflections: e.deflections, saucer_passes: e.saucer_passes,
-        offense_rating: e.offense_rating, defense_rating: e.defense_rating, team_play_rating: e.team_play_rating,
-        breakaway_shots: e.breakaway_shots, breakaway_saves: e.breakaway_saves,
-        poke_checks: e.poke_checks, shutout: e.shutout
-      });
-    }
-  }
+  /* WRITE ORDER, as in ingestOne: the replay's payload into the archive first, then the box
+     score, then the game row, then the archive row's final status. */
+  await stagePayload(ctx, norm, raw, cand.id);
+  const rows = await leagueBoxRows(cand, clubByTeam, ctx.profiles);
   await sbSend("DELETE", `game_stats?game_id=eq.${cand.id}`);
-  if (rows.length) await sbSend("POST", "game_stats", rows, "return=minimal");
+  if (rows.length && !(await postBoxScore(rows))) {
+    /* the other lane merged this replay first; its rows stand, and its archive row (status
+       merged) is what the next poll's dedupe reads */
+    summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "another writer filed this game first — left to it" });
+    console.log(`ingest: game ${cand.id} was written by another writer while replay ${norm.ea_match_id} was being merged — skipped`);
+    return R(true);
+  }
   await sbSend("PATCH", `games?id=eq.${cand.id}`,
     { home_score: homeClub.score, away_score: awayClub.score, went_ot: !!merged.went_ot,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
@@ -686,7 +825,7 @@ async function ingestContinuation(norm, raw, summary, batch, tA, tB, winBefore, 
 
   /* this row is what the NEXT match's completeness test and the merge dedupe read — a failed
      write must be loud, or the same replay would be merged again on every poll */
-  const logged = await logAttempt(norm, raw, "merged",
+  const logged = await archive(ctx, norm, raw, "merged",
     `a later sitting of a disconnected game (Rule 4.3) — merged into ${cand.ea_match_id} (${priors.length + 1} sittings, ${totalLen}s of game clock)`, cand.id);
   if (!logged) summary.errors.push({ ea_match_id: norm.ea_match_id, error: `merged into ${cand.ea_match_id} but the merge could not be archived — the next poll may merge it again; check ea_ingest_log` });
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, merged_into: cand.ea_match_id,
@@ -776,15 +915,18 @@ async function tellStaff(text) {
   } catch { /* never breaks the merge */ }
 }
 
-/* KEEP IN SYNC with the row builders in ingestOne and the auto-resume path — same columns, same
-   order, so a manually merged game is indistinguishable from an auto-ingested one downstream. */
-async function leagueBoxRows(game, clubByTeam) {
-  const cache = new Map();
+/* THE box-score row builder — a fresh filing, a Rule 4.3 resume and a manual merge all build
+   their rows here, so a game is indistinguishable downstream whichever path filed it (the three
+   used to be hand-kept copies). `cache` is the caller's resolveProfile cache (batch-wide for the
+   pollers); the lookups themselves are prefetched once for the whole roster (gameLookups). */
+async function leagueBoxRows(game, clubByTeam, cache = new Map()) {
+  const entries = [game.home_team_id, game.away_team_id].flatMap((tid) => clubByTeam[tid].players);
+  const src = gameLookups(entries, game.season_id);
   const rows = [];
   for (const tid of [game.home_team_id, game.away_team_id]) {
     const c = clubByTeam[tid];
     for (const e of c.players) {
-      const profile_id = await resolveProfile(e, game.season_id, cache);
+      const profile_id = await resolveProfile(e, game.season_id, cache, src);
       rows.push({
         game_id: game.id, team_id: tid, profile_id, skater_name: e.gamertag, position: e.position,
         goals: e.goals, assists: e.assists, shots: e.shots, hits: e.hits, pim: e.pim, is_goalie: e.is_goalie,
@@ -827,7 +969,7 @@ export const handler = async (event) => {
   if (!authed && body && body.leagueCandidates) {
     const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
     const gameId = String(body.leagueCandidates.gameId || body.leagueCandidates);
-    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,home_score,away_score`))[0];
+    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,home_score,away_score,forfeit_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
@@ -835,8 +977,11 @@ export const handler = async (event) => {
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away) return { statusCode: 422, body: JSON.stringify({ error: "This game's clubs no longer exist." }) };
     const linked = { home: home.ea_club_id != null, away: away.ea_club_id != null };
+    /* `forfeit` lets the desk say up front that a ruled game is staff's to merge (the merge
+       route refuses management on it either way) */
     const gameInfo = { id: game.id, week: game.week, status: game.status, home: home.code, away: away.code,
-      score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null };
+      score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null,
+      forfeit: game.forfeit_team_id != null };
     /* With NEITHER club linked the archive can't be searched at all — tell the desk so it can
        walk the manager through linking their own club, instead of a dead-end error. */
     if (!linked.home && !linked.away)
@@ -962,11 +1107,18 @@ export const handler = async (event) => {
     if (!gameId || !matchIds.length) return { statusCode: 400, body: JSON.stringify({ error: "Missing gameId/matchIds." }) };
     if (matchIds.length > 4) return { statusCode: 400, body: JSON.stringify({ error: "Four sittings is the limit." }) };
     if (new Set(matchIds).size !== matchIds.length) return { statusCode: 400, body: JSON.stringify({ error: "The same sitting is selected twice." }) };
-    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided`))[0];
+    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided,forfeit_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (game.voided) return { statusCode: 422, body: JSON.stringify({ error: "That game is voided." }) };
+    /* A Rule 3.2 forfeit is a statistics-staff ruling (forfeit_game / unforfeit_game). A club's
+       management could otherwise merge real sittings over it and — as this path once did by
+       writing forfeit_team_id: null — erase the ruling against itself. Staff may still merge the
+       sittings for the record; the ruling is untouched here by anyone (see the PATCH below), and
+       staff lift it with unforfeit_game when that is the call. */
+    if (game.forfeit_team_id != null && actor.via !== "staff")
+      return { statusCode: 422, body: JSON.stringify({ error: "This game carries a forfeit ruling — statistics staff can merge it." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away || (home.ea_club_id == null && away.ea_club_id == null))
@@ -1034,15 +1186,29 @@ export const handler = async (event) => {
     const awayEaId = away.ea_club_id != null ? String(away.ea_club_id) : derivedOpp.id;
     const clubByTeam = { [game.home_team_id]: clubByClubId[homeEaId], [game.away_team_id]: clubByClubId[awayEaId] };
     const rows = await leagueBoxRows(game, clubByTeam);
+    /* WRITE ORDER: the archive first. The payloads are archived by construction (they came from
+       ea_ingest_log), so the archive write here is the provenance — the first sitting owns the
+       game, the rest are merged, stamped with who did it — the SAME marks the automatic path
+       leaves, so its dedupe treats this game identically from now on. It goes in BEFORE the game
+       is touched: if the writes below die, the archive says who was rebuilding what, and the
+       human who clicked sees the error and clicks again (the retry passes every check above). */
+    const byWhom = actor.via === "management" ? `${actor.who} (${actor.club} management)` : `${actor.who} (stats staff)`;
+    for (const row of logRows) {
+      const first = row.ea_match_id === merged.ea_match_id;
+      await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(row.ea_match_id)}`,
+        { status: first ? "ingested" : "merged", game_id: game.id, reason: first
+          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}`
+          : `manually merged into ${merged.ea_match_id} by ${byWhom}` });
+    }
     await sbSend("DELETE", `game_stats?game_id=eq.${game.id}`);
-    if (rows.length) await sbSend("POST", "game_stats", rows, "return=minimal");
+    if (rows.length && !(await postBoxScore(rows)))
+      return { statusCode: 409, body: JSON.stringify({ error: "Another import wrote this game's box score at the same moment — reload the fixture and try again." }) };
     const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
+    /* forfeit_team_id is deliberately NOT in this PATCH. A merge files what was played; whether
+       a Rule 3.2 ruling stands over it is statistics staff's call, made with unforfeit_game. */
     await sbSend("PATCH", `games?id=eq.${game.id}`,
       { status: "final", home_score: homeClub.score, away_score: awayClub.score,
         ea_match_id: merged.ea_match_id, went_ot: !!merged.went_ot,
-        /* real sittings supersede any forfeit ruling — a game that was actually played is not
-           a forfeit (Rule 3.2's mutual-consent clause) */
-        forfeit_team_id: null,
         home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 },
       "return=minimal");
     /* Evidence linkage: attaching these sittings to this fixture proves the opponent's EA club.
@@ -1053,16 +1219,6 @@ export const handler = async (event) => {
       await tellStaff(`🔗 **EA club linked by evidence** — merging sittings into ${away.code} @ ${home.code} established that ` +
         `${oppTeam.code}'s EA club is “${derivedOpp.name || derivedOpp.id}” (${derivedOpp.id}). Auto-imports now cover ${oppTeam.code}. ` +
         `Correct it in the Control Center if that looks wrong.`);
-    }
-    /* provenance: the first sitting owns the game, the rest are merged — the SAME marks the
-       automatic path leaves, so its dedupe logic treats this game identically from now on */
-    const byWhom = actor.via === "management" ? `${actor.who} (${actor.club} management)` : `${actor.who} (stats staff)`;
-    for (const row of logRows) {
-      const first = row.ea_match_id === merged.ea_match_id;
-      await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(row.ea_match_id)}`,
-        { status: first ? "ingested" : "merged", game_id: game.id, reason: first
-          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}`
-          : `manually merged into ${merged.ea_match_id} by ${byWhom}` });
     }
     const linked = rows.filter((r) => r.profile_id).length;
     /* Staff should never find out a box score changed only by noticing the number moved. */
@@ -1104,6 +1260,9 @@ export const handler = async (event) => {
   /* the whole batch, normalized, is the adjacency context: the resume check needs to see whether a
      club played someone else between two sittings, and the poll's per-club history is right here */
   const batch = matches.map((m) => { try { return normalizeMatch(m); } catch (e) { return null; } }).filter(Boolean);
+  /* what the schedule and the archive already know about every match in this delivery, fetched
+     once — most of a poll is matches already filed, and those now cost nothing further */
+  const ctx = await batchContext(batch);
   for (const raw of matches) {
     try {
       const norm = normalizeMatch(raw);
@@ -1115,11 +1274,11 @@ export const handler = async (event) => {
         if (raw && raw.matchId != null && nClubs < 2) { summary.skipped.push({ ea_match_id: String(raw.matchId), reason: "incomplete match (one club only — never a league game)" }); continue; }
         summary.errors.push({ reason: "unparseable match (need 2 clubs + matchId)" }); continue;
       }
-      await ingestOne(norm, raw, summary, batch);
+      await ingestOne(norm, raw, summary, batch, { ctx });
     } catch (e) {
       summary.errors.push({ ea_match_id: raw && raw.matchId, error: String(e.message || e) });
       // best-effort archive even when the attempt blew up, so the payload is never lost
-      try { const n = normalizeMatch(raw); if (n) await logAttempt(n, raw, "error", String(e.message || e)); } catch {}
+      try { const n = normalizeMatch(raw); if (n) await archive(ctx, n, raw, "error", String(e.message || e)); } catch {}
     }
   }
   return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(summary) };

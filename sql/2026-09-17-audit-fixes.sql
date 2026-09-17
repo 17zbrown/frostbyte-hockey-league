@@ -31,6 +31,9 @@ grant select (id, season_id, week, home_team_id, away_team_id, scheduled_at, hom
   on public.games to anon, authenticated;
 alter view public.games_public set (security_invoker = false);
 revoke insert, update, delete, truncate, references, trigger on public.games_public from anon, authenticated;
+-- a function called inside a view runs with the CALLER's execute privilege, whatever the view's
+-- security mode — so the masking predicate itself must be executable by the API roles
+grant execute on function public.can_see_match(uuid) to anon, authenticated;
 create or replace function public.can_see_match(p_game uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   /* Rule 4.2 (v2.57): the private lobby code and server pick are released 30 minutes before the

@@ -24,6 +24,8 @@
 // AUTHORITY, not visibility: ar_update refuses a staffer who is the filer or the subject, so a
 // case involving someone is worked by someone else.
 
+import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
+
 /* Desk routes mirror CG.STAFF_DESKS — key is the department, value the hash route of its desk. */
 const DESK_PATH = {
   applications: "#/hub/reviewboard",
@@ -145,16 +147,23 @@ export function rowKey(table, row) {
 const COLOR = { applications: 0xFFE500, officiating: 0xC2410C, community: 0x7C3AED,
   statistics: 0x2563EB, operations: 0x2F9E44, transactions: 0x0891B2, draft: 0xDB2777, media: 0x475569 };
 
-export function createStaffAlerter(env) {
+export function createStaffAlerter(env, opts = {}) {
   const { SB_URL, SB_KEY, BOT } = env;
   const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
-  const sum = { announced: 0, skipped: 0, suppressed: 0 };
+  const SB_MS = opts.sbTimeoutMs ?? SB_TIMEOUT_MS;
+  const D_MS = opts.discordTimeoutMs ?? DISCORD_TIMEOUT_MS;
+  /* errors / lastErrorAt / lastError feed the gateway heartbeat (handlers.mjs beat) */
+  const sum = { announced: 0, skipped: 0, suppressed: 0, unconfirmed: 0, errors: 0, lastErrorAt: null, lastError: null };
   const errors = [];
-  const note = (e) => { errors.push(String((e && e.message) || e).slice(0, 180)); if (errors.length > 20) errors.shift(); };
+  const note = (e) => {
+    const msg = String((e && e.message) || e).slice(0, 180);
+    errors.push(msg); if (errors.length > 20) errors.shift();
+    sum.errors++; sum.lastErrorAt = Date.now(); sum.lastError = msg;
+  };
 
   const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
   async function sbGet(path) {
-    const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
+    const r = await timedFetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() }, SB_MS);
     if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
     return r.json();
   }
@@ -162,10 +171,10 @@ export function createStaffAlerter(env) {
   /* One-shot claim on the shared discord_post_log, so the gateway bot and the discord-sync
      catch-up can both try the same row and only one message is ever sent. */
   async function claim(ref) {
-    const r = await fetch(`${SB_URL}/rest/v1/discord_post_log`, {
+    const r = await timedFetch(`${SB_URL}/rest/v1/discord_post_log`, {
       method: "POST", headers: { ...sbHead(), Prefer: "return=minimal" },
       body: JSON.stringify({ kind: "staff_alert", ref }),
-    });
+    }, SB_MS);
     if (r.status === 201) return true;
     if (r.status === 409) return false;      // already announced
     note(new Error(`claim ${ref} -> ${r.status}`));
@@ -173,8 +182,8 @@ export function createStaffAlerter(env) {
   }
   async function release(ref) {
     try {
-      await fetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.staff_alert&ref=eq.${encodeURIComponent(ref)}`,
-        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } });
+      await timedFetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.staff_alert&ref=eq.${encodeURIComponent(ref)}`,
+        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } }, SB_MS);
     } catch (e) { note(e); }
   }
 
@@ -195,17 +204,25 @@ export function createStaffAlerter(env) {
   }
 
   /* A 404 from Discord returns a body with no id. Treating that as "sent" is how a delivery
-     system quietly stops delivering, so demand the message id. */
+     system quietly stops delivering, so demand the message id. Only a 4xx or an id-less body is
+     PROVABLE (never delivered, claim handed back); a 5xx used to be marked provable too, which
+     released the claim on an unknown outcome — the one case where the catch-up could post the
+     alert a second time. A 429 is waited out: a definitive rejection, safe to send again. */
   async function post(channelId, body) {
-    const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const t = await r.text();
-    if (!r.ok) { const e = new Error(`post ${channelId} -> ${r.status}`); e.provable = true; throw e; }
-    const j = t ? JSON.parse(t) : null;
-    if (!j || !j.id) { const e = new Error(`post ${channelId} did not deliver`); e.provable = true; throw e; }
-    return j;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const r = await timedFetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+        method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }, D_MS);
+      if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
+      if (r.status >= 500) { const e = new Error(`post ${channelId} -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }
+      const t = await r.text();
+      if (!r.ok) { const e = new Error(`post ${channelId} -> ${r.status}`); e.provable = true; throw e; }
+      const j = t ? JSON.parse(t) : null;
+      if (!j || !j.id) { const e = new Error(`post ${channelId} did not deliver`); e.provable = true; throw e; }
+      return j;
+    }
+    const e = new Error(`post ${channelId} -> rate-limited after retries`); e.provable = true; throw e;
   }
 
   /* Look up only what the message needs to be readable — a name, a club, a fixture. Never the
@@ -277,9 +294,10 @@ export function createStaffAlerter(env) {
           sum.announced++; sent++;
         } catch (e) {
           note(e);
-          /* only hand the claim back when Discord provably never took it; a transport error is
-             ambiguous and releasing on those is how you double-post */
+          /* only hand the claim back when Discord provably never took it; a timeout, a 5xx or a
+             transport error is ambiguous and releasing on those is how you double-post */
           if (e && e.provable) await release(ref);
+          else sum.unconfirmed++;
         }
       }
       if (missing.length) note(new Error(`no channel mapped for ${missing.join(",")} — discord-sync publishes discord_dept_channel_ids`));
@@ -303,11 +321,11 @@ export function createStaffAlerter(env) {
       if (rows && rows[0] && rows[0].value) watermark = rows[0].value;
       else {
         const nowIso = new Date().toISOString();
-        await fetch(`${SB_URL}/rest/v1/app_config`, {
+        await timedFetch(`${SB_URL}/rest/v1/app_config`, {
           method: "POST",
           headers: { ...sbHead(), Prefer: "resolution=merge-duplicates,return=minimal" },
           body: JSON.stringify({ key: "staff_alert_since", value: nowIso }),
-        });
+        }, SB_MS);
         return { swept: 0, announced: 0, seeded: nowIso };   // first run: everything older is history
       }
     } catch (e) { note(e); return { swept: 0, announced: 0, error: true }; }

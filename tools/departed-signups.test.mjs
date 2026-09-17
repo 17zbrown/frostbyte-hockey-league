@@ -113,8 +113,10 @@ console.log("\n— the sweep wiring and the places the rule is told to humans");
   const call = sync.indexOf("await removeDepartedSignups(sum)");
   A("the step runs in the sweep", call > 0);
   A("...right after the census settles, before the minutes-long role passes (a member who rejoins mid-sweep must not be caught by a stale read)",
-    call > sync.indexOf("await trackDepartures(") && call < sync.indexOf("for (const m of links)"));
-  A("...before the game-server resolver", call < sync.indexOf("rpc/resolve_due_servers"));
+    call > sync.indexOf("await trackDepartures(") && call < sync.indexOf("await syncLinkedMembers(ctx, sum, outOfTime)"));
+  /* server resolution moved to pg_cron on 2026-09-17: the sweep must not call it any more, so a
+     30-second kill of a long member pass can never stop server picks again */
+  A("the game-server resolver is no longer the sweep's tail", !/rpc\/resolve_due_servers/.test(sync));
   A("the run result records the count", /signupsRemoved: \(sum\.signupsRemoved \|\| \[\]\)\.length/.test(sync));
   A("a crash after the early heartbeat stamp writes a FAILING result (the panel must never lie green)",
     /rl_discord-sync_result/.test(sync.slice(sync.lastIndexOf("catch (e)"))) &&

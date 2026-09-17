@@ -123,16 +123,20 @@ const GUILD_ROLES = Object.entries({
   Staff: "R_STAFF", Center: "R_C", Media: "R_DEPT_MEDIA", Montreal: "R_CLUB_MTL",
 }).map(([name, id]) => ({ id, name }));
 let DB, member, patches, fail404, purged = 0;
+/* Discord ids whose member GET never answers — the hung socket the queue must survive; and
+   per-profile link rows for the multi-member queue tests (DB.links stays the default) */
+let hang = new Set();
 function reset() {
   DB = {
     links: [{ profile_id: "p1", role: "member", discord_id: "d1", team_id: null }],
+    linksBy: {},
     profile: { id: "p1", role: "member", departments: null, banned: false },
     seasons: [{ id: "S1", registration_open: true }],
     reg: [], spot: [],
     teams: [{ id: "T1", discord_role_id: "R_CLUB_MTL", owner_profile_id: null, gm_profile_id: null, agm_profile_id: null }],
   };
   member = { user: { id: "d1" }, roles: ["R_BOOSTER"] };
-  patches = []; fail404 = false;
+  patches = []; fail404 = false; hang = new Set();
 }
 reset();
 globalThis.fetch = async (url, opts = {}) => {
@@ -140,10 +144,12 @@ globalThis.fetch = async (url, opts = {}) => {
   const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
   if (u.includes("/guilds/") && u.includes("/roles")) return J(GUILD_ROLES);
   if (u.includes("/guilds/") && u.includes("/members/")) {
+    const did = (u.match(/members\/([^/?]+)/) || [])[1];
+    if (hang.has(did)) return new Promise(() => {});          // the socket that never answers
     if (m === "GET") return fail404 ? J({ message: "Unknown Member" }, 404) : J(member);
     if (m === "PATCH") { const b = JSON.parse(opts.body); patches.push(b); member.roles = b.roles; return J({}); }
   }
-  if (u.includes("discord_links")) return J(DB.links);
+  if (u.includes("discord_links")) { const pid = (u.match(/profile_id=eq\.([^&]+)/) || [])[1]; return J(DB.linksBy[pid] || DB.links); }
   if (u.includes("/rest/v1/profiles")) return J([DB.profile]);
   if (u.includes("/rest/v1/seasons")) return J(DB.seasons);
   if (u.includes("season_registrations")) return J(DB.reg);
@@ -240,6 +246,60 @@ console.log("\n— the queue replay never floods and always prunes");
   await new Promise((res) => setTimeout(res, 60));
   A("recent rows replay, deduped per member", r.replayed === 1 && S.sum.synced === 1, `replayed=${r.replayed} synced=${S.sum.synced}`);
   A("old rows are purged", purged === 1);
+}
+
+console.log("\n— one hung member never stalls the queue (audit 2026-09-17, P2-12)");
+{
+  /* p-hung's member GET never answers; p1 is queued behind it. Before the per-call deadline the
+     serial worker sat on p-hung forever and p1's seat change never reached Discord. */
+  reset();
+  DB.linksBy = { "p-hung": [{ profile_id: "p-hung", role: "member", discord_id: "d-hung", team_id: null }] };
+  hang.add("d-hung");
+  DB.reg = [{ profile_id: "p1", position: "C" }];
+  const S = createRoleSyncer(ENV, { debounceMs: 1, discordTimeoutMs: 25, jobTimeoutMs: 5000, retryDelaysMs: [5, 5] });
+  const t0 = Date.now();
+  let p1Done = null, hungDone = null;
+  S.enqueue("p-hung", "teams:update", (r) => { hungDone = r; });
+  S.enqueue("p1", "roster_spots:insert", (r) => { p1Done = r; });
+  await new Promise((r) => setTimeout(r, 250));
+  A("the member behind the hung one is synced", p1Done === "patched" && patches.length === 1, `p1=${p1Done}`);
+  A("...well inside the deadline, not after a hang", Date.now() - t0 < 1000);
+  A("the hung member's call was abandoned at its deadline", S.errors.some((e) => /d-hung.*timed out after 25 ms/.test(e)), S.errors.join(" | "));
+  A("...retried on the ladder, then dropped — bounded", S.sum.retried === 2 && S.sum.dropped === 1 && hungDone === "error", `retried=${S.sum.retried} dropped=${S.sum.dropped} hung=${hungDone}`);
+  A("...three syncs attempted for it in all (first + two retries), one for p1", S.sum.synced === 4, `synced=${S.sum.synced}`);
+  A("...and the drop is a lane error the heartbeat will show", S.sum.errors > 0 && S.sum.lastErrorAt && /gave up after 2 retries/.test(S.sum.lastError), S.sum.lastError);
+}
+{
+  /* the JOB deadline, separately from the per-call one: a member whose calls each answer inside
+     the call deadline but whose sync as a whole outlives the job deadline is abandoned too */
+  reset();
+  DB.linksBy = { "p-slow": [{ profile_id: "p-slow", role: "member", discord_id: "d-slow", team_id: null }] };
+  hang.add("d-slow");
+  const S = createRoleSyncer(ENV, { debounceMs: 1, discordTimeoutMs: 5000, jobTimeoutMs: 30, retryDelaysMs: [] });
+  let done = null;
+  S.enqueue("p-slow", "profiles:update", (r) => { done = r; });
+  S.enqueue("p1", "profiles:update");
+  await new Promise((r) => setTimeout(r, 150));
+  A("a sync that outlives its job deadline is abandoned as 'timeout'", done === "timeout" && S.sum.timedOut === 1, `done=${done}`);
+  A("...with an empty ladder it is dropped at once", S.sum.dropped === 1 && S.sum.retried === 0);
+  A("...and the queue moved on to the next member", S.sum.synced === 2);
+}
+{
+  /* a member on the retry ladder gets a fresh event meanwhile (Discord recovered): the fresh
+     sync converges them, the retry finds nothing left to do, and BOTH callers hear a converged
+     result — a retry is a job like any other, so no onDone is ever dropped on the ladder */
+  reset();
+  DB.linksBy = { "p-flaky": [{ profile_id: "p-flaky", role: "member", discord_id: "d-flaky", team_id: null }] };
+  hang.add("d-flaky");
+  const S = createRoleSyncer(ENV, { debounceMs: 1, discordTimeoutMs: 20, jobTimeoutMs: 5000, retryDelaysMs: [30] });
+  const heard = [];
+  S.enqueue("p-flaky", "teams:update", (r) => heard.push("first:" + r));
+  await new Promise((r) => setTimeout(r, 40));            // first attempt failed; retry pending
+  hang.delete("d-flaky");                                  // Discord recovers
+  S.enqueue("p-flaky", "roster_spots:insert", (r) => heard.push("second:" + r));
+  await new Promise((r) => setTimeout(r, 120));
+  A("the recovered member converges", heard.some((h) => /:patched$|:no-op$/.test(h)), heard.join());
+  A("...and BOTH callers hear it — the retry ladder drops nobody's callback", heard.length === 2 && heard.every((h) => /:patched$|:no-op$/.test(h)), heard.join());
 }
 
 /* ---- CGHL Management: one handle for a club's whole front office (2026-08-13) ---------------

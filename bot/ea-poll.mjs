@@ -48,6 +48,12 @@ export const EA_HEADERS = Object.freeze({
 
 export function createEaPoller(env, opts = {}) {
   const { SB_URL, SB_KEY } = env || {};
+  /* The ingest hand-off's secret: the dedicated INGEST_KEY when the VM has one, else the service
+     key (ingest-stats accepts either, timing-safe). A scoped secret is the better thing to put on
+     the wire every two minutes — the service key opens the whole database, INGEST_KEY opens one
+     endpoint. process.env is the fallback so every embedder (the systemd service, the one-shot,
+     an older checkout mid-deploy) honors /etc/chel-bot.env without having to know the key. */
+  const INGEST_KEY = (env && env.INGEST_KEY) || process.env.INGEST_KEY || null;
   /* resolved per call, not captured, so a caller may stub globalThis.fetch after import (the
      tests inject opts.fetch) */
   const F = (...a) => (opts.fetch || globalThis.fetch)(...a);
@@ -63,10 +69,17 @@ export function createEaPoller(env, opts = {}) {
   const BACKOFF_MS = opts.backoffMs ?? 5 * 60_000;         // after any 403: no EA call for this long
   const CLUB_GAP_MS = opts.clubGapMs ?? 300;               // pause between clubs
   const EA_TIMEOUT_MS = opts.eaTimeoutMs ?? 8000;
-  const INGEST_TIMEOUT_MS = opts.ingestTimeoutMs ?? 30_000;
+  /* Netlify's synchronous function limit is 60 s, and the importer is sequential (a worst-case
+     slot of several new games with a lag-out merge runs well past the old 30 s). The abort here
+     is the binding limit on the whole import, so it is aligned with the platform's; and because
+     an aborted POST may still have COMPLETED server-side, an abort is "result unknown", never a
+     failure (see the hand-off below). */
+  const INGEST_TIMEOUT_MS = opts.ingestTimeoutMs ?? 60_000;
 
-  /* surfaced as eaPoll in the gateway heartbeat's extra */
-  const sum = { live: true, polls: 0, matches: 0, ingested: 0, lastPollAt: null, lastError: null, backoffUntil: null };
+  /* the host process's view of this lane (returned to whoever embeds the poller). ingestUnknown
+     counts hand-offs that timed out client-side — outcome unknown, re-checked by the next
+     cycle's resend. */
+  const sum = { live: true, polls: 0, matches: 0, ingested: 0, ingestUnknown: 0, lastPollAt: null, lastError: null, backoffUntil: null };
   let lastIdleStampAt = -Infinity, lastPollAt = -Infinity, backoffUntil = 0;
   const iso = (t) => new Date(t == null ? now() : t).toISOString();
 
@@ -227,25 +240,36 @@ export function createEaPoller(env, opts = {}) {
       sum.backoffUntil = backoffUntil > now() ? iso(backoffUntil) : null;
       sum.matches += matches.length;
 
-      let ir = null, out = {}, ingestFail = null;
+      let ir = null, out = {}, ingestFail = null, ingestUnknown = 0;
       if (matches.length) {
         try {
-          /* redirect:"error" — this request carries the service-role key, and fetch keeps custom
-             headers across a cross-origin redirect; a redirect must fail loud, never be followed */
+          /* redirect:"error" — this request carries a secret, and fetch keeps custom headers
+             across a cross-origin redirect; a redirect must fail loud, never be followed */
           ir = await F(`${site}/api/ingest-stats`, { method: "POST", redirect: "error",
-            headers: { "Content-Type": "application/json", "x-ingest-key": SB_KEY },
+            headers: { "Content-Type": "application/json", "x-ingest-key": INGEST_KEY || SB_KEY },
             body: JSON.stringify({ matches }), signal: AbortSignal.timeout(INGEST_TIMEOUT_MS) });
           out = await ir.json().catch(() => ({}));
           if (!out || typeof out !== "object") out = {};
-        } catch (e) { ingestFail = `ingest: ${String((e && e.message) || e)}`; }
+        } catch (e) {
+          /* A client-side abort says nothing about the import: the function may have finished
+             filing every game a moment after we hung up (Netlify's own limit is the same 60 s).
+             So it is not a failure and must not paint the lane red — it is an UNKNOWN, counted
+             on its own, and the next cycle resends the same matches; the importer dedupes on
+             games.ea_match_id, so a resend of a completed import is a no-op. A real transport
+             error (a reset, a refused connection) is still a failure. */
+          if (e && (e.name === "TimeoutError" || e.name === "AbortError")) {
+            ingestUnknown = 1;
+            log(`ea-poll: ingest did not answer within ${Math.round(INGEST_TIMEOUT_MS / 1000)} s — result unknown, the next cycle re-sends`);
+          } else ingestFail = `ingest: ${String((e && e.message) || e)}`;
+        }
       }
       const ingestErrs = Array.isArray(out.errors) ? out.errors : [];
       const ingestStatus = ir ? ir.status : null;
-      const ingestOk = !matches.length || (ingestStatus === 200 && ingestErrs.length === 0);
+      const ingestOk = !matches.length || ingestUnknown === 1 || (ingestStatus === 200 && ingestErrs.length === 0);
       const ok = clubErrors.length === 0 && ingestOk;
       const firstIngestErr = ingestErrs[0] && (ingestErrs[0].error || ingestErrs[0].reason || JSON.stringify(ingestErrs[0]));
       const lastError = clubErrors[0] || ingestFail || firstIngestErr
-        || (matches.length && ingestStatus !== 200 ? `ingest HTTP ${ingestStatus}` : null) || null;
+        || (matches.length && !ingestUnknown && ingestStatus !== 200 ? `ingest HTTP ${ingestStatus}` : null) || null;
       const res = {
         ok, polled: clubs.length, matches: matches.length,
         errCount: clubErrors.length + ingestErrs.length + (ingestFail ? 1 : 0), lastError,
@@ -254,17 +278,19 @@ export function createEaPoller(env, opts = {}) {
         unmatched: Array.isArray(out.unmatched) ? out.unmatched.length : 0,
         skipped: Array.isArray(out.skipped) ? out.skipped.length : 0,
         errors: ingestErrs.length,
+        ingestUnknown,
         incomplete, offWindow, fixturesOpen: open.length,
         ...(unlinked.length ? { unlinkedInFixtures: unlinked.length,
           warning: `${unlinked.length} club${unlinked.length === 1 ? "" : "s"} in tonight's fixtures ${unlinked.length === 1 ? "has" : "have"} no EA club linked — their games cannot import until they are linked in Team HQ` } : {}),
       };
       sum.ingested += res.ingested;
+      sum.ingestUnknown += ingestUnknown;
       sum.lastError = lastError;
       await cfgSet("rl_ea-poll", iso());
       await record(res);
       log(`ea-poll: ${open.length} fixture${open.length === 1 ? "" : "s"} in window, polled ${clubs.length} club${clubs.length === 1 ? "" : "s"}, ${matches.length} match${matches.length === 1 ? "" : "es"}` +
         (offWindow ? ` (${offWindow} outside any fixture's window — the importer will refuse them)` : "") +
-        (matches.length ? `, ingest ${ingestStatus} (ingested ${res.ingested}, unmatched ${res.unmatched}, skipped ${res.skipped}, errors ${res.errors})` : "") +
+        (matches.length ? (ingestUnknown ? ", ingest timed out (result unknown, re-sent next cycle)" : `, ingest ${ingestStatus} (ingested ${res.ingested}, unmatched ${res.unmatched}, skipped ${res.skipped}, errors ${res.errors})`) : "") +
         (clubErrors.length ? `, ${clubErrors.length} club error${clubErrors.length === 1 ? "" : "s"}` : ""));
       return { at: iso(), lane: "vm", ...res, clubErrors, fixtureDue };
     } catch (e) {
@@ -313,12 +339,12 @@ const isMain = (() => {
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
-    console.log(`usage: node bot/ea-poll.mjs --once [--force]\n  --once   run one poll cycle and exit (the only mode; the loop lives in chel-bot.mjs)\n  --force  ask EA even when no fixture's game window (${describeWindow()}) is open — a diagnostic: with no open fixture nothing found can be filed\nenv: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (source /etc/chel-bot.env)`);
+    console.log(`usage: node bot/ea-poll.mjs --once [--force]\n  --once   run one poll cycle and exit (the only mode; the loop lives in ea-poll-service.mjs)\n  --force  ask EA even when no fixture's game window (${describeWindow()}) is open — a diagnostic: with no open fixture nothing found can be filed\nenv: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, optional INGEST_KEY (the scoped secret for the ingest hand-off; the service key is used without it) — source /etc/chel-bot.env`);
     process.exit(0);
   }
   const force = args.includes("--force");
   /* --once is accepted for readability; one cycle is the only mode here */
-  const env = { SB_URL: process.env.SUPABASE_URL, SB_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY };
+  const env = { SB_URL: process.env.SUPABASE_URL, SB_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY, INGEST_KEY: process.env.INGEST_KEY };
   if (!env.SB_URL || !env.SB_KEY) {
     console.error("ea-poll: missing env — need SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (set -a; . /etc/chel-bot.env; set +a)");
     process.exit(1);

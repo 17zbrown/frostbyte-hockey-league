@@ -9,6 +9,8 @@
 // Kept dependency-free of discord.js so tools/incident-rulings.test.mjs can drive it with a
 // stubbed fetch. The realtime subscription is wired in chel-bot.mjs.
 
+import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
+
 /* Rule 3.2 — by the clock. Rule 4.3 — by the occurrence. -1 means the ladder has run out and
    the game is over. KEEP IN SYNC with log_game_incident() in the database, which computes the
    same ladder for the staff desk; this copy exists so the announcement never waits on a round
@@ -55,46 +57,55 @@ function timingNote(third, early, clock) {
 export function createIncidentNotifier(env, opts = {}) {
   const { SB_URL, SB_KEY, BOT } = env;
   const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
-  const sum = { announced: 0, skipped: 0 };
+  const SB_MS = opts.sbTimeoutMs ?? SB_TIMEOUT_MS;
+  const D_MS = opts.discordTimeoutMs ?? DISCORD_TIMEOUT_MS;
+  /* errors / lastErrorAt / lastError feed the gateway heartbeat (handlers.mjs beat) */
+  const sum = { announced: 0, skipped: 0, unconfirmed: 0, errors: 0, lastErrorAt: null, lastError: null };
   const errors = [];
-  const note = (e) => { errors.push(String((e && e.message) || e).slice(0, 180)); if (errors.length > 20) errors.shift(); };
+  const note = (e) => {
+    const msg = String((e && e.message) || e).slice(0, 180);
+    errors.push(msg); if (errors.length > 20) errors.shift();
+    sum.errors++; sum.lastErrorAt = Date.now(); sum.lastError = msg;
+  };
 
   const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
   async function sbGet(path) {
-    const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
+    const r = await timedFetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() }, SB_MS);
     if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
     return r.json();
   }
-  /* A ruling is the message a club acts on — it must not be lost to a 429 or a Discord blip.
-     Same retry discipline as the sweeps, and the caller claims the row so a retry cannot
-     double-post the same ruling. */
+  /* A ruling is the message a club acts on — it must not be lost to a 429, and a 429 is safe to
+     wait out: nothing was stored. It must not arrive TWICE either, and that is what a retry on a
+     5xx or a timeout risks — a ruling a club already read, posted again as if it were new. So
+     those throw tagged `ambiguous` and the caller keeps the claim; a 4xx or a body with no
+     message id throws tagged `provable` and the claim is handed back for the catch-up. */
   async function post(channelId, body) {
     for (let attempt = 0; attempt < 4; attempt++) {
-      const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      const r = await timedFetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+      }, D_MS);
       if (r.status === 429) {
         const ra = +(r.headers.get("retry-after") || 1);
         await new Promise((res) => setTimeout(res, ra * 1000 + 250));
         continue;
       }
-      if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
-      if (!r.ok) throw new Error(`post ${channelId} -> ${r.status}`);
+      if (r.status >= 500) { const e = new Error(`post ${channelId} -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }
+      if (!r.ok) { const e = new Error(`post ${channelId} -> ${r.status}`); e.provable = true; throw e; }
       const t = await r.text();
       const j = t ? JSON.parse(t) : null;
-      if (!j || !j.id) throw new Error(`post ${channelId} did not deliver`);   // 404 must never read as sent
+      if (!j || !j.id) { const e = new Error(`post ${channelId} did not deliver`); e.provable = true; throw e; }   // 404 must never read as sent
       return j;
     }
-    throw new Error(`post ${channelId} -> rate-limited after retries`);
+    const e = new Error(`post ${channelId} -> rate-limited after retries`); e.provable = true; throw e;
   }
   /* one-shot claim on the shared discord_post_log (same table staff-alerts uses), so the live
      realtime path and the catch-up below can both try a row and only one message is sent */
   async function claim(ref) {
-    const r = await fetch(`${SB_URL}/rest/v1/discord_post_log`, {
+    const r = await timedFetch(`${SB_URL}/rest/v1/discord_post_log`, {
       method: "POST", headers: { ...sbHead(), Prefer: "return=minimal" },
       body: JSON.stringify({ kind: "incident", ref }),
-    });
+    }, SB_MS);
     if (r.status === 201) return true;
     if (r.status === 409) return false;
     note(new Error(`claim ${ref} -> ${r.status}`));
@@ -102,9 +113,17 @@ export function createIncidentNotifier(env, opts = {}) {
   }
   async function release(ref) {
     try {
-      await fetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.incident&ref=eq.${encodeURIComponent(ref)}`,
-        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } });
+      await timedFetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.incident&ref=eq.${encodeURIComponent(ref)}`,
+        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } }, SB_MS);
     } catch (e) { note(e); }
+  }
+  /* only a PROVABLE failure hands the claim back; an unknown outcome keeps it, because the
+     ruling may already be in the room and a released claim is a second copy of it. The error
+     is re-worded rather than noted here — announce()'s catch notes it once, with the verdict. */
+  async function settle(ref, e) {
+    if (e && e.provable) { await release(ref); return; }
+    sum.unconfirmed++;
+    if (e) e.message = `${ref}: delivery unconfirmed (${String(e.message || e).slice(0, 120)}) — claim kept, not re-sent`;
   }
 
   /* One incident row -> two messages, because the two clubs need different sentences: the club
@@ -147,7 +166,7 @@ export function createIncidentNotifier(env, opts = {}) {
           color: colour, footer: { text: "Ruled by league staff from the game incident log." },
         }], allowed_mentions: { parse: [] } });
         sum.announced++; _sent++;
-        } catch (e) { await release(_ref + ":" + mine.discord_channel_id); throw e; }
+        } catch (e) { await settle(_ref + ":" + mine.discord_channel_id, e); throw e; }
       }
       // the club that gets the choice — its own claim, so one failing never re-sends the other
       if (other.discord_channel_id && await claim(_ref + ":" + other.discord_channel_id)) {
@@ -165,13 +184,14 @@ export function createIncidentNotifier(env, opts = {}) {
           color: colour, footer: { text: "Ruled by league staff from the game incident log." },
         }], allowed_mentions: { parse: [] } });
         sum.announced++; _sent++;
-        } catch (e) { await release(_ref + ":" + other.discord_channel_id); throw e; }
+        } catch (e) { await settle(_ref + ":" + other.discord_channel_id, e); throw e; }
       }
       if (!_held) return "already";        /* both destinations already delivered */
       return _sent ? "announced" : "already";
     } catch (e) {
-      /* Only the FAILED destination's claim was released, above. The one that already delivered
-         keeps its claim, so a catch-up retries the missing half without re-sending the other. */
+      /* Only the FAILED destination's claim was settled, above — released if Discord provably
+         refused it, kept if the outcome is unknown. The one that already delivered keeps its
+         claim, so a catch-up retries the missing half without re-sending the other. */
       note(e);
       return "error";
     }

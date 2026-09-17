@@ -25,33 +25,57 @@
 //     is a reconciliation job, not a per-member event
 //   * nickname/gamertag sync — Discord-side changes are invisible to the database; sweep territory
 //
+// Every call carries a deadline (handlers.mjs timedFetch) and every job carries its own: one
+// member whose socket stops answering used to stall every instant role change behind it in the
+// serial worker (audit 2026-09-17, P2-12). A failed or abandoned sync re-queues on a bounded
+// backoff ladder, then belongs to the sweep.
+//
 // Dependency-free of discord.js so tools/role-sync.test.mjs can drive it with a stubbed fetch.
 
 import { desiredRolesFor, applyManagedRoles, managedRoleIds } from "../shared/roles.mjs";
+import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
 
 export function createRoleSyncer(env, opts = {}) {
   const { SB_URL, SB_KEY, BOT, GUILD } = env;
   const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
   const DEBOUNCE_MS = opts.debounceMs != null ? opts.debounceMs : 1500;
-  const sum = { synced: 0, patched: 0, noop: 0, skipped: 0 };
+  const SB_MS = opts.sbTimeoutMs ?? SB_TIMEOUT_MS;
+  const D_MS = opts.discordTimeoutMs ?? DISCORD_TIMEOUT_MS;
+  /* A member's sync is a dozen sequential calls; each has its own deadline, and the JOB has one
+     too, so a member that keeps answering slowly cannot hold the queue any longer than this. */
+  const JOB_TIMEOUT_MS = opts.jobTimeoutMs ?? 90_000;
+  /* A failed sync is tried again on a growing delay, a bounded number of times — after the last
+     one the member is the sweep's, which reconciles everyone within 2 minutes anyway. Bounded so
+     a member the bot can never edit (the server owner, anyone ranked above it) does not circle
+     the queue forever. */
+  const RETRY_DELAYS_MS = opts.retryDelaysMs ?? [5_000, 30_000, 120_000];
+  /* errors / lastErrorAt / lastError feed the gateway heartbeat (handlers.mjs beat): a failed
+     role PATCH is a failing run, the same grade the sweep gives itself */
+  const sum = { synced: 0, patched: 0, noop: 0, skipped: 0, timedOut: 0, retried: 0, dropped: 0, errors: 0, lastErrorAt: null, lastError: null };
   const errors = [];
-  const note = (e) => { errors.push(String((e && e.message) || e).slice(0, 180)); if (errors.length > 20) errors.shift(); };
+  const note = (e) => {
+    const msg = String((e && e.message) || e).slice(0, 180);
+    errors.push(msg); if (errors.length > 20) errors.shift();
+    sum.errors++; sum.lastErrorAt = Date.now(); sum.lastError = msg;
+  };
 
   const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
   async function sbGet(path) {
-    const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
+    const r = await timedFetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() }, SB_MS);
     if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
     return r.json();
   }
   /* Same transport discipline the sweeps already use (discord-sync.js). Without it a 429 was
      recorded as a permanent failure and the member's roles simply never applied — and this is the
-     path that runs on every seat change, for 200+ members. */
+     path that runs on every seat change, for 200+ members. Every call here is a GET or a PATCH of
+     the full role list — idempotent — so a 5xx is safe to retry; a timeout is thrown as the
+     failure it is and the job-level retry below decides whether to try the member again. */
   async function dApi(method, path, body) {
     for (let attempt = 0; attempt < 4; attempt++) {
-      const r = await fetch(`https://discord.com/api/v10${path}`, {
+      const r = await timedFetch(`https://discord.com/api/v10${path}`, {
         method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
-      });
+      }, D_MS);
       if (r.status === 404) return { __notfound: true };
       if (r.status === 429) {
         const ra = +(r.headers.get("retry-after") || 1);
@@ -204,6 +228,14 @@ export function createRoleSyncer(env, opts = {}) {
   const queue = [];            // jobs waiting for the worker
   const queued = new Map();    // profileId -> the job already in the queue
   let draining = false;
+  /* the job's own clock: resolves "timeout" when the sync outlives it. The sync keeps running
+     in the background until its own per-call deadlines end it — every write it could still make
+     is idempotent, so an abandoned one that finishes late just converges the member early. */
+  function withDeadline(p, ms) {
+    let t;
+    const clock = new Promise((res) => { t = setTimeout(() => res("timeout"), ms); if (t.unref) t.unref(); });
+    return Promise.race([p, clock]).finally(() => clearTimeout(t));
+  }
   async function drain() {
     if (draining) return;
     draining = true;
@@ -211,15 +243,51 @@ export function createRoleSyncer(env, opts = {}) {
       while (queue.length) {
         const job = queue.shift();
         queued.delete(job.profileId);
-        try {
-          const r = await syncProfile(job.profileId, job.reason);
+        let r;
+        try { r = await withDeadline(syncProfile(job.profileId, job.reason), JOB_TIMEOUT_MS); }
+        catch (e) { r = "error"; note(new Error(`${job.profileId} (${job.reason || "?"}): ${String((e && e.message) || e)}`)); }
+        if (r === "timeout") { sum.timedOut++; note(new Error(`${job.profileId} (${job.reason || "?"}): sync abandoned after ${JOB_TIMEOUT_MS} ms — the queue moves on`)); }
+        /* One hung or failed member must not stall the members behind it: the queue continues
+           NOW, and this one comes back on the retry ladder. onDone is a delivery contract, so it
+           fires only when the job is truly finished — delivered, or given up on. */
+        if (r === "error" || r === "timeout") {
+          const attempt = job.attempt || 0;
+          if (attempt < RETRY_DELAYS_MS.length) {
+            sum.retried++;
+            /* ref'd on purpose, like the transport deadline: a scheduled retry is owed work,
+               bounded by the ladder, and every shutdown path exits explicitly */
+            setTimeout(() => push({ ...job, attempt: attempt + 1 }), RETRY_DELAYS_MS[attempt]);
+            console.warn(`role-sync ${job.profileId} (${job.reason}): ${r} — retry ${attempt + 1}/${RETRY_DELAYS_MS.length} in ${RETRY_DELAYS_MS[attempt]} ms`);
+            continue;
+          }
+          sum.dropped++;
+          note(new Error(`${job.profileId} (${job.reason || "?"}): gave up after ${attempt} retries — the sweep reconciles this member within 2 minutes`));
           if (job.onDone) job.onDone(r);
-          if (r !== "no-op" && r !== "unlinked") console.log(`role-sync ${job.profileId} (${job.reason}): ${r}`);
-        } catch (e) {
-          console.warn(`role-sync ${job.profileId} failed:`, e && e.message ? e.message : e);
+          console.warn(`role-sync ${job.profileId} (${job.reason}): ${r} — dropped after ${attempt} retries`);
+          continue;
         }
+        if (job.onDone) job.onDone(r);
+        if (r !== "no-op" && r !== "unlinked") console.log(`role-sync ${job.profileId} (${job.reason}): ${r}`);
       }
     } finally { draining = false; }
+  }
+  /* Already waiting its turn: MERGE into that job rather than dropping this one — the caller's
+     onDone is a delivery contract, and silently discarding it left callers waiting on a callback
+     that would never fire. A retry landing on a fresh job for the same member folds into it the
+     same way: one sync serves both. */
+  function push(job) {
+    const existing = queued.get(job.profileId);
+    if (existing) {
+      existing.reason = job.reason;
+      if (job.onDone) {
+        const prev = existing.onDone;
+        existing.onDone = prev ? function(r){ prev(r); job.onDone(r); } : job.onDone;
+      }
+      return;
+    }
+    queued.set(job.profileId, job);
+    queue.push(job);
+    drain();
   }
   function enqueue(profileId, reason, onDone) {
     if (!profileId) return;
@@ -227,22 +295,7 @@ export function createRoleSyncer(env, opts = {}) {
     if (prev) clearTimeout(prev.timer);
     const timer = setTimeout(() => {
       pending.delete(profileId);
-      /* Already waiting its turn: MERGE into that job rather than dropping this one — the
-         caller's onDone is a delivery contract, and silently discarding it left callers waiting
-         on a callback that would never fire. */
-      const existing = queued.get(profileId);
-      if (existing) {
-        existing.reason = reason;
-        if (onDone) {
-          const prev = existing.onDone;
-          existing.onDone = prev ? function(r){ prev(r); onDone(r); } : onDone;
-        }
-        return;
-      }
-      const job = { profileId, reason, onDone };
-      queued.set(profileId, job);
-      queue.push(job);
-      drain();
+      push({ profileId, reason, onDone });
     }, DEBOUNCE_MS);
     pending.set(profileId, { timer, reason });
   }
@@ -262,8 +315,8 @@ export function createRoleSyncer(env, opts = {}) {
         enqueue(r.profile_id, `catch-up:${r.reason}`);
       }
       const cutoff = new Date(Date.now() - 60 * 60_000).toISOString();
-      await fetch(`${SB_URL}/rest/v1/role_sync_queue?created_at=lt.${encodeURIComponent(cutoff)}`,
-        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } });
+      await timedFetch(`${SB_URL}/rest/v1/role_sync_queue?created_at=lt.${encodeURIComponent(cutoff)}`,
+        { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } }, SB_MS);
       return { replayed: seen.size };
     } catch (e) { note(e); return { replayed: 0, error: true }; }
   }

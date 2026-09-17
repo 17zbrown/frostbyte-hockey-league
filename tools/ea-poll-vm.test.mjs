@@ -2,9 +2,11 @@
 //
 // What must never break: EA is only asked when a fixture is due (and never inside a 403 backoff
 // or within 90 s of the last poll); one club's failure never costs the others their box scores;
-// the same match reported by both clubs reaches ingest once; the ingest hand-off carries the
-// service key; the result record says which lane ran and why it failed; and the loop survives a
-// cycle that throws. Clock and network are injected — no real timer here runs longer than ~40 ms.
+// the same match reported by both clubs reaches ingest once; the ingest hand-off carries
+// INGEST_KEY when the VM has one and the service key otherwise; an ingest that times out is a
+// result unknown, not a red run; the result record says which lane ran and why it failed; and the
+// loop survives a cycle that throws. Clock and network are injected — no real timer here runs
+// longer than ~40 ms.
 import { createEaPoller, EA_HEADERS } from "../bot/ea-poll.mjs";
 import fs from "node:fs";
 
@@ -12,6 +14,7 @@ let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
 /* ---- stubbed world ---- */
+delete process.env.INGEST_KEY;   // the header choice below is asserted both ways; the shell must not decide it
 const env = { SB_URL: "https://sb.invalid", SB_KEY: "service-role-key-123" };
 let T = Date.parse("2026-09-16T23:30:00Z");                 // a Wednesday night, mid game window
 const now = () => T;
@@ -46,7 +49,7 @@ const F = async (url, opts = {}) => {
   }
   if (u.includes("/api/ingest-stats")) {
     calls.push({ kind: "ingest", url: u, opts });
-    if (world.ingestThrows) throw new Error("ECONNRESET");
+    if (world.ingestThrows) throw world.ingestThrows instanceof Error ? world.ingestThrows : new Error("ECONNRESET");
     return J(world.ingestReply, world.ingestStatus);
   }
   if (u.includes("/rest/v1/app_config") && m === "POST") {
@@ -64,7 +67,7 @@ const F = async (url, opts = {}) => {
   if (u.includes("/rest/v1/teams")) { calls.push({ kind: "clubs", url: u }); return J(world.clubs); }
   throw new Error("unexpected fetch " + u);
 };
-const mk = (over) => createEaPoller(env, { fetch: F, now, sleep: async () => {}, log: () => {}, ...over });
+const mk = (over, envOver) => createEaPoller(envOver || env, { fetch: F, now, sleep: async () => {}, log: () => {}, ...over });
 const eaCalls = () => calls.filter((c) => c.kind === "ea");
 const ingestCalls = () => calls.filter((c) => c.kind === "ingest");
 const resultWrites = () => cfgWrites.filter((w) => w.key === "rl_ea-poll_result");
@@ -133,7 +136,9 @@ console.log("\n— due: one EA call per linked club, deduped matches, one ingest
   const ing = ingestCalls()[0];
   A("ingest goes to the live site endpoint", ing.url === "https://chelgamingleague.com/api/ingest-stats");
   A("...as a JSON POST", ing.opts.method === "POST" && ing.opts.headers["Content-Type"] === "application/json");
-  A("...carrying x-ingest-key = env.SB_KEY (the service key IS the ingest key now)", ing.opts.headers["x-ingest-key"] === env.SB_KEY);
+  A("...carrying x-ingest-key = env.SB_KEY when no INGEST_KEY is set (ingest-stats accepts the service key)", ing.opts.headers["x-ingest-key"] === env.SB_KEY);
+  A("...with a 60-s abort — Netlify's own synchronous limit, so the poller never hangs up on an import the platform would still finish",
+    ing.opts.signal instanceof AbortSignal && /INGEST_TIMEOUT_MS = opts\.ingestTimeoutMs \?\? 60_000/.test(fs.readFileSync(new URL("../bot/ea-poll.mjs", import.meta.url), "utf8")));
   const body = JSON.parse(ing.opts.body);
   A("the body is {matches:[...]} with the raw EA objects", Array.isArray(body.matches) && body.matches[0].clubs && body.matches[0].timestamp);
   A("matches deduped by matchId (m1, m2, m3 — m2 seen from both clubs, sent once)",
@@ -246,10 +251,56 @@ console.log("\n— ingest outcomes decide ok");
   const r = await P3.runOnce();
   res = lastResult();
   A("an ingest transport failure is recorded, not thrown", res.ok === false && res.ingest === null && /^ingest: ECONNRESET/.test(res.lastError) && r.ok === false);
+  A("...and a normal run carries ingestUnknown: 0 — the counter is always there to read", res.ingestUnknown === 0);
   reset(); world.ea = { 111: [], 222: [] };
   const P4 = mk();
   const r4 = await P4.runOnce();
   A("no matches: no ingest call, still ok, still stamped", ingestCalls().length === 0 && r4.ok === true && lastResult().ok === true && lastResult().matches === 0 && cfg["rl_ea-poll"]);
+}
+
+console.log("\n— an ingest that times out is a result UNKNOWN, not a failure");
+{
+  /* the POST may have completed server-side a moment after the abort (Netlify's limit is the same
+     60 s); the next cycle resends and the importer's dedupe makes a completed import a no-op.
+     Painting the lane red for that would teach the operator that red means nothing. */
+  reset();
+  world.ingestThrows = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  const logs = [];
+  const P = mk({ log: (s) => logs.push(String(s)) });
+  const r = await P.runOnce();
+  const res = lastResult();
+  A("the run stays ok — no red chip, no watchdog failure", res.ok === true && r.ok === true && res.errCount === 0 && res.lastError === null, JSON.stringify(res));
+  A("...counted on its own: ingestUnknown 1, ingest status null, nothing claimed ingested", res.ingestUnknown === 1 && res.ingest === null && res.ingested === 0 && res.errors === 0, JSON.stringify(res));
+  A("...named in the log as unknown and re-sent next cycle", logs.some((s) => /ingest did not answer within 60 s — result unknown/.test(s)), logs.join(" | "));
+  A("the heartbeat sum carries the counter and no error", P.sum.ingestUnknown === 1 && P.sum.lastError === null && P.sum.ingested === 0);
+  A("the poll markers were still stamped (heartbeat semantics unchanged)", cfg["rl_ea-poll"] === new Date(T).toISOString() && cfg["rl_ea-poll-vm"] === new Date(T).toISOString());
+  world.ingestThrows = Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+  advance(120_000);
+  const r2 = await P.runOnce();
+  A("an AbortError (older runtimes) reads the same way", r2.ok === true && r2.ingestUnknown === 1 && P.sum.ingestUnknown === 2);
+  world.ingestThrows = true;                                 // a plain transport error
+  advance(120_000);
+  const r3 = await P.runOnce();
+  A("...while a real transport error is still a failure", r3.ok === false && r3.ingestUnknown === 0 && /ECONNRESET/.test(r3.lastError));
+}
+
+console.log("\n— INGEST_KEY is preferred for the hand-off when the VM has one");
+{
+  reset();
+  const P = mk({}, { ...env, INGEST_KEY: "scoped-ingest-secret" });
+  await P.runOnce();
+  A("the header carries INGEST_KEY, not the service key", ingestCalls()[0].opts.headers["x-ingest-key"] === "scoped-ingest-secret");
+  A("...and the Supabase reads still use the service key", calls.find((c) => c.kind === "due").opts.headers.apikey === env.SB_KEY);
+  reset();
+  process.env.INGEST_KEY = "from-the-vm-env-file";
+  const P2 = mk();                                             // env without INGEST_KEY, as chel-bot.mjs builds it
+  await P2.runOnce();
+  delete process.env.INGEST_KEY;
+  A("the gateway's env predates the key, so process.env.INGEST_KEY (from /etc/chel-bot.env) is honored too", ingestCalls()[0].opts.headers["x-ingest-key"] === "from-the-vm-env-file");
+  reset();
+  const P3 = mk();
+  await P3.runOnce();
+  A("...and with neither, the service key", ingestCalls()[0].opts.headers["x-ingest-key"] === env.SB_KEY);
 }
 
 console.log("\n— force bypasses the due gate only");
@@ -334,13 +385,15 @@ console.log("\n— a slow cycle never overlaps the next");
   A("...and it completes normally", ingestCalls().length === 1);
 }
 
-console.log("\n— wired into the gateway bot");
+console.log("\n— wired into its own service, not the gateway bot (audit 2026-09-17 P2-15)");
 {
-  const src = fs.readFileSync(new URL("../bot/chel-bot.mjs", import.meta.url), "utf8");
-  A("chel-bot imports the poller", /import \{ createEaPoller \} from "\.\/ea-poll\.mjs"/.test(src));
-  A("...creates it from the shared env and starts it", /const EA = createEaPoller\(env, \{ log: console\.log \}\);\s*\n\s*EA\.start\(\);/.test(src));
-  A("...only after the env check", src.indexOf("EA.start()") > src.indexOf("check /etc/chel-bot.env"));
-  A("...and reports its counters in the heartbeat extra", /eaPoll: EA\.sum/.test(src));
+  /* the loop used to live in chel-bot.mjs and died with the Discord gateway; it is its own
+     systemd unit now (ea-poll-service.mjs), which passes INGEST_KEY through explicitly */
+  const gateway = fs.readFileSync(new URL("../bot/chel-bot.mjs", import.meta.url), "utf8");
+  A("chel-bot no longer imports or starts the poller", !/from "\.\/ea-poll\.mjs"/.test(gateway) && !/createEaPoller\(/.test(gateway));
+  const service = fs.readFileSync(new URL("../bot/ea-poll-service.mjs", import.meta.url), "utf8");
+  A("ea-poll-service imports it and starts it", /import \{ createEaPoller \} from "\.\/ea-poll\.mjs"/.test(service) && /poller\.start\(\)/.test(service));
+  A("...handing INGEST_KEY through in the env", /INGEST_KEY: process\.env\.INGEST_KEY/.test(service));
   const poller = fs.readFileSync(new URL("../bot/ea-poll.mjs", import.meta.url), "utf8");
   A("the poller has no discord.js or supabase-js dependency", !/from "discord\.js"|from "@supabase/.test(poller));
   A("...and stays on plain global fetch — no undici, no proxy (the VM reaches EA directly)", !/from "undici"|ProxyAgent|HTTPS_PROXY/.test(poller));

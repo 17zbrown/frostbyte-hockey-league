@@ -1,4 +1,4 @@
-// Netlify Scheduled Function — keeps Discord in sync with the site every 5 min.
+// Netlify Scheduled Function — keeps Discord in sync with the site every 2 min.
 //  (1) Username sync: sets each profile's gamertag to the member's current Discord
 //      display name (server nick > global name > username), so name changes flow in.
 //  (2) Role sync: reconciles each member's MANAGED Discord roles with the DB —
@@ -6,8 +6,16 @@
 //      slots), Commissioner (league role), Player, Free Agent, and a position role
 //      (Center/Left Wing/Right Wing/Left Defense/Right Defense/Goalie, auto-created).
 //      Never touches non-managed roles (boosters, custom, etc.).
-//  (3) Server resolution: once a game's 30-min pick-lock passes, compute its
-//      server from the teams' private veto/preference picks (auto-fills the match card).
+//  (3) Guild furniture and permissions: the categories, rooms, forums, roles, AutoMod rules and
+//      channel locks the league depends on, reconciled every sweep.
+//
+// Server resolution (resolve_due_servers) used to run at the tail of this sweep. It runs on
+// pg_cron in the database since 2026-09-17, so a game's server pick no longer depends on a sweep
+// reaching its last line inside the 30-second limit.
+//
+// The sweep body is exported as runSweep() and the diagnostic / setup entry points as `ops`:
+// Netlify refuses external HTTP calls to a scheduled function, so netlify/functions/discord-ops.js
+// (an ordinary HTTP function) imports them and is the only way to reach them by request.
 //
 import fs from "node:fs";
 import path from "node:path";
@@ -35,28 +43,38 @@ const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
 
+/* Every request in this file carries a deadline. A scheduled function has 30 seconds in total, and
+   one hung socket — Discord or Supabase — used to hold the whole sweep until Netlify killed it,
+   with nothing written down. A request that cannot answer inside its budget is a failed request
+   like any other: it throws, the step records the error, and the sweep moves on. */
+const DISCORD_TIMEOUT_MS = 15000;
+const SB_TIMEOUT_MS = 10000;
+const deadline = (ms) => (typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined);
+const sbOpts = (opts) => ({ signal: deadline(SB_TIMEOUT_MS), ...(opts || {}) });
+
 // A transient network failure ("fetch failed" from undici — a DNS blip, connection reset, or
 // timeout) throws BEFORE any HTTP response, so the 429 handling in dApi never sees it and one blip
 // aborts the whole sweep (this is what kept failing lockPrivate). Retry the fetch itself a few
-// times with backoff so a momentary hiccup doesn't fail the run.
-async function rfetch(url, opts, tries = 3) {
+// times with backoff so a momentary hiccup doesn't fail the run. Each attempt gets its own
+// deadline — a signal is single-use, so it cannot be built once outside the loop.
+async function rfetch(url, opts, tries = 3, timeoutMs = SB_TIMEOUT_MS) {
   let err;
   for (let i = 0; i < tries; i++) {
-    try { return await fetch(url, opts); }
-    catch (e) { err = e; await new Promise((r) => setTimeout(r, 400 * (i + 1))); }
+    try { return await fetch(url, { signal: deadline(timeoutMs), ...(opts || {}) }); }
+    catch (e) { err = e; if (i + 1 < tries) await new Promise((r) => setTimeout(r, 400 * (i + 1))); }
   }
   throw err;
 }
 
-// This endpoint is publicly HTTP-invocable (the site pings it for instant sync). Debounce so a
-// flood of anonymous POSTs can't drive endless Discord/DB work. Fail-open on any guard error.
+// The sweep is reachable through discord-ops.js (run-now) as well as the schedule. Debounce so a
+// burst of run-now calls can't drive endless Discord/DB work. Fail-open on any guard error.
 async function ranRecently(key, sec) {
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/app_config?key=eq.rl_${key}&select=value`, { headers: sbHead() });
+    const r = await fetch(`${SB_URL}/rest/v1/app_config?key=eq.rl_${key}&select=value`, sbOpts({ headers: sbHead() }));
     const rows = await r.json();
     const last = rows && rows[0] && rows[0].value ? Date.parse(rows[0].value) : 0;
     if (Date.now() - last < sec * 1000) return true;
-    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: `rl_${key}`, value: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+    await fetch(`${SB_URL}/rest/v1/app_config`, sbOpts({ method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: `rl_${key}`, value: new Date().toISOString(), updated_at: new Date().toISOString() }) }));
     return false;
   } catch (e) { return false; }
 }
@@ -69,17 +87,35 @@ async function sbPatch(path, body) {
   const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { method: "PATCH", headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
 }
+/* Posting a message is the one call here that is not safe to repeat: Discord may have delivered
+   it even when we never saw the response (a timeout, or a 5xx from a proxy in front of a
+   successful write). Retrying such a call is how a club room gets the same notice twice. So a
+   message POST is sent exactly once and an ambiguous outcome is thrown as `unknown` — the caller
+   decides what "unknown" means for its bookkeeping, never dApi. Everything else (role and channel
+   PATCHes, PUT overwrites, GETs) is idempotent and retried as before. */
+const isMessagePost = (method, path) => method === "POST" && /^\/channels\/[^/]+\/messages$/.test(path);
 async function dApi(method, path, body) {
+  const oneShot = isMessagePost(method, path);
   // Retry on 429 (respect Retry-After) so a busy run doesn't skip members and mis-flag them.
   for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await rfetch(`https://discord.com/api/v10${path}`, {
-      method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
+    let r;
+    try {
+      r = await rfetch(`https://discord.com/api/v10${path}`, {
+        method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      }, oneShot ? 1 : 3, DISCORD_TIMEOUT_MS);
+    } catch (e) {
+      if (!oneShot) throw e;
+      const err = new Error(`${method} ${path} -> delivery unknown (${e && e.name === "TimeoutError" ? "timeout" : String(e.message || e)})`);
+      err.unknown = true; throw err;
+    }
     if (r.status === 404) return { __notfound: true };
     if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
     // A Discord-side 5xx is transient. Only 429 was retried, so one blip aborted the sweep.
-    if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
+    if (r.status >= 500) {
+      if (oneShot) { const err = new Error(`${method} ${path} -> delivery unknown (${r.status})`); err.unknown = true; throw err; }
+      await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue;
+    }
     if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
     const t = await r.text();
     return t ? JSON.parse(t) : null;
@@ -92,6 +128,17 @@ async function sbPost(path, body, prefer) {
     headers: { ...sbHead(), Prefer: prefer || "return=minimal" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`POST ${path} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
   const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+/* Several app_config keys read in one round trip (the stored channel ids the adopters below key
+   on). Returns {key: value}; a failed read is an empty map, so every caller falls back to its
+   name-based lookup rather than failing the step. */
+async function sbCfgMany(keys) {
+  const out = {};
+  try {
+    const rows = await sbGet(`app_config?key=in.(${keys.map(encodeURIComponent).join(",")})&select=key,value`);
+    for (const r of rows || []) if (r && r.key) out[r.key] = r.value;
+  } catch (e) { /* the adopters fall back to name lookups */ }
+  return out;
 }
 
 // Discord channel-name slug (lowercase, hyphens) to compare against team names
@@ -112,13 +159,19 @@ function slug(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, "
         read does.
 */
 const DEPART_SANITY = 0.25;
+/* A present row is rewritten only when something the diff needs has changed — the member is new
+   to the census (or back after an absence, so `present` flips) — or its last_seen is older than
+   this. Before, every sweep rewrote every row (~150 upserts every 2 minutes) to move a timestamp
+   nobody reads at that resolution. An hour is precise enough for "when were they last seen". */
+const DEPART_TOUCH_MS = 60 * 60 * 1000;
 async function trackDepartures(memberById, memberListOk, links, teams, sum) {
   if (!memberListOk || memberById.size === 0) { sum.departSkipped = "no complete census"; return; }
   let known = [];
-  try { known = await sbGet("guild_members?present=is.true&select=discord_id,username,display_name,profile_id,joined_guild_at,is_bot"); }
+  try { known = await sbGet("guild_members?present=is.true&select=discord_id,username,display_name,profile_id,joined_guild_at,is_bot,last_seen"); }
   catch (e) { sum.errors.push({ departLoad: String(e.message || e) }); return; }
 
-  const now = new Date().toISOString();
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
   const profByDiscord = new Map(links.filter((l) => l.discord_id).map((l) => [String(l.discord_id), l]));
   const codeByTeam = Object.fromEntries((teams || []).map((t) => [t.id, t.code]));
   /* whether a leaver had signed up for the season is the part a commissioner actually reacts to,
@@ -127,17 +180,23 @@ async function trackDepartures(memberById, memberListOk, links, teams, sum) {
   try { registered = new Set((await sbGet("season_registrations?select=profile_id")).map((r) => r.profile_id)); }
   catch (e) { /* the log is still worth writing without it */ }
 
-  // 1) everyone seen now is present
-  const rows = [...memberById.entries()].map(([id, m]) => {
+  // 1) everyone seen now is present — written only where the row would actually change
+  const seenAt = new Map(known.map((k) => [String(k.discord_id), k.last_seen ? Date.parse(k.last_seen) : 0]));
+  const rows = [];
+  for (const [id, m] of memberById) {
+    const last = seenAt.get(id);
+    /* known, present, and touched within the hour: nothing to write */
+    if (last !== undefined && nowMs - last < DEPART_TOUCH_MS) continue;
     const link = profByDiscord.get(id);
-    return { discord_id: id,
+    rows.push({ discord_id: id,
       username: (m.user && (m.user.username || m.user.global_name)) || null,
       display_name: m.nick || (m.user && m.user.global_name) || null,
       profile_id: (link && link.profile_id) || null,
       is_bot: !!(m.user && m.user.bot),
       joined_guild_at: m.joined_at || null,
-      last_seen: now, present: true };
-  });
+      last_seen: now, present: true });
+  }
+  sum.departRowsWritten = rows.length;
   try {
     for (let i = 0; i < rows.length; i += 200) {
       await sbPost("guild_members?on_conflict=discord_id", rows.slice(i, i + 200), "resolution=merge-duplicates,return=minimal");
@@ -280,45 +339,138 @@ async function sbUpsertCfg(key, value) {
     body: JSON.stringify({ key, value: String(value), updated_at: new Date().toISOString() }) });
 }
 
-// Ensure the "Team Management" category + its rooms exist, private to the front office. Idempotent:
-// looks up by name, creates only what's missing, and drops a webhook on #management-moves so the DB
-// trigger can post appointments/removals. VIEW(1024)+SEND(2048)+READ_HISTORY(65536)=68608.
+/* The "Team Management" category and its rooms, private to the front office (Owner / GM / AGM)
+   plus the league office. Two things changed on 2026-09-17:
+
+   IDENTITY BY ID, NOT NAME. Every room's id is stored in app_config (discord_mgmt_category_id,
+   discord_mgmt_room_<slug>_id) and looked up there FIRST; a room found by its stored id is adopted
+   whatever it is called now. The name+parent lookup is only the fallback for a room that has no
+   stored id yet, and creation happens only when neither finds anything. Keying on the name was how
+   a hand rename spawned a duplicate #management-faq (P2-8 in the 09-17 audit) — a rename is a
+   commissioner's decision and the sweep follows it.
+
+   RECONCILED EVERY SWEEP, NOT CREATE-ONLY. The rooms were created with their overwrites and never
+   looked at again, so #management-announcements let every Owner/GM/AGM post. Each room now has a
+   declared kind: a "chat" room (VIEW+SEND+READ for the front office, thread creation denied) or a
+   "feed" the office alone posts in (front office VIEW+READ only). The category carries the chat
+   shape so a room added by hand inherits a sane baseline before the next sweep sees it.
+
+   Overwrites the sweep did not write (a muted member, a bot's own entry) are kept, with the bits
+   the room denies its audience stripped from them — the same rule the Information lock applies. */
+const CREATE_THREAD_BITS = (1n << 35n) | (1n << 36n);                      /* CREATE_PUBLIC + CREATE_PRIVATE */
+const MGMT_CHAT_ALLOW = 1024n | 2048n | 65536n | (1n << 38n);              /* VIEW + SEND + READ_HISTORY + SEND_IN_THREADS (a forum post is a thread) */
+const MGMT_CHAT_DENY = CREATE_THREAD_BITS;
+const MGMT_FEED_ALLOW = 1024n | 65536n;                                    /* VIEW + READ_HISTORY */
+const MGMT_FEED_DENY = 2048n | (1n << 35n) | (1n << 36n) | (1n << 38n);    /* no messages, no threads, no replies in one */
+/* the office: everything a poster needs plus moderation of the room — the same grant the FAQ
+   forums give it (FAQ_OFFICE_ALLOW below); declared here as a value, not a name, so the two can
+   never be edited apart by accident */
+const MGMT_OFFICE_ALLOW = 1024n | 65536n | 2048n | 16384n | 32768n | 8192n | (1n << 34n) | (1n << 35n) | (1n << 36n) | (1n << 38n);
+const MGMT_ROOMS = [
+  { name: "owners-chat", slug: "owners_chat", type: 0, kind: "chat", audience: "owners",
+    topic: "Club owners only (plus the league office). Talk shop with your fellow owners." },
+  { name: "management-chat", slug: "management_chat", type: 0, kind: "chat", audience: "mgmt",
+    topic: "Everyone in club management — owners, GMs, and AGMs. Anything goes." },
+  { name: "management-help", slug: "management_help", type: 15, kind: "chat", audience: "mgmt",
+    topic: "Ask the league office anything — post a thread and staff will help." },
+  { name: "management-moves", slug: "management_moves", type: 0, kind: "chat", audience: "mgmt",
+    topic: "Front-office moves: new owners, GMs, and AGMs voted in, and departures. Auto-posted." },
+  { name: "management-announcements", slug: "management_announcements", type: 0, kind: "feed", audience: "mgmt",
+    topic: "Notices from the league office to every club's front office. Read-only — questions go in #management-help." },
+  { name: "club-ids", slug: "club_ids", type: 0, kind: "feed", audience: "mgmt",
+    topic: "Each club's EA club id and Discord ids, posted by the league office. Read-only." },
+];
+const MGMT_CFG_KEY = (slug) => `discord_mgmt_room_${slug}_id`;
+const MGMT_CAT_KEY = "discord_mgmt_category_id";
+/* the overwrite set a room of this kind should carry for this audience: @everyone hidden, the
+   audience roles by kind, the office in full */
+function mgmtOverwrites(kind, audienceIds, officeIds) {
+  const allow = kind === "feed" ? MGMT_FEED_ALLOW : MGMT_CHAT_ALLOW;
+  const deny = kind === "feed" ? MGMT_FEED_DENY : MGMT_CHAT_DENY;
+  return [
+    { id: GUILD, type: 0, allow: "0", deny: "1024" },
+    ...audienceIds.map((id) => ({ id, type: 0, allow: String(allow), deny: String(deny) })),
+    ...officeIds.map((id) => ({ id, type: 0, allow: String(MGMT_OFFICE_ALLOW), deny: "0" })),
+  ];
+}
+/* order-insensitive comparison of two overwrite lists on (id, allow, deny) */
+const sameOverwrites = (a, b) => JSON.stringify((a || []).map((o) => [o.id, String(BigInt(o.allow || "0")), String(BigInt(o.deny || "0"))]).sort())
+                              === JSON.stringify((b || []).map((o) => [o.id, String(BigInt(o.allow || "0")), String(BigInt(o.deny || "0"))]).sort());
+/* desired = ours + everything else that was there, minus the bits this kind denies its audience */
+function mgmtDesired(chan, ours, kind) {
+  const mine = new Set(ours.map((o) => o.id));
+  const strip = kind === "feed" ? MGMT_FEED_DENY : MGMT_CHAT_DENY;
+  const keep = (chan.permission_overwrites || []).filter((o) => !mine.has(o.id))
+    .map((o) => ({ id: o.id, type: o.type, allow: String(BigInt(o.allow || "0") & ~strip), deny: String(o.deny || "0") }));
+  return [...ours, ...keep];
+}
+/* find a channel by its stored id first (adopting a rename), then by name under the category */
+function findMgmtChannel(guildChannels, storedId, name, catId, types) {
+  if (storedId) {
+    const byId = guildChannels.find((c) => c.id === storedId && types.includes(c.type));
+    if (byId) return { ch: byId, via: "id" };
+  }
+  const byName = guildChannels.find((c) => c.name === name && c.parent_id === catId && types.includes(c.type));
+  return byName ? { ch: byName, via: "name" } : { ch: null, via: null };
+}
 async function ensureMgmtCategory(guildChannels, roleId, sum) {
   const owner = roleId["owner"], gm = roleId["general manager"], agm = roleId["assistant general manager"];
   const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
   if (!owner || !gm || !agm || office.length < 2) return; // roles not provisioned yet — try next run
-  const MGMT_ALLOW = "68608";
-  const ow = (ids) => [{ id: GUILD, type: 0, deny: "1024", allow: "0" }, ...ids.map((id) => ({ id, type: 0, allow: MGMT_ALLOW, deny: "0" }))];
-  const ownerAud = [owner, ...office];
-  const mgmtAud = [owner, gm, agm, ...office];
+  const audienceOf = { owners: [owner], mgmt: [owner, gm, agm] };
+  const cfg = await sbCfgMany([MGMT_CAT_KEY, ...MGMT_ROOMS.map((r) => MGMT_CFG_KEY(r.slug))]);
 
-  let cat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team management");
+  let cat = cfg[MGMT_CAT_KEY] ? guildChannels.find((c) => c.id === cfg[MGMT_CAT_KEY] && c.type === 4) : null;
+  if (!cat) cat = guildChannels.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team management");
+  const catOurs = mgmtOverwrites("chat", audienceOf.mgmt, office);
   if (!cat) {
-    cat = await dApi("POST", `/guilds/${GUILD}/channels`, { name: "Team Management", type: 4, permission_overwrites: ow(mgmtAud) });
+    cat = await dApi("POST", `/guilds/${GUILD}/channels`, { name: "Team Management", type: 4, permission_overwrites: catOurs });
     guildChannels.push(cat); sum.mgmtCatCreated = 1;
-  }
-  const catId = cat.id;
-  async function ensure(name, type, allowIds, topic) {
-    const found = guildChannels.find((c) => c.name === name && c.parent_id === catId);
-    if (found) return found;
-    const base = { name, parent_id: catId, permission_overwrites: ow(allowIds) };
-    if (type === 0 || type === 15) base.topic = topic;
-    try {
-      const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { ...base, type });
-      guildChannels.push(ch); sum.mgmtChansCreated = (sum.mgmtChansCreated || 0) + 1; return ch;
-    } catch (e) {
-      // a forum (type 15) needs a Community server; fall back to a text room so the space still exists
-      if (type === 15) {
-        try { const ch = await dApi("POST", `/guilds/${GUILD}/channels`, { ...base, type: 0 }); guildChannels.push(ch); sum.mgmtHelpFellBackToText = 1; return ch; }
-        catch (e2) { sum.errors.push({ mgmtChan: name, error: String(e2.message || e2) }); return null; }
-      }
-      sum.errors.push({ mgmtChan: name, error: String(e.message || e) }); return null;
+  } else {
+    const want = mgmtDesired(cat, catOurs, "chat");
+    if (!sameOverwrites(cat.permission_overwrites, want)) {
+      try { await dApi("PATCH", `/channels/${cat.id}`, { permission_overwrites: want }); cat.permission_overwrites = want; sum.mgmtRoomsHealed = (sum.mgmtRoomsHealed || 0) + 1; }
+      catch (e) { sum.errors.push({ mgmtCat: String(e.message || e) }); }
     }
   }
-  await ensure("owners-chat", 0, ownerAud, "Club owners only (plus the league office). Talk shop with your fellow owners.");
-  await ensure("management-chat", 0, mgmtAud, "Everyone in club management — owners, GMs, and AGMs. Anything goes.");
-  await ensure("management-help", 15, mgmtAud, "Ask the league office anything — post a thread and staff will help.");
-  const moves = await ensure("management-moves", 0, mgmtAud, "Front-office moves: new owners, GMs, and AGMs voted in, and departures. Auto-posted.");
+  if (cat && cat.id && cfg[MGMT_CAT_KEY] !== cat.id) await sbUpsertCfg(MGMT_CAT_KEY, cat.id).catch(() => {});
+  const catId = cat.id;
+
+  async function ensure(spec) {
+    const ours = mgmtOverwrites(spec.kind, audienceOf[spec.audience], office);
+    const key = MGMT_CFG_KEY(spec.slug);
+    /* a forum that had to fall back to a text room is still this room — accept either type */
+    const types = spec.type === 15 ? [15, 0] : [spec.type];
+    let { ch, via } = findMgmtChannel(guildChannels, cfg[key], spec.name, catId, types);
+    if (ch) {
+      if (via === "id" && (ch.name !== spec.name || ch.parent_id !== catId)) sum.mgmtRoomsAdopted = (sum.mgmtRoomsAdopted || 0) + 1;
+      const want = mgmtDesired(ch, ours, spec.kind);
+      if (!sameOverwrites(ch.permission_overwrites, want)) {
+        try { await dApi("PATCH", `/channels/${ch.id}`, { permission_overwrites: want }); ch.permission_overwrites = want; sum.mgmtRoomsHealed = (sum.mgmtRoomsHealed || 0) + 1; }
+        catch (e) { sum.errors.push({ mgmtChan: spec.name, error: String(e.message || e) }); }
+      }
+      if (cfg[key] !== ch.id) await sbUpsertCfg(key, ch.id).catch(() => {});
+      return ch;
+    }
+    const base = { name: spec.name, parent_id: catId, permission_overwrites: ours, topic: spec.topic };
+    try {
+      ch = await dApi("POST", `/guilds/${GUILD}/channels`, { ...base, type: spec.type });
+    } catch (e) {
+      // a forum (type 15) needs a Community server; fall back to a text room so the space still exists
+      if (spec.type !== 15) { sum.errors.push({ mgmtChan: spec.name, error: String(e.message || e) }); return null; }
+      try { ch = await dApi("POST", `/guilds/${GUILD}/channels`, { ...base, type: 0 }); sum.mgmtHelpFellBackToText = 1; }
+      catch (e2) { sum.errors.push({ mgmtChan: spec.name, error: String(e2.message || e2) }); return null; }
+    }
+    if (!ch || !ch.id) return null;
+    guildChannels.push(ch); sum.mgmtChansCreated = (sum.mgmtChansCreated || 0) + 1;
+    await sbUpsertCfg(key, ch.id).catch(() => {});
+    return ch;
+  }
+  let moves = null;
+  for (const spec of MGMT_ROOMS) {
+    const ch = await ensure(spec);
+    if (spec.name === "management-moves") moves = ch;
+  }
   if (moves && moves.id) {
     try {
       const hooks = await dApi("GET", `/channels/${moves.id}/webhooks`);
@@ -334,12 +486,20 @@ async function ensureMgmtCategory(guildChannels, roleId, sum) {
    office; #player-faq sits in General for every member (the sign-up guide is for people who are
    not rostered yet). Only the office opens posts; everyone who can see the forum may reply in a
    thread and react. Idempotent: creates what is missing and reconciles the overwrites every run,
-   so a hand-edit that reopens posting to everyone self-corrects. */
+   so a hand-edit that reopens posting to everyone self-corrects.
+
+   A forum is identified by the id stored in app_config (discord_management_faq_channel_id /
+   discord_player_faq_channel_id) FIRST: if that channel still exists and is a forum, it is the
+   forum, whatever it has been renamed to. The name+parent lookup only serves a forum with no
+   stored id, and creation happens only when neither finds one. The day this shipped, #management-faq
+   was renamed by hand and the name-keyed version of this code created an empty duplicate beside
+   the one holding the seeded guides. */
 const FAQ_VIEW = 1024n | 65536n;                                   /* VIEW + READ_HISTORY */
 const FAQ_MEMBER_ALLOW = FAQ_VIEW | 64n | (1n << 38n);              /* + ADD_REACTIONS + SEND_IN_THREADS */
 const FAQ_MEMBER_DENY = 2048n | (1n << 35n) | (1n << 36n);          /* no posts of their own (SEND, CREATE_*_THREADS) */
 const FAQ_OFFICE_ALLOW = FAQ_VIEW | 2048n | 16384n | 32768n | 8192n | (1n << 34n) | (1n << 35n) | (1n << 36n) | (1n << 38n);
                                                                    /* + SEND + EMBED + ATTACH + MANAGE_MESSAGES + MANAGE_THREADS + every thread bit */
+const FAQ_CFG_KEY = (name) => "discord_" + name.replace(/-/g, "_") + "_channel_id";
 async function ensureFaqForums(guildChannels, roleId, sum) {
   const office = ["commissioner", "staff"].map((n) => roleId[n]).filter(Boolean);
   const front = ["owner", "general manager", "assistant general manager"].map((n) => roleId[n]).filter(Boolean);
@@ -359,21 +519,26 @@ async function ensureFaqForums(guildChannels, roleId, sum) {
       topic: "How-to guides for every player — signing up, availability, the banned-ability list. One post per guide, kept current by the league office. Ask under the guide it belongs to.",
       tags: [{ name: "Getting started" }, { name: "Availability" }, { name: "Rules" }] },
   ];
-  const same = (a, b) => JSON.stringify((a || []).map((o) => [o.id, String(BigInt(o.allow || "0")), String(BigInt(o.deny || "0"))]).sort())
-                       === JSON.stringify((b || []).map((o) => [o.id, String(BigInt(o.allow || "0")), String(BigInt(o.deny || "0"))]).sort());
+  const cfg = await sbCfgMany(FORUMS.map((f) => FAQ_CFG_KEY(f.name)));
   for (const f of FORUMS) {
-    if (!f.parent) continue;
-    let ch = (guildChannels || []).find((c) => c.name === f.name && c.parent_id === f.parent.id);
+    const key = FAQ_CFG_KEY(f.name);
+    /* by stored id first — a forum, wherever it sits and whatever it is called now */
+    let ch = cfg[key] ? (guildChannels || []).find((c) => c.id === cfg[key] && c.type === 15) : null;
+    if (ch && (ch.name !== f.name || (f.parent && ch.parent_id !== f.parent.id))) sum.faqForumsAdopted = (sum.faqForumsAdopted || 0) + 1;
+    if (!ch) {
+      if (!f.parent) continue;
+      ch = (guildChannels || []).find((c) => c.name === f.name && c.parent_id === f.parent.id && c.type === 15);
+    }
     try {
       if (!ch) {
         ch = await dApi("POST", `/guilds/${GUILD}/channels`, { name: f.name, type: 15, parent_id: f.parent.id, topic: f.topic,
           permission_overwrites: f.ow, available_tags: f.tags, default_sort_order: 0 });
         guildChannels.push(ch); sum.faqForumsCreated = (sum.faqForumsCreated || 0) + 1;
-      } else if (!same(ch.permission_overwrites, f.ow)) {
+      } else if (!sameOverwrites(ch.permission_overwrites, f.ow)) {
         await dApi("PATCH", `/channels/${ch.id}`, { permission_overwrites: f.ow });
         ch.permission_overwrites = f.ow; sum.faqForumsHealed = (sum.faqForumsHealed || 0) + 1;
       }
-      if (ch && ch.id) await sbUpsertCfg("discord_" + f.name.replace(/-/g, "_") + "_channel_id", ch.id).catch(() => {});
+      if (ch && ch.id && cfg[key] !== ch.id) await sbUpsertCfg(key, ch.id).catch(() => {});
     } catch (e) { sum.errors.push({ faqForum: f.name, error: String(e.message || e) }); }
   }
 }
@@ -502,7 +667,7 @@ async function fetchClubLogoPng(logoUrl) {
     ? logoUrl.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") +
       (logoUrl.includes("?") ? "&" : "?") + "width=128&height=128&resize=contain"
     : logoUrl;
-  const r = await fetch(url);
+  const r = await fetch(url, { signal: deadline(SB_TIMEOUT_MS) });
   if (!r.ok) throw new Error(`logo ${r.status}`);
   const ct = (r.headers.get("content-type") || "").toLowerCase();
   /* Discord accepts png/jpeg/gif only. The transformer answers png; a non-Supabase URL might not,
@@ -542,7 +707,7 @@ async function fetchGuildIconPng(hash) {
   if (!hash) return null;
   try {
     const r = await rfetch(`https://cdn.discordapp.com/icons/${GUILD}/${hash}.png?size=128`,
-      { headers: { "User-Agent": UA } });
+      { headers: { "User-Agent": UA } }, 3, DISCORD_TIMEOUT_MS);
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     if (!buf.length || buf.length > 240 * 1024) return null;
@@ -854,7 +1019,7 @@ async function ensureClubRooms(guildChannels, guildRoles, teams, roleId, sum) {
         if (existing) trole = existing.id;
         else {
           const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
-          const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: true });
+          const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: true, permissions: rolePermissionsAtBirth(t.name, guildRoles) });
           if (cr && cr.id) { trole = cr.id; guildRoles.push(cr); sum.clubRolesCreated = (sum.clubRolesCreated || 0) + 1; }
         }
         if (trole) { await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole }); t.discord_role_id = trole; }
@@ -1026,6 +1191,73 @@ async function enforcePostingPolicy(guildRoles, teams, sum) {
   }
 }
 
+/* ---- elevated bits on ordinary roles (P2-9, 2026-09-17) ----
+   POST /guilds/{id}/roles without `permissions` copies @everyone's permission set into the new
+   role, and @everyone on this server carries CREATE_EVENTS and CREATE_GUILD_EXPRESSIONS (Discord's
+   defaults for a Community server). So every role this sweep ever created — the six positions, the
+   departments, the seat roles, Not Signed Up — let any member schedule server events and upload
+   emoji and stickers, and @everyone plus the club roles let anyone open threads under the post-only
+   feeds. None of those are a member's to hold; the office (Commissioner, Staff) keeps whatever it
+   has, because moderation tooling is exactly what those bits are for.
+
+   Two halves, so the hole cannot reopen: roles are CREATED with an explicit permission set
+   (rolePermissionsAtBirth), and every role the sweep owns is RECONCILED each sweep, the way the
+   mention and posting policies already are — a bit added by hand in the UI is gone within two
+   minutes. @everyone loses only the two thread-creation bits; its events/expressions bits are the
+   commissioners' call and are reported, not touched.
+
+   DISBOARD.org is a third-party bump bot whose managed role arrived holding MANAGE_CHANNELS
+   guild-wide. The sweep tries to strip it; Discord may refuse to edit a managed role, and when it
+   does the result says "manual" so the office knows to do it in the UI — rather than the sweep
+   logging the same error every two minutes forever. */
+const CREATE_GUILD_EXPRESSIONS = 1n << 43n;
+const CREATE_EVENTS = 1n << 44n;
+const MANAGE_CHANNELS = 1n << 4n;
+const ROLE_STRIP_BITS = CREATE_EVENTS | CREATE_GUILD_EXPRESSIONS | CREATE_THREAD_BITS;
+const EVERYONE_STRIP_BITS = CREATE_THREAD_BITS;
+const ROLE_BITS_KEEP = new Set(["commissioner", "staff"]);
+const DISBOARD_ROLE = /^disboard(\.org)?$/i;
+/* the permission set a role this sweep creates is born with: @everyone's, minus everything the
+   reconcilers would strip on the next pass (elevated bits, the megaphone, invites), plus the
+   posting bits the posting policy would grant it — so a new role is correct from its first second
+   and never spends a sweep in the wrong state. ONE definition of "what a fresh role may do". */
+function rolePermissionsAtBirth(name, guildRoles) {
+  const everyone = (guildRoles || []).find((r) => r.id === GUILD);
+  let perms = 0n;
+  try { perms = BigInt((everyone && everyone.permissions) || 0); } catch (e) { perms = 0n; }
+  perms &= ~(ROLE_STRIP_BITS | MENTION_EVERYONE | CREATE_INSTANT_INVITE);
+  const n = String(name || "").toLowerCase();
+  if (POST_DENY.has(n)) perms = (perms & ~DENY_STRIP_NAMED) | DENY_GRANT_NAMED;
+  else perms |= POST_BITS;
+  return perms.toString();
+}
+async function enforceRoleBits(guildRoles, teams, roleId, sum) {
+  const owned = managedRoleIds(roleId, teams);
+  for (const r of guildRoles || []) {
+    let perms;
+    try { perms = BigInt(r.permissions || 0); } catch (e) { continue; }
+    const name = String(r.name || "").toLowerCase();
+    let strip = 0n;
+    let disboard = false;
+    if (r.id === GUILD) strip = EVERYONE_STRIP_BITS;
+    else if (DISBOARD_ROLE.test(name)) { strip = MANAGE_CHANNELS; disboard = true; }
+    else if (r.managed || ROLE_BITS_KEEP.has(name) || !owned.has(r.id)) continue;
+    else strip = ROLE_STRIP_BITS;
+    const next = perms & ~strip;
+    if (next === perms) continue;
+    try {
+      await dApi("PATCH", `/guilds/${GUILD}/roles/${r.id}`, { permissions: next.toString() });
+      r.permissions = next.toString();
+      if (disboard) sum.disboardManageChannels = "stripped";
+      else sum.roleBitsStripped = (sum.roleBitsStripped || 0) + 1;
+    } catch (e) {
+      /* a managed role Discord will not let the bot edit: say so once per run, in the result */
+      if (disboard) sum.disboardManageChannels = "manual";
+      else sum.errors.push({ roleBits: r.name, error: String(e.message || e) });
+    }
+  }
+}
+
 /* AutoMod's "Block invite links" rule caught a club owner posting their own team's Discord with a
    scouting note — the rule only exempted Commissioner and Staff, so every ordinary member was
    blocked from sharing any invite link. The league's line is: anyone who has signed up may post
@@ -1071,16 +1303,36 @@ const AUTOMOD_EXEMPT_CHANNELS = { [AUTOMOD_LINK_RULE]: ["scouting-links"],
    scoped to "this role in that channel", so: the four front-office roles are exempt from both
    mention-shaped rules everywhere (accountable seats; the ML spam gate never had a reason to fire
    on them), and every club room is exempt from the mention-spam rule outright — it is a private
-   room of ~20 people, and nobody outside the club is reachable from it. Add-only and by NAME, like
-   the rest of this reconciler, so a rebuilt role or a hand-edit heals within a sweep. */
+   room of ~20 people, and nobody outside the club is reachable from it. By NAME, like the rest of
+   this reconciler, so a rebuilt role or a hand-edit heals within a sweep.
+
+   EXACT SETS, NOT UNION (2026-09-17). The reconciler used to add what was missing and never remove
+   anything, so an exemption added by hand in the UI stayed forever with nothing to say so — a role
+   quietly exempted from the link gate is a role that can post ads, and no sweep would ever report
+   it. Each rule's exempt_roles and exempt_channels are now set to precisely the declared set; what
+   the sweep removes is counted in automodPruned. The league office (Commissioner, Staff) is part of
+   the declared set on the two mention-shaped rules — it was hand-exempted with reason and must not
+   be pruned by the very change that makes pruning possible. */
 const AUTOMOD_SPAM_RULE = "Spam content";
 const AUTOMOD_MENTION_RULE = "Mention spam";
 const AUTOMOD_MGMT_EXEMPT = ["owner", "general manager", "assistant general manager", "cghl management"];
+const AUTOMOD_OFFICE = ["commissioner", "staff"];
 async function enforceAutomodExemptions(roleId, guildChannels, sum, teams) {
   const want = AUTOMOD_EXEMPT.map((n) => roleId[n]).filter(Boolean);
   if (!want.length) return;                       // roles not provisioned yet — try next sweep
   const wantMgmt = AUTOMOD_MGMT_EXEMPT.map((n) => roleId[n]).filter(Boolean);
+  const wantOffice = AUTOMOD_OFFICE.map((n) => roleId[n]).filter(Boolean);
   const clubRooms = (teams || []).map((t) => t && t.discord_channel_id).filter(Boolean);
+  /* exact-set reconcile of one list: returns the list to write, or null when it already matches;
+     counts additions and removals into the two result counters */
+  const exact = (have, wanted, addKey) => {
+    const H = new Set(have || []), W = new Set(wanted);
+    const missing = [...W].filter((id) => !H.has(id)), extra = [...H].filter((id) => !W.has(id));
+    if (!missing.length && !extra.length) return null;
+    if (missing.length) sum[addKey] = (sum[addKey] || 0) + missing.length;
+    if (extra.length) sum.automodPruned = (sum.automodPruned || 0) + extra.length;
+    return [...W];
+  };
   const rules = await dApi("GET", `/guilds/${GUILD}/auto-moderation/rules`);
   if (!Array.isArray(rules)) return;
   const chanId = (name) => {
@@ -1110,26 +1362,19 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum, teams) {
     if (!rule) { sum.automodMissing = (sum.automodMissing ? sum.automodMissing + "," : "") + ruleName; continue; }
     const patch = {};
     /* roles: the link rule and the URL gate both gate who may post a link at all. The ad/scam rule
-       stays on for everyone — it catches phrases no member needs. */
-    if (ruleName === AUTOMOD_LINK_RULE || ruleName === AUTOMOD_URL_RULE) {
-      const have = new Set(rule.exempt_roles || []);
-      const missingRoles = want.filter((id) => !have.has(id));
-      if (missingRoles.length) {
-        patch.exempt_roles = Array.from(new Set([...(rule.exempt_roles || []), ...want]));
-        sum.automodExempted = (sum.automodExempted || 0) + missingRoles.length;
-      }
+       stays on for everyone — it catches phrases no member needs — so its role set is empty. The
+       two mention-shaped rules never fire on the front office or the league office. */
+    let wantRoles = null, addKey = "automodExempted";
+    if (ruleName === AUTOMOD_LINK_RULE || ruleName === AUTOMOD_URL_RULE) wantRoles = want;
+    else if (ruleName === AUTOMOD_ADS_RULE) wantRoles = [];
+    else if (wantMgmt.length) { wantRoles = [...wantOffice, ...wantMgmt]; addKey = "automodMgmtExempted"; }
+    if (wantRoles) {
+      const next = exact(rule.exempt_roles, wantRoles, addKey);
+      if (next) patch.exempt_roles = next;
     }
-    /* the two mention-shaped rules never fire on the front office */
-    if ((ruleName === AUTOMOD_SPAM_RULE || ruleName === AUTOMOD_MENTION_RULE) && wantMgmt.length) {
-      const haveM = new Set(rule.exempt_roles || []);
-      const missingM = wantMgmt.filter((id) => !haveM.has(id));
-      if (missingM.length) {
-        patch.exempt_roles = Array.from(new Set([...(rule.exempt_roles || []), ...wantMgmt]));
-        sum.automodMgmtExempted = (sum.automodMgmtExempted || 0) + missingM.length;
-      }
-    }
-    /* the URL gate's GIF allow-list is add-only, like every other reconciliation here — a hand-
-       added allowance survives, a hand-REMOVED tenor/giphy heals back (or the picker breaks) */
+    /* the URL gate's GIF allow-list is add-only — a hand-added allowance survives (a provider the
+       picker started using before this file learned its name), a hand-REMOVED tenor/giphy heals
+       back (or the picker breaks) */
     if (ruleName === AUTOMOD_URL_RULE) {
       const md = rule.trigger_metadata || {};
       const haveAllow = new Set(md.allow_list || []);
@@ -1145,12 +1390,8 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum, teams) {
     }
     const wantChans = (AUTOMOD_EXEMPT_CHANNELS[ruleName] || []).map(chanId).filter(Boolean)
       .concat(ruleName === AUTOMOD_MENTION_RULE ? clubRooms : []);
-    const haveChans = new Set(rule.exempt_channels || []);
-    const missingChans = wantChans.filter((id) => !haveChans.has(id));
-    if (missingChans.length) {
-      patch.exempt_channels = Array.from(new Set([...(rule.exempt_channels || []), ...wantChans]));
-      sum.automodChannels = (sum.automodChannels || 0) + missingChans.length;
-    }
+    const nextChans = exact(rule.exempt_channels, wantChans, "automodChannels");
+    if (nextChans) patch.exempt_channels = nextChans;
     if (!Object.keys(patch).length) continue;     // already correct: no write
     try {
       await dApi("PATCH", `/guilds/${GUILD}/auto-moderation/rules/${rule.id}`, patch);
@@ -1162,17 +1403,39 @@ async function enforceAutomodExemptions(roleId, guildChannels, sum, teams) {
    #scouting-links is one — club management post their club's Discord for recruitment and everyone
    else browses. Reconciled every sweep like every other permission here, because a channel whose
    audience is set once by hand drifts the moment anyone edits it in the UI.
-   VIEW(1024)+READ_HISTORY(65536)=66560 allowed to @everyone, SEND(2048) denied;
-   SEND+EMBED_LINKS(16384)+ATTACH_FILES(32768)=51200 allowed to the posting roles. */
-const BOARD_EVERYONE_ALLOW = 66560n, BOARD_EVERYONE_DENY = 2048n, BOARD_POSTER_ALLOW = 51200n;
+   VIEW(1024)+READ_HISTORY(65536)=66560 allowed to @everyone; SEND(2048) and both thread-creation
+   bits denied (a thread under a post-only board is a side door to posting in it — the Information
+   lock closes the same door); SEND+EMBED_LINKS(16384)+ATTACH_FILES(32768)=51200 allowed to the
+   posting roles.
+
+   POST-ONLY FEEDS (2026-09-17): #transactions and #game-scores are written by the database through
+   webhooks, which ignore overwrites entirely, so nobody needs SEND there — @everyone reads, the
+   commissioners may post a correction, and no member may open a thread beneath a feed. Same
+   machinery, with the Information lock's poster grant. */
+const BOARD_EVERYONE_ALLOW = 66560n, BOARD_EVERYONE_DENY = 2048n | CREATE_THREAD_BITS, BOARD_POSTER_ALLOW = 51200n;
+/* the categories whose rooms are private by construction — never candidates for a public lock */
+const PRIVATE_CATEGORY_NAME = /^(staff\b|commissioners?\b|team management$|team rooms$)/i;
 const POST_ONLY_BOARDS = {
   "scouting-links": ["owner", "general manager", "assistant general manager"],
 };
+const POST_ONLY_FEEDS = {
+  "transactions": ["commissioner"],
+  "game-scores": ["commissioner"],
+};
 async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
-  for (const cname of Object.keys(POST_ONLY_BOARDS)) {
-    const chan = (guildChannels || []).find((c) => c.name === cname && c.type === 0);
+  const specs = [
+    ...Object.keys(POST_ONLY_BOARDS).map((cname) => ({ cname, roles: POST_ONLY_BOARDS[cname], posterAllow: BOARD_POSTER_ALLOW, key: "boardsLocked", types: [0] })),
+    ...Object.keys(POST_ONLY_FEEDS).map((cname) => ({ cname, roles: POST_ONLY_FEEDS[cname], posterAllow: INFO_POSTER_ALLOW, key: "feedsLocked", types: [0, 5] })),
+  ];
+  /* a board or feed is a PUBLIC channel: a same-named room under a private category (the Staff
+     department rooms once carried the plain name "transactions") must never be opened to the
+     league by this lock */
+  const privateCat = new Set((guildChannels || []).filter((c) => c.type === 4 && PRIVATE_CATEGORY_NAME.test(c.name || "")).map((c) => c.id));
+  for (const spec of specs) {
+    const { cname } = spec;
+    const chan = (guildChannels || []).find((c) => c.name === cname && spec.types.includes(c.type) && !privateCat.has(c.parent_id));
     if (!chan) continue;                          // not created — nothing to enforce
-    const posters = POST_ONLY_BOARDS[cname].map((n) => roleId[n]).filter(Boolean);
+    const posters = spec.roles.map((n) => roleId[n]).filter(Boolean);
     if (!posters.length) continue;                // roles not provisioned yet
     const ow = chan.permission_overwrites || [];
     const has = (id, allow, deny) => {
@@ -1181,7 +1444,7 @@ async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
       return (BigInt(o.allow || "0") & allow) === allow && (BigInt(o.deny || "0") & deny) === deny;
     };
     const everyoneOk = has(GUILD, BOARD_EVERYONE_ALLOW, BOARD_EVERYONE_DENY);
-    const postersOk = posters.every((rid) => has(rid, BOARD_POSTER_ALLOW, 0n));
+    const postersOk = posters.every((rid) => has(rid, spec.posterAllow, 0n));
     if (everyoneOk && postersOk) continue;        // already correct: no write
     /* keep any overwrite someone added deliberately (a muted member, a bot) — only the @everyone
        and poster entries are ours to state */
@@ -1189,13 +1452,13 @@ async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
       .map((o) => ({ id: o.id, type: o.type, allow: String(o.allow || "0"), deny: String(o.deny || "0") }));
     const next = [
       { id: GUILD, type: 0, allow: String(BOARD_EVERYONE_ALLOW), deny: String(BOARD_EVERYONE_DENY) },
-      ...posters.map((rid) => ({ id: rid, type: 0, allow: String(BOARD_POSTER_ALLOW), deny: "0" })),
+      ...posters.map((rid) => ({ id: rid, type: 0, allow: String(spec.posterAllow), deny: "0" })),
       ...keep,
     ];
     try {
       await dApi("PATCH", `/channels/${chan.id}`, { permission_overwrites: next });
       chan.permission_overwrites = next;
-      sum.boardsLocked = (sum.boardsLocked || 0) + 1;
+      sum[spec.key] = (sum[spec.key] || 0) + 1;
     } catch (e) { sum.errors.push({ postOnlyBoard: cname, error: String(e.message || e) }); }
   }
 }
@@ -1206,6 +1469,7 @@ async function enforcePostOnlyBoards(guildChannels, roleId, sum) {
    posts whatever has sat unposted for 5 minutes, claiming each row on discord_post_log exactly the
    way the bot does, so the two lanes never double-post. */
 const CLUB_NOTICE_BACKSTOP_MS = 5 * 60 * 1000;
+const CLUB_NOTICE_BOOKKEEPING_TRIES = 3;
 async function flushClubNotices(sum) {
   const before = new Date(Date.now() - CLUB_NOTICE_BACKSTOP_MS).toISOString();
   const rows = await sbGet(`club_notices?posted_at=is.null&created_at=lt.${encodeURIComponent(before)}&order=created_at.asc&limit=50`);
@@ -1213,6 +1477,7 @@ async function flushClubNotices(sum) {
   const teamIds = Array.from(new Set(rows.map((r) => r.team_id)));
   const teams = await sbGet(`teams?id=in.(${teamIds.join(",")})&select=id,discord_channel_id`);
   const roomOf = Object.fromEntries((teams || []).map((t) => [t.id, t.discord_channel_id]));
+  const releaseClaim = (ref) => rfetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.club&ref=eq.${encodeURIComponent(ref)}`, { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } }).catch(() => {});
   for (const row of rows) {
     const room = roomOf[row.team_id];
     if (!room) { sum.clubNoticesNoRoom = (sum.clubNoticesNoRoom || 0) + 1; continue; }
@@ -1223,15 +1488,33 @@ async function flushClubNotices(sum) {
     if (row.actor_profile_id) {
       try { const p = await sbGet(`profiles?id=eq.${row.actor_profile_id}&select=gamertag`); actor = p[0] && p[0].gamertag ? p[0].gamertag : null; } catch { /* fine */ }
     }
+    let delivered = false;
     try {
       const r = await dApi("POST", `/channels/${room}/messages`, { embeds: [buildNoticeEmbed(row, actor)], allowed_mentions: { parse: [] } });
       if (!r || r.__notfound || !r.id) throw new Error("did not deliver");
-      await sbPatch(`club_notices?id=eq.${row.id}`, { posted_at: new Date().toISOString(), post_error: null });
-      sum.clubNoticesPosted = (sum.clubNoticesPosted || 0) + 1;
+      delivered = true;
     } catch (e) {
-      await rfetch(`${SB_URL}/rest/v1/discord_post_log?kind=eq.club&ref=eq.${encodeURIComponent(ref)}`, { method: "DELETE", headers: { ...sbHead(), Prefer: "return=minimal" } }).catch(() => {});
+      /* An UNKNOWN outcome (timeout, 5xx) may well have been delivered. Releasing the claim would
+         invite the bot to post it again, so the claim stays and the row says why; a definite
+         refusal (4xx, a dead room) releases the claim so the next lane can try. */
+      if (!(e && e.unknown)) await releaseClaim(ref);
       try { await sbPatch(`club_notices?id=eq.${row.id}`, { post_error: String(e.message || e).slice(0, 200) }); } catch { /* observability only */ }
       sum.errors.push({ clubNotice: row.id, error: String(e.message || e) });
+      continue;
+    }
+    /* Discord accepted the message. From here the claim is NEVER released — releasing it after a
+       failed bookkeeping write is exactly how the room got the same notice twice. The PATCH is
+       retried a few times; if it still fails the claim stands, the row stays unposted for a human
+       to see, and the summary carries the error. */
+    sum.clubNoticesPosted = (sum.clubNoticesPosted || 0) + 1;
+    let bookErr = null;
+    for (let i = 0; i < CLUB_NOTICE_BOOKKEEPING_TRIES; i++) {
+      try { await sbPatch(`club_notices?id=eq.${row.id}`, { posted_at: new Date().toISOString(), post_error: null }); bookErr = null; break; }
+      catch (e) { bookErr = e; if (i + 1 < CLUB_NOTICE_BOOKKEEPING_TRIES) await new Promise((res) => setTimeout(res, 300 * (i + 1))); }
+    }
+    if (bookErr) {
+      sum.clubNoticeBookkeeping = (sum.clubNoticeBookkeeping || 0) + 1;
+      sum.errors.push({ clubNoticeBookkeeping: row.id, delivered, error: String(bookErr.message || bookErr) });
     }
   }
 }
@@ -1366,7 +1649,7 @@ async function ensureGuildCommands(sum) {
   } catch (e) { sum.errors.push({ commands: String(e.message || e) }); }
 }
 
-async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) {
+async function ensureStaffDepartments(guildChannels, guildRoles, roleId, roleNameById, sum) {
   const commish = roleId["commissioner"], staff = roleId["staff"];
   if (!commish || !staff) return; // office roles not provisioned yet — next run
   const ALLOW = "68608";
@@ -1374,8 +1657,8 @@ async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) 
   for (const d of STAFF_DEPARTMENTS) {
     if (roleId[d.role.toLowerCase()]) continue;
     try {
-      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: d.role, mentionable: true });
-      if (created && created.id) { roleId[d.role.toLowerCase()] = created.id; roleNameById[created.id] = d.role; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: d.role, mentionable: true, permissions: rolePermissionsAtBirth(d.role, guildRoles) });
+      if (created && created.id) { roleId[d.role.toLowerCase()] = created.id; roleNameById[created.id] = d.role; guildRoles.push(created); sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
     } catch (e) { sum.errors.push({ deptRole: d.role, error: String(e.message || e) }); }
   }
   // (b) the Staff category (created office-private if it doesn't exist)
@@ -1412,334 +1695,484 @@ async function ensureStaffDepartments(guildChannels, roleId, roleNameById, sum) 
   }
 }
 
-export default async (req) => {
-  // Read-only diagnostics. ?diag=staff proves who can actually see the staff rooms (the sync
-  // reporting "changed nothing" is ambiguous between already-correct and wrongly-judged-correct,
-  // and privacy is not something to infer); ?diag=guild dumps the server's structure for audits.
-  // GATED: describing a private room — even just its name and who may read it — is itself
-  // information about the league office, so this requires app_config.diag_key and 404s otherwise.
-  // Never returns ids, tokens, or message content.
-  const diag = (() => { try { return new URL(req.url).searchParams; } catch { return new URLSearchParams(); } })();
-  const diagMode = diag.get("diag");
-  const regMode = diag.get("register");   // ?register=commands (re)registers the guild slash commands
-  const setupMode = diag.get("setup");    // ?setup=community configures the welcome screen + onboarding
-  const reconcileMode = diag.get("reconcile"); // ?reconcile=teams prunes team voice + orphan rooms/roles, provisions new clubs
-  if (diagMode || regMode || setupMode || reconcileMode) {
-    const keyRow = await sbGet("app_config?key=eq.diag_key&select=value").catch(() => []);
-    const want = keyRow[0] && keyRow[0].value;
-    const got = diag.get("key") || req.headers.get("x-diag-key") || "";
-    // constant-length compare is overkill for a diagnostic, but never 401 — a 404 doesn't
-    // confirm the endpoint exists to someone probing for it
-    if (!want || got !== want) return new Response("Not found", { status: 404 });
+/* ---- the two member passes ------------------------------------------------------------------
+   Pass 1 walks every site profile with a Discord id; pass 2 walks every guild member the first
+   pass did not cover. Both take `ctx` (everything the sweep loaded) and `outOfTime()`, and stop
+   the moment it answers true: a Netlify scheduled function has 30 seconds, and a pass that needs
+   hundreds of PATCH /members (registration opening, a ban wave, the bot down through draft day)
+   used to be killed mid-loop with nothing written — a fresh heartbeat beside a stale ok:true. A
+   pass cut short is recorded as partial with the count left; the next tick continues, and since
+   a member who needs nothing costs no request, the passes converge across ticks. */
+const MEMBER_PASS_BUDGET_MS = 18000;
+function cutShort(sum, left) {
+  sum.partial = true;
+  sum.membersLeft = (sum.membersLeft || 0) + left;
+}
+async function syncLinkedMembers(ctx, sum, outOfTime) {
+  const { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
+    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, managedIds } = ctx;
+  const linked = links.filter((m) => m.discord_id);
+  for (let i = 0; i < linked.length; i++) {
+    if (outOfTime()) { cutShort(sum, linked.length - i); return; }
+    const m = linked[i];
+    try {
+      // banned players are removed from the server and kept out (no return)
+      if (bannedIds.has(m.profile_id)) {
+        if (!guildBans.has(String(m.discord_id))) {
+          const res = await dApi("PUT", `/guilds/${GUILD}/bans/${m.discord_id}`, { delete_message_seconds: 0 });
+          if (!(res && res.__notfound)) sum.banned = (sum.banned || 0) + 1;
+        }
+        await markGuild(m.profile_id, false);
+        continue;
+      }
+      // not banned on the site but still banned on Discord → lift it (site Unban made real)
+      if (guildBans.has(String(m.discord_id))) {
+        await dApi("DELETE", `/guilds/${GUILD}/bans/${m.discord_id}`);
+        guildBans.delete(String(m.discord_id));
+        sum.unbanned = (sum.unbanned || 0) + 1;
+      }
+      // read from the bulk listing; only fall back to a single fetch if that listing failed
+      const mem = memberListOk
+        ? (memberById.get(String(m.discord_id)) || { __notfound: true })
+        : await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
+      if (mem.__notfound) { sum.notInServer++; await markGuild(m.profile_id, false); continue; }
+      sum.checked++;
+      await markGuild(m.profile_id, true);
+
+      // (1) username sync — site gamertag follows Discord display name. Two refusals: never an
+      // empty name (a nick of spaces would blank the tag the whole site keys on), and never a
+      // tag another profile already holds in any case — the unique index is case-sensitive, the
+      // site is not, so "SNIPER" beside "Sniper" would be two players nothing can tell apart.
+      const disp = String(mem.nick || (mem.user && (mem.user.global_name || mem.user.username)) || "").trim();
+      if (disp && disp !== m.gamertag) {
+        const holder = tagOwner.get(disp.toLowerCase());
+        if (holder && holder !== m.profile_id) {
+          sum.renameCollisions = (sum.renameCollisions || 0) + 1;
+        } else {
+          await sbPatch(`profiles?id=eq.${m.profile_id}`, { gamertag: disp });
+          if (m.gamertag) tagOwner.delete(String(m.gamertag).trim().toLowerCase());
+          tagOwner.set(disp.toLowerCase(), m.profile_id);
+          m.gamertag = disp;
+          sum.renamed++;
+        }
+      }
+      // (1b) store the Discord @handle so the commissioner directory can show it
+      const handle = mem.user && mem.user.username;
+      if (handle && handle !== m.discord_username) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { discord_username: handle }); }
+      // (1c) avatar freshness — Discord avatar hashes rot when a member changes theirs, and the
+      // stale URL 404s forever (the users table showed 38 broken discs). Keep the stored URL
+      // current for everyone in the guild. A custom (supabase-hosted) avatar is the member's own
+      // upload and is never touched — the same rule discordIdentityPatch applies at sign-in.
+      const wantAv = mem.user && mem.user.avatar
+        ? `https://cdn.discordapp.com/avatars/${m.discord_id}/${mem.user.avatar}.png?size=128` : null;
+      const curAv = avatarById[m.profile_id] || null;
+      if (wantAv && curAv !== wantAv && (!curAv || /cdn\.discordapp\.com|media\.discordapp\.net/.test(curAv))) {
+        await sbPatch(`profiles?id=eq.${m.profile_id}`, { avatar_url: wantAv });
+        avatarById[m.profile_id] = wantAv;
+        sum.avatarsFreshened = (sum.avatarsFreshened || 0) + 1;
+      }
+
+      // (2) role sync — desired managed roles for this member. The rules live in
+      // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
+      if (inputsOk) {
+        const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
+          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies });
+        const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
+        if (changed) {
+          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
+          if (!(res && res.__notfound)) sum.roleUpdated++;
+        }
+      }
+    } catch (e) {
+      // owner + higher-role members can't be modified by the bot — log and continue
+      sum.errors.push({ discord_id: m.discord_id, error: String(e.message || e) });
+    }
   }
-  try {
-    // Register the guild slash commands (idempotent bulk-overwrite). Only /join is advertised — this
-    // replaces the old /lfg. (The handler still accepts an "lfg" name as a harmless safety net.)
-    if (BOT && GUILD && regMode === "commands") {
-      const app = await dApi("GET", `/applications/@me`);
-      const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, GUILD_COMMANDS);
-      return new Response(JSON.stringify({ appId: app.id, registered: (res || []).map((c) => c.name) }, null, 2),
-        { status: 200, headers: { "content-type": "application/json" } });
+}
+/* Pass 2 — guild members with NO site link. The loop above walks site profiles that carry a
+   discord_id, so a member who joined the server but never signed into the website was never
+   visited: with ~150 members and ~80 linked, some seventy people sat outside the sweep, which is
+   why "Not Signed Up" held 18 members when it should have held roughly 85. They cannot be
+   reached from the profiles side because there is nothing to join on — so walk the guild list
+   and reconcile everyone the first pass did not cover. An unlinked member's managed roles are
+   exactly {Not Signed Up} while sign-ups are open (they have not signed up, by definition), and
+   none once the window closes. Their non-managed roles are left alone, same as pass 1. */
+async function syncUnlinkedMembers(ctx, sum, outOfTime) {
+  const { links, memberById, memberListOk, inputsOk, roleId, regOpen, managedIds } = ctx;
+  if (!(inputsOk && memberListOk && roleId["not signed up"])) return;
+  const linkedIds = new Set(links.filter((l) => l.discord_id).map((l) => String(l.discord_id)));
+  sum.unlinkedSeen = 0;
+  const todo = [...memberById].filter(([uid, mem]) => !linkedIds.has(uid) && !(mem.user && mem.user.bot));
+  for (let i = 0; i < todo.length; i++) {
+    if (outOfTime()) { cutShort(sum, todo.length - i); return; }
+    const [uid, mem] = todo[i];
+    sum.unlinkedSeen++;
+    const desired = new Set();
+    if (regOpen) desired.add(roleId["not signed up"]);
+    const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
+    if (!changed) continue;
+    try {
+      const res = await dApi("PATCH", `/guilds/${GUILD}/members/${uid}`, { roles: next });
+      if (!(res && res.__notfound)) sum.unlinkedTagged = (sum.unlinkedTagged || 0) + 1;
+    } catch (e) {
+      // the owner and anyone above the bot cannot be edited — count it rather than fail the run
+      sum.unlinkedSkipped = (sum.unlinkedSkipped || 0) + 1;
+    }
+  }
+}
+
+/* ---- entry points reachable by request ------------------------------------------------------
+   Netlify refuses external HTTP calls to a scheduled function, so nothing here can be reached
+   through THIS function's URL — the ?diag= / ?register= / ?setup= / ?reconcile= branches sat dead
+   on the sweep for weeks (P2-0 in the 09-17 audit). netlify/functions/discord-ops.js, a plain HTTP
+   function, imports `ops`, `OPS_ROUTES`, `runOp`, `opsKeyOk` and `runSweep` and is the door:
+   /api/discord-ops?diag=…|register=…|setup=…|reconcile=…|run=now.
+
+   The key check is exactly the one those branches always used: app_config.diag_key, presented as
+   ?key= or the x-diag-key header. Describing a private room — even just its name and who may read
+   it — is itself information about the league office, so a miss is a 404, never a 401: a 404
+   doesn't confirm the endpoint exists to someone probing for it. Nothing here returns ids, tokens,
+   or message content. */
+export async function opsKeyOk(req) {
+  const params = (() => { try { return new URL(req.url).searchParams; } catch { return new URLSearchParams(); } })();
+  const keyRow = await sbGet("app_config?key=eq.diag_key&select=value").catch(() => []);
+  const want = keyRow[0] && keyRow[0].value;
+  const got = params.get("key") || (req.headers && typeof req.headers.get === "function" && req.headers.get("x-diag-key")) || "";
+  return !!want && got === want;
+}
+/* query parameter -> value -> op, so discord-ops.js carries no knowledge of what the ops do */
+export const OPS_ROUTES = {
+  diag: { guild: "diagGuild", staff: "diagStaff", teamrooms: "diagTeamrooms", rolecheck: "diagRolecheck" },
+  register: { commands: "registerCommands" },
+  setup: { community: "setupCommunity", staffmod: "setupStaffmod" },
+  reconcile: { teams: "reconcileTeams" },
+};
+export async function runOp(name) {
+  if (!ops[name]) return { status: 404, body: { error: "Not found" } };
+  if (!BOT || !GUILD) return { status: 200, body: { skipped: "Discord bot not configured" } };
+  try { return { status: 200, body: await ops[name]() }; }
+  catch (e) { return { status: 500, body: { diagError: String(e.message || e) } }; }
+}
+export const ops = {
+  // Register the guild slash commands (idempotent bulk-overwrite). Only /join is advertised — this
+  // replaces the old /lfg. (The handler still accepts an "lfg" name as a harmless safety net.)
+  async registerCommands() {
+    const app = await dApi("GET", `/applications/@me`);
+    const res = await dApi("PUT", `/applications/${app.id}/guilds/${GUILD}/commands`, GUILD_COMMANDS);
+    return { appId: app.id, registered: (res || []).map((c) => c.name) };
+  },
+
+  // Ground truth for the office: does every member's PARTICIPATION role match the database?
+  // Compares the live guild against season_registrations for the three roles the sweep manages
+  // around sign-ups (Not Signed Up / Player / Free Agent context). Read-only, names only.
+  // "The sync reported no errors" is not the same as "the roles are right" — this proves it.
+  async diagRolecheck() {
+    const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+    const rid = {}; for (const r of roles) rid[(r.name || "").toLowerCase()] = r.id;
+    const members = [];
+    let after = "0";
+    for (let page = 0; page < 10; page++) {
+      const chunk = await dApi("GET", `/guilds/${GUILD}/members?limit=1000&after=${after}`);
+      if (!Array.isArray(chunk) || !chunk.length) break;
+      members.push(...chunk);
+      if (chunk.length < 1000) break;
+      after = chunk[chunk.length - 1].user.id;
+    }
+    /* Rule 1.1 (v2.8): registration stays open until the NEXT season's opens — the deadline is
+       only the draft-eligibility line. Prefer the season whose registration is open. */
+    const season = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
+      || (await sbGet("seasons?select=id,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0] || {};
+    const regOpen = !!season.registration_open;
+    const registered = new Set((await sbGet(`season_registrations?season_id=eq.${season.id}&select=profile_id&limit=10000`)).map((r) => r.profile_id));
+    const linkRows = await sbGet("discord_links?select=profile_id,gamertag,discord_id");
+    const byDiscord = {}; for (const l of linkRows) if (l.discord_id) byDiscord[String(l.discord_id)] = l;
+    const nsu = rid["not signed up"], player = rid["player"];
+    const out = {
+      guildMembers: members.length, linked: 0, registeredInDb: registered.size, regOpen,
+      registeredWearingNotSignedUp: [], registeredMissingPlayer: [],
+      unregisteredMissingNotSignedUp: [], unlinkedWearingNotSignedUp: [],
+    };
+    for (const m of members) {
+      if (m.user && m.user.bot) continue;
+      const link = byDiscord[String(m.user.id)];
+      const has = new Set(m.roles || []);
+      const nm = m.nick || (m.user && (m.user.global_name || m.user.username));
+      if (!link) { if (nsu && has.has(nsu)) out.unlinkedWearingNotSignedUp.push(nm); continue; }
+      out.linked++;
+      const isReg = registered.has(link.profile_id);
+      if (isReg && nsu && has.has(nsu)) out.registeredWearingNotSignedUp.push(nm);
+      if (isReg && player && !has.has(player)) out.registeredMissingPlayer.push(nm);
+      if (!isReg && regOpen && nsu && !has.has(nsu)) out.unregisteredMissingNotSignedUp.push(nm);
+    }
+    out.verdict = (out.registeredWearingNotSignedUp.length || out.registeredMissingPlayer.length || out.unregisteredMissingNotSignedUp.length)
+      ? "MISMATCHES — the 2-minute sweep should clear these; if one persists, that member's top role likely outranks the bot"
+      : "clean — every linked member's participation roles match the database";
+    out.note = "unlinkedWearingNotSignedUp = in the Discord but never signed into the site; the role is telling them the truth";
+    return out;
+  },
+
+  // Grant the Staff role its moderation powers: "Timeout Members" (the modern mute — blocks
+  // sending, reacting and speaking) plus voice Mute. Additive and idempotent: it ORs the bits
+  // into whatever the role already has and never takes a permission away. One-shot (not enforced
+  // every sync) so the office can still adjust the role by hand in Discord.
+  async setupStaffmod() {
+    const MODERATE_MEMBERS = 1n << 40n;   // "Timeout Members" — mutes text + voice for a duration
+    const MUTE_MEMBERS = 1n << 22n;       // voice mute
+    const wanted = MODERATE_MEMBERS | MUTE_MEMBERS;
+    const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+    const role = roles.find((r) => (r.name || "").toLowerCase() === "staff");
+    if (!role) return { error: "staff role not found" };
+    const cur = BigInt(role.permissions || "0");
+    const next = cur | wanted;
+    const out = { role: role.name, alreadyHad: { timeout: (cur & MODERATE_MEMBERS) !== 0n, voiceMute: (cur & MUTE_MEMBERS) !== 0n } };
+    if (next === cur) out.changed = false;
+    else {
+      await dApi("PATCH", `/guilds/${GUILD}/roles/${role.id}`, { permissions: next.toString() });
+      out.changed = true;
+    }
+    // A role can only time out members whose HIGHEST role sits below it, so surface the blockers.
+    const above = roles.filter((r) => r.position > role.position && r.name !== "@everyone" && !r.managed).map((r) => r.name);
+    out.cannotModerate = above;   // members whose top role is one of these are out of Staff's reach
+    return out;
+  },
+
+  // Reconcile the Team Rooms with the live club list: delete every per-club VOICE channel (clubs
+  // no longer get voice), delete text rooms + roles for clubs that no longer exist, and provision a
+  // private text room + role (no voice) for any current club missing one — e.g. a newly added club.
+  async reconcileTeams() {
+    const out = { deletedVoice: [], deletedRooms: [], deletedRoles: [], createdRoles: [], createdRooms: [], errors: [] };
+    const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+    const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+    const teams = await sbGet("teams?select=id,code,name,color,color2,discord_role_id,discord_channel_id");
+    const teamRoomsCat = chans.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team rooms");
+    const currentSlugs = new Set(teams.map((t) => slug(t.name)));
+    const roleIdByName = {}; for (const r of roles) roleIdByName[(r.name || "").toLowerCase()] = r.id;
+    const orphanSlugs = new Set();
+
+    if (teamRoomsCat) {
+      const inCat = chans.filter((c) => c.parent_id === teamRoomsCat.id);
+      // every per-club voice channel goes — clubs don't get their own voice
+      for (const c of inCat.filter((c) => c.type === 2)) {
+        try { await dApi("DELETE", `/channels/${c.id}`); out.deletedVoice.push(c.name); }
+        catch (e) { out.errors.push({ voice: c.name, error: String(e.message || e) }); }
+      }
+      // text rooms for clubs that no longer exist
+      for (const c of inCat.filter((c) => c.type === 0)) {
+        if (currentSlugs.has(slug(c.name))) continue;
+        orphanSlugs.add(slug(c.name));
+        try { await dApi("DELETE", `/channels/${c.id}`); out.deletedRooms.push(c.name); }
+        catch (e) { out.errors.push({ room: c.name, error: String(e.message || e) }); }
+      }
+    } else { out.errors.push({ teamRooms: "category not found" }); }
+
+    // orphaned team roles: a role whose slug matches a room we just removed. Never a managed/booster role.
+    for (const r of roles) {
+      if (r.managed || (r.name || "").toLowerCase() === "@everyone") continue;
+      if (orphanSlugs.has(slug(r.name))) {
+        try { await dApi("DELETE", `/guilds/${GUILD}/roles/${r.id}`); out.deletedRoles.push(r.name); }
+        catch (e) { out.errors.push({ role: r.name, error: String(e.message || e) }); }
+      }
     }
 
-    // Ground truth for the office: does every member's PARTICIPATION role match the database?
-    // Compares the live guild against season_registrations for the three roles the sweep manages
-    // around sign-ups (Not Signed Up / Player / Free Agent context). Read-only, names only.
-    // "The sync reported no errors" is not the same as "the roles are right" — this proves it.
-    if (BOT && GUILD && diagMode === "rolecheck") {
-      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const rid = {}; for (const r of roles) rid[(r.name || "").toLowerCase()] = r.id;
-      const members = [];
-      let after = "0";
-      for (let page = 0; page < 10; page++) {
-        const chunk = await dApi("GET", `/guilds/${GUILD}/members?limit=1000&after=${after}`);
-        if (!Array.isArray(chunk) || !chunk.length) break;
-        members.push(...chunk);
-        if (chunk.length < 1000) break;
-        after = chunk[chunk.length - 1].user.id;
-      }
-      /* Rule 1.1 (v2.8): registration stays open until the NEXT season's opens — the deadline is
-         only the draft-eligibility line. Prefer the season whose registration is open. */
-      const season = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
-        || (await sbGet("seasons?select=id,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0] || {};
-      const regOpen = !!season.registration_open;
-      const registered = new Set((await sbGet(`season_registrations?season_id=eq.${season.id}&select=profile_id&limit=10000`)).map((r) => r.profile_id));
-      const linkRows = await sbGet("discord_links?select=profile_id,gamertag,discord_id");
-      const byDiscord = {}; for (const l of linkRows) if (l.discord_id) byDiscord[String(l.discord_id)] = l;
-      const nsu = rid["not signed up"], player = rid["player"];
-      const out = {
-        guildMembers: members.length, linked: 0, registeredInDb: registered.size, regOpen,
-        registeredWearingNotSignedUp: [], registeredMissingPlayer: [],
-        unregisteredMissingNotSignedUp: [], unlinkedWearingNotSignedUp: [],
-      };
-      for (const m of members) {
-        if (m.user && m.user.bot) continue;
-        const link = byDiscord[String(m.user.id)];
-        const has = new Set(m.roles || []);
-        const nm = m.nick || (m.user && (m.user.global_name || m.user.username));
-        if (!link) { if (nsu && has.has(nsu)) out.unlinkedWearingNotSignedUp.push(nm); continue; }
-        out.linked++;
-        const isReg = registered.has(link.profile_id);
-        if (isReg && nsu && has.has(nsu)) out.registeredWearingNotSignedUp.push(nm);
-        if (isReg && player && !has.has(player)) out.registeredMissingPlayer.push(nm);
-        if (!isReg && regOpen && nsu && !has.has(nsu)) out.unregisteredMissingNotSignedUp.push(nm);
-      }
-      out.verdict = (out.registeredWearingNotSignedUp.length || out.registeredMissingPlayer.length || out.unregisteredMissingNotSignedUp.length)
-        ? "MISMATCHES — the 2-minute sweep should clear these; if one persists, that member's top role likely outranks the bot"
-        : "clean — every linked member's participation roles match the database";
-      out.note = "unlinkedWearingNotSignedUp = in the Discord but never signed into the site; the role is telling them the truth";
-      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
-
-    // Grant the Staff role its moderation powers: "Timeout Members" (the modern mute — blocks
-    // sending, reacting and speaking) plus voice Mute. Additive and idempotent: it ORs the bits
-    // into whatever the role already has and never takes a permission away. One-shot (not enforced
-    // every sync) so the office can still adjust the role by hand in Discord.
-    if (BOT && GUILD && setupMode === "staffmod") {
-      const MODERATE_MEMBERS = 1n << 40n;   // "Timeout Members" — mutes text + voice for a duration
-      const MUTE_MEMBERS = 1n << 22n;       // voice mute
-      const wanted = MODERATE_MEMBERS | MUTE_MEMBERS;
-      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const role = roles.find((r) => (r.name || "").toLowerCase() === "staff");
-      if (!role) return new Response(JSON.stringify({ error: "staff role not found" }), { status: 200, headers: { "content-type": "application/json" } });
-      const cur = BigInt(role.permissions || "0");
-      const next = cur | wanted;
-      const out = { role: role.name, alreadyHad: { timeout: (cur & MODERATE_MEMBERS) !== 0n, voiceMute: (cur & MUTE_MEMBERS) !== 0n } };
-      if (next === cur) out.changed = false;
-      else {
-        await dApi("PATCH", `/guilds/${GUILD}/roles/${role.id}`, { permissions: next.toString() });
-        out.changed = true;
-      }
-      // A role can only time out members whose HIGHEST role sits below it, so surface the blockers.
-      const above = roles.filter((r) => r.position > role.position && r.name !== "@everyone" && !r.managed).map((r) => r.name);
-      out.cannotModerate = above;   // members whose top role is one of these are out of Staff's reach
-      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
-
-    // Reconcile the Team Rooms with the live club list: delete every per-club VOICE channel (clubs
-    // no longer get voice), delete text rooms + roles for clubs that no longer exist, and provision a
-    // private text room + role (no voice) for any current club missing one — e.g. a newly added club.
-    if (BOT && GUILD && reconcileMode === "teams") {
-      const out = { deletedVoice: [], deletedRooms: [], deletedRoles: [], createdRoles: [], createdRooms: [], errors: [] };
-      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
-      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const teams = await sbGet("teams?select=id,code,name,color,color2,discord_role_id,discord_channel_id");
-      const teamRoomsCat = chans.find((c) => c.type === 4 && (c.name || "").toLowerCase() === "team rooms");
-      const currentSlugs = new Set(teams.map((t) => slug(t.name)));
-      const roleIdByName = {}; for (const r of roles) roleIdByName[(r.name || "").toLowerCase()] = r.id;
-      const orphanSlugs = new Set();
-
-      if (teamRoomsCat) {
-        const inCat = chans.filter((c) => c.parent_id === teamRoomsCat.id);
-        // every per-club voice channel goes — clubs don't get their own voice
-        for (const c of inCat.filter((c) => c.type === 2)) {
-          try { await dApi("DELETE", `/channels/${c.id}`); out.deletedVoice.push(c.name); }
-          catch (e) { out.errors.push({ voice: c.name, error: String(e.message || e) }); }
-        }
-        // text rooms for clubs that no longer exist
-        for (const c of inCat.filter((c) => c.type === 0)) {
-          if (currentSlugs.has(slug(c.name))) continue;
-          orphanSlugs.add(slug(c.name));
-          try { await dApi("DELETE", `/channels/${c.id}`); out.deletedRooms.push(c.name); }
-          catch (e) { out.errors.push({ room: c.name, error: String(e.message || e) }); }
-        }
-      } else { out.errors.push({ teamRooms: "category not found" }); }
-
-      // orphaned team roles: a role whose slug matches a room we just removed. Never a managed/booster role.
-      for (const r of roles) {
-        if (r.managed || (r.name || "").toLowerCase() === "@everyone") continue;
-        if (orphanSlugs.has(slug(r.name))) {
-          try { await dApi("DELETE", `/guilds/${GUILD}/roles/${r.id}`); out.deletedRoles.push(r.name); }
-          catch (e) { out.errors.push({ role: r.name, error: String(e.message || e) }); }
-        }
-      }
-
-      // provision a role + private text room (no voice) for any current club missing one
-      // Commissioner + Staff only — the seat roles are worn across every club, so putting them on
-      // one club's room opens it to all five front offices (same rule as ensureClubRooms).
-      const office = ["commissioner", "staff"].map((n) => roleIdByName[n]).filter(Boolean);
-      for (const t of teams) {
-        try {
-          let trole = t.discord_role_id;
-          if (!trole || !roles.find((r) => r.id === trole)) {
-            const existing = roles.find((r) => !r.managed && slug(r.name) === slug(t.name));
-            if (existing) trole = existing.id;
-            else {
-              const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
-              const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: true });
-              if (cr && cr.id) { trole = cr.id; out.createdRoles.push(t.name); }
-            }
-            if (trole) await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole });
-          }
-          let tchan = t.discord_channel_id;
-          if (teamRoomsCat && (!tchan || !chans.find((c) => c.id === tchan))) {
-            const existing = chans.find((c) => c.type === 0 && c.parent_id === teamRoomsCat.id && slug(c.name) === slug(t.name));
-            if (existing) tchan = existing.id;
-            else {
-              const allow = String(1024 | 2048 | 65536); // VIEW + SEND + READ_HISTORY
-              const overwrites = [{ id: GUILD, type: 0, deny: "1024", allow: "0" }];
-              if (trole) overwrites.push({ id: trole, type: 0, allow, deny: "0" });
-              for (const oid of office) overwrites.push({ id: oid, type: 0, allow, deny: "0" });
-              const topic = `Private room for the ${t.name} — roster, lineups, and team talk. Visible only to the club and staff.`;
-              const cc = await dApi("POST", `/guilds/${GUILD}/channels`, { name: slug(t.name), type: 0, parent_id: teamRoomsCat.id, topic, permission_overwrites: overwrites });
-              if (cc && cc.id) { tchan = cc.id; out.createdRooms.push(cc.name); }
-            }
-            if (tchan) await sbPatch(`teams?id=eq.${t.id}`, { discord_channel_id: tchan });
-          }
-        } catch (e) { out.errors.push({ provision: t.name, error: String(e.message || e) }); }
-      }
-
-      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
-
-    // Configure Community onboarding + welcome screen (idempotent). Prompt options reveal CHANNELS
-    // only — never roles — so nothing here fights the managed role sync. Enabling onboarding turns on
-    // the low-friction rules-accept gate; the welcome bot already skips members still in that gate.
-    if (BOT && GUILD && setupMode === "community") {
-      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
-      const idByName = {};
-      for (const c of chans) { if (c.type === 0) { const n = (c.name || "").toLowerCase(); if (!idByName[n]) idByName[n] = c.id; } }
-      const pick = (names) => names.map((n) => idByName[n]).filter(Boolean);
-      const out = {};
-
-      // Welcome screen — the panel a prospective member sees on the invite.
-      const ws = [
-        { name: "welcome", desc: "Start here — what Chel Gaming is", emoji: "👋" },
-        { name: "season-signups", desc: "Register to play this season", emoji: "📝" },
-        { name: "pickup-games", desc: "Jump into pickup 6s — run /join", emoji: "🏒" },
-        { name: "rules", desc: "The league rulebook", emoji: "📖" },
-      ].filter((w) => idByName[w.name]).slice(0, 5);
+    // provision a role + private text room (no voice) for any current club missing one
+    // Commissioner + Staff only — the seat roles are worn across every club, so putting them on
+    // one club's room opens it to all five front offices (same rule as ensureClubRooms).
+    const office = ["commissioner", "staff"].map((n) => roleIdByName[n]).filter(Boolean);
+    for (const t of teams) {
       try {
-        await dApi("PATCH", `/guilds/${GUILD}/welcome-screen`, {
-          enabled: true,
-          description: "Competitive 6v6 EA NHL — a full season with automated stats, and clubs you can own and run.",
-          welcome_channels: ws.map((w) => ({ channel_id: idByName[w.name], description: w.desc, emoji_name: w.emoji })),
-        });
-        out.welcomeScreen = "set";
-      } catch (e) { out.welcomeScreenError = String(e.message || e); }
+        let trole = t.discord_role_id;
+        if (!trole || !roles.find((r) => r.id === trole)) {
+          const existing = roles.find((r) => !r.managed && slug(r.name) === slug(t.name));
+          if (existing) trole = existing.id;
+          else {
+            const wantColor = /^#?[0-9a-f]{6}$/i.test(t.color || "") ? parseInt(String(t.color).replace("#", ""), 16) : 0;
+            const cr = await dApi("POST", `/guilds/${GUILD}/roles`, { name: t.name, color: wantColor, mentionable: true, permissions: rolePermissionsAtBirth(t.name, roles) });
+            if (cr && cr.id) { trole = cr.id; out.createdRoles.push(t.name); }
+          }
+          if (trole) await sbPatch(`teams?id=eq.${t.id}`, { discord_role_id: trole });
+        }
+        let tchan = t.discord_channel_id;
+        if (teamRoomsCat && (!tchan || !chans.find((c) => c.id === tchan))) {
+          const existing = chans.find((c) => c.type === 0 && c.parent_id === teamRoomsCat.id && slug(c.name) === slug(t.name));
+          if (existing) tchan = existing.id;
+          else {
+            const allow = String(1024 | 2048 | 65536); // VIEW + SEND + READ_HISTORY
+            const overwrites = [{ id: GUILD, type: 0, deny: "1024", allow: "0" }];
+            if (trole) overwrites.push({ id: trole, type: 0, allow, deny: "0" });
+            for (const oid of office) overwrites.push({ id: oid, type: 0, allow, deny: "0" });
+            const topic = `Private room for the ${t.name} — roster, lineups, and team talk. Visible only to the club and staff.`;
+            const cc = await dApi("POST", `/guilds/${GUILD}/channels`, { name: slug(t.name), type: 0, parent_id: teamRoomsCat.id, topic, permission_overwrites: overwrites });
+            if (cc && cc.id) { tchan = cc.id; out.createdRooms.push(cc.name); }
+          }
+          if (tchan) await sbPatch(`teams?id=eq.${t.id}`, { discord_channel_id: tchan });
+        }
+      } catch (e) { out.errors.push({ provision: t.name, error: String(e.message || e) }); }
+    }
 
-      // Onboarding — a solid set of default channels + one optional, channel-only routing question.
-      const defaults = pick(["welcome", "rules", "announcements", "season-signups", "schedule", "standings", "news", "general-chat", "trash-talk", "highlight-reel", "league-suggestions", "pickup-games"]);
-      const opt = (id, title, desc, names) => ({ id, title, description: desc, channel_ids: pick(names), role_ids: [] });
-      const onboarding = {
-        default_channel_ids: defaults,
+    return out;
+  },
+
+  // Configure Community onboarding + welcome screen (idempotent). Prompt options reveal CHANNELS
+  // only — never roles — so nothing here fights the managed role sync. Enabling onboarding turns on
+  // the low-friction rules-accept gate; the welcome bot already skips members still in that gate.
+  async setupCommunity() {
+    const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+    const idByName = {};
+    for (const c of chans) { if (c.type === 0) { const n = (c.name || "").toLowerCase(); if (!idByName[n]) idByName[n] = c.id; } }
+    const pick = (names) => names.map((n) => idByName[n]).filter(Boolean);
+    const out = {};
+
+    // Welcome screen — the panel a prospective member sees on the invite.
+    const ws = [
+      { name: "welcome", desc: "Start here — what Chel Gaming is", emoji: "👋" },
+      { name: "season-signups", desc: "Register to play this season", emoji: "📝" },
+      { name: "pickup-games", desc: "Jump into pickup 6s — run /join", emoji: "🏒" },
+      { name: "rules", desc: "The league rulebook", emoji: "📖" },
+    ].filter((w) => idByName[w.name]).slice(0, 5);
+    try {
+      await dApi("PATCH", `/guilds/${GUILD}/welcome-screen`, {
         enabled: true,
-        mode: 0,
-        prompts: [{
-          id: "1", type: 0, title: "What brings you to Chel Gaming?",
-          single_select: true, required: false, in_onboarding: true,
-          options: [
-            opt("11", "I want to play this season", "Sign up and get into pickup games.", ["season-signups", "pickup-games"]),
-            opt("12", "I want to own or manage a club", "Run a franchise — draft, cap, and trades.", ["season-signups", "announcements", "website"]),
-            opt("13", "Just following along", "Scores, standings, and league news.", ["standings", "game-scores", "news"]),
-          ],
-        }],
-      };
-      try {
-        await dApi("PUT", `/guilds/${GUILD}/onboarding`, onboarding);
-        out.onboarding = "enabled";
-        out.defaultChannels = defaults.length;
-      } catch (e) { out.onboardingError = String(e.message || e); }
-
-      return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    if (BOT && GUILD && diagMode === "guild") {
-      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
-      const TYPE = { 0: "text", 2: "voice", 4: "category", 5: "announcement", 13: "stage", 15: "forum" };
-      const catName = Object.fromEntries(chans.filter((c) => c.type === 4).map((c) => [c.id, c.name]));
-      const priv = (c) => {
-        const ev = (c.permission_overwrites || []).find((o) => o.id === GUILD);
-        return !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n;
-      };
-      return new Response(JSON.stringify({
-        roles: roles.filter((r) => r.name !== "@everyone")
-          .sort((a, b) => b.position - a.position)
-          .map((r) => ({ name: r.name, color: r.color, hoisted: r.hoist, mentionable: r.mentionable, managed: r.managed })),
-        channels: chans.filter((c) => c.type !== 4).sort((a, b) => a.position - b.position).map((c) => ({
-          name: c.name, type: TYPE[c.type] || c.type, category: catName[c.parent_id] || null,
-          private: priv(c), topic: c.topic || null, nsfw: !!c.nsfw, slowmode: c.rate_limit_per_user || 0,
-        })),
-        categories: chans.filter((c) => c.type === 4).sort((a, b) => a.position - b.position).map((c) => c.name),
-      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
-
-    if (BOT && GUILD && diagMode === "staff") {
-      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
-      const office = roles.filter((r) => ["commissioner", "staff"].includes(r.name.toLowerCase()));
-      const cfg = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
-      const configured = String((cfg[0] && cfg[0].value) || "").split(",").map((s) => s.trim()).filter(Boolean);
-      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
-      // same target set the sync enforces: every room under a private category, plus pinned ids
-      const privCatIds = chans.filter((c) => c.type === 4 && (/^staff\b/i.test(c.name || "") || /^commissioners?\b/i.test(c.name || ""))).map((c) => c.id);
-      const ids = [...new Set([...configured, ...chans.filter((c) => c.type !== 4 && privCatIds.includes(c.parent_id)).map((c) => c.id)])];
-      const report = ids.map((cid) => {
-        const c = chans.find((x) => x.id === cid);
-        if (!c) return { channel: null, configuredId: cid, exists: false };
-        const ow = c.permission_overwrites || [];
-        const ev = ow.find((o) => o.id === GUILD);
-        return {
-          channel: "#" + c.name, exists: true,
-          hiddenFromEveryone: !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n,
-          canView: ow.filter((o) => (BigInt(o.allow || "0") & 1024n) === 1024n)
-            .map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
-        };
+        description: "Competitive 6v6 EA NHL — a full season with automated stats, and clubs you can own and run.",
+        welcome_channels: ws.map((w) => ({ channel_id: idByName[w.name], description: w.desc, emoji_name: w.emoji })),
       });
-      return new Response(JSON.stringify({
-        officeRoles: office.map((r) => r.name),
-        privateCategories: chans.filter((c) => privCatIds.includes(c.id)).map((c) => c.name),
-        staffChannels: report,
-      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
+      out.welcomeScreen = "set";
+    } catch (e) { out.welcomeScreenError = String(e.message || e); }
 
-    // Who can actually read each club's room. A club room is for THAT club plus the league
-    // office — an Owner/GM/AGM role allow would open every club's room to every club's front
-    // office, which is a scouting leak rather than a permission subtlety. Read-only; names only.
-    if (BOT && GUILD && diagMode === "teamrooms") {
-      const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-      const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
-      const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
-      const teams = await sbGet("teams?select=code,name,discord_role_id,discord_channel_id");
-      const seatNames = ["owner", "general manager", "assistant general manager"];
-      const seatIds = roles.filter((r) => seatNames.includes((r.name || "").toLowerCase())).map((r) => r.id);
-      const report = teams.map((t) => {
-        const c = t.discord_channel_id && chans.find((x) => x.id === t.discord_channel_id);
-        if (!c) return { club: t.code, room: null, provisioned: false };
-        const ow = c.permission_overwrites || [];
-        const ev = ow.find((o) => o.id === GUILD);
-        const viewers = ow.filter((o) => (BigInt(o.allow || "0") & 1024n) === 1024n);
-        return {
-          club: t.code, room: "#" + c.name, provisioned: true,
-          hiddenFromEveryone: !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n,
-          clubRoleCanView: viewers.some((o) => o.id === t.discord_role_id),
-          canView: viewers.map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
-          // the whole point of this check: seat roles must NOT appear above
-          seatRolesWithAccess: viewers.filter((o) => seatIds.includes(o.id)).map((o) => byId[o.id]),
-        };
-      });
-      const leaking = report.filter((r) => (r.seatRolesWithAccess || []).length);
-      const catsWithSeats = chans.filter((c) => c.type === 4 && /^team rooms$/i.test(c.name || ""))
-        .map((c) => ({ category: c.name,
-          seatRolesWithAccess: (c.permission_overwrites || [])
-            .filter((o) => seatIds.includes(o.id) && (BigInt(o.allow || "0") & 1024n) === 1024n)
-            .map((o) => byId[o.id]) }));
-      return new Response(JSON.stringify({
-        verdict: leaking.length
-          ? `${leaking.length} club room(s) still grant a seat role — every front office can read them`
-          : "clean — each club room is visible to its own club plus the league office only",
-        teamRooms: report,
-        teamRoomsCategory: catsWithSeats,
-      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
-    }
-  } catch (e) { return new Response(JSON.stringify({ diagError: String(e.message || e) }), { status: 500, headers: { "content-type": "application/json" } }); }
+    // Onboarding — a solid set of default channels + one optional, channel-only routing question.
+    const defaults = pick(["welcome", "rules", "announcements", "season-signups", "schedule", "standings", "news", "general-chat", "trash-talk", "highlight-reel", "league-suggestions", "pickup-games"]);
+    const opt = (id, title, desc, names) => ({ id, title, description: desc, channel_ids: pick(names), role_ids: [] });
+    const onboarding = {
+      default_channel_ids: defaults,
+      enabled: true,
+      mode: 0,
+      prompts: [{
+        id: "1", type: 0, title: "What brings you to Chel Gaming?",
+        single_select: true, required: false, in_onboarding: true,
+        options: [
+          opt("11", "I want to play this season", "Sign up and get into pickup games.", ["season-signups", "pickup-games"]),
+          opt("12", "I want to own or manage a club", "Run a franchise — draft, cap, and trades.", ["season-signups", "announcements", "website"]),
+          opt("13", "Just following along", "Scores, standings, and league news.", ["standings", "game-scores", "news"]),
+        ],
+      }],
+    };
+    try {
+      await dApi("PUT", `/guilds/${GUILD}/onboarding`, onboarding);
+      out.onboarding = "enabled";
+      out.defaultChannels = defaults.length;
+    } catch (e) { out.onboardingError = String(e.message || e); }
 
+    return out;
+  },
+
+  async diagGuild() {
+    const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+    const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+    const TYPE = { 0: "text", 2: "voice", 4: "category", 5: "announcement", 13: "stage", 15: "forum" };
+    const catName = Object.fromEntries(chans.filter((c) => c.type === 4).map((c) => [c.id, c.name]));
+    const priv = (c) => {
+      const ev = (c.permission_overwrites || []).find((o) => o.id === GUILD);
+      return !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n;
+    };
+    return {
+      roles: roles.filter((r) => r.name !== "@everyone")
+        .sort((a, b) => b.position - a.position)
+        .map((r) => ({ name: r.name, color: r.color, hoisted: r.hoist, mentionable: r.mentionable, managed: r.managed })),
+      channels: chans.filter((c) => c.type !== 4).sort((a, b) => a.position - b.position).map((c) => ({
+        name: c.name, type: TYPE[c.type] || c.type, category: catName[c.parent_id] || null,
+        private: priv(c), topic: c.topic || null, nsfw: !!c.nsfw, slowmode: c.rate_limit_per_user || 0,
+      })),
+      categories: chans.filter((c) => c.type === 4).sort((a, b) => a.position - b.position).map((c) => c.name),
+    };
+  },
+
+  async diagStaff() {
+    const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+    const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
+    const office = roles.filter((r) => ["commissioner", "staff"].includes(r.name.toLowerCase()));
+    const cfg = await sbGet("app_config?key=eq.discord_staff_channel_ids&select=value");
+    const configured = String((cfg[0] && cfg[0].value) || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+    // same target set the sync enforces: every room under a private category, plus pinned ids
+    const privCatIds = chans.filter((c) => c.type === 4 && (/^staff\b/i.test(c.name || "") || /^commissioners?\b/i.test(c.name || ""))).map((c) => c.id);
+    const ids = [...new Set([...configured, ...chans.filter((c) => c.type !== 4 && privCatIds.includes(c.parent_id)).map((c) => c.id)])];
+    const report = ids.map((cid) => {
+      const c = chans.find((x) => x.id === cid);
+      if (!c) return { channel: null, configuredId: cid, exists: false };
+      const ow = c.permission_overwrites || [];
+      const ev = ow.find((o) => o.id === GUILD);
+      return {
+        channel: "#" + c.name, exists: true,
+        hiddenFromEveryone: !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n,
+        canView: ow.filter((o) => (BigInt(o.allow || "0") & 1024n) === 1024n)
+          .map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
+      };
+    });
+    return {
+      officeRoles: office.map((r) => r.name),
+      privateCategories: chans.filter((c) => privCatIds.includes(c.id)).map((c) => c.name),
+      staffChannels: report,
+    };
+  },
+
+  // Who can actually read each club's room. A club room is for THAT club plus the league
+  // office — an Owner/GM/AGM role allow would open every club's room to every club's front
+  // office, which is a scouting leak rather than a permission subtlety. Read-only; names only.
+  async diagTeamrooms() {
+    const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
+    const byId = Object.fromEntries(roles.map((r) => [r.id, r.name]));
+    const chans = await dApi("GET", `/guilds/${GUILD}/channels`);
+    const teams = await sbGet("teams?select=code,name,discord_role_id,discord_channel_id");
+    const seatNames = ["owner", "general manager", "assistant general manager"];
+    const seatIds = roles.filter((r) => seatNames.includes((r.name || "").toLowerCase())).map((r) => r.id);
+    const report = teams.map((t) => {
+      const c = t.discord_channel_id && chans.find((x) => x.id === t.discord_channel_id);
+      if (!c) return { club: t.code, room: null, provisioned: false };
+      const ow = c.permission_overwrites || [];
+      const ev = ow.find((o) => o.id === GUILD);
+      const viewers = ow.filter((o) => (BigInt(o.allow || "0") & 1024n) === 1024n);
+      return {
+        club: t.code, room: "#" + c.name, provisioned: true,
+        hiddenFromEveryone: !!ev && (BigInt(ev.deny || "0") & 1024n) === 1024n,
+        clubRoleCanView: viewers.some((o) => o.id === t.discord_role_id),
+        canView: viewers.map((o) => (o.type === 0 ? byId[o.id] || "(role)" : "(member)")),
+        // the whole point of this check: seat roles must NOT appear above
+        seatRolesWithAccess: viewers.filter((o) => seatIds.includes(o.id)).map((o) => byId[o.id]),
+      };
+    });
+    const leaking = report.filter((r) => (r.seatRolesWithAccess || []).length);
+    const catsWithSeats = chans.filter((c) => c.type === 4 && /^team rooms$/i.test(c.name || ""))
+      .map((c) => ({ category: c.name,
+        seatRolesWithAccess: (c.permission_overwrites || [])
+          .filter((o) => seatIds.includes(o.id) && (BigInt(o.allow || "0") & 1024n) === 1024n)
+          .map((o) => byId[o.id]) }));
+    return {
+      verdict: leaking.length
+        ? `${leaking.length} club room(s) still grant a seat role — every front office can read them`
+        : "clean — each club room is visible to its own club plus the league office only",
+      teamRooms: report,
+      teamRoomsCategory: catsWithSeats,
+    };
+  },
+};
+
+/* ---- the sweep ------------------------------------------------------------------------------
+   Returns { status, body } rather than a Response so the scheduled default export below and the
+   run-now door in discord-ops.js can share it. opts.budgetMs overrides the member-pass budget
+   (tests). */
+export async function runSweep(opts = {}) {
   if (!SB_URL || !SB_KEY || !BOT || !GUILD) {
     console.log("discord-sync: missing env (need bot token + guild id + Supabase) — skipping");
-    return new Response("skipped: missing env", { status: 200 });
+    return { status: 200, body: { skipped: "missing env" } };
   }
-  // collapse rapid repeat invocations (spam / abuse); scheduled runs are 5 min apart so this never blocks them
-  if (await ranRecently("discord-sync", 6)) return new Response("skipped: ran moments ago", { status: 200 });
+  // collapse rapid repeat invocations (run-now bursts); scheduled runs are 2 min apart so this never blocks them
+  if (await ranRecently("discord-sync", 6)) return { status: 200, body: { skipped: "ran moments ago" } };
+  /* The wall clock for the whole run, and the second stamp. The heartbeat above is written at
+     start and the result at the end, so a run Netlify kills at 30 s leaves a fresh heartbeat
+     beside a stale ok:true result — the Automations chip stays green while nothing completes.
+     rl_discord-sync_started is written here so a killed run is visible as started > result.at. */
+  const T0 = Date.now();
+  const BUDGET_MS = typeof opts.budgetMs === "number" ? opts.budgetMs : MEMBER_PASS_BUDGET_MS;
+  try { await sbUpsertCfg("rl_discord-sync_started", new Date(T0).toISOString()); } catch (e) { /* observability only */ }
 
   /* Everything below runs inside one try: ranRecently already stamped the heartbeat, so a throw
      from any of the early loads would otherwise leave a fresh heartbeat next to a stale ok:true
@@ -1761,7 +2194,14 @@ export default async (req) => {
   // current in_guild per profile, so we only write when it changes
   const inGuildById = {};
   const avatarById = {};
-  for (const p of await sbGet("profiles?select=id,in_guild,avatar_url")) { inGuildById[p.id] = p.in_guild; avatarById[p.id] = p.avatar_url; }
+  /* every gamertag in use, lower-cased -> its owner, for the rename collision check: the unique
+     index on profiles.gamertag is case-sensitive while every consumer of the tag (stat linking,
+     @-pills, fuzzyProfile) is case-insensitive, so "the tag is free" must be answered without case */
+  const tagOwner = new Map();
+  for (const p of await sbGet("profiles?select=id,in_guild,avatar_url,gamertag")) {
+    inGuildById[p.id] = p.in_guild; avatarById[p.id] = p.avatar_url;
+    if (p.gamertag) tagOwner.set(String(p.gamertag).trim().toLowerCase(), p.id);
+  }
   const markGuild = async (pid, v) => { if (inGuildById[pid] !== v) { await sbPatch(`profiles?id=eq.${pid}`, { in_guild: v }); inGuildById[pid] = v; } };
   const teams = await sbGet("teams?select=id,code,name,color,color2,logo_url,owner_profile_id,gm_profile_id,agm_profile_id,discord_role_id,discord_channel_id");
   const teamRoleId = Object.fromEntries(teams.filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
@@ -1873,6 +2313,10 @@ export default async (req) => {
      and `sum` are declared before this point — see the TDZ note above, that mistake cost a sweep. */
   try { await enforcePostingPolicy(guildRoles, teams, sum); }
   catch (e) { sum.errors.push({ postingPolicy: String(e.message || e) }); }
+  /* Elevated bits (events, expressions, thread creation) come off every role the sweep owns, and
+     the thread bits off @everyone, every sweep — same reasoning as the two policies above. */
+  try { await enforceRoleBits(guildRoles, teams, roleId, sum); }
+  catch (e) { sum.errors.push({ roleBits: String(e.message || e) }); }
   try {
     const g0 = await dApi("GET", `/guilds/${GUILD}`);
     if (g0 && !g0.__notfound) await enforceVerificationLevel(g0, sum);
@@ -1893,10 +2337,75 @@ export default async (req) => {
   try { await flushClubNotices(sum); }
   catch (e) { sum.errors.push({ clubNotices: String(e.message || e) }); }
 
+  /* ---- time-critical, cheap, and therefore EARLY (2026-09-17) ----
+     The census, the departure diff, the sign-up withdrawals and the two id-keyed room checks all
+     run before any guild furniture and long before the member passes, so a sweep that runs out of
+     road (a registration-opening tick with hundreds of role PATCHes) has already done the part
+     that cannot wait for the next one. */
+  /* the departures room (Information, beside #welcome), and its id for the announcer further down */
+  try { const dch = await ensureDeparturesChannel(guildChannels, roleId, sum); if (dch && dch.id) sum.__departChanId = dch.id; }
+  catch (e) { sum.errors.push({ departChan: String(e.message || e) }); }
+  /* One bulk member list per run instead of a GET per linked member. That was ~40 requests against
+     the same route every sweep, which exhausted the rate-limit bucket (and every retry) once the
+     cadence moved to 2 minutes. Uses the same paginated endpoint as discord-welcome, so it needs
+     no extra intent. If the listing fails we fall back to per-member fetches rather than skipping
+     the sweep entirely. */
+  const memberById = new Map();
+  let memberListOk = false;
+  try {
+    let after = "0";
+    for (let page = 0; page < 10; page++) {
+      const chunk = await dApi("GET", `/guilds/${GUILD}/members?limit=1000&after=${after}`);
+      if (!Array.isArray(chunk) || !chunk.length) break;
+      for (const mm of chunk) if (mm.user && mm.user.id) memberById.set(String(mm.user.id), mm);
+      if (chunk.length < 1000) break;
+      after = chunk[chunk.length - 1].user.id;
+    }
+    memberListOk = true;
+    sum.memberList = memberById.size;
+    sum.pendingAtGate = [...memberById.values()].filter((mm) => mm.pending === true).length;
+    sum.bots = [...memberById.values()].filter((mm) => mm.user && mm.user.bot).length;
+  } catch (e) { sum.errors.push({ memberList: String(e.message || e) }); }
+
+  /* Diff this census against the last one to see who left. Runs before the per-member passes below
+     so a departure is logged on the same tick it is noticed, not the next one. */
+  try { await trackDepartures(memberById, memberListOk, links, teams, sum); }
+  catch (e) { sum.errors.push({ departures: String(e.message || e) }); }
+
+  /* Sign-ups whose owner has been out of the server past the grace window are withdrawn.
+     Deliberately RIGHT after the census lands: the role passes below can take minutes of
+     rate-limited Discord calls, and a member whose grace expires this tick but who rejoins
+     during that stretch should not be caught by a stale read. Candidates were flagged whole
+     ticks ago (the grace is measured in hours), so this never needs the passes below to run
+     first. */
+  try { await removeDepartedSignups(sum); }
+  catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
+
+  // the Team Management category + its rooms (private to the front office) and the FAQ forums —
+  // both keyed by stored id, so a rename is followed rather than duplicated
+  try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
+  try { await ensureFaqForums(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ faqForums: String(e.message || e) }); }
+
+  // Guild ban list (paginated), fetched once per run. Two jobs:
+  //  * stop re-PUTting the same ban every 5 minutes for already-banned members
+  //  * UNBAN reconciliation — a site Unban must lift the Discord ban too, or the member can
+  //    never rejoin the server and (since registration requires membership) is locked out forever
+  const guildBans = new Set();
+  try {
+    let after = null;
+    for (let page = 0; page < 10; page++) {
+      const batch = await dApi("GET", `/guilds/${GUILD}/bans?limit=1000${after ? "&after=" + after : ""}`);
+      if (!Array.isArray(batch) || !batch.length) break;
+      for (const b of batch) if (b.user && b.user.id) guildBans.add(String(b.user.id));
+      if (batch.length < 1000) break;
+      after = batch[batch.length - 1].user.id;
+    }
+  } catch (e) { sum.errors.push({ banList: String(e.message || e) }); }
+
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
   // (its role + commissioners) instead of the category default (all staff).
-  try { await ensureStaffDepartments(guildChannels, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
+  try { await ensureStaffDepartments(guildChannels, guildRoles, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
   try { await ensureGuildCommands(sum); } catch (e) { sum.errors.push({ commands: String(e.message || e) }); }
   /* One-shot Discord reap: when a club is removed from the league, its role and channel objects
      outlive the database row — the sync creates guild furniture but deliberately never deletes any
@@ -1917,12 +2426,9 @@ export default async (req) => {
       }
       /* consumed — errors above are surfaced but do NOT re-run forever on a dead id (dApi maps
          404 to null, so an already-gone object counts as reaped) */
-      await fetch(`${SB_URL}/rest/v1/app_config?key=eq.discord_reap`, { method: "DELETE", headers: sbHead() });
+      await fetch(`${SB_URL}/rest/v1/app_config?key=eq.discord_reap`, sbOpts({ method: "DELETE", headers: sbHead() }));
     }
   } catch (e) { sum.errors.push({ reap: String(e.message || e) }); }
-  /* the departures room (Information, beside #welcome), and its id for the announcer further down */
-  try { const dch = await ensureDeparturesChannel(guildChannels, roleId, sum); if (dch && dch.id) sum.__departChanId = dch.id; }
-  catch (e) { sum.errors.push({ departChan: String(e.message || e) }); }
   const deptRoleByChannel = {};
   for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) deptRoleByChannel[d.channel] = rid; }
   try {
@@ -2152,8 +2658,8 @@ export default async (req) => {
   for (const pn of POSITION_ROLES) {
     if (!roleId[pn.toLowerCase()]) {
       try {
-        const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: pn, mentionable: false });
-        if (created && created.id) { roleId[pn.toLowerCase()] = created.id; roleNameById[created.id] = pn; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+        const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name: pn, mentionable: false, permissions: rolePermissionsAtBirth(pn, guildRoles) });
+        if (created && created.id) { roleId[pn.toLowerCase()] = created.id; roleNameById[created.id] = pn; guildRoles.push(created); sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
       } catch (e) { sum.errors.push({ role: pn, error: String(e.message || e) }); }
     }
   }
@@ -2167,8 +2673,8 @@ export default async (req) => {
   for (const [name, mentionable] of ENSURE_ROLES) {
     if (roleId[name.toLowerCase()]) continue;
     try {
-      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name, mentionable });
-      if (created && created.id) { roleId[name.toLowerCase()] = created.id; roleNameById[created.id] = name; sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
+      const created = await dApi("POST", `/guilds/${GUILD}/roles`, { name, mentionable, permissions: rolePermissionsAtBirth(name, guildRoles) });
+      if (created && created.id) { roleId[name.toLowerCase()] = created.id; roleNameById[created.id] = name; guildRoles.push(created); sum.rolesCreated = (sum.rolesCreated || 0) + 1; }
     } catch (e) { sum.errors.push({ role: name, error: String(e.message || e) }); }
   }
   // Reconcile properties on the EXISTING static roles — ENSURE_ROLES only sets them at creation,
@@ -2205,9 +2711,6 @@ export default async (req) => {
     for (const n of wanted) if (roleId[n]) map[n] = roleId[n];
     if (Object.keys(map).length) await sbUpsertCfg("discord_role_ids", JSON.stringify(map));
   } catch (e) { sum.errors.push({ roleIdMap: String(e.message || e) }); }
-  // the Team Management category + its rooms (private to the front office)
-  try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }
-  try { await ensureFaqForums(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ faqForums: String(e.message || e) }); }
   try { await ensureAnnouncements(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ announcements: String(e.message || e) }); }
   try { await ensureCommunityChannels(guildChannels, teams, roleId, sum); } catch (e) { sum.errors.push({ communityChannels: String(e.message || e) }); }
   /* after the Team Rooms category is in place: give any club still missing a role or room one
@@ -2234,164 +2737,34 @@ export default async (req) => {
     }
   } catch (e) { inputsOk = false; inputsErr.push("registrations"); sum.errors.push({ regStatus: String(e.message || e) }); }
 
-  // Guild ban list (paginated), fetched once per run. Two jobs:
-  //  * stop re-PUTting the same ban every 5 minutes for already-banned members
-  //  * UNBAN reconciliation — a site Unban must lift the Discord ban too, or the member can
-  //    never rejoin the server and (since registration requires membership) is locked out forever
-  const guildBans = new Set();
-  try {
-    let after = null;
-    for (let page = 0; page < 10; page++) {
-      const batch = await dApi("GET", `/guilds/${GUILD}/bans?limit=1000${after ? "&after=" + after : ""}`);
-      if (!Array.isArray(batch) || !batch.length) break;
-      for (const b of batch) if (b.user && b.user.id) guildBans.add(String(b.user.id));
-      if (batch.length < 1000) break;
-      after = batch[batch.length - 1].user.id;
-    }
-  } catch (e) { sum.errors.push({ banList: String(e.message || e) }); }
-
-  /* One bulk member list per run instead of a GET per linked member. That was ~40 requests against
-     the same route every sweep, which exhausted the rate-limit bucket (and every retry) once the
-     cadence moved to 2 minutes. Uses the same paginated endpoint as discord-welcome, so it needs
-     no extra intent. If the listing fails we fall back to per-member fetches rather than skipping
-     the sweep entirely. */
-  const memberById = new Map();
-  let memberListOk = false;
-  try {
-    let after = "0";
-    for (let page = 0; page < 10; page++) {
-      const chunk = await dApi("GET", `/guilds/${GUILD}/members?limit=1000&after=${after}`);
-      if (!Array.isArray(chunk) || !chunk.length) break;
-      for (const mm of chunk) if (mm.user && mm.user.id) memberById.set(String(mm.user.id), mm);
-      if (chunk.length < 1000) break;
-      after = chunk[chunk.length - 1].user.id;
-    }
-    memberListOk = true;
-    sum.memberList = memberById.size;
-    sum.pendingAtGate = [...memberById.values()].filter((mm) => mm.pending === true).length;
-    sum.bots = [...memberById.values()].filter((mm) => mm.user && mm.user.bot).length;
-  } catch (e) { sum.errors.push({ memberList: String(e.message || e) }); }
-
-  /* Diff this census against the last one to see who left. Runs before the per-member passes below
-     so a departure is logged on the same tick it is noticed, not the next one. */
-  try { await trackDepartures(memberById, memberListOk, links, teams, sum); }
-  catch (e) { sum.errors.push({ departures: String(e.message || e) }); }
-
-  /* Sign-ups whose owner has been out of the server past the grace window are withdrawn.
-     Deliberately RIGHT after the census lands: the role passes below can take minutes of
-     rate-limited Discord calls, and a member whose grace expires this tick but who rejoins
-     during that stretch should not be caught by a stale read. Candidates were flagged whole
-     ticks ago (the grace is measured in hours), so this never needs the passes below to run
-     first. */
-  try { await removeDepartedSignups(sum); }
-  catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
-
   if (!inputsOk) sum.errors.push({ inputs: "load failed (" + inputsErr.join("; ") + ") — managed roles left untouched this run" });
-  for (const m of links) {
-    if (!m.discord_id) continue;
-    try {
-      // banned players are removed from the server and kept out (no return)
-      if (bannedIds.has(m.profile_id)) {
-        if (!guildBans.has(String(m.discord_id))) {
-          const res = await dApi("PUT", `/guilds/${GUILD}/bans/${m.discord_id}`, { delete_message_seconds: 0 });
-          if (!(res && res.__notfound)) sum.banned = (sum.banned || 0) + 1;
-        }
-        await markGuild(m.profile_id, false);
-        continue;
-      }
-      // not banned on the site but still banned on Discord → lift it (site Unban made real)
-      if (guildBans.has(String(m.discord_id))) {
-        await dApi("DELETE", `/guilds/${GUILD}/bans/${m.discord_id}`);
-        guildBans.delete(String(m.discord_id));
-        sum.unbanned = (sum.unbanned || 0) + 1;
-      }
-      // read from the bulk listing; only fall back to a single fetch if that listing failed
-      const mem = memberListOk
-        ? (memberById.get(String(m.discord_id)) || { __notfound: true })
-        : await dApi("GET", `/guilds/${GUILD}/members/${m.discord_id}`);
-      if (mem.__notfound) { sum.notInServer++; await markGuild(m.profile_id, false); continue; }
-      sum.checked++;
-      await markGuild(m.profile_id, true);
-
-      // (1) username sync — site gamertag follows Discord display name
-      const disp = mem.nick || (mem.user && (mem.user.global_name || mem.user.username));
-      if (disp && disp !== m.gamertag) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { gamertag: disp }); sum.renamed++; }
-      // (1b) store the Discord @handle so the commissioner directory can show it
-      const handle = mem.user && mem.user.username;
-      if (handle && handle !== m.discord_username) { await sbPatch(`profiles?id=eq.${m.profile_id}`, { discord_username: handle }); }
-      // (1c) avatar freshness — Discord avatar hashes rot when a member changes theirs, and the
-      // stale URL 404s forever (the users table showed 38 broken discs). Keep the stored URL
-      // current for everyone in the guild. A custom (supabase-hosted) avatar is the member's own
-      // upload and is never touched — the same rule discordIdentityPatch applies at sign-in.
-      const wantAv = mem.user && mem.user.avatar
-        ? `https://cdn.discordapp.com/avatars/${m.discord_id}/${mem.user.avatar}.png?size=128` : null;
-      const curAv = avatarById[m.profile_id] || null;
-      if (wantAv && curAv !== wantAv && (!curAv || /cdn\.discordapp\.com|media\.discordapp\.net/.test(curAv))) {
-        await sbPatch(`profiles?id=eq.${m.profile_id}`, { avatar_url: wantAv });
-        avatarById[m.profile_id] = wantAv;
-        sum.avatarsFreshened = (sum.avatarsFreshened || 0) + 1;
-      }
-
-      // (2) role sync — desired managed roles for this member. The rules live in
-      // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
-      if (inputsOk) {
-        const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
-          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies });
-        const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
-        if (changed) {
-          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
-          if (!(res && res.__notfound)) sum.roleUpdated++;
-        }
-      }
-    } catch (e) {
-      // owner + higher-role members can't be modified by the bot — log and continue
-      sum.errors.push({ discord_id: m.discord_id, error: String(e.message || e) });
-    }
-  }
-  /* Pass 2 — guild members with NO site link. The loop above walks site profiles that carry a
-     discord_id, so a member who joined the server but never signed into the website was never
-     visited: with ~150 members and ~80 linked, some seventy people sat outside the sweep, which is
-     why "Not Signed Up" held 18 members when it should have held roughly 85. They cannot be
-     reached from the profiles side because there is nothing to join on — so walk the guild list
-     and reconcile everyone the first pass did not cover. An unlinked member's managed roles are
-     exactly {Not Signed Up} while sign-ups are open (they have not signed up, by definition), and
-     none once the window closes. Their non-managed roles are left alone, same as pass 1. */
-  try {
-    if (inputsOk && memberListOk && roleId["not signed up"]) {
-      const linkedIds = new Set(links.filter((l) => l.discord_id).map((l) => String(l.discord_id)));
-      sum.unlinkedSeen = 0;
-      for (const [uid, mem] of memberById) {
-        if (linkedIds.has(uid)) continue;                       // pass 1 owned this member
-        if (mem.user && mem.user.bot) continue;                 // bots never sign up
-        sum.unlinkedSeen++;
-        const desired = new Set();
-        if (regOpen) desired.add(roleId["not signed up"]);
-        const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
-        if (!changed) continue;
-        try {
-          const res = await dApi("PATCH", `/guilds/${GUILD}/members/${uid}`, { roles: next });
-          if (!(res && res.__notfound)) sum.unlinkedTagged = (sum.unlinkedTagged || 0) + 1;
-        } catch (e) {
-          // the owner and anyone above the bot cannot be edited — count it rather than fail the run
-          sum.unlinkedSkipped = (sum.unlinkedSkipped || 0) + 1;
-        }
-      }
-    }
-  } catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
-
-  // (3) resolve the server for any game whose 30-min pick-lock has passed (auto-fills the match card)
-  try {
-    const rr = await fetch(`${SB_URL}/rest/v1/rpc/resolve_due_servers`, { method: "POST", headers: sbHead(), body: "{}" });
-    sum.serversResolved = rr.ok ? await rr.json() : `err ${rr.status}`;
-  } catch (e) { sum.errors.push({ rpc: "resolve_due_servers", error: String(e.message || e) }); }
+  /* The two member passes are the only part of the sweep whose cost scales with the server, and
+     they run LAST for that reason: everything time-critical above has already landed. They stop
+     when the budget is spent and the result says so (partial, membersLeft); the next tick picks
+     the remainder up, because a member that needed nothing is a no-op that costs no request. */
+  const outOfTime = () => Date.now() - T0 > BUDGET_MS;
+  const ctx = { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
+    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, managedIds };
+  await syncLinkedMembers(ctx, sum, outOfTime);
+  try { await syncUnlinkedMembers(ctx, sum, outOfTime); }
+  catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
+  sum.elapsedMs = Date.now() - T0;
 
   console.log("discord-sync:", JSON.stringify(sum));
   // per-run result for the Automations panel — red chip + last error when a run fails
   try {
-    await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+    await fetch(`${SB_URL}/rest/v1/app_config`, sbOpts({ method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "rl_discord-sync_result", value: JSON.stringify({
         at: new Date().toISOString(), ok: sum.errors.length === 0, checked: sum.checked,
+        /* a run cut short by the time budget is a fact the panel must show, not an error */
+        partial: !!sum.partial, membersLeft: sum.membersLeft || 0, elapsedMs: sum.elapsedMs,
         unlinkedSeen: sum.unlinkedSeen, unlinkedTagged: sum.unlinkedTagged,
+        renamed: sum.renamed, renameCollisions: sum.renameCollisions || 0,
+        roleBitsStripped: sum.roleBitsStripped || 0, disboardManageChannels: sum.disboardManageChannels || null,
+        automodPruned: sum.automodPruned || 0, feedsLocked: sum.feedsLocked || 0,
+        mgmtRoomsHealed: sum.mgmtRoomsHealed || 0, mgmtRoomsAdopted: sum.mgmtRoomsAdopted || 0,
+        faqForumsAdopted: sum.faqForumsAdopted || 0, faqForumsHealed: sum.faqForumsHealed || 0,
+        departRowsWritten: sum.departRowsWritten || 0, clubNoticeBookkeeping: sum.clubNoticeBookkeeping || 0,
         gate: sum.gate, guildMemberCount: sum.guildMemberCount, memberList: sum.memberList,
         departed: sum.departed || 0, departAnnounced: sum.departAnnounced || 0,
         signupsRemoved: (sum.signupsRemoved || []).length,
@@ -2408,21 +2781,27 @@ export default async (req) => {
         pendingAtGate: sum.pendingAtGate, bots: sum.bots,
         staffChecked: sum.staffChecked, staffLocked: sum.staffLocked, staffMissing: sum.staffMissing,
         errCount: sum.errors.length, lastError: sum.errors[0] ? JSON.stringify(sum.errors[0]).slice(0, 200) : null
-      }), updated_at: new Date().toISOString() }) });
+      }), updated_at: new Date().toISOString() }) }));
   } catch {}
-  return new Response(JSON.stringify(sum), { status: 200, headers: { "content-type": "application/json" } });
+  return { status: 200, body: sum };
 
   } catch (e) {
     // the heartbeat is already stamped — record the failure or the panel lies green
     try {
-      await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
+      await fetch(`${SB_URL}/rest/v1/app_config`, sbOpts({ method: "POST", headers: { ...sbHead(), Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ key: "rl_discord-sync_result", value: JSON.stringify({
           at: new Date().toISOString(), ok: false, errCount: 1,
           lastError: String(e.message || e).slice(0, 200)
-        }), updated_at: new Date().toISOString() }) });
+        }), updated_at: new Date().toISOString() }) }));
     } catch {}
-    return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 500, headers: { "content-type": "application/json" } });
+    return { status: 500, body: { error: String(e.message || e) } };
   }
+}
+
+/* the scheduled entry point: Netlify calls this every two minutes with no useful request */
+export default async () => {
+  const r = await runSweep();
+  return new Response(JSON.stringify(r.body), { status: r.status, headers: { "content-type": "application/json" } });
 };
 
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
@@ -2430,6 +2809,11 @@ export default async (req) => {
    fake exodus — so it is tested directly rather than only through the whole sync. */
 export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
   removeDepartedSignups, SIGNUP_REMOVAL_GRACE_HOURS,
+  dApi, flushClubNotices, syncLinkedMembers, syncUnlinkedMembers, MEMBER_PASS_BUDGET_MS, DEPART_TOUCH_MS,
+  enforceRoleBits, rolePermissionsAtBirth, ROLE_STRIP_BITS, EVERYONE_STRIP_BITS, CREATE_THREAD_BITS, CREATE_EVENTS,
+  CREATE_GUILD_EXPRESSIONS, MANAGE_CHANNELS, ROLE_BITS_KEEP,
+  ensureMgmtCategory, MGMT_ROOMS, MGMT_CFG_KEY, MGMT_CAT_KEY, MGMT_CHAT_ALLOW, MGMT_CHAT_DENY, MGMT_FEED_ALLOW, MGMT_FEED_DENY, MGMT_OFFICE_ALLOW,
+  ensureFaqForums, FAQ_CFG_KEY, POST_ONLY_FEEDS, AUTOMOD_OFFICE,
   AUTOMOD_SPAM_RULE, AUTOMOD_MENTION_RULE, AUTOMOD_MGMT_EXEMPT,
   enforceAutomodExemptions, AUTOMOD_EXEMPT, AUTOMOD_LINK_RULE, AUTOMOD_ADS_RULE,
   AUTOMOD_URL_RULE, AUTOMOD_URL_REGEX, AUTOMOD_URL_ALLOW, DENY_STRIP_NAMED, DENY_GRANT_NAMED,

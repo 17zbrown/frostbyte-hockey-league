@@ -57,6 +57,9 @@ const TEAMS = [
 let posts = [];
 const claimed = new Set();
 let failChannel = null;
+/* fiveHundredChannel answers 500 (delivery unknown); hangChannel never answers; postAttempts
+   counts every POST /messages so "sent once" is provable */
+let fiveHundredChannel = null, hangChannel = null, postAttempts = 0;
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
@@ -80,6 +83,9 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/teams?id=in.")) return J(TEAMS);
   const m = u.match(/channels\/([\w-]+)\/messages/);
   if (m && opts.method === "POST") {
+    postAttempts++;
+    if (m[1] === hangChannel) return new Promise(() => {});
+    if (m[1] === fiveHundredChannel) return J({ message: "upstream" }, 500);
     if (m[1] === failChannel) return J({ message: "Unknown Channel" }, 404);
     posts.push({ channel: m[1], body: JSON.parse(opts.body) });
     return J({ id: "msg" + posts.length });
@@ -160,6 +166,30 @@ console.log("\n— failures never pretend to have delivered");
   A("the next one still goes out", r2 === "announced" && posts.length === 2);
   const bad = await N.announce({ game_id: "nope", team_id: "T1", kind: "disconnect", occurrence: 1 });
   A("an unknown game is skipped, not crashed", bad === "no-game");
+}
+
+console.log("\n— an unknown outcome keeps its claim and is never re-sent (audit 2026-09-17, P2-12)");
+{
+  posts = []; claimed.clear(); postAttempts = 0; fiveHundredChannel = "chan-bos";
+  const row = { id: "inc-5xx", game_id: "g1", team_id: "T1", kind: "late_start", minutes_late: 8, occurrence: 1 };
+  const r = await N.announce(row);
+  A("a 5xx on the offender's copy is an error", r === "error");
+  A("...sent exactly ONCE — no retry loop on a 5xx", postAttempts === 1, `attempts=${postAttempts}`);
+  A("...and its claim is KEPT: the ruling may already be in the room", claimed.has("inc:inc-5xx:chan-bos"));
+  A("...counted as unconfirmed for the heartbeat", N.sum.unconfirmed === 1 && N.sum.errors > 0 && /unconfirmed/.test(N.sum.lastError));
+  fiveHundredChannel = null; posts = []; postAttempts = 0;
+  const again = await N.announce(row);
+  A("the catch-up sends the OTHER club its copy and leaves the unconfirmed one alone", again === "announced" && posts.length === 1 && posts[0].channel === "chan-tor" && postAttempts === 1);
+}
+{
+  posts = []; claimed.clear(); postAttempts = 0; hangChannel = "chan-tor";
+  const N2 = createIncidentNotifier({ SB_URL: "https://sb.invalid", SB_KEY: "k", BOT: "tok" }, { discordTimeoutMs: 25 });
+  const t0 = Date.now();
+  const r = await N2.announce({ id: "inc-hang", game_id: "g1", team_id: "T1", kind: "disconnect", occurrence: 1 });
+  A("a socket that never answers is abandoned at the deadline", r === "error" && Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  A("...the offender's copy went out, the hung one was sent once", posts.length === 1 && posts[0].channel === "chan-bos" && postAttempts === 2);
+  A("...and the hung destination's claim is kept, tagged as a timeout", claimed.has("inc:inc-hang:chan-tor") && /timed out after 25 ms/.test(N2.errors[0]), N2.errors.join(" | "));
+  hangChannel = null;
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

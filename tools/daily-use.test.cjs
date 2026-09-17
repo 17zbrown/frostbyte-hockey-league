@@ -105,13 +105,15 @@ console.log("— the Discord bot survives 200 members");
   A("...and drains serially instead of firing 500 timers at once", /async function drain\(\)/.test(roleSync) && /while \(queue\.length\)/.test(roleSync));
   A("incident rulings retry", /rate-limited after retries/.test(incidents));
   A("...claim so a retry can't double-post", /kind: "incident", ref/.test(incidents));
-  A("...release only the destination that failed", (incidents.match(/await release\(_ref \+ ":" \+/g)||[]).length === 2);
+  /* v2.57: a failed destination is settled per destination — released on a provable failure, the claim
+     kept on an ambiguous one (timeout / 5xx after Discord may have accepted it) so it is never re-sent */
+  A("...release only the destination that failed", (incidents.match(/await settle\(_ref \+ ":" \+/g)||[]).length === 2 && /if \(e && e\.provable\) \{ await release\(ref\); return; \}/.test(incidents));
   A("...and a catch-up re-sends what was missed", /async function catchUp\(minutes = 24 \* 60\)/.test(incidents) && /INC\.catchUp\(\)/.test(botMain));
   /* review round 2: the claim is per DESTINATION, so a half-delivered ruling retries only the
      club that missed it instead of re-sending to the one that already had it */
   A("...claimed per destination, not per ruling", /claim\(_ref \+ ":" \+ mine\.discord_channel_id\)/.test(incidents) && /claim\(_ref \+ ":" \+ other\.discord_channel_id\)/.test(incidents));
   A("...and an idless row can't collapse every ruling onto one ref", /row\.game_id, row\.team_id, row\.kind/.test(incidents));
-  A("role-sync merges a repeat enqueue instead of dropping its callback", /existing\.onDone = prev \? function\(r\)\{ prev\(r\); onDone\(r\); \} : onDone;/.test(roleSync));
+  A("role-sync merges a repeat enqueue instead of dropping its callback", /existing\.onDone = prev \? function\(r\)\{ prev\(r\); job\.onDone\(r\); \} : job\.onDone;/.test(roleSync));
 }
 
 console.log("— nothing public burns metered resources");

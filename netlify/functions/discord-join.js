@@ -13,15 +13,65 @@
 // REQUIRES to add a member — plus whether Membership Screening would hold new
 // members as "pending". No secrets are returned. Every real join also records its
 // outcome to app_config.rl_discord-join_result so failures are diagnosable.
+//
+// AUTH (2026-09-17, P2-14): this URL was reachable by anyone. A GET ran four bot-token
+// Discord calls and wrote app_config; a POST forwarded whatever bearer the caller sent
+// to Discord — anonymous traffic could burn the bot's invalid-request budget. Now:
+//   POST  needs a signed-in member: Authorization: Bearer <Supabase session JWT>,
+//         verified against GoTrue the way ingest-stats.js authForGame does.
+//   GET   (the diagnostic) needs the ops key: app_config.diag_key as ?key= or x-diag-key.
+//   anything else is 401.
 // Node 18+ runtime (global fetch, BigInt, no dependencies).
 
 const BOT = process.env.DISCORD_BOT_TOKEN;
 const GUILD = process.env.DISCORD_GUILD_ID;
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+/* the apikey for the session check — the anon key when set, the service key otherwise (either
+   identifies the project to GoTrue; the bearer is what is being verified) */
+const SB_ANON = process.env.SUPABASE_ANON_KEY || SB_KEY;
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 const json = (o, s = 200) => ({ statusCode: s, headers: { "content-type": "application/json" }, body: JSON.stringify(o) });
 const dh = { Authorization: `Bot ${BOT}`, "User-Agent": UA };
+const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` });
+
+/* case-insensitive header lookup — Netlify lower-cases them, browsers do not always */
+function header(event, name) {
+  const h = event.headers || {};
+  const k = Object.keys(h).find((x) => x.toLowerCase() === name.toLowerCase());
+  return k ? h[k] : "";
+}
+
+/* Who is asking? The Supabase session JWT from the Authorization header, proven by GoTrue
+   (/auth/v1/user answers for the bearer, or 401s). Returns the user id or null. The service key
+   itself is never accepted as a session. */
+async function sessionUser(event) {
+  if (!SB_URL || !SB_ANON) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(String(header(event, "authorization") || "").trim());
+  if (!m || m[1] === SB_KEY) return null;
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_ANON, Authorization: `Bearer ${m[1]}` }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const u = await r.json();
+    return (u && u.id) || null;
+  } catch (e) { return null; }
+}
+
+/* The ops key gate, identical to discord-ops.js: app_config.diag_key via ?key= or x-diag-key.
+   No key on file means no diagnostic is reachable at all. */
+async function opsKeyOk(event) {
+  if (!SB_URL || !SB_KEY) return false;
+  const q = event.queryStringParameters || {};
+  const got = q.key || header(event, "x-diag-key") || "";
+  if (!got) return false;
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/app_config?key=eq.diag_key&select=value`, { headers: sbHead(), signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return false;
+    const rows = await r.json();
+    const want = rows && rows[0] && rows[0].value;
+    return !!want && got === want;
+  } catch (e) { return false; }
+}
 
 // Flip profiles.in_guild for the member with this Discord id (so registration can require it),
 // and record their Discord @handle so the commissioner directory can show it.
@@ -90,12 +140,19 @@ async function botDiag() {
 
 export const handler = async (event) => {
   const q = event.queryStringParameters || {};
-  if (event.httpMethod === "GET" || q.diag === "1") {
+  const method = String(event.httpMethod || "").toUpperCase();
+  if (method === "GET" || q.diag === "1") {
+    /* the diagnostic costs bot-token Discord calls and writes app_config: ops key only */
+    if (!(await opsKeyOk(event))) return json({ error: "Unauthorized" }, 401);
     const d = await botDiag();
     await logResult({ kind: "diag", ok: !!d.canAddMembers, diag: d });
     return json({ diagnostic: d });
   }
-  if (event.httpMethod !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (method !== "POST") return json({ error: "Unauthorized" }, 401);
+  /* a join is made on behalf of a signed-in member — prove the session before touching Discord,
+     so an anonymous POST never reaches /users/@me with a made-up bearer */
+  const uid = await sessionUser(event);
+  if (!uid) return json({ error: "Unauthorized" }, 401);
   if (!BOT || !GUILD) { await logResult({ ok: false, lastError: "Discord bot not configured (DISCORD_BOT_TOKEN / DISCORD_GUILD_ID missing)" }); return json({ skipped: "Discord bot not configured" }, 200); }
 
   let token;

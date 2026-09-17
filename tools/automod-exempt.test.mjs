@@ -78,14 +78,33 @@ console.log("\n— it adds what is missing and leaves a correct rule alone");
   A("...and reports nothing changed", !sum.automodExempted);
 }
 
-console.log("\n— it never removes an exemption someone added by hand");
+console.log("\n— the exempt set is EXACT: a hand-added exemption is pruned and counted (2026-09-17)");
 {
+  /* the reconciler used to be union-only, so a role quietly exempted from the link gate in the UI
+     — a role that can then post ads — stayed forever with nothing to say so */
   const extra = "r-custom";
   rules = rule([extra]); patched = []; created = [];
-  await I.enforceAutomodExemptions(ROLE, NO_CHANS, { errors: [] });
-  A("a hand-added role survives the reconcile", patched[0].body.exempt_roles.includes(extra));
-  A("...alongside the eight", I.AUTOMOD_EXEMPT.every((n) => patched[0].body.exempt_roles.includes(ROLE[n])));
+  let sum = { errors: [] };
+  await I.enforceAutomodExemptions(ROLE, NO_CHANS, sum);
+  A("a hand-added role is removed from the gated rules", patched.every((p) => !p.body.exempt_roles.includes(extra)));
+  A("...leaving exactly the eight", patched.every((p) => p.body.exempt_roles.length === I.AUTOMOD_EXEMPT.length && I.AUTOMOD_EXEMPT.every((n) => p.body.exempt_roles.includes(ROLE[n]))));
   A("...with no duplicates", new Set(patched[0].body.exempt_roles).size === patched[0].body.exempt_roles.length);
+  A("...and the removals are counted (one per gated rule)", sum.automodPruned === 2, String(sum.automodPruned));
+  A("...while the additions are counted separately", sum.automodExempted === 16, String(sum.automodExempted));
+
+  /* the ad/scam rule stays on for everyone: a role exempted from it by hand is pruned too */
+  rules = rule(idsFor(I.AUTOMOD_EXEMPT)); rules[1].exempt_roles = [ROLE.player]; patched = []; sum = { errors: [] };
+  await I.enforceAutomodExemptions(ROLE, NO_CHANS, sum);
+  const ads = patched.find((p) => p.id === "AM2");
+  A("a role exempted from the ad/scam rule by hand is pruned", !!ads && ads.body.exempt_roles.length === 0);
+  A("...and counted", sum.automodPruned === 1, String(sum.automodPruned));
+
+  /* channels are exact too: a hand-exempted channel on the URL gate does not survive */
+  rules = rule(idsFor(I.AUTOMOD_EXEMPT)); rules[2].exempt_channels = ["chan-hand"]; patched = []; sum = { errors: [] };
+  await I.enforceAutomodExemptions(ROLE, NO_CHANS, sum);
+  const url = patched.find((p) => p.id === "AM3");
+  A("a hand-exempted channel on the URL gate is pruned", !!url && url.body.exempt_channels.length === 0);
+  A("...counted as a prune, not an addition", sum.automodPruned === 1 && !sum.automodChannels);
 }
 
 console.log("\n— it degrades safely");
@@ -118,13 +137,25 @@ console.log("\n— a club's management may @ whatever it wants in its own room (
   const spam = patched.find((x) => x.id === "AM4"), ment = patched.find((x) => x.id === "AM5");
   A("the Spam content rule is patched", !!spam);
   for (const n of I.AUTOMOD_MGMT_EXEMPT) A(`...${n} exempt from Spam content`, spam && spam.body.exempt_roles.includes(ROLE[n]));
-  A("...commissioner and staff still exempt (add-only)", spam && spam.body.exempt_roles.includes(ROLE.commissioner) && spam.body.exempt_roles.includes(ROLE.staff));
+  A("...commissioner and staff still exempt (part of the declared set, so exactness cannot prune them)", spam && spam.body.exempt_roles.includes(ROLE.commissioner) && spam.body.exempt_roles.includes(ROLE.staff));
+  A("...the office is declared, not inherited", JSON.stringify(I.AUTOMOD_OFFICE) === JSON.stringify(["commissioner", "staff"]));
   A("...players are NOT exempt from Spam content", spam && !spam.body.exempt_roles.includes(ROLE.player));
   A("the Mention spam rule is patched", !!ment);
   for (const n of I.AUTOMOD_MGMT_EXEMPT) A(`...${n} exempt from Mention spam`, ment && ment.body.exempt_roles.includes(ROLE[n]));
   A("...every club room is exempt from Mention spam", ment && ment.body.exempt_channels.includes("room-bos") && ment.body.exempt_channels.includes("room-dal"));
   A("...a club with no room adds nothing", ment && !ment.body.exempt_channels.includes(null) && ment.body.exempt_channels.length === 2);
   A("...club rooms are NOT exempted from Spam content (generic spam stays gated for the rest of the room)", !spam.body.exempt_channels);
+  {
+    /* Player exempted from both mention-shaped rules by hand: pruned from each, counted twice */
+    rules = mention(idsFor(["commissioner", "staff", ...I.AUTOMOD_MGMT_EXEMPT, "player"]), ["room-bos", "room-dal"]); patched = [];
+    const s2 = { errors: [] };
+    await I.enforceAutomodExemptions(ROLE, NO_CHANS, s2, TEAMS);
+    const m2 = patched.find((x) => x.id === "AM5"), sp2 = patched.find((x) => x.id === "AM4");
+    A("...and a member role exempted from Mention spam by hand is pruned", !!m2 && !m2.body.exempt_roles.includes(ROLE.player));
+    A("...and from Spam content", !!sp2 && !sp2.body.exempt_roles.includes(ROLE.player));
+    A("...the office and the front office untouched", [m2, sp2].every((x) => x && [ROLE.commissioner, ROLE.staff, ...idsFor(I.AUTOMOD_MGMT_EXEMPT)].every((id) => x.body.exempt_roles.includes(id))));
+    A("...two prunes counted", s2.automodPruned === 2, String(s2.automodPruned));
+  }
   A("counted", sum.automodMgmtExempted === I.AUTOMOD_MGMT_EXEMPT.length * 2, String(sum.automodMgmtExempted));
 
   rules = mention(idsFor(["commissioner", "staff", ...I.AUTOMOD_MGMT_EXEMPT]), ["room-bos", "room-dal"]); patched = []; created = []; sum = { errors: [] };

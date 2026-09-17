@@ -129,6 +129,36 @@ console.log("\n— the guards against a fake exodus");
   A("a plausible drop announces normally", d.posts.length === 10 && !d.sum.departSuspicious);
 }
 
+console.log("\n— the census is written only where it changes (2026-09-17)");
+{
+  /* every sweep used to rewrite every present row to move last_seen by two minutes — ~150 upserts
+     a tick for a timestamp nobody reads at that resolution */
+  const writes = [];
+  const base = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    if (String(url).includes("/rest/v1/guild_members") && opts.method === "POST") writes.push(JSON.parse(opts.body).length);
+    return base(url, opts);
+  };
+  seed(["1","2","3"]);
+  const fresh = new Date().toISOString();
+  DB.guild_members.forEach((r) => { r.last_seen = fresh; });
+  let r = await run(["1","2","3"]);
+  A("a census identical to the last one within the hour writes no rows", writes.length === 0 && r.sum.departRowsWritten === 0, JSON.stringify(writes));
+
+  DB.guild_members.find((x) => x.discord_id === "2").last_seen = new Date(Date.now() - 2 * 3600000).toISOString();
+  r = await run(["1","2","3","4"]);
+  A("a stale row (older than an hour) and a new member are the only rows written", writes.length === 1 && writes[0] === 2 && r.sum.departRowsWritten === 2, JSON.stringify(writes));
+  A("...and the stale row's timestamp moved", Date.now() - Date.parse(DB.guild_members.find((x) => x.discord_id === "2").last_seen) < 60000);
+
+  writes.length = 0;
+  /* a member who left (present:false) and came back flips present, so their row IS written */
+  DB.guild_members.find((x) => x.discord_id === "3").present = false;
+  r = await run(["1","2","3","4"]);
+  A("a returning member's row is written (present flips)", writes.length === 1 && writes[0] === 1 && DB.guild_members.find((x) => x.discord_id === "3").present === true);
+  A("the touch window is an hour", I.DEPART_TOUCH_MS === 60 * 60 * 1000);
+  globalThis.fetch = base;
+}
+
 console.log("\n— it does not invent departures");
 {
   seed(["1","2","3"]);

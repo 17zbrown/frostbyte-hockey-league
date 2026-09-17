@@ -26,20 +26,23 @@ if [ ! -f /etc/chel-bot.env ]; then
   NEED_ENV=1
 fi
 
+# Two long-running units: the Discord gateway bot and, separately, the EA score poller — separate
+# so a gateway exit can never take the box-score import down with it.
 install -m 644 deploy/chel-bot.service /etc/systemd/system/
+install -m 644 deploy/chel-ea-poll.service /etc/systemd/system/
 install -m 644 deploy/chel-bot-update.service /etc/systemd/system/
 install -m 644 deploy/chel-bot-update.timer /etc/systemd/system/
 chmod +x deploy/update.sh
 systemctl daemon-reload
-systemctl enable chel-bot chel-bot-update.timer
+systemctl enable chel-bot chel-ea-poll chel-bot-update.timer
 systemctl start chel-bot-update.timer
 
 if [ "${NEED_ENV:-0}" = "1" ]; then
   echo ""
   echo ">>> Now edit /etc/chel-bot.env with the four values from Netlify's environment"
-  echo ">>> variables, then run:  sudo systemctl start chel-bot"
+  echo ">>> variables, then run:  sudo systemctl start chel-bot chel-ea-poll"
 else
-  systemctl restart chel-bot
-  echo "chel-bot (re)started."
+  systemctl restart chel-bot chel-ea-poll
+  echo "chel-bot and chel-ea-poll (re)started."
 fi
-echo "Check it:  systemctl status chel-bot   and   journalctl -u chel-bot -f"
+echo "Check them:  systemctl status chel-bot chel-ea-poll   and   journalctl -u chel-bot -u chel-ea-poll -f"

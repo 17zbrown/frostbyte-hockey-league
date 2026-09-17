@@ -5,7 +5,10 @@ import { createClubNotices, buildNoticeEmbed, KIND_STYLE } from "../bot/club-not
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 const world = { teams: { "t-bos": { id: "t-bos", code: "BOS", discord_channel_id: "room-bos" }, "t-nyi": { id: "t-nyi", code: "NYI", discord_channel_id: null } },
-  profiles: { "u-gm": { gamertag: "Mr. Plow" } }, claims: new Set(), posts: [], patches: [], failPost: false, unposted: [] };
+  profiles: { "u-gm": { gamertag: "Mr. Plow" } }, claims: new Set(), posts: [], patches: [], unposted: [],
+  /* failPost: false | 404 (Discord provably refused it) | 500 (edge error — delivery unknown) | "hang" (the
+     socket never answers); postAttempts counts every POST /messages so "sent once" is provable */
+  failPost: false, postAttempts: 0, failPatch: false };
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = (opts.method || "GET").toUpperCase();
   const J = (b, s = 200) => new Response(b === null ? null : JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
@@ -14,8 +17,17 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/discord_post_log") && m === "POST") { const ref = JSON.parse(opts.body).ref; if (world.claims.has(ref)) return J(null, 409); world.claims.add(ref); return J(null, 201); }
   if (u.includes("/rest/v1/discord_post_log") && m === "DELETE") { const ref = decodeURIComponent(u.split("ref=eq.")[1]); world.claims.delete(ref); return J(null, 204); }
   if (u.includes("/rest/v1/club_notices?posted_at=is.null")) return J(world.unposted);
-  if (u.includes("/rest/v1/club_notices?id=eq.") && m === "PATCH") { world.patches.push({ id: decodeURIComponent(u.split("id=eq.")[1]), body: JSON.parse(opts.body) }); return J(null, 204); }
-  if (u.includes("discord.com") && m === "POST") { if (world.failPost) return new Response("nope", { status: 500 }); world.posts.push({ channel: u.split("/channels/")[1].split("/")[0], body: JSON.parse(opts.body) }); return J({ id: "m" + world.posts.length }); }
+  if (u.includes("/rest/v1/club_notices?id=eq.") && m === "PATCH") {
+    if (world.failPatch) return new Response("db down", { status: 503 });
+    world.patches.push({ id: decodeURIComponent(u.split("id=eq.")[1]), body: JSON.parse(opts.body) }); return J(null, 204);
+  }
+  if (u.includes("discord.com") && m === "POST") {
+    world.postAttempts++;
+    if (world.failPost === "hang") return new Promise(() => {});
+    if (world.failPost === 404) return J({ message: "Unknown Channel" }, 404);
+    if (world.failPost === 500) return new Response("nope", { status: 500 });
+    world.posts.push({ channel: u.split("/channels/")[1].split("/")[0], body: JSON.parse(opts.body) }); return J({ id: "m" + world.posts.length });
+  }
   return J([]);
 };
 const env = { SB_URL: "https://sb.invalid", SB_KEY: "k", BOT: "t" };
@@ -38,11 +50,48 @@ console.log("\n— the cases that must not post");
   const C = createClubNotices(env);
   A("a club with no room is skipped", (await C.announce(row({ id: "n2", team_id: "t-nyi" }))) === "no-room" && world.posts.length === 1);
   A("an already-posted row is skipped", (await C.announce(row({ id: "n3", posted_at: "2026-09-14T01:01:00Z" }))) === "already");
-  world.failPost = true;
+  world.failPost = 404;
   const r = await C.announce(row({ id: "n4" }));
   world.failPost = false;
-  A("a failed delivery releases its claim and records the error", r === "error" && !world.claims.has("club:n4") && world.patches.some((x) => x.id === "n4" && x.body.post_error));
+  A("a delivery Discord provably refused releases its claim and records the error", r === "error" && !world.claims.has("club:n4") && world.patches.some((x) => x.id === "n4" && x.body.post_error));
   A("...so a retry can land it", (await C.announce(row({ id: "n4" }))) === "announced");
+}
+console.log("\n— an unknown outcome is never re-sent, and never released (audit 2026-09-17, P2-12)");
+{
+  const C = createClubNotices(env, { discordTimeoutMs: 30 });
+  world.failPost = 500; world.postAttempts = 0;
+  const r = await C.announce(row({ id: "n7" }));
+  A("a 5xx from Discord is 'unconfirmed', not an error to retry", r === "unconfirmed" && C.sum.unconfirmed === 1);
+  A("...sent exactly ONCE — no retry loop on a 5xx", world.postAttempts === 1);
+  A("...the claim is KEPT, so no lane can post it again", world.claims.has("club:n7"));
+  A("...and the row says why, with posted_at still null", world.patches.some((x) => x.id === "n7" && /^unconfirmed:/.test(x.body.post_error) && !x.body.posted_at));
+  world.failPost = false; world.postAttempts = 0;
+  A("announcing it again (the catch-up) sends nothing", (await C.announce(row({ id: "n7" }))) === "unconfirmed" && world.postAttempts === 0);
+
+  world.failPost = "hang"; world.postAttempts = 0;
+  const t0 = Date.now();
+  const r2 = await C.announce(row({ id: "n8" }));
+  A("a socket that never answers is abandoned at the deadline, not waited on", r2 === "unconfirmed" && Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  A("...sent once, claim kept, marked as a timeout", world.postAttempts === 1 && world.claims.has("club:n8") && /timed out/.test(C.errors[C.errors.length - 1]));
+  A("...and both count as lane errors for the heartbeat", C.sum.errors === 2 && C.sum.lastErrorAt && /n8/.test(C.sum.lastError));
+  world.failPost = false;
+}
+console.log("\n— Discord accepted it, the stamp failed: the claim stays");
+{
+  const C = createClubNotices(env, { catchUpAgeMs: 0 });
+  world.failPatch = true; world.postAttempts = 0;
+  const before = world.posts.length;
+  const r = await C.announce(row({ id: "n9" }));
+  A("delivered, reported as announced-but-unstamped", r === "announced-unstamped" && world.posts.length === before + 1 && C.sum.announced === 1 && C.sum.stampFailed === 1);
+  A("the claim is kept — releasing after a delivery is the other double post", world.claims.has("club:n9"));
+  A("...and it is a lane error the heartbeat will show", C.sum.errors === 1 && /posted_at would not write/.test(C.sum.lastError));
+  world.failPatch = false; world.postAttempts = 0;
+  world.unposted = [row({ id: "n9" })];
+  const n = await C.catchUp();
+  A("the next catch-up writes the stamp WITHOUT posting again", world.postAttempts === 0 && world.posts.length === before + 1 && n === 0);
+  A("...and posted_at lands", world.patches.some((x) => x.id === "n9" && x.body.posted_at));
+  A("...after which the row is ordinary again", (await C.announce(row({ id: "n9" }))) === "claimed-elsewhere");
+  world.unposted = [];
 }
 console.log("\n— the catch-up posts what realtime missed");
 {

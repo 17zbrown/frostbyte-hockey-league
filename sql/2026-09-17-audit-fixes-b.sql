@@ -141,3 +141,11 @@ select public._splice_fn('public.automation_watchdog()', variadic array[
   '(''draft-watchdog'', interval ''1 hour''),
       (''resolve-servers'', interval ''1 hour''),', '1']);
 commit;
+
+-- ==== I-17 · hygiene: the new trigger functions are not executable through the API ====
+revoke execute on function public.move_registration_note() from public, anon, authenticated;
+revoke execute on function public.clear_lineups_on_roster_remove() from public, anon, authenticated;
+revoke execute on function public.guard_trade_assets() from public, anon, authenticated;
+revoke execute on function public.guard_roster_identity() from public, anon, authenticated;
+revoke execute on function public.stamp_availability() from public, anon, authenticated;
+revoke execute on function public.review_records_on_stats_write() from public, anon, authenticated;

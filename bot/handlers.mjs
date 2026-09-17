@@ -10,11 +10,73 @@
 //                  discord-sync census diff from reporting the same departure again.
 // If this process dies, nothing is lost: the sweeps simply take over at their own pace.
 //
+// This file also exports the bot's transport (timedFetch + the two deadlines, withRetries) —
+// the one definition every instant lane in bot/ imports, so "every call has a deadline" and
+// "a POST /messages is never re-sent on an unknown outcome" are decided once.
+//
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID.
 
 import { buildDepartureEmbed } from "../shared/departure-card.mjs";
 
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
+
+/* ================= the bot's transport: every call has a deadline =================
+   One definition for all four instant lanes (role-sync, club-notices, incidents, staff-alerts
+   import these), kept here rather than in a module of its own because this file already owns the
+   bot's failure posture. Before this, no Discord or Supabase call in the bot carried a timeout: a
+   socket that stopped answering mid-response hung its lane forever — and role-sync's serial
+   worker meant one hung member stalled every instant role change behind it (audit 2026-09-17,
+   P2-12). The deadlines are the audit's: 15 s for Discord, 10 s for Supabase. */
+export const DISCORD_TIMEOUT_MS = 15_000;
+export const SB_TIMEOUT_MS = 10_000;
+
+/* fetch with a hard deadline that covers the WHOLE exchange — headers and body — and rejects even
+   if the underlying fetch ignores its signal (a stubbed fetch in a test, say). The body is read
+   inside the window and re-wrapped, so callers keep the familiar Response surface (ok, status,
+   headers.get, text(), json()) and nothing downstream can hang on a stalled body stream. Timeouts
+   are tagged `timeout` and `ambiguous`: the request may or may not have been processed. fetch is
+   resolved from the global at call time so tests can stub it after import. */
+export async function timedFetch(url, o = {}, ms) {
+  const ctl = new AbortController();
+  /* deliberately NOT unref'd: an in-flight request is real work, and a process whose only
+     pending work is a request that has stopped answering must live long enough to time it out
+     and log it, not exit with the outcome unknown. Bounded by ms, and every shutdown path in
+     bot/ exits explicitly, so it can never hold a stop hostage. */
+  const timer = setTimeout(() => ctl.abort(), ms);
+  const timedOut = () => {
+    const e = new Error(`${o.method || "GET"} ${String(url).split("?")[0]} timed out after ${ms} ms`);
+    e.timeout = true; e.ambiguous = true;
+    return e;
+  };
+  try {
+    const { res, text } = await new Promise((resolve, reject) => {
+      ctl.signal.addEventListener("abort", () => reject(timedOut()), { once: true });
+      Promise.resolve()
+        .then(() => globalThis.fetch(url, { ...o, signal: ctl.signal }))
+        .then((r) => r.text().then((t) => ({ res: r, text: t })))
+        .then(resolve, reject);
+    });
+    /* a null-body status refuses a body — and an empty text is the same thing to every caller */
+    const nullBody = text === "" || res.status === 204 || res.status === 205 || res.status === 304;
+    return new Response(nullBody ? null : text, { status: res.status, statusText: res.statusText, headers: res.headers });
+  } catch (e) {
+    if (e && (e.name === "AbortError" || e.name === "TimeoutError")) throw timedOut();
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+/* Bookkeeping that follows a delivered message (welcomed_members, club_notices.posted_at) is the
+   write that must not be lost to a blip: Discord has already accepted the message, so a lost
+   stamp means the sweep sends it again. Three attempts with a short backoff, then the caller
+   decides what "still failing" means for its ledger. */
+export async function withRetries(fn, tries = 3, baseDelayMs = 500) {
+  let err;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); }
+    catch (e) { err = e; if (i + 1 < tries) await new Promise((r) => setTimeout(r, baseDelayMs * (i + 1))); }
+  }
+  throw err;
+}
 
 export function createHandlers(env, opts = {}) {
   const { SB_URL, SB_KEY, BOT, GUILD } = env;
@@ -24,44 +86,64 @@ export function createHandlers(env, opts = {}) {
   const BURST_CAP = opts.burstCap ?? 15;
   const BURST_WINDOW_MS = opts.burstWindowMs ?? 10 * 60 * 1000;
   const gatewayState = opts.gatewayState;
+  const SB_MS = opts.sbTimeoutMs ?? SB_TIMEOUT_MS;
+  const D_MS = opts.discordTimeoutMs ?? DISCORD_TIMEOUT_MS;
 
   const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
 
-  // Same transient-failure posture as the sweeps: retry the fetch itself on network blips,
-  // respect Retry-After on 429, back off on Discord 5xx.
-  async function rfetch(url, o, tries = 3) {
+  /* Same transient-failure posture as the sweeps — retry the fetch itself on a network blip —
+     with two limits the sweeps lack. A TIMEOUT is not a blip: it is ten seconds of nothing, and
+     stacking three of them stalls the lane for half a minute, so it is thrown as the failure it
+     is. And only an IDEMPOTENT request is retried at all: a POST whose socket died after the
+     bytes went out may have landed, and sending it again is how a departure gets logged twice. */
+  async function rfetch(url, o, ms, tries = 3) {
+    const idempotent = (o.method || "GET") !== "POST";
     let err;
     for (let i = 0; i < tries; i++) {
-      try { return await fetch(url, o); }
-      catch (e) { err = e; await new Promise((r) => setTimeout(r, 400 * (i + 1))); }
+      try { return await timedFetch(url, o, ms); }
+      catch (e) {
+        err = e;
+        if (e.timeout || !idempotent) { if (!idempotent) e.ambiguous = true; throw e; }
+        await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      }
     }
     throw err;
   }
   async function sbGet(path) {
-    const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() });
+    const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHead() }, SB_MS);
     if (!r.ok) throw new Error(`GET ${path} -> ${r.status} ${await r.text()}`);
     return r.json();
   }
   async function sbPost(path, body, prefer) {
     const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { method: "POST",
-      headers: { ...sbHead(), Prefer: prefer || "return=minimal" }, body: JSON.stringify(body) });
+      headers: { ...sbHead(), Prefer: prefer || "return=minimal" }, body: JSON.stringify(body) }, SB_MS);
     if (!r.ok) throw new Error(`POST ${path} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
     const t = await r.text(); return t ? JSON.parse(t) : null;
   }
   async function sbPatch(path, body) {
     const r = await rfetch(`${SB_URL}/rest/v1/${path}`, { method: "PATCH",
-      headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify(body) });
+      headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify(body) }, SB_MS);
     if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
   }
+  /* Retry-After on a 429 is always honored — a 429 is a definitive rejection, the request was
+     not processed. A 5xx is only retried when the request is idempotent (GET, PATCH): for a
+     POST /messages a 502 from the edge says nothing about whether Discord stored the message,
+     and re-sending is exactly the double post the claim ledgers exist to prevent. So a
+     non-idempotent 5xx, like a timeout, is thrown tagged `ambiguous` and the caller keeps its
+     claim (audit 2026-09-17, P2-12). */
   async function dApi(method, path, body) {
+    const idempotent = method !== "POST";
     for (let attempt = 0; attempt < 4; attempt++) {
       const r = await rfetch(`https://discord.com/api/v10${path}`, {
         method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body)
-      });
+      }, D_MS);
       if (r.status === 404) return { __notfound: true };   // callers MUST check — see dPost
       if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
-      if (r.status >= 500) { await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue; }
+      if (r.status >= 500) {
+        if (!idempotent) { const e = new Error(`${method} ${path} -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }
+        await new Promise((res) => setTimeout(res, 600 * (attempt + 1))); continue;
+      }
       if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${(await r.text()).slice(0, 120)}`);
       const t = await r.text();
       return t ? JSON.parse(t) : null;
@@ -177,8 +259,13 @@ export function createHandlers(env, opts = {}) {
         content: welcomeText(m.id, { rules: byName["rules"], general: byName["general-chat"] }),
         allowed_mentions: { users: [m.id] },
       });
-      await markWelcomed(m.id);
       sum.welcomed++;
+      /* Discord has the greeting now; the record is what stops the sweep sending a second one.
+         There is no claim to hold here (welcomed_members IS the claim), so a record that will
+         not write after three tries is reported loudly and the duplicate is the sweep's — better
+         a member greeted twice than a lane that pretends it recorded something it did not. */
+      try { await withRetries(() => markWelcomed(m.id)); }
+      catch (e) { recordError(`welcome-record ${m.id} (greeted, unrecorded — the sweep may greet again)`, e); return "welcomed-unrecorded"; }
       return "welcomed";
     } catch (e) { recordError(`welcome ${m && m.id}`, e); return "error"; }
   }
@@ -262,13 +349,29 @@ export function createHandlers(env, opts = {}) {
   /* A heartbeat that only proves "the timer fired" is worse than none: it makes a deaf bot look
      healthy on the Automations panel and satisfies the watchdog's staleness check. So the row
      reports the GATEWAY's state, and a disconnected bot writes ok:false — which the watchdog's
-     failing-run branch pages on, without waiting out the 10-minute staleness window. */
+     failing-run branch pages on, without waiting out the 10-minute staleness window.
+
+     opts.lanes — [{ key, sum }] for the instant lanes chel-bot.mjs wires up. Each lane's note()
+     keeps sum.errors / sum.lastErrorAt / sum.lastError, and a lane error inside the last hour
+     flips ok:false exactly as one of this file's own does: a role PATCH or a club-room post that
+     failed used to be visible only in the journal, while the row the watchdog reads stayed green
+     (audit 2026-09-17). The sweep grades itself the same way — any failed member PATCH is a
+     failing run — so the two lanes' rows now mean the same thing. */
   async function beat(opts = {}) {
     const nowIso = new Date().toISOString();
+    const HOUR = 60 * 60 * 1000;
     const gw = typeof gatewayState === "function" ? gatewayState() : { connected: true, detail: "not instrumented" };
-    const recent = errors.filter((e) => Date.now() - e.at < 60 * 60 * 1000);
+    const recent = errors.filter((e) => Date.now() - e.at < HOUR);
+    const lanes = (opts.lanes || []).filter((L) => L && L.sum);
+    const laneErrors = lanes.reduce((n, L) => n + (L.sum.errors || 0), 0);
+    const laneRecent = lanes.filter((L) => L.sum.lastErrorAt && Date.now() - L.sum.lastErrorAt < HOUR)
+      .sort((a, b) => b.sum.lastErrorAt - a.sum.lastErrorAt);
     const fatal = opts.fatal || null;
-    const healthy = recent.length === 0 && gw.connected !== false && !fatal;
+    const healthy = recent.length === 0 && laneRecent.length === 0 && gw.connected !== false && !fatal;
+    /* the most recent failure wins the lastError slot, whichever lane it came from */
+    const ownLast = errors.length ? errors[errors.length - 1] : null;
+    const laneLast = laneRecent[0] ? { at: laneRecent[0].sum.lastErrorAt, error: `${laneRecent[0].key}: ${laneRecent[0].sum.lastError}` } : null;
+    const latest = ownLast && laneLast ? (ownLast.at >= laneLast.at ? ownLast : laneLast) : (ownLast || laneLast);
     await cfgSet("rl_gateway-bot", nowIso);
     await cfgSet("rl_gateway-bot_result", JSON.stringify({
       at: nowIso, ok: healthy, connected: gw.connected !== false,
@@ -278,8 +381,10 @@ export function createHandlers(env, opts = {}) {
       uptimeMin: Math.round((Date.now() - startedAt) / 60000),
       ...(opts.extra || {}),          // e.g. the incident lane's own liveness
       errCount: errors.length,
+      laneErrors,                     // every failed instant-lane operation since this process started
+      laneErrorsRecent: laneRecent.length,   // lanes with a failure inside the last hour (what flips ok)
       lastError: fatal || (gw.connected === false ? `not connected to Discord (${gw.detail})` : null)
-        || (errors.length ? errors[errors.length - 1].error : null)
+        || (latest ? latest.error : null)
     }));
   }
 

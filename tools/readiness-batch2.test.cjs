@@ -56,7 +56,7 @@ console.log("\n— a same-night double-header can't misfile a box score (v2.37: 
   A("...taking the EARLIEST open fixture in window (a 2-2-3 night files each match on its own slot)", /function fixtureForMatch\(fixtures, teamA, teamB, matchEndMs[\s\S]{0,900}\.filter\(pair\)\.sort\(byTime\)\.filter\(/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "shared", "game-window.cjs"), "utf8")));
   A("...a match with no end time is never guessed onto a fixture", /EA gave this match no end time — it cannot be placed in a game window/.test(ingest));
   A("...and the day-either-side fallback is gone from the automatic path (a commissioner replay is the one relaxed caller)", !/days <= 1/.test(ingest) && !/no scheduled game for these clubs within a day of/.test(ingest));
-  A("...logged as unmatched, never silently dropped", /await logAttempt\(norm, raw, "unmatched", why\);/.test(ingest));
+  A("...logged as unmatched, never silently dropped", /await archive\(ctx, norm, raw, "unmatched", why\);/.test(ingest));
   A("the behavior itself is exercised end to end by tools/game-window.test.mjs", require("fs").existsSync(require("path").join(__dirname, "game-window.test.mjs")));
 }
 

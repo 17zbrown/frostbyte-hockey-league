@@ -15,11 +15,12 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
 
-/* both places that CREATE a club role must ask for a mentionable role */
-const createMentionable = (src.match(/roles`, \{ name: t\.name, color: wantColor, mentionable: true \}/g) || []).length;
-A("both club-role creation sites create a mentionable role", createMentionable === 2, `found ${createMentionable}/2`);
+/* both places that CREATE a club role must ask for a mentionable role — and, since 2026-09-17, hand
+   Discord an explicit permission set (rolePermissionsAtBirth) instead of inheriting @everyone's */
+const createMentionable = (src.match(/roles`, \{ name: t\.name, color: wantColor, mentionable: true, permissions: rolePermissionsAtBirth\(t\.name, \w+\) \}/g) || []).length;
+A("both club-role creation sites create a mentionable role with explicit permissions", createMentionable === 2, `found ${createMentionable}/2`);
 A("no club-role creation site still creates a non-mentionable role",
-  !src.includes("{ name: t.name, color: wantColor, mentionable: false }"));
+  !/\{ name: t\.name, color: wantColor, mentionable: false/.test(src));
 
 /* the every-sweep reconcile flips an existing club role back to mentionable if it drifted off */
 A("the sweep reads each club role's current mentionable flag",
