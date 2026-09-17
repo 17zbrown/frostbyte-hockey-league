@@ -87,7 +87,7 @@ Tampering with another club's rostered players is a discipline matter.
 
 Set your lines at #/hub/lines. Three lines across all six positions, and you can dress the whole week at once. A goalie's 6-game week is two nights, so a goalie can backstop two lines.
 
-**Lineups lock 30 minutes before puck drop.** The game code goes out at that same mark, to management and the players dressed that night.
+**Lineups lock 30 minutes before puck drop.** The game code goes out 30 minutes before the night's first game, to the two clubs' rosters and front offices only. Change a locked lineup and the other club and the officials are told automatically — who came out, who went in, and the penalties you owe.
 
 After the lock you can only substitute for a genuine emergency (a disconnect, a hardware failure, a personal emergency), using a rostered eligible player, reported to the league office before the game starts.
 
