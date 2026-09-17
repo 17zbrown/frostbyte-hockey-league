@@ -91,6 +91,13 @@
   to = "/.netlify/functions/discord-join"
   status = 200
 
+# The request-reachable door to the Discord sweep (diag / register / setup / reconcile / run-now).
+# discord-sync itself is scheduled, and Netlify refuses external HTTP to scheduled functions.
+[[redirects]]
+  from = "/api/discord-ops"
+  to = "/.netlify/functions/discord-ops"
+  status = 200
+
 # Discord interactions endpoint for the #lfg pickup bot (slash command + button/select callbacks).
 # This URL goes in the Discord Developer Portal under "Interactions Endpoint URL".
 [[redirects]]
