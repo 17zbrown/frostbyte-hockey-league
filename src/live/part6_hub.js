@@ -268,7 +268,7 @@ CG.hubDashboard = function(){
       cards.push('<div class="card" '+(av?"":'style="border-color:var(--chrome-deep);background:var(--chrome-tint)"')+'>'+
         '<div class="card-h"><h3>'+esc(CG.WEEK8.label)+' availability</h3><span class="chip '+(av?"chip-win":"chip-warn")+'">'+(av?"Submitted":"Due Wed 7:30 PM ET")+'</span></div>'+
         '<div class="card-b">'+(av
-          ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+'. You can edit until the deadline.</p>'
+          ? '<p class="small" style="color:var(--steel)">Logged '+CG.fmtFull(av.at)+(av.late?' — <b>recorded as late</b> (Rule 5.1)':'')+'. You can edit until the deadline; a change after it is accepted at your club’s discretion and recorded as late.</p>'
           : '<p class="small" style="color:var(--steel)">Your club’s management builds lineups from this — 30 seconds now saves a scramble later.</p>')+
         '<a class="btn '+(av?"btn-ghost":"btn-chrome")+' btn-sm" style="margin-top:12px" href="#/hub/availability">'+(av?"Review / edit":"Submit availability")+'</a></div></div>');
     } else {
@@ -381,7 +381,7 @@ CG.tonightCard = function(me, myGame, inLineup){
   var note = (myGame && inLineup)
     ? '<div class="card-b" style="border-top:1px solid var(--line)"><p class="small" style="color:var(--steel)">'+
       "You’re in the confirmed lineup at "+CG.POS_NAME[me.pos]+". Your private game code goes live at "+
-      CG.fmtTime(myGame.at-30*60000)+" — open the matchup to grab it."+'</p></div>'
+      CG.fmtTime(CG.codeReleaseAt(myGame))+" (30 minutes before the night’s first game) — open the matchup to grab it."+'</p></div>'
     : '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Tap any game for confirmed lines, server settings, and the private lobby code (Rule 4.2).</span></div>';
   return '<div class="card" style="grid-column:1/-1"><div class="card-h"><h3>Tonight’s slate</h3>'+
     '<span class="chip chip-live"><span class="live-dot"></span>'+lg.tonight.length+' game'+(lg.tonight.length===1?"":"s")+'</span></div>'+
@@ -394,7 +394,12 @@ CG.hubAvailability = function(){
   if (!CG.can("availability.submit") && !CG.can("availability.viewTeam")) return CG.unauthorized();
   /* with no game week scheduled the window isn't "closed", it hasn't opened — and `now > null`
      coerces to true, which would otherwise show the deadline-passed state before a season exists */
-  var closed = CG.WEEK8.open && CG.now() > CG.WEEK8.deadline;
+  /* Rule 5.1: the deadline is soft — an answer after it is still accepted (at management's
+     discretion) but the database records it as late (v2.57). So the form stays open; `past`
+     only changes what the page says. It used to hard-lock the buttons and promise a
+     commissioner override that did not exist. */
+  var past = CG.WEEK8.open && CG.now() > CG.WEEK8.deadline;
+  var closed = false;
   var mine = me ? CG.availGet(me.id) : null;
   var h = '<div style="margin-bottom:22px"><span class="eyebrow chr">'+esc(CG.WEEK8.label)+
       (CG.WEEK8.open ? ' · deadline '+CG.fmtFull(CG.WEEK8.deadline) : ' · not yet scheduled')+'</span>'+
@@ -403,7 +408,8 @@ CG.hubAvailability = function(){
   var form = !me
     ? '<div class="note">You’re viewing as league staff — no player profile, so there’s nothing personal to submit. The team grid below is what management and staff see.</div>'
     : '<div class="card"><div class="card-h"><h3>My submission</h3>'+
-    '<span class="chip '+(mine?"chip-win":closed?"chip-loss":"chip-warn")+'">'+(closed?"Window closed":mine?"Submitted "+CG.fmtDay(mine.at):"Not submitted")+'</span></div>'+
+    '<span class="chip '+(mine?(mine.late?"chip-warn":"chip-win"):past?"chip-loss":"chip-warn")+'">'+(mine?("Submitted "+CG.fmtDay(mine.at)+(mine.late?" · late":"")):past?"Past the deadline":"Not submitted")+'</span></div>'+
+    (past?'<div class="note" style="margin:0 0 12px">The '+esc(CG.WEEK8.label)+' deadline was '+CG.fmtFull(CG.WEEK8.deadline)+'. You can still answer — your club decides whether to use it for lineups, and the league office records it as late (Rule 5.1).</div>':"")+
     '<div class="card-b">'+
     (closed && !mine ? '<div class="empty"><b>The '+esc(CG.WEEK8.label)+' window has closed</b><p>Availability locked at the deadline. Message your GM — a commissioner can still enter a late submission with an override.</p></div>'
     : CG.WEEK8.nights.map(function(n,i){
@@ -463,7 +469,8 @@ CG.hubAvailability = function(){
           '<td class="tnum">'+p.pos+'</td>'+
           CG.WEEK8.nights.map(function(n){ return '<td>'+cell(n.key)+'</td>'; }).join("")+
           '<td class="tleft small" style="color:var(--steel);max-width:220px">'+esc(note)+'</td>'+
-          '<td class="tnum" style="font-size:11px">'+(silent?'<span class="chip chip-loss" style="font-size:9px">no response</span>':CG.fmtDay(av.at))+'</td></tr>';
+          '<td class="tnum" style="font-size:11px">'+(silent?'<span class="chip chip-loss" style="font-size:9px">no response</span>':CG.fmtDay(av.at)+
+            (av.late?' <span class="chip chip-warn" style="font-size:9px;padding:1px 6px" title="Changed after the 7:30 PM ET deadline — accepted at management’s discretion, recorded as late (Rule 5.1)">late</span>':""))+'</td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">One mark per game, in puck-drop order: ✓ available · ✗ not available · — no answer (? = an older per-night answer). Notes are per night. Opponents never see this grid — they only see your finalized lineup.</span></div></div>';
   }

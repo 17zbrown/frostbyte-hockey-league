@@ -380,6 +380,19 @@ CG.countdown = function(el, targetMs, onElapsed){
 };
 
 /* ---------- MATCHUP CENTER ---------- */
+/* Rule 4.2 (v2.57): the private lobby code and server pick are released 30 minutes before the
+   night's FIRST game — one moment for the whole slate — to the two clubs' rosters and front
+   offices. The database masks the code until then (games_public / can_see_match); these helpers
+   only tell the page when to expect it. */
+CG.nightFirstAt = function(g){
+  var fmt = new Intl.DateTimeFormat("en-CA",{ timeZone:"America/New_York" });
+  var day = fmt.format(new Date(g.at)), first = g.at;
+  ((CG.lg && CG.lg.schedule) || []).forEach(function(x){
+    if (!x.voided && x.at < first && fmt.format(new Date(x.at)) === day) first = x.at;
+  });
+  return first;
+};
+CG.codeReleaseAt = function(g){ return CG.nightFirstAt(g) - 30*60000; };
 CG.gameCode = function(id){
   /* the real code is the one the commissioner sets on the game (EA lobby codes are 6-digit) */
   var g = CG.lg && CG.lg.schedule && CG.lg.schedule.find(function(x){ return x.id===id; });
@@ -498,8 +511,9 @@ CG.ROUTES.matchup = function(id){
       }).join("")+'</div>'+(starsBlurb?'<p class="caption" style="margin-top:12px">'+esc(starsBlurb)+'</p>':"")+'</div></div>'+
     '</div></div>';
   } else {
-    /* PREVIEW: server, code, lineups */
-    var released = now >= g.at - 30*60000;
+    /* PREVIEW: server, code, lineups. The code releases with the night's first game (Rule 4.2);
+       the lineups release with THIS game's lock (Rule 5.3). */
+    var released = now >= CG.codeReleaseAt(g);
     /* Reveal lineups at the SAME moment they lock (T-30), not 60 minutes out. Revealing at T-60
        while the builder stayed editable until T-30 let a manager read the opponent's confirmed
        sheet and then change his own for 30 minutes. Now both sheets appear only once neither can
@@ -520,11 +534,11 @@ CG.ROUTES.matchup = function(id){
       codeBox = '<div class="codebox locked"><span class="lock">'+CG.ic("lock",14)+'Private game code</span><div class="cb-code">Restricted to the two clubs</div>'+
         '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Codes are visible only to rostered players, management, staff, and the commissioner (Rule 4.2).</p></div>';
     } else if (!released){
-      codeBox = '<div class="codebox locked"><span class="lock">'+CG.ic("clock",14)+'Code releases at T-30</span><div class="cb-code">'+CG.fmtTime(g.at-30*60000)+'</div>'+
-        '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Automatic release 30 minutes before puck drop. Never share codes publicly (Rule 4.2).</p></div>';
+      codeBox = '<div class="codebox locked"><span class="lock">'+CG.ic("clock",14)+'Code releases at '+CG.fmtTime(CG.codeReleaseAt(g))+'</span><div class="cb-code">'+CG.fmtTime(CG.codeReleaseAt(g))+'</div>'+
+        '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Automatic release 30 minutes before the night’s first game, to the two clubs only. Never share codes publicly (Rule 4.2).</p></div>';
     } else {
       codeBox = '<div class="codebox"><span class="lock" style="color:var(--chrome)">'+CG.ic("code",14)+'Private game code · live</span><div class="cb-code">'+(CG.gameCode(g.id)||'<span style="opacity:.6;letter-spacing:0;font-size:.7em">code pending</span>')+'</div>'+
-        '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Released '+CG.fmtTime(g.at-30*60000)+' · visible to rostered players and staff only.</p></div>';
+        '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Released '+CG.fmtTime(CG.codeReleaseAt(g))+' · visible to the two clubs and the league office only.</p></div>';
     }
     body += '<div class="grid g23" style="align-items:start"><div class="stack">';
     /* lineups */
@@ -534,7 +548,12 @@ CG.ROUTES.matchup = function(id){
       body += '<div class="grid g2" style="gap:0" id="muLineups">'+[g.away,g.home].map(function(code){
         var slots = CG.plannedLineup(g, code);
         var anyone = ["LW","C","RW","LD","RD","G"].some(function(pos){ return slots[pos] && CG.playerById(lg, slots[pos]); });
-        return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="teamcell" style="margin-bottom:12px">'+CG.crest(code,26)+'<span class="nm">'+esc(CG.TEAM[code].name)+'</span></span>'+
+        /* Rule 5.3 (v2.57): a lineup changed after the lock is marked for BOTH clubs to see, with
+           the penalties it owes — the opponent coordinates the infractions from here. */
+        var lrow = CG._pubLineups ? CG._pubLineups[code+":"+g.id] : null;
+        var postLock = (lrow && lrow.post_lock)
+          ? '<span class="chip chip-warn" style="margin-left:8px" title="Changed after the 30-minute lock (Rule 5.3)">Changed after lock · serves '+(lrow.penalties_owed||0)+' penalt'+((lrow.penalties_owed||0)===1?'y':'ies')+'</span>' : "";
+        return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="teamcell" style="margin-bottom:12px">'+CG.crest(code,26)+'<span class="nm">'+esc(CG.TEAM[code].name)+'</span>'+postLock+'</span>'+
           (anyone ? ["LW","C","RW","LD","RD","G"].map(function(pos){
             var p = slots[pos] && CG.playerById(lg, slots[pos]);
             return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line-soft)">'+

@@ -30,8 +30,11 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 console.log("— the club offers, it does not sign");
 {
   A("the free-agent board calls offer_free_agent", /rpc\("offer_free_agent",\{ p_registration:regId, p_salary:sal, p_years:yrs, p_note:note \}\)/.test(live));
-  A("...and no longer signs unilaterally from the board", !/rpc\("sign_free_agent",\{ p_registration:regId/.test(live));
-  A("the button says Offer", />Offer<\/button>/.test(live));
+  /* v2.57: the FULL format offers and the player decides; the BASIC format has no player-side step —
+     the club signs a waived player outright at the minimum (sign_free_agent) and the button says Sign */
+  A("the full format offers; the basic format signs outright", /rpc\("offer_free_agent"/.test(live) && /rpc\("sign_free_agent",\{ p_registration:regId, p_salary:750000 \}/.test(live));
+  A("the direct signing is gated to the basic format", /if \(basicOffer\)\{[\s\S]{0,400}sign_free_agent/.test(live));
+  A("the button says Offer in full and Sign in basic", /\(basicFA\?'Sign':'Offer'\)/.test(live));
   A("the modal collects salary, term and a note", /id="faSal"/.test(live) && /id="faYears"/.test(live) && /id="faNote"/.test(live));
   A("the copy says the player decides", /You offer, the player decides \(Rule 2\.2\)/.test(live));
 }

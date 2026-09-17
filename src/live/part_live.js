@@ -231,6 +231,13 @@ CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
    Keep this in sync with the GRANT in the lock_down_profiles_columns migration. */
 CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,twitch,live,"+
   "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone";
+/* games: everything but the private lobby code and the server pick. Those two columns are no
+   longer granted to the API roles (v2.57, Rule 4.2): they are read through the games_public view,
+   which masks them unless the database's can_see_match() says the reader is on one of the two
+   clubs (or in the league office) and the night's first game is within 30 minutes. A "*" select on
+   games now fails outright, which is the point — the code cannot leak by accident again. */
+CG.GAME_PUBLIC_COLS = "id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,"+
+  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided";
 
 /* Last known current-season id, remembered across visits so the first query of a cold boot can
    already be scoped. Wrong-but-stale is safe: the season row is re-read in the same batch and the
@@ -249,12 +256,45 @@ CG._seasonHint = function(){
     return (v && CG._UUID_RE.test(v)) ? v : null;
   } catch(e){ return null; }
 };
-CG.buildLiveLeague = async function(){
+/* ---- the boot cache and the delta rebuild ----
+   The last full boot's raw query results. When one game changes (a final lands, a server
+   resolves), league-live re-reads the games table and that game's box score and re-assembles the
+   league from everything else already in hand. Re-running all nineteen boot queries in every open
+   tab on every games event was the "herd" that took the database down at forty tabs
+   (docs/audits/2026-09-17-stress-test.md, P0-3). */
+CG._bootCache = null;
+CG._deltaBoot = async function(cached, gameIds){
+  var q = cached.slice();
+  var games = await CG.sbAll("games", CG.GAME_PUBLIC_COLS, "scheduled_at");
+  if (games.error) throw new Error(games.error.message || "games failed");
+  q[6] = games;
+  var ids = (gameIds||[]).filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
+  if (ids.length && q[12] && !q[12].error){
+    var fresh = await CG.sb.from("game_stats").select("*").in("game_id", ids);
+    if (!fresh.error){
+      var keep = (q[12].data||[]).filter(function(r){ return ids.indexOf(r.game_id) < 0; });
+      q[12] = { data: keep.concat(fresh.data||[]), error:null };
+    }
+  }
+  q[17] = await CG._codesToday();
+  return q;
+};
+/* The masked view: game_code / server come back null unless the database lets THIS reader see
+   them. Scoped to the games around now — codes only exist to be read on the night. */
+CG._codesToday = function(){
+  if (!CG.sb) return Promise.resolve({ data:[], error:null });
+  var now = CG.now ? CG.now() : Date.now();
+  var from = new Date(now - 12*3600000).toISOString(), to = new Date(now + 36*3600000).toISOString();
+  return CG.sb.from("games_public").select("id,game_code,server").gte("scheduled_at", from).lte("scheduled_at", to)
+    .then(function(r){ return r; }, function(e){ return { data:[], error:e }; });
+};
+CG.buildLiveLeague = async function(opts){
+  opts = opts || {};
   var sb = CG.sb;
   CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
   var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
   if (!sb) throw new Error("Supabase client unavailable");
-  var q = await Promise.all([
+  var q = (opts.delta && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta) : await Promise.all([
     sb.from("teams").select("*"),
     sb.from("divisions").select("*").order("sort_order"),
     sb.from("seasons").select("*").order("number", { ascending:false }),
@@ -266,7 +306,7 @@ CG.buildLiveLeague = async function(){
     CG.sbAll("profiles",CG.PROFILE_PUBLIC_COLS,"id"),
     CG.sbAll("roster_spots","*","id"),
     CG.sbAll("contracts","*","id"),
-    CG.sbAll("games","*","scheduled_at"),
+    CG.sbAll("games",CG.GAME_PUBLIC_COLS,"scheduled_at"),
     CG.sbAll("transactions","*","occurred_at",false),
     CG.sbAll("news","*","published_at",false),
     /* both orders go through the builder: sbAll applies filterFn before its own orderCol, so
@@ -303,8 +343,11 @@ CG.buildLiveLeague = async function(){
     /* Career games, ACROSS ALL SEASONS, as ~200 aggregate rows. The box-score load above is
        scoped to one season, so counting career games from it would report 0 for every returning
        player — and the OVR surfaces would call a settled rating "provisional" league-wide. */
-    CG.sb.rpc("career_games_played")
+    CG.sb.rpc("career_games_played"),
+    /* 17: tonight's lobby codes and server picks through the masked view (Rule 4.2) */
+    CG._codesToday()
   ]);
+  CG._bootCache = q;
   if (q[12] && q[12].error){
     CG.LIVE.partial.game_stats = String((q[12].error && q[12].error.message) || q[12].error);
     console.warn("game_stats failed to load — stats shown will be incomplete", q[12].error);
@@ -466,11 +509,13 @@ CG.buildLiveLeague = async function(){
      playoff bracket must never blend a past season's games into this one.
      (career games still span every season — via the career_games_played aggregate, since the
      game_stats load below is scoped to one season.) */
+  var codeById={}; ((q[17]&&!q[17].error&&q[17].data)||[]).forEach(function(c){ codeById[c.id]=c; });
   var schedule = games.filter(function(g){ return !seasonId || g.season_id===seasonId; }).map(function(g){
+    var cc = codeById[g.id]||{};
     return { id:g.id, week:g.week||1, stage:g.stage||"regular",
       home:id2code[g.home_team_id], away:id2code[g.away_team_id],
       at:Date.parse(g.scheduled_at), feature:false,
-      code:g.game_code||null, server:g.server||null, status:g.status,
+      code:cc.game_code||null, server:cc.server||null, status:g.status,
       homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot,
       forfeit:g.forfeit_team_id?id2code[g.forfeit_team_id]:null, voided:!!g.voided,
       eaMatchId:g.ea_match_id||null };
@@ -796,7 +841,7 @@ CG.buildLiveLeague = async function(){
     var base = { nights:{}, at:null };
     ((CG.WEEK8 && CG.WEEK8.nights) || []).forEach(function(n){ base.nights[n.key] = { st:"nr", games:{} }; });
     if (!saved) return base;
-    var out = { at: saved.at, nights: {} };
+    var out = { at: saved.at, late: !!saved.late, lateAt: saved.lateAt||null, nights: {} };
     Object.keys(base.nights).forEach(function(k){
       var v = saved.nights[k];
       if (!v){ out.nights[k] = { st:"nr", games:{} }; return; }
@@ -1559,7 +1604,7 @@ CG.loadMatchupLineups = function(g){
   if (CG._pubLineups[kA] !== undefined && CG._pubLineups[kB] !== undefined) return;   /* cached */
   var ids = [ (CG.lg._codeToId||{})[g.home], (CG.lg._codeToId||{})[g.away] ].filter(Boolean);
   if (ids.length<2) return;
-  CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie")
+  CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie,post_lock,post_lock_count,post_lock_at,penalties_owed")
     .eq("game_id", g.id).in("team_id", ids)
     .then(function(r){
       CG._pubLineups[kA] = null; CG._pubLineups[kB] = null;
@@ -1589,7 +1634,7 @@ CG.loadMyLineups = function(){
   }).sort(function(a,b){ return a.at-b.at; }).slice(0,6);
   if (!mine.length) return Promise.resolve();
   CG._myLineupsAt = CG.now();
-  return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie")
+  return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie,post_lock,post_lock_count,post_lock_at,penalties_owed")
     .eq("team_id", tid).in("game_id", mine.map(function(g){ return g.id; }))
     .then(function(r){
       if (r && r.error) return;                     /* leave it UNKNOWN rather than assert a scratch */
@@ -1615,7 +1660,7 @@ CG.loadMyWeekLineups = function(force){
   nights.forEach(function(n){ (CG.clubGamesOnNight ? CG.clubGamesOnNight(me.team, n) : []).forEach(function(g){ games.push(g); }); });
   if (!games.length) return Promise.resolve();
   CG._myWeekLineupsAt = CG.now();
-  return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie")
+  return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie,post_lock,post_lock_count,post_lock_at,penalties_owed")
     .eq("team_id", tid).in("game_id", games.map(function(g){ return g.id; }))
     .then(function(r){
       if (r && r.error) return;                     /* leave it UNKNOWN rather than assert "not set" */
@@ -1879,7 +1924,9 @@ CG._wrapHubDashboard = function(){
   _hubDashboardProto = CG.hubDashboard;
   CG.hubDashboard = function(){
     var me = CG.me(), r = CG.role();
-    var offers = CG.offersCardHtml() + CG.clubOffersCardHtml() + CG.extensionCardHtml();
+    /* basic format (v2.57): no contract offers and no extensions — clubs sign and trade players
+       outright, so the negotiation cards have nothing to show */
+    var offers = CG.isBasic() ? "" : (CG.offersCardHtml() + CG.clubOffersCardHtml() + CG.extensionCardHtml());
     if (me || r==="staff" || r==="commish" || !CG.auth.profile) return offers + _hubDashboardProto();
     /* A club owner/GM/AGM who holds no roster spot (every manager, pre-season) used to fall into
        the new-member "on the way to a roster spot" onboarding. They run a club — give them a
@@ -4883,11 +4930,14 @@ CG._avail = {};
 CG.loadAvailability = async function(){
   if (!CG.sb || !CG.auth.user || !CG.SEASON || !CG.SEASON.id) return;
   var sid = CG.SEASON.id;
-  var r = await CG.sbAll("availability","profile_id,week_key,nights,submitted_at","week_key",true,
+  var r = await CG.sbAll("availability","profile_id,week_key,nights,submitted_at,first_submitted_at,late,late_at","week_key",true,
     function(qb){ return qb.eq("season_id", sid); });
   CG._avail = {};
   ((r && r.data) || []).forEach(function(row){
-    CG._avail[row.week_key+":"+row.profile_id] = { at: Date.parse(row.submitted_at), nights: row.nights||{} };
+    /* submitted_at and late are stamped by the database (Rule 5.1, v2.57): a post-deadline change
+       is accepted but recorded as late, and the record cannot be back-dated from a browser */
+    CG._avail[row.week_key+":"+row.profile_id] = { at: Date.parse(row.submitted_at), first: row.first_submitted_at ? Date.parse(row.first_submitted_at) : null,
+      late: !!row.late, lateAt: row.late_at ? Date.parse(row.late_at) : null, nights: row.nights||{} };
   });
 };
 CG.availGet = function(pid){ return (CG.WEEK8 && CG.WEEK8.open) ? (CG._avail[CG.WEEK8.key+":"+pid] || null) : null; };
@@ -6385,7 +6435,7 @@ CG.MGMT_ACTION_PAGE = {
   set_team_line:"lines", set_team_line_night:"lines", set_game_lineup:"lines",
   schedule_pick:"schedule",
   trade_propose:"tradehub", accept_trade:"tradehub", trade_decline:"tradehub", trade_cancel:"tradehub",
-  offer_free_agent:"freeagents", respond_offer:"freeagents",
+  offer_free_agent:"freeagents", respond_offer:"freeagents", sign_free_agent:"freeagents",
   draft_make_pick:"draft", save_draft_board:"draft"
 };
 if (!CG.fmtAgo) CG.fmtAgo = function(ts){
@@ -6493,7 +6543,7 @@ CG.reloadLeague = async function(){
    open it refreshes the data in memory but waits to re-draw until
    you're done, so nothing you're doing is interrupted.
    ================================================================ */
-CG._liveT = null; CG._liveBusy = false; CG._liveAgain = false;
+CG._liveT = null; CG._liveBusy = false; CG._liveAgain = false; CG._liveGames = null;
 function pvBusyInteracting(){
   if (CG._holdReload) return true;   /* a form with unsaved edits (the permissions matrix) is on screen */
   var a = document.activeElement, tn = a && a.tagName;
@@ -6501,15 +6551,25 @@ function pvBusyInteracting(){
   var ov = document.getElementById("overlay-root");
   return !!(ov && ov.innerHTML.trim());   /* a modal / drawer / palette is open */
 }
-CG.liveReload = function(){
+/* opts.game: the games row that changed (from the realtime payload). A games-only change is a
+   DELTA rebuild — two reads, not nineteen — and it waits a random 1–9 s so a hundred open tabs
+   spread over the window instead of hitting the database in the same second. A call with no game
+   (a role change, a manual refresh) keeps the fast, full rebuild. */
+CG.liveReload = function(opts){
+  opts = opts || {};
+  if (opts.game){ (CG._liveGames = CG._liveGames || []).push(opts.game); }
+  else CG._liveGames = null;   /* a full reload is owed — a later delta must not downgrade it */
   clearTimeout(CG._liveT);
+  var wait = opts.game ? 1000 + Math.floor(Math.random()*8000) : 1000;
   CG._liveT = setTimeout(function run(){
     if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
     CG._liveBusy = true;
-    CG.buildLiveLeague().then(function(lg){
+    var delta = CG._liveGames; CG._liveGames = null;
+    CG.buildLiveLeague(delta ? { delta: delta } : {}).then(function(lg){
       CG.lg = lg;
       CG.refreshRole();
-      return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
+      /* a game changing does not move rosters, availability or trades */
+      return delta ? null : Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
     }).then(function(){
       /* don't yank the page out from under an active interaction — the data is
          already fresh in memory, so the next navigation shows it. Otherwise
@@ -6524,7 +6584,7 @@ CG.liveReload = function(){
       CG._liveBusy = false;
       if (CG._liveAgain){ CG._liveAgain = false; CG.liveReload(); }
     });
-  }, 1000);
+  }, wait);
 };
 /* one public channel — scores/standings/stats are the same for everyone, so this
    runs for signed-out viewers too. Idempotent: subscribed once for the session. */
@@ -6537,7 +6597,7 @@ CG.subscribeLeague = function(){
        Subscribing to game_stats too made every connected tab, guests included, rebuild the whole
        league a dozen times per game. */
     CG._leagueChannel = CG.sb.channel("league-live")
-      .on("postgres_changes",{ event:"*", schema:"public", table:"games" }, function(){ CG.liveReload(); })
+      .on("postgres_changes",{ event:"*", schema:"public", table:"games" }, function(p){ CG.liveReload({ game: (p && (p.new && p.new.id || p.old && p.old.id)) || "?" }); })
       .subscribe();
   } catch(e){}
 };
@@ -7685,7 +7745,9 @@ CG.staffDirectoryCard = function(){
   var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League staff</h3><span class="chip">'+dir.length+'</span></div>';
   h += dir.map(function(s){
     var depts = (s.departments||[]).map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" ");
-    var canEdit = isCommish || s.id===uid;
+    /* departments are set by the commissioner — a staff member's own edit used to look like it
+       worked while the database quietly kept the old list (v2.57) */
+    var canEdit = isCommish;
     return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
       '<span class="chip '+(s.role==="commissioner"?"chip-chrome":"")+'" style="font-size:9px">'+(s.role==="commissioner"?"COMMISH":"STAFF")+'</span>'+
       '<b style="font-family:var(--f-disp);min-width:120px">'+esc(s.gamertag||"—")+'</b>'+
@@ -12022,7 +12084,7 @@ CG.hubFreeAgents = function(){
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">'+(basicFA?'Waived players':'Free agents')+'</h1>'+
     (basicFA
-      ? '<p class="lede" style="margin-top:8px">Every waived player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends him the one deal the basic format allows — the league minimum, $750K, to the end of the season — which he accepts or declines from his dashboard. He joins your roster the moment he accepts; the league office confirms nothing (Rule 2.2).</p></div>'
+      ? '<p class="lede" style="margin-top:8px">Every waived player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Sign</b> puts him on your roster at the one deal the basic format allows — the league minimum, $750K, to the end of the season. No offer, no acceptance: clubs move players, players are not asked (Rule 2.2).</p>'
       : '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>');
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>'+(basicFA?'waived players':'free agents')+'</span></div>'+
@@ -12048,11 +12110,11 @@ CG.hubFreeAgents = function(){
           '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
             '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'"'+(held?' disabled title="Exclusive to '+esc(rhCode)+' until free agency opens — approaching him is tampering (Rule 2.2)"':'')+'>Approach</button>'+
             '<button class="btn btn-chrome btn-sm" data-fa-sign="'+r.id+'" data-name="'+esc(prof.gamertag||"this player")+'"'+((canSign&&!full&&!held)?"":" disabled")+
-              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="Offers open with free agency"':full?' title="Your roster is full"':'')+'>Offer</button>'+
+              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your roster is full"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(basicFA
-        ? 'You offer, the player decides (Rule 2.2). The deal is fixed — $750K to the end of the season — so he accepts or declines from his dashboard; the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room (including his position group) and the movement deadline are checked again both when you send and when he accepts.'
+        ? 'One button, one deal (Rule 2.2). A waived player signs at the league minimum — $750K to the end of the season — the moment you press Sign; he is not asked, the league office confirms nothing, and he is on your roster immediately. Your cap space and roster room are checked when you sign, and the move is logged for the whole league.</span></div>'
         : 'You offer, the player decides (Rule 2.2). Send terms and the player accepts, counters, or declines from his dashboard — the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room, and the window are checked again both when you send and when he accepts.')+'</span></div>'
     :(basicFA
       ? '<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No waived players right now</b><p>This board lists players a club has waived. Undrafted and late-registering players are placed on clubs by the league office, not signed here (Rule 2.8) — so it fills only when a club lets someone go.</p></div></div>'
@@ -12074,11 +12136,32 @@ CG.AFTER._hubFreeAgents = function(){
   }); });
   document.querySelectorAll("[data-fa-sign]").forEach(function(b){ b.addEventListener("click", function(){
     var regId=this.getAttribute("data-fa-sign"), name=this.getAttribute("data-name");
+    var b=this;
     var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
     var t=(CG.TEAMS||[]).find(function(x){ return uid&&(x.owner===uid||x.gm===uid||x.agm===uid); });
     var used=t?CG.teamPayroll(CG.lg, t.code):0;   /* includes unsigned-contract dead cap (Rule 2.5) */
     var space=Math.max(0,(CG.CAP||60000000)-used);
     var basicOffer = CG.isBasic();
+    if (basicOffer){
+      /* Rule 2.2, basic format (v2.57): there is no offer and no player-side step — the club signs
+         the waived player outright at the league minimum. sign_free_agent does the roster, cap and
+         deadline checks and logs the transaction. */
+      CG.confirm("Sign "+esc(name)+"?",
+        "He joins your roster the moment you confirm — $750K to the end of the season, the one deal a waived player can sign in this format. He is not asked and the league office confirms nothing; the signing is logged for the whole league (Rule 2.2).",
+        "Sign player", function(){
+        var btn=b; btn.disabled=true;
+        CG.mgmtQueue("sign_free_agent", { p_registration:regId, p_salary:750000 }, "sign "+name+" at $750K to the end of the season").then(function(q){ if (q){ btn.disabled=false; return; }
+        CG.sb.rpc("sign_free_agent",{ p_registration:regId, p_salary:750000 }).then(function(r){
+          btn.disabled=false;
+          if (r.error){ CG.toast("Couldn’t sign: "+r.error.message,"err"); return; }
+          if (CG.closeOverlay) CG.closeOverlay();
+          CG.toast(name+" signed — $750K to the end of the season. He’s on your roster.","ok");
+          CG.reloadLeague();
+        });
+        });
+      });
+      return;
+    }
     CG.modal("Offer terms to "+esc(name),
       (basicOffer
         ? '<label class="fld"><span>Salary</span><input id="faSal" type="number" value="0.75" readonly style="opacity:.7"></label>'+

@@ -506,7 +506,7 @@ CG.baseNotifs = function(){
   if (r==="guest") return n;
   var feat = lg.tonight.find(function(g){ return g.feature; });
   if (lg.tonight.length) n.push({ id:"n-codes", t:CG.now()-2*3600000, icon:"code",
-    title:"Game night — codes at T-30", body:"Tonight's private lobby codes go live on each matchup page 30 minutes before puck drop.", route: feat ? "#/matchup/"+feat.id : "#/schedule" });
+    title:"Game night — codes at T-30", body:"Tonight's private lobby codes go live on the matchup pages 30 minutes before the night's first game, to the two clubs in each game.", route: feat ? "#/matchup/"+feat.id : "#/schedule" });
   /* nothing to submit against until a game week exists — and with no deadline there is no date to
      put in the body, so the whole notification is withheld rather than shown half-empty */
   if (CG.WEEK8.open) n.push({ id:"n-avail", t:CG.now()-24*3600000, icon:"cal",
