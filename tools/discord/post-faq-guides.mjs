@@ -29,7 +29,7 @@ const GUIDES = [
   { key: "waive", forum: "management", tag: "Waivers", title: "How to waive a player",
     body: "One button on the Roster page: he leaves immediately, his cap hit clears, and any club with room may sign him at the league minimum until the movement deadline. Rulebook 2.2 · 2.4 · 2.5 · 2.6." },
   { key: "draft", forum: "management", tag: "Draft", title: "How to draft your team",
-    body: "Rank your board before draft day, pick in one click when your clock runs, the snake order, make-up picks and the public draft room. The draft starts at 9:00 AM ET. Rulebook 2.1 · 2.3 · 2.5 · 2.6 · 2.8." },
+    body: "Rank your board before draft day, pick in one click when your clock runs, the snake order, make-up picks and the public draft room. The draft starts at 9:00 PM ET. Rulebook 2.1 · 2.3 · 2.5 · 2.6 · 2.8." },
 ];
 async function api(method, p, body, headers) {
   for (let i = 0; i < 4; i++) {
