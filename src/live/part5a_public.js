@@ -2252,7 +2252,6 @@ CG.ROUTES.player = function(pid, qs){
   var sus = lg.suspensions.find(function(x){ return x.playerId===p.id; });
   var isG = p.pos==="G";
   var me = CG.me();
-  var canSeeAvail = CG.role()==="commish" || CG.role()==="staff" || (me && me.team===p.team && CG.can("availability.viewTeam")) || (me && me.id===p.id);
   /* "no games" has to mean no games at ANY stage: s.gp is regular-season only, and a player
      with a handful of pre-season appearances does have a sample to talk about. */
   var preS = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
@@ -2281,7 +2280,6 @@ CG.ROUTES.player = function(pid, qs){
           (sus? (sus.status==="served"
             ? '<span class="chip chip-warn">Suspension served</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
-          (canSeeAvail?'<span class="chip '+(CG.availGet(p.id)?"chip-win":"chip-warn")+'">'+esc(CG.WEEK8.label)+' availability: '+(CG.availGet(p.id)?"submitted":"not submitted")+'</span>':"")+
         '</div></div>'+
       /* OVR comes from profiles.overall, which the database recomputes after every final
          (compute_overall). It OPENS at 70 and blends onto the real rating across three games, so
@@ -2292,11 +2290,9 @@ CG.ROUTES.player = function(pid, qs){
         CG.ovrNote(p.id)+'</div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
-      (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>'
-        /* "Live" is a semantic status. Before a single game exists it is simply untrue, and a
-           green pill on an 0-0-0 club dilutes the token everywhere else it is used. */
-        :((CG.lg.schedule&&CG.lg.schedule.length)?'<span class="chip chip-win">Live — updates after every final</span>'
-                                                 :'<span class="chip">Season 1 — not yet under way</span>'))+
+      /* v2.60: only the archived warning rides beside the picker — the "Live" and "not yet under
+         way" status pills were noise on a player's own page */
+      (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>':"")+
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+
