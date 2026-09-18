@@ -50,7 +50,9 @@ A("game cards wrap each side as one unit", /<span class="side away">'\+CG\.crest
 A("...and keep the status chip on phones", /\.gamecard \.gc-tag\{display:inline-flex;grid-column:2;justify-self:start\}/.test(css) && !/\.gamecard \.gc-tag\{display:none\}/.test(css));
 A("the stat band is a 2×2 on phones", /\.statline\{display:grid;grid-template-columns:1fr 1fr;gap:0 14px\}/.test(css));
 A("the club page: short tab labels, paired stat tiles, OVR beside the name", /'Roster<span class="hide-xs"> &amp; stats<\/span>'/.test(pub) && /class="grid g4 team-stats"/.test(css.length ? pub : "") && /<th class="tleft">Player<\/th>'\+\(archived\?"":'<th>OVR<\/th>'\)\+'<th>POS<\/th><th class="hide-xs-col">#<\/th>/.test(pub));
-A("the club hero puts crest and rating on one row", /\.hero-row \.crest3d\{order:-2\}/.test(css) && /\.hero-row \.hero-ovr\{order:-1;margin-left:auto/.test(css));
+/* v2.61: the hero is a named-area grid on phones (crest + badge on the top line, the words beneath) */
+A("the club hero puts crest and rating on one row", /grid-template-areas:"crest ovr" "main main"/.test(css) && /\.hero-row \.crest3d\{grid-area:crest/.test(css) && /\.hero-row \.hero-ovr\{grid-area:ovr/.test(css));
+A("...the crest is phone-sized and the name cannot clip", /\.hero-row \.crest3d \.crest\{width:56px !important/.test(css) && /\.hero-main \.h-page\{font-size:clamp\(24px,7\.4vw,34px\);line-height:1\.02;overflow-wrap:anywhere/.test(css));
 A("ranking cards re-flow with the commentary full width", (pub2.match(/class="card-b pr-card"/g)||[]).length === 2 && (pub2.match(/class="pr-body"/g)||[]).length === 2 && /\.pr-card \.pr-body\{grid-column:1\/-1\}/.test(css));
 A("the rulebook's version history is collapsed, the contents stays first", /<details class="card rb-history"/.test(pub2) && !/\.rb-page \.hub-side\{order:2\}/.test(css));
 A("the KPI grids pair up", /\.grid:has\(>\.kpi:first-child\):not\(:has\(>:not\(\.kpi\)\)\)\{grid-template-columns:1fr 1fr !important\}/.test(css));

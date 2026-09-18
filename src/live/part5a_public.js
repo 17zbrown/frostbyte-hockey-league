@@ -2232,8 +2232,8 @@ CG.AFTER.players = function(param, qs){
    and unrostered profiles alike, and the directory searches it. A profile without one says so. */
 CG.eaIdChip = function(eaId){
   return eaId
-    ? '<span class="chip chip-ink" style="border-color:#39434B" title="EA ID — search this name in NHL to find him">'+CG.ic("gamepad",12)+' EA ID · <b style="margin-left:4px">'+esc(eaId)+'</b></span>'
-    : '<span class="chip chip-warn" title="No EA ID on file — box scores cannot be matched to this player until he adds one">EA ID not set</span>';
+    ? '<span class="chip chip-ink" style="border-color:#39434B" title="EA ID: search this name in NHL to find him">EA ID · <b style="margin-left:4px">'+esc(eaId)+'</b></span>'
+    : '<span class="chip chip-ink" style="border-color:#39434B;color:var(--on-ink-dim)" title="No EA ID on file: box scores cannot be matched to this player until he adds one">EA ID not set</span>';
 };
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
@@ -2268,8 +2268,9 @@ CG.ROUTES.player = function(pid, qs){
       '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
-          (p.rookie?'<span class="chip chip-chrome">Rookie</span>':"")+
-          '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>'+
+          /* v2.61: every identity label is the same outlined chip; Message is the one filled action */
+          (p.rookie?'<span class="chip chip-ink" style="border-color:#39434B">Rookie</span>':"")+
+          (p.platform && p.platform!=="—" ? '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>' : "")+
           CG.eaIdChip(p.eaId)+
           /* the envelope: one click into a DM with this player (hidden on your own profile) */
           (CG.auth && CG.auth.user && CG.auth.user.id!==p.id
