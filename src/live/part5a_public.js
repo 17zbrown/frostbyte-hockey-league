@@ -2137,7 +2137,7 @@ CG.ROUTES.players = function(param, qs){
     return !rosteredIds[pr.id] && !pr.banned && (pr.gamertag||pr.display_name);
   }).map(function(pr){
     var reg = regByProfile[pr.id];
-    return { id:pr.id, tag:pr.gamertag||pr.display_name, pos:(reg&&reg.position)||null,
+    return { id:pr.id, tag:pr.gamertag||pr.display_name, pos:(reg&&reg.position)||null, eaId:pr.ea_id||"",
              ovr:(pr.overall==null?null:pr.overall),
              state:(CG.poolState?CG.poolState(pr.id).label:"Signed in") };
   });
@@ -2155,7 +2155,7 @@ CG.ROUTES.players = function(param, qs){
   var list = lg.players.filter(function(p){
     if (fTeam && p.team!==fTeam) return false;
     if (fPos && p.pos!==fPos) return false;
-    if (fQ && p.tag.toLowerCase().indexOf(fQ)<0) return false;
+    if (fQ && p.tag.toLowerCase().indexOf(fQ)<0 && (p.eaId||"").toLowerCase().indexOf(fQ)<0) return false;
     if (fFlag==="rookie" && !p.rookie) return false;
     if (fFlag==="susp" && !lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return false;
     return true;
@@ -2164,7 +2164,7 @@ CG.ROUTES.players = function(param, qs){
      and suspended toggles are roster concepts and leave them out */
   var freeList = (fTeam==="" || fTeam==="FA") && fFlag==="" ? unrostered.filter(function(u){
     if (fPos && u.pos!==fPos) return false;
-    if (fQ && u.tag.toLowerCase().indexOf(fQ)<0) return false;
+    if (fQ && u.tag.toLowerCase().indexOf(fQ)<0 && (u.eaId||"").toLowerCase().indexOf(fQ)<0) return false;
     return true;
   }).sort(function(a,b){ return (b.ovr==null?-1:b.ovr) - (a.ovr==null?-1:a.ovr); }) : [];
   if (fTeam==="FA") list = [];
@@ -2175,6 +2175,7 @@ CG.ROUTES.players = function(param, qs){
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,24)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.TEAM[p.team].name)+'</small></span>'+
         (p.rookie?'<span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+'</span></td>'+
       '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
+      '<td class="tleft mono" style="font-size:12px">'+(p.eaId?esc(p.eaId):'<span class="caption">—</span>')+'</td>'+
       '<td class="tnum">'+s.gp+'</td><td class="tleft tnum" style="font-size:12px">'+stat+'</td>'+
       '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px"'+
         (CG.ovrProgress(p.id).provisional?' title="'+esc(CG.ovrNote(p.id,"title"))+'"':'')+'>'+lg.ratings[p.id].ovr+
@@ -2185,6 +2186,7 @@ CG.ROUTES.players = function(param, qs){
     return '<tr class="rowlink" style="--tc:var(--chrome)" data-go="#/player/'+esc(u.id)+'">'+
       '<td class="tleft"><span class="playercell">'+CG.leagueMark(48,"light-tile")+'<span><span class="nm">'+esc(u.tag)+'</span><small>'+esc(u.state)+'</small></span></span></td>'+
       '<td class="tnum">'+(u.pos||"—")+'</td><td class="tnum">—</td>'+
+      '<td class="tleft mono" style="font-size:12px">'+(u.eaId?esc(u.eaId):'<span class="caption">—</span>')+'</td>'+
       '<td class="tnum">0</td><td class="tleft tnum" style="font-size:12px">—</td>'+
       '<td>'+(u.ovr!=null?'<span class="ovrbox '+CG.ovrClass(u.ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+u.ovr+'</span>':'<span class="caption">—</span>')+'</td></tr>';
   }).join("");
@@ -2192,7 +2194,7 @@ CG.ROUTES.players = function(param, qs){
   var body = shown
     ? '<div class="card"><div class="card-h"><h3>'+shown+' players</h3><span class="chip">Sorted by overall</span>'+
       '<span class="caption" style="margin-left:auto">* still settling — fewer than '+CG.OVR_SETTLE_GP+' games</span></div>'+
-      '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
+      '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th class="tleft">EA ID</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     : '<div class="empty"><div class="e-art">'+CG.ic("user",22)+'</div><b>No players match</b><p>Loosen the filters — everyone who has signed in to the site lives in this directory.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
 };
@@ -2225,6 +2227,14 @@ CG.AFTER.players = function(param, qs){
 };
 
 /* ---------- PLAYER PROFILE ---------- */
+/* The EA ID on every profile (v2.59): the name to search in-game to find, invite or verify a player.
+   Public by design — it is the identity the box scores are matched on — so it shows on rostered
+   and unrostered profiles alike, and the directory searches it. A profile without one says so. */
+CG.eaIdChip = function(eaId){
+  return eaId
+    ? '<span class="chip chip-ink" style="border-color:#39434B" title="EA ID — search this name in NHL to find him">'+CG.ic("gamepad",12)+' EA ID · <b style="margin-left:4px">'+esc(eaId)+'</b></span>'
+    : '<span class="chip chip-warn" title="No EA ID on file — box scores cannot be matched to this player until he adds one">EA ID not set</span>';
+};
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
   pid = pid || (qs && (qs.id || qs.pid)) || null;  /* accept legacy #/player?id=… links */
@@ -2261,6 +2271,7 @@ CG.ROUTES.player = function(pid, qs){
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
           (p.rookie?'<span class="chip chip-chrome">Rookie</span>':"")+
           '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>'+
+          CG.eaIdChip(p.eaId)+
           /* the envelope: one click into a DM with this player (hidden on your own profile) */
           (CG.auth && CG.auth.user && CG.auth.user.id!==p.id
             ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(p.id)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
@@ -2758,9 +2769,11 @@ CG.AFTER.player = function(pid, qs){
      The rest of this handler's selectors are all guarded and no-op on the minimal page; the pickup
      fetch below targets #pickupSection and runs for any account. */
   if (!CG.lg.players.find(function(x){ return x.id===pid; }) && CG.sb){
-    CG.sb.from("profiles").select("gamertag").eq("id", pid).maybeSingle().then(function(r){
+    CG.sb.from("profiles").select("gamertag,ea_id,platform").eq("id", pid).maybeSingle().then(function(r){
       var hdr = document.getElementById("acctHdr"); if (!hdr) return;
       if (r && r.data) hdr.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp);font-size:16px;flex:1">'+esc(r.data.gamertag||"Player")+'</b>'+
+        (r.data.platform?'<span class="chip chip-ink" style="border-color:#39434B">'+esc(r.data.platform)+'</span>':"")+
+        CG.eaIdChip(r.data.ea_id)+
         (CG.auth && CG.auth.user && CG.auth.user.id!==pid
           ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(pid)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
         '</div><p class="caption" style="margin:4px 0 0">This account isn’t on a league roster — only pickup game stats show here.</p>';

@@ -149,3 +149,19 @@ revoke execute on function public.guard_trade_assets() from public, anon, authen
 revoke execute on function public.guard_roster_identity() from public, anon, authenticated;
 revoke execute on function public.stamp_availability() from public, anon, authenticated;
 revoke execute on function public.review_records_on_stats_write() from public, anon, authenticated;
+
+-- ==== v2.59 (2026-09-18) · a registration carries the player's EA ID (Rule 1.1) ====
+create or replace function public.require_guild_membership() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.profiles where id = new.profile_id and in_guild) then
+    raise exception 'JOIN_DISCORD: You must be in the Chel Gaming Discord server to register.' using errcode = 'P0001';
+  end if;
+  /* v2.59: the EA ID is the identity the box scores are matched on and it is shown on every
+     profile — a sign-up without one is not a player the league can score. The office can still
+     register someone by hand (trusted_writer / commissioner) and fix the ID after. */
+  if not (public.trusted_writer() or public.is_commissioner())
+     and not exists (select 1 from public.profiles where id = new.profile_id and coalesce(btrim(ea_id), '') <> '') then
+    raise exception 'EA_ID: Add your EA ID before registering — it is the name the box scores are matched on.' using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
