@@ -87,12 +87,13 @@ console.log("— the record and the briefings");
 }
 for (const f of ["CGHL-Season1-Owners-Briefing.md", "CGHL-Season1-Owners-Briefing-DISCORD.txt"]) {
   const b = R(f);
-  A(`${f}: 15 rounds in a snake (v2.48 basic format)`, /the working figure on the site is 15 rounds in a snake order/.test(b) && !/^10 rounds,/m.test(b) && !/^14 rounds,/m.test(b));
+  /* v2.64: Season 1 is published at 12 rounds (three management seats + 12 picks = the 15-man roster) */
+  A(`${f}: 12 rounds in a snake (v2.64)`, /the published figure is 12 rounds in a snake order/.test(b) && !/^10 rounds,/m.test(b) && !/^14 rounds,/m.test(b));
   A(`${f}: no rookie bidding, no free agency`, /There is no free agency/.test(b) && !/go to rookie bidding/.test(b) && !/rookie bidding/.test(b));
   A(`${f}: says the unplaced are placed, not signed`, /placed on one by the league office at \$750K/.test(b) && !/signs in open free agency like everyone else/.test(b));
   A(`${f}: says ten clubs, not twelve`, !/twelve clubs/.test(b));
   A(`${f}: front office must be complete`, /Your front office must be complete/.test(b));
-  A(`${f}: the cap consequence is spelled out`, /\$43\.5M of the \$50M cap/.test(b));
+  A(`${f}: the cap consequence is spelled out`, /\$27\.5M of the \$50M cap/.test(b));
   A(`${f}: the full-format edition is shelved beside it, not deleted`, /\$39\.25M of a \$40M cap/.test(R(f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt"))));
 }
 console.log(ok ? "\nPASS" : "\nFAIL"); process.exit(ok ? 0 : 1);

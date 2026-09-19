@@ -73,7 +73,8 @@ A("Road to N is empty without a pre-season; eligibility is the cutoff alone in b
 A("rights classes only exist in full", /if \(CG\.fmt\("rights"\) && served > 0/.test(live));
 A("trades: picks are not assets in basic", /if \(!CG\.fmt\("pick_trades"\)\) return \[\];/.test(live) && /Draft picks are not traded in the basic format — trade players only \(Rule 2\.3\)/.test(live));
 A("term selects follow the format", (live.match(/\[1,2,3\]\.slice\(0, CG\.fmt\("max_contract_years"\)\)/g) || []).length === 4 && /\[1,2,3\]\.slice\(0, CG\.fmt\("max_contract_years"\)\)/.test(hub));
-A("the draft board is built to the format's round count, snake copy gated", /var rounds = CG\.fmt\("draft_rounds"\);/.test(live) && /\["as_drawn","Keep the drawn order"/.test(live) && /CG\.fmt\("draft_snake"\)\?CG\.fmt\("draft_rounds"\)\+' rounds in a snake/.test(live));
+/* v2.64: the round count is the commissioner's to publish per season; the format's figure is the default the field offers */
+A("the draft board is built to the rounds the commissioner enters (format figure as the default), snake copy gated", /var rounds = parseInt\(\(document\.getElementById\("dRounds"\)\|\|\{\}\)\.value, 10\);/.test(live) && /if \(key === "draft_rounds"\)\{ var sn = s \|\| CG\.SEASON; if \(sn && sn\.draft_rounds\) return sn\.draft_rounds; \}/.test(live) && /\["as_drawn","Keep the drawn order"/.test(live) && /CG\.fmt\("draft_snake"\)\?CG\.fmt\("draft_rounds"\)\+' rounds in a snake/.test(live));
 A("Rule 2.9 in basic is the sign-up cutoff", /if \(CG\.isBasic\(\)\)\{\s*var s0 = CG\.SEASON \|\| \{\}, dl0 = s0\.signup_deadline_at \|\| s0\.registration_deadline;/.test(live));
 
 console.log("\n— the Seasons editor");

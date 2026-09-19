@@ -170,8 +170,9 @@ console.log("— the owners' briefings, the documents owners actually work from"
     A(`${f}: says an off-lattice figure is refused`, /refused when you type it/.test(b));
     A(`${f}: still states the $750,000 minimum`, /Minimum salary \$750,000/.test(b));
     A(`${f}: tells owners what a pick costs (v2.48 basic: fifteen rounds)`, /the last round pays the\s*\$750,000 league minimum/.test(b));
-    A(`${f}: ...and that round 1 is $4,250,000`, /round 1 is \$4,250,000/.test(b));
-    A(`${f}: ...and that a full class is $37,500,000`, /\$37,500,000/.test(b));
+    /* v2.64: 12 published rounds → $750K + 11 × $250K */
+    A(`${f}: ...and that round 1 is $3,500,000`, /round 1 is \$3,500,000/.test(b));
+    A(`${f}: ...and that a full class is $25,500,000`, /\$25,500,000/.test(b));
     A(`${f}: ...and that an expired clock signs at the same price`, /if your clock expires/.test(b));
   }
 }

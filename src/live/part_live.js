@@ -112,7 +112,12 @@ CG.FORMAT_RULES = {
 CG.FORMAT_NAME = { basic:"Basic format", full:"Full format" };
 CG.seasonFormat = function(s){ s = s || CG.SEASON || {}; return s.format === "full" ? "full" : "basic"; };
 CG.isBasic = function(s){ return CG.seasonFormat(s) === "basic"; };
-CG.fmt = function(key, s){ return CG.FORMAT_RULES[CG.seasonFormat(s)][key]; };
+CG.fmt = function(key, s){
+  /* Rule 2.8 (v2.64): the round count is a commissioner-published season setting — the format's
+     figure is only the default. Mirrors public.season_rules(). */
+  if (key === "draft_rounds"){ var sn = s || CG.SEASON; if (sn && sn.draft_rounds) return sn.draft_rounds; }
+  return CG.FORMAT_RULES[CG.seasonFormat(s)][key];
+};
 /* Rule 5.2: the weekly appearance cap for one player — mirrors public.weekly_cap() */
 CG.weeklyCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat(o.season)];
   if (o.stage === "preseason" && r.preseason) return Infinity;
@@ -4535,7 +4540,7 @@ CG.admDraftLive = function(){
       }).join("")+'</div>'+
       '<div id="dManualWrap" style="display:none;margin-bottom:14px"><span class="eyebrow" style="display:block;margin-bottom:8px">Arrange the order — first pick at the top</span><div id="dManualList"></div></div>'+
       '<div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">'+
-      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+CG.fmt("draft_rounds")+'" readonly title="Set by the season format (Rule 2.8)"></label>'+
+      '<label class="fld" style="max-width:130px;margin:0"><span>Rounds</span><input id="dRounds" type="number" min="1" max="20" value="'+CG.fmt("draft_rounds")+'" title="The number of rounds the board is built to — the season publishes it (Rule 2.8). The format suggests '+CG.FORMAT_RULES[CG.seasonFormat()].draft_rounds+'."></label>'+
       '<button class="btn btn-chrome" id="dGenerate">'+CG.ic("grid",15)+(hasPicks?"Regenerate the board":"Generate the board")+'</button>'+
       (meta?'<button class="btn btn-ghost" id="dAnnounce">Announce the order</button>':"")+
       '</div>'+
@@ -4646,7 +4651,9 @@ CG.AFTER._admDraft = function(){
   renderManual();
   var gen = document.getElementById("dGenerate");
   if (gen) gen.addEventListener("click", function(){
-    var rounds = CG.fmt("draft_rounds");   /* Rule 2.8: the round count is the format's — the database refuses any other */
+    /* Rule 2.8 (v2.64): the round count is the commissioner's to publish; the board records it */
+    var rounds = parseInt((document.getElementById("dRounds")||{}).value, 10);
+    if (!(rounds >= 1 && rounds <= 20)){ CG.toast("Rounds must be between 1 and 20","err"); return; }
     var styleName = (CG.DRAFT_STYLES.find(function(s){return s[0]===style;})||["","?"])[1];
     var manualIds = style==="manual" ? CG._manualOrder.map(function(c){ return (CG.lg._codeToId||{})[c]; }) : null;
     CG.confirm("Generate the draft board?",
@@ -12104,7 +12111,7 @@ CG.hubFreeAgents = function(){
       !rosteredIds[r.profile_id] && !faHeld[r.profile_id];
   };
   var byOvr=function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); };
-  /* ONE board (v2.33). Rookie bidding is abolished: the draft (fifteen rounds basic, fourteen full) fills every active
+  /* ONE board (v2.33). Rookie bidding is abolished: the draft (the season's published round count) fills every active
      spot outright, so there is no post-draft rookie class to auction. Anyone still without a
      club — first-year or veteran — is signed here by offer and acceptance (Rule 2.2). */
   /* v2.35: only the players free agency is FOR — a deal that has ended (Rule 2.2). Before the

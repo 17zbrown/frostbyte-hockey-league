@@ -181,3 +181,13 @@ select public.apply_mgmt_salaries();   -- re-seats every management contract at 
 -- (full text of draft_fits and the two splices: see the v2.63 apply transcript; the function is the
 --  same shape check as check_roster_structure, asked BEFORE the row is written so the pick dialog
 --  can say why and the clock's auto-pick chooses someone who fits instead of failing every minute)
+
+-- ==== v2.64 (2026-09-19) · the round count is the season's to publish; the board built to 12; webhooks ====
+alter table public.seasons add column if not exists draft_rounds integer check (draft_rounds between 1 and 20);
+create or replace function public.season_rules(p_season uuid) returns jsonb language sql stable set search_path = public as $$
+  select public.format_rules(public.season_format(p_season))
+      || coalesce((select jsonb_build_object('draft_rounds', s.draft_rounds) from public.seasons s where s.id = p_season and s.draft_rounds is not null), '{}'::jsonb) $$;
+-- generate_draft_board: the "must equal the format's rounds" refusal replaced by `update seasons set draft_rounds = p_rounds`
+-- select public.generate_draft_board(1, 12, 'as_drawn', null);   -- applied live: 96 picks, same drawn order (NYI first)
+-- _draft_notify_on_clock → 'discord_draft_webhook'; announce_lifecycle draft_tonight → 'discord_announcements_webhook',
+-- round count read from the board; discord_default_webhook re-created in #announcements (the old one returned 404).

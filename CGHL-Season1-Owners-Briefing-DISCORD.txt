@@ -45,13 +45,13 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 **📋 DRAFT DAY: SAT SEPT 19, 9:00 PM ET**
 
-**A snake-order draft**, live on the site on a pick clock. The number of rounds is a season setting the league office publishes before draft night (Rule 2.8) — the working figure on the site is 15 rounds in a snake order, and the final number will be confirmed before Saturday. The order was drawn at random and is published in the draft room: it runs first to last in round one, reverses for round two, and alternates from there — the club picking last in round one picks first in round two. Every season's order is drawn fresh; it has nothing to do with how the previous season finished.
+**A snake-order draft**, live on the site on a pick clock. The number of rounds is a season setting the league office publishes before draft night (Rule 2.8) — the published figure is 12 rounds in a snake order: with your three management seats that fills the 15-man roster exactly, and everyone undrafted is placed as depth after the draft. The order was drawn at random and is published in the draft room: it runs first to last in round one, reverses for round two, and alternates from there — the club picking last in round one picks first in round two. Every season's order is drawn fresh; it has nothing to do with how the previous season finished.
 
 **Everyone who signed up by the Thursday cutoff is in the pool.** There is no pre-season and no appearance requirement — registered on time is the whole test (Rule 2.8).
 
 **Build your board in advance.** It is private to your management group. If your clock runs out, the league takes the best available player off your own board, so an absent manager never costs the club a pick or lands someone you never ranked.
 
-**What a pick costs.** Draft salaries are set by round, not negotiated: the last round pays the $750,000 league minimum and every round above it adds $250,000 (so with 15 rounds, round 1 is $4,250,000 and a full class is $37,500,000 — $43.5M of the $50M cap with your GM and AGM). The scale follows whatever round count is published, and the draft room shows it. Every pick in a round costs the same, and the same scale applies if your clock expires and the league picks off your board.
+**What a pick costs.** Draft salaries are set by round, not negotiated: the last round pays the $750,000 league minimum and every round above it adds $250,000 (so with 12 rounds, round 1 is $3,500,000 and a full class is $25,500,000, $27.5M of the $50M cap with your AGM at $2M). The scale follows whatever round count is published, and the draft room shows it. Every pick in a round costs the same, and the same scale applies if your clock expires and the league picks off your board.
 
 **Draft picks cannot be traded.** Trades are players for players (Rule 2.3).
 
