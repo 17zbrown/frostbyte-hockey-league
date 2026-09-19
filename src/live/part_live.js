@@ -10309,7 +10309,7 @@ CG.roadAheadCard = function(s, opts){
     [s.registration_deadline, "Sign-up cutoff", "Register by now to enter the draft — everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
     [s.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
     [s.starts_at, "Puck drop", "The regular season opens the Wednesday after the draft — "+perClub+" games over "+(CG.seasonShape?CG.seasonShape(s).weeks:6)+" weeks, every stat imported automatically from EA."],
-    [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven. You need "+CG.playoffMinGp(s)+" regular-season games to dress in it (Rule 8.3)."]
+    [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven. "+(CG.playoffMinGp(s) ? "You need "+CG.playoffMinGp(s)+" regular-season games to dress in it (Rule 8.3)." : "Every rostered player is eligible to dress in it (Rule 8.3).")]
   ] : [
     [s.offseason_starts_at, "Off-season begins", "Two weeks of no games while the league seats team owners and their management staff."],
     [s.registration_deadline, "Sign-up deadline", "Register by now to enter the draft. Miss it and you can still join — you’re randomly placed on a club instead, up until the movement deadline."],
@@ -11019,6 +11019,10 @@ CG.seasonForm = function(id){
     if(document.getElementById("ssRegOpen").value==="1" && otherOpen){ CG.toast("Sign-ups are already open for "+(otherOpen.name||"another season")+" — one season takes sign-ups at a time (Rule 1.1). Close that one first.","err"); return; }
     function iso(elId){ var v=document.getElementById(elId).value; return v ? CG.etISO(v.slice(0,10), v.slice(11,16)) : null; }
     var fmtV=document.getElementById("ssFormat").value, fr=CG.FORMAT_RULES[fmtV];
+    /* Rule 8.3 (v2.67): the box takes a whole number of games, 0 included (no floor); a typed
+       negative or a non-number is refused rather than quietly saved as "no floor" */
+    var poRaw=document.getElementById("ssPoMin").value.trim();
+    if (poRaw!=="" && !/^\d{1,3}$/.test(poRaw)){ CG.toast("The playoff eligibility floor is a whole number of regular-season games (0 for no floor)","err"); return; }
     var cap=Math.round(parseFloat(document.getElementById("ssCap").value||String(fr.salary_cap/1e6))*1e6);
     if (fmtV==="basic" && (iso("ssPre")||iso("ssFaOpen")||iso("ssFaClose"))){ CG.toast("A basic-format season has no pre-season or free-agency window — clear those dates or pick the full format","err"); return; }
     var rec={ name:name, number:num, status:document.getElementById("ssStatus").value, format:fmtV,
@@ -11037,7 +11041,7 @@ CG.seasonForm = function(id){
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||fr.trade_deadline_week,
       /* Rule 8.3 (v2.67): the playoff floor is the season's to publish; an empty box falls back to
          the format's figure (null), 0 is a real answer (no floor) */
-      playoff_min_gp:(function(){ var v = document.getElementById("ssPoMin").value; return v === "" ? null : Math.max(0, parseInt(v,10)||0); })(),
+      playoff_min_gp:(poRaw === "" ? null : parseInt(poRaw,10)),
       moves_lock_override:document.getElementById("ssMoves").value };
     if (isNew) rec.weeks = fr.weeks;
     var btn=this; btn.disabled=true;

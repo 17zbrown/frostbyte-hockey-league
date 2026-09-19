@@ -52,7 +52,7 @@ A("the series cap and the floor read through the helpers", CG.seriesCap({ pos:"G
 /* v2.67: the floor is the season's to publish. A season row overrides the format, 0 is honored as "no floor", and
    an unset row falls through to the format's figure, mirroring public.season_rules(). */
 A("the season's published floor overrides the format, 0 included, null falls through", CG.playoffMinGp({ format:"basic", playoff_min_gp:16 }) === 16 && CG.playoffMinGp({ format:"basic", playoff_min_gp:20 }) === 20 && CG.playoffMinGp({ format:"basic", playoff_min_gp:0 }) === 0 && CG.playoffMinGp({ format:"basic", playoff_min_gp:null }) === 16 && CG.fmt("draft_rounds", { format:"basic", draft_rounds:12 }) === 12);
-A("the Control Center season editor carries the floor and writes it (empty = inherit, 0 = no floor)", /id="ssPoMin" type="number" min="0"/.test(live) && /playoff_min_gp:\(function\(\)\{ var v = document\.getElementById\("ssPoMin"\)\.value; return v === "" \? null : Math\.max\(0, parseInt\(v,10\)\|\|0\); \}\)\(\)/.test(live));
+A("the Control Center season editor carries the floor and writes it (empty = inherit, 0 = no floor)", /id="ssPoMin" type="number" min="0"/.test(live) && /playoff_min_gp:\(poRaw === "" \? null : parseInt\(poRaw,10\)\)/.test(live) && /if \(poRaw!=="" && !\/\^\\d\{1,3\}\$\/\.test\(poRaw\)\)\{ CG\.toast\(/.test(live));
 A("the database overlays it the same way", /jsonb_strip_nulls\(jsonb_build_object\('draft_rounds', s\.draft_rounds, 'playoff_min_gp', s\.playoff_min_gp\)\)/.test(R("sql/2026-09-19-playoff-floor-setting.sql")));
 A("the composition in words", CG.rosterShapeWords({ format:"basic" }) === "two full lines plus three players of any position" && CG.rosterShapeWords({ format:"full" }) === "9 F / 6 D / 2 G");
 

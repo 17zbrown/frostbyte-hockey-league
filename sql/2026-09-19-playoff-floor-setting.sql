@@ -31,3 +31,9 @@ commit;
 select public._splice_fn('set_game_lineup(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,boolean)',
   E'a games-played floor for the playoffs where the format sets one (basic: eighteen\n         regular-season games).',
   E'a games-played floor for the playoffs where the season publishes one (v2.67:\n         public.playoff_min_gp reads the season setting, then the format''s default).', '1');
+-- Proof that a season's override reaches the gate (run live as a rolled-back rehearsal, all passed):
+-- with Season 2 set to 0 public.playoff_min_gp(s2) = 0, set to 23 it = 23, and set_game_lineup's
+-- source reads public.playoff_min_gp(v_game.season_id). The self-check above cannot tell the
+-- overlay from the default while both say 16; this one can.
+-- begin; ... update public.seasons set playoff_min_gp = 0 where id = s2; assert playoff_min_gp(s2) = 0;
+--           update ... = 23; assert playoff_min_gp(s2) = 23; raise exception 'REHEARSAL'; commit;
