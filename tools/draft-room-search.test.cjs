@@ -39,7 +39,8 @@ console.log("— CG._roomPoolRows filters on gamertag, EA ID and position, keeps
 console.log("— draft night is findable by players: a front-page strip and a dashboard card link to #/draft");
 A("the helper exists and is silent once the draft is complete", /CG\.draftNightBand = function\(where\)\{/.test(live) && /if \(status === "complete"\) return "";/.test(live));
 A("...shown while live or paused, or from draft-day morning", /live = status === "live" \|\| status === "paused";/.test(live) && /now >= at - 18\*3600000 && now < at \+ 12\*3600000/.test(live));
-A("the front page renders it", /html \+= CG\.draftNightBand\("home"\);/.test(pub));
+A("the front page carries the big hero button, not a strip (one door, not two)", /\(CG\.draftNightBand \? CG\.draftNightBand\("hero"\) : ""\)\+/.test(pub) && !/CG\.draftNightBand\("home"\)/.test(pub) && /id="heroDraftCta" class="btn btn-chrome hero-cta"/.test(live));
+A("...and checks once a minute whether the draft is still on, removing the button in place when it completes", /CG\._draftCtaPoll = setInterval\(/.test(pub) && /from\("draft_state"\)\.select\("season_number,status"\)/.test(pub) && /if \(cta\) cta\.outerHTML = next;/.test(pub));
 A("the dashboard renders it for non-management", /if \(CG\.draftNightBand && !\(CG\.managesClub && CG\.managesClub\(\)\)\)\{ var dnb = CG\.draftNightBand\("hub"\); if \(dnb\) cards\.push\(dnb\); \}/.test(hub));
 A("both link to the room", (live.match(/href="#\/draft"/g)||[]).length >= 2);
 

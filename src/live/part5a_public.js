@@ -1035,8 +1035,6 @@ CG.ROUTES.home = function(){
       (regOpen?'<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a>':"")+'</span>'+
     '</div></section>';
   }
-  /* draft night (v2.68): the room is public, so the front page points at it while it matters */
-  if (CG.draftNightBand) html += CG.draftNightBand("home");
   /* registration strip — stays up for the whole sign-up window, not just the eligibility run-up */
   var regDl = sR.registration_deadline ? Date.parse(sR.registration_deadline) : null;
   if (regOpen && !faLive){
@@ -1060,6 +1058,9 @@ CG.ROUTES.home = function(){
     '<div class="hero-name">'+
       '<h1 data-rv="words">'+CG.splitChars("Chel Gaming")+'</h1>'+
       '<span class="hn-sub" data-rv="up" style="--rv-i:4">'+esc(seasonLine)+'</span>'+
+      /* v2.68: on draft night the wordmark carries one big door into the draft room; it is gone
+         the moment the draft completes (CG.draftNightBand decides, the poll below keeps it honest) */
+      (CG.draftNightBand ? CG.draftNightBand("hero") : "")+
     '</div>'+
     CG.naMap()+
   '</section>';
@@ -1332,6 +1333,23 @@ CG.deadlineBand = function(){
 };
 
 CG.AFTER.home = function(){
+  /* draft night (v2.68): while the hero button is up, ask the database once a minute whether the
+     draft is still on. A visitor who leaves the front page open through the draft sees the button
+     go on its own when the draft completes; nobody else pays for the check. One row, one column. */
+  if (document.getElementById("heroDraftCta") && !CG._draftCtaPoll && CG.sb){
+    CG._draftCtaPoll = setInterval(function(){
+      if (!document.getElementById("heroDraftCta")){ clearInterval(CG._draftCtaPoll); CG._draftCtaPoll = null; return; }
+      CG.sb.from("draft_state").select("season_number,status").eq("season_number", CG._draftSeason ? CG._draftSeason() : ((CG.SEASON&&CG.SEASON.number)||1)).limit(1).then(function(r){
+        if (r.error || !r.data || !r.data.length) return;
+        var was = CG.lg.draftState ? CG.lg.draftState.status : "setup";
+        CG.lg.draftState = Object.assign({}, CG.lg.draftState||{}, r.data[0]);
+        if (r.data[0].status !== was){
+          var cta = document.getElementById("heroDraftCta"), next = CG.draftNightBand("hero");
+          if (cta) cta.outerHTML = next;
+        }
+      });
+    }, 60000);
+  }
   /* deadline countdown — textContent only, so the tick never repaints the page (seamless rule) */
   var dl = document.getElementById("dlClock");
   if (dl && !CG._dlTimer){

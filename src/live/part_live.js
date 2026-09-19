@@ -3834,8 +3834,14 @@ CG.draftNightBand = function(where){
   var body = live ? "Every pick lands on the board the moment a club makes it. Open the room to follow along."
                   : "Clubs pick at "+(at ? CG.fmtTime(at) : "9:00 PM ET")+". The board updates live for everyone, so you can watch every pick as it happens.";
   var cta = live ? "Watch the draft" : "Open the draft room";
+  if (where === "hero"){
+    /* the front page's one big button: the live dot when the room is running, the time until then */
+    return '<a id="heroDraftCta" class="btn btn-chrome hero-cta" data-rv="up" style="--rv-i:5" href="#/draft" aria-label="'+cta+' (the draft room)">'+
+      '<span class="chip chip-live" style="pointer-events:none"><span class="live-dot"></span>'+(live?(status==="paused"?"Paused":"Live"):"Tonight "+(at?CG.fmtTime(at):"9:00 PM ET"))+'</span>'+
+      '<span>'+(live ? "Watch the draft live" : "Watch the draft live tonight")+'</span>'+CG.ic("play",16)+'</a>';
+  }
   if (where === "home"){
-    return '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
+    return '<section id="draftNightStrip" style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
       '<span class="chip chip-live"><span class="live-dot"></span>'+lead+'</span>'+
       '<span style="color:var(--on-ink-dim);font-size:13px">'+body+'</span>'+
       '<a class="btn btn-chrome btn-sm" href="#/draft" style="margin-left:auto">'+cta+'</a></div></section>';

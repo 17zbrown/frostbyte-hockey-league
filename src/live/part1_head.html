@@ -1007,6 +1007,12 @@ html.rv-on .na-wrap.pins-in .na-pin{opacity:1;transform:translate(-50%,-50%) sca
   font-size:clamp(44px,11vw,148px);line-height:.86;letter-spacing:-.035em;text-transform:uppercase}
 .hero-name .hn-sub{display:block;margin-top:clamp(10px,1.6vh,18px);font-family:var(--f-mono);
   font-size:clamp(10px,1.1vw,13px);letter-spacing:.42em;text-transform:uppercase;color:var(--steel)}
+.hero-cta{display:inline-flex;align-items:center;gap:12px;margin-top:clamp(18px,3vh,30px);padding:16px 26px 16px 18px;
+  font-size:clamp(15px,1.5vw,19px);font-weight:800;letter-spacing:.01em;border-radius:14px;
+  box-shadow:0 10px 32px color-mix(in srgb,var(--chrome) 42%,transparent),0 0 0 1px color-mix(in srgb,var(--chrome) 55%,transparent)}
+.hero-cta .chip{font-size:10px}
+.hero-cta:hover{transform:translateY(-1px)}
+@media (max-width:560px){.hero-cta{width:100%;justify-content:center;padding:15px 16px;gap:10px}}
 .na-cap{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:18px 26px 20px;pointer-events:none;
   display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
   background:linear-gradient(to top,var(--map-sea-2),transparent)}
