@@ -3,7 +3,7 @@
    15-man active roster (two full lines plus three flex, management inside) plus two in camp, on
    the $250K salary lattice, one-season contracts, one player on the trade block, the cap outlook,
    the Owner's permission policy (the GM's roster moves need approval) and a queue of pending /
-   decided moves. Games played are spread around the 18-game playoff floor (Rule 8.3) so the Road
+   decided moves. Games played are spread around the 16-game playoff floor (Rule 8.3, Season 1's published figure) so the Road
    to 18 card shows a player already there, players who can still get there, and one who cannot. The CG.sb
    stub is taught the roster RPCs so a click really moves, waives, queues or approves in memory.
    Shapes: part_live.js rows (:340-370), team_cap_outlook (part6_hub.js:1633), mgmt moves (:7952).
@@ -54,7 +54,7 @@
       if (lg.glog) lg.glog[p.id] = [];
       lg.players.push(p);
     }
-    if (row[8] != null) lg.pstats[p.id].gp = row[8];   /* regular-season games played so far, around the 18-game floor */
+    if (row[8] != null) lg.pstats[p.id].gp = row[8];   /* regular-season games played so far, around the 16-game floor */
     p.tag = row[2]; p.pos = row[3]; p.salary = row[4]; p.term = row[5]; p.squad = row[6];
     p.spotId = "spot-"+p.id; p.onBlock = false; p.origin = undefined; p.team = club;
     if (p.mgmt==="owner"||p.mgmt==="gm") p.mgmtSalary = true;

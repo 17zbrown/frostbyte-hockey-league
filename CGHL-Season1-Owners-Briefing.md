@@ -63,7 +63,7 @@ Tampering with another club's rostered players is a discipline matter.
 
 **Weekly cap: an active-roster player can play up to 6 games a week — skaters and goalies alike — and a camp player up to 3.** That's the only availability rule: there's no minimum number of games a player has to mark available. An over-cap lineup is simply refused.
 
-**The playoffs have a floor: a player needs 18 regular-season games to dress in the playoffs**, and in a series everyone is capped at 4 games. Team HQ's **Road to 18** card shows every player's count and how many club games are left — spread the games so the players you want in the postseason get there (Rule 8.3).
+**The playoffs have a floor: a player needs 16 regular-season games to dress in the playoffs (Season 1's published floor)**, and in a series everyone is capped at 4 games. Team HQ's **Road to 16** card shows every player's count and how many club games are left — spread the games so the players you want in the postseason get there (Rule 8.3).
 
 **Cap is $50,000,000 hard.** Minimum salary $750,000, and every salary in the league moves in $250,000 steps — $750K, $1M, $1.25M, $1.5M and up. Anything off that lattice is refused when you type it. **Every contract runs one season** — no extensions, no re-signings, no held rights; everyone goes back into next season's draft. Owner counts $0 against the cap, GM $3M, AGM $3M. A manager cannot be waived or traded while holding the seat. Cap and contract details stay inside your management group.
 
@@ -107,7 +107,7 @@ Two other things happen at the deadline: automatic placement of new players stop
 
 Clubs are seeded 1 to 3 inside their own division. **The 1 seed rests through the opening round** while the 2 seed plays the 3 seed; the winner meets the 1 seed for the division title; the two division champions meet in the final. Three rounds, three game weeks.
 
-Series are best of seven, played inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday. **Every player is capped at 4 games per series, and only players with 18 regular-season games can dress** (Rule 8.3).
+Series are best of seven, played inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday. **Every player is capped at 4 games per series, and only players with 16 regular-season games can dress** (Rule 8.3).
 
 ## 🧭 WHERE THINGS LIVE
 
@@ -137,7 +137,7 @@ Series are best of seven, played inside one game week — 2 games Wednesday, 2 T
 • **Wednesday, Thursday, Friday at 9:00, 9:35 and 10:10 PM ET**
 • **Roster 15: two full lines plus three of any position, management inside it.** Training camp unlimited
 • **Weekly cap: active players 6 games, camp players 3 — no availability minimum**
-• **Playoffs: 18 regular-season games to be eligible; 4 games per player per series**
+• **Playoffs: 16 regular-season games to be eligible (the season's published floor); 4 games per player per series**
 • **Cap $50M, minimum $750K, every contract one season**
 • **Draft: random snake order, rounds published before draft night (working figure 15); everyone registered by Thursday is in**
 • **Lines lock 30 minutes before puck drop. 1 penalty per player changed after**

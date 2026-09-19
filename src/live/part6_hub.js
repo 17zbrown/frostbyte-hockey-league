@@ -1739,20 +1739,20 @@ CG.hubRoster = function(qs){
   /* v2.51 (Rule 8.3): the playoff games-played floor — management's tracker for who is eligible and who
      needs games, so the preferred players get their minimum before the postseason */
   if (CG.playoffRoad && CG.playoffMinGp()){
-    var pr18 = CG.playoffRoad(lg, club), min18 = CG.playoffMinGp();
-    var short18 = pr18.filter(function(r){ return !r.done; }), left18 = pr18.length ? pr18[0].left : 0;
-    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+min18+' — playoff eligibility</h3>'+
-      (short18.length ? '<span class="chip chip-warn">'+short18.length+' still short</span>' : '<span class="chip chip-win">everyone eligible</span>')+'</div><div class="card-b">'+
-      (pr18.length ? '<div class="stack" style="gap:9px">'+pr18.map(function(r){
-          var pct = Math.round(Math.min(1, r.gp/min18)*100), danger = !r.reachable;
+    var prRoad = CG.playoffRoad(lg, club), minGp = CG.playoffMinGp();
+    var shortGp = prRoad.filter(function(r){ return !r.done; }), leftGp = prRoad.length ? prRoad[0].left : 0;
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+minGp+' — playoff eligibility</h3>'+
+      (shortGp.length ? '<span class="chip chip-warn">'+shortGp.length+' still short</span>' : '<span class="chip chip-win">everyone eligible</span>')+'</div><div class="card-b">'+
+      (prRoad.length ? '<div class="stack" style="gap:9px">'+prRoad.map(function(r){
+          var pct = Math.round(Math.min(1, r.gp/minGp)*100), danger = !r.reachable;
           return '<div style="display:flex;align-items:center;gap:12px">'+
             '<span style="flex:0 0 140px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b style="font-size:13px">'+esc(r.tag)+'</b> <small class="caption">'+esc(r.pos||"")+(r.squad==="tc"?" · camp":"")+'</small></span>'+
             '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+pct+'%;background:'+(r.done?"var(--green)":danger?"var(--red)":"var(--chrome)")+'"></i></span>'+
-            '<span class="num" style="flex:0 0 52px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / '+min18+'</span>'+
-            (r.done?'<span class="chip chip-win" style="font-size:9px">eligible</span>':danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+min18+'</span>':'<span class="caption">needs '+r.need+'</span>')+
+            '<span class="num" style="flex:0 0 52px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / '+minGp+'</span>'+
+            (r.done?'<span class="chip chip-win" style="font-size:9px">eligible</span>':danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+minGp+'</span>':'<span class="caption">needs '+r.need+'</span>')+
           '</div>';
         }).join("")+'</div>' : '<p class="caption">No roster yet.</p>')+
-      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+min18+' regular-season games to be dressed in the playoffs. The club has '+left18+' regular-season game'+(left18===1?'':'s')+' left; a player who can no longer reach '+min18+' is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
+      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+minGp+' regular-season games to be dressed in the playoffs. The club has '+leftGp+' regular-season game'+(leftGp===1?'':'s')+' left; a player who can no longer reach '+minGp+' is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
   }
   /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
      The card states the caps that DO exist. */

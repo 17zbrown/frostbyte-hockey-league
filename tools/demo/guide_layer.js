@@ -63,12 +63,12 @@
   CG.bootLive = async function(){
     CG.lg = CG.buildLeague({});
     /* v2.51: the season is a BASIC-format season (the league standard) — the same fields
-       loadLeague derives from the season row, so the cap tiles, Squads meters, Road to 18 and
+       loadLeague derives from the season row, so the cap tiles, Squads meters, Road to N and
        every rule caption read the format in force rather than the prototype's $40M fallback */
     var FR = CG.FORMAT_RULES.basic;
     CG.SEASON = Object.assign({}, CG.SEASON, { id:"S1", number:1, registration_open:false, format:"basic", salary_cap:FR.salary_cap, roster_max:FR.roster_max });
     CG.CAP = FR.salary_cap; CG.ROSTER_MAX = FR.roster_max; CG.ROSTER_QUOTA = Object.assign({}, FR.quota); CG.CAMP_MAX = FR.camp_max;
-    /* the prototype schedule carries no stage/status; the live rows always do (the Road to 18
+    /* the prototype schedule carries no stage/status; the live rows always do (the Road to N
        card counts the regular-season games still to play) */
     (CG.lg.schedule||[]).forEach(function(g){ if (!g.stage) g.stage = "regular"; if (!g.status) g.status = g.at < CG.now() - 3*3600000 ? "final" : "scheduled"; });
     var t = CG.TEAMS[0];

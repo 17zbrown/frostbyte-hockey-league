@@ -100,9 +100,9 @@ CG.now = function(){ return Date.now(); };
    through CG.fmt(key) so it never lives in two places again. */
 CG.FORMAT_RULES = {
   /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
-     the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and an
-     18-game regular-season floor for the playoffs */
-  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:18,
+     the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and a
+     16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67) */
+  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
   full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0,
@@ -116,6 +116,9 @@ CG.fmt = function(key, s){
   /* Rule 2.8 (v2.64): the round count is a commissioner-published season setting — the format's
      figure is only the default. Mirrors public.season_rules(). */
   if (key === "draft_rounds"){ var sn = s || CG.SEASON; if (sn && sn.draft_rounds) return sn.draft_rounds; }
+  /* Rule 8.3 (v2.67): so is the playoff eligibility floor. An explicit 0 means "no floor", so the
+     season's value wins whenever it is set at all, not only when it is truthy. */
+  if (key === "playoff_min_gp"){ var sp = s || CG.SEASON; if (sp && sp.playoff_min_gp != null) return sp.playoff_min_gp; }
   return CG.FORMAT_RULES[CG.seasonFormat(s)][key];
 };
 /* Rule 5.2: the weekly appearance cap for one player — mirrors public.weekly_cap() */
@@ -10910,7 +10913,8 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?0:s.owner_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?0:s.gm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?2000000:s.agm_salary))/1e6)+'"></label>'+
-    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||CG.fmt("roster_max", s))+'" readonly title="Set by the season format (Rule 2.1): 18 basic, 17 full"></label>'+
+    '<label class="fld"><span>Playoff eligibility floor (regular-season games)</span><input id="ssPoMin" type="number" min="0" max="200" step="1" value="'+(s.playoff_min_gp!=null?s.playoff_min_gp:CG.fmt("playoff_min_gp", s))+'" title="Rule 8.3: regular-season games a player needs to be dressed in the playoffs. 0 means no floor."></label>'+
+    '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||CG.fmt("roster_max", s))+'" readonly title="Set by the season format (Rule 2.1): '+CG.FORMAT_RULES.basic.roster_max+' basic, '+CG.FORMAT_RULES.full.roster_max+' full"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||CG.fmt("trade_deadline_week", s))+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
     '</div><p class="caption" id="ssSpaceHelp"></p>',
@@ -10921,7 +10925,7 @@ CG.seasonForm = function(id){
   function syncFormat(){
     var f = fmtSel.value, r = CG.FORMAT_RULES[f];
     document.getElementById("ssRoster").value = r.roster_max;
-    if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; }
+    if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; document.getElementById("ssPoMin").value = r.playoff_min_gp; }
     ["ssOff","ssPre","ssFaOpen","ssFaClose"].forEach(function(id){ var el = document.getElementById(id); el.disabled = (f==="basic"); if (f==="basic") el.value = ""; el.closest("label").style.opacity = f==="basic" ? ".45" : ""; });
     document.getElementById("ssFormatNote").textContent = f==="basic"
       ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+") with unlimited camp, everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a "+r.playoff_min_gp+"-game floor and a "+r.series_cap+"-game series cap."
@@ -11031,6 +11035,9 @@ CG.seasonForm = function(id){
       gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"0")*1e6),
       agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"2")*1e6),
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||fr.trade_deadline_week,
+      /* Rule 8.3 (v2.67): the playoff floor is the season's to publish; an empty box falls back to
+         the format's figure (null), 0 is a real answer (no floor) */
+      playoff_min_gp:(function(){ var v = document.getElementById("ssPoMin").value; return v === "" ? null : Math.max(0, parseInt(v,10)||0); })(),
       moves_lock_override:document.getElementById("ssMoves").value };
     if (isNew) rec.weeks = fr.weeks;
     var btn=this; btn.disabled=true;

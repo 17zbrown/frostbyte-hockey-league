@@ -19,7 +19,7 @@ const GUIDES = [
   { key: "getting_started", forum: "player", tag: "Getting started", title: "How to sign up to play",
     body: "From Discord sign-in to the draft pool in three boxes — join the server, add your EA ID, register — and what happens at the sign-up cutoff. Rulebook 1.1 · 2.8 · 2.9." },
   { key: "availability", forum: "player", tag: "Availability", title: "How to mark your availability",
-    body: "Available or Not Available for each of the week's nine games, in by Wednesday 7:30 PM ET. No weekly quota — but 18 regular-season games to be dressed in the playoffs. Rulebook 5.1 · 5.2 · 8.3." },
+    body: "Available or Not Available for each of the week's nine games, in by Wednesday 7:30 PM ET. No weekly quota, but 16 regular-season games (Season 1's published floor) to be dressed in the playoffs. Rulebook 5.1 · 5.2 · 8.3." },
   { key: "loadout", forum: "both", tag: "Rules", title: "Banned X-Factors, builds, loadouts and cosmetics",
     body: "Six abilities banned at every tier, two more at Red tier only, no pre-built loadouts, no special-character cosmetics, no enforcer build, builds locked to your position — and what happens if you load in with one. Rulebook 4.5." },
   { key: "lineup", forum: "management", tag: "Lineups", title: "How to set your lineups",
