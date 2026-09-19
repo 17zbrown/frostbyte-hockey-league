@@ -3742,6 +3742,8 @@ CG.ROUTES.draft = function(){
       (spectate || role==="staff" ? 'the first pick goes' : 'your club’s picks go')+' on the clock right here.</div>';
   }
 
+  /* v2.66: managers see their club's remaining room by position, management seats counted */
+  var roomCard = (isMgr && myClub) ? CG.rosterRoomCard(myClub, { title: (CG.TEAM[myClub]||{}).name+" · roster spots remaining" }) : "";
   var summary = '<div class="grid g3" style="margin-bottom:20px">'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+made+' / '+total+'</b><span>picks made'+(skips?' · '+skips+' skipped':'')+'</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+pool.length+'</b><span>prospects available</span></div>'+
@@ -3806,7 +3808,7 @@ CG.ROUTES.draft = function(){
       'Every selection appears here live and posts to <b>#draft-hub</b> on the Discord. '+
       'Prospect scouting stays inside the clubs — what you see is what the league sees.</p></div></div>';
   }
-  return head + '<div class="shell" style="padding-bottom:48px">'+clockBox+ticker+summary+
+  return head + '<div class="shell" style="padding-bottom:48px">'+clockBox+ticker+summary+roomCard+
     '<div class="grid g23" style="align-items:start">'+board+poolCard+'</div></div>';
 };
 /* Rule 2.8 (v2.33): the draft will not start while any club is short an Owner, GM or AGM. The
@@ -4191,11 +4193,36 @@ CG.rerenderKeepScroll = function(){
    database's draft_fits(), which is what actually refuses the pick. */
 CG.draftFits = function(club, pos){
   var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
-  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return p.status==="active" && p.squad!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
+  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
   if (counted.length >= max) return "roster full · "+max;
   var grp = CG.posGroup(pos||"C"), n = counted.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length;
   if (q[grp] != null && n >= q[grp]) return "no room · "+q[grp]+" "+(grp==="G"?"G":grp==="D"?"D":"F");
   return null;
+};
+/* The club's roster room by position group (Rule 2.1), management included — what the draft desk
+   and the room show so a manager knows what still fits before the clock is his. */
+CG.rosterRoomFor = function(club){
+  var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
+  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
+  var by = { F:0, D:0, G:0 }, byMgmt = { F:0, D:0, G:0 };
+  counted.forEach(function(p){ var g = CG.posGroup(p.pos); by[g]++; if (p.mgmt) byMgmt[g]++; });
+  var mgmt = counted.filter(function(p){ return p.mgmt; }).length;
+  var open = Math.max(0, max - counted.length);
+  return { max:max, used:counted.length, open:open, mgmt:mgmt, groups:["F","D","G"].map(function(g){
+    var cap = q[g]||0; return { g:g, used:by[g], mgmt:byMgmt[g], cap:cap, room:Math.min(open, Math.max(0, cap-by[g])) }; }) };
+};
+CG.rosterRoomCard = function(club, opts){
+  opts = opts || {};
+  var r = CG.rosterRoomFor(club), word = { F:"forwards", D:"defensemen", G:"goaltenders" };
+  var tiles = r.groups.map(function(x){
+    var full = x.room === 0;
+    return '<div class="kpi" style="cursor:default'+(full?';opacity:.6':'')+'"><b class="num" style="font-size:22px">'+x.room+'</b>'+
+      '<span>'+word[x.g]+' open · '+x.used+' of '+x.cap+' filled'+(x.mgmt?' ('+x.mgmt+' management)':'')+(full?' · full':'')+'</span></div>';
+  }).join("");
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(opts.title||"Roster spots remaining")+'</h3>'+
+    '<span class="chip'+(r.open===0?' chip-loss':'')+'">'+r.open+' of '+r.max+' open · '+r.used+' filled, '+r.mgmt+' by management</span></div>'+
+    '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'+tiles+'</div>'+
+    '<p class="caption" style="margin-top:10px">Your Owner, GM and AGM hold roster spots in their own position groups (Rule 2.6), so they are counted here. A group at its cap cannot take another pick; the pool greys those players out.</p></div></div>';
 };
 CG.draftPickModalLive = function(pickId, forCode){
   var pool = (CG.lg.draftPool||[]).slice().sort(function(a,b){
@@ -4291,6 +4318,8 @@ CG.hubDraftLive = function(){
     '<p class="lede" style="margin-top:8px">Build your board before the night, then let it work for you: if your clock ever runs out, the league drafts the best available player <b>from your board</b> automatically.</p></div>';
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Board coverage</h3>'+covChip+'</div>'+
     '<div class="card-b"><p class="caption">'+covNote+'</p></div></div>';
+  /* v2.66: how much roster room the club has left, by position group — the shape a pick must fit */
+  h += CG.rosterRoomCard(myCode);
 
   /* status strip */
   h += '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">'+
