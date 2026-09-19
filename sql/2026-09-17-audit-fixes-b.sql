@@ -176,3 +176,8 @@ create or replace function public.draft_management_gaps() returns jsonb language
   from public.teams t where t.owner_profile_id is null or t.gm_profile_id is null $$;
 update public.seasons set owner_salary = 0, gm_salary = 0, agm_salary = 2000000 where name in ('Season 1','Season 2');
 select public.apply_mgmt_salaries();   -- re-seats every management contract at the new pay
+
+-- ==== v2.63 (2026-09-19) · a pick must fit the club's shape (Rule 2.1): draft_fits() in the pick RPC and the auto-pick ====
+-- (full text of draft_fits and the two splices: see the v2.63 apply transcript; the function is the
+--  same shape check as check_roster_structure, asked BEFORE the row is written so the pick dialog
+--  can say why and the clock's auto-pick chooses someone who fits instead of failing every minute)

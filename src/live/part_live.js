@@ -4179,6 +4179,17 @@ CG.rerenderKeepScroll = function(){
   window.scrollTo({ top: y, left: 0, behavior: "instant" });
 };
 /* shared pick modal: search the pool, eligible players first, one click to draft */
+/* Rule 2.1 at the pick (v2.63): the club's active roster, management included, is capped as a whole
+   and per position group. Returns why a prospect would not fit today, or null. Mirrors the
+   database's draft_fits(), which is what actually refuses the pick. */
+CG.draftFits = function(club, pos){
+  var q = CG.ROSTER_QUOTA || {}, max = CG.ROSTER_MAX || 15;
+  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return p.status==="active" && p.squad!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
+  if (counted.length >= max) return "roster full · "+max;
+  var grp = CG.posGroup(pos||"C"), n = counted.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length;
+  if (q[grp] != null && n >= q[grp]) return "no room · "+q[grp]+" "+(grp==="G"?"G":grp==="D"?"D":"F");
+  return null;
+};
 CG.draftPickModalLive = function(pickId, forCode){
   var pool = (CG.lg.draftPool||[]).slice().sort(function(a,b){
     var ea = CG.eligOf(a.profileId).ok?1:0, eb = CG.eligOf(b.profileId).ok?1:0;
@@ -4193,16 +4204,20 @@ CG.draftPickModalLive = function(pickId, forCode){
     var more = matches.length>30 ? '<p class="caption" style="padding:8px 0">Showing 30 of '+matches.length+' — refine the search.</p>' : '';
     return more + list.map(function(p){
       var e = CG.eligOf(p.profileId);
+      var noFit = forCode ? CG.draftFits(forCode, p.pos) : null;
       return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft)">'+
         '<b style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis">'+esc(p.tag)+'</b>'+
         '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+'</span>'+CG.eligChipD(p.profileId)+
-        '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-modpick="'+p.profileId+'" data-name="'+esc(p.tag)+'">Draft</button></div>';
+        (noFit?'<span class="chip" style="font-size:9px" title="Rule 2.1: the active roster is capped as a whole and per position group, management included">'+esc(noFit)+'</span>':"")+
+        '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-modpick="'+p.profileId+'" data-name="'+esc(p.tag)+'"'+(noFit?' disabled':'')+'>Draft</button></div>';
     }).join("");
   }
   CG.modal("Draft a player"+(forCode?" — "+esc(forCode):""),
     '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
     '<div id="modPickList" style="max-height:320px;overflow:auto">'+rows("")+'</div>'+
-    '<p class="caption" style="margin-top:10px">A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).</p>',
+    '<p class="caption" style="margin-top:10px">'+(CG.isBasic()
+      ? 'Draft to the shape: at most '+((CG.ROSTER_QUOTA||{}).F||9)+' forwards, '+((CG.ROSTER_QUOTA||{}).D||7)+' defensemen and '+((CG.ROSTER_QUOTA||{}).G||5)+' goaltenders, '+(CG.ROSTER_MAX||15)+' in all with your management (Rule 2.1). A player who would not fit is greyed out.'
+      : 'A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).')+'</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button>');
   function wire(){
     document.querySelectorAll("[data-modpick]").forEach(function(b){ b.addEventListener("click", function(){
@@ -4713,7 +4728,9 @@ CG.AFTER._admDraft = function(){
     });
   }); });
   document.querySelectorAll("[data-openpick]").forEach(function(b){ b.addEventListener("click", function(){
-    CG.draftPickModalLive(this.getAttribute("data-openpick"));
+    /* the commissioner picking on a club's behalf: grey out what would not fit THAT club */
+    var pk = (CG.lg.draftPicks||[]).find(function(x){ return x.id===this.getAttribute("data-openpick"); }.bind(this));
+    CG.draftPickModalLive(this.getAttribute("data-openpick"), pk ? pk.ownerCode : (CG.myManagedTeam&&CG.myManagedTeam()||{}).code);
   }); });
 };
 CG.AFTER.draft = function(){
