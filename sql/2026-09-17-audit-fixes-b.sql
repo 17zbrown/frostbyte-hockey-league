@@ -165,3 +165,14 @@ begin
   end if;
   return new;
 end $$;
+
+-- ==== v2.62 (2026-09-19) · Rule 2.8: Owner + GM seat the club for the draft (AGM optional); Rule 2.6 pay Owner 0 / GM 0 / AGM 2M ====
+create or replace function public.draft_management_gaps() returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'team_id', t.id, 'code', t.code, 'name', t.name,
+    'missing', array_remove(array[
+      case when t.owner_profile_id is null then 'Owner' end,
+      case when t.gm_profile_id is null then 'GM' end], null)) order by t.code), '[]'::jsonb)
+  from public.teams t where t.owner_profile_id is null or t.gm_profile_id is null $$;
+update public.seasons set owner_salary = 0, gm_salary = 0, agm_salary = 2000000 where name in ('Season 1','Season 2');
+select public.apply_mgmt_salaries();   -- re-seats every management contract at the new pay

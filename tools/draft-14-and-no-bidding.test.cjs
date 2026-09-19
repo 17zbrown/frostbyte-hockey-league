@@ -32,13 +32,14 @@ A("...and prices the class at $33,250,000", /\$33,250,000/.test(secFull("2.8")))
 A("...and discloses the cap consequence", /within \$750,000 of the cap/.test(secFull("2.8")));
 
 console.log("— a complete front office before the draft");
-A("Rule 2.8 requires Owner, GM and AGM", /must hold an Owner, a General Manager and an Assistant General Manager/.test(sec("2.8")));
-A("...and says the draft will not start while a seat is empty", /the draft does not start while a seat is vacant/.test(sec("2.8")));
-A("Rule 2.6 cross-references it", /all three seats before the entry draft begins/.test(sec("2.6")));
+/* v2.62: the AGM seat may be open on draft night */
+A("Rule 2.8 requires Owner and GM, and lets the AGM seat stay open", /must hold an Owner and a General Manager \(Rule 2\.6\) before the draft may begin; the Assistant General Manager's seat may be open/.test(sec("2.8")));
+A("...and says the draft will not start while one of those seats is empty", /the draft does not start while one of those seats is vacant/.test(sec("2.8")));
+A("Rule 2.6 cross-references it", /Owner and General Manager seats before the entry draft begins/.test(sec("2.6")));
 A("the draft room asks the database before confirming", /CG\.sb\.rpc\("draft_management_gaps"\)/.test(live));
 A("...and names who is short", /The draft can’t start yet/.test(live) && /Still open:/.test(live));
 A("...from a helper built on the loaded seats", /CG\.draftSeatGaps = function/.test(live));
-A("...shown on the Build-the-board card too", /The draft cannot start yet<\/b> — every club needs an Owner, GM and AGM/.test(live));
+A("...shown on the Build-the-board card too", /The draft cannot start yet<\/b> — every club needs an Owner and a GM/.test(live));
 
 console.log("— rookie bidding is gone");
 for (const id of ["0.6", "2.2", "2.5"]) A(`section ${id} no longer mentions rookie bidding`, !/rookie bidding/i.test(sec(id)));

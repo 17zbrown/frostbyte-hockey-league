@@ -3807,7 +3807,8 @@ CG.ROUTES.draft = function(){
    already loaded so the page can say WHO is short before the button is pressed, not after. */
 CG.draftSeatGaps = function(){
   return (CG.TEAMS||[]).map(function(t){
-    var m=[]; if(!t.owner) m.push("Owner"); if(!t.gm) m.push("GM"); if(!t.agm) m.push("AGM");
+    /* v2.62 (Rule 2.8): a club drafts with its Owner and GM seated; the AGM seat may be open */
+    var m=[]; if(!t.owner) m.push("Owner"); if(!t.gm) m.push("GM");
     return m.length ? { code:t.code, name:t.name, missing:m } : null;
   }).filter(Boolean);
 };
@@ -3825,7 +3826,7 @@ CG.draftStart = function(){
     var gaps=(g&&!g.error&&Array.isArray(g.data))?g.data:CG.draftSeatGaps();
     if (gaps.length){
       CG.modal("The draft can’t start yet",
-        '<p>Every club needs an Owner, a GM and an AGM before the draft begins (Rule 2.8). Still open:</p><ul>'+
+        '<p>Every club needs an Owner and a GM before the draft begins (Rule 2.8). Still open:</p><ul>'+
         gaps.map(function(x){ return '<li><b>'+esc(x.code)+'</b> — '+esc((x.missing||[]).join(", "))+'</li>'; }).join("")+
         '</ul><p class="caption">Seat them under Teams, then come back. The server refuses to start regardless of this check.</p>',
         '<button class="btn btn-chrome" data-close>OK</button>');
@@ -4509,7 +4510,7 @@ CG.admDraftLive = function(){
     var meta = st && st.order_meta;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Build the board</h3>'+
       (meta?'<span class="chip chip-win">'+(meta.fallback?'order set — random draw (no prior season)':'order set — '+esc(CG.dStyleName(meta)))+(meta.snake?' · snake':'')+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
-      (function(){ var g=CG.draftSeatGaps(); return g.length ? '<div class="note" style="margin-bottom:14px"><b>The draft cannot start yet</b> — every club needs an Owner, GM and AGM (Rule 2.8). Still open: '+g.map(function(x){ return esc(x.code)+' ('+x.missing.join(", ")+')'; }).join("; ")+'.</div>' : ''; })()+
+      (function(){ var g=CG.draftSeatGaps(); return g.length ? '<div class="note" style="margin-bottom:14px"><b>The draft cannot start yet</b> — every club needs an Owner and a GM (Rule 2.8). Still open: '+g.map(function(x){ return esc(x.code)+' ('+x.missing.join(", ")+')'; }).join("; ")+'.</div>' : ''; })()+
       '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
       CG.DRAFT_STYLES.map(function(s){
         var on = s[0]===(CG._dStyle||(meta&&meta.style)||"nhl_lottery");
@@ -8252,7 +8253,7 @@ CG.hubManagement = function(){
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
     '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the Owner nominates management for the league office to approve, or removes a sitting GM or AGM.</p></div>';
-  if ((needsGm || needsAgm) && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+(needsGm && needsAgm ? "A General Manager and an Assistant GM are required" : needsGm ? "A General Manager is required" : "An Assistant GM is required")+'</b>Every club must hold all three seats before the entry draft begins — the draft will not start while a seat is empty (Rule 2.8). Nominate below; the league office’s reviewers approve it.</div>';
+  if ((needsGm || needsAgm) && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+(needsGm && needsAgm ? "A General Manager and an Assistant GM are open" : needsGm ? "A General Manager is required" : "The Assistant GM seat is open")+'</b>'+(needsGm ? "Every club must hold its Owner and General Manager seats before the entry draft begins (Rule 2.8); the Assistant GM seat may be filled later. " : "The draft can start without an Assistant GM (Rule 2.8), but a full front office shares the work. ")+'Nominate below; the league office’s reviewers approve it.</div>';
   h+=CG.mgmtApprovalsCard(m);
   h+=CG.mgmtSeatsTable(m);
   h+=CG.mgmtPermissionsCard(m);
@@ -8272,7 +8273,7 @@ CG.hubManagement = function(){
                : "the Owner removes them first, then nominates the successor; ")+
     "an approval into a seat that is still held is refused and nothing moves. "+
     "A removed manager’s management contract ends with the seat, and a spot held only because of the seat is released with it. "+
-    "Every club must hold all three seats before the entry draft begins (Rule 2.8).</div>";
+    "Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</div>";
   return h;
 };
 CG.AFTER._management = function(){
@@ -8364,7 +8365,7 @@ CG.nominateManagerModal = function(role){
   var label = role==="gm"?"General Manager":"Assistant GM";
   CG.modal("Nominate a "+label,
     '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season who isn’t already under contract — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
-      ' Every club must hold all three seats before the entry draft begins (Rule 2.8).</p>'+
+      ' Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</p>'+
     CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
     '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
@@ -10824,8 +10825,8 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Playoffs start (ET)</span><input type="datetime-local" id="ssPlayoffs" value="'+dt(s.playoffs_start_at)+'"></label>'+
     '<label class="fld"><span>Salary cap ($M)</span><input id="ssCap" type="number" min="1" step="0.5" value="'+((s.salary_cap||CG.fmt("salary_cap", s))/1e6)+'"></label>'+
     '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?0:s.owner_salary))/1e6)+'"></label>'+
-    '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?3000000:s.gm_salary))/1e6)+'"></label>'+
-    '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?3000000:s.agm_salary))/1e6)+'"></label>'+
+    '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?0:s.gm_salary))/1e6)+'"></label>'+
+    '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?2000000:s.agm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||CG.fmt("roster_max", s))+'" readonly title="Set by the season format (Rule 2.1): 18 basic, 17 full"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||CG.fmt("trade_deadline_week", s))+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
@@ -10944,8 +10945,8 @@ CG.seasonForm = function(id){
       /* fixed management salaries — Owner/GM/AGM roster spots and contracts are pinned to
          these three numbers by the database (protect_manager_spot) */
       owner_salary:Math.round(parseFloat(document.getElementById("ssOwnSal").value||"0")*1e6),
-      gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"3")*1e6),
-      agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"3")*1e6),
+      gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"0")*1e6),
+      agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"2")*1e6),
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||fr.trade_deadline_week,
       moves_lock_override:document.getElementById("ssMoves").value };
     if (isNew) rec.weeks = fr.weeks;

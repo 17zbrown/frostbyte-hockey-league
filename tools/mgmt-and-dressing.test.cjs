@@ -18,9 +18,9 @@ const sec = (id) => { for (const c of rb.chapters) for (const s of c.sections) i
 console.log("— management salaries: Owner $0 / GM $3M / AGM $3M, everywhere");
 {
   const r26 = sec("2.6");
-  A("Rule 2.6 puts the GM and AGM at a flat $3,000,000 each",
-    /the General Manager and Assistant General Manager \(and any additional tertiary management contract\) each count a flat \$3,000,000/.test(r26));
-  A("...with the Owner at $0", /the Owner counts \$0 against the cap/.test(r26));
+  /* v2.62: Owner $0, GM $0, AGM $2,000,000 */
+  A("Rule 2.6 puts the AGM at a flat $2,000,000", /Assistant General Manager \(and any additional tertiary management contract\) counts a flat \$2,000,000/.test(r26));
+  A("...with the Owner and GM at $0", /the Owner and the General Manager each count \$0 against the cap/.test(r26));
   A("...and no longer says the GM counts $0", !/the Owner and the General Manager count \$0/.test(r26));
   if (briefing) A("the owners' briefing agrees (Owner $0, GM $3M, AGM $3M)", /Owner counts \$0 against the cap, GM \$3M, AGM \$3M/.test(briefing));
   A("the Control Center defaults a new Owner salary to $0, not $3M", /s\.owner_salary==null\?0:s\.owner_salary/.test(live));
