@@ -3780,7 +3780,9 @@ CG.ROUTES.draft = function(){
 
   var poolCard = '<div class="card"><div class="card-h"><h3>Prospect pool</h3><span class="chip">'+pool.length+' available</span></div>'+
     (pool.length ? '<div class="card-b" style="padding-top:8px"><p class="caption" style="margin-bottom:10px">Registered players not yet on a roster, ranked by the commissioner’s scouted overall. Pre-season lines come from the EA box scores.</p>'+
-      pool.slice(0,40).map(function(pr,i){
+      CG.poolPager("room", pool.length)+
+      CG.poolSlice("room", pool.map(function(pr,i){ pr._rank = i+1; return pr; })).map(function(pr){
+        var i = pr._rank - 1;
         var ps=(CG.lg.preGp||{})[pr.profileId], vet=CG.lg.isVeteran&&CG.lg.isVeteran(pr.profileId);
         var preLine = ps&&ps.gp ? ps.gp+" GP · "+ps.g+"G "+ps.a+"A pre-season" : "no pre-season games";
         /* v2.35: the same predicate the pick RPC enforces (deadline first, then five games or a
@@ -3790,9 +3792,9 @@ CG.ROUTES.draft = function(){
                                     : el.gp>=CG.PRESEASON_MIN_GP ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
                                                : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF '+CG.PRESEASON_MIN_GP+'</span>');
         return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
-          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+(pr.eaId?" · EA: "+esc(pr.eaId):"")+' · '+preLine+'</small></span>'+
+          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+' · EA ID '+(pr.eaId?'<span class="mono">'+esc(pr.eaId)+'</span>':'<span style="color:var(--amber-ink)">not set</span>')+' · '+preLine+'</small></span>'+
           '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
-      }).join("")+'</div>'
+      }).join("")+CG.poolPager("room", pool.length)+'</div>'
       : '<div class="card-b"><p class="caption">No prospects available yet — the pool fills from season registrations that haven’t been assigned to a club.</p></div>')+'</div>';
 
   if (spectate){
@@ -4203,19 +4205,18 @@ CG.draftPickModalLive = function(pickId, forCode){
   });
   function rows(q){
     q = (q||"").toLowerCase();
-    var matches = pool.filter(function(p){ return !q || p.tag.toLowerCase().indexOf(q)>=0; });
-    var list = matches.slice(0,30);
-    if (!list.length) return '<p class="caption" style="padding:14px 0">No available players match.</p>';
-    var more = matches.length>30 ? '<p class="caption" style="padding:8px 0">Showing 30 of '+matches.length+' — refine the search.</p>' : '';
-    return more + list.map(function(p){
+    var matches = pool.filter(function(p){ return !q || p.tag.toLowerCase().indexOf(q)>=0 || (p.eaId||"").toLowerCase().indexOf(q)>=0; });
+    if (!matches.length) return '<p class="caption" style="padding:14px 0">No available players match.</p>';
+    var pager = CG.poolPager("pick", matches.length), list = CG.poolSlice("pick", matches);
+    return pager + list.map(function(p){
       var e = CG.eligOf(p.profileId);
       var noFit = forCode ? CG.draftFits(forCode, p.pos) : null;
-      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft)">'+
-        '<b style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis">'+esc(p.tag)+'</b>'+
-        '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+'</span>'+CG.eligChipD(p.profileId)+
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft);flex-wrap:wrap">'+
+        '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small class="caption" style="display:block">'+esc(p.pos||"?")+' · EA ID '+(p.eaId?'<span class="mono">'+esc(p.eaId)+'</span>':'<span style="color:var(--amber-ink)">not set</span>')+'</small></span>'+
+        CG.eligChipD(p.profileId)+
         (noFit?'<span class="chip" style="font-size:9px" title="Rule 2.1: the active roster is capped as a whole and per position group, management included">'+esc(noFit)+'</span>':"")+
         '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-modpick="'+p.profileId+'" data-name="'+esc(p.tag)+'"'+(noFit?' disabled':'')+'>Draft</button></div>';
-    }).join("");
+    }).join("") + pager;
   }
   CG.modal("Draft a player"+(forCode?" — "+esc(forCode):""),
     '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
@@ -4238,8 +4239,11 @@ CG.draftPickModalLive = function(pickId, forCode){
     }); });
   }
   wire();
+  function repaintList(){ var lst = document.getElementById("modPickList"); if (!lst) return; lst.innerHTML = rows((document.getElementById("modPickQ")||{}).value||""); wire(); CG.wirePoolPager(lst, repaintList); }
+  CG._poolPage.pick = 0;
+  CG.wirePoolPager(document.getElementById("modPickList"), repaintList);
   var q=document.getElementById("modPickQ");
-  if(q) q.addEventListener("input", function(){ document.getElementById("modPickList").innerHTML = rows(this.value); wire(); });
+  if(q) q.addEventListener("input", function(){ CG._poolPage.pick = 0; repaintList(); });
 };
 
 /* ---------------- Team HQ · Draft desk ---------------- */
@@ -4425,6 +4429,29 @@ CG.hubDraftLive = function(){
     '</div></div></div>';
   return h;
 };
+/* Pages for the prospect lists (v2.65): nothing is cut off at 14 or 40 any more — every prospect
+   is reachable, 25 to a page, with the EA ID on every row. `name` keys the page state; the
+   caller re-renders its own container when a page button is pressed. */
+CG.POOL_PAGE = 25;
+CG._poolPage = CG._poolPage || {};
+CG.poolPager = function(name, total){
+  var per = CG.POOL_PAGE, pages = Math.max(1, Math.ceil(total / per)), page = Math.min(CG._poolPage[name]||0, pages-1);
+  CG._poolPage[name] = page;
+  if (pages <= 1) return "";
+  var from = page*per+1, to = Math.min(total, (page+1)*per);
+  return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0 4px;flex-wrap:wrap">'+
+    '<button class="btn btn-ghost btn-sm" data-pool-pg="'+name+'" data-dir="-1"'+(page===0?' disabled':'')+'>‹ Previous</button>'+
+    '<span class="caption">'+from+'–'+to+' of '+total+' · page '+(page+1)+' of '+pages+'</span>'+
+    '<button class="btn btn-ghost btn-sm" data-pool-pg="'+name+'" data-dir="1"'+(page>=pages-1?' disabled':'')+'>Next ›</button></div>';
+};
+CG.poolSlice = function(name, list){ var per = CG.POOL_PAGE, page = CG._poolPage[name]||0; return list.slice(page*per, page*per+per); };
+CG.wirePoolPager = function(root, rerender){
+  (root||document).querySelectorAll("[data-pool-pg]").forEach(function(b){ b.addEventListener("click", function(){
+    var name = this.getAttribute("data-pool-pg"), dir = parseInt(this.getAttribute("data-dir"),10)||0;
+    CG._poolPage[name] = Math.max(0, (CG._poolPage[name]||0) + dir);
+    rerender();
+  }); });
+};
 CG._bdPoolRows = function(pool, boarded, q, posF){
   q = (q||"").toLowerCase();
   var matches = pool.filter(function(p){
@@ -4433,17 +4460,17 @@ CG._bdPoolRows = function(pool, boarded, q, posF){
     if (posF && posF!=="ALL" && p.pos!==posF) return false;
     return true;
   });
-  var list = matches.slice(0, 14);
-  if (!list.length) return '<p class="caption" style="padding:8px 0">'+(Object.keys(boarded).length?"Everyone matching is already on your board.":"No available players match.")+'</p>';
-  var more = matches.length>14 ? '<p class="caption" style="padding:6px 0">Showing 14 of '+matches.length+' — search or filter to narrow it.</p>' : '';
-  return more + list.map(function(p){
+  if (!matches.length) return '<p class="caption" style="padding:8px 0">'+(Object.keys(boarded).length?"Everyone matching is already on your board.":"No available players match.")+'</p>';
+  var pager = CG.poolPager("desk", matches.length), list = CG.poolSlice("desk", matches);
+  return pager + list.map(function(p){
     var pre = (CG.lg.preGp||{})[p.profileId]||{gp:0,g:0,a:0};
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft)">'+
-      '<b style="font-size:13.5px">'+esc(p.tag)+'</b>'+
-      '<span class="mono" style="font-size:10px;color:var(--steel)">'+esc(p.pos||"?")+(CG.fmt("preseason")?' · '+pre.gp+'gp '+pre.g+'g '+pre.a+'a':'')+'</span>'+
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft);flex-wrap:wrap">'+
+      '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b>'+
+        '<small class="caption" style="display:block">'+esc(p.pos||"?")+' · EA ID '+(p.eaId?'<span class="mono">'+esc(p.eaId)+'</span>':'<span style="color:var(--amber-ink)">not set</span>')+
+        (CG.fmt("preseason")?' · '+pre.gp+'gp '+pre.g+'g '+pre.a+'a':'')+'</small></span>'+
       (CG.fmt("preseason") ? CG.eligChipD(p.profileId) : '')+
       '<button class="btn btn-ghost btn-sm" style="margin-left:auto" data-bd-add="'+p.profileId+'">'+CG.ic("plus",12)+'Add</button></div>';
-  }).join("");
+  }).join("") + pager;
 };
 CG.AFTER._hubDraft = function(){
   CG.subscribeDraft(); CG._armDraftTick();
@@ -4464,7 +4491,7 @@ CG.AFTER._hubDraft = function(){
   CG._bdUI = CG._bdUI || { q:"", pos:"ALL" };
   function rerenderPool(){
     var el = document.getElementById("bdPoolList");
-    if (el){ el.innerHTML = CG._bdPoolRows(CG.lg.draftPool||[], boarded, CG._bdUI.q, CG._bdUI.pos); wireAdds(); }
+    if (el){ el.innerHTML = CG._bdPoolRows(CG.lg.draftPool||[], boarded, CG._bdUI.q, CG._bdUI.pos); wireAdds(); CG.wirePoolPager(el, rerenderPool); }
   }
   function wireAdds(){
     document.querySelectorAll("[data-bd-add]").forEach(function(b){ b.addEventListener("click", function(){
@@ -4472,9 +4499,10 @@ CG.AFTER._hubDraft = function(){
     }); });
   }
   var s = document.getElementById("bdSearch");
-  if (s) s.addEventListener("input", function(){ CG._bdUI.q = this.value; rerenderPool(); });
+  if (s) s.addEventListener("input", function(){ CG._bdUI.q = this.value; CG._poolPage.desk = 0; rerenderPool(); });
+  CG.wirePoolPager(document.getElementById("bdPoolList"), rerenderPool);
   document.querySelectorAll("[data-bd-pos]").forEach(function(b){ b.addEventListener("click", function(){
-    CG._bdUI.pos = this.getAttribute("data-bd-pos");
+    CG._bdUI.pos = this.getAttribute("data-bd-pos"); CG._poolPage.desk = 0;
     var self = this;
     document.querySelectorAll("[data-bd-pos]").forEach(function(x){ var on = x===self; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); });
     rerenderPool();
@@ -4759,6 +4787,8 @@ CG.AFTER.draft = function(){
   var p=document.querySelector("[data-draft-pause]"); if(p) p.addEventListener("click", function(){ CG.draftPauseResume(true); });
   var r=document.querySelector("[data-draft-resume]"); if(r) r.addEventListener("click", function(){ CG.draftPauseResume(false); });
   var k=document.querySelector("[data-draft-skip]"); if(k) k.addEventListener("click", CG.draftSkip);
+  /* the prospect pool's pages: a page press repaints the room in place (scroll and focus kept) */
+  CG.wirePoolPager(document, function(){ if (CG.repaintDraft) CG.repaintDraft(); else CG.router(); });
   CG.startDraftClock();
   CG.subscribeDraft();
 };
