@@ -242,6 +242,9 @@ CG.hubDashboard = function(){
   var h = '<div style="margin-bottom:24px"><span class="eyebrow chr">'+CG.fmtFull(CG.now())+'</span>'+
     '<h1 class="h-page" style="margin-top:8px">'+title+'</h1></div>';
   var cards = [];
+  /* draft night (v2.68): players are not in the draft, but they can watch it; management already
+     has its own draft desk in Team HQ, so the pointer is for everyone else */
+  if (CG.draftNightBand && !(CG.managesClub && CG.managesClub())){ var dnb = CG.draftNightBand("hub"); if (dnb) cards.push(dnb); }
   if (me){
     var t = CG.TEAM[me.team], s = lg.pstats[me.id];
     var av = CG.availGet(me.id);

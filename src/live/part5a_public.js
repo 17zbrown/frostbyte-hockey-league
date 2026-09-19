@@ -1035,6 +1035,8 @@ CG.ROUTES.home = function(){
       (regOpen?'<a class="btn btn-chrome btn-sm" href="#/register">Register to play</a>':"")+'</span>'+
     '</div></section>';
   }
+  /* draft night (v2.68): the room is public, so the front page points at it while it matters */
+  if (CG.draftNightBand) html += CG.draftNightBand("home");
   /* registration strip — stays up for the whole sign-up window, not just the eligibility run-up */
   var regDl = sR.registration_deadline ? Date.parse(sR.registration_deadline) : null;
   if (regOpen && !faLive){

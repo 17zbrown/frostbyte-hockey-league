@@ -3783,23 +3783,18 @@ CG.ROUTES.draft = function(){
         (showAdmin?'<td class="tright">'+(p.used?'<button class="btn btn-ghost btn-sm" data-reversepick="'+p.id+'">Reverse</button>':'<span class="caption">—</span>')+'</td>':'')+'</tr>';
     }).join("")+'</tbody></table></div></div>';
 
+  /* v2.68: the room's pool is searchable (gamertag, EA ID, position) with position chips, like the
+     desk's. The filter lives in CG._roomUI so a realtime repaint mid-draft keeps it. */
+  CG._roomUI = CG._roomUI || { q:"", pos:"ALL" };
   var poolCard = '<div class="card"><div class="card-h"><h3>Prospect pool</h3><span class="chip">'+pool.length+' available</span></div>'+
     (pool.length ? '<div class="card-b" style="padding-top:8px"><p class="caption" style="margin-bottom:10px">Registered players not yet on a roster, ranked by the commissioner’s scouted overall. Pre-season lines come from the EA box scores.</p>'+
-      CG.poolPager("room", pool.length)+
-      CG.poolSlice("room", pool.map(function(pr,i){ pr._rank = i+1; return pr; })).map(function(pr){
-        var i = pr._rank - 1;
-        var ps=(CG.lg.preGp||{})[pr.profileId], vet=CG.lg.isVeteran&&CG.lg.isVeteran(pr.profileId);
-        var preLine = ps&&ps.gp ? ps.gp+" GP · "+ps.g+"G "+ps.a+"A pre-season" : "no pre-season games";
-        /* v2.35: the same predicate the pick RPC enforces (deadline first, then five games or a
-           returning player; in the basic format the cutoff alone) — a late registrant with games used to read ELIGIBLE here */
-        var el = CG.eligOf(pr.profileId);
-        var eligChip = el.vet ? "" : (el.ok ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
-                                    : el.gp>=CG.PRESEASON_MIN_GP ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
-                                               : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF '+CG.PRESEASON_MIN_GP+'</span>');
-        return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
-          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+' · EA ID '+(pr.eaId?'<span class="mono">'+esc(pr.eaId)+'</span>':'<span style="color:var(--amber-ink)">not set</span>')+' · '+preLine+'</small></span>'+
-          '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
-      }).join("")+CG.poolPager("room", pool.length)+'</div>'
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'+
+      '<input type="search" id="roomSearch" placeholder="Search gamertag, EA ID or position…" value="'+esc(CG._roomUI.q)+'" aria-label="Search the prospect pool" style="flex:1;min-width:180px">'+
+      '<span style="display:inline-flex;gap:6px;flex-wrap:wrap" role="group" aria-label="Position filter">'+["ALL","C","LW","RW","LD","RD","G"].map(function(px){
+        var on = px===CG._roomUI.pos;
+        return '<button type="button" class="chip'+(on?" chip-chrome":"")+'" data-room-pos="'+px+'" aria-pressed="'+on+'" style="cursor:pointer">'+px+'</button>';
+      }).join("")+'</span></div>'+
+      '<div id="roomPoolList">'+CG._roomPoolRows(pool)+'</div></div>'
       : '<div class="card-b"><p class="caption">No prospects available yet — the pool fills from season registrations that haven’t been assigned to a club.</p></div>')+'</div>';
 
   if (spectate){
@@ -3823,6 +3818,32 @@ CG.draftSeatGaps = function(){
     var m=[]; if(!t.owner) m.push("Owner"); if(!t.gm) m.push("GM");
     return m.length ? { code:t.code, name:t.name, missing:m } : null;
   }).filter(Boolean);
+};
+/* v2.68: a pointer to the draft room for everyone who is not management. The room is public and
+   updates live, but nothing on a player's dashboard or the front page said so. Shown while the
+   draft is live or paused, and from the morning of draft day until it completes; silent otherwise.
+   where = "home" renders the front-page strip, "hub" the dashboard card. */
+CG.draftNightBand = function(where){
+  var st = CG.lg.draftState, status = st ? st.status : "setup";
+  if (status === "complete") return "";
+  var at = CG.SEASON && CG.SEASON.draft_at ? Date.parse(CG.SEASON.draft_at) : null;
+  var now = CG.now(), live = status === "live" || status === "paused";
+  var soon = at && now >= at - 18*3600000 && now < at + 12*3600000;
+  if (!live && !soon) return "";
+  var lead = live ? (status === "paused" ? "The draft is paused" : "The draft is live") : "Draft night is tonight";
+  var body = live ? "Every pick lands on the board the moment a club makes it. Open the room to follow along."
+                  : "Clubs pick at "+(at ? CG.fmtTime(at) : "9:00 PM ET")+". The board updates live for everyone, so you can watch every pick as it happens.";
+  var cta = live ? "Watch the draft" : "Open the draft room";
+  if (where === "home"){
+    return '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
+      '<span class="chip chip-live"><span class="live-dot"></span>'+lead+'</span>'+
+      '<span style="color:var(--on-ink-dim);font-size:13px">'+body+'</span>'+
+      '<a class="btn btn-chrome btn-sm" href="#/draft" style="margin-left:auto">'+cta+'</a></div></section>';
+  }
+  return '<div class="card" style="grid-column:1/-1;border-color:var(--chrome-deep);background:var(--chrome-tint)"><div class="card-h"><h3>'+lead+'</h3>'+
+    '<span class="chip chip-live"><span class="live-dot"></span>'+(live?"Live":"Tonight")+'</span></div>'+
+    '<div class="card-b" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><p class="small" style="color:var(--steel);flex:1;min-width:220px;margin:0">'+body+'</p>'+
+    '<a class="btn btn-chrome btn-sm" href="#/draft">'+cta+'</a></div></div>';
 };
 CG._draftSeason = function(){ return (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number) || 1; };
 CG.refreshDraft = function(){ if(!CG.sb) return;
@@ -4477,6 +4498,36 @@ CG.poolPager = function(name, total){
     '<button class="btn btn-ghost btn-sm" data-pool-pg="'+name+'" data-dir="1"'+(page>=pages-1?' disabled':'')+'>Next ›</button></div>';
 };
 CG.poolSlice = function(name, list){ var per = CG.POOL_PAGE, page = CG._poolPage[name]||0; return list.slice(page*per, page*per+per); };
+/* v2.68: the draft room's prospect rows, filtered by CG._roomUI (search on gamertag, EA ID, position
+   code or position name; a position chip). Rank numbers are the player's place in the WHOLE pool, so
+   a filtered list still tells a manager where each prospect sits. */
+CG._roomPoolRows = function(pool){
+  var ui = CG._roomUI || { q:"", pos:"ALL" }, q = (ui.q||"").trim().toLowerCase();
+  var ranked = pool.map(function(pr,i){ pr._rank = i+1; return pr; });
+  var matches = ranked.filter(function(pr){
+    if (ui.pos && ui.pos!=="ALL" && pr.pos!==ui.pos) return false;
+    if (!q) return true;
+    var hay = [pr.tag, pr.eaId, pr.pos, CG.POS_NAME[pr.pos]].filter(Boolean).join(" ").toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+  if (!matches.length) return '<p class="caption" style="padding:10px 0">No available prospect matches'+(q?' “'+esc(ui.q.trim())+'”':'')+(ui.pos&&ui.pos!=="ALL"?' at '+esc(ui.pos):'')+'.</p>';
+  var note = matches.length!==pool.length ? '<p class="caption" style="margin:4px 0 6px">'+matches.length+' of '+pool.length+' match</p>' : '';
+  return note + CG.poolPager("room", matches.length)+
+      CG.poolSlice("room", matches).map(function(pr){
+        var i = pr._rank - 1;
+        var ps=(CG.lg.preGp||{})[pr.profileId], vet=CG.lg.isVeteran&&CG.lg.isVeteran(pr.profileId);
+        var preLine = ps&&ps.gp ? ps.gp+" GP · "+ps.g+"G "+ps.a+"A pre-season" : "no pre-season games";
+        /* v2.35: the same predicate the pick RPC enforces (deadline first, then five games or a
+           returning player; in the basic format the cutoff alone) — a late registrant with games used to read ELIGIBLE here */
+        var el = CG.eligOf(pr.profileId);
+        var eligChip = el.vet ? "" : (el.ok ? ' <span class="chip chip-win" style="font-size:9px">ELIGIBLE</span>'
+                                    : el.gp>=CG.PRESEASON_MIN_GP ? ' <span class="chip chip-warn" style="font-size:9px">LATE SIGN-UP</span>'
+                                               : ' <span class="chip chip-warn" style="font-size:9px">'+el.gp+' OF '+CG.PRESEASON_MIN_GP+'</span>');
+        return '<div class="leaderrow" style="cursor:default"><span class="rk num">'+(i+1)+'</span>'+
+          '<span style="min-width:0"><b style="font-size:13.5px">'+esc(pr.tag)+'</b>'+eligChip+'<small style="display:block" class="caption">'+(CG.POS_NAME[pr.pos]||pr.pos)+' · EA ID '+(pr.eaId?'<span class="mono">'+esc(pr.eaId)+'</span>':'<span style="color:var(--amber-ink)">not set</span>')+' · '+preLine+'</small></span>'+
+          '<span class="val"><b class="num">'+(pr.ovr!=null?pr.ovr:"—")+'</b><span>'+(pr.ovr!=null?"OVR":"unrated")+'</span></span></div>';
+      }).join("")+CG.poolPager("room", matches.length);
+};
 CG.wirePoolPager = function(root, rerender){
   (root||document).querySelectorAll("[data-pool-pg]").forEach(function(b){ b.addEventListener("click", function(){
     var name = this.getAttribute("data-pool-pg"), dir = parseInt(this.getAttribute("data-dir"),10)||0;
@@ -4819,8 +4870,23 @@ CG.AFTER.draft = function(){
   var p=document.querySelector("[data-draft-pause]"); if(p) p.addEventListener("click", function(){ CG.draftPauseResume(true); });
   var r=document.querySelector("[data-draft-resume]"); if(r) r.addEventListener("click", function(){ CG.draftPauseResume(false); });
   var k=document.querySelector("[data-draft-skip]"); if(k) k.addEventListener("click", CG.draftSkip);
-  /* the prospect pool's pages: a page press repaints the room in place (scroll and focus kept) */
-  CG.wirePoolPager(document, function(){ if (CG.repaintDraft) CG.repaintDraft(); else CG.router(); });
+  /* the prospect pool's pages, search and position chips repaint the list alone (v2.68); anything
+     else in the room repaints in place (scroll and focus kept) */
+  CG._roomUI = CG._roomUI || { q:"", pos:"ALL" };
+  function rerenderRoomPool(){
+    var el = document.getElementById("roomPoolList");
+    if (el){ el.innerHTML = CG._roomPoolRows(CG.lg.draftPool||[]); CG.wirePoolPager(el, rerenderRoomPool); }
+    else if (CG.repaintDraft) CG.repaintDraft(); else CG.router();
+  }
+  var rs = document.getElementById("roomSearch");
+  if (rs) rs.addEventListener("input", function(){ CG._roomUI.q = this.value; CG._poolPage.room = 0; rerenderRoomPool(); });
+  document.querySelectorAll("[data-room-pos]").forEach(function(b){ b.addEventListener("click", function(){
+    CG._roomUI.pos = this.getAttribute("data-room-pos"); CG._poolPage.room = 0;
+    var self = this;
+    document.querySelectorAll("[data-room-pos]").forEach(function(x){ var on = x===self; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); });
+    rerenderRoomPool();
+  }); });
+  CG.wirePoolPager(document, rerenderRoomPool);
   CG.startDraftClock();
   CG.subscribeDraft();
 };
