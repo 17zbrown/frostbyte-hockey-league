@@ -4183,7 +4183,7 @@ CG.rerenderKeepScroll = function(){
    and per position group. Returns why a prospect would not fit today, or null. Mirrors the
    database's draft_fits(), which is what actually refuses the pick. */
 CG.draftFits = function(club, pos){
-  var q = CG.ROSTER_QUOTA || {}, max = CG.ROSTER_MAX || 15;
+  var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
   var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return p.status==="active" && p.squad!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
   if (counted.length >= max) return "roster full · "+max;
   var grp = CG.posGroup(pos||"C"), n = counted.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length;
@@ -4216,7 +4216,7 @@ CG.draftPickModalLive = function(pickId, forCode){
     '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
     '<div id="modPickList" style="max-height:320px;overflow:auto">'+rows("")+'</div>'+
     '<p class="caption" style="margin-top:10px">'+(CG.isBasic()
-      ? 'Draft to the shape: at most '+((CG.ROSTER_QUOTA||{}).F||9)+' forwards, '+((CG.ROSTER_QUOTA||{}).D||7)+' defensemen and '+((CG.ROSTER_QUOTA||{}).G||5)+' goaltenders, '+(CG.ROSTER_MAX||15)+' in all with your management (Rule 2.1). A player who would not fit is greyed out.'
+      ? 'Draft to the shape: at most '+(CG.ROSTER_QUOTA||CG.fmt("quota")).F+' forwards, '+(CG.ROSTER_QUOTA||CG.fmt("quota")).D+' defensemen and '+(CG.ROSTER_QUOTA||CG.fmt("quota")).G+' goaltenders, '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' in all with your management (Rule 2.1). A player who would not fit is greyed out.'
       : 'A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).')+'</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button>');
   function wire(){
