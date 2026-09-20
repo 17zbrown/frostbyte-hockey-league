@@ -1,0 +1,17 @@
+-- v2.70 (2026-09-19, commissioner's ruling minutes before the Season 1 draft): an expired draft clock
+-- SKIPS the pick; nothing is auto-drafted from the board or the pool. A pick still unused when the
+-- draft concludes is replaced after the draft by ONE registered player placed on the club at random,
+-- into its active roster at the league minimum (origin postdraft_random, which counts toward the
+-- shape), before the general depth placement. Applied live; repo record. Rehearsed rolled back:
+-- _place_for_unused_picks seated 96 players for 96 unused picks at $750,000 with every trigger green.
+--
+-- 1) _draft_auto_advance: skip instead of auto-draft (full body replaced; the board lookup and the
+--    best-available fallback are gone; transaction text says the pick is skipped and what follows).
+-- 2) new public._place_for_unused_picks(p_season uuid, p_season_number int) returns int
+--    (security definer, EXECUTE revoked from public/anon/authenticated): per club,
+--    owed = unused draft_picks - existing postdraft_random spots; each placement picks a random
+--    eligible, unrostered registrant with draft_fits() null, inserts roster_spots at 750000, marks the
+--    registration assigned and logs a 'sign' transaction.
+-- 3) distribute_unproven_rookies(boolean): after set_config('app.roster_notice','batch'), 
+--    v_n := v_n + public._place_for_unused_picks(v_season.id, v_season.number); then the depth loop.
+-- Rulebook 2.8 paragraphs 5, 6 (salary sentence) and 8 (two-pass placement) say the same.

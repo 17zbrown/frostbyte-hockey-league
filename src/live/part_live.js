@@ -4348,8 +4348,9 @@ CG.hubDraftLive = function(){
   var mySkipped = myPicks.filter(function(p){ return p.skipped && !p.used; });
   var picksUntil = (nextMine && cur) ? picks.filter(function(p){ return !p.used && !p.skipped && p.overall>=cur.overall && p.overall<nextMine.overall; }).length : null;
   var unlocked = pool.length>0 || (CG.SEASON && CG.SEASON.preseason_starts_at && Date.parse(CG.SEASON.preseason_starts_at)<=CG.now());
-  /* Board coverage: the auto-pick drafts from YOUR board when your clock expires — a board thinner
-     than your remaining picks means the league eventually drafts best-available-overall for you.
+  /* Board coverage: your board is what the one-click Draft button picks from on your clock (v2.70:
+     an expired clock is SKIPPED, nothing is auto-drafted). A board thinner than your remaining
+     picks means you will be choosing from the pool by hand later in the night.
      Counted against the players still actually available, since rivals draft your targets too. */
   var remainingMine = myPicks.filter(function(pk){ return !pk.used && !pk.skipped; }).length;
   /* no pick order yet → coverage can't be graded; null keeps "no picks left" honest */
@@ -4365,16 +4366,16 @@ CG.hubDraftLive = function(){
   var covNote = cov.level==="pre"
     ? 'Coverage grades against your pick count once the commissioner generates the draft order — until then, just keep ranking.'
     : cov.level==="short"
-    ? 'If your clock runs out past your board, the league drafts best-available <b>overall</b> — rank more players.'
+    ? 'Fewer names than picks: later in the night you will be picking from the pool by hand on the clock. Rank more players, and remember an expired clock is <b>skipped</b>.'
     : cov.level==="thin"
     ? 'Enough for your picks with nothing to spare — other clubs draft your targets too. A few extra names is cheap insurance.'
-    : 'If your clock ever runs out, the auto-pick takes the best player still available <b>from this list</b>.';
+    : 'On your clock, one click drafts the best player still available <b>from this list</b>. Nobody drafts for you: a clock that runs out is skipped and a random player is placed on the club after the draft.';
   covNote += covIneli;
   var draftAt = CG.SEASON && CG.SEASON.draft_at ? Date.parse(CG.SEASON.draft_at) : null;
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · the war room</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Draft desk</h1>'+
-    '<p class="lede" style="margin-top:8px">Build your board before the night, then let it work for you: if your clock ever runs out, the league drafts the best available player <b>from your board</b> automatically.</p></div>';
+    '<p class="lede" style="margin-top:8px">Build your board before the night so your pick is one click on the clock. Nobody drafts for you: a clock that runs out is <b>skipped</b>, and a club with a pick it never used receives one random player after the draft (Rule 2.8).</p></div>';
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Board coverage</h3>'+covChip+'</div>'+
     '<div class="card-b"><p class="caption">'+covNote+'</p></div></div>';
   /* v2.66: how much roster room the club has left, by position group — the shape a pick must fit */
@@ -4509,7 +4510,7 @@ CG.hubDraftLive = function(){
 
   /* how it works */
   h += '<div class="card"><div class="card-h"><h3>How draft night runs</h3></div><div class="card-b"><div class="grid g2" style="gap:14px">'+
-    [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the league auto-drafts your top available board player — never a player you didn’t rank, unless your board runs dry."],
+    [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the pick is skipped: nobody drafts for you. A skipped pick can still be used before the draft concludes; one that never is gets replaced by a random player placed on the club after the draft (Rule 2.8)."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
      ["Skipped picks aren’t lost","If a pick gets skipped, it stays yours — use it any time before the draft ends from the Make-up card."],
      ["Eligibility","Registered by 11:59 PM ET the Thursday before the draft and, for randomly assigned first-years, at least 3 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of three still plays — placed on a club under Rule 2.2."]
@@ -4713,7 +4714,7 @@ CG.admDraftLive = function(){
       (running&&cur?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
         '<b style="font-family:var(--f-disp)">'+esc(CG.TEAM[cur.ownerCode]?CG.TEAM[cur.ownerCode].name:cur.ownerCode)+' are on the clock</b><span class="caption">R'+cur.round+' · #'+cur.overall+' overall</span>'+
         '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-openpick="'+cur.id+'">Pick on their behalf</button></div>':"")+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the league auto-drafts from the club’s own board (best available), then best-rated eligible player. Skipped picks stay recoverable — clubs use them from Team HQ, or you can from the table below. Concluding releases every unused pick; ten minutes later everyone still without a club is placed on one automatically (Rule 2.8).</span></div></div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the pick is skipped, nothing is drafted for the club (v2.70). Skipped picks stay recoverable — clubs use them from Team HQ, or you can from the table below. Concluding releases every unused pick; ten minutes later everyone still without a club is placed on one automatically (Rule 2.8).</span></div></div>';
   }
 
   /* FULL BOARD */

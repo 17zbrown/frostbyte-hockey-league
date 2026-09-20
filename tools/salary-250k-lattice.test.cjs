@@ -147,8 +147,8 @@ console.log("— the rulebook says the same thing");
   }
   A("...states the scale follows the round count rather than assuming ten (full)",
     /set by the number of rounds the commissioner calls/.test(secFull("2.8")));
-  A("...and covers a clock expiry, not just a club picking for itself",
-    /whether the club selects for itself or its clock expires and the league office selects from its board/.test(sec("2.8")));
+  A("...and says a replacement placement for an unused pick is not a selection and pays the minimum (v2.70)",
+    /for a selection it never used is not a selection and is paid the league minimum/.test(sec("2.8")));
   A("...states every pick in a round costs the same",
     /identical cap hit/.test(sec("2.8")));
   A("...and prices the full class (basic: derived from the formula, not a fixed pin)",
@@ -173,7 +173,7 @@ console.log("— the owners' briefings, the documents owners actually work from"
     /* v2.64: 12 published rounds → $750K + 11 × $250K */
     A(`${f}: ...and that round 1 is $3,500,000`, /round 1 is \$3,500,000/.test(b));
     A(`${f}: ...and that a full class is $25,500,000`, /\$25,500,000/.test(b));
-    A(`${f}: ...and that an expired clock signs at the same price`, /if your clock expires/.test(b));
+    A(`${f}: ...and that an expired clock skips the pick (v2.70)`, /clock runs out the pick is skipped/.test(b));
   }
 }
 

@@ -58,7 +58,7 @@ A("no surviving copy still routes undrafted players to bidding", !/go to free ag
 A("the Draft Room channel topic no longer promises a bidding board", !/bidding board/.test(R("shared/roles.mjs")));
 
 console.log("— post-draft placement (v2.33)");
-A("Rule 2.8 P7 says everyone unplaced is seated ten minutes after the draft", /a ten \(10\) minute period, after which every registered player still without a club/.test(sec("2.8")));
+A("Rule 2.8 P7 says everyone unplaced is seated ten minutes after the draft", /a ten \(10\) minute period, after which the league office places players in two passes/.test(sec("2.8")) && /every registered player still without a club is placed on one by the league office, in random order/.test(sec("2.8")));
 A("...in random order, no club choosing", /in random order/.test(sec("2.8")) && /No club selects/.test(sec("2.8")));
 A("...as a one-season contract", /on a contract for the season \(Rule 2\.5\)/.test(sec("2.8")));
 A("...and guarantees nobody is left without a club (basic has no unseatable case)", /No club selects, and no registered player is left without a club/.test(sec("2.8")));

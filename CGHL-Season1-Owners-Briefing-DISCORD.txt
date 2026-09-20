@@ -49,9 +49,9 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 **Everyone who signed up by the Thursday cutoff is in the pool.** There is no pre-season and no appearance requirement — registered on time is the whole test (Rule 2.8).
 
-**Build your board in advance.** It is private to your management group. If your clock runs out, the league takes the best available player off your own board, so an absent manager never costs the club a pick or lands someone you never ranked.
+**Build your board in advance.** It is private to your management group. Your top available player is one click on the clock. If your clock runs out the pick is skipped, nobody drafts for you, and a pick you never use is replaced after the draft by one random player placed on your roster at the league minimum (Rule 2.8).
 
-**What a pick costs.** Draft salaries are set by round, not negotiated: the last round pays the $750,000 league minimum and every round above it adds $250,000 (so with 12 rounds, round 1 is $3,500,000 and a full class is $25,500,000, $27.5M of the $50M cap with your AGM at $2M). The scale follows whatever round count is published, and the draft room shows it. Every pick in a round costs the same, and the same scale applies if your clock expires and the league picks off your board.
+**What a pick costs.** Draft salaries are set by round, not negotiated: the last round pays the $750,000 league minimum and every round above it adds $250,000 (so with 12 rounds, round 1 is $3,500,000 and a full class is $25,500,000, $27.5M of the $50M cap with your AGM at $2M). The scale follows whatever round count is published, and the draft room shows it. Every pick in a round costs the same, and the same scale applies if the commissioner picks for you at your request.
 
 **Draft picks cannot be traded.** Trades are players for players (Rule 2.3).
 
