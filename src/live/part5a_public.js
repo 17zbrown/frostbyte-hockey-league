@@ -2023,9 +2023,8 @@ CG.ROUTES.team = function(code, qs){
     }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding-top:22px;padding-bottom:40px">';
   if (tab==="roster"){
-    var rosterTable = '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Roster — '+esc(SD.label)+'</caption><thead><tr>'+
-      '<th class="tleft">Player</th>'+(archived?"":'<th>OVR</th>')+'<th>POS</th><th class="hide-xs-col">#</th><th>GP</th><th>Pts / Record</th></tr></thead><tbody>'+
-      roster.map(function(p){
+    /* v2.72: one row builder, so the active roster and training camp render as two blocks */
+    var rowFor = function(p){
         var ps = SD.pstats[p.id], line;
         if (p.pos==="G") line = ps.w+"-"+ps.l+"-"+ps.otl+" · "+(ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—");
         else line = ps.p+" pts · "+ps.g+"G "+ps.a+"A";
@@ -2038,7 +2037,13 @@ CG.ROUTES.team = function(code, qs){
             (CG.ovrProgress(p.id).provisional?'<span style="opacity:.75">*</span>':'')+'</span></td>')+
           '<td class="tnum">'+p.pos+'</td><td class="tnum hide-xs-col">'+p.jersey+'</td>'+
           '<td>'+ps.gp+'</td><td class="tleft" style="font-family:var(--f-mono);font-size:12px;white-space:nowrap">'+line+'</td></tr>';
-      }).join("")+
+      };
+    var rosterTable = '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Roster — '+esc(SD.label)+'</caption><thead><tr>'+
+      '<th class="tleft">Player</th>'+(archived?"":'<th>OVR</th>')+'<th>POS</th><th class="hide-xs-col">#</th><th>GP</th><th>Pts / Record</th></tr></thead><tbody>'+
+      (function(){ var sq = CG.splitSquads(roster), cols = archived?5:6;
+        function head(label, n, note){ return '<tr class="squad-head"><td colspan="'+cols+'" class="tleft"><b style="font-family:var(--f-disp)">'+label+' — '+n+'</b>'+(note?' <span class="caption">'+note+'</span>':'')+'</td></tr>'; }
+        return (sq.camp.length ? head("Active roster", sq.active.length, "") : "") + sq.active.map(rowFor).join("") +
+          (sq.camp.length ? head("Training camp", sq.camp.length, "Camp players fill any position and dress in up to three games a week (Rules 2.1, 5.2)") + sq.camp.map(rowFor).join("") : ""); })()+
       (roster.length ? "" : CG.emptyRow(archived?5:6, "No players on this roster yet",
         "Clubs fill up at the draft and in free agency. Signings show here the moment they’re made."))+
       '</tbody></table></div></div>';
@@ -2192,8 +2197,8 @@ CG.ROUTES.players = function(param, qs){
     var s = lg.pstats[p.id];
     var stat = p.pos==="G" ? (s.gp? (s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,"")+" SV%" : "—") : s.p+" pts";
     return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-      '<td class="tleft"><span class="playercell">'+CG.crest(p.team,24)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.TEAM[p.team].name)+'</small></span>'+
-        (p.rookie?'<span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+'</span></td>'+
+      '<td class="tleft"><span class="playercell">'+CG.crest(p.team,24)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.TEAM[p.team].name)+(CG.isCamp(p)?' · training camp':'')+'</small></span>'+
+        (p.rookie?'<span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+(CG.isCamp(p)?CG.campChip("xs"):"")+'</span></td>'+
       '<td class="tnum">'+p.pos+'</td><td class="tnum">'+p.jersey+'</td>'+
       '<td class="tleft mono" style="font-size:12px">'+(p.eaId?esc(p.eaId):'<span class="caption">—</span>')+'</td>'+
       '<td class="tnum">'+s.gp+'</td><td class="tleft tnum" style="font-size:12px">'+stat+'</td>'+
@@ -2290,6 +2295,7 @@ CG.ROUTES.player = function(pid, qs){
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
           /* v2.61: every identity label is the same outlined chip; Message is the one filled action */
           (p.rookie?'<span class="chip chip-ink" style="border-color:#39434B">Rookie</span>':"")+
+          (!archived && CG.isCamp(p)?'<span class="chip chip-ink" style="border-color:#39434B" title="Training camp: fills any position, up to 3 games a week (Rules 2.1, 5.2)">Training camp</span>':"")+
           (p.platform && p.platform!=="—" ? '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>' : "")+
           CG.eaIdChip(p.eaId)+
           /* the envelope: one click into a DM with this player (hidden on your own profile) */
@@ -2959,7 +2965,7 @@ CG.ROUTES.stats = function(param, qs){
       '<th class="tleft">Player</th><th class="sortable">GP</th><th class="sortable">G</th><th class="sortable">A</th><th class="sortable sorted">P</th><th class="sortable">P/GP</th><th class="sortable">+/-</th><th class="sortable">S</th><th class="sortable">S%</th><th class="sortable">HIT</th><th class="sortable">BLK</th><th class="sortable">TK</th><th class="sortable">PIM</th><th class="sortable">GWG</th><th class="sortable">FO%</th></tr></thead><tbody>'+
       list.map(function(p){ var s=lg.pstats[p.id];
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+'</small></span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td><td data-v="'+s.g+'" class="'+(s.g?"":"z")+'">'+s.g+'</td><td data-v="'+s.a+'" class="'+(s.a?"":"z")+'">'+s.a+'</td>'+
         '<td data-v="'+s.p+'" class="pts">'+s.p+'</td><td data-v="'+(s.p/Math.max(1,s.gp)).toFixed(2)+'">'+(s.p/Math.max(1,s.gp)).toFixed(2)+'</td>'+
         '<td data-v="'+s.pm+'">'+(s.pm>0?"+":"")+s.pm+'</td><td data-v="'+s.shots+'">'+s.shots+'</td>'+
@@ -2976,7 +2982,7 @@ CG.ROUTES.stats = function(param, qs){
       la.map(function(p){ var s=lg.pstats[p.id];
         var toiPg=s.gp?(s.toi||0)/s.gp:0, possPg=s.gp?(s.poss||0)/s.gp:0, passp=s.passAtt?100*s.pass/s.passAtt:0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+'</small></span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td>'+
         '<td data-v="'+toiPg.toFixed(0)+'">'+(s.gp?CG.fmtToi(toiPg):"—")+'</td>'+
         '<td data-v="'+(s.ppg||0)+'" class="'+((s.ppg||0)?"":"z")+'">'+(s.ppg||0)+'</td>'+
@@ -2996,7 +3002,7 @@ CG.ROUTES.stats = function(param, qs){
       '<th class="tleft">Goaltender</th><th class="sortable">GP</th><th class="sortable">W</th><th class="sortable">L</th><th class="sortable">OTL</th><th class="sortable">SA</th><th class="sortable">SV</th><th class="sortable sorted">SV%</th><th class="sortable">GAA</th><th class="sortable">SO</th><th class="sortable">QS</th><th class="sortable">Brk%</th><th class="sortable">Poke</th></tr></thead><tbody>'+
       gl.map(function(p){ var s=lg.pstats[p.id]; var svp = s.sa? s.sv/s.sa : 0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+CG.TEAM[p.team].code+'</small></span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td><td data-v="'+s.w+'">'+s.w+'</td><td data-v="'+s.l+'">'+s.l+'</td><td data-v="'+s.otl+'">'+s.otl+'</td>'+
         '<td data-v="'+s.sa+'">'+s.sa+'</td><td data-v="'+s.sv+'">'+s.sv+'</td>'+
         '<td data-v="'+svp.toFixed(3)+'" class="pts">'+svp.toFixed(3).replace(/^0/,"")+'</td>'+

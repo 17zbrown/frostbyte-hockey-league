@@ -30,7 +30,7 @@ ctx.CG = {
   contractHeldIds: () => ({}),
 };
 vm.createContext(ctx);
-for (const fn of ["mapDraftData", "applyDraftRow", "applyDraftState", "repaintDraft", "refreshDraftLite", "reconcileDraftSoon"]) {
+for (const fn of ["mapDraftData", "applyDraftRow", "applyPickToRoster", "applyDraftState", "repaintDraft", "refreshDraftLite", "reconcileDraftSoon"]) {
   const m = src.match(new RegExp("CG\\." + fn + " = (?:async )?function[\\s\\S]*?\\n\\};"));
   if (!m) { A("located CG." + fn, false); process.exit(1); }
   vm.runInContext(m[0], ctx);
@@ -38,7 +38,7 @@ for (const fn of ["mapDraftData", "applyDraftRow", "applyDraftState", "repaintDr
 
 const CLUBS = { t1: "TOR", t2: "BOS" };
 ctx.CG.lg = {
-  _idToCode: CLUBS, _profName: { p1: "Sniper99", p2: "Dangle_47" }, _rosteredIds: {},
+  _idToCode: CLUBS, _profName: { p1: "Sniper99", p2: "Dangle_47" }, _rosteredIds: {}, players: [], byTeam: { TOR: [], BOS: [] }, pstats: {},
   _registrationsRaw: [
     { profile_id: "p1", season_id: "s1", profiles: { gamertag: "Sniper99" }, position: "C", scout_ovr: 80 },
     { profile_id: "p2", season_id: "s1", profiles: { gamertag: "Dangle_47" }, position: "LD", scout_ovr: 75 },
@@ -65,6 +65,12 @@ ctx.CG.mapDraftData(ctx.CG.lg, ctx.CG.lg._draftPicksRaw, ctx.CG.lg._registration
     A("the board shows the selection immediately", p1.used === true && p1.playerName === "Sniper99");
     A("...and the drafted player leaves the pool at once",
       ctx.CG.lg.draftPool.length === 1 && ctx.CG.lg.draftPool[0].profileId === "p2");
+    /* v2.72: he is on his club's roster in memory the same instant (the roster-room tiles, the shape
+       check and every roster list read lg.byTeam), with a provisional row until the roster refetch lands */
+    const onRoster = (ctx.CG.lg.byTeam.TOR || []).find((x) => x.id === "p1");
+    A("...and joins his club's roster in memory at once", !!onRoster && onRoster.pos === "C" && onRoster.squad === "pro" && onRoster._provisional === true && ctx.CG.lg._rosteredIds.p1 === true);
+    A("...with a zeroed stat line so nothing reads undefined", ctx.CG.lg.pstats.p1 && ctx.CG.lg.pstats.p1.gp === 0);
+    A("a second payload for the same pick does not double him", ctx.CG.applyPickToRoster({ used: true, player_id: "p1", current_team_id: "t1", season_number: 1, round: 1 }) === false && ctx.CG.lg.byTeam.TOR.length === 1);
     ctx.CG.repaintDraft();
     A("the room repaints", repaints === 1);
   }

@@ -281,20 +281,32 @@ CG._seasonHint = function(){
    tab on every games event was the "herd" that took the database down at forty tabs
    (docs/audits/2026-09-17-stress-test.md, P0-3). */
 CG._bootCache = null;
-CG._deltaBoot = async function(cached, gameIds){
+CG._deltaBoot = async function(cached, gameIds, roster){
   var q = cached.slice();
-  var games = await CG.sbAll("games", CG.GAME_PUBLIC_COLS, "scheduled_at");
-  if (games.error) throw new Error(games.error.message || "games failed");
-  q[6] = games;
-  var ids = (gameIds||[]).filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
-  if (ids.length && q[12] && !q[12].error){
-    var fresh = await CG.sb.from("game_stats").select("*").in("game_id", ids);
-    if (!fresh.error){
-      var keep = (q[12].data||[]).filter(function(r){ return ids.indexOf(r.game_id) < 0; });
-      q[12] = { data: keep.concat(fresh.data||[]), error:null };
+  if (gameIds){
+    var games = await CG.sbAll("games", CG.GAME_PUBLIC_COLS, "scheduled_at");
+    if (games.error) throw new Error(games.error.message || "games failed");
+    q[6] = games;
+    var ids = (gameIds||[]).filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
+    if (ids.length && q[12] && !q[12].error){
+      var fresh = await CG.sb.from("game_stats").select("*").in("game_id", ids);
+      if (!fresh.error){
+        var keep = (q[12].data||[]).filter(function(r){ return ids.indexOf(r.game_id) < 0; });
+        q[12] = { data: keep.concat(fresh.data||[]), error:null };
+      }
     }
+    q[17] = await CG._codesToday();
   }
-  q[17] = await CG._codesToday();
+  /* v2.72: a roster delta (a draft pick landing, a signing, a waiver) re-reads the two tables the
+     rosters are built from and nothing else, so every roster surface repaints from the record
+     without the 19-request boot */
+  if (roster){
+    var rs = await CG.sbAll("roster_spots","*","id");
+    if (rs.error) throw new Error(rs.error.message || "roster_spots failed");
+    q[4] = rs;
+    var ct = await CG.sbAll("contracts","*","id");
+    if (!ct.error) q[5] = ct;
+  }
   return q;
 };
 /* The masked view: game_code / server come back null unless the database lets THIS reader see
@@ -312,7 +324,7 @@ CG.buildLiveLeague = async function(opts){
   CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
   var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
   if (!sb) throw new Error("Supabase client unavailable");
-  var q = (opts.delta && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta) : await Promise.all([
+  var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster) : await Promise.all([
     sb.from("teams").select("*"),
     sb.from("divisions").select("*").order("sort_order"),
     sb.from("seasons").select("*").order("number", { ascending:false }),
@@ -3793,7 +3805,7 @@ CG.ROUTES.draft = function(){
       '<button type="button" class="btn btn-ghost btn-sm" data-room-round="'+(vi<roundList.length-1?roundList[vi+1]:"")+'"'+(vi<roundList.length-1?'':' disabled')+'>'+(vi<roundList.length-1?'Round '+roundList[vi+1]+' ›':'Last round ›')+'</button></span></div>';
   var board = '<div class="card"><div class="card-h"><h3>Season '+maxSn+' board</h3><span class="chip">'+made+' / '+total+'</span></div>'+
     roundStrip + roundHead +
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>Draft board · round '+viewRound+'</caption><thead><tr><th>Pick</th><th>Rd</th><th class="tleft">Club</th><th class="tleft">Result</th>'+(showAdmin?'<th class="tright">Admin</th>':'')+'</tr></thead><tbody>'+
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Draft board · round '+viewRound+'</caption><thead><tr><th>Pick</th><th>Rd</th><th class="tleft">Club</th><th>Pos</th><th class="tleft">Result</th>'+(showAdmin?'<th class="tright">Admin</th>':'')+'</tr></thead><tbody>'+
     roundRows.map(function(p){
       var isCurrent = st && p.overall===st.current_overall && (dstatus==="live"||dstatus==="paused") && !p.used && !p.skipped;
       var isMine = p.ownerCode===myClub;
@@ -3804,6 +3816,7 @@ CG.ROUTES.draft = function(){
       return '<tr'+(isCurrent?' style="background:var(--chrome-tint)"':(isMine?' style="background:var(--ice)"':""))+'>'+
         '<td class="tnum">'+(p.overall||"—")+'</td><td class="tnum">R'+p.round+'</td>'+
         '<td class="tleft"><span class="teamcell">'+(p.ownerCode?CG.crest(p.ownerCode,18):"")+'<span class="mono" style="font-size:11px">'+esc(p.ownerCode||"—")+'</span>'+(p.origCode&&p.origCode!==p.ownerCode?'<span class="caption" style="font-size:10px">via '+esc(p.origCode)+'</span>':'')+'</span></td>'+
+        '<td class="tnum"><span class="mono" style="font-size:11px">'+(p.used?esc(CG.pickPos(p)||"—"):"—")+'</span></td>'+
         '<td class="tleft">'+result+'</td>'+
         (showAdmin?'<td class="tright">'+(p.used?'<button class="btn btn-ghost btn-sm" data-reversepick="'+p.id+'">Reverse</button>':'<span class="caption">—</span>')+'</td>':'')+'</tr>';
     }).join("")+'</tbody></table></div>'+
@@ -4005,8 +4018,61 @@ CG.applyDraftRow = function(row){
   var raw = CG.lg._draftPicksRaw, i = -1;
   for (var k = 0; k < raw.length; k++){ if (raw[k].id === row.id){ i = k; break; } }
   if (i >= 0) raw[i] = row; else raw.push(row);
+  CG.applyPickToRoster(row);
   CG.mapDraftData(CG.lg, raw, CG.lg._registrationsRaw||[]);
+  if (CG._pickDialogRepaint) { try { CG._pickDialogRepaint(); } catch(e){} }
   return true;
+};
+/* v2.72: the drafted player joins his club's roster in memory the instant the pick payload
+   arrives, so the roster-room tiles, the shape check and every roster list agree with the board
+   without a reload. The authoritative row (jersey, contract, spot id) follows in the roster delta. */
+CG.applyPickToRoster = function(row){
+  var lg = CG.lg; if (!lg || !row || !row.used || !row.player_id) return false;
+  lg._rosteredIds = lg._rosteredIds || {};
+  if (lg._rosteredIds[row.player_id]) return false;
+  var code = (lg._idToCode||{})[row.current_team_id]; if (!code) return false;
+  var reg = (lg._registrationsRaw||[]).find(function(r){ return r.profile_id === row.player_id; }) || {};
+  var prof = (lg._profilesRaw||[]).find(function(pr){ return pr.id === row.player_id; }) || {};
+  var sn = row.season_number, rounds = 1;
+  (lg._draftPicksRaw||[]).forEach(function(k){ if (k.season_number === sn && (k.round||1) > rounds) rounds = k.round; });
+  var entry = { id: row.player_id, tag: (lg._profName||{})[row.player_id] || prof.gamertag || "Player", team: code,
+    pos: reg.position || "C", depth: 99, jersey: prof.jersey_number || 0, platform: prof.platform || "", arch: "", shoots: "", joined: "",
+    twitch: prof.twitch || "", twitchLive: false, overall: prof.overall || 70, eaId: prof.ea_id || "", avatar: prof.avatar_url || "",
+    banned: false, salary: CG.draftRoundSalary ? CG.draftRoundSalary(row.round||1, rounds) : 750000, term: 1, mgmt: null, mgmtSalary: 0,
+    onBlock: false, status: "active", origin: "draft", spotId: null, squad: "pro", squadMoves: 0, rookie: true, _provisional: true };
+  lg.players = lg.players || []; lg.players.push(entry);
+  (lg.byTeam[code] = lg.byTeam[code] || []).push(entry);
+  lg._rosteredIds[row.player_id] = true;
+  if (lg.pstats && !lg.pstats[row.player_id]) lg.pstats[row.player_id] = entry.pos === "G"
+    ? { gp:0, gs:0, w:0, l:0, otl:0, sa:0, sv:0, ga:0, so:0, qs:0, weekly:{} }
+    : { gp:0, g:0, a:0, p:0, pm:0, shots:0, hits:0, blk:0, gv:0, tk:0, pim:0, fow:0, fot:0, gwg:0, weekly:{} };
+  return true;
+};
+/* the front offices and the league office need the roster exact (spot ids for squad moves, the
+   contract row); spectators see no roster in the room, and everyone gets one spread-out full
+   reload when the draft completes */
+CG.rosterDeltaSoon = function(){
+  var r = typeof CG.role === "function" ? CG.role() : "guest";
+  if (r !== "mgmt" && r !== "commish" && r !== "staff") return;
+  if (document.visibilityState === "hidden") return;
+  CG.liveReload({ roster: true });
+};
+(function(){ var orig = CG.closeOverlay; if (!orig || orig._draftWrapped) return;
+  CG.closeOverlay = function(){ var r = orig.apply(this, arguments); CG._pickDialogRepaint = null;
+    if (CG._draftRepaintOwed){ CG._draftRepaintOwed = false; setTimeout(function(){ CG.repaintDraft(); }, 0); } return r; };
+  CG.closeOverlay._draftWrapped = true; })();
+/* v2.72: a pick's position, from the registration (the draft's own record) or the roster */
+CG.pickPos = function(p){
+  if (!p || !p.playerId) return "";
+  var lg = CG.lg, cache = lg._posByProfile;
+  if (!cache || cache._src !== lg._registrationsRaw){
+    cache = { _src: lg._registrationsRaw };
+    (lg._registrationsRaw||[]).forEach(function(r){ if (r.position) cache[r.profile_id] = r.position; });
+    lg._posByProfile = cache;
+  }
+  if (cache[p.playerId]) return cache[p.playerId];
+  var pl = (lg.players||[]).find(function(x){ return x.id === p.playerId; });
+  return pl ? pl.pos : "";
 };
 CG.applyDraftState = function(row){
   if (!row || !CG.lg) return false;
@@ -4019,7 +4085,7 @@ CG.applyDraftState = function(row){
 CG.repaintDraft = function(){
   if (location.hash.indexOf("/draft") < 0) return;
   var ov = document.getElementById("overlay-root");
-  if (ov && ov.innerHTML.trim()) return;
+  if (ov && ov.innerHTML.trim()){ CG._draftRepaintOwed = true; return; }
   var a = document.activeElement, id = a && a.id;
   var isField = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
   var val = isField ? a.value : null, ss = isField ? a.selectionStart : null, se = isField ? a.selectionEnd : null;
@@ -4094,14 +4160,19 @@ CG.subscribeDraft = function(){
   if(CG._draftChannel || !CG.sb) return;
   CG._draftChannel = CG.sb.channel("draft-live")
     .on("postgres_changes",{ event:"*", schema:"public", table:"draft_state" }, function(p){
+      var was = CG.lg && CG.lg.draftState ? CG.lg.draftState.status : null;
       if (CG.applyDraftState(p && p.new)) CG.repaintDraft();
       CG.reconcileDraftSoon();
+      /* v2.72: the draft just completed — every open tab takes one full reload, spread over two
+         minutes, so rosters, team pages and the pool agree with the record for everyone */
+      if (p && p.new && p.new.status === "complete" && was !== "complete") CG.liveReload({ jitterMs: 120000 });
     })
     .on("postgres_changes",{ event:"*", schema:"public", table:"draft_picks" }, function(p){
       /* a DELETE payload carries only the primary key (replica identity default), so it cannot
          be applied in place — the reconcile below picks it up */
       if (p && p.eventType !== "DELETE" && CG.applyDraftRow(p.new)) CG.repaintDraft();
       CG.reconcileDraftSoon();
+      if (p && p.new && p.new.used && p.new.player_id) CG.rosterDeltaSoon();
     })
     .subscribe(function(status){
       /* a dead socket must not look like a live one: drop the channel so the next visit to the
@@ -4279,8 +4350,9 @@ CG.rosterRoomFor = function(club){
   var by = { F:0, D:0, G:0 }, byMgmt = { F:0, D:0, G:0 };
   counted.forEach(function(p){ var g = CG.posGroup(p.pos); by[g]++; if (p.mgmt) byMgmt[g]++; });
   var mgmt = counted.filter(function(p){ return p.mgmt; }).length;
+  var camp = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && CG.isCamp(p); }).length;
   var open = Math.max(0, max - counted.length);
-  return { max:max, used:counted.length, open:open, mgmt:mgmt, groups:["F","D","G"].map(function(g){
+  return { max:max, used:counted.length, open:open, mgmt:mgmt, camp:camp, groups:["F","D","G"].map(function(g){
     var cap = q[g]||0; return { g:g, used:by[g], mgmt:byMgmt[g], cap:cap, room:Math.min(open, Math.max(0, cap-by[g])) }; }) };
 };
 CG.rosterRoomCard = function(club, opts){
@@ -4292,17 +4364,21 @@ CG.rosterRoomCard = function(club, opts){
       '<span>'+word[x.g]+' open · '+x.used+' of '+x.cap+' filled'+(x.mgmt?' ('+x.mgmt+' management)':'')+(full?' · full':'')+'</span></div>';
   }).join("");
   return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(opts.title||"Roster spots remaining")+'</h3>'+
-    '<span class="chip'+(r.open===0?' chip-loss':'')+'">'+r.open+' of '+r.max+' open · '+r.used+' filled, '+r.mgmt+' by management</span></div>'+
+    '<span class="chip'+(r.open===0?' chip-loss':'')+'">'+r.open+' of '+r.max+' open · '+r.used+' filled, '+r.mgmt+' by management'+(r.camp?' · '+r.camp+' in camp':'')+'</span></div>'+
     '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'+tiles+'</div>'+
     '<p class="caption" style="margin-top:10px">Your Owner, GM and AGM hold roster spots in their own position groups (Rule 2.6), so they are counted here. A group at its cap cannot take another pick; the pool greys those players out.</p></div></div>';
 };
 CG.draftPickModalLive = function(pickId, forCode){
-  var pool = (CG.lg.draftPool||[]).slice().sort(function(a,b){
+  /* v2.72: read the pool live on every repaint (it used to be a snapshot taken when the dialog
+     opened, so a player drafted by another club stayed pickable here until a reload) */
+  function livePool(){ return (CG.lg.draftPool||[]).slice().sort(function(a,b){
     var ea = CG.eligOf(a.profileId).ok?1:0, eb = CG.eligOf(b.profileId).ok?1:0;
     if (ea!==eb) return eb-ea;
     return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr);
-  });
+  }); }
+  var pool = livePool();
   function rows(q){
+    pool = livePool();
     q = (q||"").toLowerCase();
     var matches = pool.filter(function(p){ return !q || p.tag.toLowerCase().indexOf(q)>=0 || (p.eaId||"").toLowerCase().indexOf(q)>=0; });
     if (!matches.length) return '<p class="caption" style="padding:14px 0">No available players match.</p>';
@@ -4338,7 +4414,8 @@ CG.draftPickModalLive = function(pickId, forCode){
     }); });
   }
   wire();
-  function repaintList(){ var lst = document.getElementById("modPickList"); if (!lst) return; lst.innerHTML = rows((document.getElementById("modPickQ")||{}).value||""); wire(); CG.wirePoolPager(lst, repaintList); }
+  function repaintList(){ var lst = document.getElementById("modPickList"); if (!lst){ CG._pickDialogRepaint = null; return; } lst.innerHTML = rows((document.getElementById("modPickQ")||{}).value||""); wire(); CG.wirePoolPager(lst, repaintList); }
+  CG._pickDialogRepaint = repaintList;
   CG._poolPage.pick = 0;
   CG.wirePoolPager(document.getElementById("modPickList"), repaintList);
   var q=document.getElementById("modPickQ");
@@ -4503,9 +4580,9 @@ CG.hubDraftLive = function(){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>The draft, pick by pick</h3>'+
       (st&&st.order_meta?'<span class="chip">'+esc(CG.dStyleName(st.order_meta))+(st.order_meta.snake?' · snake order':'')+'</span>':"")+'</div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>Every pick, live</caption>'+
-      '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th class="tleft">Status</th></tr></thead><tbody>'+
+      '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th>Pos</th><th class="tleft">Status</th></tr></thead><tbody>'+
       Object.keys(rounds).sort(function(a,b){return a-b;}).map(function(rn){
-        return '<tr><td colspan="4" style="background:var(--ice);font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;padding:7px 12px">ROUND '+rn+'</td></tr>'+
+        return '<tr><td colspan="5" style="background:var(--ice);font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;padding:7px 12px">ROUND '+rn+'</td></tr>'+
           rounds[rn].sort(function(a,b){ return a.overall-b.overall; }).map(function(p){
             var isCur = cur && p.id===cur.id;
             var mine = p.ownerCode===myCode;
@@ -4513,6 +4590,7 @@ CG.hubDraftLive = function(){
               '<td class="num">'+p.overall+'</td>'+
               '<td class="tleft"><span class="teamcell">'+CG.crest(p.ownerCode,20)+'<span class="mono" style="font-size:12px">'+esc(p.ownerCode||"?")+(mine?' <b style="font-size:10px;color:var(--steel)">YOU</b>':'')+'</span></span></td>'+
               '<td class="tleft">'+(p.used?'<b>'+esc(p.playerName||"")+'</b>':'<span class="caption">—</span>')+'</td>'+
+              '<td class="tnum"><span class="mono" style="font-size:11px">'+(p.used?esc(CG.pickPos(p)||"—"):"—")+'</span></td>'+
               '<td class="tleft">'+(isCur?'<span class="chip chip-live" style="font-size:9px"><span class="live-dot"></span>ON THE CLOCK</span>'
                 : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
                 : p.skipped?'<span class="chip chip-warn" style="font-size:9px">'+(mine?'MAKE-UP WAITING':'SKIPPED')+'</span>'
@@ -4736,14 +4814,15 @@ CG.admDraftLive = function(){
     picks.forEach(function(p){ (rounds[p.round]=rounds[p.round]||[]).push(p); });
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Every pick</h3><span class="chip">'+made+' of '+picks.length+' made</span></div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>The full board</caption>'+
-      '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th class="tleft">Status</th><th class="tright">Actions</th></tr></thead><tbody>'+
+      '<thead><tr><th>Pick</th><th class="tleft">Club</th><th class="tleft">Selection</th><th>Pos</th><th class="tleft">Status</th><th class="tright">Actions</th></tr></thead><tbody>'+
       Object.keys(rounds).sort(function(a,b){return a-b;}).map(function(rn){
-        return '<tr><td colspan="5" style="background:var(--ice);font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;padding:7px 12px">ROUND '+rn+'</td></tr>'+
+        return '<tr><td colspan="6" style="background:var(--ice);font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;padding:7px 12px">ROUND '+rn+'</td></tr>'+
           rounds[rn].sort(function(a,b){ return a.overall-b.overall; }).map(function(p){
             var isCur = cur && p.id===cur.id;
             return '<tr class="'+(isCur?"dr-now":"")+'"><td class="num">'+p.overall+'</td>'+
               '<td class="tleft"><span class="teamcell">'+CG.crest(p.ownerCode,20)+'<span class="mono" style="font-size:12px">'+esc(p.ownerCode||"?")+'</span>'+(p.origCode&&p.origCode!==p.ownerCode?'<span class="caption" style="font-size:10px">via '+esc(p.origCode)+'</span>':'')+'</span></td>'+
               '<td class="tleft">'+(p.used?'<b>'+esc(p.playerName||"")+'</b>':'<span class="caption">—</span>')+'</td>'+
+              '<td class="tnum"><span class="mono" style="font-size:11px">'+(p.used?esc(CG.pickPos(p)||"—"):"—")+'</span></td>'+
               '<td class="tleft">'+(isCur?'<span class="chip chip-live" style="font-size:9px"><span class="live-dot"></span>ON THE CLOCK</span>'
                 : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
                 : p.skipped?'<span class="chip chip-warn" style="font-size:9px">SKIPPED</span>'
@@ -5389,9 +5468,13 @@ CG.messagesBody = function(){
   else if (!active){ thread = '<div class="empty" style="padding:70px 20px"><div class="e-art">'+CG.ic("msg",20)+'</div><b>Pick a conversation</b><p>Open a member\u2019s profile and hit the envelope \u2014 or start one with New message.</p></div>'; }
   else {
     var msgs = CG._dm.msgs.filter(function(m){ return CG.dmOtherId(m)===active; });
+    var lastDay = null;
     var body = msgs.length ? msgs.map(function(m){
       var mine = m.sender_id===me;
       var media = "";
+      /* v2.72: a thread runs for weeks; each bubble carries its day and a divider opens each new day */
+      var ts = Date.parse(m.created_at), day = CG.fmtDay(ts), divider = "";
+      if (day !== lastDay){ lastDay = day; divider = '<div class="dm-day" role="separator"><span>'+esc(day)+'</span></div>'; }
       if (m.media_path){
         var mu = (CG._dm.mediaUrls||{})[m.media_path];
         if (mu === undefined) media = '<span class="caption" style="display:block;opacity:.75">Loading attachment\u2026</span>';
@@ -5399,8 +5482,8 @@ CG.messagesBody = function(){
         else if (/^video\//.test(m.media_type||"")) media = '<video controls playsinline preload="metadata" src="'+esc(mu)+'" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></video>';
         else media = '<a href="'+esc(mu)+'" target="_blank" rel="noopener"><img src="'+esc(mu)+'" alt="Attachment" loading="lazy" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></a>';
       }
-      return '<div style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+media+(m.body?esc(m.body):"")+
-        '<span style="display:block;font-size:10px;opacity:.6;margin-top:3px">'+CG.fmtTime(Date.parse(m.created_at))+'</span></div>';
+      return divider + '<div style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+media+(m.body?esc(m.body):"")+
+        '<span style="display:block;font-size:10px;opacity:.6;margin-top:3px" title="'+esc(CG.fmtFull(ts))+'">'+esc(CG.fmtFull(ts))+'</span></div>';
     }).join("") : '<div class="empty" style="padding:40px"><p>No messages yet — say hi.</p></div>';
     thread = '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center">'+CG.dmAva(active)+'<b style="font-family:var(--f-disp)">'+esc(CG.dmName(active))+'</b></div>'+
       '<div id="dmMsgs" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;min-height:300px">'+body+'</div>'+
@@ -5681,16 +5764,19 @@ CG.admPreseason = function(){
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
     '<div class="card-b club-led">'+
     CG.TEAMS.map(function(t){
-      var players=(lg.byTeam[t.code]||[]).slice().sort(function(a,b){ var o={G:0,LD:1,RD:2,C:3,LW:4,RW:5}; return (o[a.pos]==null?9:o[a.pos])-(o[b.pos]==null?9:o[b.pos]); });
-      var n=players.length, pct=Math.round(100*n/rosterMax);
+      var players=(lg.byTeam[t.code]||[]).slice().sort(function(a,b){ var o={G:0,LD:1,RD:2,C:3,LW:4,RW:5}; return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (o[a.pos]==null?9:o[a.pos])-(o[b.pos]==null?9:o[b.pos]); });
+      /* v2.72: camp sits outside the active roster (Rule 2.1): the N/max reads the active roster only */
+      var campN=players.filter(CG.isCamp).length, n=players.length-campN, pct=Math.round(100*n/rosterMax);
       return '<details><summary>'+
         '<span class="chev" aria-hidden="true">▸</span>'+CG.crest(t.code,22)+
         '<span style="flex:1;min-width:0"><b style="font-family:var(--f-disp);font-size:14px">'+esc(t.name)+'</b></span>'+
         '<span class="rb-track" style="width:120px;flex:none"><span class="rb-fill" style="width:'+Math.min(100,pct)+'%"></span></span>'+
-        '<b class="num" style="width:54px;text-align:right;font-size:13px">'+n+'/'+rosterMax+'</b></summary>'+
+        '<b class="num" style="width:54px;text-align:right;font-size:13px">'+n+'/'+rosterMax+'</b>'+(campN?'<span class="chip chip-warn chip-xs" style="margin-left:8px">+'+campN+' camp</span>':'')+'</summary>'+
         '<div class="cl-players">'+
-          (n?players.map(function(p){ var mg=p.mgmt;
-            return '<div class="cl-row"><span class="mono" style="width:30px;color:var(--steel)">#'+(p.jersey||"—")+'</span>'+
+          (players.length?players.map(function(p, pi){ var mg=p.mgmt;
+            var head = (campN && pi===0 && !CG.isCamp(p)) ? '<div class="cl-row squad-head"><b style="font-family:var(--f-disp);font-size:12px">Active roster — '+n+'</b></div>'
+                     : (CG.isCamp(p) && (pi===0 || !CG.isCamp(players[pi-1]))) ? '<div class="cl-row squad-head"><b style="font-family:var(--f-disp);font-size:12px">Training camp — '+campN+'</b></div>' : "";
+            return head + '<div class="cl-row"><span class="mono" style="width:30px;color:var(--steel)">#'+(p.jersey||"—")+'</span>'+
               '<span class="mono" style="width:32px">'+esc(p.pos||"—")+'</span>'+
               '<span class="nm" style="flex:1;min-width:0">'+esc(p.tag||"—")+'</span>'+
               (mg?'<span class="chip chip-chrome" style="font-size:9px;margin-right:6px">'+esc((mg||"").toUpperCase())+'</span>':'')+
@@ -6778,21 +6864,39 @@ function pvBusyInteracting(){
    DELTA rebuild — two reads, not nineteen — and it waits a random 1–9 s so a hundred open tabs
    spread over the window instead of hitting the database in the same second. A call with no game
    (a role change, a manual refresh) keeps the fast, full rebuild. */
+/* The manager-only state loadManagerData and friends hang on CG.lg. A delta rebuild replaces the
+   object, so that state is carried across (v2.72; before this, every game final on a game night
+   emptied a manager's Trade Hub, lineups cache and draft board until the next full load). The
+   draft data is carried too and re-mapped against the NEW roster, so a drafted player leaves the
+   pool the moment the roster refetch lands. */
+CG._LG_CARRY = ["_appBallots","_appMsgs","_draftPicksRaw","_lineups","_mgmtApps","_mgmtMoves","_mgmtPolicy","_mgmtPolicyAt",
+  "_myBoard","_myTrades","_ownerApps","_registrationsRaw","_servers","_staffApps","_vetoes","_actionReqs","_actionMsgs","draftState"];
+CG._carryLg = function(from, to){
+  if (!from || !to) return;
+  CG._LG_CARRY.forEach(function(k){ if (from[k] !== undefined) to[k] = from[k]; });
+  if (to._draftPicksRaw && CG.mapDraftData) CG.mapDraftData(to, to._draftPicksRaw, to._registrationsRaw||[]);
+};
 CG.liveReload = function(opts){
   opts = opts || {};
   if (opts.game){ (CG._liveGames = CG._liveGames || []).push(opts.game); }
-  else CG._liveGames = null;   /* a full reload is owed — a later delta must not downgrade it */
+  else if (opts.roster){ CG._liveRoster = true; }
+  else { CG._liveGames = null; CG._liveRoster = false; }   /* a full reload is owed — a later delta must not downgrade it */
   clearTimeout(CG._liveT);
-  var wait = opts.game ? 1000 + Math.floor(Math.random()*8000) : 1000;
+  var wait = opts.jitterMs ? 1000 + Math.floor(Math.random()*opts.jitterMs)
+           : (opts.game || opts.roster) ? 1000 + Math.floor(Math.random()*8000) : 1000;
   CG._liveT = setTimeout(function run(){
     if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
     CG._liveBusy = true;
-    var delta = CG._liveGames; CG._liveGames = null;
-    CG.buildLiveLeague(delta ? { delta: delta } : {}).then(function(lg){
+    var delta = CG._liveGames, roster = !!CG._liveRoster;
+    var full = delta === null && !roster;
+    CG._liveGames = null; CG._liveRoster = false;
+    var prev = CG.lg;
+    CG.buildLiveLeague(full ? {} : { delta: delta || null, roster: roster }).then(function(lg){
+      if (!full) CG._carryLg(prev, lg);
       CG.lg = lg;
       CG.refreshRole();
-      /* a game changing does not move rosters, availability or trades */
-      return delta ? null : Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
+      /* a game or roster changing does not move availability or trades; the manager state came across */
+      return full ? Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]) : null;
     }).then(function(){
       /* don't yank the page out from under an active interaction — the data is
          already fresh in memory, so the next navigation shows it. Otherwise
@@ -6834,12 +6938,12 @@ CG.admTeamsLive = function(){
   h+='<div class="card"><div class="card-h"><h3>Clubs</h3><button class="btn btn-chrome btn-sm" id="teamAdd">'+CG.ic("plus",14)+'Add a club</button></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>All clubs</caption><thead><tr><th class="tleft">Club</th><th class="tleft">Code</th><th class="tleft">Division</th><th>Roster</th><th class="tright">Actions</th></tr></thead><tbody>'+
     teams.map(function(t){
-      var n=(CG.lg.byTeam[t.code]||[]).length;
+      var nAll=(CG.lg.byTeam[t.code]||[]), nCamp=nAll.filter(CG.isCamp).length, n=nAll.length-nCamp;
       return '<tr><td class="tleft"><span class="teamcell">'+CG.crest(t.code,24)+'<span><span class="nm">'+esc(t.name)+'</span><small>'+esc(t.city||"—")+'</small></span></span></td>'+
         '<td class="tleft mono" style="font-size:12px"><span style="display:inline-flex;align-items:center;gap:7px">'+esc(t.code)+
           '<i aria-hidden="true" style="width:34px;height:10px;border-radius:5px;border:1px solid var(--line);background:linear-gradient(90deg,'+esc(t.color)+','+esc(t.color2||t.color)+')"></i></span></td>'+
         '<td class="tleft">'+esc(t.div)+'</td>'+
-        '<td data-v="'+n+'">'+n+'</td>'+
+        '<td data-v="'+n+'">'+n+(nCamp?' <span class="caption">+ '+nCamp+' camp</span>':'')+'</td>'+
         '<td class="tright"><span style="display:inline-flex;gap:6px"><button class="btn btn-ghost btn-sm" data-team-edit="'+t.id+'">Edit</button>'+
         '<button class="btn btn-ghost btn-sm" data-team-del="'+t.id+'" data-name="'+esc(t.name)+'">Remove</button></span></td></tr>';
     }).join("")+'</tbody></table></div>'+
@@ -8348,7 +8452,7 @@ CG.teamOverviewCard = function(mt){
     '<div class="card-b" style="padding-top:0;padding-bottom:16px"><div class="ovstat">'+
       '<div class="cell"><b>'+(rec.w||0)+"–"+(rec.l||0)+"–"+(rec.otl||0)+'</b><span>Record</span></div>'+
       '<div class="cell"><b>#'+(pr.rank||"—")+'<small> / '+prN+'</small></b><span>'+(played?"Power rank":"Pre-season seed")+'</span></div>'+
-      '<div class="cell"><b>'+rosterN+'<small> / '+rosterMax+'</small></b><span>Roster</span></div>'+
+      '<div class="cell"><b>'+rosterN+'<small> / '+rosterMax+'</small></b><span>Active roster'+(campN?' · '+campN+' in camp':'')+'</span></div>'+
       '<div class="cell"><b'+(over?' style="color:var(--red-ink)"':'')+'>'+CG.fmtMoney(pay)+'</b><span>of '+CG.fmtMoney(cap)+' cap</span></div>'+
     '</div>'+
     '<div style="margin-top:12px">'+
@@ -12459,9 +12563,7 @@ CG.hubTradeHubLive = function(qs){
   var outgoing=trades.filter(function(tr){ return tr.from_team_id===myTid; });
   var others=Object.keys(CG.TEAM).filter(function(c){ return c!==club; }).sort();
   function items(pids,kids){
-    var out=(pids||[]).map(function(pid){ var p=CG.tPlayer(pid), sx=CG.signedExtensionOf?CG.signedExtensionOf(pid):null;
-      return '<div style="margin-top:6px"><span class="playercell">'+(p?CG.crest(p.team,18):"")+'<span class="nm">'+esc(p?p.tag:"a player")+'</span>'+(p?'<small style="color:var(--steel)">'+p.pos+' · '+CG.fmtMoney(p.salary)+'</small>':"")+
-        (sx?' <span class="chip chip-chrome" title="A signed extension travels with him and counts against the receiving club from Season '+esc(String(sx.start_season))+' (Rule 2.5)">signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' · '+CG.fmtMoney(sx.salary)+'</span>':'')+'</span></div>'; });
+    var out=(pids||[]).map(function(pid){ return CG.tradePlayerRow(pid); });
     (kids||[]).forEach(function(kid){ var kk=CG.tPick(kid); out.push('<div class="caption" style="margin-top:6px">'+(kk?esc(CG.pickLabel(kk))+' pick':'<span class="chip chip-warn" style="font-size:9px">pick no longer available</span>')+'</div>'); });
     return out.length?out.join(""):'<span class="caption">—</span>';
   }
@@ -12477,7 +12579,9 @@ CG.hubTradeHubLive = function(qs){
         '<div class="grid g2" style="gap:14px"><div><span class="caption">You receive</span>'+items(tr.offered_profile_ids,tr.offered_pick_ids)+'</div>'+
         '<div><span class="caption">You send</span>'+items(tr.requested_profile_ids,tr.requested_pick_ids)+'</div></div>'+
         (tr.note?'<p class="small" style="color:var(--steel);margin-top:10px;font-style:italic">“'+esc(tr.note)+'”</p>':"")+
+        CG.tradeBalanceCard(fromCode, tr.offered_profile_ids, lg._idToCode[tr.to_team_id], tr.requested_profile_ids, { compact:true })+
         '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:flex-end">'+
+          '<button class="btn btn-ghost btn-sm" data-trade-open="'+tr.id+'">Details</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade-counter="'+tr.id+'">Counter</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade-decline="'+tr.id+'">Decline</button>'+
           '<button class="btn btn-chrome btn-sm" data-trade-accept="'+tr.id+'">Accept</button></div></div>';
@@ -12492,11 +12596,12 @@ CG.hubTradeHubLive = function(qs){
           '<span class="teamcell">'+CG.crest(toCode,22)+'<span class="nm">to '+esc((CG.TEAM[toCode]||{}).name||toCode)+'</span></span><span class="chip chip-warn">Proposed</span></div>'+
           '<div class="grid g2" style="gap:14px"><div><span class="caption">You send</span>'+items(tr.offered_profile_ids,tr.offered_pick_ids)+'</div>'+
           '<div><span class="caption">You receive</span>'+items(tr.requested_profile_ids,tr.requested_pick_ids)+'</div></div>'+
-          '<button class="btn btn-ghost btn-sm" data-trade-cancel="'+tr.id+'" style="margin-top:10px">Withdraw offer</button></div>';
+          '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-trade-open="'+tr.id+'">Details</button>'+
+          '<button class="btn btn-ghost btn-sm" data-trade-cancel="'+tr.id+'">Withdraw offer</button></div></div>';
       }).join("")+'</div>';
   }
   function sideList(pids,kids,sk){
-    var body=(pids||[]).map(function(pid){ var p=CG.tPlayer(pid); return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="playercell">'+(p?CG.crest(p.team,18):"")+'<span class="nm">'+esc(p?p.tag:"?")+'</span><small style="color:var(--steel)">'+(p?p.pos+" · "+CG.fmtMoney(p.salary):"")+'</small></span><button class="chip" data-trade-rm="'+sk+'p:'+pid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
+    var body=(pids||[]).map(function(pid){ return CG.tradePlayerRow(pid, { rm: sk+'p:'+pid }); }).join("");
     body+=(kids||[]).map(function(kid){ var kk=CG.tPick(kid); return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'+(kk?'<span class="caption">'+esc(CG.pickLabel(kk))+' pick</span>':'<span class="chip chip-warn" style="font-size:9px">pick no longer available</span>')+'<button class="chip" data-trade-rm="'+sk+'k:'+kid+'" style="cursor:pointer;margin-left:auto">✕</button></div>'; }).join("");
     return body||'<p class="caption" style="margin-top:8px">Nothing added yet.</p>';
   }
@@ -12507,19 +12612,137 @@ CG.hubTradeHubLive = function(qs){
       '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(t.name)+' send</b>'+sideList(d.offP,d.offK,"off")+'<button class="btn btn-ghost btn-sm" id="tradeAddOff" style="margin-top:12px">'+CG.ic("plus",13)+(CG.fmt("pick_trades")?'Add player / pick':'Add player')+'</button></div>'+
       '<div style="border:1px solid var(--line);border-radius:12px;padding:14px"><b style="font-family:var(--f-disp)">'+esc(partnerName)+' send</b>'+sideList(d.reqP,d.reqK,"req")+'<button class="btn btn-ghost btn-sm" id="tradeAddReq"'+(d.partner?"":" disabled")+' style="margin-top:12px">'+CG.ic("plus",13)+(CG.fmt("pick_trades")?'Add player / pick':'Add player')+'</button></div>'+
     '</div>'+
+    ((d.offP.length||d.reqP.length) ? CG.tradeBalanceCard(club, d.offP, d.partner, d.reqP, { compact:true }) : '')+
     '<label class="fld" style="margin-top:14px"><span>Note to the other club (optional)</span><input id="tradeNote" placeholder="Why this works for both sides…"></label>'+
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
     '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
   '</div></div>';
   return h+inc+outCard+build;
 };
+/* ================================================================
+   TRADE INTEL (v2.72): every trade opens to its players' numbers, with a balance reading
+   ================================================================ */
+CG.isCamp = function(p){ return !!(p && p.squad === "tc"); };
+CG.campChip = function(sz){ return '<span class="chip chip-warn'+(sz==="xs"?' chip-xs':'')+'" title="Training camp: fills any position, up to 3 games a week (Rules 2.1, 5.2)">Camp</span>'; };
+CG.splitSquads = function(list){
+  var out = { active:[], camp:[] };
+  (list||[]).forEach(function(p){ (CG.isCamp(p) ? out.camp : out.active).push(p); });
+  return out;
+};
+CG.tradeStats = function(pid){
+  var lg = CG.lg, p = CG.tPlayer(pid), s = (lg.pstats||{})[pid] || {};
+  var goalie = !!(p && p.pos === "G"), gp = s.gp || 0;
+  if (goalie){
+    var sa = s.sa||0, sv = s.sv||0, svp = sa ? sv/sa : null, gaa = gp ? (s.ga||0)/gp : null;
+    return { goalie:true, gp:gp, w:s.w||0, l:s.l||0, otl:s.otl||0, svp:svp, gaa:gaa, so:s.so||0,
+      line: gp ? (s.w||0)+"-"+(s.l||0)+"-"+(s.otl||0)+" · "+(svp!=null?svp.toFixed(3).replace(/^0/,""):"—")+" SV% · "+(gaa!=null?gaa.toFixed(2):"—")+" GAA · "+gp+" GP" : "no games yet" };
+  }
+  return { goalie:false, gp:gp, g:s.g||0, a:s.a||0, p:s.p||0, pm:s.pm||0, pim:s.pim||0, ppg: gp ? (s.p||0)/gp : 0,
+    line: gp ? (s.g||0)+"G "+(s.a||0)+"A "+(s.p||0)+"P · "+gp+" GP · "+(((s.p||0)/gp).toFixed(2))+" P/GP" : "no games yet" };
+};
+/* One number per player, in the open, so a lopsided offer shows before it is accepted. Scouted
+   overall carries most of it (10 per overall above 60); this season's production adds to it once
+   he has games (weighted in over his first five); the cap hit costs 8 per $1M. A reading for the
+   two front offices and the transactions department, not a rule. */
+CG.tradeValue = function(pid){
+  var p = CG.tPlayer(pid); if (!p) return { value:0, ovr:0, prod:0, cap:0, missing:true };
+  var st = CG.tradeStats(pid);
+  var ovr = Math.max(0, (p.overall||70) - 60) * 10, prod = 0;
+  if (st.gp >= 1){
+    prod = st.goalie ? Math.max(0, ((st.svp||0) - 0.880) * 2000) + (st.w||0) * 3 : st.ppg * 40;
+    prod = Math.round(prod * Math.min(1, st.gp / 5));
+  }
+  var cap = -Math.round(((p.salary||0)/1e6) * 8);
+  return { value: Math.max(0, Math.round(ovr + prod + cap)), ovr: ovr, prod: Math.round(prod), cap: cap, missing:false };
+};
+CG.tradeSide = function(pids){
+  var out = { n:0, ovrSum:0, salary:0, value:0, gp:0, g:0, a:0, p:0, goalies:0, camp:0, missing:0 };
+  (pids||[]).forEach(function(pid){
+    var pl = CG.tPlayer(pid), v = CG.tradeValue(pid), st = pl ? CG.tradeStats(pid) : null;
+    out.n++; out.value += v.value;
+    if (!pl){ out.missing++; return; }
+    out.ovrSum += pl.overall||70; out.salary += pl.salary||0; if (CG.isCamp(pl)) out.camp++;
+    out.gp += st.gp; if (st.goalie) out.goalies++; else { out.g += st.g; out.a += st.a; out.p += st.p; }
+  });
+  out.avgOvr = (out.n - out.missing) ? Math.round(out.ovrSum / (out.n - out.missing)) : 0;
+  return out;
+};
+CG.tradePlayerRow = function(pid, opts){
+  opts = opts || {};
+  var p = CG.tPlayer(pid), lg = CG.lg, name = p ? p.tag : ((lg._profName||{})[pid] || "a player");
+  var st = p ? CG.tradeStats(pid) : null, v = p ? CG.tradeValue(pid) : null;
+  var sx = CG.signedExtensionOf ? CG.signedExtensionOf(pid) : null;
+  return '<div class="trow">'+
+    '<span class="playercell" style="min-width:0">'+(p?CG.crest(p.team,20):'')+'<span style="min-width:0">'+
+      (p ? '<a class="nm" href="'+CG.playerRoute(p)+'" style="font-weight:700">'+esc(name)+'</a>' : '<b class="nm">'+esc(name)+'</b>')+
+      '<small style="display:block;color:var(--steel)">'+(p ? esc(CG.POS_NAME[p.pos]||p.pos)+' · '+CG.fmtMoney(p.salary)+(p.mgmt?' · management':'') : 'not on a roster')+'</small></span></span>'+
+    '<span class="tr-chips">'+(p&&CG.isCamp(p)?CG.campChip("xs"):'')+(p&&p.origin==="depth_random"?'<span class="chip chip-ink chip-xs">Depth</span>':'')+
+      (sx?'<span class="chip chip-chrome chip-xs">signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+'</span>':'')+'</span>'+
+    '<span class="tr-stats mono">'+(st ? esc(st.line) : '—')+'</span>'+
+    '<span class="tr-ovr"><b class="num">'+(p ? (p.overall||70) : '—')+'</b><small>OVR</small></span>'+
+    (opts.value !== false && v ? '<span class="tr-val" title="Overall '+v.ovr+' · production '+v.prod+' · cap '+v.cap+'"><b class="num">'+v.value+'</b><small>value</small></span>' : '')+
+    (opts.rm ? '<button type="button" class="chip" data-trade-rm="'+opts.rm+'" style="cursor:pointer" aria-label="Remove '+esc(name)+'">✕</button>' : '')+
+  '</div>';
+};
+CG.tradeBalanceCard = function(aCode, aPids, bCode, bPids, opts){
+  opts = opts || {};
+  var A = CG.tradeSide(aPids), B = CG.tradeSide(bPids);
+  var aName = (CG.TEAM[aCode]||{}).name || aCode || "Club A", bName = (CG.TEAM[bCode]||{}).name || bCode || "Club B";
+  var total = A.value + B.value, aPct = total ? Math.round(A.value/total*100) : 50;
+  var diff = total ? Math.abs(A.value - B.value) / Math.max(A.value, B.value, 1) : 0;
+  var verdict, tone;
+  if (!A.n && !B.n){ verdict = "Add players to read it"; tone = "chip"; }
+  else if (!A.n || !B.n){ verdict = "One side is empty"; tone = "chip-warn"; }
+  else if (diff < 0.08){ verdict = "Even"; tone = "chip-win"; }
+  else { verdict = "Favors "+(A.value > B.value ? bName : aName)+" by "+Math.round(diff*100)+"%"; tone = diff < 0.25 ? "chip-warn" : "chip-loss"; }
+  function col(code, S, label){
+    var allG = S.n && S.goalies === S.n - S.missing && S.goalies > 0;
+    return '<div><span class="eyebrow">'+esc(label)+'</span>'+
+      '<div class="tb-kpis"><div><b class="num">'+S.n+'</b><small>player'+(S.n===1?'':'s')+(S.camp?' · '+S.camp+' camp':'')+'</small></div>'+
+      '<div><b class="num">'+(S.n-S.missing?S.avgOvr:'—')+'</b><small>avg OVR</small></div>'+
+      '<div><b class="num">'+CG.fmtMoney(S.salary)+'</b><small>cap hit</small></div>'+
+      '<div><b class="num">'+(allG ? S.gp : S.p)+'</b><small>'+(allG ? 'GP' : 'points')+'</small></div>'+
+      '<div><b class="num">'+S.value+'</b><small>value</small></div></div></div>';
+  }
+  return '<div class="card tbal"'+(opts.compact?' style="margin-top:14px"':'')+'><div class="card-h"><h3>Trade balance</h3><span class="chip '+tone+'">'+esc(verdict)+'</span></div>'+
+    '<div class="card-b"><div class="tb-meter" role="img" aria-label="'+esc(aName)+' sends '+A.value+' of value, '+esc(bName)+' sends '+B.value+'"><i style="width:'+aPct+'%"></i></div>'+
+    '<div class="tb-legend"><span>'+CG.crest(aCode,16)+' '+esc(aName)+' sends <b class="num">'+A.value+'</b></span><span>'+CG.crest(bCode,16)+' '+esc(bName)+' sends <b class="num">'+B.value+'</b></span></div>'+
+    '<div class="grid g2" style="gap:16px;margin-top:14px">'+col(aCode, A, aName+" sends")+col(bCode, B, bName+" sends")+'</div>'+
+    '<p class="caption" style="margin-top:12px">Value per player: 10 for every scouted overall above 60, plus this season\'s production once he has games (a skater\'s points per game × 40, a goaltender\'s save percentage above .880 plus 3 a win, weighted in over his first five games), minus 8 per $1M of cap hit. A reading, not a rule: the transactions department may still reverse a trade it judges not to be a hockey deal (Rule 2.3).</p>'+
+    '</div></div>';
+};
+CG.tradeDetailModal = function(t, opts){
+  opts = opts || {};
+  var lg = CG.lg, codeOf = lg._idToCode || {};
+  var f = codeOf[t.from_team_id] || "?", to = codeOf[t.to_team_id] || "?";
+  var fName = (CG.TEAM[f]||{}).name||f, toName = (CG.TEAM[to]||{}).name||to;
+  var chip = t.status==="proposed" ? "chip-warn" : t.status==="accepted" ? "chip-win" : "chip";
+  function side(pids, kids){
+    var rows = (pids||[]).map(function(pid){ return CG.tradePlayerRow(pid); }).join("");
+    (kids||[]).forEach(function(kid){ var kk = CG.tPick(kid); rows += '<div class="caption" style="margin-top:6px">'+(kk?esc(CG.pickLabel(kk))+' pick':'a pick')+'</div>'; });
+    return rows || '<p class="caption" style="margin-top:8px">Nothing</p>';
+  }
+  var proposer = (lg._profName||{})[t.from_profile_id];
+  var body = '<div class="tdetail">'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><span class="chip '+chip+'" style="text-transform:uppercase">'+esc(t.status||"")+'</span>'+
+      '<span class="caption">Proposed '+(t.created_at?CG.fmtFull(Date.parse(t.created_at)):'—')+(proposer?' by '+esc(proposer):'')+
+      (t.updated_at && t.status!=="proposed" ? ' · '+esc(t.status)+' '+CG.fmtFull(Date.parse(t.updated_at)) : '')+'</span></div>'+
+    '<div class="grid g2" style="gap:16px;align-items:start">'+
+      '<div class="tside"><div class="tside-h">'+CG.crest(f,22)+'<b>'+esc(fName)+' send</b></div>'+side(t.offered_profile_ids, t.offered_pick_ids)+'</div>'+
+      '<div class="tside"><div class="tside-h">'+CG.crest(to,22)+'<b>'+esc(toName)+' send</b></div>'+side(t.requested_profile_ids, t.requested_pick_ids)+'</div></div>'+
+    (t.note ? '<p class="small" style="color:var(--steel);margin-top:12px;font-style:italic">“'+esc(t.note)+'”</p>' : '')+
+    CG.tradeBalanceCard(f, t.offered_profile_ids, to, t.requested_profile_ids, { compact:true })+
+    '</div>';
+  CG.modal(fName+" ⇄ "+toName, body, '<button class="btn btn-ghost" data-close>Close</button>'+(opts.footHtml||''));
+};
 CG.tradePicker = function(side){
   var d=CG.liveTrade(), code = side==="off" ? CG.myClub() : d.partner;
   if(!code){ CG.toast("Choose a partner first","err"); return; }
   var alreadyP = side==="off"? d.offP : d.reqP, alreadyK = side==="off"? d.offK : d.reqK;
-  var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; });
+  var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; })
+    .sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (b.overall||0)-(a.overall||0); });
   var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
-  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b><span class="caption" style="display:block">'+p.pos+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
+  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
   var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
   CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players</span>'+(pHtml||'<span class="caption">none available</span>')+
     (CG.fmt("pick_trades") ? '<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>') : '<span class="caption" style="margin-top:8px">Players only — draft picks are not traded in the basic format (Rule 2.3).</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');
@@ -12585,6 +12808,11 @@ CG.AFTER._tradehubLive = function(qs){
   document.querySelectorAll("[data-trade-decline]").forEach(function(b){ b.addEventListener("click", function(){ CG.declineTrade(this.getAttribute("data-trade-decline")); }); });
   document.querySelectorAll("[data-trade-cancel]").forEach(function(b){ b.addEventListener("click", function(){ CG.cancelTrade(this.getAttribute("data-trade-cancel")); }); });
   document.querySelectorAll("[data-trade-counter]").forEach(function(b){ b.addEventListener("click", function(){ CG.counterTrade(this.getAttribute("data-trade-counter")); }); });
+  /* v2.72: every offer opens to its players' numbers and the balance reading */
+  document.querySelectorAll("[data-trade-open]").forEach(function(b){ b.addEventListener("click", function(){
+    var id=this.getAttribute("data-trade-open"), tr=(CG.lg._myTrades||[]).find(function(x){ return x.id===id; });
+    if (tr) CG.tradeDetailModal(tr);
+  }); });
 };
 /* route the Team HQ Trade Hub to the live version */
 CG._protoTradeHub = CG.hubTradeHub;

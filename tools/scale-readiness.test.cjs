@@ -26,7 +26,7 @@ console.log("— one league rebuild per game, not per stat row");
 {
   /* v2.57: the handler passes the changed game so the rebuild is a delta (two reads), jittered */
   A("the public channel listens to games only", /table:"games" \}, function\(p\)\{ CG\.liveReload\(\{ game:[^\n]*\n      \.subscribe\(\);/.test(live));
-  A("...and a games change is a delta rebuild, not the whole boot", /CG\._deltaBoot = async function/.test(live) && /opts\.delta && CG\._bootCache/.test(live));
+  A("...and a games change is a delta rebuild, not the whole boot", /CG\._deltaBoot = async function/.test(live) && /\(opts\.delta \|\| opts\.roster\) && CG\._bootCache/.test(live));
   A("...spread over a jitter window so open tabs don't stampede", /1000 \+ Math\.floor\(Math\.random\(\)\*8000\)/.test(live));
   A("...not to game_stats", !/table:"game_stats" \}, function\(\)\{ CG\.liveReload\(\); \}\)/.test(live));
   A("...and says why", /patches games to final/.test(live));

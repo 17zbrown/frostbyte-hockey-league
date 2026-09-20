@@ -1,0 +1,19 @@
+-- v2.72 (2026-09-20): two club-room changes, applied live (rehearsed with a rollback first).
+--
+-- 1) notify_squad_or_block (trigger zz_notify_squad_or_block on roster_spots): the on_block branch is
+--    removed. A trade-block listing is announced in #trade-block only (notify_trade_block, via
+--    app_config.discord_tradeblock_webhook); the club's own room and the Owner/GM/AGM bells no
+--    longer repeat it. The squad branch (to camp / to the active roster) is unchanged.
+--
+-- 2) notify_availability_submitted + trigger notify_availability_submitted_trg
+--    AFTER INSERT OR UPDATE ON public.availability: when a rostered player submits or changes his
+--    weekly availability, one row goes into club_notices for his club (kind 'availability',
+--    link_view 'lineups'; the bot's realtime lane posts it into teams.discord_channel_id, the
+--    discord-sync sweep is the backstop). A save that leaves nights unchanged is silent. Body:
+--      "<gamertag> is available for 5 of 9 games in Week 3 (Wed 2/3 (note) · Thu 3/3 · Fri 0/3)."
+--    with ". Submitted after the deadline (Rule 5.1)." appended when late. Title "Availability in:"
+--    on the first submission, "Availability updated:" after. Legacy one-answer-per-night rows
+--    (no games map) count as one game per night. It writes club_notices directly, not club_notify,
+--    so the site bells are not chimed fifteen times a week; the dashboard grid already shows it.
+--    Rehearsal (rolled back): one notice per insert, exact body asserted, no-change update silent.
+-- The bot's KIND_STYLE gained an 'availability' entry (📅, links to #/hub/lineups).

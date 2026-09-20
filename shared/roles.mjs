@@ -33,7 +33,7 @@ export const POSITION_ROLES = ["Center", "Left Wing", "Right Wing", "Left Defens
    managedRoleIds() because their ids are data, not names. */
 export const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant General Manager",
   "CGHL Management", "Commissioner", "Staff", "Free Agent", "Restricted Free Agent", "Rookie",
-  "Not Signed Up", ...POSITION_ROLES];
+  "Not Signed Up", "Training Camp", ...POSITION_ROLES];
 
 export function managedRoleIds(roleId, teams) {
   const ids = new Set();
@@ -72,6 +72,7 @@ export function managedRoleIds(roleId, teams) {
 export function desiredRolesFor(m, ctx) {
   const { roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf } = ctx;
   const rfa = ctx.rfa || new Set();
+  const camp = ctx.camp || new Set();   /* profiles whose roster spot this season is in training camp (v2.72) */
   const rookies = ctx.rookies || new Set();
   const desired = new Set();
   const isRegistered = registered.has(m.profile_id);
@@ -84,6 +85,9 @@ export function desiredRolesFor(m, ctx) {
   if (onRoster) desired.add(teamRoleId[m.team_id]);
   else if (isRegistered && !holdsSeat && rfa.has(m.profile_id) && roleId["restricted free agent"]) desired.add(roleId["restricted free agent"]);
   else if (isRegistered && !holdsSeat && roleId["free agent"]) desired.add(roleId["free agent"]);
+  /* Training Camp rides with the club role: a camp player is the club's player (Rule 2.1) and
+     wears the badge only while his spot is in camp; a call-up drops it on the next pass. */
+  if (onRoster && camp.has(m.profile_id) && roleId["training camp"]) desired.add(roleId["training camp"]);
   /* Rookie rides alongside the rest: it is a length-of-service badge, not a rights class, so it
      sits happily on a rostered player and on a free agent alike. */
   if ((isRegistered || onRoster) && rookies.has(m.profile_id) && roleId["rookie"]) desired.add(roleId["rookie"]);

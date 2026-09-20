@@ -1007,6 +1007,36 @@ html.rv-on .na-wrap.pins-in .na-pin{opacity:1;transform:translate(-50%,-50%) sca
   font-size:clamp(44px,11vw,148px);line-height:.86;letter-spacing:-.035em;text-transform:uppercase}
 .hero-name .hn-sub{display:block;margin-top:clamp(10px,1.6vh,18px);font-family:var(--f-mono);
   font-size:clamp(10px,1.1vw,13px);letter-spacing:.42em;text-transform:uppercase;color:var(--steel)}
+/* direct messages (v2.72): a day divider in the thread */
+.dm-day{display:flex;align-items:center;gap:10px;align-self:stretch;margin:6px 0 2px;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel)}
+.dm-day::before,.dm-day::after{content:"";flex:1;height:1px;background:var(--line)}
+/* roster blocks (v2.72): the active roster and training camp are two blocks in every roster table */
+tr.squad-head td{background:var(--ice);padding:8px 12px;border-top:1px solid var(--line)}
+tr.squad-head .caption{margin-left:6px}
+.bench-h{flex-basis:100%;width:100%;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);padding:6px 0 2px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.cl-row.squad-head{background:var(--ice);padding:6px 10px}
+/* trade intel (v2.72): player rows with season lines, the balance meter */
+.trow{display:grid;grid-template-columns:minmax(0,1.6fr) auto minmax(0,1.4fr) 44px 48px auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line-soft)}
+.trow:first-child{border-top:0}
+.trow .nm{color:var(--ink);text-decoration:none}.trow .nm:hover{text-decoration:underline}
+.trow .tr-chips{display:inline-flex;gap:4px;flex-wrap:wrap}
+.trow .tr-stats{font-size:11px;color:var(--steel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .tr-ovr,.trow .tr-val{display:flex;flex-direction:column;align-items:flex-end;line-height:1.05}
+.trow .tr-ovr b,.trow .tr-val b{font-size:15px}.trow .tr-ovr small,.trow .tr-val small{font-family:var(--f-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel)}
+@media (max-width:720px){.trow{grid-template-columns:minmax(0,1fr) auto auto auto}.trow .tr-stats{grid-column:1/-1;white-space:normal}.trow .tr-chips{grid-column:1/-1}}
+/* inside a two-column card (offer cards, the builder's two boxes) the row takes two lines: identity, then the season line */
+.grid.g2 .trow,.tside .trow{grid-template-columns:minmax(0,1fr) auto auto auto}
+.grid.g2 .trow .tr-stats,.tside .trow .tr-stats{grid-column:1/-1;white-space:normal;padding-left:28px}
+.grid.g2 .trow .tr-chips:empty,.tside .trow .tr-chips:empty{display:none}
+.tside-h{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-family:var(--f-disp)}
+.tbal .tb-meter{height:10px;border-radius:5px;background:var(--red);overflow:hidden}
+.tbal .tb-meter i{display:block;height:100%;background:var(--chrome)}
+.tbal .tb-legend{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--steel)}
+.tbal .tb-legend span{display:inline-flex;align-items:center;gap:6px}
+.tbal .tb-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:8px;margin-top:8px}
+.tbal .tb-kpis div{display:flex;flex-direction:column;line-height:1.1}.tbal .tb-kpis b{font-size:16px}
+.tbal .tb-kpis small{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+.tx-row:hover{background:var(--ice)}.tx-row:focus-visible{outline:2px solid var(--chrome);outline-offset:-2px}
 .rtabs{display:flex;flex-wrap:wrap;gap:6px;padding:12px 18px 4px;align-items:center}
 .rtabs .chip{cursor:pointer}
 .rtabs .chip .live-dot{margin-right:5px}

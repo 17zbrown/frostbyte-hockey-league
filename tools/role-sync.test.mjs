@@ -323,7 +323,25 @@ console.log("\n— one hung member never stalls the queue (audit 2026-09-17, P2-
   A("a member with no seat does NOT get it", !rolesFor(null).has("R_MGMT"));
   A("...and losing the seat revokes it, because it is reconciled like every managed role",
     MANAGED_STATIC.includes("CGHL Management"));
+}
 
+/* ---- Training Camp (v2.72): a badge that rides with the club role while the spot is in camp ---- */
+{
+  const rid = { "player":"R_PLAYER", "training camp":"R_TC" };
+  const base = { roleId: rid, teamRoleId: { T1: "R_CLUB_MTL" }, registered: new Set(["p1"]), regOpen: false,
+                 mgmtRoleByProfile: {}, deptByProfile: {}, posOf: {} };
+  const rolesFor = (teamId, inCamp) => desiredRolesFor({ profile_id: "p1", role: "member", team_id: teamId },
+    { ...base, camp: inCamp ? new Set(["p1"]) : new Set() });
+  A("a rostered player in camp wears Training Camp beside his club role", rolesFor("T1", true).has("R_TC") && rolesFor("T1", true).has("R_CLUB_MTL"));
+  A("a rostered player on the active roster does not", !rolesFor("T1", false).has("R_TC"));
+  A("a camp flag without a roster spot grants nothing", !rolesFor(null, true).has("R_TC"));
+  A("...and it is reconciled like every managed role, so a call-up drops it", MANAGED_STATIC.includes("Training Camp"));
+  const syncSrc = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const bot = fs.readFileSync(new URL("../bot/role-sync.mjs", import.meta.url), "utf8");
+  A("the sweep reads squad off the season's roster spots and passes camp into the rules", /select=profile_id,position,squad,status/.test(syncSrc) && /rookies, camp, managedIds \}/.test(syncSrc) && /\["Training Camp", true\]/.test(syncSrc));
+  A("the bot's instant lane does the same, so the two paths cannot fight", /select=position,squad,status/.test(bot) && /camp: inCamp \? new Set\(\[profileId\]\) : new Set\(\)/.test(bot));
+}
+{
   const sync = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
   A("the sweep creates the role if it is missing", /\["CGHL Management", true\]/.test(sync));
   A("...and keeps it mentionable, so the ping actually works",

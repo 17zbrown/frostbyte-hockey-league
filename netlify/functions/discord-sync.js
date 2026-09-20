@@ -1593,7 +1593,7 @@ async function ensureRoleOrder(guildRoles, teams, roleId, sum) {
   const club = uniq(teams.map((t) => t.discord_role_id)).filter(movable);
   const rest = uniq([
     ...idsOf(["owner", "general manager", "assistant general manager", "player", "free agent",
-              "not signed up", "center", "left wing", "right wing", "left defense", "right defense", "goalie"]),
+              "not signed up", "training camp", "center", "left wing", "right wing", "left defense", "right defense", "goalie"]),
     ...STAFF_DEPARTMENTS.map((d) => roleId[String(d.role).toLowerCase()]),
   ]).filter((id) => movable(id) && !club.includes(id) && !office.includes(id));
 
@@ -1710,7 +1710,7 @@ function cutShort(sum, left) {
 }
 async function syncLinkedMembers(ctx, sum, outOfTime) {
   const { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, managedIds } = ctx;
+    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds } = ctx;
   const linked = links.filter((m) => m.discord_id);
   for (let i = 0; i < linked.length; i++) {
     if (outOfTime()) { cutShort(sum, linked.length - i); return; }
@@ -1776,7 +1776,7 @@ async function syncLinkedMembers(ctx, sum, outOfTime) {
       // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
       if (inputsOk) {
         const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
-          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies });
+          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp });
         const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
         if (changed) {
           const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
@@ -2216,6 +2216,7 @@ export async function runSweep(opts = {}) {
   // player position (current season) -> for position-based Discord roles
   // POS_LABEL / POSITION_ROLES come from shared/roles.mjs (imported at top)
   const posOf = {};
+  const camp = new Set();   /* v2.72: roster spots in training camp this season → the Training Camp role */
   try {
     /* v2.36: sign-up positions come from the season taking sign-ups and roster positions from the
        season in play (active, else the lowest-numbered open season). "Newest season" pointed at a
@@ -2224,7 +2225,10 @@ export async function runSweep(opts = {}) {
     const curSeason = seasons.find((s) => s.status === "active") || seasons[0] || null;
     const regSeasonRow = seasons.filter((s) => s.registration_open).sort((a, b) => b.number - a.number)[0] || curSeason;
     if (regSeasonRow) for (const r of await sbGet(`season_registrations?season_id=eq.${regSeasonRow.id}&select=profile_id,position`)) if (r.position) posOf[r.profile_id] = r.position;
-    if (curSeason) for (const s of await sbGet(`roster_spots?season_id=eq.${curSeason.id}&select=profile_id,position`)) if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
+    if (curSeason) for (const s of await sbGet(`roster_spots?season_id=eq.${curSeason.id}&select=profile_id,position,squad,status`)) {
+      if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
+      if (s.squad === "tc" && (s.status || "active") === "active") camp.add(s.profile_id);
+    }
   } catch (e) { inputsOk = false; inputsErr.push("positions: " + String(e.message || e)); }
 
 
@@ -2669,7 +2673,7 @@ export async function runSweep(opts = {}) {
   // ensure the mentionable roles the automations depend on exist (created once, then reused):
   //  Staff (members ping the officials), the front-office roles (gate the Team Management rooms),
   //  and "Not Signed Up" (the daily sign-up reminder pings this one role).
-  const ENSURE_ROLES = [["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["CGHL Management", true], ["Not Signed Up", true], ["Restricted Free Agent", true], ["Rookie", true]];
+  const ENSURE_ROLES = [["Training Camp", true], ["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["CGHL Management", true], ["Not Signed Up", true], ["Restricted Free Agent", true], ["Rookie", true]];
   for (const [name, mentionable] of ENSURE_ROLES) {
     if (roleId[name.toLowerCase()]) continue;
     try {
@@ -2690,6 +2694,8 @@ export async function runSweep(opts = {}) {
     /* the two rights classes sit beside Free Agent, and Rookie beside them — mentionable so the
        office can address a class at once, unhoisted so they do not crowd the seat roles */
     ["Restricted Free Agent", true, false], ["Rookie", true, false],
+    /* v2.72: camp players, so management can address its camp at once; unhoisted, a badge not a rank */
+    ["Training Camp", true, false],
   ];
   for (const [name, mentionable, hoist] of ROLE_PROPS) {
     const rid = roleId[name.toLowerCase()];
@@ -2744,7 +2750,7 @@ export async function runSweep(opts = {}) {
      the remainder up, because a member that needed nothing is a no-op that costs no request. */
   const outOfTime = () => Date.now() - T0 > BUDGET_MS;
   const ctx = { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, managedIds };
+    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds };
   await syncLinkedMembers(ctx, sum, outOfTime);
   try { await syncUnlinkedMembers(ctx, sum, outOfTime); }
   catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }

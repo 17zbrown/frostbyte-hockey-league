@@ -440,8 +440,9 @@ CG.hubAvailability = function(){
     '</div></div>';
   var grid = "";
   if (CG.can("availability.viewTeam")){
-    var roster = (lg.byTeam[me&&me.team?me.team:CG.myClub()]||[]).slice().sort(function(a,b){ return a.pos.localeCompare(b.pos); });
+    var roster = (lg.byTeam[me&&me.team?me.team:CG.myClub()]||[]).slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || a.pos.localeCompare(b.pos); });
     var clubCode = me&&me.team?me.team:CG.myClub();
+    var gridCols = 4 + CG.WEEK8.nights.length, gridCamp = roster.some(CG.isCamp);
     var nightGames = {};
     CG.WEEK8.nights.forEach(function(n){ nightGames[n.key] = CG.clubGamesOnNight ? CG.clubGamesOnNight(clubCode, n) : []; });
     grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc((CG.TEAM[me&&me.team?me.team:CG.myClub()]||{}).name||"—")+'</h3>'+
@@ -452,7 +453,7 @@ CG.hubAvailability = function(){
         return '<th>'+esc(new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",month:"numeric",day:"numeric"}).format(new Date(n.at)))+'</th>';
       }).join("")+
       '<th class="tleft">Note</th><th>Logged</th></tr></thead><tbody>'+
-      roster.map(function(p){
+      roster.map(function(p, idx){
         var av = CG.avFor(p.id);
         /* v2.44: one mark per GAME that night (✓ available · ✗ not · — no answer), oldest first */
         function cell(nk){
@@ -467,7 +468,10 @@ CG.hubAvailability = function(){
         var noteN = CG.WEEK8.nights.filter(function(n){ return av.nights[n.key] && av.nights[n.key].note; })[0];
         var note = noteN ? av.nights[noteN.key].note : "";
         var silent = CG.WEEK8.nights.every(function(n){ return !av.nights[n.key] || av.nights[n.key].st==="nr"; });
-        return '<tr'+(me&&p.id===me.id?' style="background:var(--chrome-tint)"':"")+'>'+
+        /* v2.72: the active roster and training camp are two blocks */
+        var gHead = (gridCamp && idx===0) ? '<tr class="squad-head"><td colspan="'+gridCols+'" class="tleft"><b style="font-family:var(--f-disp)">Active roster</b></td></tr>'
+                  : (CG.isCamp(p) && (idx===0 || !CG.isCamp(roster[idx-1]))) ? '<tr class="squad-head"><td colspan="'+gridCols+'" class="tleft"><b style="font-family:var(--f-disp)">Training camp</b> <span class="caption">any position · up to 3 games a week</span></td></tr>' : "";
+        return gHead + '<tr'+(me&&p.id===me.id?' style="background:var(--chrome-tint)"':"")+'>'+
           '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm">'+esc(p.tag)+'</span>'+(me&&p.id===me.id?'<span class="chip" style="font-size:9px;padding:1px 7px">you</span>':"")+'</span></td>'+
           '<td class="tnum">'+p.pos+'</td>'+
           CG.WEEK8.nights.map(function(n){ return '<td>'+cell(n.key)+'</td>'; }).join("")+
@@ -803,16 +807,18 @@ CG.hubLineup = function(qs){
     '<div class="rk-line g1">'+CG.luSlot("G", slots.G, locked)+'</div>'+
   '</div></div>';
   var bench = '<div class="card"><div class="card-h"><h3>Bench — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
-    '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p){
+    '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p, i, arr){
       var av = CG.avFor(p.id);
+      /* v2.72: camp players sit in their own group at the end of the bench */
+      var groupHead = (i===0 && !CG.isCamp(p) && arr.some(CG.isCamp)) ? '<div class="bench-h">Active roster</div>' : (CG.isCamp(p) && (i===0 || !CG.isCamp(arr[i-1]))) ? '<div class="bench-h">Training camp · any position · 3 a week</div>' : "";
       var avKey = CG.nightAvKey(game);   /* the availability night this game falls on */
       /* v2.44: the answer for THIS game (a legacy per-night answer still counts for every game that night) */
       var un = !!(avKey && CG.avGame && CG.avGame(av, avKey, game.id)==="no");
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
       var reason = dis ? "Suspended (Rule 7.4)" : un ? "Marked unavailable" : "";
-      return '<div class="bp'+(used?" dis":"")+(dis||un?" dis":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
-        CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+
+      return groupHead + '<div class="bp'+(used?" dis":"")+(dis||un?" dis":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
+        CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+(CG.isCamp(p)?CG.campChip("xs"):"")+
         (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
         '<span class="bp-meta">OVR '+lg.ratings[p.id].ovr+'</span></div>';
     }).join("")+'</div>'+
@@ -1675,7 +1681,11 @@ CG.hubRoster = function(qs){
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
   };
-  var rows = contracted.map(rowFor).join("") +
+  /* v2.72: the active roster and training camp are two blocks, never interleaved (Rule 2.1) */
+  var sqSplit = CG.splitSquads(contracted);
+  var rows = (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Active roster — '+sqSplit.active.length+'</b></td></tr>' : "") +
+    sqSplit.active.map(rowFor).join("") +
+    (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Training camp — '+sqSplit.camp.length+'</b> <span class="caption">Outside the active roster and its shape; a camp player fills any position and dresses in up to three games a week. Call up moves him onto the active roster when it has room (Rules 2.1, 5.2).</span></td></tr>' + sqSplit.camp.map(rowFor).join("") : "") +
     (loans.length ? '<tr class="loan-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
   /* the 9/6/2 shape is CONTRACTED players only; pre-season loans ride the active roster without
      counting against it (Rule 2.1) and are shown as their own tally */

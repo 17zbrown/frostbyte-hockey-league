@@ -158,9 +158,13 @@ export function createRoleSyncer(env, opts = {}) {
         isRegistered = !!(reg && reg[0]);
         for (const r of reg || []) if (r.position) pos = r.position;    // sign-up position, from the season taking sign-ups
       }
+      let inCamp = false;
       if (C.posSeason) {
-        const spots = await sbGet(`roster_spots?season_id=eq.${C.posSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=position`);
-        for (const s of spots || []) if (s.position) pos = s.position;   // roster spot (season in play) wins over signup
+        const spots = await sbGet(`roster_spots?season_id=eq.${C.posSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=position,squad,status`);
+        for (const s of spots || []) {
+          if (s.position) pos = s.position;   // roster spot (season in play) wins over signup
+          if (s.squad === "tc" && (s.status || "active") === "active") inCamp = true;   // v2.72: Training Camp role
+        }
       }
 
       /* club seat — held on the team row, not the profile; same overwrite order as the sweep's
@@ -202,6 +206,7 @@ export function createRoleSyncer(env, opts = {}) {
         posOf: pos ? { [profileId]: pos } : {},
         rfa: isRfa ? new Set([profileId]) : new Set(),
         rookies: isRookie ? new Set([profileId]) : new Set(),
+        camp: inCamp ? new Set([profileId]) : new Set(),
       });
       const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
       if (!changed) { sum.noop++; return "no-op"; }

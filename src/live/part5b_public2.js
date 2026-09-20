@@ -581,7 +581,7 @@ CG.ROUTES.matchup = function(id){
         return '<div style="border-top:1px solid var(--line-soft)">'+top.map(function(p,i){
           var s = lg.pstats[p.id]||{ g:0, a:0 };
           return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(code,26)+
-            '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b></span>'+
+            '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+'</span>'+
             '<span class="val"><b class="num">'+(pre?mxOvr(p):mxPts(p))+'</b><span>'+(pre?"OVR":s.g+"G "+s.a+"A")+'</span></span></div>';
         }).join("")+'</div>';
       }).join("")+'</div></div>';

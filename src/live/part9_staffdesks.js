@@ -690,11 +690,13 @@ CG.AFTER._deskTransactions = function(){
     var pd = document.getElementById("txPend");
     if (pd) pd.textContent = pending.length;
 
+    CG._deskTrades = trades;
     function tradeRow(t){
       var f = codeOf[t.from_team_id] || "?", to = codeOf[t.to_team_id] || "?";
       var chip = t.status==="proposed" ? "chip-warn" : t.status==="accepted" ? "chip-win" : "chip";
       var np = (t.offered_pick_ids||[]).length, nq = (t.requested_pick_ids||[]).length;
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      /* v2.72: the row opens to the players' numbers and the balance reading (the Send back button stops the click) */
+      return '<div class="card-b tx-row" data-trade-open="'+t.id+'" role="button" tabindex="0" title="Open the trade" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft);cursor:pointer">'+
         '<span class="chip '+chip+' chip-xs" style="text-transform:uppercase">'+esc(t.status||"")+'</span>'+
         '<span class="teamcell">'+CG.crest(f,20)+'<b class="mono" style="font-size:12px">'+esc(f)+'</b></span>'+
         '<span class="caption">→</span>'+
@@ -703,6 +705,7 @@ CG.AFTER._deskTransactions = function(){
           (np?' + '+np+' pick'+(np>1?"s":""):"")+' <b>for</b> '+who(t.requested_profile_ids)+
           (nq?' + '+nq+' pick'+(nq>1?"s":""):"")+'</span></span>'+
         '<span class="caption">'+(t.created_at?CG.fmtDay(Date.parse(t.created_at)):"")+'</span>'+
+        '<span class="caption" aria-hidden="true">Details ›</span>'+
         (t.status==="accepted"
           ? '<button class="btn btn-ghost btn-sm" data-tx-reverse="'+t.id+'" data-pair="'+esc(f+" / "+to)+'">Send back</button>'
           : "")+'</div>';
@@ -730,10 +733,22 @@ CG.AFTER._deskTransactions = function(){
 
     body.innerHTML = h;
 
+    /* v2.72: any row opens the trade — both sides' players with their season lines, the note, the
+       proposer and the balance reading; an accepted trade carries the Send back button there too */
+    function openTrade(id){
+      var t = (CG._deskTrades||[]).find(function(x){ return x.id===id; }); if (!t) return;
+      var f = codeOf[t.from_team_id] || "?", to = codeOf[t.to_team_id] || "?";
+      CG.tradeDetailModal(t, { footHtml: t.status==="accepted" ? '<button class="btn btn-ink" id="txDetailReverse">Send back</button>' : '' });
+      var rb = document.getElementById("txDetailReverse");
+      if (rb) rb.addEventListener("click", function(){ openReverse(id, f+" / "+to); });
+    }
+    body.querySelectorAll("[data-trade-open]").forEach(function(row){
+      row.addEventListener("click", function(e){ if (e.target.closest("button,a")) return; openTrade(this.getAttribute("data-trade-open")); });
+      row.addEventListener("keydown", function(e){ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); openTrade(this.getAttribute("data-trade-open")); } });
+    });
     /* Rule 2.4: a completed trade the department judges un-natural goes back. The database
        refuses if a player or pick in it has since moved on, so a half-undone trade is impossible. */
-    body.querySelectorAll("[data-tx-reverse]").forEach(function(b){ b.addEventListener("click", function(){
-      var id=this.getAttribute("data-tx-reverse"), pair=this.getAttribute("data-pair");
+    function openReverse(id, pair){
       CG.modal("Send the "+esc(pair)+" trade back?",
         '<p class="small" style="color:var(--steel)">Every player and pick returns to the club that had it. Both clubs are notified with your reason, and the reversal is posted to the league transaction log.</p>'+
         '<label class="fld" style="margin-top:12px"><span>Reason (both clubs see this)</span>'+
@@ -751,6 +766,9 @@ CG.AFTER._deskTransactions = function(){
           if (CG.reloadLeague) CG.reloadLeague(); else CG.AFTER._deskTransactions();
         });
       });
+    }
+    body.querySelectorAll("[data-tx-reverse]").forEach(function(b){ b.addEventListener("click", function(e){
+      e.stopPropagation(); openReverse(this.getAttribute("data-tx-reverse"), this.getAttribute("data-pair"));
     }); });
   });
 };
