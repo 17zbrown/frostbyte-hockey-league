@@ -469,7 +469,7 @@ CG.hubAvailability = function(){
         var note = noteN ? av.nights[noteN.key].note : "";
         var silent = CG.WEEK8.nights.every(function(n){ return !av.nights[n.key] || av.nights[n.key].st==="nr"; });
         /* v2.72: the active roster and training camp are two blocks */
-        var gHead = (gridCamp && idx===0) ? '<tr class="squad-head"><td colspan="'+gridCols+'" class="tleft"><b style="font-family:var(--f-disp)">Active roster</b></td></tr>'
+        var gHead = (gridCamp && idx===0 && !CG.isCamp(p)) ? '<tr class="squad-head"><td colspan="'+gridCols+'" class="tleft"><b style="font-family:var(--f-disp)">Active roster</b></td></tr>'
                   : (CG.isCamp(p) && (idx===0 || !CG.isCamp(roster[idx-1]))) ? '<tr class="squad-head"><td colspan="'+gridCols+'" class="tleft"><b style="font-family:var(--f-disp)">Training camp</b> <span class="caption">any position · up to 3 games a week</span></td></tr>' : "";
         return gHead + '<tr'+(me&&p.id===me.id?' style="background:var(--chrome-tint)"':"")+'>'+
           '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm">'+esc(p.tag)+'</span>'+(me&&p.id===me.id?'<span class="chip" style="font-size:9px;padding:1px 7px">you</span>':"")+'</span></td>'+

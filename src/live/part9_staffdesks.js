@@ -744,7 +744,7 @@ CG.AFTER._deskTransactions = function(){
     }
     body.querySelectorAll("[data-trade-open]").forEach(function(row){
       row.addEventListener("click", function(e){ if (e.target.closest("button,a")) return; openTrade(this.getAttribute("data-trade-open")); });
-      row.addEventListener("keydown", function(e){ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); openTrade(this.getAttribute("data-trade-open")); } });
+      row.addEventListener("keydown", function(e){ if (e.target.closest("button,a")) return; if (e.key==="Enter"||e.key===" "){ e.preventDefault(); openTrade(this.getAttribute("data-trade-open")); } });
     });
     /* Rule 2.4: a completed trade the department judges un-natural goes back. The database
        refuses if a player or pick in it has since moved on, so a half-undone trade is impossible. */

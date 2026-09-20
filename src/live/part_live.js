@@ -281,6 +281,10 @@ CG._seasonHint = function(){
    tab on every games event was the "herd" that took the database down at forty tabs
    (docs/audits/2026-09-17-stress-test.md, P0-3). */
 CG._bootCache = null;
+/* The boot array's tail, by name. career_games_played is entry 17 and the codes view entry 18;
+   v2.57 read the codes from 17 (so codes were blank on a full boot) and its delta wrote them
+   there (wiping careerGp until the next full load). tools/boot-index.test.cjs counts the array. */
+CG.BOOT_CAREER = 17; CG.BOOT_CODES = 18;
 CG._deltaBoot = async function(cached, gameIds, roster){
   var q = cached.slice();
   if (gameIds){
@@ -295,7 +299,7 @@ CG._deltaBoot = async function(cached, gameIds, roster){
         q[12] = { data: keep.concat(fresh.data||[]), error:null };
       }
     }
-    q[17] = await CG._codesToday();
+    q[CG.BOOT_CODES] = await CG._codesToday();
   }
   /* v2.72: a roster delta (a draft pick landing, a signing, a waiver) re-reads the two tables the
      rosters are built from and nothing else, so every roster surface repaints from the record
@@ -539,7 +543,7 @@ CG.buildLiveLeague = async function(opts){
      playoff bracket must never blend a past season's games into this one.
      (career games still span every season — via the career_games_played aggregate, since the
      game_stats load below is scoped to one season.) */
-  var codeById={}; ((q[17]&&!q[17].error&&q[17].data)||[]).forEach(function(c){ codeById[c.id]=c; });
+  var codeById={}; ((q[CG.BOOT_CODES]&&!q[CG.BOOT_CODES].error&&q[CG.BOOT_CODES].data)||[]).forEach(function(c){ codeById[c.id]=c; });
   var schedule = games.filter(function(g){ return !seasonId || g.season_id===seasonId; }).map(function(g){
     var cc = codeById[g.id]||{};
     return { id:g.id, week:g.week||1, stage:g.stage||"regular",
@@ -690,7 +694,7 @@ CG.buildLiveLeague = async function(opts){
   /* careerGp spans EVERY season and comes from the aggregate RPC; gameStatsRows is this season
      only. If the RPC is unavailable, fall back to counting what we did load — undercounts a
      returning player rather than inventing a number. */
-  var careerRows = (q[17] && !q[17].error && q[17].data) || null;
+  var careerRows = (q[CG.BOOT_CAREER] && !q[CG.BOOT_CAREER].error && q[CG.BOOT_CAREER].data) || null;
   if (careerRows) careerRows.forEach(function(r){ if (r.profile_id) careerGp[r.profile_id] = +r.gp || 0; });
   gameStatsRows.forEach(function(r){
     if (!r.profile_id) return;
@@ -6880,16 +6884,19 @@ CG.liveReload = function(opts){
   opts = opts || {};
   if (opts.game){ (CG._liveGames = CG._liveGames || []).push(opts.game); }
   else if (opts.roster){ CG._liveRoster = true; }
-  else { CG._liveGames = null; CG._liveRoster = false; }   /* a full reload is owed — a later delta must not downgrade it */
-  clearTimeout(CG._liveT);
+  else { CG._liveFullOwed = true; }   /* a full reload is owed — a later delta must not downgrade it */
   var wait = opts.jitterMs ? 1000 + Math.floor(Math.random()*opts.jitterMs)
            : (opts.game || opts.roster) ? 1000 + Math.floor(Math.random()*8000) : 1000;
+  /* a full reload already on the clock covers any delta: keep its timer (and its spread) */
+  if (CG._liveT && CG._liveFullOwed && (opts.game || opts.roster)) return;
+  clearTimeout(CG._liveT);
   CG._liveT = setTimeout(function run(){
+    CG._liveT = null;
     if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
+    var full = !!CG._liveFullOwed, delta = full ? null : CG._liveGames, roster = full ? false : !!CG._liveRoster;
+    CG._liveFullOwed = false; CG._liveGames = null; CG._liveRoster = false;
+    if (!full && !delta && !roster) return;              /* nothing queued (a retry that found the work already done) */
     CG._liveBusy = true;
-    var delta = CG._liveGames, roster = !!CG._liveRoster;
-    var full = delta === null && !roster;
-    CG._liveGames = null; CG._liveRoster = false;
     var prev = CG.lg;
     CG.buildLiveLeague(full ? {} : { delta: delta || null, roster: roster }).then(function(lg){
       if (!full) CG._carryLg(prev, lg);
@@ -6909,7 +6916,8 @@ CG.liveReload = function(opts){
       }
     }).catch(function(){}).then(function(){
       CG._liveBusy = false;
-      if (CG._liveAgain){ CG._liveAgain = false; CG.liveReload(); }
+      /* what queued while we were busy is still flagged: run it as queued (a delta stays a delta) */
+      if (CG._liveAgain){ CG._liveAgain = false; CG._liveT = setTimeout(run, 0); }
     });
   }, wait);
 };

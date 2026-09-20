@@ -1023,9 +1023,9 @@ tr.squad-head .caption{margin-left:6px}
 .trow .tr-stats{font-size:11px;color:var(--steel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow .tr-ovr,.trow .tr-val{display:flex;flex-direction:column;align-items:flex-end;line-height:1.05}
 .trow .tr-ovr b,.trow .tr-val b{font-size:15px}.trow .tr-ovr small,.trow .tr-val small{font-family:var(--f-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel)}
-@media (max-width:720px){.trow{grid-template-columns:minmax(0,1fr) auto auto auto}.trow .tr-stats{grid-column:1/-1;white-space:normal}.trow .tr-chips{grid-column:1/-1}}
+@media (max-width:720px){.trow{grid-template-columns:minmax(0,1fr) auto auto auto;grid-auto-flow:row dense}.trow .tr-stats{grid-column:1/-1;white-space:normal}.trow .tr-chips{grid-column:1/-1}}
 /* inside a two-column card (offer cards, the builder's two boxes) the row takes two lines: identity, then the season line */
-.grid.g2 .trow,.tside .trow{grid-template-columns:minmax(0,1fr) auto auto auto}
+.grid.g2 .trow,.tside .trow{grid-template-columns:minmax(0,1fr) auto auto auto;grid-auto-flow:row dense}
 .grid.g2 .trow .tr-stats,.tside .trow .tr-stats{grid-column:1/-1;white-space:normal;padding-left:28px}
 .grid.g2 .trow .tr-chips:empty,.tside .trow .tr-chips:empty{display:none}
 .tside-h{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-family:var(--f-disp)}
@@ -1710,8 +1710,9 @@ details.rb-history[open]>summary::after{content:"–"}
   .tbl.roster-tbl caption{display:block;width:100%;box-sizing:border-box;padding:12px 16px 6px}
   .tbl.roster-tbl,.tbl.roster-tbl tbody{display:block}
   .tbl.roster-tbl tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:12px 16px;border-bottom:1px solid var(--line-soft)}
-  .tbl.roster-tbl tr.loan-head{display:block}
-  .tbl.roster-tbl tr.loan-head td{display:block;padding:0}
+  .tbl.roster-tbl tr.loan-head,.tbl.roster-tbl tr.squad-head{display:block}
+  .tbl.roster-tbl tr.loan-head td,.tbl.roster-tbl tr.squad-head td{display:block;padding:0}
+  .tbl.roster-tbl tr.squad-head td{padding:10px 0 6px}
   .tbl.roster-tbl td{display:block;border:0;padding:0;text-align:left;font-size:13.5px;box-shadow:none !important}
   .tbl.roster-tbl td:first-child{order:0;flex:1 1 calc(100% - 96px);font-size:15px;padding-left:0}
   .tbl.roster-tbl td:nth-child(3){order:1;flex:0 0 auto}
