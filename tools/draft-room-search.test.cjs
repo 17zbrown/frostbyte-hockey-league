@@ -44,5 +44,13 @@ A("...and checks once a minute whether the draft is still on, removing the butto
 A("the dashboard renders it for non-management", /if \(CG\.draftNightBand && !\(CG\.managesClub && CG\.managesClub\(\)\)\)\{ var dnb = CG\.draftNightBand\("hub"\); if \(dnb\) cards\.push\(dnb\); \}/.test(hub));
 A("both link to the room", (live.match(/href="#\/draft"/g)||[]).length >= 2);
 
+console.log("— v2.69: the board is one round per page, landing on the live round, following the clock until pinned");
+A("a round strip with one tab per round, the live round dotted", /class="rtabs" role="tablist" aria-label="Draft rounds"/.test(live) && /data-room-round="'\+rn\+'" aria-selected="'\+on\+'"/.test(live) && /isLive\?'<span class="live-dot"><\/span>':''/.test(live));
+A("the view follows the clock unless the visitor pinned a round", /var pinned = CG\._roomUI\.round != null && roundList\.indexOf\(CG\._roomUI\.round\) >= 0;/.test(live) && /var viewRound = pinned \? CG\._roomUI\.round : \(liveRound \|\| \(dstatus==="complete" \? roundList\[roundList\.length-1\] : roundList\[0\]\)\);/.test(live));
+A("only that round's picks are in the table", /var roundRows = cur\.filter\(function\(p\)\{ return p\.round===viewRound; \}\);/.test(live) && /roundRows\.map\(function\(p\)\{/.test(live) && !/\n    cur\.map\(function\(p\)\{\n      var isCurrent/.test(live));
+A("a Live round chip brings a pinned visitor back to the clock", /data-room-round="live"/.test(live) && /CG\._roomUI\.round = v==="live" \? null : parseInt\(v,10\);/.test(live));
+A("previous / next round under the table, honest at the ends", /'‹ First round'/.test(live) && /'Last round ›'/.test(live));
+A("wired for spectators too, before the early return", /CG\.wireRoundPages\(\);\n  if \(role!=="mgmt" && role!=="commish" && role!=="staff"\)\{/.test(live));
+
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 process.exit(fails ? 1 : 0);

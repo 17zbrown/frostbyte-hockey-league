@@ -3767,9 +3767,34 @@ CG.ROUTES.draft = function(){
         '</div>';
     }).join("")+'</div></div>' : "";
   var showAdmin = isComm && dstatus!=="setup";
+  /* v2.69: one round per page. The live round is the page you land on and the strip follows the
+     clock as rounds turn over, until you click another round; then "Live round" brings you back.
+     The choice lives in CG._roomUI so the room's realtime repaints keep it. */
+  CG._roomUI = CG._roomUI || { q:"", pos:"ALL" };
+  var roundList = []; cur.forEach(function(p){ if (roundList.indexOf(p.round)<0) roundList.push(p.round); }); roundList.sort(function(a,b){ return a-b; });
+  var liveRound = onClock ? onClock.round : null;
+  var pinned = CG._roomUI.round != null && roundList.indexOf(CG._roomUI.round) >= 0;
+  var viewRound = pinned ? CG._roomUI.round : (liveRound || (dstatus==="complete" ? roundList[roundList.length-1] : roundList[0]));
+  var roundRows = cur.filter(function(p){ return p.round===viewRound; });
+  var vi = roundList.indexOf(viewRound);
+  var roundMade = roundRows.filter(function(p){ return p.used; }).length;
+  var roundStrip = '<div class="rtabs" role="tablist" aria-label="Draft rounds">'+
+    roundList.map(function(rn){
+      var on = rn===viewRound, isLive = rn===liveRound;
+      return '<button type="button" role="tab" class="chip'+(on?" chip-chrome":"")+'" data-room-round="'+rn+'" aria-selected="'+on+'" title="Round '+rn+(isLive?" · on the clock":"")+'">'+(isLive?'<span class="live-dot"></span>':'')+'R'+rn+'</button>';
+    }).join("")+
+    (liveRound && viewRound!==liveRound ? '<button type="button" class="chip chip-live" data-room-round="live" style="margin-left:auto;cursor:pointer"><span class="live-dot"></span>Live round · R'+liveRound+'</button>' : '')+'</div>';
+  var roundHead = '<div class="card-b" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:12px;padding-bottom:6px">'+
+    '<b style="font-family:var(--f-disp);font-size:16px">Round '+viewRound+' of '+roundList.length+'</b>'+
+    (viewRound===liveRound ? '<span class="chip chip-live"><span class="live-dot"></span>'+(dstatus==="paused"?"Paused":"On the clock")+'</span>' : '')+
+    '<span class="caption">'+(roundRows.length?'picks '+(roundRows[0].overall||"—")+'–'+(roundRows[roundRows.length-1].overall||"—")+' · ':'')+roundMade+' of '+roundRows.length+' made</span>'+
+    '<span style="margin-left:auto;display:inline-flex;gap:6px">'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-room-round="'+(vi>0?roundList[vi-1]:"")+'"'+(vi>0?'':' disabled')+'>'+(vi>0?'‹ Round '+roundList[vi-1]:'‹ First round')+'</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-room-round="'+(vi<roundList.length-1?roundList[vi+1]:"")+'"'+(vi<roundList.length-1?'':' disabled')+'>'+(vi<roundList.length-1?'Round '+roundList[vi+1]+' ›':'Last round ›')+'</button></span></div>';
   var board = '<div class="card"><div class="card-h"><h3>Season '+maxSn+' board</h3><span class="chip">'+made+' / '+total+'</span></div>'+
-    '<div class="tblwrap"><table class="tbl keepcols"><caption>Draft board</caption><thead><tr><th>Pick</th><th>Rd</th><th class="tleft">Club</th><th class="tleft">Result</th>'+(showAdmin?'<th class="tright">Admin</th>':'')+'</tr></thead><tbody>'+
-    cur.map(function(p){
+    roundStrip + roundHead +
+    '<div class="tblwrap"><table class="tbl keepcols"><caption>Draft board · round '+viewRound+'</caption><thead><tr><th>Pick</th><th>Rd</th><th class="tleft">Club</th><th class="tleft">Result</th>'+(showAdmin?'<th class="tright">Admin</th>':'')+'</tr></thead><tbody>'+
+    roundRows.map(function(p){
       var isCurrent = st && p.overall===st.current_overall && (dstatus==="live"||dstatus==="paused") && !p.used && !p.skipped;
       var isMine = p.ownerCode===myClub;
       var result = p.used ? '<span class="chip chip-win">'+esc(p.playerName||"Drafted")+'</span>'
@@ -3781,7 +3806,11 @@ CG.ROUTES.draft = function(){
         '<td class="tleft"><span class="teamcell">'+(p.ownerCode?CG.crest(p.ownerCode,18):"")+'<span class="mono" style="font-size:11px">'+esc(p.ownerCode||"—")+'</span>'+(p.origCode&&p.origCode!==p.ownerCode?'<span class="caption" style="font-size:10px">via '+esc(p.origCode)+'</span>':'')+'</span></td>'+
         '<td class="tleft">'+result+'</td>'+
         (showAdmin?'<td class="tright">'+(p.used?'<button class="btn btn-ghost btn-sm" data-reversepick="'+p.id+'">Reverse</button>':'<span class="caption">—</span>')+'</td>':'')+'</tr>';
-    }).join("")+'</tbody></table></div></div>';
+    }).join("")+'</tbody></table></div>'+
+    '<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:6px;justify-content:space-between;flex-wrap:wrap">'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-room-round="'+(vi>0?roundList[vi-1]:"")+'"'+(vi>0?'':' disabled')+'>'+(vi>0?'‹ Round '+roundList[vi-1]:'‹ First round')+'</button>'+
+      '<span class="caption" style="align-self:center">'+roundList.length+' rounds · one per page</span>'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-room-round="'+(vi<roundList.length-1?roundList[vi+1]:"")+'"'+(vi<roundList.length-1?'':' disabled')+'>'+(vi<roundList.length-1?'Round '+roundList[vi+1]+' ›':'Last round ›')+'</button></div></div>';
 
   /* v2.68: the room's pool is searchable (gamertag, EA ID, position) with position chips, like the
      desk's. The filter lives in CG._roomUI so a realtime repaint mid-draft keeps it. */
@@ -4857,8 +4886,19 @@ CG.AFTER._admDraft = function(){
     CG.draftPickModalLive(this.getAttribute("data-openpick"), pk ? pk.ownerCode : (CG.myManagedTeam&&CG.myManagedTeam()||{}).code);
   }); });
 };
+/* v2.69: the board's round pages, for every role in the room. "live" un-pins the view so it follows
+   the clock again. */
+CG.wireRoundPages = function(){
+  document.querySelectorAll("[data-room-round]").forEach(function(b){ b.addEventListener("click", function(){
+    var v = this.getAttribute("data-room-round"); if (!v) return;
+    CG._roomUI = CG._roomUI || { q:"", pos:"ALL" };
+    CG._roomUI.round = v==="live" ? null : parseInt(v,10);
+    if (CG.repaintDraft) CG.repaintDraft(); else CG.router();
+  }); });
+};
 CG.AFTER.draft = function(){
   var role = CG.role();
+  CG.wireRoundPages();
   if (role!=="mgmt" && role!=="commish" && role!=="staff"){
     if (!CG._spectatorDraftTried){
       CG._spectatorDraftTried = true;
