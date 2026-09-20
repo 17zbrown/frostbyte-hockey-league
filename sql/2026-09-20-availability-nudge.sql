@@ -1,0 +1,17 @@
+-- v2.75 (2026-09-20): Rule 5.1 availability nudge (#2 of the inactivity plan). Applied live; the
+-- tick was rehearsed with Week 1 shifted into the past and rolled back (111 players nudged, 111
+-- DMs queued, 111 bells, one club line per club, a second tick nudged nobody).
+--   public.discord_dms (id, profile_id, discord_id, kind, content, created_at, sent_at, send_error):
+--     rows the gateway bot sends as DMs (bot/dms.mjs; exactly-once via discord_post_log kind 'dm';
+--     a 4xx such as closed DMs is stamped send_error and never retried). RLS on, no API grants,
+--     added to the supabase_realtime publication.
+--   public.availability_nudges (season_id, week_key, profile_id, nudged_at): the ledger of who was
+--     told; readable by management and the office.
+--   public.availability_nudge_tick(): for every regular week of the current season whose deadline
+--     (week_availability_deadline) passed within the last 36 hours, every active roster spot with no
+--     availability row and no nudge yet gets create_notification(type 'availability', view
+--     'availability'), a discord_dms row when he has a Discord link, and a nudge row; then one
+--     club_notices row per club (kind 'availability') naming the missing players. Suspended and
+--     banned players are skipped. EXECUTE revoked from public/anon/authenticated.
+--   cron.schedule('availability-nudge', '*/15 * * * *', 'select public.availability_nudge_tick()').
+-- Client: CG.notifRoute maps 'availability' -> #/hub/availability and 'lineups' -> #/hub/lineups.

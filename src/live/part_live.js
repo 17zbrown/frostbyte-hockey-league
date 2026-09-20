@@ -1466,6 +1466,8 @@ CG.notifRoute = function(view, param){
     /* a post-game recap: the box score for the game the player just skated in */
     case "game":         return p ? "#/matchup/"+encodeURIComponent(p) : "#/schedule";
     case "draft":        return "#/hub/draft";
+    case "availability": return "#/hub/availability";   /* v2.75: the closed-week nudge lands on the form */
+    case "lineups":      return "#/hub/lineups";
     case "manager":      return "#/hub";
     case "mgmtapprovals": return "#/hub/management";
     case "transactions": return "#/home";

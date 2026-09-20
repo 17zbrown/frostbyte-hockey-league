@@ -23,6 +23,7 @@ import { createIncidentNotifier } from "./incidents.mjs";
 import { createStaffAlerter } from "./staff-alerts.mjs";
 import { createRoleSyncer } from "./role-sync.mjs";
 import { createClubNotices } from "./club-notices.mjs";
+import { createDms } from "./dms.mjs";
 import { createClient } from "@supabase/supabase-js";
 
 const env = {
@@ -113,6 +114,11 @@ client.once(Events.ClientReady, (c) => {
     .catch((e) => console.error("club-notice catch-up failed:", e.message));
   clubSweep();
   setInterval(clubSweep, 300_000);
+  const dmSweep = () => DMS.catchUp()
+    .then((n) => { if (n) console.log(`dm catch-up: sent ${n}`); })
+    .catch((e) => console.error("dm catch-up failed:", e.message));
+  dmSweep();
+  setInterval(dmSweep, 300_000);
   setInterval(incSweep, 600_000);
   setInterval(roleSweep, 600_000);
 });
@@ -146,6 +152,9 @@ const DESK = createStaffAlerter(env);
 const RS = createRoleSyncer(env);
 const CLUB = createClubNotices(env);
 let clubNoticesLive = false;
+/* direct messages the league asks the bot to send one member (v2.75: the Rule 5.1 availability nudge) */
+const DMS = createDms(env);
+let dmsLive = false;
 let incidentsLive = false;
 let deskAlertsLive = false;
 let roleSyncLive = false;
@@ -211,6 +220,15 @@ if (env.SB_URL && env.SB_KEY) {
       console.log(`club notices: ${status}`);
     });
 
+  sb.channel("discord-dms")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "discord_dms" }, (payload) => {
+      DMS.send(payload.new).then((r) => { if (r !== "skip") console.log(`dm ${payload.new && payload.new.id}: ${r}`); });
+    })
+    .subscribe((status) => {
+      dmsLive = status === "SUBSCRIBED";
+      console.log(`direct messages: ${status}`);
+    });
+
   sb.channel("role-sync")
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "role_sync_queue" }, (payload) => {
       const row = payload.new || {};
@@ -227,7 +245,7 @@ if (env.SB_URL && env.SB_KEY) {
 // `lanes` is what lets a failed role PATCH or club-room post flip ok:false — each lane counts its
 // own failures (sum.errors / lastErrorAt / lastError) and beat() grades the last hour of them.
 const LANES = [
-  { key: "role-sync", sum: RS.sum }, { key: "club-notices", sum: CLUB.sum },
+  { key: "role-sync", sum: RS.sum }, { key: "club-notices", sum: CLUB.sum }, { key: "dms", sum: DMS.sum },
   { key: "incidents", sum: INC.sum }, { key: "staff-alerts", sum: DESK.sum },
 ];
 setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced, incidentErrors: INC.sum.errors,
@@ -235,7 +253,8 @@ setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.a
     roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched, roleErrors: RS.sum.errors,
     roleRetried: RS.sum.retried, roleDropped: RS.sum.dropped, roleTimedOut: RS.sum.timedOut,
     clubNoticesLive, clubNotices: CLUB.sum.announced, clubNoticesFailed: CLUB.sum.failed,
-    clubNoticesUnconfirmed: CLUB.sum.unconfirmed, clubNoticesUnstamped: CLUB.sum.stampFailed, clubNoticeErrors: CLUB.sum.errors },
+    clubNoticesUnconfirmed: CLUB.sum.unconfirmed, clubNoticesUnstamped: CLUB.sum.stampFailed, clubNoticeErrors: CLUB.sum.errors,
+    dmsLive, dmsSent: DMS.sum.sent, dmsRefused: DMS.sum.refused, dmsUnconfirmed: DMS.sum.unconfirmed, dmErrors: DMS.sum.errors },
   lanes: LANES })
   .catch((e) => console.error("heartbeat failed:", e.message)), 60_000);
 
