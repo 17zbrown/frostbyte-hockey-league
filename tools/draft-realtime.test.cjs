@@ -81,6 +81,12 @@ ctx.CG.mapDraftData(ctx.CG.lg, ctx.CG.lg._draftPicksRaw, ctx.CG.lg._registration
   console.log("\n— reconcile is coalesced and draft-only");
   {
     queries = 0;
+    /* v2.71: the refetch is jittered 1.5 to 9 s in production so 300 tabs never hit the API together;
+       the test pins the window shut to keep the run short */
+    const live = require("fs").readFileSync(require("path").join(__dirname, "..", "src/live/part_live.js"), "utf8");
+    A("the production jitter window is 1.5 to 9 s", /CG\.RECONCILE_DELAY \|\| \[1500, 9000\]/.test(live) && /d\[0\] \+ Math\.floor\(Math\.random\(\)\*Math\.max\(0, d\[1\]-d\[0\]\)\)/.test(live));
+    A("...and only front offices and the league office refetch after a pick", /if \(rr !== "mgmt" && rr !== "commish" && rr !== "staff"\) return;/.test(live));
+    ctx.CG.RECONCILE_DELAY = [50, 50];
     for (let i = 0; i < 12; i++) ctx.CG.reconcileDraftSoon();   // a burst of picks
     await tick(900);
     A("a burst of 12 events causes ONE refetch", queries === 2, `${queries} queries (2 = picks + state)`);

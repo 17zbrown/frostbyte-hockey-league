@@ -35,7 +35,8 @@ console.log("— one league rebuild per game, not per stat row");
 console.log("— draft night can't spin itself");
 {
   A("the heartbeat stamps on settle, not on start", /CG\._draftBeating = false; CG\._draftBeatAt = CG\.now\(\);/.test(live));
-  A("...and never overlaps itself", /if \(!CG\._draftBeating && CG\.now\(\) - last > 10000\)/.test(live));
+  /* v2.71: 45 s for front offices and the league office, 90 s for spectators, never from a hidden tab */
+  A("...and never overlaps itself", /if \(!CG\._draftBeating && CG\.now\(\) - last > beatMs && document\.visibilityState !== "hidden"\)/.test(live) && /beatMs = \(rb === "mgmt" \|\| rb === "commish" \|\| rb === "staff"\) \? 45000 : 90000;/.test(live));
 }
 
 console.log("— destructive confirmations fail closed");

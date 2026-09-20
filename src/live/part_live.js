@@ -4050,10 +4050,19 @@ CG.refreshDraftLite = function(){
 CG._draftReconcileT = null;
 CG.reconcileDraftSoon = function(){
   if (CG._draftReconcileT) return;                 /* a burst collapses into one refetch */
+  /* v2.71: the payload was already applied in place; this refetch only guards against a missed
+     event. Spread it over 1.5 to 9 s so 300 tabs do not hit the API in the same 700 ms after
+     every pick, and skip it in background tabs (the beat catches them up when they return). */
+  if (document.visibilityState === "hidden") return;
+  /* Spectators and players already have the pick on screen from the payload; only the front
+     offices and the league office need the table exact within seconds (a reversal is a DELETE
+     the payload cannot carry). Everyone else picks a reversal up on the next safety beat. */
+  var rr = typeof CG.role === "function" ? CG.role() : "mgmt"; if (rr !== "mgmt" && rr !== "commish" && rr !== "staff") return;
+  var d = CG.RECONCILE_DELAY || [1500, 9000];
   CG._draftReconcileT = setTimeout(function(){
     CG._draftReconcileT = null;
     CG.refreshDraftLite().then(CG.repaintDraft);
-  }, 700);
+  }, d[0] + Math.floor(Math.random()*Math.max(0, d[1]-d[0])));
 };
 
 /* Draft night runs for hours on one open page. A dropped socket used to null the channel and
@@ -4070,7 +4079,11 @@ CG._draftHeartbeat = function(){
   /* Stamp when the beat SETTLES, not when it starts. repaintDraft re-runs the router, which
      re-arms the clock and ticks again synchronously — with a start-stamp, a reply slower than the
      interval turned this safety poll into a continuous refetch loop on every open draft tab. */
-  if (!CG._draftBeating && CG.now() - last > 10000){
+  /* v2.71 (draft night): 45 s, not 10, and never from a background tab. With 300 people in the
+     room the 10 s beat alone was 60 requests a second against a 10-connection API pool; realtime
+     carries every pick, this is only the dead-socket safety net. */
+  var rb = typeof CG.role === "function" ? CG.role() : "mgmt", beatMs = (rb === "mgmt" || rb === "commish" || rb === "staff") ? 45000 : 90000;
+  if (!CG._draftBeating && CG.now() - last > beatMs && document.visibilityState !== "hidden"){
     CG._draftBeating = true;
     CG.refreshDraftLite().then(CG.repaintDraft).catch(function(){}).then(function(){
       CG._draftBeating = false; CG._draftBeatAt = CG.now();
@@ -4179,7 +4192,7 @@ CG._armDraftTick = function(){
        and a repaint every 10s would fight whatever they are doing. Re-arm the channel and refresh
        the data; the tick below redraws the clock from it. */
     if (CG._draftChannel === null && CG.subscribeDraft) CG.subscribeDraft();
-    if (CG.refreshDraftLite && !CG._drBeating && Date.now() - (CG._drBeatAt||0) > 10000){
+    if (CG.refreshDraftLite && !CG._drBeating && Date.now() - (CG._drBeatAt||0) > 45000 && document.visibilityState !== "hidden"){
       CG._drBeating = true;
       CG.refreshDraftLite().catch(function(){}).then(function(){
         CG._drBeating = false; CG._drBeatAt = Date.now();
