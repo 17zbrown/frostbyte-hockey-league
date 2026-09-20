@@ -1,0 +1,21 @@
+-- v2.73 (2026-09-20): depth placements are carried in TRAINING CAMP, and count like anyone else when
+-- called up. Commissioner's ruling after the Season 1 draft ("all the drafted players and management
+-- on the active roster, all the post-draft random assignments on training camp"). Applied live in one
+-- gated transaction with app.mgr_sync='1' (silences the squad club-room notices); rehearsed rolled back.
+--
+-- 1) Shape counters: check_roster_structure(), pro_roster_count(uuid,uuid), draft_fits(uuid,uuid,uuid)
+--    exclude only ('preseason_random','latecomer_random') by origin. A depth_random row on the
+--    active roster now counts against the group caps and the 15; in camp it does not (squad='tc').
+--    Error text: "(Training camp and pre-season loans do not count.)"
+-- 2) place_new_roster_spot(): a depth_random INSERT gets NEW.squad := 'tc'.
+-- 3) _assign_reg_random(uuid,text,boolean,text): basic-format depth placements use mode 'overflow'
+--    (the club carrying the fewest players, random among equals) and v_camp := true, so the row is
+--    written with squad 'tc'; the transaction reads "League-office placement — a registered player
+--    joins <club>'s training camp as depth (Rule 2.8)".
+-- 4) Data: update roster_spots set squad='tc' where season 1, status active, origin depth_random
+--    (45 rows; 5 were already in camp). Result: BOS/DAL/DET/NYI/PIT/SEA/UTA 15 active, VAN 14 (no
+--    AGM seated), camp 6-7 each. Assertions: no depth row left on the active roster; every club's
+--    pro_roster_count = picks used + seats filled and <= 15; no 'roster' club notice produced.
+-- _place_for_unused_picks (v2.70) still writes origin 'postdraft_random' onto the ACTIVE roster: it
+-- replaces a draft pick and fills the club to fifteen.
+-- Rulebook 0.6, 2.1 p5, 2.8 p8 and the 10.1 definition of "depth" say the same (changelog 2.73).

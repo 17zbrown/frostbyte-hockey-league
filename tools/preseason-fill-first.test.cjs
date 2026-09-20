@@ -19,7 +19,8 @@ A("[full] Rule 0.4 states the order: own group → another group's seat → unca
 A("[full] ...and says a loan does not change the registered position and counts against no limit", /A pre-season loan does not change a player's registered position for the draft, counts against no roster limit/.test(secFull("0.4")));
 /* BASIC format has no pre-season: the fill-first order is replaced by a depth placement */
 A("[basic] Rule 0.4 says there is no pre-season", /The basic format has no pre-season/.test(sec("0.4")));
-A("[basic] Rule 2.1 gives depth placements the equivalent no-limit carve-out", /A depth placement is the one exception to the published composition/.test(sec("2.1")) && /counts against neither the published composition nor any roster limit, so that every registered player has a club/.test(sec("2.1")));
+/* v2.73: depth is carried in training camp, outside the composition; called up, it counts like anyone else */
+A("[basic] Rule 2.1 carries depth placements in training camp, outside the composition", /is carried in the club's training camp as depth/.test(sec("2.1")) && /Camp is not counted against the published composition/.test(sec("2.1")) && /Called up to the active roster, a depth player takes one of its spots like any other player/.test(sec("2.1")));
 const cl240 = rb.changelog.find((c) => c.version === "2.40"), cl241 = rb.changelog.find((c) => c.version === "2.41");
 A("changelog 2.40 + 2.41", !!cl240 && /fills every open roster seat before anyone goes to camp/.test(cl240.summary) && !!cl241 && /roster shape is by position group/.test(cl241.summary));
 A("...American spelling", !/practis|colour|centre|organis|defence/i.test(rb.changelog[0].summary + secFull("0.4") + secFull("2.1") + sec("0.4") + sec("2.1")));

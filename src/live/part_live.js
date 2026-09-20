@@ -178,7 +178,9 @@ CG.gameCapFor = function(p, game){
 /* roster rows that ride the active roster WITHOUT counting against the shape (Rule 2.1): the full
    format's pre-season loans and the basic format's league-office depth placements — mirrors the
    origin list in check_roster_structure / place_new_roster_spot */
-CG.OUTSIDE_SHAPE_ORIGINS = { preseason_random:1, latecomer_random:1, depth_random:1 };
+/* v2.73: only pre-season loans sit outside the shape by origin. A league-office depth placement is
+   carried in training camp; called up, he counts like anyone else (the active roster is fifteen). */
+CG.OUTSIDE_SHAPE_ORIGINS = { preseason_random:1, latecomer_random:1 };
 CG.spotOutsideShape = function(p){ return !!p && !p.mgmt && !!CG.OUTSIDE_SHAPE_ORIGINS[p.origin]; };
 /* the shape and camp size for the CURRENT season — rewritten from the format on every league load */
 CG.ROSTER_QUOTA = Object.assign({}, CG.FORMAT_RULES.basic.quota);
@@ -4340,7 +4342,7 @@ CG.rerenderKeepScroll = function(){
    database's draft_fits(), which is what actually refuses the pick. */
 CG.draftFits = function(club, pos){
   var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
-  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
+  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random"].indexOf(p.origin) < 0; });
   if (counted.length >= max) return "roster full · "+max;
   var grp = CG.posGroup(pos||"C"), n = counted.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length;
   if (q[grp] != null && n >= q[grp]) return "no room · "+q[grp]+" "+(grp==="G"?"G":grp==="D"?"D":"F");
@@ -4350,7 +4352,7 @@ CG.draftFits = function(club, pos){
    and the room show so a manager knows what still fits before the clock is his. */
 CG.rosterRoomFor = function(club){
   var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
-  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random","depth_random"].indexOf(p.origin) < 0; });
+  var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random"].indexOf(p.origin) < 0; });
   var by = { F:0, D:0, G:0 }, byMgmt = { F:0, D:0, G:0 };
   counted.forEach(function(p){ var g = CG.posGroup(p.pos); by[g]++; if (p.mgmt) byMgmt[g]++; });
   var mgmt = counted.filter(function(p){ return p.mgmt; }).length;

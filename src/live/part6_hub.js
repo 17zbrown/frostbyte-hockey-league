@@ -1689,8 +1689,10 @@ CG.hubRoster = function(qs){
     (loans.length ? '<tr class="loan-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
   /* the 9/6/2 shape is CONTRACTED players only; pre-season loans ride the active roster without
      counting against it (Rule 2.1) and are shown as their own tally */
-  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !isLoan(p) && !isDepth(p) && !CG.isWaived(p.id); });
-  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !isLoan(p) && !isDepth(p) && !CG.isWaived(p.id); });
+  /* v2.73: depth placements live in camp and count like anyone else wherever they are; the depth
+     tally below is informational */
+  var proSq = roster.filter(function(p){ return p.spotId && p.squad!=="tc" && !isLoan(p) && !CG.isWaived(p.id); });
+  var tcSq  = roster.filter(function(p){ return p.spotId && p.squad==="tc" && !isLoan(p) && !CG.isWaived(p.id); });
   var loanSq = loans.filter(function(p){ return p.spotId && !CG.isWaived(p.id); });
   var depthSq = roster.filter(function(p){ return p.spotId && isDepth(p) && !CG.isWaived(p.id); });
   var qG = CG.ROSTER_QUOTA.G, gCap = CG.weeklyCap({ pos:"G" }), sCap = CG.weeklyCap({ pos:"C" }), cCap = CG.weeklyCap({ squad:"tc" });
@@ -1714,7 +1716,7 @@ CG.hubRoster = function(qs){
         ? 'the active roster is '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' players: '+CG.rosterShapeWords()+' (at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen or '+qG+' goaltenders), with your Owner, GM and AGM inside those spots; training camp is unlimited. '
         : 'the active roster is '+CG.ROSTER_QUOTA.F+' forwards (centers and wings in any mix), '+CG.ROSTER_QUOTA.D+' defensemen (either side) and '+qG+' goaltenders, the one position locked to its exact role; training camp holds up to '+CG.CAMP_MAX+' players. ')+
       (CG.isBasic()
-        ? 'Players the league office places after the draft — anyone undrafted, and late sign-ups — join as depth: real one-season contracts you can dress, trade or waive, that never count against the '+CG.ROSTER_QUOTA.F+'/'+CG.ROSTER_QUOTA.D+'/'+qG+' shape (Rule 2.8). '
+        ? 'Players the league office places after the draft (anyone undrafted, and late sign-ups) join your training camp as depth: real one-season contracts you can dress at any position up to '+cCap+' games a week, trade or waive. Call one up and he takes an active-roster spot like anyone else, so the roster must have room (Rule 2.8). '
         : 'Randomly assigned pre-season players ride the active roster as loans and don’t count against the '+CG.ROSTER_QUOTA.F+'/'+CG.ROSTER_QUOTA.D+'/'+qG+' shape — a club can hold as many as it is sent, so everyone gets a club for the pre-season (Rule 2.1); they return to the draft pool when it ends. ')+
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
