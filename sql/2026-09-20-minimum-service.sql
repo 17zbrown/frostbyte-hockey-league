@@ -1,0 +1,13 @@
+-- v2.74 (2026-09-20): Rule 2.4 minimum service. A club may not waive or trade a player with fewer
+-- than three regular-season games this season (active roster or camp). Applied live, rehearsed
+-- rolled back, then probed as a real GM (waive_player refused with the rule text).
+--   format_rules: "min_service_gp":3 (basic) / 0 (full); public.min_service_gp(p_season) reads the
+--     season_rules overlay so a per-season figure can be added later.
+--   public.can_move_player(p_season, p_profile) returns text: null when movable, else
+--     'Rule 2.4 — <tag> has played N of the 3 regular-season games a player needs this season before
+--     he can be waived or traded.' (SECURITY DEFINER, executable by anon/authenticated).
+--   waive_player(uuid): roster membership checked first, then can_move_player before the delete.
+--   guard_trade_insert(): on INSERT (or a row kept 'proposed') every offered and requested id is checked.
+--   accept_trade(uuid): the same loop before the pick row-locks.
+-- Client mirror: CG.minServiceGp(), CG.canMovePlayer(p) (Trade/Waive buttons disabled with the count,
+-- the Trade Hub picker greys such players out, trade rows carry an "N of 3 GP" chip).

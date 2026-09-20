@@ -49,9 +49,9 @@ Take the side the schedule lists. The club listed Home picks Home, or the box sc
 
 **✍️ AFTER THE DRAFT**
 
-Ten minutes after the draft ends, everyone still without a club — anyone undrafted, and anyone who signed up after the cutoff — is placed on one by the league office at $750K as **depth**: a real one-season contract you can dress, trade or waive like any other player, that never counts against your roster shape. You don't choose, they don't choose. Late sign-ups keep being placed the same way until the trade deadline.
+Ten minutes after the draft ends, everyone still without a club — anyone undrafted, and anyone who signed up after the cutoff — is placed on one by the league office at $750K as **depth in your training camp**: a real one-season contract you can dress at any position (up to 3 games a week), trade or waive like any other player. Camp sits outside your 15; call one up only when the active roster has room. You don't choose, they don't choose. Late sign-ups keep being placed the same way until the trade deadline.
 
-There is no free agency. The one signing you can make is a **waived player**: from the moment the draft ends until the deadline, any club with room in his position group can sign him at $750K for the rest of the season.
+There is no free agency. The one signing you can make is a **waived player**: from the moment the draft ends until the deadline, any club with room in his position group can sign him at $750K for the rest of the season. **Minimum service (Rule 2.4): a player must have played 3 regular-season games this season before you can waive or trade him**, on the roster or in camp. Play your picks and placements before you move them; the Trade and Waive buttons show the count until then.
 
 Tampering with another club's rostered players is a discipline matter.
 

@@ -1664,8 +1664,14 @@ CG.hubRoster = function(qs){
         : '<div class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
           extBtn+squadBtn(p)+
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
-          '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
-          '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button></div>');
+          (function(){ var mv = CG.canMovePlayer ? CG.canMovePlayer(p) : null;
+            /* Rule 2.4 minimum service (v2.74): the two moves that take a player off the club wait for his games */
+            return mv
+              ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">Trade</button>'+
+                '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">Waive</button>'+
+                '<span class="chip chip-warn chip-xs" title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</span>'
+              : '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
+                '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button>'; })()+'</div>');
     var gp = (lg.pstats[p.id]||{}).gp||0;
     var rp = regPos[p.id];
     var posCell = (loan && rp && rp !== p.pos)
@@ -1721,7 +1727,8 @@ CG.hubRoster = function(qs){
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
         : 'Camp players may dress in up to '+cCap+' games a week at any position; skaters play their own position group, up to '+sCap+' games a week'+(gCap===sCap?', goaltenders too':' (goaltenders up to '+gCap+')')+' — Rule 5.2. ')+
-      'You may move players between the active roster and training camp freely, as often as you like, all season — there is no limit on squad changes (Rule 2.1).</p></div></div>';
+      'You may move players between the active roster and training camp freely, as often as you like, all season — there is no limit on squad changes (Rule 2.1).'+
+      (CG.minServiceGp()?' A player can be waived or traded only after '+CG.minServiceGp()+' regular-season games this season; until then his Trade and Waive buttons wait, and the count sits beside them (Rule 2.4).':'')+'</p></div></div>';
   }
   /* Road to 3 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'
      draft eligibility — management is OBLIGED to spread ice time so everyone can reach three games.

@@ -102,10 +102,10 @@ CG.FORMAT_RULES = {
   /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
      the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and a
      16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67) */
-  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16,
+  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:3,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
-  full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0,
+  full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0, min_service_gp:0,
            salary_cap:40000000, weeks:8, trade_deadline_week:6, draft_rounds:14, draft_snake:false, max_contract_years:3,
            extensions:true, rights:true, pick_trades:true, preseason:true, fa_window:true, playoff_per_div:4, playoff_best_of:7 }
 };
@@ -132,6 +132,16 @@ CG.seriesCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat
   return r.series_cap != null ? r.series_cap : CG.weeklyCap(Object.assign({}, o, { stage:"playoff" })); };
 /* Rule 8.3: regular-season games a player needs to be playoff-eligible (0 = no floor) */
 CG.playoffMinGp = function(s){ return CG.fmt("playoff_min_gp", s) || 0; };
+/* Rule 2.4 minimum service (v2.74): regular-season games this season before a club may waive or
+   trade a player (0 = none). Mirrors public.can_move_player(): null when movable, else the reason. */
+CG.minServiceGp = function(s){ var sn = s || CG.SEASON; if (sn && sn.min_service_gp != null) return sn.min_service_gp; return CG.fmt("min_service_gp", s) || 0; };
+CG.canMovePlayer = function(p){
+  if (!p) return null;
+  var need = CG.minServiceGp(); if (!need) return null;
+  var gp = ((CG.lg && CG.lg.pstats && CG.lg.pstats[p.id]) || {}).gp || 0;
+  if (gp >= need) return null;
+  return { gp: gp, need: need, text: "Rule 2.4: "+(p.tag||"this player")+" has played "+gp+" of the "+need+" regular-season games a player needs this season before he can be waived or traded." };
+};
 /* a club's published composition in words: "two full lines plus three players of any position" or "9 F / 6 D / 2 G" */
 CG.rosterShapeWords = function(s){ var r = CG.FORMAT_RULES[CG.seasonFormat(s)];
   var w = ["zero","one","two","three","four","five","six"];
@@ -12687,6 +12697,7 @@ CG.tradePlayerRow = function(pid, opts){
       (p ? '<a class="nm" href="'+CG.playerRoute(p)+'" style="font-weight:700">'+esc(name)+'</a>' : '<b class="nm">'+esc(name)+'</b>')+
       '<small style="display:block;color:var(--steel)">'+(p ? esc(CG.POS_NAME[p.pos]||p.pos)+' · '+CG.fmtMoney(p.salary)+(p.mgmt?' · management':'') : 'not on a roster')+'</small></span></span>'+
     '<span class="tr-chips">'+(p&&CG.isCamp(p)?CG.campChip("xs"):'')+(p&&p.origin==="depth_random"?'<span class="chip chip-ink chip-xs">Depth</span>':'')+
+      (function(){ var mv = p && CG.canMovePlayer(p); return mv ? '<span class="chip chip-warn chip-xs" title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</span>' : ''; })()+
       (sx?'<span class="chip chip-chrome chip-xs">signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+'</span>':'')+'</span>'+
     '<span class="tr-stats mono">'+(st ? esc(st.line) : '—')+'</span>'+
     '<span class="tr-ovr"><b class="num">'+(p ? (p.overall||70) : '—')+'</b><small>OVR</small></span>'+
@@ -12752,9 +12763,9 @@ CG.tradePicker = function(side){
   var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; })
     .sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (b.overall||0)-(a.overall||0); });
   var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
-  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
+  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; var mv=CG.canMovePlayer(p); return '<button class="gamecard" '+(mv?'disabled title="'+esc(mv.text)+'"':'data-tpick-p="'+p.id+'"')+' style="grid-template-columns:auto 1fr auto;text-align:left;cursor:'+(mv?'not-allowed;opacity:.55':'pointer')+';width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+(mv?' <span class="chip chip-warn chip-xs">'+mv.gp+' of '+mv.need+' GP</span>':'')+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
   var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
-  CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players</span>'+(pHtml||'<span class="caption">none available</span>')+
+  CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players'+(CG.minServiceGp()?' · a player needs '+CG.minServiceGp()+' regular-season games this season before he can be traded (Rule 2.4)':'')+'</span>'+(pHtml||'<span class="caption">none available</span>')+
     (CG.fmt("pick_trades") ? '<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>') : '<span class="caption" style="margin-top:8px">Players only — draft picks are not traded in the basic format (Rule 2.3).</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');
   document.querySelectorAll("[data-tpick-p]").forEach(function(b){ b.addEventListener("click", function(){ (side==="off"?d.offP:d.reqP).push(this.getAttribute("data-tpick-p")); if(CG.closeOverlay)CG.closeOverlay(); CG.router(); }); });
   document.querySelectorAll("[data-tpick-k]").forEach(function(b){ b.addEventListener("click", function(){ (side==="off"?d.offK:d.reqK).push(this.getAttribute("data-tpick-k")); if(CG.closeOverlay)CG.closeOverlay(); CG.router(); }); });
