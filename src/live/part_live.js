@@ -6344,6 +6344,16 @@ CG.userEditModal = function(id){
   if (!pr){ CG.toast("Profile not found — reload and try again","err"); return; }
   var nm = pr.gamertag||pr.display_name||"member";
   function fld(label,fid,val,attrs){ return '<label class="fld"><span>'+label+'</span><input id="'+fid+'" value="'+esc(val==null?"":val)+'" '+(attrs||"")+'></label>'; }
+  /* v2.77: the league office sets a player's position (Rule 2.1). The current figure is his roster
+     spot this season, else his sign-up; the save goes through set_player_position, and the shape
+     check refuses a move into a full group with the reason. */
+  var rosterP = (CG.lg.players||[]).find(function(x){ return x.id===id; });
+  var regP = ((CG.lg._registrationsRaw||[]).find(function(r){ return r.profile_id===id; })||{}).position;
+  var curPos = rosterP ? rosterP.pos : (regP || "");
+  var posSel = '<label class="fld"><span>Position'+(rosterP?' (roster, '+esc(rosterP.team)+')':regP?' (sign-up)':'')+'</span><select id="uePos">'+
+      (curPos?'':'<option value="" selected>—</option>')+
+      ["C","LW","RW","LD","RD","G"].map(function(x){ return '<option value="'+x+'"'+(curPos===x?" selected":"")+'>'+x+' · '+esc(CG.POS_NAME[x]||x)+'</option>'; }).join("")+
+      '</select></label>';
   CG.modal("Edit player — "+esc(nm),
     '<div class="grid g2" style="gap:12px">'+
     fld("Gamertag","ueGT",pr.gamertag)+
@@ -6356,8 +6366,9 @@ CG.userEditModal = function(id){
     fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
     fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
     fld("Twitch channel","ueTw",pr.twitch,'placeholder="channel name only"')+
+    posSel+
     '</div>'+
-    '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here.</p>',
+    '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here. A position change moves his roster spot this season (the club\'s shape must have room in the new group, Rule 2.1) and his sign-up; his Discord position role follows.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ueGo">Save player</button>');
   document.getElementById("ueGo").addEventListener("click", function(){
     var jer = parseInt(document.getElementById("ueJer").value,10);
@@ -6374,12 +6385,19 @@ CG.userEditModal = function(id){
     };
     if (!payload.gamertag){ CG.toast("A player needs a gamertag","err"); return; }
     var btn=this; btn.disabled=true;
+    var newPos = (document.getElementById("uePos")||{}).value || "";
+    var posChanged = !!newPos && newPos !== curPos;
     CG.sb.from("profiles").update(payload).eq("id",id).select("id").then(function(r){
+      if (r.error){ btn.disabled=false; CG.toast("Couldn’t save: "+r.error.message,"err"); return null; }
+      if (!r.data || !r.data.length){ btn.disabled=false; CG.toast("The database refused the edit (no row updated) — check your seat and retry","err"); return null; }
+      /* the position goes through its own door, so a refused shape leaves the profile edit standing */
+      return posChanged ? CG.sb.rpc("set_player_position", { p_profile:id, p_position:newPos }) : { data:null, error:null };
+    }).then(function(pr2){
+      if (pr2 === null) return;
       btn.disabled=false;
-      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if (!r.data || !r.data.length){ CG.toast("The database refused the edit (no row updated) — check your seat and retry","err"); return; }
+      if (pr2.error){ CG.toast("Player saved, but the position was refused: "+pr2.error.message,"err"); CG.reloadLeague(); return; }
       if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast("Player saved","ok");
+      CG.toast(posChanged && pr2.data ? "Player saved · "+pr2.data : "Player saved","ok");
       CG.reloadLeague();
     });
   });

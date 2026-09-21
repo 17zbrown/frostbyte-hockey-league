@@ -1,0 +1,9 @@
+-- v2.77 (2026-09-21): public.set_player_position(p_profile uuid, p_position hockey_position) returns text.
+-- Commissioners only. Updates the player's active roster spot for the current season (the deferred
+-- shape trigger check_roster_structure refuses a move into a full group at commit, so the RPC fails
+-- as a whole with the Rule 2.1 message) and his season registration; logs an admin action
+-- ('player_position') and, when a roster row moved, a 'roster' transaction. Positions accepted:
+-- C, LW, RW, LD, RD, G. EXECUTE granted to authenticated (the function checks is_commissioner()).
+-- Rehearsed rolled back: with a club's forward group filled to 9, D -> LW was refused at commit with
+-- "Rule 2.1 — the active roster holds at most 15 players (up to 9 forwards, ...)"; D -> RD succeeded.
+-- Client: the Users and roles player editor (CG.userEditModal) gained a Position select.
