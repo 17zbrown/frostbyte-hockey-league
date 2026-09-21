@@ -813,16 +813,19 @@ CG.hubLineup = function(qs){
       var groupHead = (i===0 && !CG.isCamp(p) && arr.some(CG.isCamp)) ? '<div class="bench-h">Active roster</div>' : (CG.isCamp(p) && (i===0 || !CG.isCamp(arr[i-1]))) ? '<div class="bench-h">Training camp · any position · 3 a week</div>' : "";
       var avKey = CG.nightAvKey(game);   /* the availability night this game falls on */
       /* v2.44: the answer for THIS game (a legacy per-night answer still counts for every game that night) */
-      var un = !!(avKey && CG.avGame && CG.avGame(av, avKey, game.id)==="no");
+      /* v2.76: availability is management's information, not a gate. A player who marked himself
+         out (or never answered) can still be dressed; the chip says what he told you. */
+      var avv = avKey && CG.avGame ? CG.avGame(av, avKey, game.id) : "nr";
+      var un = avv === "no", noAns = !avKey || avv === "nr";
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
-      var reason = dis ? "Suspended (Rule 7.4)" : un ? "Marked unavailable" : "";
-      return groupHead + '<div class="bp'+(used?" dis":"")+(dis||un?" dis":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
+      var reason = dis ? "Suspended (Rule 7.4)" : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
+      return groupHead + '<div class="bp'+(used?" dis":"")+(dis?" dis":"")+(un?" warn":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
         CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+(CG.isCamp(p)?CG.campChip("xs"):"")+
-        (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
+        (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':noAns?'<span class="chip chip-ink" style="font-size:9px">NO ANSWER</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
         '<span class="bp-meta">OVR '+lg.ratings[p.id].ovr+'</span></div>';
     }).join("")+'</div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="luMsg">Assignments validate position, availability, suspension, and duplicates — errors explain themselves.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="luMsg">Assignments validate position, suspension, the weekly cap and duplicates. Availability is shown as a guide, not a gate: you may dress anyone on the roster, and a player marked out is flagged when you place him.</span></div></div>';
   var hist = saved && saved.rev && saved.rev.length
     ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Revision history</h3></div>'+
       saved.rev.map(function(rv){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("clock",14)+'</span><span><b>'+esc(rv.what)+'</b></span><span class="nf-t">'+CG.fmtTime(rv.at)+'</span></div>'; }).join("")+'</div>'
@@ -869,12 +872,15 @@ CG.AFTER._lineup = function(){
      possible). The database makes the same test (lineup_slot_ok). */
   var preGame = game.stage==="preseason";
   function flex(p){ return p.squad==="tc" || (preGame && !!p.mgmt); }
+  /* v2.76: what the player told the club about THIS game — information for management, never a gate */
+  function avState(p){ var nk = CG.nightAvKey(game); return (nk && CG.avGame) ? CG.avGame(CG.avFor(p.id), nk, game.id) : "nr"; }
+  function avWarn(p){ return avState(p)==="no" ? p.tag+" is marked not available for this game (dressed anyway; check that he can play)." : null; }
   function validate(p, pos){
     if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — use an emergency call-up to swap a player now.";
     if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
-    if (avNightKey && CG.avGame && CG.avGame(CG.avFor(p.id), avNightKey, game.id)==="no") return p.tag+" is marked not available for this game.";
+    /* v2.76: a player marked out is dressable; avWarn() names him when he is placed */
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
     /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
        played games by the box score plus games still to come by the filed lineup */
@@ -888,6 +894,7 @@ CG.AFTER._lineup = function(){
     if (err){ msg(err, true); CG.toast(err, "err"); return; }
     state.slots[pos] = pid;
     save("Assigned "+p.tag+" to "+pos);
+    var w = avWarn(p); if (w){ msg(w, true); CG.toast(w, "err"); }
   }
   document.querySelectorAll("[data-bench]").forEach(function(el){
     el.addEventListener("click", function(){
@@ -926,7 +933,7 @@ CG.AFTER._lineup = function(){
        been suspended, traded, or marked unavailable is skipped and named, not silently dressed.
        The plan REPLACES the draft (cleared first): without this, a player the plan moves to a
        different slot trips the duplicate check against his own old position. */
-    var skipped = [];
+    var skipped = [], outs = [];
     state.slots = {};
     var pslots = CG.lineFromRow(prow);
     ["LW","C","RW","LD","RD","G"].forEach(function(pos){
@@ -934,10 +941,12 @@ CG.AFTER._lineup = function(){
       var p = CG.playerById(lg, pid);
       var why = p ? validate(p, pos) : "no longer rostered";
       if (why){ skipped.push((p?p.tag:"a player")+" ("+why+")"); return; }
+      if (p && avWarn(p)) outs.push(p.tag);
       state.slots[pos] = pid;
     });
     save("Filled from "+(prow.name||("Line "+pslot)));
     if (skipped.length) CG.toast("Filled, except: "+skipped.join("; "),"err");
+    else if (outs.length) CG.toast("Filled from "+(prow.name||("Line "+pslot))+". Marked not available for this game: "+outs.join(", ")+" (dressed anyway; check they can play)","err");
     else CG.toast("Filled from "+(prow.name||("Line "+pslot))+" — review and submit","ok");
   });
   var auto = $("#luAuto");
@@ -949,7 +958,9 @@ CG.AFTER._lineup = function(){
          (Rule 5.2 — rostered players are preferred over camp players wherever one is available),
          then a rostered manager borrowed from another group (pre-season), then camp players —
          in-group before out-of-group — so auto-fill spends a camp player's three games last. */
-      var rank = function(p){ return (p.squad==="tc"?2:0) + (CG.posGroup(p.pos)!==CG.posGroup(pos)?1:0); };
+      /* v2.76: availability ranks first (said yes, then no answer, then marked out), so the helper
+         reaches for a player who told you he cannot play only when nobody else fits */
+      var rank = function(p){ var a = avState(p); return (a==="no"?8:a==="nr"?4:0) + (p.squad==="tc"?2:0) + (CG.posGroup(p.pos)!==CG.posGroup(pos)?1:0); };
       var pick = lg.byTeam[club].filter(function(p){ return flex(p) || CG.posGroup(p.pos)===CG.posGroup(pos); })
         .sort(function(a,b){
           var ac=rank(a), bc=rank(b);

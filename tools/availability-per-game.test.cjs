@@ -33,7 +33,10 @@ A("no night, no answer", CG.avGame({ nights: {} }, "n1", "g1") === "nr" && CG.av
 
 console.log("— consumers");
 A("the club grid marks one cell per game, oldest first", /One mark per game, in puck-drop order/.test(hub) && /games\.map\(function\(g\)\{\s*var v = CG\.avGame \? CG\.avGame\(av, nk, g\.id\)/.test(hub));
-A("the lineup builder checks the exact game being dressed", /CG\.avGame\(av, avKey, game\.id\)==="no"/.test(hub) && /CG\.avGame\(CG\.avFor\(p\.id\), avNightKey, game\.id\)==="no"/.test(hub));
+/* v2.76: availability informs, it does not bind — the bench reads the exact game's answer for its chip, and
+   placing a player marked out warns instead of refusing */
+A("the lineup builder reads the exact game being dressed", /var avv = avKey && CG\.avGame \? CG\.avGame\(av, avKey, game\.id\) : "nr";/.test(hub) && /function avState\(p\)\{ var nk = CG\.nightAvKey\(game\); return \(nk && CG\.avGame\) \? CG\.avGame\(CG\.avFor\(p\.id\), nk, game\.id\) : "nr"; \}/.test(hub));
+A("...and a player marked out is dressable, with a warning, never refused", !/is marked not available for this game\."/.test(hub) && /dressed anyway; check that he can play/.test(hub) && /var w = avWarn\(p\); if \(w\)\{ msg\(w, true\); CG\.toast\(w, "err"\); \}/.test(hub) && /\(dis\?" dis":""\)\+\(un\?" warn":""\)/.test(hub));
 A("nights carry their ET day so club games match a night", /return \{ key:"n"\+\(i\+1\), at:at, day:nightDays\[i\] \};/.test(live));
 A("clubGamesOnNight and avGame are top-level (the demo and every page can reach them)", /^CG\.clubGamesOnNight = function/m.test(live) && /^CG\.avGame = function/m.test(live));
 
