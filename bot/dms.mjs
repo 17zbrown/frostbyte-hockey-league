@@ -85,7 +85,8 @@ export function createDms(env, opts = {}) {
       try {
         let ch = dmChannels.get(row.discord_id);
         if (!ch) { const c = await discord("POST", "/users/@me/channels", { recipient_id: row.discord_id }); ch = c.id; dmChannels.set(row.discord_id, ch); }
-        await discord("POST", `/channels/${ch}/messages`, { content: String(row.content).slice(0, 1990), allowed_mentions: { parse: [] } });
+        /* flags 4 = SUPPRESS_EMBEDS: a DM carries a link to the site and the unfurled card buried it */
+        await discord("POST", `/channels/${ch}/messages`, { content: String(row.content).slice(0, 1990), allowed_mentions: { parse: [] }, flags: 4 });
       } catch (e) {
         const msg = String(e.message || e).slice(0, 200);
         if (e.retry) {

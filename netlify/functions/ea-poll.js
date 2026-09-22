@@ -111,7 +111,7 @@ async function nhl27Canary(dispatcher, uFetch) {
     const wh = await (await fetch(`${SB_URL}/rest/v1/app_config?key=eq.discord_staff_webhook&select=value`, { headers: h })).json();
     const hook = wh && wh[0] && wh[0].value;
     if (hook) await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: "**EA's club registry is live again** — clubs/search is returning NHL 27 clubs (" + n + " for \"hockey\"). Clubs can now be created in-game and their EA ids linked in Control Center \u2192 Clubs / Team HQ. The stats auto-import starts working as soon as clubs are linked.\n\nContract check first: https://chelgamingleague.com/api/pickup-import?diag=ea27check&club=<your club name>", username: "CGHL Automations" }) });
+      body: JSON.stringify({ content: "**EA's club registry is live again** — clubs/search is returning NHL 27 clubs (" + n + " for \"hockey\"). Clubs can now be created in-game and their EA ids linked in Control Center \u2192 Clubs / Team HQ. The stats auto-import starts working as soon as clubs are linked.\n\nContract check first: https://chelgamingleague.com/api/pickup-import?diag=ea27check&club=<your club name>", username: "CGHL Automations", flags: 4 }) });
     await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...h, Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ key: "ea27_canary_alerted", value: new Date().toISOString(), updated_at: new Date().toISOString() }) });
     console.log("ea-poll: NHL 27 canary fired — registry live, staff alerted");

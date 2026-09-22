@@ -108,6 +108,7 @@ console.log("— the club rooms");
     /<@d1>/.test(bos.content) && /<@d2>/.test(bos.content) && /Still to answer \(2\)/.test(bos.content));
   A("a player with no Discord link is named in text rather than dropped", /NoDiscord/.test(club("ch2").content));
   A("the mention actually notifies him", JSON.stringify(bos.allowed_mentions) === JSON.stringify({ parse: ["users", "roles"] }));
+  A("the link does not unfurl into a preview card (SUPPRESS_EMBEDS)", bos.flags === 4, JSON.stringify(bos.flags));
   A("the club's own games for the week are listed, grouped by night",
     /BOS this week \(times ET\): /.test(bos.content) && /vs DAL/.test(bos.content) && /at VAN/.test(bos.content)
     && /: \w{3} \d+:\d\d [AP]M (vs|at) \w+, \d+:\d\d [AP]M (vs|at) \w+$/.test(bos.content.split("\n").pop()), bos.content.split("\n").pop());
@@ -121,7 +122,14 @@ console.log("\n— the management announcement");
   const mg = club("mgmtroom");
   A("it pings Owner, GM and AGM", /<@&OWN>/.test(mg.content) && /<@&GM>/.test(mg.content) && /<@&AGM>/.test(mg.content));
   A("...and nobody else", !/<@&PL>/.test(mg.content));
-  A("it asks for lineups by the same hour", /lineups: please have them filed by/i.test(mg.content));
+  A("it asks for lineups ONE HOUR after availability closes, not at the same moment (ruling 2026-09-22)",
+    /one hour after availability closes/.test(mg.content) && /building on the finished picture/.test(mg.content), mg.content.split("\n")[1]);
+  {
+    /* the two hours in the post must actually differ by 60 minutes, whatever the clock reads */
+    const hrs = mg.content.split("\n")[1].match(/\d+:\d\d [AP]M ET/g) || [];
+    const mins = hrs.map((h) => { const [, H, M, ap] = h.match(/(\d+):(\d\d) ([AP]M)/); return ((+H % 12) + (ap === "PM" ? 12 : 0)) * 60 + +M; });
+    A("...exactly an hour apart", hrs.length === 2 && ((mins[0] - mins[1] + 1440) % 1440) === 60, hrs.join(" then "));
+  }
   A("it counts the sheets still owed (4 of 4 games, 1 filed = 3)", /Sheets still to file: \*\*3 of 4\*\*/.test(mg.content), mg.content.split("\n")[2]);
   A("...naming the clubs that owe them", /BOS 1/.test(mg.content) && /DAL 1/.test(mg.content) && /VAN 1/.test(mg.content));
   A("it carries the outstanding availability count", /Availability still outstanding: 3 players/.test(mg.content));

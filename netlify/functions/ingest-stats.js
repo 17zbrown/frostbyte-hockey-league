@@ -923,7 +923,7 @@ async function tellStaff(text) {
     const hook = byKey.discord_staff_webhook || byKey.discord_updates_webhook;
     if (!hook) return;
     await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: text.slice(0, 1800), allowed_mentions: { parse: [] } }) });
+      body: JSON.stringify({ content: text.slice(0, 1800), allowed_mentions: { parse: [] }, flags: 4 }) });
   } catch { /* never breaks the merge */ }
 }
 

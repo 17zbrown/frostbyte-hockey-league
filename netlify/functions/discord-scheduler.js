@@ -55,6 +55,12 @@ async function release(kind, ref) {
 // `ambiguous` marks the one case where we don't know whether the message landed.
 async function postWithRetry(url, headers, payload) {
   const ATTEMPTS = 4;
+  /* Commissioner's standing instruction (2026-09-22): no link previews. Every post of ours that
+     carries a URL was unfurling into a card that buried the message under a site preview, three
+     and four deep in the weekly schedule. SUPPRESS_EMBEDS (flag 4) is set on every plain-text
+     message; a post that carries its own `embeds` (the #rules mirror, the schedule card) is left
+     alone, because that flag would hide those too. */
+  if (payload && payload.content && !payload.embeds) payload = { ...payload, flags: 4 };
   for (let i = 0; i < ATTEMPTS; i++) {
     let r;
     try {
@@ -601,6 +607,11 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
    plus one for the front offices, so the first tick inside the window posts and every later tick
    is refused. A club whose post fails keeps its own retry without re-posting to the other seven. */
 const AVAIL_LEAD_MS = 24 * 60 * 60 * 1000;
+/* Commissioner's ruling (2026-09-22): the office asks for lineups ONE HOUR after availability
+   closes, 8:30 PM ET in a normal week, so that a club builds its sheets on the finished
+   availability picture rather than racing the same clock its players are on. It is still a
+   request and not a lock: Rule 5.3 locks each game 30 minutes before its own puck drop. */
+const LINEUP_LAG_MS = 60 * 60 * 1000;
 async function sbRpc(fn, body) {
   const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, { method: "POST", headers: sbHead(), body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`rpc ${fn} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
@@ -632,6 +643,7 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
   const lead = dl - nowMs;
   if (!forced && lead > AVAIL_LEAD_MS) return `week ${wk} closes ${fmtDay(new Date(dl).toISOString())} ${fmtTime(new Date(dl).toISOString())}; the reminder is due in ${Math.round((lead - AVAIL_LEAD_MS) / 60000)} min`;
   const wkKey = `w${wk}`, closes = `${fmtDay(new Date(dl).toISOString())}, ${fmtTime(new Date(dl).toISOString())}`;
+  const linesBy = `${fmtDay(new Date(dl + LINEUP_LAG_MS).toISOString())}, ${fmtTime(new Date(dl + LINEUP_LAG_MS).toISOString())}`;
   const mgmtRoom = cfg.discord_mgmt_room_management_announcements_id;
   if (!mgmtRoom) unconfigured.push("management lineup reminder (app_config.discord_mgmt_room_management_announcements_id)");
   let roles = {};
@@ -677,7 +689,7 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
     const sheets = Object.values(owed).reduce((a, b) => a + b, 0), total = weekGames.length * 2;
     const still = Object.keys(owed).filter((tid) => owed[tid] > 0)
       .sort((a, b) => owed[b] - owed[a]).map((tid) => `${(teamById[tid] || {}).code || "?"} ${owed[tid]}`).join(" · ");
-    return `${ping}\n🗓️ **Week ${wk} lineups: please have them filed by ${closes}**, the same hour availability closes (Rule 5.1).`
+    return `${ping}\n🗓️ **Week ${wk} lineups: please have them filed by ${linesBy}**, one hour after availability closes (${closes}, Rule 5.1), so you are building on the finished picture.`
       + `\nSheets still to file: **${sheets} of ${total}**${still ? ` (${still})` : ""}.`
       + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
       + `\nAvailability still outstanding: ${(missing || []).length} player${(missing || []).length === 1 ? "" : "s"}; each club's list is in its own room.`
