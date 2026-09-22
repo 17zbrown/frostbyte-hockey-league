@@ -343,6 +343,8 @@ export default async (req) => {
     // (F) availability + lineup reminder — self-gating on the week's own deadline minus 24 hours,
     //     so it needs no clock window here (a holiday-shifted week moves its own reminder with it).
     sum.availability = await availabilityReminder(season, games, teamById, cfg, now, dry, forceRun === "availability", sum.errors, sum.unconfigured);
+    // (G) tonight's lineups — self-gating on the night's own first lock, four hours ahead
+    sum.lineups = await lineupReminder(season, games, teamById, cfg, now, dry, forceRun === "lineups", sum.errors, sum.unconfigured);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
   const errs = (sum.error ? [sum.error] : []).concat(sum.errors);
@@ -594,6 +596,70 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
 // carries the deadline and the link — and now mentions nobody: postWebhook without `ping` sends
 // allowed_mentions {parse:[]}, so even a stray <@&…> in the copy could not fire a notification.
 // The ROLE itself stays: discord-sync still uses it for channel permissions and the GIF carve-out.
+/* ---------- (G) tonight's lineups, due when the night's first game locks ----------
+   Commissioner's ruling (2026-09-22): a club sets its lines the DAY OF, not for the whole week at
+   once. Each game day the office asks for that night's sheets by the moment the night's FIRST game
+   locks, which is 8:30 PM ET for a 9:00 PM start and moves with the night rather than being pinned
+   to a clock. It is still a request, not a lock: every game keeps its own T-30 under Rule 5.3, so a
+   10:10 game is genuinely editable until 9:40. The reminder opens four hours before the night's
+   first puck drop and stays open until that first lock, claimed once per ET day. */
+const LINEUP_LEAD_MS = 4 * 60 * 60 * 1000;
+/* THE definition of "tonight's lineups are due": the night's first puck drop minus the lock. */
+const nightLockAt = (list) => Math.min(...list.map((g) => Date.parse(g.scheduled_at))) - 30 * 60000;
+async function lineupReminder(season, games, teamById, cfg, now, dry, forced, errors, unconfigured) {
+  const sw = String(cfg.lineup_reminder_enabled ?? "").trim().toLowerCase();
+  if (["off", "0", "false", "no", "paused"].includes(sw)) return `paused (app_config.lineup_reminder_enabled=${sw})`;
+  const nowMs = now.getTime();
+  const byDay = {};
+  for (const g of games) {
+    if ((g.stage || "regular") !== "regular" || g.voided) continue;
+    const ms = Date.parse(g.scheduled_at);
+    if (ms < nowMs - 6 * 60 * 60 * 1000) continue;
+    const ymd = etParts(new Date(ms)).ymd;
+    (byDay[ymd] = byDay[ymd] || []).push(g);
+  }
+  let ymd = null, dl = null;
+  for (const d of Object.keys(byDay).sort()) {
+    const lock = nightLockAt(byDay[d]);
+    if (lock > nowMs) { ymd = d; dl = lock; break; }
+  }
+  if (ymd === null) return "no game night ahead";
+  if (!forced && dl - nowMs > LINEUP_LEAD_MS) return `${ymd} sheets are due ${fmtTime(new Date(dl).toISOString())}; the reminder is due in ${Math.round((dl - nowMs - LINEUP_LEAD_MS) / 60000)} min`;
+  const room = cfg.discord_mgmt_room_management_announcements_id;
+  if (!room) { unconfigured.push("nightly lineup reminder (app_config.discord_mgmt_room_management_announcements_id)"); return "no management room configured"; }
+  let roles = {};
+  try { roles = JSON.parse(cfg.discord_role_ids || "{}") || {}; } catch { roles = {}; }
+
+  const tonight = byDay[ymd].slice().sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
+  const filed = await sbGet(`game_lineups?game_id=in.(${tonight.map((g) => g.id).join(",")})&select=game_id,team_id`);
+  const filedSet = new Set((filed || []).map((r) => `${r.game_id}:${r.team_id}`));
+  const owed = {};
+  for (const g of tonight) for (const tid of [g.home_team_id, g.away_team_id]) {
+    if (!filedSet.has(`${g.id}:${tid}`)) owed[tid] = (owed[tid] || 0) + 1;
+  }
+  const short = Object.keys(owed).sort((a, b) => owed[b] - owed[a]).map((tid) => `${(teamById[tid] || {}).code || "?"} ${owed[tid]}`).join(" · ");
+  const missing = Object.values(owed).reduce((a, b) => a + b, 0), total = tonight.length * 2;
+  const slots = [...new Set(tonight.map((g) => fmtTime(g.scheduled_at)))].join(", ");
+  const ping = roles["cghl management"]
+    ? `<@&${roles["cghl management"]}>`
+    : ["owner", "general manager", "assistant general manager"].map((k) => roles[k]).filter(Boolean).map((id) => `<@&${id}>`).join(" ");
+  const body = `${ping}\n🗓️ **Tonight: ${tonight.length} game${tonight.length === 1 ? "" : "s"}, ${slots}.** Set tonight's lines now, on the day, with the week's availability in front of you.`
+    + `\n**All of tonight's sheets are due by ${fmtTime(new Date(dl).toISOString())}**, when the night's first game locks.`
+    + (missing ? `\nStill to file tonight: **${missing} of ${total}** (${short}).` : `\nEvery sheet for tonight is already filed. Nothing to do.`)
+    + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
+    + `\nEach later game still has its own lock 30 minutes before its own puck drop, so a sheet can be changed until then at no cost. After a game locks, a change is an emergency call-up only and **each player you change costs the club one in-game minor in that game** (Rule 5.3).`;
+  if (dry) return { day: ymd, dueAt: new Date(dl).toISOString(), games: tonight.length, missing, total, body };
+  const ref = `${season.id}-${ymd}`;
+  if (!(await claim("lineup_reminder", ref))) return `already posted for ${ymd}`;
+  const res = await postChannel(room, body);
+  if (!res.ok) {
+    errors.push(`lineup reminder ${ymd}: ${res.error}`);
+    if (!res.ambiguous) await release("lineup_reminder", ref);
+    return `post failed: ${res.error}`;
+  }
+  return `posted tonight's lineup call (${ymd}: ${missing} of ${total} still to file)`;
+}
+
 /* ---------- (F) availability, 24 hours out, and the lineups that hang on it (Rule 5.1) ----------
    A week's availability closes at 7:30 PM ET on the night of its FIRST game: Wednesday in a normal
    week, and whatever the first night is in a holiday-shifted one. The deadline itself is computed
@@ -693,8 +759,9 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
     const sheets = Object.values(owed).reduce((a, b) => a + b, 0), total = weekGames.length * 2;
     const still = Object.keys(owed).filter((tid) => owed[tid] > 0)
       .sort((a, b) => owed[b] - owed[a]).map((tid) => `${(teamById[tid] || {}).code || "?"} ${owed[tid]}`).join(" · ");
-    return `${ping}\n🗓️ **Week ${wk} lineups: please have them filed by ${linesBy}**, one hour after availability closes (${closes}, Rule 5.1), so you are building on the finished picture.`
-      + `\nSheets still to file: **${sheets} of ${total}**${still ? ` (${still})` : ""}.`
+    return `${ping}\n🗓️ **Week ${wk} availability closes ${closes}** (Rule 5.1).`
+      + `\n**Lineups are set day by day**: each night's sheets are due when that night's FIRST game locks, ${linesBy.split(", ").pop()} on a normal night, and you get a reminder that afternoon. You are never asked to file the whole week at once.`
+      + `\nSheets filed for the week so far: **${total - sheets} of ${total}**${still ? ` (still to file: ${still})` : ""}.`
       + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
       + `\nAvailability still outstanding: ${(missing || []).length} player${(missing || []).length === 1 ? "" : "s"}; each club's list is in its own room.`
       + `\nThe lock is unchanged: each game locks 30 minutes before its own puck drop. After the lock a change is an emergency call-up only, and **each player you change costs the club one in-game minor in that game** (two swaps, two minors; moving the same six between positions costs nothing). The door shuts 10 minutes after puck drop, and the filed sheet is then the record (Rule 5.3).`;
@@ -743,6 +810,14 @@ export async function runAvailabilityReminder({ dry = false } = {}) {
   const errors = [], unconfigured = [];
   const availability = await availabilityReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
   return { availability, errors, unconfigured, ok: errors.length === 0 };
+}
+/* the nightly half, on the same door: /api/discord-ops?post=lineup-reminder */
+export async function runLineupReminder({ dry = false } = {}) {
+  const w = await loadWorld();
+  if (!w) return { skipped: "no season" };
+  const errors = [], unconfigured = [];
+  const lineups = await lineupReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
+  return { lineups, errors, unconfigured, ok: errors.length === 0 };
 }
 
 async function signupReminder(cfg, et, dry, errors, unconfigured) {

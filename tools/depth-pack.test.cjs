@@ -142,9 +142,9 @@ console.log("\n— an unconfigured Discord feed can no longer read as healthy si
   /* four jobs returned a bare string when their webhook was unset, so sum.errors stayed empty
      and the result row said ok:true while a public feed was dark forever. */
   A("unconfigured is tracked separately from errors", /sum = \{ errors: \[\], unconfigured: \[\] \}/.test(sched));
-  /* v2.79: five, with the weekly availability + lineup reminder's management room */
+  /* v2.79: five, with the weekly reminder's management room; v2.82: six, with the nightly one */
   A("...and every one of them names itself",
-    (sched.match(/unconfigured\.push\(/g) || []).length === 5);
+    (sched.match(/unconfigured\.push\(/g) || []).length === 6);
   A("...and it reaches the persisted result row",
     /unconfigured: sum\.unconfigured, unconfiguredCount: sum\.unconfigured\.length/.test(sched));
   A("errors still drive ok, so an unset feed does not page forever", /ok: errs\.length === 0/.test(sched));

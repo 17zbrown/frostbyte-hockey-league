@@ -54,6 +54,9 @@ function reset(over = {}) {
     { key: "discord_role_ids", value: ROLE_IDS },
   ];
   postStatus = over.postStatus || 204;
+  /* the nightly lineup call (tools/lineup-reminder.test.mjs) posts to the same room on the same
+     tick; switch it off here so a count of these posts is a count of THIS step */
+  cfgRows = cfgRows.concat([{ key: "lineup_reminder_enabled", value: "off" }]);
   posts = []; claims = new Set(); released = [];
 }
 reset();
@@ -125,16 +128,22 @@ console.log("\n— the management announcement");
   A("it pings the one management role, not three (commissioner, 2026-09-22)",
     /<@&MGMT>/.test(mg.content) && !/<@&OWN>/.test(mg.content) && !/<@&GM>/.test(mg.content), mg.content.split("\n")[0]);
   A("...and nobody else", !/<@&PL>/.test(mg.content));
-  A("it asks for lineups ONE HOUR after availability closes, not at the same moment (ruling 2026-09-22)",
-    /one hour after availability closes/.test(mg.content) && /building on the finished picture/.test(mg.content), mg.content.split("\n")[1]);
+  /* v2.82 ruling: clubs set lines the DAY OF. The weekly post no longer asks for the week's sheets
+     at once; it points at the nightly deadline and the reminder that carries it. */
+  A("it does not ask for the whole week's lineups at once",
+    /Lineups are set day by day/.test(mg.content) && /never asked to file the whole week at once/.test(mg.content), mg.content.split("\n")[2]);
+  A("...it names the nightly deadline as that night's FIRST lock",
+    /each night's sheets are due when that night's FIRST game locks/.test(mg.content) && /you get a reminder that afternoon/.test(mg.content));
   {
-    /* the two hours in the post must actually differ by 60 minutes, whatever the clock reads */
-    const hrs = mg.content.split("\n")[1].match(/\d+:\d\d [AP]M ET/g) || [];
+    /* on the week's first night that deadline is an hour after the window closes, which is the
+       whole reason the hour was chosen; both times appear and must differ by 60 minutes */
+    const hrs = mg.content.match(/\d+:\d\d [AP]M ET/g) || [];
     const mins = hrs.map((h) => { const [, H, M, ap] = h.match(/(\d+):(\d\d) ([AP]M)/); return ((+H % 12) + (ap === "PM" ? 12 : 0)) * 60 + +M; });
-    A("...exactly an hour apart", hrs.length === 2 && ((mins[0] - mins[1] + 1440) % 1440) === 60, hrs.join(" then "));
+    A("...and that is an hour after availability closes on the week's first night",
+      hrs.length >= 2 && ((mins[1] - mins[0] + 1440) % 1440) === 60, hrs.join(" then "));
   }
-  A("it counts the sheets still owed (4 of 4 games, 1 filed = 3)", /Sheets still to file: \*\*3 of 4\*\*/.test(mg.content), mg.content.split("\n")[2]);
-  A("...naming the clubs that owe them", /BOS 1/.test(mg.content) && /DAL 1/.test(mg.content) && /VAN 1/.test(mg.content));
+  A("it reports the week's filing progress (4 slots, 1 filed)", /Sheets filed for the week so far: \*\*1 of 4\*\*/.test(mg.content), mg.content.split("\n")[3]);
+  A("...naming the clubs that still owe", /BOS 1/.test(mg.content) && /DAL 1/.test(mg.content) && /VAN 1/.test(mg.content));
   A("it carries the outstanding availability count", /Availability still outstanding: 3 players/.test(mg.content));
   A("it does NOT claim lineups lock at the availability deadline (Rule 5.3 is unchanged)",
     /locks 30 minutes before its own puck drop/.test(mg.content) && !/lineups lock at 7:30/i.test(mg.content));

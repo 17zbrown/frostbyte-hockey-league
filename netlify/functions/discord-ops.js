@@ -14,6 +14,7 @@
 //   GET  /api/discord-ops?post=availability-reminder             send this week's availability and
 //                                                                lineup reminders now (&dry=1 shows
 //                                                                exactly what it would post)
+//   GET  /api/discord-ops?post=lineup-reminder                  send tonight's lineup call now
 //
 // The key: app_config.diag_key, sent as ?key=… or the x-diag-key header — the same check those
 // branches always had. A missing or wrong key is a 404, never a 401, so a probe learns nothing.
@@ -24,7 +25,7 @@
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (SUPABASE_ANON_KEY
 // as the apikey for session checks when set). Node 18+.
 import { OPS_ROUTES, runOp, opsKeyOk, runSweep } from "./discord-sync.js";
-import { runAvailabilityReminder } from "./discord-scheduler.js";
+import { runAvailabilityReminder, runLineupReminder } from "./discord-scheduler.js";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -69,6 +70,10 @@ export default async (req) => {
   if (params.get("post") === "availability-reminder") {
     if (!(await opsKeyOk(req))) return notFound();
     return json(await runAvailabilityReminder({ dry: params.get("dry") === "1" }));
+  }
+  if (params.get("post") === "lineup-reminder") {
+    if (!(await opsKeyOk(req))) return notFound();
+    return json(await runLineupReminder({ dry: params.get("dry") === "1" }));
   }
 
   /* everything else is an op from the routing table, key-gated */
