@@ -2712,7 +2712,10 @@ export async function runSweep(opts = {}) {
   // Publish a name->id map of the league roles so the DATABASE can render @role pills too
   // (public._role_tag reads this). Without it the DB can only bold a role name.
   try {
-    const wanted = ["staff", "commissioner", "owner", "general manager", "assistant general manager", "player", "free agent", "not signed up"];
+    /* "cghl management" is the one role that covers all three front-office seats; the weekly
+       lineup reminder pings it instead of three separate roles (commissioner, 2026-09-22). It is
+       published here with the rest so there is no second place that has to learn its id. */
+    const wanted = ["staff", "commissioner", "owner", "general manager", "assistant general manager", "player", "free agent", "not signed up", "cghl management"];
     const map = {};
     for (const n of wanted) if (roleId[n]) map[n] = roleId[n];
     if (Object.keys(map).length) await sbUpsertCfg("discord_role_ids", JSON.stringify(map));

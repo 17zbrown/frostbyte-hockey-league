@@ -685,7 +685,11 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
     return head + who + `\n${team.code || ""} this week (times ET): ${clubLine(tid)}`;
   };
   const mgmtBody = () => {
-    const ping = ["owner", "general manager", "assistant general manager"].map((k) => roles[k]).filter(Boolean).map((id) => `<@&${id}>`).join(" ");
+    /* One role covers all three front-office seats. The three separate pings are kept only as a
+       fallback for a guild that has no such role yet, so this never silently pings nobody. */
+    const ping = roles["cghl management"]
+      ? `<@&${roles["cghl management"]}>`
+      : ["owner", "general manager", "assistant general manager"].map((k) => roles[k]).filter(Boolean).map((id) => `<@&${id}>`).join(" ");
     const sheets = Object.values(owed).reduce((a, b) => a + b, 0), total = weekGames.length * 2;
     const still = Object.keys(owed).filter((tid) => owed[tid] > 0)
       .sort((a, b) => owed[b] - owed[a]).map((tid) => `${(teamById[tid] || {}).code || "?"} ${owed[tid]}`).join(" · ");

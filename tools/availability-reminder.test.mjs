@@ -25,7 +25,9 @@ const TEAMS = [
   { id: "t2", code: "DAL", name: "Stars", discord_channel_id: "ch2", discord_role_id: "r2" },
   { id: "t3", code: "VAN", name: "Canucks", discord_channel_id: "ch3", discord_role_id: "r3" },
 ];
-const ROLE_IDS = JSON.stringify({ owner: "OWN", "general manager": "GM", "assistant general manager": "AGM", player: "PL" });
+const ROLE_IDS = JSON.stringify({ owner: "OWN", "general manager": "GM", "assistant general manager": "AGM", player: "PL", "cghl management": "MGMT" });
+/* a guild that has not got the one-role-for-the-front-office role yet */
+const ROLE_IDS_OLD = JSON.stringify({ owner: "OWN", "general manager": "GM", "assistant general manager": "AGM", player: "PL" });
 
 let W, posts, claims, released, cfgRows, missing, lineups, postStatus;
 /* `leadH` = how many hours from now the week's availability deadline sits */
@@ -120,7 +122,8 @@ console.log("— the club rooms");
 console.log("\n— the management announcement");
 {
   const mg = club("mgmtroom");
-  A("it pings Owner, GM and AGM", /<@&OWN>/.test(mg.content) && /<@&GM>/.test(mg.content) && /<@&AGM>/.test(mg.content));
+  A("it pings the one management role, not three (commissioner, 2026-09-22)",
+    /<@&MGMT>/.test(mg.content) && !/<@&OWN>/.test(mg.content) && !/<@&GM>/.test(mg.content), mg.content.split("\n")[0]);
   A("...and nobody else", !/<@&PL>/.test(mg.content));
   A("it asks for lineups ONE HOUR after availability closes, not at the same moment (ruling 2026-09-22)",
     /one hour after availability closes/.test(mg.content) && /building on the finished picture/.test(mg.content), mg.content.split("\n")[1]);
@@ -136,6 +139,16 @@ console.log("\n— the management announcement");
   A("it does NOT claim lineups lock at the availability deadline (Rule 5.3 is unchanged)",
     /locks 30 minutes before its own puck drop/.test(mg.content) && !/lineups lock at 7:30/i.test(mg.content));
   A("the lineup builder is linked", /#\/hub\/lineup/.test(mg.content));
+}
+
+{
+  /* a guild without the combined role must still reach the front office, not silently ping nobody */
+  const keep = posts.slice();
+  reset({ cfgRows: [{ key: "discord_mgmt_room_management_announcements_id", value: "mgmtroom" }, { key: "discord_role_ids", value: ROLE_IDS_OLD }] });
+  await now();
+  const fb = club("mgmtroom");
+  A("without that role it falls back to the three seats", /<@&OWN>/.test(fb.content) && /<@&GM>/.test(fb.content) && /<@&AGM>/.test(fb.content), fb.content.split("\n")[0]);
+  posts.length = 0; posts.push(...keep);
 }
 
 console.log("\n— exactly once");
@@ -207,7 +220,7 @@ console.log("\n— the dry run shows the office exactly what would go out");
   reset();
   const r = await now(true);
   A("nothing is posted and nothing is claimed", posts.length === 0 && claims.size === 0);
-  A("...but the copy is returned in full", r.availability.clubs.length === 3 && /Week 1 availability closes/.test(r.availability.clubs[0]) && /<@&OWN>/.test(r.availability.management));
+  A("...but the copy is returned in full", r.availability.clubs.length === 3 && /Week 1 availability closes/.test(r.availability.clubs[0]) && /<@&MGMT>/.test(r.availability.management));
   A("...with the counts", r.availability.missing === 3 && r.availability.sheetsOwed === 3, JSON.stringify({ m: r.availability.missing, s: r.availability.sheetsOwed }));
 }
 
