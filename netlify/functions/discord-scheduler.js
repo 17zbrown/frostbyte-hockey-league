@@ -697,7 +697,7 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
       + `\nSheets still to file: **${sheets} of ${total}**${still ? ` (${still})` : ""}.`
       + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
       + `\nAvailability still outstanding: ${(missing || []).length} player${(missing || []).length === 1 ? "" : "s"}; each club's list is in its own room.`
-      + `\nThe hard lock is unchanged: every game locks 30 minutes before its own puck drop, and an emergency call-up is open until 10 minutes after it (Rule 5.3).`;
+      + `\nThe lock is unchanged: each game locks 30 minutes before its own puck drop. After the lock a change is an emergency call-up only, and **each player you change costs the club one in-game minor in that game** (two swaps, two minors; moving the same six between positions costs nothing). The door shuts 10 minutes after puck drop, and the filed sheet is then the record (Rule 5.3).`;
   };
   if (dry) return { week: wk, closes, missing: (missing || []).length, sheetsOwed: Object.values(owed).reduce((a, b) => a + b, 0), clubs: Object.keys(byClub).map((tid) => clubBody(tid)), management: mgmtBody() };
 

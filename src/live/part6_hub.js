@@ -800,9 +800,9 @@ CG.hubLineup = function(qs){
       : emergency ? editControls+'<button class="btn btn-ghost btn-sm" id="luEmCancel">Cancel</button>'
       : '<span class="lock">'+CG.ic("lock",14)+'Locked</span>'+(CG.emergencyClosed(game)
           ? '<span class="caption">The door closed 10 minutes after puck drop. The sheet on file is the record (Rule 5.3).</span>'
-          : '<button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the deadline for an emergency call-up">Emergency call-up</button>'))+
+          : '<button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the lock: one in-game minor per player changed (Rule 5.3)">Emergency call-up</button>'))+
     '</span></div>'+
-    (emergency?'<div class="note red" style="margin-bottom:18px;font-size:13px;line-height:1.5">This game locked at '+CG.fmtTime(lockAt)+'. Emergency call-ups are for a genuine no-show — the swap is recorded, and the opponent already sees the locked lineup. Change only the player you must.</div>':"");
+    (emergency?'<div class="note red" style="margin-bottom:18px;font-size:13px;line-height:1.5">This game locked at '+CG.fmtTime(lockAt)+'. Emergency call-ups are for a genuine no-show. <b>Each player you change costs the club one in-game minor, served in this game</b> (two swaps, two minors; moving the same six between positions costs nothing, Rule 5.3). The opponent and the officials are told the moment you submit. Change only the player you must.</div>':"");
   var rink = '<div class="rink"><div class="rk-rows">'+
     '<div class="rk-line">'+["LW","C","RW"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
     '<div class="rk-line d2">'+["LD","RD"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
@@ -878,7 +878,7 @@ CG.AFTER._lineup = function(){
   function avState(p){ var nk = CG.nightAvKey(game); return (nk && CG.avGame) ? CG.avGame(CG.avFor(p.id), nk, game.id) : "nr"; }
   function avWarn(p){ return avState(p)==="no" ? p.tag+" is marked not available for this game (dressed anyway; check that he can play)." : null; }
   function validate(p, pos){
-    if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3) — use an emergency call-up to swap a player now.";
+    if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3). An emergency call-up can still swap a player, at one in-game minor per player changed.";
     if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
@@ -1071,7 +1071,7 @@ CG.AFTER._lineup = function(){
   });
   var emBtn = $("#luEmergency");
   if (emBtn) emBtn.addEventListener("click", function(){
-    CG.confirm("Start an emergency call-up?","This game locked at "+CG.fmtTime(game.at-30*60000)+". Use this only for a genuine no-show — swap the player, then resubmit. The change is recorded against the club.","Enable call-up", function(){
+    CG.confirm("Start an emergency call-up?","This game locked at "+CG.fmtTime(game.at-30*60000)+". Use this only for a genuine no-show. Each player you change costs the club ONE IN-GAME MINOR, served in this game: two swaps are two minors, and moving the same six between positions costs nothing (Rule 5.3). The opponent and the officials are told the moment you submit, and the door shuts 10 minutes after puck drop.","Enable call-up", function(){
       CG._luEmergency = CG._luEmergency||{}; CG._luEmergency[game.id]=true; CG.router();
     });
   });

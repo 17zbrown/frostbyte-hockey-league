@@ -96,6 +96,15 @@ console.log("\n— the emergency call-up door (Rule 5.3)");
 A("one definition of when it closes, ten minutes after puck drop", /CG\.emergencyClosed = function\(g\)\{ return CG\.now\(\) >= \(g\.at \|\| Date\.parse\(g\.scheduled_at\)\) \+ 10\*60000; \};/.test(pub));
 A("the header stops offering the button once it is shut", /CG\.emergencyClosed\(game\)\s*\n?\s*\? '<span class="caption">The door closed 10 minutes after puck drop/.test(hub));
 A("...and the submit handler says so rather than letting the RPC refuse", /if \(pastLock && CG\.emergencyClosed\(game\)\)\{ CG\.toast\("Emergency call-ups closed 10 minutes after puck drop/.test(hub));
+/* v2.81: the door costs one in-game minor per player changed (Rule 5.3 second paragraph). Every
+   place that offers it must say so, or it reads as a free grace period. The submit confirm always
+   did; the button, the banner, the locked-edit refusal and the confirm that OPENS the mode did not. */
+A("the price is named where the mode is opened", /Each player you change costs the club ONE IN-GAME MINOR, served in this game/.test(hub));
+A("...on the banner that stays on screen while it is open", /Each player you change costs the club one in-game minor, served in this game<\/b>/.test(hub));
+A("...on the button that opens it", /title="Swap a player after the lock: one in-game minor per player changed \(Rule 5\.3\)"/.test(hub));
+A("...and when an edit to a locked sheet is refused", /An emergency call-up can still swap a player, at one in-game minor per player changed/.test(hub));
+A("...and the submit confirm still does", /EACH player changed costs the club one in-game penalty, served in this game \(Rule 5\.3\)/.test(hub));
+A("nothing offers the door as free", !/emergency call-up to swap a player now/.test(hub) && !/The change is recorded against the club\./.test(hub));
 {
   const src = pub.slice(pub.indexOf("CG.emergencyClosed = function"), pub.indexOf("\n", pub.indexOf("CG.emergencyClosed = function")));
   const CG = { now: () => T + 9 * 60000 }; new Function("CG", src)(CG);

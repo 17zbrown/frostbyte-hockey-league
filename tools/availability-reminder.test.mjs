@@ -138,6 +138,11 @@ console.log("\n— the management announcement");
   A("it carries the outstanding availability count", /Availability still outstanding: 3 players/.test(mg.content));
   A("it does NOT claim lineups lock at the availability deadline (Rule 5.3 is unchanged)",
     /locks 30 minutes before its own puck drop/.test(mg.content) && !/lineups lock at 7:30/i.test(mg.content));
+  /* the door is not free: Rule 5.3 charges one in-game minor per player changed, and a post that
+     names the door without the price reads as a grace period */
+  A("...and it names the PRICE of a post-lock change, not just the door",
+    /one in-game minor/.test(mg.content) && /two swaps, two minors/.test(mg.content) && /same six between positions costs nothing/.test(mg.content),
+    mg.content.split("\n").pop().slice(0, 140));
   A("the lineup builder is linked", /#\/hub\/lineup/.test(mg.content));
 }
 
