@@ -1,0 +1,21 @@
+-- v2.79 (2026-09-22): Rule 5.1 reminder, 24 hours before a week's availability window closes.
+-- Applied live in two gated transactions, each asserted before commit.
+--
+--   public.availability_missing(p_season uuid, p_week_key text)
+--     returns (profile_id, team_id, gamertag, discord_id) for every ACTIVE roster spot with no
+--     availability row for that week key, excluding suspended and banned players, gamertag already
+--     coalesced to 'a player', ordered by lower(gamertag). SECURITY DEFINER; EXECUTE revoked from
+--     public, anon AND authenticated (the default-privileges trap: authenticated had it), granted
+--     to service_role only. This is THE definition of "his availability is not in".
+--
+--   public.availability_nudge_tick() was spliced (public._splice_fn) to read it in both loops, so
+--     the reminder that goes out 24 hours early and the nudge that goes out when the window closes
+--     can never disagree about who is missing. Asserted: the function body contains
+--     'availability_missing', contains no inline copy of the old join, and a tick outside a closed
+--     window still nudges nobody.
+--
+-- The deadline itself is unchanged: public.week_availability_deadline (sql/2026-09-17-audit-fixes-b.sql),
+-- the week's first non-voided game night at 7:30 PM ET. The reminder step in
+-- netlify/functions/discord-scheduler.js calls both functions over PostgREST RPC rather than
+-- writing a third copy of either rule; /api/discord-ops?post=availability-reminder is the door that
+-- sends one on demand, because a scheduled function cannot be reached over HTTP.

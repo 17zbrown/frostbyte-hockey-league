@@ -287,6 +287,22 @@ async function rulesUpkeep(errors) {
   return out;
 }
 
+/* The season, the clubs, the config and the schedule: every step reads the same four, so they are
+   loaded once here and handed down. The ops door (runAvailabilityReminder) calls this too, which is
+   the point: the season is picked by ONE rule, in one place, rather than re-queried per entry. */
+async function loadWorld() {
+  const active = await sbGet("seasons?select=id,number&status=eq.active&order=number.desc&limit=1");
+  /* v2.36: no active season yet -> the LOWEST-numbered open one (the season next up), never the
+     newest — a Season 2 row created ahead of time would otherwise have swallowed the pre-season slate */
+  const season = active[0] || (await sbGet("seasons?select=id,number&status=neq.complete&order=number.asc&limit=1"))[0];
+  if (!season) return null;
+  const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id,discord_role_id");
+  const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
+  const cfg = Object.fromEntries((await sbGet("app_config?select=key,value")).map((c) => [c.key, c.value]));
+  const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,stage,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code,forfeit_team_id,voided&order=scheduled_at`);
+  return { season, teams, teamById, cfg, games };
+}
+
 export default async (req) => {
   if (!SB_URL || !SB_KEY) return json({ skipped: "missing supabase env" });
   // ?run=casework|signups bypasses the time gate for a manual check; &dry=1 computes without posting.
@@ -304,15 +320,9 @@ export default async (req) => {
     /* mirror the rulebook into #rules — a no-op on every tick until the published version changes */
     try { sum.rules = await rulesUpkeep(sum.errors); } catch (e) { sum.errors.push(`rules: ${String(e.message || e)}`); }
 
-    const active = await sbGet("seasons?select=id,number&status=eq.active&order=number.desc&limit=1");
-    /* v2.36: no active season yet -> the LOWEST-numbered open one (the season next up), never the
-       newest — a Season 2 row created ahead of time would otherwise have swallowed the pre-season slate */
-    const season = active[0] || (await sbGet("seasons?select=id,number&status=neq.complete&order=number.asc&limit=1"))[0];
-    if (!season) return json({ skipped: "no season" });
-    const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id,discord_role_id");
-    const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
-    const cfg = Object.fromEntries((await sbGet("app_config?select=key,value")).map((c) => [c.key, c.value]));
-    const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,stage,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code,forfeit_team_id,voided&order=scheduled_at`);
+    const world = await loadWorld();
+    if (!world) return json({ skipped: "no season" });
+    const { season, teamById, cfg, games } = world;
 
     // (A) weekly schedule — Tuesday 5:00-5:09pm ET
     if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors, sum.unconfigured);
@@ -324,6 +334,9 @@ export default async (req) => {
     //     sitting on a claimed case. (E) sign-up reminder — unpinged, and pausable from app_config.
     if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors, sum.unconfigured);
     if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors, sum.unconfigured);
+    // (F) availability + lineup reminder — self-gating on the week's own deadline minus 24 hours,
+    //     so it needs no clock window here (a holiday-shifted week moves its own reminder with it).
+    sum.availability = await availabilityReminder(season, games, teamById, cfg, now, dry, forceRun === "availability", sum.errors, sum.unconfigured);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
   const errs = (sum.error ? [sum.error] : []).concat(sum.errors);
@@ -575,6 +588,135 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
 // carries the deadline and the link — and now mentions nobody: postWebhook without `ping` sends
 // allowed_mentions {parse:[]}, so even a stray <@&…> in the copy could not fire a notification.
 // The ROLE itself stays: discord-sync still uses it for channel permissions and the GIF carve-out.
+/* ---------- (F) availability, 24 hours out, and the lineups that hang on it (Rule 5.1) ----------
+   A week's availability closes at 7:30 PM ET on the night of its FIRST game: Wednesday in a normal
+   week, and whatever the first night is in a holiday-shifted one. The deadline itself is computed
+   in ONE place, public.week_availability_deadline, and who has not answered in one more,
+   public.availability_missing. The post-deadline nudge reads the same two, so the reminder that
+   goes out a day earlier can never name a different set of players than the nudge that follows it.
+
+   The window OPENS at the deadline minus 24 hours and stays open until the deadline, exactly as
+   REMINDER_LEAD_MAX does for game night: a tick lost to a cold start or a deploy becomes a
+   catch-up, not a missed week. What makes a wide window safe is the claim, one per club per week
+   plus one for the front offices, so the first tick inside the window posts and every later tick
+   is refused. A club whose post fails keeps its own retry without re-posting to the other seven. */
+const AVAIL_LEAD_MS = 24 * 60 * 60 * 1000;
+async function sbRpc(fn, body) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, { method: "POST", headers: sbHead(), body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`rpc ${fn} -> ${r.status} ${(await r.text()).slice(0, 140)}`);
+  return r.json();
+}
+/* the deadline is the database's to define, not this file's (there is already one structural copy
+   in the browser, which cannot call a function at render time; a third would be the regression) */
+async function weekDeadlineMs(seasonId, weekKey) {
+  const v = await sbRpc("week_availability_deadline", { p_season: seasonId, p_week_key: weekKey });
+  const at = typeof v === "string" ? v : (v && v.length ? v[0] : null);
+  const ms = at ? Date.parse(at) : NaN;
+  return Number.isFinite(ms) ? ms : null;
+}
+async function availabilityReminder(season, games, teamById, cfg, now, dry, forced, errors, unconfigured) {
+  /* OFF SWITCH: set app_config.availability_reminder_enabled to off/paused to stop it with no
+     deploy. Unset means ON, so a fresh environment never silently loses it. */
+  const sw = String(cfg.availability_reminder_enabled ?? "").trim().toLowerCase();
+  if (["off", "0", "false", "no", "paused"].includes(sw)) return `paused (app_config.availability_reminder_enabled=${sw})`;
+  const nowMs = now.getTime();
+  const regular = games.filter((g) => (g.stage || "regular") === "regular" && !g.voided);
+  /* look only at the week in play and the one after it: two RPC calls at most per tick */
+  const weeks = [...new Set(regular.filter((g) => Date.parse(g.scheduled_at) > nowMs - 6 * 60 * 60 * 1000).map((g) => g.week || 1))].sort((a, b) => a - b).slice(0, 2);
+  let wk = null, dl = null;
+  for (const w of weeks) {
+    const at = await weekDeadlineMs(season.id, `w${w}`);
+    if (at && at > nowMs) { wk = w; dl = at; break; }
+  }
+  if (wk === null) return "no game week with an open availability window";
+  const lead = dl - nowMs;
+  if (!forced && lead > AVAIL_LEAD_MS) return `week ${wk} closes ${fmtDay(new Date(dl).toISOString())} ${fmtTime(new Date(dl).toISOString())}; the reminder is due in ${Math.round((lead - AVAIL_LEAD_MS) / 60000)} min`;
+  const wkKey = `w${wk}`, closes = `${fmtDay(new Date(dl).toISOString())}, ${fmtTime(new Date(dl).toISOString())}`;
+  const mgmtRoom = cfg.discord_mgmt_room_management_announcements_id;
+  if (!mgmtRoom) unconfigured.push("management lineup reminder (app_config.discord_mgmt_room_management_announcements_id)");
+  let roles = {};
+  try { roles = JSON.parse(cfg.discord_role_ids || "{}") || {}; } catch { roles = {}; }
+
+  const weekGames = regular.filter((g) => (g.week || 1) === wk).sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
+  const byClub = {};
+  for (const g of weekGames) for (const tid of [g.home_team_id, g.away_team_id]) (byClub[tid] = byClub[tid] || []).push(g);
+  const missing = await sbRpc("availability_missing", { p_season: season.id, p_week_key: wkKey });
+  const missByClub = {};
+  for (const m of missing || []) (missByClub[m.team_id] = missByClub[m.team_id] || []).push(m);
+  const filed = weekGames.length
+    ? await sbGet(`game_lineups?game_id=in.(${weekGames.map((g) => g.id).join(",")})&select=game_id,team_id`)
+    : [];
+  const filedSet = new Set((filed || []).map((r) => `${r.game_id}:${r.team_id}`));
+  const owed = {};      /* club -> sheets not yet filed this week */
+  for (const tid of Object.keys(byClub)) owed[tid] = byClub[tid].filter((g) => !filedSet.has(`${g.id}:${tid}`)).length;
+
+  const clubLine = (tid) => byClub[tid].map((g) => `${fmtDay(g.scheduled_at)} ${fmtTime(g.scheduled_at)} ${g.home_team_id === tid ? "vs " + ((teamById[g.away_team_id] || {}).code || "?") : "at " + ((teamById[g.home_team_id] || {}).code || "?")}`).join(" · ");
+  const clubBody = (tid) => {
+    const team = teamById[tid] || {}, out = missByClub[tid] || [];
+    const head = `📋 **Week ${wk} availability closes ${closes}** (Rule 5.1, 90 minutes before the night's first puck drop).`;
+    const who = out.length
+      ? `\nStill to answer (${out.length}): ` + out.map((m) => (m.discord_id ? `<@${m.discord_id}>` : m.gamertag)).join(" ")
+        + `\nIt takes a minute, one answer per game: https://chelgamingleague.com/#/hub/availability`
+      : `\nEvery ${team.name || team.code || "club"} player has answered. Nothing to do.`;
+    return head + who + `\n${team.code || ""} this week: ${clubLine(tid)}`;
+  };
+  const mgmtBody = () => {
+    const ping = ["owner", "general manager", "assistant general manager"].map((k) => roles[k]).filter(Boolean).map((id) => `<@&${id}>`).join(" ");
+    const sheets = Object.values(owed).reduce((a, b) => a + b, 0), total = weekGames.length * 2;
+    const still = Object.keys(owed).filter((tid) => owed[tid] > 0)
+      .sort((a, b) => owed[b] - owed[a]).map((tid) => `${(teamById[tid] || {}).code || "?"} ${owed[tid]}`).join(" · ");
+    return `${ping}\n🗓️ **Week ${wk} lineups: please have them filed by ${closes}**, the same hour availability closes (Rule 5.1).`
+      + `\nSheets still to file: **${sheets} of ${total}**${still ? ` (${still})` : ""}.`
+      + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
+      + `\nAvailability still outstanding: ${(missing || []).length} player${(missing || []).length === 1 ? "" : "s"}; each club's list is in its own room.`
+      + `\nThe hard lock is unchanged: every game locks 30 minutes before its own puck drop, and an emergency call-up is open until 10 minutes after it (Rule 5.3).`;
+  };
+  if (dry) return { week: wk, closes, missing: (missing || []).length, sheetsOwed: Object.values(owed).reduce((a, b) => a + b, 0), clubs: Object.keys(byClub).map((tid) => clubBody(tid)), management: mgmtBody() };
+
+  let posted = 0;
+  for (const tid of Object.keys(byClub)) {
+    const team = teamById[tid];
+    if (!team || !team.discord_channel_id) {
+      errors.push(`availability reminder: ${(team && team.code) || tid} has no Discord room, so its club was not reminded`);
+      continue;
+    }
+    const ref = `${season.id}-${wkKey}-${team.code || tid}`;
+    if (!(await claim("availability_reminder", ref))) continue;
+    const res = await postChannel(team.discord_channel_id, clubBody(tid));
+    if (!res.ok) {
+      errors.push(`availability reminder ${team.code || tid}: ${res.error}`);
+      if (!res.ambiguous) await release("availability_reminder", ref);
+      continue;
+    }
+    posted++;
+  }
+  let mgmt = "no management room configured";
+  if (mgmtRoom) {
+    const ref = `${season.id}-${wkKey}-management`;
+    if (!(await claim("availability_reminder", ref))) mgmt = "already posted";
+    else {
+      const res = await postChannel(mgmtRoom, mgmtBody());
+      if (!res.ok) {
+        errors.push(`lineup reminder (management): ${res.error}`);
+        if (!res.ambiguous) await release("availability_reminder", ref);
+        mgmt = `post failed: ${res.error}`;
+      } else mgmt = "posted";
+    }
+  }
+  return `week ${wk}: reminded ${posted} club${posted === 1 ? "" : "s"} (${(missing || []).length} players outstanding), management ${mgmt}`;
+}
+/* The scheduler is a SCHEDULED function, and Netlify refuses external HTTP to those, so ?run= is
+   unreachable in production. /api/discord-ops?post=availability-reminder calls this instead: the
+   same step, the same claims, forced past the 24-hour window so the office can send it early or
+   re-send a week that failed. One implementation, two doors. */
+export async function runAvailabilityReminder({ dry = false } = {}) {
+  const w = await loadWorld();
+  if (!w) return { skipped: "no season" };
+  const errors = [], unconfigured = [];
+  const availability = await availabilityReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
+  return { availability, errors, unconfigured, ok: errors.length === 0 };
+}
+
 async function signupReminder(cfg, et, dry, errors, unconfigured) {
   /* OFF SWITCH (commissioner, 2026-09-08): the notice is PAUSED, not deleted. Turn it back on by
      setting app_config.signup_reminder_enabled to "on" — or deleting that row — with no deploy.
