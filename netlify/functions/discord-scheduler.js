@@ -475,17 +475,26 @@ async function weeklyStandings(games, teamById, cfg, errors, unconfigured) {
 // the first tick to post takes the (team, night) row and every later tick short-circuits on it, so a
 // wider window can never double-post. Games already under way are filtered out above, which is what
 // closes the window at puck drop.
-const REMINDER_LEAD_MAX = 35;
+// v2.78: 75, not 35. Lineups lock 30 minutes before each game (Rule 5.3), so a reminder that only
+// became eligible at T-35 landed in the last five minutes before the lock, and if that one cron tick
+// was late, after it. At 75 a club has three quarters of an hour to file, and the claim per club per
+// ET night still makes a wider window impossible to double-post.
+const REMINDER_LEAD_MAX = 75;
 
 async function gameReminders(games, teamById, now, errors) {
   const nowMs = now.getTime(), byTeam = {};
   for (const g of games) {
-    if (g.status === "final" || new Date(g.scheduled_at).getTime() < nowMs) continue;
+    if (g.status === "final" || g.voided || new Date(g.scheduled_at).getTime() < nowMs) continue;
     for (const tid of [g.home_team_id, g.away_team_id]) (byTeam[tid] = byTeam[tid] || []).push(g);
   }
   let posted = 0;
   for (const tid in byTeam) {
-    const team = teamById[tid]; if (!team || !team.discord_channel_id) continue;
+    const team = teamById[tid];
+    if (!team || !team.discord_channel_id){
+      /* v2.78: say so. This used to drop a club's whole game-night post with the run still green. */
+      errors.push({ gameReminder: `${(team && team.code) || tid} has no Discord room — its game-night reminder was not posted` });
+      continue;
+    }
     const list = byTeam[tid].sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
     const firstMs = new Date(list[0].scheduled_at).getTime(), mins = (firstMs - nowMs) / 60000;
     if (mins > REMINDER_LEAD_MAX) continue;

@@ -393,6 +393,11 @@ CG.nightFirstAt = function(g){
   return first;
 };
 CG.codeReleaseAt = function(g){ return CG.nightFirstAt(g) - 30*60000; };
+/* Rule 5.3: the emergency call-up door opens at the lock and closes ten minutes after puck
+   drop. set_game_lineup enforces the same instant in the database, so anything that offers
+   the door past it is offering a button that can only hand back a refusal. One definition,
+   read by the builder’s header and by its handler. */
+CG.emergencyClosed = function(g){ return CG.now() >= (g.at || Date.parse(g.scheduled_at)) + 10*60000; };
 CG.gameCode = function(id){
   /* the real code is the one the commissioner sets on the game (EA lobby codes are 6-digit) */
   var g = CG.lg && CG.lg.schedule && CG.lg.schedule.find(function(x){ return x.id===id; });

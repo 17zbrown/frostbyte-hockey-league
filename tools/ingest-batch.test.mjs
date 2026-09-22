@@ -30,6 +30,8 @@ const world = {
   prior: {},         // ea_player_id -> profile_id, prior links in game_stats
   profiles: [],      // [{id, gamertag}]
   statPostStatus: 204,
+  cfg: [],           // app_config rows (the staff webhook, when a test wants one)
+  toStaff: [],       // what tellStaff posted
 };
 const calls = [];                 // every fetch, in order: {m, u, body}
 const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
@@ -74,12 +76,13 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/profiles?")) return J([]);
   if (u.includes("/rest/v1/season_registrations?")) return J([]);
   if (u.includes("/rest/v1/notifications") && (m === "DELETE" || m === "POST")) return NIL();
-  if (u.includes("/rest/v1/app_config")) return J([]);
+  if (u.includes("/rest/v1/app_config")) return J(world.cfg || []);
+  if (u.includes("discord.com/api/webhooks")) { world.toStaff.push(JSON.parse(opts.body).content); return NIL(); }
   throw new Error("unexpected fetch " + m + " " + u);
 };
 const reset = () => {
   calls.length = 0;
-  world.open = []; world.finals = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204;
+  world.open = []; world.finals = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = [];
 };
 /* an EA match between two clubs that ENDED at `end` and ran `toi` seconds of game clock, with the
    given rosters ({eaPlayerId: name}) on each side */
@@ -135,6 +138,40 @@ console.log("\n— a Rule 4.3 resume: the replay's payload is archived before th
   const final = of(isLogPost).slice(-1)[0];
   A("...and finished as `merged` (what the next poll's dedupe reads) without re-uploading the body",
     final.body[0].status === "merged" && final.body[0].game_id === "g900" && !("payload" in final.body[0]), JSON.stringify(final.body[0]));
+}
+
+console.log("\n— a resume that adds up to a TIE: filed, and the officials are told the same minute");
+{
+  /* Rule 4.1 has continuous overtime and no shootout, so a resumed game cannot end level. A level
+     total means the clubs replayed in full instead of resuming, or a sitting was filed twice.
+     Both sittings are real box scores, so the import must still land; what must not happen is a
+     tie sitting quietly in the standings, where it charges BOTH clubs a loss until someone reads
+     it. It travels as a warning, not an error: the import itself worked, and turning the poll red
+     would page for a healthy run. */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  const first = ea("t1", at(20), 111, 222, 1500, [1, 0]);
+  world.finals = [{ ...G900, ea_match_id: "t1" }];
+  world.filed = { t1: "g900" }; world.archived = { t1: { status: "ingested", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "t1", payload: first }];
+  const s = await post([ea("t1b", at(55), 111, 222, 3600, [1, 2])]);   // 1-0 + 1-2 = 2-2
+  A("the merged game is still filed — the box score is the record", s.ingested.length === 1 && s.ingested[0].resumed === true, JSON.stringify(s));
+  const gp = of(isGamePatch).slice(-1)[0];
+  A("...on the level line, untouched (an already-final game keeps its status)", gp && gp.body.home_score === 2 && gp.body.away_score === 2 && gp.body.status !== "scheduled", JSON.stringify(gp && gp.body));
+  A("it is a WARNING, not an error: the poll stays green", (s.errors || []).length === 0 && (s.warnings || []).length === 1, JSON.stringify({ e: s.errors, w: s.warnings }));
+  A("...naming the match and the score", /2-2/.test(s.warnings[0].warning) && s.warnings[0].ea_match_id === "t1", JSON.stringify(s.warnings[0]));
+  A("the officials are told the same minute, with where to rule on it",
+    world.toStaff.length === 1 && /ended level/i.test(world.toStaff[0]) && /Stats manager/.test(world.toStaff[0]) && /Rule 4\.1/.test(world.toStaff[0]),
+    JSON.stringify(world.toStaff).slice(0, 220));
+
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  const a = ea("u1", at(20), 111, 222, 1500, [1, 0]);
+  world.finals = [{ ...G900, ea_match_id: "u1" }];
+  world.filed = { u1: "g900" }; world.archived = { u1: { status: "ingested", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "u1", payload: a }];
+  const t = await post([ea("u1b", at(55), 111, 222, 3600, [2, 1])]);   // 1-0 + 2-1 = 3-1
+  A("a decided resume says nothing to anyone", (t.warnings || []).length === 0 && world.toStaff.length === 0, JSON.stringify(t.warnings));
 }
 
 console.log("\n— a batch: filed matches cost nothing, one prefetch covers the whole delivery");

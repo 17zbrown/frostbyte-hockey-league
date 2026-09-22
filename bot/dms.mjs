@@ -18,7 +18,7 @@ export function createDms(env, opts = {}) {
   const { SB_URL, SB_KEY, BOT } = env;
   const SB_MS = opts.sbTimeoutMs ?? SB_TIMEOUT_MS;
   const D_MS = opts.discordTimeoutMs ?? DISCORD_TIMEOUT_MS;
-  const sum = { sent: 0, skipped: 0, refused: 0, failed: 0, unconfirmed: 0, stampFailed: 0, errors: 0, lastErrorAt: null, lastError: null };
+  const sum = { sent: 0, skipped: 0, refused: 0, deferred: 0, failed: 0, unconfirmed: 0, stampFailed: 0, errors: 0, lastErrorAt: null, lastError: null };
   const errors = [];
   const note = (e) => {
     const msg = String((e && e.message) || e).slice(0, 180);
@@ -50,7 +50,10 @@ export function createDms(env, opts = {}) {
       if (!j || !j.id) { const e = new Error(`${method} ${path} returned no id`); e.provable = true; throw e; }
       return j;
     }
-    const e = new Error(`${method} ${path} -> rate-limited after retries`); e.provable = true; throw e;
+    /* v2.78: a 429 means Discord stored NOTHING, so this is not a refusal like a closed DM — it is
+       "not yet". Tagged neither provable nor ambiguous: the claim is released and send_error is left
+       null, so the next catch-up tries again instead of the row being excluded forever. */
+    const e = new Error(`${method} ${path} -> rate-limited after retries`); e.retry = true; throw e;
   }
   async function claim(ref) {
     const r = await timedFetch(`${SB_URL}/rest/v1/discord_post_log`, { method: "POST", headers: { ...sbHead(), Prefer: "return=minimal" }, body: JSON.stringify({ kind: "dm", ref }) }, SB_MS);
@@ -85,6 +88,12 @@ export function createDms(env, opts = {}) {
         await discord("POST", `/channels/${ch}/messages`, { content: String(row.content).slice(0, 1990), allowed_mentions: { parse: [] } });
       } catch (e) {
         const msg = String(e.message || e).slice(0, 200);
+        if (e.retry) {
+          await release(ref);
+          sum.deferred++;
+          note(new Error(`${ref}: ${msg} — left for the next sweep`));
+          return "deferred";
+        }
         if (e.provable) {
           /* the door is closed (DMs off, left the server): record it, hand the claim back, do not knock again */
           await release(ref);
@@ -117,9 +126,27 @@ export function createDms(env, opts = {}) {
     try { rows = await sbGet(`discord_dms?sent_at=is.null&send_error=is.null&created_at=lt.${encodeURIComponent(before)}&order=created_at.asc&limit=100`); }
     catch (e) { note(e); return 0; }
     let n = 0;
-    for (const row of rows) { if (String(await send(row)).startsWith("sent")) n++; }
+    for (const row of rows) {
+      if (String(await send(row)).startsWith("sent")) n++;
+      await new Promise((r) => setTimeout(r, opts.gapMs ?? 350));
+    }
     return n;
   }
 
-  return { send, catchUp, sum, errors };
+  /* Discord's DM limits are per-recipient AND global, and the availability nudge writes one row per
+     player in a single statement — a hundred realtime events at once. Everything funnels through one
+     queue with a small gap between messages, so the burst is paced instead of being half-refused. */
+  const GAP_MS = opts.gapMs ?? 350;
+  let chain = Promise.resolve(), lastAt = 0;
+  function enqueue(row){
+    const run = chain.then(async () => {
+      const wait = Math.max(0, GAP_MS - (Date.now() - lastAt));
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      try { return await send(row); } finally { lastAt = Date.now(); }
+    });
+    chain = run.catch(() => {});
+    return run;
+  }
+  async function catchUpQueued(minAgeMs){ return catchUp(minAgeMs); }
+  return { send: enqueue, sendNow: send, catchUp: catchUpQueued, sum, errors };
 }

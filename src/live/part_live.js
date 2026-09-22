@@ -334,6 +334,65 @@ CG._codesToday = function(){
   return CG.sb.from("games_public").select("id,game_code,server").gte("scheduled_at", from).lte("scheduled_at", to)
     .then(function(r){ return r; }, function(e){ return { data:[], error:e }; });
 };
+/* Rule 4.2 (v2.78): the codes are minted with the schedule but masked until 30 minutes before the
+   night's first game, so a tab opened before that moment booted with nulls. This re-reads the
+   masked view in place — no page rebuild — and repaints, for the people the view will answer:
+   the two clubs' rosters and front offices, and the league office. */
+CG.refreshCodes = function(){
+  if (!CG.sb || !CG.lg) return Promise.resolve(0);
+  return CG._codesToday().then(function(r){
+    if (!r || r.error) return 0;
+    var by = {}; (r.data||[]).forEach(function(c){ if (c && c.id) by[c.id] = c; });
+    var n = 0;
+    (CG.lg.schedule||[]).forEach(function(g){
+      var c = by[g.id]; if (!c) return;
+      var code = c.game_code || null, server = c.server || null;
+      if (g.code !== code || g.server !== server){ g.code = code; g.server = server; n++; }
+    });
+    if (n){
+      var ov = document.getElementById("overlay-root");
+      if (!(ov && ov.innerHTML.trim())){
+        var y = window.pageYOffset;
+        if (CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else if (CG.router) CG.router();
+        window.scrollTo(0, y);
+      }
+    }
+    return n;
+  }, function(){ return 0; });
+};
+/* Armed once per session: from two minutes before tonight's release until the last game is well
+   under way, ask again every minute while the tab is visible and a code is still missing. Only for
+   a member whose club plays tonight (or the league office) — for anyone else the view answers null
+   by design and the poll would be waste. */
+CG.armCodeWatch = function(){
+  if (CG._codeWatch) return;
+  var role = typeof CG.role === "function" ? CG.role() : "guest";
+  if (role === "guest") return;
+  var office = role === "commish" || role === "staff";
+  /* NOT CG.myClub(): it falls back to the first club in the table for anyone unaffiliated, which
+     would arm this watch for every visitor and poll a view that answers null for them by design. */
+  var me = CG.me && CG.me(), mt = CG.myManagedTeam && CG.myManagedTeam();
+  var mine = (me && me.team) || (mt && mt.code) || null;
+  if (!office && !mine) return;
+  var tonight = (CG.lg && CG.lg.schedule || []).filter(function(g){
+    return g.status !== "final" && Math.abs(g.at - CG.now()) < 20*3600000
+      && (office || g.home === mine || g.away === mine);
+  });
+  if (!tonight.length) return;
+  var first = tonight.reduce(function(m, g){ return Math.min(m, g.at); }, Infinity);
+  var last  = tonight.reduce(function(m, g){ return Math.max(m, g.at); }, 0);
+  var from = first - 32*60000, until = last + 30*60000;
+  if (CG.now() > until) return;
+  CG._codeWatch = setInterval(function(){
+    var t = CG.now();
+    if (t > until){ clearInterval(CG._codeWatch); CG._codeWatch = null; return; }
+    if (t < from) return;
+    if (document.visibilityState === "hidden") return;
+    var missing = tonight.some(function(g){ var row = (CG.lg.schedule||[]).find(function(x){ return x.id === g.id; }); return row && !row.code; });
+    if (!missing){ clearInterval(CG._codeWatch); CG._codeWatch = null; return; }
+    CG.refreshCodes();
+  }, 60000);
+};
 CG.buildLiveLeague = async function(opts){
   opts = opts || {};
   var sb = CG.sb;
@@ -844,7 +903,12 @@ CG.buildLiveLeague = async function(opts){
   if (futureG.length){
     var avWk = futureG[0].week || 1, avStage = futureG[0].stage || "regular";
     var byNight = {};
-    futureG.filter(function(g){ return (g.week||1)===avWk && (g.stage||"regular")===avStage; }).forEach(function(g){
+    /* v2.78: EVERY night of that week, played or not. The night keys are positional (n1, n2, n3)
+       and the answers are stored under them, so a list built from unplayed games only used to
+       shift the moment a night went final: on Thursday the list became [Thu, Fri], Thursday took
+       the key that holds Wednesday's answers, and every answer for the rest of the week read as
+       "no answer" (and a re-save would have overwritten the wrong night). */
+    schedule.filter(function(g){ return (g.week||1)===avWk && (g.stage||"regular")===avStage; }).forEach(function(g){
       var day = new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date(g.at));
       if (!byNight[day] || g.at < byNight[day]) byNight[day] = g.at;
     });
@@ -10914,6 +10978,17 @@ CG.renderLineupReadiness = function(){
 };
 CG.AFTER._admScheduleLive = function(){
   CG.renderLineupReadiness();
+  /* v2.78: on game night this card is the office's only view of who has not filed, and its chips
+     count down to each lock — so it repaints every 30 seconds while the page is open (the card
+     replaces its own node; nothing else on the page is touched). */
+  clearInterval(CG._readyIv);
+  CG._readyIv = setInterval(function(){
+    if (location.hash.indexOf("/admin/schedule") < 0){ clearInterval(CG._readyIv); CG._readyIv = null; return; }
+    if (document.visibilityState === "hidden") return;
+    var ov = document.getElementById("overlay-root");
+    if (ov && ov.innerHTML.trim()) return;
+    CG.renderLineupReadiness();
+  }, 30000);
   /* Season shape: the arithmetic is shown live, because weeks x nights x times decides how many
      games there are, and that in turn decides which divisional splits are even possible. Typing a
      number that cannot work should say so before it is saved, not after a schedule is generated. */
@@ -11941,7 +12016,10 @@ CG.hubScheduleLive = function(){
     var locked = CG.now() >= lockAt;
     var rows = games.map(function(g){
       var homeSide = g.home===club, opp = homeSide?g.away:g.home;
-      var codeReleased = CG.now() >= g.at - 30*60000;
+      /* Rule 4.2: the night's codes release together, 30 minutes before its FIRST game — the same
+          moment can_see_match starts answering. This used to gate on each game's own puck drop, so
+          the 10:20 code read "locked" here while the matchup page already showed it. */
+      var codeReleased = CG.now() >= (CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at - 30*60000);
       return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:12px">'+
         '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
           '<span class="mono" style="font-size:12px;color:var(--steel);min-width:76px">'+CG.fmtTime(g.at)+'</span>'+
@@ -11950,7 +12028,7 @@ CG.hubScheduleLive = function(){
           '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">'+
             (codeReleased
               ? '<span class="chip chip-chrome mono" style="letter-spacing:.12em">'+(CG.gameCode(g.id)||'code pending')+'</span>'
-              : '<span class="chip">'+CG.ic("lock",11)+' Code at '+CG.fmtTime(g.at-30*60000)+'</span>')+
+              : '<span class="chip">'+CG.ic("lock",11)+' Code at '+CG.fmtTime(CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at-30*60000)+'</span>')+
             '<a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Match card</a></span></div>'+
         CG.serverVetoControls(g, me, lockAt)+
       '</div>';
@@ -12967,6 +13045,7 @@ CG.bootLive = async function(){
   }
   CG.renderChrome();
   CG.subscribeLeague();   /* scores, standings and stats now update live for everyone */
+  CG.armCodeWatch();      /* Rule 4.2: tonight's codes reach a tab that was open before T-30 */
   /* land back where the user was before the OAuth round-trip (stashed by CG.signIn just
      before redirecting; consumed only within 10 minutes so a stale stash can't hijack boot) */
   var ret = null;

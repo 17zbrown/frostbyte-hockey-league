@@ -264,6 +264,10 @@ export function createEaPoller(env, opts = {}) {
         }
       }
       const ingestErrs = Array.isArray(out.errors) ? out.errors : [];
+      /* Warnings are things the officials must rule on (a resumed game that ended level), not
+         transport failures. They must NOT turn the run red or the watchdog would page for a poll
+         that worked, and the real signal would drown. They ride on the record and in the log. */
+      const ingestWarns = Array.isArray(out.warnings) ? out.warnings : [];
       const ingestStatus = ir ? ir.status : null;
       const ingestOk = !matches.length || ingestUnknown === 1 || (ingestStatus === 200 && ingestErrs.length === 0);
       const ok = clubErrors.length === 0 && ingestOk;
@@ -278,6 +282,8 @@ export function createEaPoller(env, opts = {}) {
         unmatched: Array.isArray(out.unmatched) ? out.unmatched.length : 0,
         skipped: Array.isArray(out.skipped) ? out.skipped.length : 0,
         errors: ingestErrs.length,
+        ...(ingestWarns.length ? { warnings: ingestWarns.length,
+          ingestWarning: ingestWarns[0].warning || ingestWarns[0].error || null } : {}),
         ingestUnknown,
         incomplete, offWindow, fixturesOpen: open.length,
         ...(unlinked.length ? { unlinkedInFixtures: unlinked.length,
@@ -291,7 +297,8 @@ export function createEaPoller(env, opts = {}) {
       log(`ea-poll: ${open.length} fixture${open.length === 1 ? "" : "s"} in window, polled ${clubs.length} club${clubs.length === 1 ? "" : "s"}, ${matches.length} match${matches.length === 1 ? "" : "es"}` +
         (offWindow ? ` (${offWindow} outside any fixture's window — the importer will refuse them)` : "") +
         (matches.length ? (ingestUnknown ? ", ingest timed out (result unknown, re-sent next cycle)" : `, ingest ${ingestStatus} (ingested ${res.ingested}, unmatched ${res.unmatched}, skipped ${res.skipped}, errors ${res.errors})`) : "") +
-        (clubErrors.length ? `, ${clubErrors.length} club error${clubErrors.length === 1 ? "" : "s"}` : ""));
+        (clubErrors.length ? `, ${clubErrors.length} club error${clubErrors.length === 1 ? "" : "s"}` : "") +
+        (ingestWarns.length ? `, ${ingestWarns.length} for the officials: ${ingestWarns.map((w) => w.warning || w.error).join("; ")}` : ""));
       return { at: iso(), lane: "vm", ...res, clubErrors, fixtureDue };
     } catch (e) {
       const msg = String((e && e.message) || e);

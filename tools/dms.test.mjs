@@ -15,6 +15,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("discord.com/api/v10/channels/") && m === "POST") {
     world.postAttempts++;
     if (world.failPost === 403) return J({ message: "Cannot send messages to this user", code: 50007 }, 403);
+    if (world.failPost === 429) return new Response(JSON.stringify({ message: "rate limited" }), { status: 429, headers: { "content-type": "application/json", "retry-after": "0" } });
     if (world.failPost === 500) return new Response("nope", { status: 500 });
     world.posts.push({ channel: u.split("/channels/")[1].split("/")[0], body: JSON.parse(opts.body) }); return J({ id: "m" + world.posts.length });
   }
@@ -48,6 +49,26 @@ console.log("— an unknown outcome is never sent twice");
   A("...claim kept", world.claims.has("dm:d5"));
   world.failPost = false;
   A("...and not re-sent by this process", (await D.send(row({ id: "d5", discord_id: "u3" }))) === "unconfirmed" && world.postAttempts === 1);
+}
+console.log("— a rate-limited DM is deferred, never marked refused (v2.78)");
+{
+  const D = createDms(env, { gapMs: 0 }); world.postAttempts = 0; world.patches.length = 0;
+  world.failPost = 429;
+  const r = await D.send(row({ id: "d7", discord_id: "u7" }));
+  A("deferred, not refused", r === "deferred", r);
+  A("...the claim is released so a later sweep may try again", !world.claims.has("dm:d7"));
+  A("...and send_error is NOT stamped (the catch-up selects send_error=is.null)", !world.patches.some((p) => p.id === "d7"));
+  world.failPost = false;
+  A("...and the retry then sends it", (await D.send(row({ id: "d7", discord_id: "u7" }))) === "sent");
+}
+console.log("— a burst is paced through one queue");
+{
+  const D = createDms(env, { gapMs: 20 }); world.postAttempts = 0;
+  const t0 = Date.now();
+  const rows = Array.from({ length: 5 }, (_, i) => row({ id: "b" + i, discord_id: "ub" + i }));
+  const out = await Promise.all(rows.map((r) => D.send(r)));
+  A("every message in the burst is sent", out.every((r) => r === "sent"), out.join());
+  A("...one at a time, with a gap between them", Date.now() - t0 >= 20 * 4);
 }
 console.log("— the catch-up sends what realtime missed");
 {

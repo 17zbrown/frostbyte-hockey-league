@@ -789,6 +789,18 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
   if (merged.error) {
     return refuse(merged.error);
   }
+  /* Rule 4.3 resumes a lag-out game, so the sittings' goals ADD: that total is the real score.
+     What cannot stand is a level total. This league plays continuous overtime and has no shootout
+     (Rule 4.1), so a tie means the clubs replayed the game in full instead of resuming it, or one
+     sitting was filed twice. File it anyway (the box score is still the record) and put it in front
+     of the officials the same night: a level final charges BOTH clubs a loss until it is ruled on.
+     It travels as a WARNING, not an error, because the import itself worked. */
+  if (merged.clubs && merged.clubs.length === 2 && (merged.clubs[0].score || 0) === (merged.clubs[1].score || 0)) {
+    const lvl = `\u26a0\ufe0f **Resumed game ended level** \u00b7 EA match ${merged.ea_match_id}, merged from ${(merged.merged_from || []).join(" + ")}, finished ${merged.clubs[0].score} to ${merged.clubs[1].score}. A resumed game cannot end tied (Rule 4.1): the clubs likely replayed in full rather than resuming, or one sitting was filed twice. Rule on it in Control Center, Stats manager, before the table is read. A level final charges both clubs a loss.`;
+    (summary.warnings = summary.warnings || []).push({ ea_match_id: merged.ea_match_id,
+      warning: `merged game ended level (${merged.clubs[0].score}-${merged.clubs[1].score}); the officials were told` });
+    await tellStaff(lvl);
+  }
 
   // write exactly as a normal ingest writes, from the merged line
   const clubByTeam = {};
@@ -1240,7 +1252,7 @@ export const handler = async (event) => {
     if (!jwt || !(await isCommissioner(jwt))) return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
     const row = (await sbGet(`ea_ingest_log?ea_match_id=eq.${encodeURIComponent(String(body.reingest))}&select=payload&limit=1`))[0];
     if (!row) return { statusCode: 404, body: JSON.stringify({ error: "No archived payload for that match id" }) };
-    const summary = { received: 1, ingested: [], skipped: [], unmatched: [], errors: [] };
+    const summary = { received: 1, ingested: [], skipped: [], unmatched: [], errors: [], warnings: [] };
     try {
       const norm = normalizeMatch(row.payload);
       if (!norm) summary.errors.push({ reason: "archived payload is unparseable" });
@@ -1256,7 +1268,7 @@ export const handler = async (event) => {
   const matches = matchesRaw && matchesRaw.slice().sort((a, b) => (+a?.timestamp || 0) - (+b?.timestamp || 0));
   if (!matches) return { statusCode: 400, body: JSON.stringify({ error: "Expected { matches: [...] } or a single match object." }) };
 
-  const summary = { received: matches.length, ingested: [], skipped: [], unmatched: [], errors: [] };
+  const summary = { received: matches.length, ingested: [], skipped: [], unmatched: [], errors: [], warnings: [] };
   /* the whole batch, normalized, is the adjacency context: the resume check needs to see whether a
      club played someone else between two sittings, and the poll's per-club history is right here */
   const batch = matches.map((m) => { try { return normalizeMatch(m); } catch (e) { return null; } }).filter(Boolean);

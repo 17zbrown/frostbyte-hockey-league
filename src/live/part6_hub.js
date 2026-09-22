@@ -798,7 +798,9 @@ CG.hubLineup = function(qs){
     '<span style="margin-left:auto;display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;min-width:0">'+
     (!rawLocked ? editControls
       : emergency ? editControls+'<button class="btn btn-ghost btn-sm" id="luEmCancel">Cancel</button>'
-      : '<span class="lock">'+CG.ic("lock",14)+'Locked</span><button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the deadline for an emergency call-up">Emergency call-up</button>')+
+      : '<span class="lock">'+CG.ic("lock",14)+'Locked</span>'+(CG.emergencyClosed(game)
+          ? '<span class="caption">The door closed 10 minutes after puck drop. The sheet on file is the record (Rule 5.3).</span>'
+          : '<button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the deadline for an emergency call-up">Emergency call-up</button>'))+
     '</span></div>'+
     (emergency?'<div class="note red" style="margin-bottom:18px;font-size:13px;line-height:1.5">This game locked at '+CG.fmtTime(lockAt)+'. Emergency call-ups are for a genuine no-show — the swap is recorded, and the opponent already sees the locked lineup. Change only the player you must.</div>':"");
   var rink = '<div class="rink"><div class="rk-rows">'+
@@ -981,6 +983,9 @@ CG.AFTER._lineup = function(){
   if (sub) sub.addEventListener("click", function(){
     var pastLock = CG.now() >= game.at - 30*60000;
     if (pastLock && !inEmergency()){ CG.toast("Lineup is locked (Rule 5.3) — use an emergency call-up","err"); return; }
+    /* v2.78: the door can close while the builder sits open. Say so here rather than let the RPC
+       answer with a refusal the club cannot read (Rule 5.3). */
+    if (pastLock && CG.emergencyClosed(game)){ CG.toast("Emergency call-ups closed 10 minutes after puck drop. The filed sheet is the record (Rule 5.3).","err"); return; }
     var missing = ["LW","C","RW","LD","RD","G"].filter(function(pos){ return !state.slots[pos]; });
     if (missing.length){ CG.toast("Fill every slot first — missing "+missing.join(", "), "err"); return; }
     var emg = pastLock;   /* submitting after the lock is, by definition, an emergency call-up */
