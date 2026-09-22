@@ -650,7 +650,19 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
   const owed = {};      /* club -> sheets not yet filed this week */
   for (const tid of Object.keys(byClub)) owed[tid] = byClub[tid].filter((g) => !filedSet.has(`${g.id}:${tid}`)).length;
 
-  const clubLine = (tid) => byClub[tid].map((g) => `${fmtDay(g.scheduled_at)} ${fmtTime(g.scheduled_at)} ${g.home_team_id === tid ? "vs " + ((teamById[g.away_team_id] || {}).code || "?") : "at " + ((teamById[g.home_team_id] || {}).code || "?")}`).join(" · ");
+  /* a week is three nights of three games: group them by night so the line reads like a schedule
+     rather than nine repetitions of the same date */
+  const opp = (g, tid) => (g.home_team_id === tid ? "vs " : "at ") + ((teamById[g.home_team_id === tid ? g.away_team_id : g.home_team_id] || {}).code || "?");
+  const clubLine = (tid) => {
+    const nights = [];
+    for (const g of byClub[tid]) {
+      const day = fmtDay(g.scheduled_at).split(",")[0];
+      const last = nights[nights.length - 1];
+      const at = `${fmtTime(g.scheduled_at).replace(" ET", "")} ${opp(g, tid)}`;
+      if (last && last.day === day) last.games.push(at); else nights.push({ day, games: [at] });
+    }
+    return nights.map((n) => `${n.day} ${n.games.join(", ")}`).join(" · ");
+  };
   const clubBody = (tid) => {
     const team = teamById[tid] || {}, out = missByClub[tid] || [];
     const head = `📋 **Week ${wk} availability closes ${closes}** (Rule 5.1, 90 minutes before the night's first puck drop).`;
@@ -658,7 +670,7 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
       ? `\nStill to answer (${out.length}): ` + out.map((m) => (m.discord_id ? `<@${m.discord_id}>` : m.gamertag)).join(" ")
         + `\nIt takes a minute, one answer per game: https://chelgamingleague.com/#/hub/availability`
       : `\nEvery ${team.name || team.code || "club"} player has answered. Nothing to do.`;
-    return head + who + `\n${team.code || ""} this week: ${clubLine(tid)}`;
+    return head + who + `\n${team.code || ""} this week (times ET): ${clubLine(tid)}`;
   };
   const mgmtBody = () => {
     const ping = ["owner", "general manager", "assistant general manager"].map((k) => roles[k]).filter(Boolean).map((id) => `<@&${id}>`).join(" ");

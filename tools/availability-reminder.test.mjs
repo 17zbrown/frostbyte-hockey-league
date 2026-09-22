@@ -108,7 +108,9 @@ console.log("— the club rooms");
     /<@d1>/.test(bos.content) && /<@d2>/.test(bos.content) && /Still to answer \(2\)/.test(bos.content));
   A("a player with no Discord link is named in text rather than dropped", /NoDiscord/.test(club("ch2").content));
   A("the mention actually notifies him", JSON.stringify(bos.allowed_mentions) === JSON.stringify({ parse: ["users", "roles"] }));
-  A("the club's own games for the week are listed", /BOS this week: /.test(bos.content) && /vs DAL/.test(bos.content) && /at VAN/.test(bos.content), bos.content.split("\n").pop());
+  A("the club's own games for the week are listed, grouped by night",
+    /BOS this week \(times ET\): /.test(bos.content) && /vs DAL/.test(bos.content) && /at VAN/.test(bos.content)
+    && /: \w{3} \d+:\d\d [AP]M (vs|at) \w+, \d+:\d\d [AP]M (vs|at) \w+$/.test(bos.content.split("\n").pop()), bos.content.split("\n").pop());
   A("the link goes to the availability page", /#\/hub\/availability/.test(bos.content));
   const van = club("ch3");
   A("a club with everyone in is told so, and pings nobody", /Nothing to do/.test(van.content) && !/<@/.test(van.content), van.content.split("\n")[1]);
