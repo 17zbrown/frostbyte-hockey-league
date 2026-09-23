@@ -1,0 +1,17 @@
+-- v2.95 (2026-09-23): a player is told when his club dresses him, and when it drops him.
+-- Applied live by splicing public.set_game_lineup (public._splice_fn), rehearsed first against
+-- real data and rolled back: 6 notifications on a fresh sheet, 0 on a resubmit of the same six,
+-- 2 on a one-player swap (the man in and the man out).
+--
+-- Two edits:
+--   1. `select * into v_old ...` moved OUT of the `if v_locked` branch so the previous sheet is
+--      read on EVERY filing; the post-lock penalty count now guards on `v_old.game_id is not null`
+--      instead of the SELECT's `found`.
+--   2. After the upsert and the post-lock notices, a block compares the six going in against the
+--      six that were there and calls public.create_notification(profile, 'lineups', ..., 'game',
+--      p_game) for each player ADDED ("You are dressed vs BOS") and each player DROPPED ("You are
+--      no longer dressed"). view 'game' routes to #/matchup/<id> on the site.
+--
+-- Deliberately quiet: a resubmit of the same six, or a shuffle of those six between positions,
+-- notifies nobody, because nothing changed for any player. The body names the game time and the
+-- lock time, and cites Rule 5.3 for what a post-lock change costs.

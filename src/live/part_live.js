@@ -1560,7 +1560,7 @@ CG.notifRoute = function(view, param){
     case "game":         return p ? "#/matchup/"+encodeURIComponent(p) : "#/schedule";
     case "draft":        return "#/hub/draft";
     case "availability": return "#/hub/availability";   /* v2.75: the closed-week nudge lands on the form */
-    case "lineups":      return "#/hub/lineups";
+    case "lineups":      return "#/hub/lineups";   /* the week's sheets; a single game uses view "game" */
     case "manager":      return "#/hub";
     case "mgmtapprovals": return "#/hub/management";
     case "transactions": return "#/home";
@@ -1594,7 +1594,9 @@ CG.notifRoute = function(view, param){
   }
 };
 CG.notifIcon = function(type){
-  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", app_message:"msg", request:"flag", stat:"chart" }[type] || "bell";
+  /* v2.95: 'lineups' (dressed for a game) and 'availability' (the week's nudge) both had the
+     default bell, which told a player nothing at a glance in a list of twenty. */
+  return { trade:"swap", flag:"flag", roster:"users", role:"shield", sign:"check", draft:"grid", discord:"msg", app:"users", app_message:"msg", request:"flag", stat:"chart", lineups:"grid", availability:"cal" }[type] || "bell";
 };
 /* staff/commish backlog summary from the DB (open cases, apps, unmatched EA imports, finals
    missing box scores, active suspensions). Powers the Staff Desk "Needs attention" card and

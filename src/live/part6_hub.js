@@ -128,9 +128,12 @@ CG.hubNav = function(section){
     if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
     if (CG.LIVE_MODE && CG.can("lineup.build") && CG.hubGameStats) club.push(["gamestats","Game stats","chart"]);
-    /* ONE lineup surface: the board (#/hub/lines) replaced the per-game builder in the nav. The
-       old page stays routed but unlisted as the emergency call-up door (Rule 5.3). */
+    /* TWO lineup surfaces, both listed (v2.95). The board (#/hub/lines) is where a club builds
+       its lines and dresses whole nights; the per-game page (#/hub/lineup) is where it changes
+       ONE game, and it is also the emergency call-up door (Rule 5.3). It was routed but unlisted,
+       so the only way in was a link from somewhere else, which is no way to find a page. */
     if (CG.can("lineup.build")) club.push(["lines","Lineup builder","grid"]);
+    if (CG.can("lineup.build")) club.push(["lineup","Game lineups","cal"]);
     if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
     if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);
     if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubDraftLive) club.push(["draft","Draft","play"]);
@@ -780,7 +783,9 @@ CG.hubLineup = function(qs){
     : "";
   var nightSwitch = gameSwitch;
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+CG.fmtFull(game.at)+' · vs '+esc(CG.TEAM[opp].name)+'</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Per-game adjustments'+nightSwitch+'</h1>'+
+    /* v2.95: "Per-game adjustments" described the mechanism, not the job. This page IS a club's
+       lineup for one game, so it is named that on the page and in the nav. */
+    '<h1 class="h-sec" style="margin-top:8px">Game lineup'+nightSwitch+'</h1>'+
     (game.stage==="preseason" ? '<div class="note" style="margin-top:10px"><b style="font-family:var(--f-disp)">Pre-season game.</b> No weekly caps, and your Owner, GM and AGM can be dressed at any position — get as many players into games as you can (Rules 0.4 and 5.2).</div>' : '')+
     '<p class="lede" style="margin-top:8px">One game, one lineup. Day-to-day lines live in the <a href="#/hub/lines" style="font-weight:700;border-bottom:2px solid var(--chrome)">Lineup builder</a> — this page adjusts a single night, and after the '+CG.fmtTime(lockAt)+' lock every change costs one in-game penalty (Rule 5.3).</p></div>';
   /* the night plan reaching the real game: when this night has a planned line, offer it as a
@@ -1153,6 +1158,29 @@ CG.lineOvr = function(slots){
 /* v2.89: the line ONE game dresses. Its own plan wins; otherwise the night's default stands, which
    is what a club that runs the same six all night never has to think about. A club may now put a
    different line in each of a night's three games. */
+/* v2.95: the week's availability, one mark per night, for a player card in the line creator.
+   A manager builds lines here and had to leave for the Availability page to see who said no.
+   Aggregates each night's games the way the grid's night summary does: all yes, all no, mixed,
+   or no answer. Returns "" when there is no game week to answer for. */
+CG.lcAvStrip = function(club, p){
+  var nights = (CG.WEEK8 && CG.WEEK8.open && CG.WEEK8.nights) || [];
+  if (!nights.length || !CG.avFor) return "";
+  var av = CG.avFor(p.id);
+  var out = nights.map(function(n){
+    var games = CG.clubGamesOnNight ? CG.clubGamesOnNight(club, n) : [];
+    var vals = games.map(function(g){ return CG.avGame ? CG.avGame(av, n.key, g.id) : "nr"; });
+    if (!vals.length) vals = [ (av.nights[n.key] && av.nights[n.key].st) || "nr" ];
+    var yes = vals.filter(function(v){ return v === "yes"; }).length;
+    var no  = vals.filter(function(v){ return v === "no"; }).length;
+    var st  = (yes === vals.length) ? "yes" : (no === vals.length) ? "no" : (yes || no) ? "mb" : "nr";
+    var mark = st === "yes" ? "\u2713" : st === "no" ? "\u2717" : st === "mb" ? "\u00b7" : "\u2014";
+    var lab = (CG.NIGHT_LABEL[n.key] || n.key).slice(0, 3);
+    return '<span class="avcell '+st+'" title="'+esc(lab)+': '+
+      (st==="yes" ? "available for every game" : st==="no" ? "not available" : st==="mb" ? yes+" of "+vals.length+" games" : "no answer")+
+      '">'+mark+'</span>';
+  }).join("");
+  return '<span class="lc-av-strip" title="This week\u2019s availability, one mark per night">'+out+'</span>';
+};
 CG.lcGameSlot = function(club, nightKey, gameId){
   var lg = CG.lg || {};
   var own = (lg._gameLinePlan || {})[gameId];
@@ -1234,8 +1262,12 @@ CG.hubLines = function(qs){
       var pid = sl[pos], pl = pid && CG.playerById(lg, pid);
       cells += '<div class="lc-slot'+(pl?" filled":"")+'" data-line="'+n+'" data-slot="'+pos+'" tabindex="0" role="button" '+
         'aria-label="Line '+n+' '+CG.POS_NAME[pos]+(pl?" — "+esc(pl.tag):" — empty")+'" draggable="'+(!!pl)+'">'+
-        (pl ? CG.lcAv(pl,26)+'<span class="nm">'+esc(pl.tag)+'</span><span class="mt">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+'</span>'
-            : '<span class="mt">'+pos+'</span>')+'</div>';
+        /* v2.95: the same anatomy as the per-game page's slot — the position always labelled,
+           then the name, then the rating. The avatar competed with the name in a 6-across grid
+           and the position was only implied by the column header. */
+        '<span class="sl-pos">'+CG.POS_NAME[pos]+'</span>'+
+        (pl ? '<span class="sl-name">'+esc(pl.tag)+'</span><span class="sl-sub">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+'</span>'
+            : '<span class="sl-sub">Empty</span>')+'</div>';
     });
   });
   var grid = '<div class="card" style="margin-bottom:18px"><div class="card-b lc-wrap"><div class="lc-grid">'+cells+'</div></div>'+
@@ -1273,6 +1305,7 @@ CG.hubLines = function(qs){
             '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">'+CG.POS_NAME[p.pos]+'</span>'+
               (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
               (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+              (CG.lcAvStrip?CG.lcAvStrip(club,p):"")+
               '</span></span>'+
             '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
         }).join("")+'</div>';
@@ -1286,6 +1319,7 @@ CG.hubLines = function(qs){
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
             (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+            (CG.lcAvStrip?CG.lcAvStrip(club,p):"")+
             '</span></span>'+
           '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
       }).join("")+'</div>' : "")+

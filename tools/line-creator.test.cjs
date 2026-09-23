@@ -317,9 +317,14 @@ console.log("\n— training camp, the week button, and the penalty price");
   A("...reporting refusals, counting games", /Dressed "\+okN\+" game/.test(src6));
   A("the emergency confirm names the cost",
     /EACH player changed costs the club one in-game penalty/.test(src6));
-  A("the old page is the unlisted per-game door",
-    /Per-game adjustments/.test(src6) && !/club\.push\(\["lineup"/.test(src6));
-  A("...and the nav's one entry is the board", /club\.push\(\["lines","Lineup builder"/.test(src6));
+  /* v2.95 REVERSED deliberately: the per-game page is now LISTED, as "Game lineups". It was
+     routed but unlisted, so the only way in was a link from somewhere else. Both surfaces are in
+     the club nav: the board builds lines and dresses nights, the game page changes one game and
+     is the emergency call-up door. */
+  A("the per-game page is listed, under a name that says what it is",
+    /club\.push\(\["lineup","Game lineups","cal"\]\)/.test(src6) && /Game lineup'\+nightSwitch/.test(src6));
+  A("...and it no longer calls itself an adjustment", !/>Per-game adjustments/.test(src6));
+  A("...alongside the board", /club\.push\(\["lines","Lineup builder"/.test(src6));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

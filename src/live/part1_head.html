@@ -1369,6 +1369,11 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .lc-slot:hover{border-color:var(--steel)}
 .lc-slot.filled{border-style:solid;border-color:var(--line);border-bottom:2.5px solid var(--chrome);background:var(--paper);cursor:grab}
 .lc-slot.target{border-color:var(--chrome-deep);background:var(--chrome-tint)}
+/* v2.95: the line slot wears the per-game page's anatomy (sl-pos / sl-name / sl-sub), scaled for
+   a six-across grid, so a manager reads the same box on both pages. */
+.lc-slot .sl-pos{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.12em;color:var(--steel);text-transform:uppercase;line-height:1}
+.lc-slot .sl-name{font-family:var(--f-disp);font-weight:700;font-size:12.5px;line-height:1.15;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lc-slot .sl-sub{font-family:var(--f-mono);font-size:9.5px;color:var(--steel)}
 .lc-slot .nm{font-family:var(--f-disp);font-weight:700;font-size:12.5px;line-height:1.15;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lc-slot .mt{font-family:var(--f-mono);font-size:9.5px;color:var(--steel)}
 .lc-board{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -1386,6 +1391,9 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
    an ellipsis on a three-column board (the shell is capped, so no viewport is wide enough) */
 .lc-pc .two .ln2{display:flex;align-items:center;gap:4px 6px;row-gap:3px;flex-wrap:wrap;min-width:0}
 .lc-pc .two .ln2 .chip{flex:0 0 auto}
+/* v2.95 the week's availability on a player card: the grid's own marks, shrunk to fit a meta row */
+.lc-av-strip{display:inline-flex;gap:2px;flex:0 0 auto}
+.lc-av-strip .avcell{width:15px;height:15px;border-radius:4px;font-size:9px;line-height:1}
 /* v2.92: the rating sits on the NAME's line, not centered against the whole card. Centered, it
    landed beside the meta row and crowded "GOALTENDER". */
 .lc-pc .ov{font-family:var(--f-mono);font-size:10px;color:var(--steel);align-self:flex-start;margin-top:3px;flex:0 0 auto}

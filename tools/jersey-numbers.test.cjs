@@ -48,8 +48,9 @@ console.log("\n— committing a change");
 
 console.log("\n— the line-creator card stops clipping");
 {
+  /* v2.95: the availability strip joined the meta row, between the week load and its close */
   A("the name owns the top row: the chips moved into the meta row",
-    /<span class="ln2">[\s\S]{0,400}weekLoadChip\(loadOf\(p\),"xs"\)[\s\S]{0,40}<\/span><\/span>/.test(hub));
+    /<span class="ln2">[\s\S]{0,400}weekLoadChip\(loadOf\(p\),"xs"\)[\s\S]{0,120}<\/span><\/span>/.test(hub));
   A("...on the camp board too", (hub.match(/weekLoadChip\(loadOf\(p\),"xs"\)\)\+\s*\n\s*'<\/span><\/span>'/g) || []).length >= 1 ||
     (hub.match(/weekLoadChip/g) || []).length >= 2);
   A("the name line is its own row and ellipses only as a last resort",

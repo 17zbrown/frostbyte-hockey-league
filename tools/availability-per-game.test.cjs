@@ -52,7 +52,10 @@ console.log("— rulebook");
 const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
 const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); };
 A("Rule 5.1 says the answer is per game, with a note per night", /Available or Not Available for each of the club’s games that week, with an optional note per night/.test(sec("5.1")));
-A("Rule 5.3 says every rostered player can see the week's set lineups", /Every rostered player can see the club’s set lineups for the week from My Hub/.test(sec("5.3")));
+/* v2.95 re-pointed: the sentence now opens with the player being NOTIFIED when he is dressed, and
+   the week's sheets follow it in the same paragraph. */
+A("Rule 5.3 says a player is told when he is dressed", /A player is notified the moment his club dresses him for a game/.test(sec("5.3")));
+A("...and that every rostered player can still see the week's set lineups", /can also see the club’s set lineups for the week from My Hub/.test(sec("5.3")));
 const cl = rb.changelog.find((c) => c.version === "2.44");
 A("changelog 2.44", !!cl && /Lineups page under My Hub/.test(cl.summary) && /answered per game/.test(cl.summary));
 A("...American spelling", !/practis|colour|centre|organis|defence/i.test(cl.summary + sec("5.1") + sec("5.3")));
