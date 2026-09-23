@@ -120,6 +120,10 @@ CG.hubNav = function(section){
   var club = [];
   var clubTools = r!=="commish" || CG.managesClub();
   if (clubTools){
+    /* v2.88: the roster's availability grid lives on this page, so the front office gets a Team HQ
+       entry for it. It used to hang off "availability.submit" alone, which is a PLAYER permission:
+       a commissioner previewing a club had no way to reach the grid from any menu at all. */
+    if (CG.can("availability.viewTeam")) club.push(["availability","Availability","cal"]);
     if (CG.can("roster.manage")) club.push(["management","Management","shield"]);
     if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
@@ -440,13 +444,17 @@ CG.hubAvailability = function(){
     '</div></div>';
   var grid = "";
   if (CG.can("availability.viewTeam")){
-    var roster = (lg.byTeam[me&&me.team?me.team:CG.myClub()]||[]).slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || a.pos.localeCompare(b.pos); });
-    var clubCode = me&&me.team?me.team:CG.myClub();
+    /* v2.88: an explicit front-office preview wins over the viewer's own roster spot, the same
+       rule as the rest of Team HQ (v2.86). A commissioner who still plays was shown HIS club's
+       grid under the previewed club's name, which is worse than showing nothing. */
+    var clubCode = (CG.previewClub && CG.previewClub()) || (me && me.team ? me.team : CG.myClub());
+    var roster = (lg.byTeam[clubCode]||[]).slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || a.pos.localeCompare(b.pos); });
     var gridCols = 4 + CG.WEEK8.nights.length, gridCamp = roster.some(CG.isCamp);
     var nightGames = {};
     CG.WEEK8.nights.forEach(function(n){ nightGames[n.key] = CG.clubGamesOnNight ? CG.clubGamesOnNight(clubCode, n) : []; });
-    grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc((CG.TEAM[me&&me.team?me.team:CG.myClub()]||{}).name||"—")+'</h3>'+
+    grid = '<div class="card" style="margin-top:20px"><div class="card-h"><h3>Team grid — '+esc((CG.TEAM[clubCode]||{}).name||"—")+'</h3>'+
       '<span class="chip">Visible to management & staff only</span></div>'+
+      (roster.length ? "" : '<div class="card-b"><p class="caption">No rostered players to show for this club yet.</p></div>')+
       '<div class="tblwrap"><table class="tbl keepcols"><caption>'+esc(CG.WEEK8.label)+' availability by player</caption><thead><tr>'+
       '<th class="tleft">Player</th><th>POS</th>'+
       CG.WEEK8.nights.map(function(n){
