@@ -791,6 +791,9 @@ CG.hubLineup = function(qs){
         'title="Submit these six for all '+nightGs.length+' of tonight\u2019s games at once">'+
         '<input type="checkbox" id="luWholeNight"> whole night ('+nightGs.length+' games)</label>';
     })()+
+    /* v2.85: withdraw the sheet. Nothing could unfile a game before, so a club that had filled its
+       week had no way to give a player his games back short of finding a replacement with room. */
+    (dbLu && !rawLocked ? '<button class="btn btn-ghost btn-sm" id="luRemove" title="Withdraw this sheet: the six come off this game and get the game back in their week (Rule 5.2)">Remove lineup</button>' : "")+
     '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(emergency?"Submit emergency call-up":(status==="submitted"?"Resubmit":"Submit lineup"))+'</button>';
   var bar = '<div class="note '+(emergency?"red":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">Status: '+(emergency?"Emergency call-up":(rawLocked?"Locked":status))+'</b>'+
@@ -978,6 +981,25 @@ CG.AFTER._lineup = function(){
   if (clr) clr.addEventListener("click", function(){
     if (isLocked()){ CG.toast("Lineup is locked (Rule 5.3)","err"); return; }
     state.slots={}; save("Cleared all slots");
+  });
+  var rm = $("#luRemove");
+  if (rm) rm.addEventListener("click", function(){
+    CG.confirm("Withdraw this lineup?",
+      "The six come off this game. Each of them gets this game back in his week (Rule 5.2), so you can dress him somewhere else. "+
+      "The game is then unfiled: file a lineup again before it locks at "+CG.fmtTime(game.at-30*60000)+", or the club plays with no sheet of record (Rule 3.2).",
+      "Withdraw", function(){
+      if (!CG.LIVE_MODE || !CG.sb){ CG.toast("Not connected, reload and retry","err"); return; }
+      rm.disabled = true;
+      CG.sb.rpc("clear_game_lineup", { p_game: game.id, p_team: (lg._codeToId||{})[club] }).then(function(r){
+        rm.disabled = false;
+        if (r.error){ CG.toast(r.error.message, "err"); return; }
+        /* clear BOTH records of it: what the league has on file and this browser's own draft */
+        if (lg._lineups) delete lg._lineups[club+":"+game.id];
+        var st = CG.store.get("lineups")||{}; delete st[key]; CG.store.set("lineups", st);
+        CG.toast(r.data === false ? "There was no lineup on file for this game" : "Lineup withdrawn, the six have this game back in their week", "ok");
+        CG.router();
+      });
+    });
   });
   var sub = $("#luSubmit");
   if (sub) sub.addEventListener("click", function(){
@@ -1286,7 +1308,8 @@ CG.hubLines = function(qs){
           ? (open.length
               ? '<button class="btn btn-ghost btn-sm lc-dress"'+(picked.length?"":" disabled")+' data-night="'+n.key+'" data-slot="'+planned+'" title="'+
                   (picked.length ? 'Submit this line for '+(picked.length===open.length?'every not-yet-locked game of ':'the selected game'+(picked.length===1?"":"s")+' on ')+esc(CG.fmtDate(g.at)) : 'Pick at least one game')+'">'+
-                  (dressedN?"Redress":"Dress")+' '+picked.length+' game'+(picked.length===1?"":"s")+'</button>'
+                  (dressedN?"Redress":"Dress")+' '+picked.length+' game'+(picked.length===1?"":"s")+'</button>'+
+                (dressedN ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="Withdraw the filed sheets for the selected game'+(picked.length===1?"":"s")+' of '+esc(CG.fmtDate(g.at))+'. Everyone on them gets those games back in his week (Rule 5.2).">Clear '+picked.length+'</button>' : "")
               : '<span class="lock" title="Every game this night has locked">'+CG.ic("lock",13)+'Locked</span>'+
                 '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Swap a player after the lock — one in-game penalty per change (Rule 5.3)">Emergency call-up</a>')
           : '<span class="caption">pick a line to enable dressing</span>')+
@@ -1638,6 +1661,34 @@ CG.AFTER._lines = function(qs){
           next(i+1);
         });
       })(0);
+    });
+  });
+  document.querySelectorAll(".lc-clear").forEach(function(el){
+    el.addEventListener("click", function(){
+      var night = el.dataset.night, picks = CG.lcPicked(club, night);
+      if (!picks.length) return;
+      CG.confirm("Withdraw "+picks.length+" sheet"+(picks.length===1?"":"s")+"?",
+        (CG.NIGHT_LABEL[night]||night)+": "+picks.map(function(g){ return CG.fmtTime(g.at); }).join(", ")+
+        ". Everyone on those sheets gets those games back in his week (Rule 5.2), so you can dress him elsewhere. "+
+        "The games are then unfiled: dress them again before they lock (Rule 3.2).",
+        "Withdraw", function(){
+        if (!CG.LIVE_MODE || !CG.sb || !tid){ CG.toast("Not connected, reload and retry","err"); return; }
+        el.disabled = true;
+        var n = 0, errs = [];
+        (function next(i){
+          if (i >= picks.length){
+            el.disabled = false;
+            if (errs.length) CG.toast("Withdrew "+n+", refused: "+errs.join("; "), "err");
+            else CG.toast("Withdrew "+n+" sheet"+(n===1?"":"s")+", those games are back in the players' weeks", "ok");
+            repaint(); return;
+          }
+          CG.sb.rpc("clear_game_lineup", { p_game: picks[i].id, p_team: tid }).then(function(r){
+            if (r.error) errs.push(CG.fmtTime(picks[i].at)+": "+r.error.message);
+            else { n++; if (lg._lineups) delete lg._lineups[club+":"+picks[i].id]; }
+            next(i+1);
+          });
+        })(0);
+      });
     });
   });
   document.querySelectorAll(".lc-gp").forEach(function(el){

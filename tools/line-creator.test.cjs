@@ -177,7 +177,8 @@ console.log("\n— locks and caps cannot be planned around");
   A("no direct insert into game_lineups anywhere in the creator",
     !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
   A("a locked night shows the lock instead of a Dress button",
-    /open\.length[\s\S]{0,500}Locked/.test(src6));
+    /* v2.85 widened: the per-game picker and the Clear button sit between the two */
+    /open\.length[\s\S]{0,900}Locked/.test(src6));
   A("a refused dress surfaces the rule's own message", /the rules refused: /.test(src6));
   A("saving a line goes through set_team_line", /CG\.sb\.rpc\("set_team_line"/.test(src6));
   A("planning a night goes through set_team_line_night", /CG\.sb\.rpc\("set_team_line_night"/.test(src6));

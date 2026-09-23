@@ -1,0 +1,18 @@
+-- v2.85 (2026-09-22, the night before Season 1's first games): withdraw a filed lineup.
+-- Applied live in one gated transaction; rehearsed first with a real clear + rollback.
+--
+--   public.clear_game_lineup(p_game uuid, p_team uuid) returns boolean
+--     Deletes the club's game_lineups row for that game and returns whether one was there.
+--     Same gate as set_game_lineup: signed in, not suspended, the club is in the game, caller is
+--     a commissioner or the club's management, and mgmt_gate(team,'lines'). Refuses once the game
+--     is not 'scheduled', and refuses after the T-30 lock for everyone except a commissioner,
+--     because a locked sheet is the lineup of record (Rule 5.3) and a swap after it is an
+--     emergency call-up, not a withdrawal. Takes the same per-club-week advisory lock as
+--     set_game_lineup. Logs 'lineup_withdrawn' to admin_audit with the club, the week and the six
+--     who came off. SECURITY DEFINER; EXECUTE revoked from public and anon, granted to
+--     authenticated (management calls it from the browser).
+--
+-- WHY: every route into game_lineups wrote six players and nothing could unfile a game, so the
+-- Rule 5.2 weekly cap (which counts FILED games, not only played ones) could trap a club that had
+-- filled its week: the only way to free a player was to find a replacement who still had room.
+-- Boston ran out of such players. Withdrawing a sheet gives every player on it that game back.
