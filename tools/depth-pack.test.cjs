@@ -42,7 +42,8 @@ console.log("— a player is told only when he IS playing, never when he is not"
   A("the card only speaks when the player is dressed", /var note = \(myGame && inLineup\)/.test(hub));
   A("...and otherwise falls back to the plain slate note", /Tap any game for confirmed lines/.test(hub));
   A("a player loads his own club's lineups", /CG\.loadMyLineups = function/.test(live));
-  A("...through the anon-readable game_lineups table", /loadMyLineups[\s\S]{0,900}from\("game_lineups"\)/.test(live));
+  /* v2.87 widened: the comment explaining the full-week fetch sits between the two */
+  A("...through the anon-readable game_lineups table", /loadMyLineups[\s\S]{0,1300}from\("game_lineups"\)/.test(live));
   A("...for every signed-in role, not just management",
     /CG\.loadMyLineups\(\);\s+\/\* every role/.test(live));
   A("...and a failed fetch leaves the answer UNKNOWN rather than asserting a scratch",

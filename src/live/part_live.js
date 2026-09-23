@@ -1733,6 +1733,23 @@ CG.plannedLineup = function(g, code){
   if (row) return { LW:row.lw||null, C:row.center||null, RW:row.rw||null, LD:row.ld||null, RD:row.rd||null, G:row.goalie||null };
   return { LW:null, C:null, RW:null, LD:null, RD:null, G:null };   /* the live site never guesses */
 };
+/* v2.87: the six on file for one game, as a row of position + name. The schedule desk and the
+   roster's own week page both draw it, so a club and its players read the same sheet the same way.
+   Returns "" when no lineup is filed; the caller decides what to say in that case. */
+CG.lineupStrip = function(g, code, opts){
+  opts = opts || {};
+  var lg = CG.lg || {}, row = (CG._pubLineups||{})[code+":"+g.id];
+  if (row === undefined && lg._lineups) row = lg._lineups[code+":"+g.id];
+  if (!row) return "";
+  var slots = CG.plannedLineup(g, code), POS = ["LW","C","RW","LD","RD","G"];
+  var meId = opts.highlight || null;
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px 16px">'+POS.map(function(ps){
+    var id = slots[ps], p = id && CG.playerById(lg, id), nm = p ? p.tag : null;
+    return '<span class="small" style="white-space:nowrap"><span class="caption" style="margin-right:5px">'+ps+'</span>'+
+      (nm ? '<b'+(id===meId?' style="background:var(--chrome-tint);padding:1px 6px;border-radius:6px"':'')+'>'+esc(nm)+'</b>'
+          : '<span style="color:var(--steel)">not set</span>')+'</span>';
+  }).join("")+'</div>';
+};
 /* fetch both clubs' submitted lineups for a matchup, then re-render once they land */
 CG.loadMatchupLineups = function(g){
   if (!CG.sb || !g) return;
@@ -1767,7 +1784,11 @@ CG.loadMyLineups = function(){
   var from = CG.now() - 12*3600000;
   var mine = (CG.lg.schedule||[]).filter(function(g){
     return (g.home===me.team || g.away===me.team) && g.status!=="final" && g.at >= from;
-  }).sort(function(a,b){ return a.at-b.at; }).slice(0,6);
+  }).sort(function(a,b){ return a.at-b.at; }).slice(0,12);
+  /* v2.87: TWELVE, not six. A club's week is three nights of three games, and My Hub's "This
+     week's lineups" page draws every one of them: at six, games seven to nine were never fetched,
+     so they sat on "Loading" for the whole week however long a player waited. Twelve covers a full
+     week with headroom for the next night. */
   if (!mine.length) return Promise.resolve();
   CG._myLineupsAt = CG.now();
   return CG.sb.from("game_lineups").select("team_id,game_id,center,lw,rw,ld,rd,goalie,post_lock,post_lock_count,post_lock_at,penalties_owed")
@@ -12096,7 +12117,15 @@ CG.hubScheduleLive = function(){
     if (!nights[day]){ nights[day]=[]; order.push(day); }
     nights[day].push(g);
   });
-  h += order.slice(0,2).map(function(day){
+  /* v2.87: the WHOLE game week, not the first two nights. A club's week is three nights of three
+     games; the desk stopped at two, so Friday's three games (their codes, their server picks and
+     now their lineups) had no home until Wednesday's had been played. Nights beyond this week are
+     still summarised below rather than drawn. */
+  var wkNo = (upcoming[0] && upcoming[0].week) || null;
+  var thisWeek = wkNo == null ? order.slice(0,2)
+    : order.filter(function(day){ return nights[day].some(function(g){ return (g.week||1) === wkNo; }); });
+  if (!thisWeek.length) thisWeek = order.slice(0,2);
+  h += thisWeek.map(function(day){
     var games = nights[day];
     var firstAt = games[0].at;
     var lockAt = firstAt - (CG.VETO_LOCK_MS||1800000);
@@ -12117,7 +12146,23 @@ CG.hubScheduleLive = function(){
               ? '<span class="chip chip-chrome mono" style="letter-spacing:.12em">'+(CG.gameCode(g.id)||'code pending')+'</span>'
               : '<span class="chip">'+CG.ic("lock",11)+' Code at '+CG.fmtTime(CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at-30*60000)+'</span>')+
             '<a class="btn btn-ghost btn-sm" href="#/matchup/'+g.id+'">Match card</a></span></div>'+
-        CG.serverVetoControls(g, me, lockAt)+
+        (function(){
+          /* v2.87: the sheet itself, in the box. The desk showed codes and servers but never who
+             was dressed, so management had to open the builder game by game to check. */
+          var strip = CG.lineupStrip ? CG.lineupStrip(g, club, { highlight: me && me.id }) : "";
+          var gLock = g.at - 30*60000, past = CG.now() >= gLock;
+          return '<div style="border-top:1px dashed var(--line-soft);padding-top:10px">'+
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:'+(strip?"8px":"0")+'">'+
+              '<span class="caption" style="letter-spacing:.08em">LINEUP</span>'+
+              (strip ? '<span class="chip '+(past?"chip-warn":"chip-win")+'" style="font-size:9px">'+(past?"Locked":"Set")+'</span>'
+                     : '<span class="chip chip-loss" style="font-size:9px">Not set</span>')+
+              (strip ? "" : '<span class="caption">'+(past
+                  ? "This game locked at "+CG.fmtTime(gLock)+" with no sheet on file (Rule 3.2)."
+                  : "Due by "+CG.fmtTime(gLock)+", when it locks.")+'</span>')+
+              '<a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#/hub/lineup?game='+g.id+'">'+(strip?(past?"View":"Edit"):"Set lineup")+'</a>'+
+            '</div>'+strip+'</div>'+
+            CG.serverVetoControls(g, me, lockAt);
+        })()+
       '</div>';
     }).join("");
     return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+CG.fmtDay(firstAt)+'</h3>'+
@@ -12127,7 +12172,7 @@ CG.hubScheduleLive = function(){
       rows+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Home picks a 1st and 2nd server; away sets a veto and a preferred. Picks are private to each club — the server resolves from both sides when the night locks (Rule 4). Codes go only to rostered players and management (Rule 4.2).</span></div></div>';
   }).join("");
-  if (order.length>2) h += '<p class="caption" style="margin-top:4px">'+(order.length-2)+' more game night'+(order.length-2===1?"":"s")+' scheduled — they surface here as they approach. <a href="#/schedule" style="font-weight:700;border-bottom:2px solid var(--chrome)">Full league schedule</a></p>';
+  if (order.length>thisWeek.length) h += '<p class="caption" style="margin-top:4px">'+(order.length-thisWeek.length)+' more game night'+(order.length-thisWeek.length===1?"":"s")+' scheduled — they surface here as they approach. <a href="#/schedule" style="font-weight:700;border-bottom:2px solid var(--chrome)">Full league schedule</a></p>';
   return h;
 };
 CG.AFTER._hubSchedule = function(){
