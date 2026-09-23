@@ -119,8 +119,11 @@ console.log("\n— the night plan");
   /* v2.89: the night select is now the "All three" shortcut, and each GAME carries its own line
      select, so a night can dress up to three different lines. */
   A("Wednesday's night-wide select carries the plan", /<select class="lc-night" data-night="wed"[^>]*>[\s\S]*?value="1" selected/.test(h));
-  A("...and every game of the night has its own line select",
-    (h.match(/class="lc-gline" data-night="wed"/g) || []).length >= 1);
+  /* v2.90: the per-game selects sit behind a Per game toggle. These fixture nights hold ONE game
+     each, so there is nothing to split and no toggle is offered: the night-wide select governs it.
+     The multi-game case is covered in tools/line-picker.test.cjs. */
+  A("...and a one-game night offers no split, because there is nothing to split",
+    !/lc-pergame/.test(h) && !/class="lc-gline"/.test(h));
   A("a planned night offers Dress, keyed on the night rather than one line",
     /lc-dress"[^>]*data-night="wed"/.test(h) && !/lc-dress"[^>]*data-slot=/.test(h));
   A("an unplanned night explains itself instead", /pick a line to enable dressing/.test(h));

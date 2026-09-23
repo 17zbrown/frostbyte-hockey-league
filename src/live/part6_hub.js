@@ -1164,6 +1164,20 @@ CG.lcGameSlot = function(club, nightKey, gameId){
 CG.lcNightSlots = function(club, nightKey){
   return CG.lcOpenGames(club, nightKey).map(function(g){ return CG.lcGameSlot(club, nightKey, g.id); });
 };
+/* v2.90: the per-game selects are behind a toggle. Four selects on every night row was a wall,
+   and most clubs dress one line a night and never need them. A night that ALREADY runs more than
+   one line opens itself, or its own state would be hidden behind a button. */
+CG.lcPerGameOpen = function(club, nightKey){
+  var st = (CG._lcOpenNights || {})[nightKey];
+  if (st != null) return !!st;
+  var slots = CG.lcNightSlots(club, nightKey).filter(function(x){ return x != null; });
+  return [...new Set(slots)].length > 1;
+};
+CG.lcTogglePerGame = function(club, nightKey){
+  CG._lcOpenNights = CG._lcOpenNights || {};
+  CG._lcOpenNights[nightKey] = !CG.lcPerGameOpen(club, nightKey);
+  return CG._lcOpenNights[nightKey];
+};
 CG.lcOpenGames = function(club, nightKey){
   return CG.nightGames(club, nightKey).filter(function(g){ return CG.now() < g.at - 30*60000; });
 };
@@ -1290,6 +1304,7 @@ CG.hubLines = function(qs){
       var slotOf = {}; open.forEach(function(x){ slotOf[x.id] = CG.lcGameSlot(club, n.key, x.id); });
       var toDress = open.filter(function(x){ return slotOf[x.id] != null; });
       var distinct = [...new Set(toDress.map(function(x){ return slotOf[x.id]; }))];
+      var perOpen = CG.lcPerGameOpen(club, n.key);
       var dressedN = games.filter(function(x){ return (lg._lineups||{})[club+":"+x.id]; }).length;
       var owed = games.reduce(function(a,x){ var d=(lg._lineups||{})[club+":"+x.id]; return a + (d && d.penalties_owed>0 ? d.penalties_owed : 0); }, 0);
       var opts = '<option value="">— none —</option>'+[1,2,3].map(function(s2){
@@ -1297,24 +1312,28 @@ CG.hubLines = function(qs){
         return '<option value="'+s2+'"'+(planned===s2?" selected":"")+(r?"":' disabled')+'>'+
           esc((r && r.name) ? r.name : "Line "+s2)+(r?"":" (empty)")+'</option>';
       }).join("");
-      return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<span style="flex:0 0 148px"><b style="font-family:var(--f-disp)">'+(CG.NIGHT_LABEL[n.key]||n.key)+'</b>'+
+      return '<div class="card-b lc-nrow" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="lc-nname"><b style="font-family:var(--f-disp)">'+(CG.NIGHT_LABEL[n.key]||n.key)+'</b>'+
           '<span class="caption" style="display:block">'+CG.fmtDate(g.at)+' · '+games.length+' game'+(games.length===1?"":"s")+' · vs '+esc(CG.TEAM[opp].name)+(games.length>1?" +":"")+'</span></span>'+
-        '<label class="fld" style="margin:0;flex:0 1 190px"><span>All three</span><select class="lc-night" data-night="'+n.key+'" title="Set every game of this night to one line. Change any single game below to run a different line in it.">'+opts+'</select></label>'+
-        (distinct.length > 1 ? '<span class="chip chip-chrome" style="font-size:9px" title="This night dresses more than one line">'+distinct.length+' lines</span>' : "")+
+        '<label class="fld lc-all"><span>All '+(open.length||games.length)+'</span><select class="lc-night" data-night="'+n.key+'" title="Set every game of this night to one line. Open Per game to run a different line in one of them.">'+opts+'</select></label>'+
+
         (dressedN ? '<span class="chip chip-xs" title="Games with a submitted lineup">'+dressedN+' / '+games.length+' dressed</span>' : "")+
-        /* v2.89: one line per GAME. Up to three different lines a night; "— none —" leaves that
-           game out of the dressing entirely and keeps whatever is already filed for it. */
-        (open.length ? '<span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-basis:100%;padding-top:4px">'+
+        /* v2.90: the per-game selects live behind this toggle. v2.89: one line per GAME, up to
+           three a night; "— none —" leaves that game out of the dressing entirely and keeps
+           whatever is already filed for it. */
+        (open.length > 1 ? '<button type="button" class="btn btn-ghost btn-sm lc-pergame" data-night="'+n.key+'" aria-expanded="'+perOpen+'" '+
+          'title="Set a different line for individual games of this night">'+CG.ic(perOpen?"up":"down",12)+'Per game'+
+          (distinct.length > 1 ? ' · '+distinct.length+' lines' : '')+'</button>' : "")+
+        (open.length && perOpen ? '<div class="lc-gsel">'+
           open.map(function(x){
             var gs = CG.lcGameSlot(club, n.key, x.id);
-            return '<label class="fld" style="margin:0;min-width:168px"><span>'+CG.fmtTime(x.at).replace(" ET","")+'</span>'+
+            return '<label class="fld"><span>'+CG.fmtTime(x.at).replace(" ET","")+'</span>'+
               '<select class="lc-gline" data-night="'+n.key+'" data-game="'+x.id+'">'+
               '<option value="">— none —</option>'+[1,2,3].map(function(sl){
                 var r = (lg._teamLines||{})[sl];
                 return '<option value="'+sl+'"'+(gs===sl?" selected":"")+(r?"":" disabled")+'>'+esc((r&&r.name)?r.name:("Line "+sl))+(r?"":" (empty)")+'</option>';
               }).join("")+'</select></label>';
-          }).join("")+'</span>' : "")+
+          }).join("")+'</div>' : "")+
         (owed ? '<span class="chip chip-loss" style="font-size:9.5px" title="Post-lock changes cost one in-game penalty each (Rule 5.3)">serves '+owed+' penalt'+(owed===1?"y":"ies")+'</span>' : "")+
         (prow
           ? (open.length
@@ -1724,6 +1743,12 @@ CG.AFTER._lines = function(qs){
           });
         })(0);
       });
+    });
+  });
+  document.querySelectorAll(".lc-pergame").forEach(function(el){
+    el.addEventListener("click", function(){
+      CG.lcTogglePerGame(club, el.dataset.night);
+      repaint();
     });
   });
   document.querySelectorAll(".lc-gline").forEach(function(el){

@@ -19,7 +19,7 @@ const NIGHT = [
   { id: "c", at: 1000 + 5 * 3600000 + 70 * 60000 },
 ];
 CG.nightGames = () => NIGHT;
-new Function("CG", cut("lcOpenGames") + cut("lcGameSlot") + cut("lcNightSlots"))(CG);
+new Function("CG", cut("lcOpenGames") + cut("lcGameSlot") + cut("lcNightSlots") + cut("lcPerGameOpen") + cut("lcTogglePerGame"))(CG);
 
 console.log("— a line per game, up to three a night");
 {
@@ -40,6 +40,40 @@ console.log("— a line per game, up to three a night");
   CG.lg._gameLinePlan = { a: 2 };
   CG.lg._linePlan = { wed: 1 };
   A("a game with no line of its own still falls back to the night", slots().join(",") === "2,1,1", slots().join(","));
+}
+
+console.log("\n— the per-game selects are behind a toggle (v2.90)");
+{
+  CG._lcOpenNights = {};
+  CG.lg._linePlan = { wed: 1 }; CG.lg._gameLinePlan = {};
+  A("a night running ONE line starts collapsed, so the row stays a row", CG.lcPerGameOpen("BOS", "wed") === false);
+  CG.lg._gameLinePlan = { b: 2 };
+  A("...but a night already running more than one opens itself, or its state would be hidden",
+    CG.lcPerGameOpen("BOS", "wed") === true);
+  CG._lcOpenNights = {}; CG.lg._gameLinePlan = {};
+  A("the toggle opens it", CG.lcTogglePerGame("BOS", "wed") === true && CG.lcPerGameOpen("BOS", "wed") === true);
+  A("...and closes it again", CG.lcTogglePerGame("BOS", "wed") === false && CG.lcPerGameOpen("BOS", "wed") === false);
+  A("one night's choice does not move another's", CG.lcPerGameOpen("BOS", "thu") === false && CG._lcOpenNights.thu === undefined);
+  /* an explicit close must survive a night that would otherwise open itself */
+  CG.lg._gameLinePlan = { b: 2 };
+  CG._lcOpenNights = { wed: false };
+  A("an explicit close beats the auto-open", CG.lcPerGameOpen("BOS", "wed") === false);
+}
+
+console.log("\n— the markup the toggle drives");
+{
+  const src6 = require("fs").readFileSync(require("path").join(__dirname, "..", "src/live/part6_hub.js"), "utf8");
+  A("the selects render only when the night is open", /open\.length && perOpen \? '<div class="lc-gsel">'/.test(src6));
+  A("the toggle only appears when there is more than one game to split", /open\.length > 1 \? '<button type="button" class="btn btn-ghost btn-sm lc-pergame"/.test(src6));
+  A("...and it reports its state to assistive tech", /aria-expanded="'\+perOpen\+'"/.test(src6));
+  A("...and says when the night runs more than one line", /distinct\.length > 1 \? ' · '\+distinct\.length\+' lines' : ''/.test(src6));
+  const css = require("fs").readFileSync(require("path").join(__dirname, "..", "src/live/part1_head.html"), "utf8");
+  A("the selects are a grid: three across on a desk", /\.lc-gsel\{flex-basis:100%;display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/.test(css));
+  A("...one per row on a phone, with full-width controls and 44px targets",
+    /@media\(max-width:720px\)\{[\s\S]{0,420}\.lc-gsel\{grid-template-columns:1fr/.test(css) &&
+    /\.lc-nrow \.btn\{min-height:44px/.test(css) && /\.lc-all\{flex:1 1 100%\}/.test(css));
+  A("the roster board drops to one column on a phone, so names are not cut to an initial",
+    /@media\(max-width:560px\)\{\.lc-board\{grid-template-columns:1fr\}/.test(css));
 }
 
 console.log("\n— the week dresses in an order that frees before it fills");

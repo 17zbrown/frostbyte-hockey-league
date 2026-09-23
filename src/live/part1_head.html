@@ -1390,6 +1390,26 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .lc-av img{width:100%;height:100%;object-fit:cover;display:block}
 .lc-av b{color:var(--paper);font-family:var(--f-disp);font-size:11px;letter-spacing:.02em}
 @media(max-width:700px){.lc-board{grid-template-columns:1fr 1fr}}
+/* v2.90: one column on a phone. Two columns at 375px left every name truncated to an initial and
+   the position clipped mid-word, which is unusable for the one screen a manager builds lines on. */
+@media(max-width:560px){.lc-board{grid-template-columns:1fr}.lc-pc .two b{white-space:normal}}
+/* v2.90 the night plan row: a name, the night-wide line, a Per game toggle, then the buttons.
+   The per-game selects are a grid so three of them line up on a desk and stack on a phone. */
+.lc-nrow{row-gap:10px}
+.lc-nname{flex:0 0 148px;min-width:0}
+.lc-all{margin:0;flex:0 1 186px;min-width:0}
+.lc-gsel{flex-basis:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding-top:2px}
+.lc-gsel .fld{margin:0;min-width:0}
+.lc-pergame{gap:6px}
+@media(max-width:720px){
+  /* one column of full-width controls, every tap target a comfortable size */
+  .lc-nrow{align-items:stretch}
+  .lc-nname{flex:1 1 100%}
+  .lc-all{flex:1 1 100%}
+  .lc-gsel{grid-template-columns:1fr;gap:8px}
+  .lc-nrow .btn{min-height:44px;flex:1 1 auto;justify-content:center}
+  .lc-nrow>.chip{align-self:center}
+}
 .bench{display:flex;flex-direction:column;gap:8px}
 .bench .bp{display:flex;align-items:center;gap:10px;border:1.5px solid var(--line);border-radius:var(--r-s);
   padding:9px 12px;background:var(--paper);cursor:grab;transition:border-color .12s;min-height:44px}
