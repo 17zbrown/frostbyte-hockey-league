@@ -1,0 +1,20 @@
+-- v2.89 (2026-09-23): a club may dress a DIFFERENT line in each game of a night (up to three).
+-- Applied live in one gated transaction; rehearsed first (set, clear, and a refusal for an unsaved
+-- line slot) and rolled back.
+--
+--   public.team_game_line_plan (season_id, team_id, game_id, slot, updated_by, updated_at)
+--     PK (season_id, team_id, game_id). Which saved line (team_lines.slot) a club intends to dress
+--     for ONE game. No row means "use the night's plan" (public.team_line_plan), so a club that
+--     runs the same six all night never has to think about it. RLS: read for is_commissioner() or
+--     is_gm_of(team_id), matching team_line_plan. SELECT granted to authenticated.
+--
+--   public.set_team_game_line(p_game uuid, p_team uuid, p_slot integer)
+--     Upserts that row, or deletes it when p_slot is null. Same gate as set_team_line_night:
+--     signed in, not suspended, the club is in that game, commissioner or club management, and
+--     mgmt_gate(team,'lines'). Refuses a slot with no saved line. SECURITY DEFINER; EXECUTE
+--     revoked from public and anon, granted to authenticated.
+--
+-- Client: CG.lcGameSlot(club, night, gameId) resolves game -> night -> none, and the line creator's
+-- night row carries one select per game plus an "All three" shortcut that also clears the per-game
+-- overrides. dressNight submits each game with ITS OWN line. The v2.84 on/off game picker
+-- (CG.lcPicked / lcTogglePick / CG._lcPick) is REMOVED: "— none —" on a game does that job now.

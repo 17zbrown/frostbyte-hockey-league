@@ -31,7 +31,9 @@ A("nothing claims success before the server answers",
 
 console.log("\n— the night row");
 A("a Clear button appears only when that night has something filed", /\(dressedN \? '<button class="btn btn-ghost btn-sm lc-clear"/.test(hub));
-A("...and clears exactly the games the night has picked", /var night = el\.dataset\.night, picks = CG\.lcPicked\(club, night\);/.test(hub));
+/* v2.89: the per-game picker became a per-game LINE select, so Clear withdraws the night's open
+   games rather than a selected subset of them */
+A("...and clears the night's open games", /var night = el\.dataset\.night, picks = CG\.lcOpenGames\(club, night\);/.test(hub));
 A("...one RPC per game, refusals collected per game", /CG\.sb\.rpc\("clear_game_lineup", \{ p_game: picks\[i\]\.id, p_team: tid \}\)/.test(hub) &&
   /errs\.push\(CG\.fmtTime\(picks\[i\]\.at\)\+": "\+r\.error\.message\)/.test(hub));
 A("...and the in-memory copy follows each success", /\{ n\+\+; if \(lg\._lineups\) delete lg\._lineups\[club\+":"\+picks\[i\]\.id\]; \}/.test(hub));

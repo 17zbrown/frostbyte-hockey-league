@@ -12,33 +12,34 @@ let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 const cut = (name) => { const i = src.indexOf("CG." + name + " = function"); return src.slice(i, src.indexOf("\n};", i) + 3); };
 
-const CG = { _lcPick: null, now: () => 1000 };
+const CG = { now: () => 1000, lg: { _gameLinePlan: {}, _linePlan: {} } };
 const NIGHT = [
   { id: "a", at: 1000 + 5 * 3600000 },
   { id: "b", at: 1000 + 5 * 3600000 + 35 * 60000 },
   { id: "c", at: 1000 + 5 * 3600000 + 70 * 60000 },
 ];
 CG.nightGames = () => NIGHT;
-new Function("CG", cut("lcOpenGames") + cut("lcPicked") + cut("lcTogglePick"))(CG);
+new Function("CG", cut("lcOpenGames") + cut("lcGameSlot") + cut("lcNightSlots"))(CG);
 
-console.log("— picking games within a night");
-A("unset means every open game, exactly as the button always behaved", CG.lcPicked("BOS", "wed").length === 3);
-CG.lcTogglePick("BOS", "wed", "b");
-A("dropping one leaves the other two", CG.lcPicked("BOS", "wed").map((g) => g.id).join("") === "ac", CG.lcPicked("BOS", "wed").map((g) => g.id).join(""));
-CG.lcTogglePick("BOS", "wed", "c");
-A("...and dropping another leaves one", CG.lcPicked("BOS", "wed").map((g) => g.id).join("") === "a");
-CG.lcTogglePick("BOS", "wed", "b");
-A("toggling one back on restores it, in the night's own order", CG.lcPicked("BOS", "wed").map((g) => g.id).join("") === "ab");
-CG.lcTogglePick("BOS", "wed", "a"); CG.lcTogglePick("BOS", "wed", "b");
-A("picking nothing means nothing (the button disables rather than silently dressing all three)", CG.lcPicked("BOS", "wed").length === 0);
-A("another night is untouched by this one's picks", CG.lcPicked("BOS", "thu").length === 3);
+console.log("— a line per game, up to three a night");
 {
-  /* a game that locks while the tab is open must drop out of the selection on its own */
-  const late = { ...CG, now: () => 1000 + 5 * 3600000 - 20 * 60000 };
-  new Function("CG", cut("lcOpenGames") + cut("lcPicked"))(late);
-  late._lcPick = { fri: ["a", "b", "c"] };
-  A("a locked game leaves the picture even when it was picked", late.lcPicked("BOS", "fri").map((g) => g.id).join("") === "bc",
-    late.lcPicked("BOS", "fri").map((g) => g.id).join(""));
+  const NIGHT_IDS = ["a", "b", "c"];
+  const slots = () => NIGHT_IDS.map((id) => CG.lcGameSlot("BOS", "wed", id));
+  CG.lg._linePlan = {}; CG.lg._gameLinePlan = {};
+  A("with nothing planned at all, no game dresses anything", slots().every((s) => s === null), JSON.stringify(slots()));
+  CG.lg._linePlan.wed = 1;
+  A("the night's default covers every game of it", slots().join(",") === "1,1,1", slots().join(","));
+  CG.lg._gameLinePlan.b = 2;
+  A("a per-game line overrides the night for THAT game only", slots().join(",") === "1,2,1", slots().join(","));
+  CG.lg._gameLinePlan.c = 3;
+  A("...so a night can run three different lines", slots().join(",") === "1,2,3", slots().join(","));
+  A("the night summary reports them in game order", CG.lcNightSlots("BOS", "wed").join(",") === "1,2,3");
+  CG.lg._linePlan = {};
+  A("clearing the night default leaves the per-game ones standing",
+    slots()[0] === null && slots()[1] === 2 && slots()[2] === 3, JSON.stringify(slots()));
+  CG.lg._gameLinePlan = { a: 2 };
+  CG.lg._linePlan = { wed: 1 };
+  A("a game with no line of its own still falls back to the night", slots().join(",") === "2,1,1", slots().join(","));
 }
 
 console.log("\n— the week dresses in an order that frees before it fills");

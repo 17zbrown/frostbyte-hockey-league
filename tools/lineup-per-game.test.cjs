@@ -61,16 +61,18 @@ console.log("\n— the night is all its games, not one");
 console.log("\n— the old single-game-per-night resolution is gone from the write paths");
 {
   A("the per-night dress button now keys on the night, dressing all its games",
-    /var night = el\.getAttribute\("data-night"\)/.test(src) && /dressNight\(night, slot, function\(err, okN, qN\)/.test(src));
+    /var night = el\.getAttribute\("data-night"\)/.test(src) && /dressNight\(night, null, function\(err, okN, qN\)/.test(src));
   /* v2.84: the night's games now come through the picker, whose DEFAULT is every open game of
      the night; a club may narrow it to one or two, which is the point, but never to the first
      game by accident. */
-  A("...via a helper that resolves the night's games through the picker",
-    /function dressNight\(nightKey, slot, done\)\{[\s\S]{0,300}CG\.lcPicked\(club, nightKey\)/.test(src));
-  A("...and the picker defaults to every not-yet-locked game of the night",
-    /CG\.lcOpenGames = function\(club, nightKey\)\{[\s\S]{0,220}CG\.nightGames\(club, nightKey\)\.filter/.test(src)
-    && /if \(!sel\) return open;/.test(src));
-  A("Dress-the-week dresses whole nights, not first games", /dressNight\(n\.key, pl, function\(err, dressed, queued\)/.test(src));
+  /* v2.89: dressNight walks the night's OPEN games and gives each the line set for it */
+  A("...via a helper that walks the night's open games",
+    /function dressNight\(nightKey, slot, done\)\{[\s\S]{0,420}CG\.lcOpenGames\(club, nightKey\)\.filter\(function\(g\)\{ return CG\.lcGameSlot\(club, nightKey, g\.id\) != null; \}\)/.test(src));
+  A("...and each game is submitted with ITS OWN line",
+    /dressGame\(games\[i\]\.id, CG\.lcGameSlot\(club, nightKey, games\[i\]\.id\)/.test(src));
+  A("...with the open set still every not-yet-locked game of the night",
+    /CG\.lcOpenGames = function\(club, nightKey\)\{[\s\S]{0,220}CG\.nightGames\(club, nightKey\)\.filter/.test(src));
+  A("Dress-the-week dresses whole nights, not first games", /dressNight\(n\.key, null, function\(err, dressed, queued\)/.test(src));
   A("the builder switcher is per game", /href="#\/hub\/lineup\?game='\+g\.id/.test(src));
   A("the tasks tile counts all of tonight's games", /subN \+ ' \/ ' \+ tonightGs\.length \+ ' submitted'/.test(src) || /subN\+' \/ '\+tonightGs\.length/.test(src));
 }

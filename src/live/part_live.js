@@ -1421,6 +1421,11 @@ CG.loadManagerData = async function(){
         CG.lg._teamLines = {}; CG.lg._linePlan = {};
         jobs.push(CG.sb.from("team_lines").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
           .then(function(tl){ (tl && !tl.error && tl.data || []).forEach(function(row){ CG.lg._teamLines[row.slot]=row; }); }, function(){}));
+        /* v2.89: the per-GAME plan, which overrides the night's default. A night is up to three
+           games and a club may want a different line in each. */
+        jobs.push(CG.sb.from("team_game_line_plan").select("game_id,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+          .then(function(gp){ CG.lg._gameLinePlan = {}; ((gp && !gp.error && gp.data) || []).forEach(function(r){ CG.lg._gameLinePlan[r.game_id] = r.slot; }); },
+                function(){ CG.lg._gameLinePlan = CG.lg._gameLinePlan || {}; }));
         jobs.push(CG.sb.from("team_line_plan").select("night,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
           .then(function(tp){ (tp && !tp.error && tp.data || []).forEach(function(row){ CG.lg._linePlan[row.night]=row.slot; }); }, function(){}));
       }
@@ -7077,7 +7082,7 @@ function pvBusyInteracting(){
    emptied a manager's Trade Hub, lineups cache and draft board until the next full load). The
    draft data is carried too and re-mapped against the NEW roster, so a drafted player leaves the
    pool the moment the roster refetch lands. */
-CG._LG_CARRY = ["_appBallots","_appMsgs","_draftPicksRaw","_lineups","_mgmtApps","_mgmtMoves","_mgmtPolicy","_mgmtPolicyAt",
+CG._LG_CARRY = ["_appBallots","_appMsgs","_draftPicksRaw","_lineups","_gameLinePlan","_mgmtApps","_mgmtMoves","_mgmtPolicy","_mgmtPolicyAt",
   "_myBoard","_myTrades","_ownerApps","_registrationsRaw","_servers","_staffApps","_vetoes","_actionReqs","_actionMsgs","draftState"];
 CG._carryLg = function(from, to){
   if (!from || !to) return;
