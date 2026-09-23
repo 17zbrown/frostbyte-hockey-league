@@ -83,15 +83,15 @@
   var CODES = ["482913","715046","903318","264781"];
   lg.tonight.slice().sort(function(a,b){ return a.at-b.at; }).forEach(function(g, i){ g.code = CODES[i] || null; });
   if (st==="pending"){ TONIGHT.code = null; lg._servers = {}; }
-  else if (locked){ TONIGHT.server = "NA East"; lg._servers = {}; lg._servers[TONIGHT.id] = "NA East"; }
+  else if (locked){ TONIGHT.server = "NA Northeast"; lg._servers = {}; lg._servers[TONIGHT.id] = "NA Northeast"; }
 
   /* ---- server picks: Saturday's home game already has its 1st/2nd choice; tonight's away game is
      the one the guide sets (already set once the night has locked) ---- */
   lg._vetoes = {};
   /* under Owner-approves nothing this seat picked exists yet — the moves are still in the queue,
      so every dropdown reads "— pick —" (that IS the pitfall the state teaches) */
-  if (NEXT && st!=="approve") lg._vetoes[NEXT.id] = { game_id:NEXT.id, team_id:t.id, pref1:"NA East", pref2:"NA Northeast", veto:null, preferred:null };
-  if (locked) lg._vetoes[TONIGHT.id] = { game_id:TONIGHT.id, team_id:t.id, veto:"NA Central", preferred:"NA East", pref1:null, pref2:null };
+  if (NEXT && st!=="approve") lg._vetoes[NEXT.id] = { game_id:NEXT.id, team_id:t.id, pref1:"NA Northeast", pref2:"NA Northeast", veto:null, preferred:null };
+  if (locked) lg._vetoes[TONIGHT.id] = { game_id:TONIGHT.id, team_id:t.id, veto:"NA Central", preferred:"NA Northeast", pref1:null, pref2:null };
 
   /* ---- Rule 2.6: the Owner can put a GM/AGM seat's Schedule page under approval. The pick is
      then queued (mgmt_request_move) instead of saved, and the page carries the Owner's banner. ---- */
@@ -160,7 +160,7 @@
   var oppName = (CG.TEAM[OPP]||{}).name || OPP, tTime = CG.fmtTime(TONIGHT.at), lockTime = CG.fmtTime(TONIGHT.at - 30*60000);
   var vs = (TONIGHT.home===club ? t.name+" vs "+oppName : t.name+" @ "+oppName);
   CG._notifs = [];
-  if (locked) CG._notifs.push({ id:"gn-code", t: TONIGHT.at - 30*60000, icon:"code", title:"Lobby code live — "+vs, body:"Server: NA East. The code is on the matchup page — rostered players and management only (Rule 4.2).", read:false, route:"#/matchup/"+TONIGHT.id });
+  if (locked) CG._notifs.push({ id:"gn-code", t: TONIGHT.at - 30*60000, icon:"code", title:"Lobby code live — "+vs, body:"Server: NA Northeast. The code is on the matchup page — rostered players and management only (Rule 4.2).", read:false, route:"#/matchup/"+TONIGHT.id });
   if (posted) CG._notifs.push({ id:"gn-lineup", t: base - 55*60000, icon:"check", title:"Lineup submitted — "+vs, body:"Six dressed for "+tTime+". Locks "+lockTime+" (Rule 5.3).", read:locked, route:"#/hub/lineup?game="+TONIGHT.id });
   CG._notifs.push({ id:"gn-night", t: Date.parse("2026-07-15T12:00:00-04:00"), icon:"clock", title:"Game night — "+vs+", "+tTime, body:"Server picks and lineups lock "+lockTime+"; the private lobby code releases then.", read:posted, route:"#/hub/schedule" });
   CG._notifs.push({ id:"gn-avail", t: Date.parse("2026-07-13T20:05:00-04:00"), icon:"cal", title:"Week 8 availability is open", body:"Answer by Sunday 8:00 PM ET so your management can build the lineups.", read:true, route:"#/hub/availability" });

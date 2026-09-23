@@ -186,8 +186,8 @@ CG.AFTER._admCodes = function(){
 /* ---------- server presets ---------- */
 CG.admPresets = function(){
   var presets = [
-    { name:"League Night", assigned:"All regular-season games", set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 4:00"],["OT","Continuous 4:00 — no shootout"],["Sides","Home selects Home, Away selects Away"],["Pauses","2 per club"],["Streaming","Both goalie POVs"]] },
-    { name:"Playoff Standard", assigned:"Playoff weeks", set:[["Region","NA East"],["Mode","EASHL 6v6 Private"],["Periods","3 × 4:00"],["OT","Continuous 4:00 — no shootout"],["Sides","Home selects Home, Away selects Away"],["Pauses","1 per club"],["Streaming","League broadcast + POVs"]] }
+    { name:"League Night", assigned:"All regular-season games", set:[["Region","NA Central (standard)"],["Mode","EASHL 6v6 Private"],["Periods","3 × 4:00"],["OT","Continuous 4:00 — no shootout"],["Sides","Home selects Home, Away selects Away"],["Pauses","2 per club"],["Streaming","Both goalie POVs"]] },
+    { name:"Playoff Standard", assigned:"Playoff weeks", set:[["Region","NA Central (standard)"],["Mode","EASHL 6v6 Private"],["Periods","3 × 4:00"],["OT","Continuous 4:00 — no shootout"],["Sides","Home selects Home, Away selects Away"],["Pauses","1 per club"],["Streaming","League broadcast + POVs"]] }
   ];
   return '<div class="grid g2">'+presets.map(function(p,i){
     return '<div class="card"><div class="card-h"><h3>'+p.name+'</h3><span class="chip'+(i===0?" chip-chrome":"")+'">'+(i===0?"Active default":"Scheduled")+'</span></div>'+

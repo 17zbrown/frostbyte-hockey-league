@@ -47,11 +47,11 @@ const night = () => ([
 
 console.log("— CG.refreshCodes: the masked view is re-read in place");
 {
-  const w = world({ now: T - 20 * 60000, schedule: night(), codes: [{ id: "g1", game_code: "ABC123", server: "NA East" }] });
+  const w = world({ now: T - 20 * 60000, schedule: night(), codes: [{ id: "g1", game_code: "ABC123", server: "NA Central" }] });
   return w.CG.refreshCodes().then((n) => {
-    A("the code lands on the game already in memory", n === 1 && w.CG.lg.schedule[0].code === "ABC123" && w.CG.lg.schedule[0].server === "NA East");
+    A("the code lands on the game already in memory", n === 1 && w.CG.lg.schedule[0].code === "ABC123" && w.CG.lg.schedule[0].server === "NA Central");
     A("...and the page is repainted once, not rebuilt", w.CG._repaints === 1);
-    const same = world({ now: T, schedule: [{ ...night()[0], code: "ABC123", server: "NA East" }], codes: [{ id: "g1", game_code: "ABC123", server: "NA East" }] });
+    const same = world({ now: T, schedule: [{ ...night()[0], code: "ABC123", server: "NA Central" }], codes: [{ id: "g1", game_code: "ABC123", server: "NA Central" }] });
     return same.CG.refreshCodes().then((m) => {
       A("nothing changed means nothing repaints (no flicker every minute)", m === 0 && !same.CG._repaints);
       const over = world({ now: T, schedule: night(), codes: [{ id: "g1", game_code: "ABC123" }], overlay: true });

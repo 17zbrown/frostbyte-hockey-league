@@ -259,17 +259,20 @@ console.log("\n— server veto: Away knocks one out, Home picks from the rest");
   A("Away cannot pick the server", !!I.applyServer(lobby, "capB", 0).error);
   A("Home cannot pick the vetoed server", !!I.applyServer(lobby, "capA", 1).error);
   const pick = I.applyServer(lobby, "capA", 2);
-  A("Home picks from the remaining two", !pick.error && pick.status === "done" && lobby.state.server === "NA Central");
+  /* the list is the league's to change (v2.96), so read it rather than pin its names: a pin here
+     would fail the next time the commissioner adds or drops a server, which is not a bug */
+  A("Home picks from the servers left", !pick.error && pick.status === "done" && lobby.state.server === I.SERVERS[2]);
   A("a 6-digit code drops", /^[0-9]{6}$/.test(String(lobby.state.code)));
-  A("the done view names the veto", JSON.stringify(pick.view).includes("Away vetoed NA Northeast"));
+  A("the done view names the veto", JSON.stringify(pick.view).includes(`Away vetoed ${I.SERVERS[1]}`));
+  A("the veto is recorded by name, not only by index", lobby.state.vetoedName === I.SERVERS[1]);
 
   const fresh = mk(); fresh.status = "server";
   const stage1 = I.serverView(fresh);
-  A("stage one offers three veto buttons to Away", (JSON.stringify(stage1).match(/lfg:veto:/g) || []).length === 3);
+  A("stage one offers a veto button per server", (JSON.stringify(stage1).match(/lfg:veto:/g) || []).length === I.SERVERS.length);
   I.applyVeto(fresh, "capB", 0);
   const stage2 = I.serverView(fresh);
   const s2 = JSON.stringify(stage2);
-  A("stage two offers server buttons", (s2.match(/lfg:server:/g) || []).length === 3);
+  A("stage two offers a button per server", (s2.match(/lfg:server:/g) || []).length === I.SERVERS.length);
   A("...with the vetoed one disabled", /vetoed[^}]*"disabled":true/.test(s2) || /"disabled":true/.test(s2));
 }
 

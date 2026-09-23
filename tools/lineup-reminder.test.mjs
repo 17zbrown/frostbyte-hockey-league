@@ -80,9 +80,11 @@ globalThis.fetch = async (url, init = {}) => {
 const mod = await import(new URL("../netlify/functions/discord-scheduler.js", import.meta.url).pathname);
 const tick = () => mod.default(new Request("https://x/.netlify/functions/discord-scheduler"));
 const now = (dry = false) => mod.runLineupReminder({ dry });
-/* the ordinary tick ALSO fires the club game-night reminders through postChannel, so a count of
-   every post is not a count of this one */
-const calls = () => posts.filter((p) => p.channel === "mgmtroom");
+/* the ordinary tick ALSO fires the club game-night reminders through postChannel, and since v2.96
+   the server-pick ask lands in the SAME management room, so neither a count of every post nor a
+   count of that room's posts is a count of this one. Match the post itself. */
+const calls = () => posts.filter((p) => p.channel === "mgmtroom" && /Set tonight's lines now/.test(p.content || ""));
+const serverCalls = () => posts.filter((p) => p.channel === "mgmtroom" && /Server picks for tonight/.test(p.content || ""));
 
 console.log("— the call itself");
 {
@@ -129,6 +131,9 @@ console.log("\n— the window");
   reset({ leadH: 0.6, count: 1 });
   body = await (await tick()).json();
   A("still open at T-36m, so a lost tick catches up", calls().length === 1, String(body.lineups));
+  /* v2.96: the server-pick ask shares this room and this window. The two are separate posts with
+     separate claims, so one must never be mistaken for, or suppressed by, the other. */
+  A("...and the server-pick ask is its own post, not folded into it", serverCalls().length === 1, String(body.serverPicks));
 
   reset({ leadH: 0.4, count: 1 });          // first lock already passed
   body = await (await tick()).json();

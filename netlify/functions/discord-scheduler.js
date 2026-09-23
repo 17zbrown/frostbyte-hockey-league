@@ -345,6 +345,8 @@ export default async (req) => {
     sum.availability = await availabilityReminder(season, games, teamById, cfg, now, dry, forceRun === "availability", sum.errors, sum.unconfigured);
     // (G) tonight's lineups — self-gating on the night's own first lock, four hours ahead
     sum.lineups = await lineupReminder(season, games, teamById, cfg, now, dry, forceRun === "lineups", sum.errors, sum.unconfigured);
+    // (H) tonight's server picks — self-gating on the night's own first puck drop, 90 min ahead
+    sum.serverPicks = await serverPickReminder(season, games, teamById, cfg, now, dry, forceRun === "servers", sum.errors, sum.unconfigured);
   } catch (e) { sum.error = String(e.message || e); console.error("discord-scheduler:", sum.error); }
   console.log("discord-scheduler:", JSON.stringify(sum));
   const errs = (sum.error ? [sum.error] : []).concat(sum.errors);
@@ -501,6 +503,11 @@ async function weeklyStandings(games, teamById, cfg, errors, unconfigured) {
 // was late, after it. At 75 a club has three quarters of an hour to file, and the claim per club per
 // ET night still makes a wider window impossible to double-post.
 const REMINDER_LEAD_MAX = 75;
+/* The league's servers and the standard one, mirroring CG.SERVERS / CG.DEFAULT_SERVER in the
+   browser and public.server_options() / public.default_server() in the database, which is what
+   actually resolves a game. Quoted in the nightly ask so a club never has to go looking. */
+const SERVER_LIST = ["NA Northeast", "NA Southeast", "NA Central", "NA West"];
+const DEFAULT_SERVER = "NA Central";
 
 async function gameReminders(games, teamById, now, errors) {
   const nowMs = now.getTime(), byTeam = {};
@@ -660,6 +667,84 @@ async function lineupReminder(season, games, teamById, cfg, now, dry, forced, er
   return `posted tonight's lineup call (${ymd}: ${missing} of ${total} still to file)`;
 }
 
+/* ---------- (H) server picks, 7:30 PM ET on the night itself (Rule 4.2) ----------
+   Commissioner's ruling (2026-09-23): on a game night the office asks the clubs still owing server
+   picks to file them, and it asks at 7:30 PM ET, an hour before the picks freeze. Like every other
+   deadline here it is anchored to the NIGHT rather than to a clock: 90 minutes before the night's
+   first puck drop, which is 7:30 for a 9:00 start and moves with a night that does not start at 9.
+   That is the same 90 minutes Rule 5.1 uses for availability, deliberately: a club answers both
+   halves of game night from one picture.
+
+   The window opens there and stays open until the picks actually lock (the night's first puck drop
+   minus 30 minutes), so a tick lost to a cold start becomes a catch-up rather than a silent miss.
+   The claim, one per ET day, is what makes the wide window safe.
+
+   Silence is the condition, not the subject: a night where every club has already filed gets NO
+   post. The commissioner asked for a reminder for clubs that have not submitted, and a cheerful
+   "nothing to do" every game night is how a channel stops being read. */
+const SERVER_PICK_LEAD_MS = 90 * 60000;     /* before the night's FIRST puck drop */
+/* A club has answered for a game when it has named something for the side it is on: the home club
+   a 1st choice, the away club a veto or a preferred. A row of nulls is not an answer. */
+const vetoAnswered = (row, isHome) => !!(row && (isHome ? row.pref1 : (row.veto || row.preferred)));
+async function serverPickReminder(season, games, teamById, cfg, now, dry, forced, errors, unconfigured) {
+  const sw = String(cfg.server_pick_reminder_enabled ?? "").trim().toLowerCase();
+  if (["off", "0", "false", "no", "paused"].includes(sw)) return `paused (app_config.server_pick_reminder_enabled=${sw})`;
+  const nowMs = now.getTime();
+  const byDay = {};
+  for (const g of games) {
+    if ((g.stage || "regular") !== "regular" || g.voided) continue;
+    const ms = Date.parse(g.scheduled_at);
+    if (ms < nowMs - 6 * 60 * 60 * 1000) continue;
+    (byDay[etParts(new Date(ms)).ymd] ||= []).push(g);
+  }
+  let ymd = null, lock = null;
+  for (const d of Object.keys(byDay).sort()) {
+    const l = nightLockAt(byDay[d]);
+    if (l > nowMs) { ymd = d; lock = l; break; }
+  }
+  if (ymd === null) return "no game night ahead";
+  const firstAt = Math.min(...byDay[ymd].map((g) => Date.parse(g.scheduled_at)));
+  const opensAt = firstAt - SERVER_PICK_LEAD_MS;
+  if (!forced && nowMs < opensAt) return `${ymd}: the ask opens ${fmtTime(new Date(opensAt).toISOString())}, in ${Math.round((opensAt - nowMs) / 60000)} min`;
+  const room = cfg.discord_mgmt_room_management_announcements_id;
+  if (!room) { unconfigured.push("server pick reminder (app_config.discord_mgmt_room_management_announcements_id)"); return "no management room configured"; }
+  let roles = {};
+  try { roles = JSON.parse(cfg.discord_role_ids || "{}") || {}; } catch { roles = {}; }
+
+  const tonight = byDay[ymd].slice().sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
+  const picks = await sbGet(`game_vetoes?game_id=in.(${tonight.map((g) => g.id).join(",")})&select=game_id,team_id,veto,preferred,pref1,pref2`);
+  const byPick = Object.fromEntries((picks || []).map((r) => [`${r.game_id}:${r.team_id}`, r]));
+  const owed = {};      /* club -> games it has filed nothing for */
+  for (const g of tonight) {
+    for (const [tid, isHome] of [[g.home_team_id, true], [g.away_team_id, false]]) {
+      if (!vetoAnswered(byPick[`${g.id}:${tid}`], isHome)) owed[tid] = (owed[tid] || 0) + 1;
+    }
+  }
+  const missing = Object.values(owed).reduce((a, b) => a + b, 0), total = tonight.length * 2;
+  if (!missing) return `${ymd}: every club has filed its picks, nothing to ask`;
+  const short = Object.keys(owed).sort((a, b) => owed[b] - owed[a])
+    .map((tid) => `${(teamById[tid] || {}).code || "?"} ${owed[tid]}`).join(" \u00b7 ");
+  const ping = roles["cghl management"]
+    ? `<@&${roles["cghl management"]}>`
+    : ["owner", "general manager", "assistant general manager"].map((k) => roles[k]).filter(Boolean).map((id) => `<@&${id}>`).join(" ");
+  const body = `${ping}\n\ud83c\udf10 **Server picks for tonight are still open \u2014 they freeze at ${fmtTime(new Date(lock).toISOString())}.**`
+    + `\nHome clubs name a 1st and a 2nd choice; away clubs name the server they will not play on, plus a preferred. Picks are private to each club and the server resolves from both sides when the night locks (Rule 4.2).`
+    + `\nStill to file: **${missing} of ${total}** (${short}).`
+    + `\nThe four servers: ${SERVER_LIST.join(", ")}. **With no pick from either club the game is played on ${DEFAULT_SERVER}.**`
+    + `\nYour roster's own suggestions are on the same page, under "What your roster suggests".`
+    + `\nTeam HQ, Schedule desk: https://chelgamingleague.com/#/hub/schedule`;
+  if (dry) return { day: ymd, opensAt: new Date(opensAt).toISOString(), locksAt: new Date(lock).toISOString(), games: tonight.length, missing, total, body };
+  const ref = `${season.id}-${ymd}`;
+  if (!(await claim("server_pick_reminder", ref))) return `already posted for ${ymd}`;
+  const res = await postChannel(room, body);
+  if (!res.ok) {
+    errors.push(`server pick reminder ${ymd}: ${res.error}`);
+    if (!res.ambiguous) await release("server_pick_reminder", ref);
+    return `post failed: ${res.error}`;
+  }
+  return `asked for tonight's server picks (${ymd}: ${missing} of ${total} still to file)`;
+}
+
 /* ---------- (F) availability, 24 hours out, and the lineups that hang on it (Rule 5.1) ----------
    A week's availability closes at 7:30 PM ET on the night of its FIRST game: Wednesday in a normal
    week, and whatever the first night is in a holiday-shifted one. The deadline itself is computed
@@ -810,6 +895,14 @@ export async function runAvailabilityReminder({ dry = false } = {}) {
   const errors = [], unconfigured = [];
   const availability = await availabilityReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
   return { availability, errors, unconfigured, ok: errors.length === 0 };
+}
+/* the night's server picks, same door: /api/discord-ops?post=server-reminder */
+export async function runServerPickReminder({ dry = false } = {}) {
+  const w = await loadWorld();
+  if (!w) return { skipped: "no season" };
+  const errors = [], unconfigured = [];
+  const serverPicks = await serverPickReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
+  return { serverPicks, errors, unconfigured, ok: errors.length === 0 };
 }
 /* the nightly half, on the same door: /api/discord-ops?post=lineup-reminder */
 export async function runLineupReminder({ dry = false } = {}) {

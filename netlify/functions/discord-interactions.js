@@ -47,7 +47,12 @@ function selectTwelve(signups) {
   });
   return { chosen, rest: (signups || []).filter((x) => !taken[x.id]) };
 }
-const SERVERS = ["NA East", "NA Northeast", "NA Central"];
+/* The league's server list (commissioner, 2026-09-23), the same four the site and
+   public.server_options() offer. `s.vetoed` is an INDEX into this array, so a lobby mid-veto when
+   the list changes would read the wrong name: every lobby also records `vetoedName` and display
+   prefers it, so a list change can never rename a veto after the fact. */
+const SERVERS = ["NA Northeast", "NA Southeast", "NA Central", "NA West"];
+const vetoName = (s) => s.vetoedName || SERVERS[s.vetoed] || "that server";
 const BRAND = 0xFFE500;
 
 /* ---------- Discord response envelopes ---------- */
@@ -379,7 +384,7 @@ function serverView(lobby, ea) {
     return {
       embeds: [{
         title: "🚫 Server veto — Away goes first",
-        description: `Teams are set. <@${s.captains[1]}> (Away), knock out the server you **don't** want. <@${s.captains[0]}> (Home) then picks between the other two.\n\n${teams}`,
+        description: `Teams are set. <@${s.captains[1]}> (Away), knock out the server you **don't** want. <@${s.captains[0]}> (Home) then picks any of the other ${SERVERS.length - 1}.\n\n${teams}`,
         color: BRAND,
       }],
       components: [{ type: 1, components: SERVERS.map((sv, i) => ({ type: 2, style: 2, label: `🚫 ${sv}`, custom_id: `lfg:veto:${lobby.id}:${i}` })) }],
@@ -388,7 +393,7 @@ function serverView(lobby, ea) {
   return {
     embeds: [{
       title: "🌐 Pick the server",
-      description: `<@${s.captains[1]}> (Away) vetoed **${SERVERS[s.vetoed]}**. <@${s.captains[0]}> (Home), pick between the other two.\n\n${teams}`,
+      description: `<@${s.captains[1]}> (Away) vetoed **${vetoName(s)}**. <@${s.captains[0]}> (Home), pick any of the other ${SERVERS.length - 1}.\n\n${teams}`,
       color: BRAND,
     }],
     components: [{ type: 1, components: SERVERS.map((sv, i) => (i === s.vetoed
@@ -408,7 +413,7 @@ function doneView(lobby, ea) {
   return {
     embeds: [{
       title: "✅ Lobby ready — good luck out there",
-      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A", ea)}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B", ea)}\n\n**Server:** ${s.server}${s.vetoed != null ? ` (Away vetoed ${SERVERS[s.vetoed]})` : ""}\n**Private lobby code:** \`${s.code}\`\n\n${STATS_HOWTO}`,
+      description: `**Home** (<@${s.captains[0]}>): ${teamNames(s, "A", ea)}\n**Away** (<@${s.captains[1]}>): ${teamNames(s, "B", ea)}\n\n**Server:** ${s.server}${s.vetoed != null ? ` (Away vetoed ${vetoName(s)})` : ""}\n**Private lobby code:** \`${s.code}\`\n\n${STATS_HOWTO}`,
       color: BRAND,
       footer: { text: "Names in `code` are EA gamertags — search those in NHL, not the Discord names." },
     }],
@@ -566,9 +571,10 @@ function applyPick(lobby, userId, pickId) {
 function applyVeto(lobby, userId, idx) {
   const s = lobby.state;
   if (userId !== s.captains[1]) return { error: "Only the Away captain vetoes a server." };
-  if (s.vetoed != null) return { error: `The veto is in — **${SERVERS[s.vetoed]}** is out. Waiting on the Home captain to pick.` };
+  if (s.vetoed != null) return { error: `The veto is in — **${vetoName(s)}** is out. Waiting on the Home captain to pick.` };
   if (!(idx >= 0 && idx < SERVERS.length)) return { error: "Unknown server." };
   s.vetoed = idx;
+  s.vetoedName = SERVERS[idx];   /* the name, not just the index: see SERVERS above */
   return { view: serverView(lobby), status: "server", state: s };
 }
 function applyServer(lobby, userId, idx) {
@@ -576,7 +582,7 @@ function applyServer(lobby, userId, idx) {
   if (userId !== s.captains[0]) return { error: "Only the Home captain picks the server." };
   /* guards for stale buttons: a pick can't jump the veto, and can't land on the vetoed server */
   if (s.vetoed == null) return { error: `The Away captain (<@${s.captains[1]}>) vetoes a server first.` };
-  if (idx === s.vetoed) return { error: `**${SERVERS[idx]}** was vetoed — pick one of the other two.` };
+  if (idx === s.vetoed) return { error: `**${SERVERS[idx]}** was vetoed — pick one of the other ${SERVERS.length - 1}.` };
   s.server = SERVERS[idx] || SERVERS[0];
   s.code = String(Math.floor(100000 + Math.random() * 900000));
   lobby.status = "done";

@@ -601,7 +601,56 @@ CG.hubWeekLineups = function(){
    Home club picks 1st + 2nd server choice; away club picks a veto (won't play) + a
    preferred. Picks are private to each club and lock 30 min before puck drop, when the
    resolve_game_server RPC settles the server from both clubs' picks. */
-CG.SERVERS = ["NA East","NA Northeast","NA Central"];
+/* THE league's server list, in the order the office lists them (commissioner, 2026-09-23).
+   The database keeps the same list in public.server_options() for the resolver; change one and
+   change the other. */
+CG.SERVERS = ["NA Northeast","NA Southeast","NA Central","NA West"];
+/* The standard server: what a game lands on when NEITHER club names one. Mirrors
+   public.default_server(), which is what actually decides it. If the away club vetoes the
+   standard server and nobody names an alternative, the resolver falls to the first listed
+   server that is not the veto. */
+CG.DEFAULT_SERVER = "NA Central";
+/* What a club's own roster suggests, most-suggested first. Advisory only (Rule 4.2): it tells
+   management where its players say they play best, it never sets the pick. Counts the ACTIVE
+   squad and camp alike; anyone with no preference is counted once in `none`. */
+CG.suggestedServers = function(club){
+  var list = ((CG.lg && CG.lg.byTeam) || {})[club] || [];
+  var n = {}, none = 0;
+  list.forEach(function(p){
+    var sv = p && p.server;
+    if (sv && CG.SERVERS.indexOf(sv) >= 0) n[sv] = (n[sv]||0)+1; else none++;
+  });
+  var rows = CG.SERVERS.filter(function(sv){ return n[sv]; })
+    .map(function(sv){ return { server: sv, n: n[sv] }; })
+    .sort(function(a,b){ return b.n - a.n || CG.SERVERS.indexOf(a.server) - CG.SERVERS.indexOf(b.server); });
+  return { rows: rows, none: none, answered: list.length - none, roster: list.length, top: rows.length ? rows[0].server : null };
+};
+/* The board management reads before it picks. Drawn once on the Schedule desk, not per game. */
+CG.serverSuggestCard = function(club){
+  var s = CG.suggestedServers(club);
+  var bars = s.rows.length
+    ? '<div class="srv-sug">'+s.rows.map(function(r){
+        var pct = s.answered ? Math.round(r.n/s.answered*100) : 0;
+        return '<div class="srv-row"><span class="srv-nm">'+esc(r.server)+'</span>'+
+          '<span class="srv-bar"><i style="width:'+Math.max(4,pct)+'%"></i></span>'+
+          '<span class="srv-n mono">'+r.n+'</span></div>';
+      }).join("")+'</div>'
+    : '<p class="small" style="color:var(--steel);margin:0">Nobody on the roster has set one yet. Players choose theirs in Settings, under Suggested server.</p>';
+  /* the same order as the bars above it, most-suggested first: two orderings of one list in one
+     card reads as two different answers */
+  var names = s.rows.length
+    ? '<div class="srv-who">'+s.rows.map(function(r){
+        var who = ((CG.lg.byTeam||{})[club]||[]).filter(function(p){ return p.server===r.server; })
+          .map(function(p){ return esc(p.tag); }).join(", ");
+        return '<div><b>'+esc(r.server)+'</b> <span class="caption" style="letter-spacing:0;text-transform:none">'+who+'</span></div>';
+      }).join("")+'</div>'
+    : "";
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>What your roster suggests</h3>'+
+    '<span class="chip">'+s.answered+' of '+s.roster+' answered</span></div><div class="card-b">'+
+    bars + names +
+    '<p class="caption" style="margin-top:10px">A suggestion, not a vote: the picks and the veto are management’s (Rule 4.2). '+
+    'With no pick from either club a game is played on <b>'+esc(CG.DEFAULT_SERVER)+'</b>.</p></div></div>';
+};
 CG.VETO_LOCK_MS = 30*60000;
 /* The night a game belongs to, in league time. This used to answer "fri" or else "wed", which was
    fine while the week was two nights and silently wrong the moment a third arrived — a Thursday
@@ -690,7 +739,10 @@ CG.nightGames = function(club, nightKey){
 CG.serverVetoControls = function(game, me, lockAt){
   var mine = (CG.lg._vetoes||{})[game.id] || {};
   var home = game.home===(CG.hqClub() || (me && me.team));
-  function opts(sel){ return '<option value="">— pick —</option>'+CG.SERVERS.map(function(s){ return '<option value="'+esc(s)+'"'+(s===sel?" selected":"")+'>'+esc(s)+'</option>'; }).join(""); }
+  function opts(sel){ return '<option value="">— pick —</option>'+CG.SERVERS.map(function(s){ return '<option value="'+esc(s)+'"'+(s===sel?" selected":"")+'>'+esc(s)+(s===CG.DEFAULT_SERVER?" (standard)":"")+'</option>'; }).join(""); }
+  /* What happens if this club files nothing: silence is a choice, so name its outcome rather than
+     leaving the desk blank. */
+  var noPick = '<p class="caption" style="margin:8px 0 0">No pick from either club and this game is played on <b>'+esc(CG.DEFAULT_SERVER)+'</b>.</p>';
   if (CG.now() >= lockAt){
     var srv = (CG.lg._servers||{})[game.id];
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="lock">'+CG.ic("lock",13)+'Picks locked</span>'+
@@ -699,11 +751,13 @@ CG.serverVetoControls = function(game, me, lockAt){
   if (home){
     return '<div class="grid g2" style="gap:12px">'+
       '<label class="fld" style="margin:0"><span>1st choice · home</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref1">'+opts(mine.pref1)+'</select></label>'+
-      '<label class="fld" style="margin:0"><span>2nd choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref2">'+opts(mine.pref2)+'</select></label></div>';
+      '<label class="fld" style="margin:0"><span>2nd choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref2">'+opts(mine.pref2)+'</select></label></div>'+
+      (mine.pref1 ? "" : noPick);
   }
   return '<div class="grid g2" style="gap:12px">'+
     '<label class="fld" style="margin:0"><span>Veto — won’t play</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="veto">'+opts(mine.veto)+'</select></label>'+
-    '<label class="fld" style="margin:0"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label></div>';
+    '<label class="fld" style="margin:0"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label></div>'+
+    ((mine.veto||mine.preferred) ? "" : noPick);
 };
 CG.saveVeto = function(gameId, changedSel){
   var club = CG.hqClub(); if(!club) return;

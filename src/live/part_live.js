@@ -284,7 +284,7 @@ CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
    so a signed-out scraper cannot harvest members' Discord identities from /rest/v1/profiles.
    Keep this in sync with the GRANT in the lock_down_profiles_columns migration. */
 CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,twitch,live,"+
-  "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone";
+  "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone,preferred_server";
 /* games: everything but the private lobby code and the server pick. Those two columns are no
    longer granted to the API roles (v2.57, Rule 4.2): they are read through the games_public view,
    which masks them unless the database's can_see_match() says the reader is on one of the two
@@ -613,6 +613,9 @@ CG.buildLiveLeague = async function(opts){
         team: team.code, pos: pos, depth: depth[dk],
         jersey: rs.jersey_number || p.jersey_number || 0,
         platform: p.platform || "—",
+        /* v2.96: the server this player says he plays best on, his own setting in Settings.
+           Advisory only: it informs the club's picks and vetoes, it never decides them. */
+        server: p.preferred_server || null,
         /* rookie is stamped in a second pass below, once lg.isReturning exists — it was hardcoded
            false here, which made the "R" chip and the Rookie-of-the-Year race permanently empty.
            arch/shoots are still placeholders: they need real profile columns (not yet built). */
@@ -12117,6 +12120,9 @@ CG.hubScheduleLive = function(){
   if (!upcoming.length){
     return h + '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>No games on the slate</b><p>Game nights appear here the moment the league posts your schedule.</p></div></div>';
   }
+  /* v2.96: the roster's own suggestions, above the nights. Management asked where its players play
+     best and the answers had nowhere to land; they belong beside the controls that use them. */
+  if (CG.serverSuggestCard) h += CG.serverSuggestCard(club);
   /* group by ET night */
   var nights = {}, order = [];
   upcoming.forEach(function(g){
@@ -12504,11 +12510,18 @@ CG.AFTER.hub = function(param, qs){
   var sl=document.getElementById("sSaveLive");
   if (sl) sl.addEventListener("click", function(){
     var ea=(document.getElementById("sEaLive").value||"").trim(), plat=document.getElementById("sPlatLive").value;
+    var srvEl=document.getElementById("sSrvLive"), srv=srvEl?srvEl.value:null;
     if (ea && ea.length<2){ CG.toast("EA ID looks too short","err"); return; }
-    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
+    /* The list is the league's, not this form's: a server the league no longer plays on is refused
+       here rather than written and then quietly ignored by the resolver. */
+    if (srv && (CG.SERVERS||[]).indexOf(srv)<0){ CG.toast("That server is not one the league plays on","err"); return; }
+    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null, preferred_server:srv||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
       if(!(r.data||[]).length){ CG.toast("That didn’t save — your sign-in may have expired. Sign in again and retry.","err"); return; }
-      CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null;
+      CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null; CG.auth.profile.preferred_server=srv||null;
+      /* the club's board reads lg.players, so update the loaded row too: the suggestion shows up
+         on the Schedule desk immediately instead of after the next full league load */
+      ((CG.lg&&CG.lg.players)||[]).forEach(function(lp){ if(lp.id===CG.auth.user.id) lp.server=srv||null; });
       CG.toast("Profile saved","ok");
     });
   });
@@ -12620,6 +12633,9 @@ CG.hubSettings = function(){
     '<span class="hint">Synced automatically from your Discord display name every few minutes — change it there and it flows here.</span></label>'+
     '<label class="fld"><span>EA ID</span><input id="sEaLive" value="'+esc(p.ea_id||"")+'"><span class="hint">Used to link your EA box scores to your profile — required to register.</span></label>'+
     '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
+    '<label class="fld"><span>Suggested server</span><select id="sSrvLive"><option value="">No preference</option>'+
+      (CG.SERVERS||[]).map(function(x){ return '<option value="'+esc(x)+'"'+((p.preferred_server||"")===x?" selected":"")+'>'+esc(x)+'</option>'; }).join("")+
+    '</select><span class="hint">The server you play best on. Your club\u2019s management sees the whole roster\u2019s answers when it sets each game\u2019s server picks and veto (Rule 4.2). It is a suggestion, not a vote: the picks stay management\u2019s. Leave it on <b>No preference</b> if you play anywhere.</span></label>'+
     '<button class="btn btn-ink" id="sSaveLive">Save profile</button></div></div>'+
     '<div class="stack">'+
     '<div class="card" id="dcAcctCard"><div class="card-h"><h3>Discord account</h3><span class="chip" id="dcAcctChip">Checking…</span></div><div class="card-b" id="dcAcctBody"><p class="small" style="color:var(--steel)">Loading your linked accounts…</p></div></div>'+

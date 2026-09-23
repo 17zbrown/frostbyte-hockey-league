@@ -128,7 +128,7 @@ console.log("\n— EA gamertags beside names");
   const body = JSON.stringify(view);
   A("the queue card carries EA names", body.includes("IceWizard99") && body.includes("NetMinderEA"));
   A("...and numbers the line", body.includes("1. <@u1>"));
-  const done = I.doneView({ state: { captains: ["u1", "u2"], teams: { A: ["u1"], B: ["u2"] }, server: "NA East", code: "123456", vetoed: 1 } }, ea);
+  const done = I.doneView({ state: { captains: ["u1", "u2"], teams: { A: ["u1"], B: ["u2"] }, server: "NA Central", code: "123456", vetoed: 1 } }, ea);
   const dbody = JSON.stringify(done);
   A("the ready card carries EA names", dbody.includes("IceWizard99"));
   A("...and tells them how to enter a lagged-out game", /Lagged out/.test(dbody) && /Import as one game/.test(dbody));
