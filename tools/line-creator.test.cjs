@@ -159,8 +159,14 @@ console.log("\n— switching the previewed club reloads its data");
   const live = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_live.js"), "utf8");
   /* the binding moved to a document-level delegated listener (the per-render binder was skipped
      by AFTER-chain branches that never chained, leaving the picker dead on half the hub pages) */
+  /* v2.86: the same delegated listener now also carries the seat mirror, so the club guard is no
+     longer the first statement in it. What must hold is that BOTH selects are bound at the
+     document and neither depends on a page remembering to chain a binder. */
   A("the picker is bound once, at the document, so no page can render it dead",
-    /document\.addEventListener\("change", function\(e\)\{\s*\n\s*if \(!e\.target \|\| e\.target\.id !== "cmPreview"\) return;/.test(live));
+    /document\.addEventListener\("change", function\(e\)\{[\s\S]{0,700}if \(!e\.target \|\| e\.target\.id !== "cmPreview"\) return;/.test(live));
+  A("...and the seat mirror rides the same listener",
+    /if \(e\.target && e\.target\.id === "cmPreviewSeat"\)\{/.test(live) &&
+    live.indexOf('e.target.id === "cmPreviewSeat"') > live.indexOf('document.addEventListener("change"'));
   A("the picker reloads manager data before re-rendering",
     /CG\.setPreviewClub\(v \|\| null\);[\s\S]{0,600}CG\.loadManagerData\(\)\.then\(done, done\)/.test(live));
   A("the club-keyed loads follow myClub(), which honors the preview",

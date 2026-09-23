@@ -5395,21 +5395,52 @@ CG.previewClub = function(){
   var code = (CG.store.get("prefs")||{}).previewClub || null;
   return (code && CG.TEAM && CG.TEAM[code]) ? code : null;
 };
+/* v2.86: which SEAT a preview is rendered as. The league office sees everything, which is NOT what
+   the club sees: an Owner sets per-seat access, so a GM's Team HQ can be missing pages and carrying
+   approval banners the office never meets. Mirroring a seat renders the club's own screen, which is
+   the point when you are walking someone through theirs. Authority is unchanged either way: the
+   office's moves are real and immediate, they are never queued behind an Owner. */
+CG.PREVIEW_SEATS = [["owner","Owner"],["gm","General Manager"],["agm","Assistant GM"],["office","League office (sees everything)"]];
+CG.previewSeat = function(){
+  if (!CG.previewClub || !CG.previewClub()) return null;
+  var s = (CG.store.get("prefs")||{}).previewSeat || "owner";
+  return CG.PREVIEW_SEATS.some(function(x){ return x[0]===s; }) ? s : "owner";
+};
+CG.setPreviewSeat = function(seat){
+  var prefs = CG.store.get("prefs") || {};
+  if (seat) prefs.previewSeat = seat; else delete prefs.previewSeat;
+  CG.store.set("prefs", prefs);
+};
+/* who actually holds the mirrored seat, for the bar */
+CG.previewSeatHolder = function(){
+  var seat = CG.previewSeat(), t = CG.previewClub && CG.TEAM[CG.previewClub()];
+  if (!seat || seat==="office" || !t) return null;
+  var uid = t[seat], names = (CG.lg && CG.lg._profName) || {};
+  return uid ? (names[uid] || "that seat") : null;
+};
 CG.setPreviewClub = function(code){
   var prefs = CG.store.get("prefs") || {};
   if (code) prefs.previewClub = code; else delete prefs.previewClub;
   CG.store.set("prefs", prefs);
 };
 CG.myManagedTeam = function(){
-  var uid = (CG.auth.user && CG.auth.user.id) || ((CG.me()||{}).id);
-  var seat = uid ? (CG.TEAMS||[]).find(function(t){ return t.owner===uid || t.gm===uid || t.agm===uid; }) : null;
-  if (seat) return seat;                       /* a real seat always wins over a preview */
+  /* v2.86: an explicit preview WINS. It used to lose to a real seat, so a grandfathered
+     commissioner who still manages a club could never actually look at another one: the page said
+     he was viewing theirs while every read and write stayed on his own. Picking a club is a
+     deliberate act, and "None — my own hub" puts it back. */
   var pv = CG.previewClub();
-  return pv ? CG.TEAM[pv] : null;
+  if (pv) return CG.TEAM[pv];
+  var uid = (CG.auth.user && CG.auth.user.id) || ((CG.me()||{}).id);
+  return (uid ? (CG.TEAMS||[]).find(function(t){ return t.owner===uid || t.gm===uid || t.agm===uid; }) : null) || null;
 };
 /* live override: a manager with no roster spot (e.g. before the pre-season fills
    rosters) still runs THEIR club — never the alphabetical fallback */
 CG.myClub = function(){
+  /* v2.86: the preview first. loadManagerData keys its whole fetch on this (lineups, lines, the
+     night plan, trades, vetoes, the management policy), so a commissioner who ALSO holds a roster
+     spot used to preview another club and be shown his own club's data under its name. */
+  var pv = CG.previewClub && CG.previewClub();
+  if (pv) return pv;
   var me = CG.me();
   if (me && me.team) return me.team;
   var t = CG.myManagedTeam();
@@ -5439,9 +5470,16 @@ CG.hubShell = function(section, inner){
     '<div class="note'+(pv?' red':'')+'" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
       '<b style="font-family:var(--f-disp)">'+(pv ? 'Viewing '+esc(CG.TEAM[pv].name)+'\u2019s front office' : 'Commissioner preview')+'</b>'+
       '<span class="caption" style="flex:1;min-width:220px">'+
-        (pv ? 'You are seeing Team HQ as this club\u2019s management. This is the <b>real club</b> \u2014 anything you save here is a live change.'
+        (pv ? (CG.previewSeat()==="office"
+              ? 'You are seeing everything the league office can see, which is more than this club\u2019s own seats see. Pick a seat to mirror their screen. This is the <b>real club</b>: anything you save here is a live change.'
+              : 'You are seeing exactly what this club\u2019s '+esc(CG.seatLabel(CG.previewSeat()))+(CG.previewSeatHolder()?' ('+esc(CG.previewSeatHolder())+')':'')+' sees, including the pages the Owner has hidden or put behind approval. This is the <b>real club</b>: anything you save here is a live change, and your own moves are never queued.')
             : 'Pick a club to see its Team HQ without holding a seat on it. Nothing is written to the club.')+'</span>'+
       '<select id="cmPreview" style="min-width:200px"><option value="">None \u2014 my own hub</option>'+opts+'</select>'+
+      (pv ? '<label class="fld" style="margin:0"><span>Seeing it as</span><select id="cmPreviewSeat" style="min-width:210px">'+
+        CG.PREVIEW_SEATS.map(function(x){
+          var who = (x[0]!=="office" && CG.TEAM[pv] && CG.TEAM[pv][x[0]]) ? ((CG.lg&&CG.lg._profName||{})[CG.TEAM[pv][x[0]]] || "") : "";
+          return '<option value="'+x[0]+'"'+(CG.previewSeat()===x[0]?' selected':'')+'>'+esc(x[1])+(who?' \u00b7 '+esc(who):(x[0]==="office"?'':' \u00b7 vacant'))+'</option>';
+        }).join("")+'</select></label>' : "")+
     '</div></div></section>';
   return bar + CG._origHubShell(section, inner);
 };
@@ -5451,9 +5489,19 @@ CG.hubShell = function(section, inner){
    but only actually worked on some, which read as randomly broken. A delegated listener cannot be
    skipped by a branch that forgot to chain. */
 document.addEventListener("change", function(e){
+  /* v2.86: the seat mirror needs no refetch — the club's data is already loaded, only the view
+     changes — so it repaints in place rather than reloading the league. */
+  if (e.target && e.target.id === "cmPreviewSeat"){
+    CG.setPreviewSeat(e.target.value || "owner");
+    CG.toast(e.target.value === "office" ? "Seeing everything, as the league office"
+      : "Seeing this club as its "+CG.seatLabel(e.target.value)+" sees it", "ok");
+    if (CG.router) CG.router();
+    return;
+  }
   if (!e.target || e.target.id !== "cmPreview") return;
   var v = e.target.value;
   CG.setPreviewClub(v || null);
+  CG.setPreviewSeat(v ? "owner" : null);       /* a new club starts at its fullest real view */
   /* the club-keyed loads (trades, vetoes, lineups, saved lines, night plan) were fetched for the
      PREVIOUS club — without a reload the new club's front office renders the old club's data */
   var done = function(){ CG.toast(v ? "Viewing "+v+"’s front office" : "Preview off", "ok"); if (CG.router) CG.router(); };
@@ -6877,9 +6925,15 @@ if (!CG.fmtAgo) CG.fmtAgo = function(ts){
   var h = Math.round(m/60); if (h < 24) return h+" h ago";
   return CG.fmtFull ? CG.fmtFull(ts) : new Date(ts).toLocaleString();
 };
+CG.seatLabel = function(seat){ var r = (CG.PREVIEW_SEATS||[]).find(function(x){ return x[0]===seat; }); return r ? r[1] : (seat||""); };
 CG.mgmtPageLabel = function(page){ var r = CG.MGMT_PAGES.find(function(x){ return x[0]===page; }); return r ? r[1] : page; };
 /* which seat the signed-in member holds on their club: owner | gm | agm | null */
 CG.mySeat = function(){
+  /* v2.86: a preview renders AS the mirrored seat, so everything keyed on the seat (the nav, the
+     Owner-only controls, the approval banner) shows the club's own screen. "office" mirrors
+     nobody and keeps the old see-everything view. */
+  var pv = CG.previewSeat && CG.previewSeat();
+  if (pv) return pv === "office" ? null : pv;
   var t = CG.myManagedTeam && CG.myManagedTeam(); var uid = CG.auth && CG.auth.user && CG.auth.user.id;
   if (!t || !uid) return null;
   return t.owner===uid ? "owner" : t.gm===uid ? "gm" : t.agm===uid ? "agm" : null;
@@ -6889,7 +6943,9 @@ CG.mgmtAccess = function(page){
   var seat = CG.mySeat();
   if (!seat){ return CG.role()==="commish" && CG.previewClub && CG.previewClub() ? "office" : "none"; }
   if (seat==="owner") return "owner";
-  if (CG.role()==="commish") return "office";
+  /* a commissioner who is NOT mirroring a seat keeps the office view; one who IS reads the club's
+     own policy for that seat, or the mirror would show a GM full access he does not have */
+  if (CG.role()==="commish" && !(CG.previewSeat && CG.previewSeat())) return "office";
   /* the last policy loaded stands in while a league rebuild is fetching the next one, so a click
      in that window still takes the queue path instead of the raw gate refusal */
   var pol = (CG.lg && CG.lg._mgmtPolicy) || CG._mgmtPolicyCache || {};
@@ -6921,6 +6977,10 @@ CG.mgmtPendingCount = function(){
 CG.MGMT_FAILED = "failed";
 CG.mgmtQueue = function(action, args, summary, opts){
   opts = opts || {};
+  /* The league office acts directly, even while mirroring a seat whose moves would be queued: the
+     VIEW is a mirror, the authority is not (mgmt_access_for returns 'office' for a commissioner,
+     so the database would not queue it either). */
+  if (CG.role() === "commish") return Promise.resolve(false);
   var page = opts.page || CG.MGMT_ACTION_PAGE[action], t = CG.myManagedTeam && CG.myManagedTeam();
   if (!page || !t || CG.mgmtAccess(page) !== "approve") return Promise.resolve(false);
   return CG.sb.rpc("mgmt_request_move", { p_team_code:t.code, p_action:action, p_args:args||{}, p_summary:summary }).then(function(r){
@@ -6941,9 +7001,12 @@ CG.mgmtApprovalBanner = function(section){
   if (CG.mgmtAccess(page) !== "approve") return "";
   var t = CG.myManagedTeam(), names = (CG.lg && CG.lg._profName) || {}, ownerName = t && t.owner ? (names[t.owner] || "the Owner") : "the Owner";
   var uid = CG.auth.user && CG.auth.user.id;
-  var mine = CG.mgmtMoves("pending").filter(function(m){ return m.page===page && m.requested_by===uid; });
+  var mirror = CG.previewSeat && CG.previewSeat() && CG.previewSeat() !== "office";
+  var mine = mirror ? [] : CG.mgmtMoves("pending").filter(function(m){ return m.page===page && m.requested_by===uid; });
   return '<div class="note" style="margin-bottom:16px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+esc(ownerName)+' approves '+esc(CG.mgmtPageLabel(page)).toLowerCase()+' moves</b>'+
-    'Everything you do on this page is sent to the Owner and takes effect only when they approve it (Rule 2.6). You are told either way.'+
+    (mirror
+      ? 'This is what the '+esc(CG.seatLabel(CG.previewSeat()))+' sees here: everything they do on this page goes to the Owner and takes effect only when they approve it (Rule 2.6). <b>Your own moves are not queued</b> — you act as the league office, so anything you do here lands immediately.'
+      : 'Everything you do on this page is sent to the Owner and takes effect only when they approve it (Rule 2.6). You are told either way.')+
     (mine.length ? '<div class="stack" style="gap:6px;margin-top:10px">'+mine.map(function(m){
       return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="chip chip-warn chip-xs">Waiting</span><span style="flex:1">'+esc(m.summary)+' <span class="caption">· '+esc(CG.fmtAgo ? CG.fmtAgo(Date.parse(m.created_at)) : "")+'</span></span>'+
         '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw-move="'+esc(m.id)+'">Withdraw</button></div>';
