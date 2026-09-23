@@ -489,6 +489,13 @@ CG.ROUTES.matchup = function(id){
       });
       return n>cap ? ' <span class="chip chip-loss" style="font-size:9px" title="Dressed in '+n+' games of this series — over the '+cap+'-game '+(isGoalie?"goaltender":"skater")+' cap (Rule 8.3), an ineligible-player forfeit under Rule 5.2">OVER CAP</span>' : "";
     }
+    /* v2.93: a final with no lines is a real state, not an empty grid. A forfeit carries no
+       individual statistics by rule; anything else final and empty simply has not imported yet,
+       and saying which is which is the difference between "the league knows" and "the site is
+       broken". */
+    var emptyNote = res.forfeit
+      ? 'No individual statistics are applied to a forfeited game (Rule 3.2). The result stands as recorded; the players\u2019 records carry nothing from it.'
+      : 'The box score has not been imported yet. It lands automatically within a few minutes of the final, from the club private lobby it was played in (Rule 6.2); if it never arrives, the statistics staff can attach it by hand.';
     [g.away, g.home].forEach(function(code){
       var box = res.box[code];
       var sk = Object.keys(box).filter(function(pid){ return !box[pid].goalie; }).map(function(pid){ return { p: boxPlayer(pid, code, box[pid]), b: box[pid], pid: pid }; })
@@ -503,17 +510,21 @@ CG.ROUTES.matchup = function(id){
           '<td class="'+(b.pim?"":"z")+'">'+b.pim+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="mono" style="font-size:11px">'+(b.toi?CG.fmtToi(b.toi):"—")+'</td></tr>';
         }).join("")+
         (gl?'<tr><td class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">G: '+esc(gl.p.tag)+capFlag(gl.pid, true)+'</td><td colspan="11" class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">'+gl.b.sv+'/'+gl.b.sa+' saves'+(gl.b.sa?" ("+(gl.b.sv/gl.b.sa).toFixed(3).replace(/^0/,"")+")":"")+' · '+gl.b.ga+' GA'+(gl.b.so?" · SHUTOUT":"")+((gl.b.brkShots||gl.b.pokes)?' · '+(gl.b.brkSv||0)+'/'+(gl.b.brkShots||0)+' brk · '+(gl.b.pokes||0)+' poke':"")+(gl.b.toi?' · '+CG.fmtToi(gl.b.toi):"")+'</td></tr>':"")+
-        '</tbody></table></div></div>';
+        '</tbody></table></div>'+
+        (!sk.length && !gl ? '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="caption">'+emptyNote+'</span></div>' : "")+
+        '</div>';
     });
     body += '</div><div class="stack">'+
-      '<div class="card"><div class="card-h"><h3>Three Stars</h3><span class="chip chip-chrome">Official</span></div><div class="card-b"><div class="stack" style="gap:10px">'+
+      (res.stars.length
+      ? '<div class="card"><div class="card-h"><h3>Three Stars</h3><span class="chip chip-chrome">Official</span></div><div class="card-b"><div class="stack" style="gap:10px">'+
       res.stars.map(function(st,i){
         var b = res.box[st.team][st.pid];
         var p = boxPlayer(st.pid, st.team, b);
         return '<div class="starcard"'+(p.id?' data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"':'')+'><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
           '<div style="display:flex;gap:10px;align-items:center;margin-top:4px">'+CG.crest(p.team,28)+'<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
           '<span class="caption" style="display:block">'+(b.goalie? b.sv+" saves" : b.g+"G "+b.a+"A")+'</span></div></div></div>';
-      }).join("")+'</div>'+(starsBlurb?'<p class="caption" style="margin-top:12px">'+esc(starsBlurb)+'</p>':"")+'</div></div>'+
+      }).join("")+'</div>'+(starsBlurb?'<p class="caption" style="margin-top:12px">'+esc(starsBlurb)+'</p>':"")+'</div></div>'
+      : '<div class="card"><div class="card-h"><h3>Three Stars</h3></div><div class="card-b"><span class="caption">'+emptyNote+'</span></div></div>')+
     '</div></div>';
   } else {
     /* PREVIEW: server, code, lineups. The code releases with the night's first game (Rule 4.2);
