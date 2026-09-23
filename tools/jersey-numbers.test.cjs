@@ -57,6 +57,10 @@ console.log("\n— the line-creator card stops clipping");
   A("the position never breaks mid-word", /\.lc-pc \.two \.ps\{[^}]*white-space:nowrap\}/.test(css));
   A("the meta row wraps with room between rows", /\.lc-pc \.two \.ln2\{[^}]*row-gap:3px[^}]*flex-wrap:wrap/.test(css));
   A("...and its chips do not shrink", /\.lc-pc \.two \.ln2 \.chip\{flex:0 0 auto\}/.test(css));
+  /* v2.92: the rating belongs on the NAME's line. Centered against the card it landed beside the
+     meta row and crowded the position. */
+  A("the rating sits on the name's line, not centered against the card",
+    /\.lc-pc \.ov\{[^}]*align-self:flex-start;margin-top:3px;flex:0 0 auto\}/.test(css));
 }
 
 console.log("\n— the field on a phone");

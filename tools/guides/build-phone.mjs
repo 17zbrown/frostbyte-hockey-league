@@ -40,7 +40,7 @@ function shoot(listPath, port) {
    the puck is 42 CSS px, so its half-width is converted from the capture's own size. */
 const PUCK = 32, COL_W = 516;   /* the phone puck, and the poster column the image fills, CSS px */
 function puckAt(box, img) {
-  /* centred on the ring's top-right corner: half the puck sits on the control's own corner
+  /* centered on the ring's top-right corner: half the puck sits on the control's own corner
      padding, half outside — the smallest footprint that still reads as "this one" */
   const scale = COL_W / img.width;
   const rx = PUCK / 2 / (img.width * scale) * 100, ry = PUCK / 2 / (img.height * scale) * 100;
