@@ -31,6 +31,7 @@ const world = {
   profiles: [],      // [{id, gamertag}]
   statPostStatus: 204,
   cfg: [],           // app_config rows (the staff webhook, when a test wants one)
+  forfeits: [],      // what the abandoned-game sweep ruled
   toStaff: [],       // what tellStaff posted
 };
 const calls = [];                 // every fetch, in order: {m, u, body}
@@ -46,7 +47,16 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/ea_ingest_log?ea_match_id=in.") && u.includes("payload=not.is.null"))
     return J(inList(u).filter((id) => world.archived[id]).map((id) => ({ ea_match_id: id, ...world.archived[id] })));
   const pairRows = (rows) => { const p = pairOf(u); return rows.filter((g) => p && ((g.home_team_id === p[0] && g.away_team_id === p[1]) || (g.home_team_id === p[1] && g.away_team_id === p[0]))); };
-  if (u.includes("/rest/v1/games?") && u.includes("status=eq.final")) return J(pairRows(world.finals).map((g) => ({ ...g, status: "final" })));
+  if (u.includes("/rest/v1/games?") && u.includes("status=eq.final")) {
+    /* the abandoned-game sweep asks per TEAM: or=(home_team_id.eq.T,away_team_id.eq.T) */
+    const one = u.match(/home_team_id\.eq\.([^,)]+),away_team_id\.eq\.([^,)]+)/);
+    if (one && one[1] === one[2]) {
+      const t = one[1];
+      return J(world.finals.filter((g) => g.home_team_id === t || g.away_team_id === t)
+        .map((g) => ({ status: "final", voided: false, forfeit_team_id: null, ...g })));
+    }
+    return J(pairRows(world.finals).map((g) => ({ ...g, status: "final" })));
+  }
   if (u.includes("/rest/v1/games?") && u.includes("scheduled_at=gte.")) {
     const open = pairRows(world.open).map((g) => ({ status: "scheduled", ea_match_id: null, voided: false, forfeit_team_id: null, ...g }));
     const fin = pairRows(world.finals).map((g) => ({ status: "final", voided: false, forfeit_team_id: null, ...g }));
@@ -58,6 +68,11 @@ globalThis.fetch = async (url, opts = {}) => {
     for (const g of world.open) if (g.id === id && b.ea_match_id) g.ea_match_id = b.ea_match_id;
     return NIL();
   }
+  if (u.includes("/rest/v1/rpc/forfeit_abandoned_game")) {
+    const b = JSON.parse(opts.body); world.forfeits.push(b);
+    return J({ ok: true, winner: "w", kept_result: true, score: "2-1" });
+  }
+  if (u.includes("/rest/v1/teams?ea_club_id=not.is.null")) return J(TEAMS.map((t) => ({ ...t, code: t.id })));
   if (u.includes("/rest/v1/teams?ea_club_id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(String(t.ea_club_id)))); }
   if (u.includes("/rest/v1/teams?id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(t.id)).map((t) => ({ ...t, name: t.id, code: t.id }))); }
   if (u.includes("/rest/v1/ea_ingest_log?or=")) return J(world.logs);
@@ -82,7 +97,7 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 const reset = () => {
   calls.length = 0;
-  world.open = []; world.finals = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = [];
+  world.open = []; world.finals = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = [];
 };
 /* an EA match between two clubs that ENDED at `end` and ran `toi` seconds of game clock, with the
    given rosters ({eaPlayerId: name}) on each side */
@@ -138,6 +153,57 @@ console.log("\n— a Rule 4.3 resume: the replay's payload is archived before th
   const final = of(isLogPost).slice(-1)[0];
   A("...and finished as `merged` (what the next poll's dedupe reads) without re-uploading the body",
     final.body[0].status === "merged" && final.body[0].game_id === "g900" && !("payload" in final.body[0]), JSON.stringify(final.body[0]));
+}
+
+console.log("\n— an ABANDONED game: a club moved on to another opponent, so nobody is coming back");
+{
+  /* Commissioner's ruling (2026-09-23): an unfinished game whose clubs went on to other opponents
+     is over. The club ahead on the ice keeps the win and BOTH clubs keep their stats. The evidence
+     has to be in the delivery: a later match, same club, different opponent. */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  const stub = ea("ab1", at(18), 111, 222, 900, [2, 1]);            // 15 min of clock, 2-1
+  world.finals = [{ ...G900, ea_match_id: "ab1", home_score: 2, away_score: 1 }];
+  world.filed = { ab1: "g900" }; world.archived = { ab1: { status: "ingested", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "ab1", payload: stub }];
+  /* tA (111) then plays club 333 — a different opponent — AFTER the abandoned sitting */
+  const s1 = await post([ea("nx1", at(60), 111, 333, 3600, [3, 2])]);
+  A("the unfinished game is ruled a forfeit", world.forfeits.length === 1, JSON.stringify(world.forfeits));
+  A("...against the club that was BEHIND, so the club ahead keeps the win",
+    world.forfeits[0] && world.forfeits[0].p_forfeiting_team === "tB" && world.forfeits[0].p_game === "g900", JSON.stringify(world.forfeits[0]));
+  A("...with a reason that names the clock and the rule", /min of game clock[\s\S]*Rule 4\.3/.test(String(world.forfeits[0].p_reason)), String(world.forfeits[0].p_reason));
+  A("it is reported as a warning, not an error, so the poll stays green", (s1.errors || []).length === 0 && (s1.warnings || []).some((w) => /ruled a forfeit/.test(w.warning)), JSON.stringify(s1.warnings));
+  A("the officials are told, with how to undo it", world.toStaff.some((t) => /Abandoned game ruled/.test(t) && /Undo it/.test(t)), JSON.stringify(world.toStaff).slice(0, 160));
+
+  /* no other opponent yet: the game is still resumable and must NOT be ruled */
+  reset();
+  const stub2 = ea("ab2", at(18), 111, 222, 900, [2, 1]);
+  world.finals = [{ ...G900, ea_match_id: "ab2", home_score: 2, away_score: 1 }];
+  world.filed = { ab2: "g900" }; world.archived = { ab2: { status: "ingested", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "ab2", payload: stub2 }];
+  await post([ea("ab2b", at(40), 111, 222, 2700, [1, 0])]);          // the resume itself
+  A("a resume in the same delivery is merged, never ruled abandoned", world.forfeits.length === 0);
+
+  /* a level abandoned game has nobody to give the win to */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  const stub3 = ea("ab3", at(18), 111, 222, 900, [1, 1]);
+  world.finals = [{ ...G900, ea_match_id: "ab3", home_score: 1, away_score: 1 }];
+  world.filed = { ab3: "g900" }; world.archived = { ab3: { status: "ingested", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "ab3", payload: stub3 }];
+  const s3 = await post([ea("nx3", at(60), 111, 333, 3600, [3, 2])]);
+  A("a level abandoned game is NOT ruled automatically", world.forfeits.length === 0);
+  A("...it goes to the officials, saying why", world.toStaff.some((t) => /level/i.test(t)) &&
+    (s3.warnings || []).some((w) => /level/.test(w.warning)), JSON.stringify(s3.warnings));
+
+  /* a complete game is never touched, however many other games follow it */
+  reset();
+  const full = ea("cp1", at(18), 111, 222, 3600, [4, 1]);
+  world.finals = [{ ...G900, ea_match_id: "cp1", home_score: 4, away_score: 1 }];
+  world.filed = { cp1: "g900" }; world.archived = { cp1: { status: "ingested", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "cp1", payload: full }];
+  await post([ea("nx4", at(60), 111, 333, 3600, [3, 2])]);
+  A("a game that ran its full clock is never ruled abandoned", world.forfeits.length === 0);
 }
 
 console.log("\n— a resume that adds up to a TIE: filed, and the officials are told the same minute");

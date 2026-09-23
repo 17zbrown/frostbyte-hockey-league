@@ -42,6 +42,11 @@ async function sbGet(path) {
   if (!r.ok) throw new Error(`GET ${path} -> ${r.status} ${await r.text()}`);
   return r.json();
 }
+/* v2.94: an RPC call for the importer's own lane (forfeit_abandoned_game). sbSend would do, but
+   naming it keeps the call sites honest about what they are: a function, not a table write. */
+async function sbRpc(fn, body) {
+  return sbSend("POST", `rpc/${fn}`, body || {});
+}
 async function sbSend(method, path, body, prefer) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, {
     method, headers: sbHeaders(prefer ? { Prefer: prefer } : undefined),
@@ -1293,5 +1298,97 @@ export const handler = async (event) => {
       try { const n = normalizeMatch(raw); if (n) await archive(ctx, n, raw, "error", String(e.message || e)); } catch {}
     }
   }
+/* ---- Rule 4.3, the abandoned game (v2.94) --------------------------------------------------
+   A game whose sittings never add up to a full clock is UNFINISHED: the clubs are expected to
+   reload and resume, and ingestContinuation merges the sittings when they do. But once one of
+   those clubs plays a DIFFERENT opponent, the unfinished game is over: nobody is coming back to
+   it. Commissioner's ruling (2026-09-23): that game is a forfeit, the club ahead on the ice takes
+   the win, and BOTH clubs keep every stat they earned.
+
+   Deliberately conservative in three ways, because this writes a loss into the table:
+     - it rules only a game this batch could see the evidence for (the later match against another
+       opponent is in the same delivery, with a LATER end time than the last sitting);
+     - it never rules a level game. Nobody is ahead, so there is no one to give the win to; the
+       officials are told and it waits for a human;
+     - it never touches a game that is already forfeit-ruled or voided.
+   Everything it does is reversible with unforfeit_game, and every ruling is logged and announced. */
+async function closeOutAbandoned(ctx, summary, batch) {
+  if (!batch || !batch.length) return;
+  const clubsOf = (n) => n.clubs.map((c) => String(c.ea_club_id));
+  const pairOf = (n) => clubsOf(n).slice().sort().join("|");
+  const allClubs = [...new Set(batch.flatMap(clubsOf))];
+  /* EVERY club, not just this delivery's: the abandoned game's opponent is by definition the club
+     that is NOT here, and without its row the game could not even be named, let alone ruled. */
+  let teams;
+  try { teams = await sbGet("teams?ea_club_id=not.is.null&select=id,code,ea_club_id"); } catch { return; }
+  if (!teams || !teams.length) return;
+  const inBatch = teams.filter((t) => allClubs.includes(String(t.ea_club_id)));
+  if (!inBatch.length) return;
+  const codeOf = (tid) => (teams.find((t) => t.id === tid) || {}).code || tid;
+  const clubOfTeam = new Map(teams.map((t) => [t.id, String(t.ea_club_id)]));
+  /* where each club appears in this delivery: which pair, and when that match ended */
+  const seenAt = new Map();
+  for (const m of batch) for (const c of clubsOf(m)) {
+    if (!seenAt.has(c)) seenAt.set(c, []);
+    seenAt.get(c).push({ ts: m.ts || 0, pair: pairOf(m) });
+  }
+  /* The abandoned game's OWN pair is the one NOT in this delivery, so the search starts from each
+     club in the delivery and looks at its recent finals against anyone. */
+  const done = new Set();
+  for (const t of inBatch) {
+    let finals;
+    try {
+      finals = await sbGet(`games?or=(home_team_id.eq.${t.id},away_team_id.eq.${t.id})&status=eq.final&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,home_team_id,away_team_id,home_score,away_score,scheduled_at,ea_match_id,week,stage`);
+    } catch { continue; }
+    for (const g of finals || []) {
+      if (done.has(g.id)) continue;
+      const cHome = clubOfTeam.get(g.home_team_id), cAway = clubOfTeam.get(g.away_team_id);
+      if (!cHome || !cAway) continue;                 /* both sides must be clubs this batch names */
+      const pair = [cHome, cAway].slice().sort().join("|");
+      /* the same finished/unfinished test ingestContinuation uses, read from the archive */
+      let ps = [];
+      try {
+        const rows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(g.ea_match_id)},and(game_id.eq.${g.id},status.eq.merged))&select=ea_match_id,payload`);
+        for (const r of rows || []) {
+          if (!r.payload) continue;
+          const n2 = normalizeMatch(r.payload);
+          if (n2 && !ps.some((x) => x.ea_match_id === n2.ea_match_id)) ps.push(n2);
+        }
+      } catch { continue; }
+      if (!ps.length) continue;                       /* not judgeable without the payloads */
+      const sorted = ps.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      const last = sorted[sorted.length - 1];
+      const total = ps.reduce((a, p2) => a + segElapsed(p2), 0);
+      if (segElapsed(last) >= REGULATION_S || total >= REGULATION_S || last.went_ot) continue;   /* finished */
+      /* did either club play a DIFFERENT opponent after the last sitting? */
+      const movedOn = [cHome, cAway].some((c) => (seenAt.get(c) || []).some((x) => x.pair !== pair && x.ts > (last.ts || 0)));
+      if (!movedOn) continue;                         /* still resumable: leave it for the merge */
+      done.add(g.id);
+      const mins = Math.round(total / 60);
+      if ((g.home_score || 0) === (g.away_score || 0)) {
+        summary.warnings.push({ game_id: g.id, warning: "abandoned game is level, the officials must rule it" });
+        await tellStaff(`\u26a0\ufe0f **Abandoned game, level score** \u00b7 ${codeOf(g.away_team_id)} at ${codeOf(g.home_team_id)}, week ${g.week}: ${mins} min of game clock was played, the score was level at ${g.home_score}-${g.away_score}, and a club has moved on to another opponent. Rule 4.3 gives the win to the club ahead and neither is, so this one is yours: rule it in Control Center, Stats manager.`);
+        continue;
+      }
+      const loser = (g.home_score || 0) > (g.away_score || 0) ? g.away_team_id : g.home_team_id;
+      const winner = loser === g.home_team_id ? g.away_team_id : g.home_team_id;
+      const reason = `abandoned: ${mins} min of game clock played, and a club moved on to another opponent (Rule 4.3)`;
+      try {
+        const r = await sbRpc("forfeit_abandoned_game", { p_game: g.id, p_forfeiting_team: loser, p_reason: reason });
+        const ruled = r && (Array.isArray(r) ? r[0] : r);
+        if (!ruled || ruled.ok !== true) continue;
+        summary.warnings.push({ game_id: g.id, warning: `abandoned game ruled a forfeit: ${codeOf(winner)} keeps the win, both clubs keep their stats` });
+        await tellStaff(`\u26a0\ufe0f **Abandoned game ruled (Rule 4.3)** \u00b7 ${codeOf(g.away_team_id)} at ${codeOf(g.home_team_id)}, week ${g.week}: only ${mins} min of game clock was played and a club went on to another opponent instead of resuming. **${codeOf(winner)} takes the win ${g.home_score}-${g.away_score}; both clubs keep their statistics.** Undo it in Control Center, Stats manager, if the clubs were still going to replay it.`);
+      } catch (e) {
+        summary.errors.push({ game_id: g.id, error: `could not rule the abandoned game: ${String((e && e.message) || e)}` });
+      }
+    }
+  }
+}
+
+  /* Rule 4.3 (v2.94): close out any game this delivery proved abandoned, AFTER everything in it
+     has been filed — the evidence is the batch itself, and a resume in the same batch must win. */
+  try { await closeOutAbandoned(ctx, summary, batch); }
+  catch (e) { summary.errors.push({ reason: `abandoned-game sweep: ${String((e && e.message) || e)}` }); }
   return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(summary) };
 };

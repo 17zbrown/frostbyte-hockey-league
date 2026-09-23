@@ -1,0 +1,16 @@
+-- v2.94 (2026-09-23): Rule 4.3, the abandoned game. Applied live in one gated transaction.
+--
+--   public.forfeit_abandoned_game(p_game uuid, p_forfeiting_team uuid, p_reason text) returns jsonb
+--     forfeit_game(keep_result := true) with a MACHINE gate: public.trusted_writer() only (the
+--     importer's service key), so statistics staff keep their own door in forfeit_game and this
+--     one is unreachable from a browser (EXECUTE revoked from public, anon AND authenticated).
+--     Sets games.forfeit_team_id and NOTHING else: the score stands as played and game_stats is
+--     untouched, so both clubs keep every statistic. Refuses a voided game, a game that is not
+--     filed, a club not in the game, an already-ruled game (returns ok:false, already_ruled), and
+--     a LEVEL game (no club is ahead, so there is no one to give the win to). Logs
+--     'abandoned_forfeit' to admin_audit with both codes and the score. Reversible: unforfeit_game.
+--
+-- The caller is closeOutAbandoned() in netlify/functions/ingest-stats.js, which runs after every
+-- batch: for each club in the delivery, any recent final of that club whose archived sittings do
+-- not add up to a full game clock AND whose pair is not the pair this delivery is about (i.e. a
+-- club moved on to someone else, with a later end time than the last sitting) is ruled.
