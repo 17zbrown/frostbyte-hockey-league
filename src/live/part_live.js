@@ -179,6 +179,30 @@ CG.weekGamesFor = function(pid, game, club, opts){
   });
   return n;
 };
+/* Rule 5.2 (v2.83): a player's WHOLE week, the game in hand included — what weekGamesFor counts,
+   without excluding the game being edited. This is the number a manager needs to SEE before he
+   builds a line, not after the database refuses him: the cap counts games a club has already
+   filed, not only games that have been played, so a club can run a player out of week long before
+   a puck drops. Returns null when the club has no game that week to measure against. */
+CG.weekUsedFor = function(pid, club, game){
+  if (!game) return null;
+  return CG.weekGamesFor(pid, game, club, { excludeGame: "__none__" });
+};
+/* "4/6" for a player's week, and whether he is at the cap. `game` is any game of the week. */
+CG.weekLoad = function(p, club, game){
+  if (!p || !game) return null;
+  var cap = CG.gameCapFor(p, game), used = CG.weekUsedFor(p.id, club, game);
+  return { used: used, cap: cap, left: Math.max(0, cap - used), full: used >= cap };
+};
+/* the chip the line creator and the bench both wear */
+CG.weekLoadChip = function(load, size){
+  if (!load) return "";
+  var cls = load.full ? "chip-loss" : (load.left <= 1 ? "chip-warn" : "");
+  return '<span class="chip '+cls+'" style="font-size:'+(size==="xs"?9:10)+'px" title="'+
+    (load.full ? "At the weekly limit (Rule 5.2): dressed in "+load.used+" of "+load.cap+" games this week, counting games already filed"
+               : "Dressed or played in "+load.used+" of "+load.cap+" games this week (Rule 5.2)")+
+    '">'+load.used+'/'+load.cap+'</span>';
+};
 /* the cap that applies to one player in one game: the series cap in the playoffs, else the weekly cap */
 CG.gameCapFor = function(p, game){
   var o = { pos: p.pos, squad: p.squad, stage: game.stage || "regular" };

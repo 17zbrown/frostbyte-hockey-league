@@ -887,7 +887,7 @@ CG.AFTER._lineup = function(){
     /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
        played games by the box score plus games still to come by the filed lineup */
     var cap = CG.gameCapFor(p, game), used = CG.weekGamesFor(p.id, game, club);
-    if (used >= cap) return p.tag+" has already played or been dressed in "+used+" games this "+(game.stage==="playoff"?"series":"week")+" — the limit is "+cap+" (Rule "+(game.stage==="playoff"?"8.3":"5.2")+").";
+    if (used >= cap) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already played or filed (Rule "+(game.stage==="playoff"?"8.3":"5.2")+"). Drop him from a game you have already dressed to free one.";
     return null;
   }
   function assign(pid, pos){
@@ -1183,7 +1183,18 @@ CG.hubLines = function(qs){
   var camp = [];
   roster.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr)-(lg.ratings[a.id].ovr); })
     .forEach(function(p){ if (p.squad==="tc") camp.push(p); else (byPos[p.pos]||(byPos[p.pos]=[])).push(p); });
-  var board = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
+  /* v2.83: the weekly load, shown BEFORE a line is built. The cap counts games a club has already
+     FILED, not only games that have been played, so a club can spend a player's whole week on
+     Friday and only find out when Wednesday is refused. Measured against the club's next game. */
+  var wkRef = (CG.lineNights(club)[0] || {}).game || null;
+  var loadOf = function(p){ return CG.weekLoad ? CG.weekLoad(p, club, wkRef) : null; };
+  var capped = roster.filter(function(p){ var l = loadOf(p); return l && l.full; });
+  var board = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span>'+
+    (capped.length ? '<span class="chip chip-loss" title="Rule 5.2: these players are dressed or have played in every game their week allows, counting the lineups you have already filed. Dressing them again is refused.">'+capped.length+' at the weekly limit</span>' : "")+'</div>'+
+    (capped.length ? '<div class="card-b" style="border-bottom:1px solid var(--line-soft)"><span class="caption"><b>'+
+      capped.map(function(p){ return esc(p.tag); }).join(", ")+'</b> '+(capped.length===1?"has":"have")+' no games left this week (Rule 5.2). '+
+      'The count includes lineups you have already filed, not just games played, so swap '+(capped.length===1?"him":"them")+' out of a line before dressing a night '+
+      (capped.length===1?"he":"they")+' cannot play.</span></div>' : "")+
     '<div class="card-b"><div class="lc-board">'+POS.map(function(pos){
       return '<div class="lc-col"><div class="lc-ch">'+CG.POS_NAME[pos]+'</div>'+
         (byPos[pos]||[]).map(function(p){
@@ -1193,7 +1204,7 @@ CG.hubLines = function(qs){
             CG.lcAv(p,34)+
             '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">'+CG.POS_NAME[p.pos]+'</span>'+
               (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+'</span></span>'+
-            (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
+            (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
             '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
         }).join("")+'</div>';
     }).join("")+'</div>'+
@@ -1205,7 +1216,7 @@ CG.hubLines = function(qs){
           CG.lcAv(p,34)+
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+'</span></span>'+
-          (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':"")+
+          (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
           '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
       }).join("")+'</div>' : "")+
     '</div></div>';
@@ -1495,9 +1506,17 @@ CG.AFTER._lines = function(qs){
     if (!games.length){ done("every game this night has locked", 0); return; }
     var okN = 0, qN = 0, errs = [];
     (function next(i){
-      if (i >= games.length){ done(errs.length ? errs.join("; ") : null, okN, qN); return; }
+      if (i >= games.length){
+        /* v2.83: one line per REASON, not per game. Three games refused for the same player used
+           to print the same sentence three times, and a week printed it nine. */
+        var byMsg = {}, order = [];
+        errs.forEach(function(e){ if (!byMsg[e.err]){ byMsg[e.err] = []; order.push(e.err); } byMsg[e.err].push(CG.fmtTime(e.at)); });
+        var lines = order.map(function(m){ return byMsg[m].length+" game"+(byMsg[m].length===1?"":"s")+" ("+byMsg[m].join(", ")+"): "+m; });
+        done(lines.length ? lines.join(" · ") : null, okN, qN);
+        return;
+      }
       dressGame(games[i].id, slot, function(err, queued){
-        if (err) errs.push(CG.fmtTime(games[i].at)+" — "+err); else if (queued) qN++; else okN++;
+        if (err) errs.push({ at: games[i].at, err: err }); else if (queued) qN++; else okN++;
         next(i+1);
       });
     })(0);
@@ -1509,10 +1528,37 @@ CG.AFTER._lines = function(qs){
       var pl = (lg._linePlan||{})[n.key];
       return pl && (lg._teamLines||{})[pl] && CG.nightGames(club, n.key).some(function(g){ return CG.now() < g.at - 30*60000; });
     });
-    CG.confirm("Dress the week — "+jobs.length+" night"+(jobs.length===1?"":"s")+"?",
+    /* v2.83 PRE-FLIGHT: say which nights the weekly cap will refuse, and for whom, BEFORE the
+       button is pressed. The count includes lineups already filed (Rule 5.2), so a manager can
+       spend a player's week on one night and be refused on another with no warning at all; this
+       walks the plan, simulates the nights in order, and names the conflict in the confirm. */
+    var wkRefD = (CG.lineNights(club)[0] || {}).game || null;
+    var used = {}, conflicts = [];
+    jobs.forEach(function(n){
+      var pl = (lg._linePlan||{})[n.key], line = (lg._teamLines||{})[pl] || {};
+      var open = CG.nightGames(club, n.key).filter(function(g){ return CG.now() < g.at - 30*60000; });
+      ["center","lw","rw","ld","rd","goalie"].forEach(function(k){
+        var pid = line[k]; if (!pid) return;
+        var p = CG.playerById(lg, pid); if (!p || !wkRefD) return;
+        if (used[pid] == null) used[pid] = CG.weekUsedFor(pid, club, wkRefD) || 0;
+        var already = open.filter(function(g){
+          var lu = (lg._lineups||{})[club+":"+g.id];
+          return lu && [lu.center,lu.lw,lu.rw,lu.ld,lu.rd,lu.goalie].indexOf(pid) >= 0;
+        }).length;
+        var add = open.length - already, cap = CG.gameCapFor(p, wkRefD);
+        if (add > 0 && used[pid] + add > cap){
+          conflicts.push({ night: (CG.NIGHT_LABEL[n.key]||n.key), tag: p.tag, left: Math.max(0, cap - used[pid]), need: add, cap: cap, used: used[pid] });
+        }
+        used[pid] = Math.min(cap, used[pid] + add);
+      });
+    });
+    CG.confirm("Dress the week: "+jobs.length+" night"+(jobs.length===1?"":"s")+"?",
       jobs.map(function(n){ var pl=(lg._linePlan||{})[n.key];
-        return (CG.NIGHT_LABEL[n.key]||n.key)+" — "+((((lg._teamLines||{})[pl]||{}).name)||("Line "+pl)); }).join(" · ")+
-      ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before its lock.",
+        return (CG.NIGHT_LABEL[n.key]||n.key)+": "+((((lg._teamLines||{})[pl]||{}).name)||("Line "+pl)); }).join(" · ")+
+      ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before its lock."+
+      (conflicts.length ? "\n\nThe weekly limit (Rule 5.2) will refuse some of this: "+conflicts.map(function(c){
+        return c.tag+" on "+c.night+" ("+c.used+" of "+c.cap+" games already filed or played, "+(c.left?("room for only "+c.left+" more"):"none left")+")";
+      }).join("; ")+". Change those lines first, or dress the rest and fix them after." : ""),
       "Dress the week", function(){
       dressWeek.disabled = true;
       var okN = 0, qN = 0, errs = [];

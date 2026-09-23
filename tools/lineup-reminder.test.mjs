@@ -21,10 +21,18 @@ const TEAMS = [
 const ROLES = JSON.stringify({ owner: "OWN", "general manager": "GM", "assistant general manager": "AGM", "cghl management": "MGMT" });
 
 let games, posts, claims, released, cfgRows, lineups, postStatus;
-/* first puck drop `leadH` hours from now, then two more games 35 minutes apart */
+/* A night is three games 35 minutes apart. For the CONTENT blocks the night is anchored at
+   01:00 UTC two days out, which is 9:00 PM Eastern in either half of the year and therefore cannot
+   straddle midnight ET however long this suite takes to run; those blocks force the step through
+   the ops door, so the window does not apply. The WINDOW blocks pass count:1 and place that single
+   game `leadH` hours from now, which is the only way to exercise the real clock without a night
+   that splits across two ET days when the suite happens to run late in the evening. */
 function reset(over = {}) {
-  const first = Date.now() + (over.leadH ?? 3) * H;
-  games = over.games || [0, 35, 70].map((m, i) => ({
+  const count = over.count ?? 3;
+  const first = over.leadH != null
+    ? Date.now() + over.leadH * H
+    : (() => { const d = new Date(Date.now() + 2 * 86400000); d.setUTCHours(1, 0, 0, 0); return d.getTime(); })();
+  games = over.games || [0, 35, 70].slice(0, count).map((m, i) => ({
     id: `g${i}`, week: 1, stage: "regular", voided: false, status: "scheduled",
     home_team_id: i % 2 ? "t2" : "t1", away_team_id: i % 2 ? "t1" : "t2",
     scheduled_at: new Date(first + m * MIN).toISOString(),
@@ -102,7 +110,7 @@ console.log("\n— the deadline is derived, never a fixed clock");
   A("due exactly 30 minutes before the night's first puck drop", Date.parse(r.lineups.dueAt) === firstPd - 30 * MIN,
     new Date(r.lineups.dueAt).toISOString() + " vs " + new Date(firstPd - 30 * MIN).toISOString());
   /* a night that starts at 8:15 must move its own deadline, not sit at 8:30 */
-  reset({ leadH: 2.25 });
+  reset({ leadH: 2.25, count: 1 });
   const r2 = await now(true);
   A("...so a night that starts earlier moves its own deadline with it",
     Date.parse(r2.lineups.dueAt) === Math.min(...games.map((g) => Date.parse(g.scheduled_at))) - 30 * MIN);
@@ -110,19 +118,19 @@ console.log("\n— the deadline is derived, never a fixed clock");
 
 console.log("\n— the window");
 {
-  reset({ leadH: 6 });
+  reset({ leadH: 6, count: 1 });
   let body = await (await tick()).json();
   A("six hours out it waits and says when it is due", /the reminder is due in \d+ min/.test(String(body.lineups)) && calls().length === 0, String(body.lineups));
 
-  reset({ leadH: 3.5 });
+  reset({ leadH: 3.5, count: 1 });
   body = await (await tick()).json();
   A("inside four hours the ordinary tick sends it", calls().length === 1, String(body.lineups));
 
-  reset({ leadH: 0.6 });
+  reset({ leadH: 0.6, count: 1 });
   body = await (await tick()).json();
   A("still open at T-36m, so a lost tick catches up", calls().length === 1, String(body.lineups));
 
-  reset({ leadH: 0.4 });          // first lock already passed
+  reset({ leadH: 0.4, count: 1 });          // first lock already passed
   body = await (await tick()).json();
   A("once the first game has locked, tonight's call is over", calls().length === 0 && /no game night ahead/.test(String(body.lineups)), String(body.lineups));
 }

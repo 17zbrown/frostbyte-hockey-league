@@ -171,7 +171,8 @@ console.log("\n— locks and caps cannot be planned around");
 {
   A("dressing goes through set_game_lineup and nothing else",
     /function dressGame[\s\S]{0,1200}CG\.sb\.rpc\("set_game_lineup"/.test(src6)   /* v2.38: the Owner-approval queue sits in front of the RPC */ &&
-    /function dressNight\(nightKey, slot, done\)[\s\S]{0,500}dressGame\(games\[i\]\.id, slot/.test(src6));
+    /* v2.83 widened: the refusal grouping sits between the signature and the dispatch */
+    /function dressNight\(nightKey, slot, done\)[\s\S]{0,1400}dressGame\(games\[i\]\.id, slot/.test(src6));
   A("...with p_emergency false — the plan can never bypass the lock", /p_emergency:false/.test(src6));
   A("no direct insert into game_lineups anywhere in the creator",
     !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
