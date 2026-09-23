@@ -1377,15 +1377,26 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .lc-pc{display:flex;align-items:center;gap:9px;border:0;border-bottom:1.5px solid var(--line);border-radius:var(--r-s) var(--r-s) 0 0;padding:8px 6px;background:transparent;cursor:grab;min-height:48px;min-width:0;transition:background .12s}
 .lc-pc:hover{background:var(--paper)}
 .lc-pc .two{display:flex;flex-direction:column;min-width:0;flex:1;text-align:left;gap:1px}
-.lc-pc .two b{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lc-pc .two .ps{font-family:var(--f-mono);font-size:9px;letter-spacing:.08em;color:var(--steel);text-transform:uppercase}
+/* v2.91: the NAME owns the top row of the card and the meta row beneath carries everything else
+   (position, line chips, the week load). They shared a line before, so a three-column board cut
+   every name to an initial and clipped "GOALTENDER" mid-word. */
+.lc-pc .two b{font-size:12.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em}
+.lc-pc .two .ps{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--steel);text-transform:uppercase;white-space:nowrap}
 /* position + line chips share the row UNDER the gamertag: beside it they squeezed the name to
    an ellipsis on a three-column board (the shell is capped, so no viewport is wide enough) */
-.lc-pc .two .ln2{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0}
+.lc-pc .two .ln2{display:flex;align-items:center;gap:4px 6px;row-gap:3px;flex-wrap:wrap;min-width:0}
+.lc-pc .two .ln2 .chip{flex:0 0 auto}
 .lc-pc .ov{font-family:var(--f-mono);font-size:10px;color:var(--steel)}
 .lc-pc.sel{outline:2px solid var(--chrome-deep);border-radius:var(--r-s)}
 .lc-pc.dis{opacity:.45;cursor:not-allowed}
 .lc-pc .lnc{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;color:var(--paper);background:var(--ink);border-radius:5px;padding:1.5px 4px}
+/* v2.91 the jersey field in the Team HQ roster table: a number that looks like the number it
+   replaces, not a form control bolted into a data row */
+.jersey-in{width:56px;padding:3px 6px;text-align:center;font-family:var(--f-mono);font-size:12px;
+  border:1px solid var(--line);border-radius:var(--r-s);background:var(--paper);color:var(--ink)}
+.jersey-in:focus{outline:2px solid var(--chrome-deep);outline-offset:1px;border-color:transparent}
+.jersey-in:disabled{opacity:.5}
+@media(pointer:coarse){.jersey-in{width:64px;padding:8px 6px;font-size:15px}}
 .lc-av{border-radius:50%;overflow:hidden;flex:0 0 auto;background:var(--ink);display:inline-flex;align-items:center;justify-content:center;border:1.5px solid var(--line)}
 .lc-av img{width:100%;height:100%;object-fit:cover;display:block}
 .lc-av b{color:var(--paper);font-family:var(--f-disp);font-size:11px;letter-spacing:.02em}

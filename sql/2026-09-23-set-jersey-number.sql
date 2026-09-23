@@ -1,0 +1,15 @@
+-- v2.91 (2026-09-23): club management sets its own players' jersey numbers.
+-- Applied live in one gated transaction; rehearsed first (set, duplicate refused, out of range
+-- refused, re-setting the same number on the same player allowed) and rolled back.
+--
+--   public.set_jersey_number(p_team uuid, p_profile uuid, p_number integer) returns integer
+--     Writes roster_spots.jersey_number for the CURRENT season. Gate: signed in, not suspended,
+--     commissioner or is_gm_of(team), then mgmt_gate(team,'roster'). Refuses a number outside
+--     1..99 (22023), a player who is not on that club's active roster this season (22023), and a
+--     number already worn by another active player on the club, naming him (23505).
+--     SECURITY DEFINER; EXECUTE revoked from public and anon, granted to authenticated.
+--
+-- SCHEMA NOTE: roster_spots.jersey_number is NOT NULL with CHECK (jersey_number BETWEEN 1 AND 99),
+-- so there is no "no number" state and nothing can clear one; every spot always wears something.
+-- The number is a CLUB-AND-SEASON fact (it lives on the spot, not the profile), so a player who
+-- moves clubs does not carry it. No club had duplicate numbers when this shipped.

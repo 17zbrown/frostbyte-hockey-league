@@ -1267,9 +1267,13 @@ CG.hubLines = function(qs){
           return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
             (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
             CG.lcAv(p,34)+
+            /* v2.91: the name owns the first row; position, line chips and the week load share the
+               second. They used to compete for one line, so every name was cut to an initial and
+               "GOALTENDER" was clipped mid-word. */
             '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">'+CG.POS_NAME[p.pos]+'</span>'+
-              (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+'</span></span>'+
-            (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+              (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
+              (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+              '</span></span>'+
             '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
         }).join("")+'</div>';
     }).join("")+'</div>'+
@@ -1280,8 +1284,9 @@ CG.hubLines = function(qs){
           (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', training camp">'+
           CG.lcAv(p,34)+
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
-            (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+'</span></span>'+
-          (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+            (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
+            (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+            '</span></span>'+
           '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
       }).join("")+'</div>' : "")+
     '</div></div>';
@@ -1884,6 +1889,9 @@ CG.hubRoster = function(qs){
   var isDepth = function(p){ return !p.mgmt && p.origin === "depth_random"; };
   var regPos = {}; (lg._registrationsRaw||[]).forEach(function(r){ if (r.profile_id && r.position) regPos[r.profile_id] = r.position; });
   var contracted = roster.filter(function(p){ return !isLoan(p); }), loans = roster.filter(isLoan);
+  /* only a seat that may manage the roster can renumber it; the same gate the page's other
+     roster moves use, so a seat the Owner has put behind approval cannot quietly renumber either */
+  var canEditNum = CG.can("roster.manage") && (!CG.mgmtAccess || CG.mgmtAccess("roster") !== "hidden");
   var rowFor = function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
     var status = waived ? '<span class="chip chip-loss">Waived</span>'
@@ -1932,6 +1940,11 @@ CG.hubRoster = function(qs){
       : esc(p.pos);
     return '<tr class="'+(loan?"loan-row":"")+'"'+(waived?' style="opacity:.55"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
+      /* v2.91: the club sets its own numbers. Editable for management (and the office in a
+         preview); a loan is not the club's player, so his number is not the club's to change. */
+      '<td class="tnum" data-l="#" data-v="'+(p.jersey||0)+'">'+((canEditNum && !loan && !isDepth(p))
+        ? '<input class="jersey-in" type="number" min="1" max="99" step="1" value="'+(p.jersey||"")+'" data-jersey="'+p.id+'" aria-label="Jersey number for '+esc(p.tag)+'" title="1 to 99, and no two players on the club share one">'
+        : '<span class="mono">'+(p.jersey ? "#"+p.jersey : "—")+'</span>')+'</td>'+
       '<td class="tnum" data-l="Pos">'+posCell+'</td>'+
       '<td class="tnum" data-v="'+lg.ratings[p.id].ovr+'"><span class="ovrbox mid" style="min-width:30px;height:20px;font-size:11px">'+lg.ratings[p.id].ovr+'</span></td>'+
       '<td class="tnum" data-v="'+(p.salary||0)+'" data-l="Cap">'+'<b>'+CG.fmtMoney(p.salary)+'</b></td>'+
@@ -1942,10 +1955,10 @@ CG.hubRoster = function(qs){
   };
   /* v2.72: the active roster and training camp are two blocks, never interleaved (Rule 2.1) */
   var sqSplit = CG.splitSquads(contracted);
-  var rows = (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Active roster — '+sqSplit.active.length+'</b></td></tr>' : "") +
+  var rows = (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="9" class="tleft"><b style="font-family:var(--f-disp)">Active roster — '+sqSplit.active.length+'</b></td></tr>' : "") +
     sqSplit.active.map(rowFor).join("") +
-    (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Training camp — '+sqSplit.camp.length+'</b> <span class="caption">Outside the active roster and its shape; a camp player fills any position and dresses in up to three games a week. Call up moves him onto the active roster when it has room (Rules 2.1, 5.2).</span></td></tr>' + sqSplit.camp.map(rowFor).join("") : "") +
-    (loans.length ? '<tr class="loan-head"><td colspan="8" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
+    (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="9" class="tleft"><b style="font-family:var(--f-disp)">Training camp — '+sqSplit.camp.length+'</b> <span class="caption">Outside the active roster and its shape; a camp player fills any position and dresses in up to three games a week. Call up moves him onto the active roster when it has room (Rules 2.1, 5.2).</span></td></tr>' + sqSplit.camp.map(rowFor).join("") : "") +
+    (loans.length ? '<tr class="loan-head"><td colspan="9" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
   /* the 9/6/2 shape is CONTRACTED players only; pre-season loans ride the active roster without
      counting against it (Rule 2.1) and are shown as their own tally */
   /* v2.73: depth placements live in camp and count like anyone else wherever they are; the depth
@@ -2051,7 +2064,7 @@ CG.hubRoster = function(qs){
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols roster-tbl"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
-    '<th class="tleft sortable">Player</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
+    '<th class="tleft sortable">Player</th><th class="sortable" title="Jersey number — click to change (Rule 2.1)">#</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
     (rightsHeld.length ? '<div class="card-b" style="border-top:1px solid var(--line)"><b style="font-family:var(--f-disp);display:block;margin-bottom:8px">Rights held until free agency opens</b>'+
       '<p class="caption" style="margin-bottom:10px">Their deals ended with last season. Until this season’s free agency opens, only you can re-sign them — after that they are free agents (Rule 2.2).</p>'+
@@ -2081,6 +2094,30 @@ CG.renderCapOutlook = function(rows){
       : '<p class="caption" style="margin-top:12px">Every player deal — your picks, depth placements and any waived player you sign — runs to the end of this season and comes off the books with it; the three front-office seats count at their fixed values (Rule 2.6). Nothing carries into next season: everyone re-enters the draft (Rule 2.5).</p>');
 };
 CG.AFTER._roster = function(){
+  /* v2.91: jersey numbers. Committed on blur or Enter, never on every keystroke, and the field is
+     put back to what the league actually holds if the write is refused, so the page can never show
+     a number the club does not have. */
+  document.querySelectorAll(".jersey-in").forEach(function(el){
+    var was = el.value;
+    var commit = function(){
+      var pid = el.dataset.jersey, n = parseInt(el.value, 10);
+      if (el.value === was) return;
+      if (!CG.LIVE_MODE || !CG.sb){ CG.toast("Not connected, reload and retry","err"); el.value = was; return; }
+      var tid = ((CG.lg && CG.lg._codeToId) || {})[CG.myClub()];
+      if (!tid){ el.value = was; return; }
+      if (!(n >= 1 && n <= 99)){ CG.toast("A jersey number is 1 to 99","err"); el.value = was; return; }
+      el.disabled = true;
+      CG.sb.rpc("set_jersey_number", { p_team: tid, p_profile: pid, p_number: n }).then(function(r){
+        el.disabled = false;
+        if (r.error){ CG.toast(r.error.message, "err"); el.value = was; return; }
+        was = String(n);
+        var pl = CG.playerById(CG.lg, pid); if (pl) pl.jersey = n;    /* the table, the cards and the crest all read this */
+        CG.toast((pl?pl.tag:"That player")+" wears #"+n, "ok");
+      });
+    };
+    el.addEventListener("change", commit);
+    el.addEventListener("keydown", function(e){ if (e.key === "Enter"){ e.preventDefault(); el.blur(); } });
+  });
   (function(){
     var club = CG.myClub(), tid = ((CG.lg && CG.lg._codeToId) || {})[club];
     if (!tid || !CG.sb || !document.getElementById("capOutlookBody")) return;
