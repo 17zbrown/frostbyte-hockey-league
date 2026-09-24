@@ -104,9 +104,13 @@ const reset = () => {
 const ea = (id, end, home, away, toi = 3600, scores = [3, 2], rosterH = { p1: "HomeGuy" }, rosterA = { p2: "AwayGuy" }) => ({
   matchId: id, timestamp: Math.floor(ms(end) / 1000),
   clubs: { [home]: { score: scores[0], details: { name: "H" } }, [away]: { score: scores[1], details: { name: "A" } } },
+  /* v3.06: each club's goals sit on its players, because that is where the importer reads the
+     score from now. A club `score` that none of its players scored is a payload EA does not
+     produce (all eleven clean games of the first game night agreed exactly); the goals go to the
+     first player of each club so the roster SIZE, which other assertions count, is unchanged. */
   players: {
-    [home]: Object.fromEntries(Object.entries(rosterH).map(([pid, nm]) => [pid, { playername: nm, position: "center", skgoals: "1", toiseconds: String(toi) }])),
-    [away]: Object.fromEntries(Object.entries(rosterA).map(([pid, nm]) => [pid, { playername: nm, position: "goalie", glsaves: "5", glshots: "8", glga: "3", toiseconds: String(toi) }])),
+    [home]: Object.fromEntries(Object.entries(rosterH).map(([pid, nm], i) => [pid, { playername: nm, position: "center", skgoals: String(i === 0 ? scores[0] : 0), toiseconds: String(toi) }])),
+    [away]: Object.fromEntries(Object.entries(rosterA).map(([pid, nm], i) => [pid, { playername: nm, position: "goalie", skgoals: String(i === 0 ? scores[1] : 0), glsaves: "5", glshots: "8", glga: "3", toiseconds: String(toi) }])),
   },
 });
 const post = async (matches) => JSON.parse((await handler({ httpMethod: "POST", headers: { "x-ingest-key": "ingest" }, body: JSON.stringify({ matches }) })).body);

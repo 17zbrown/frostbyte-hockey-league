@@ -110,8 +110,12 @@ const summary = () => ({ received: 1, ingested: [], skipped: [], unmatched: [], 
 /* an EA match between two clubs that ENDED at `end` (ISO) and ran `toi` seconds of game clock */
 const ea = (id, end, home, away, toi = 3600, scores = [3, 2]) => ({ matchId: id, timestamp: Math.floor(ms(end) / 1000),
   clubs: { [home]: { score: scores[0], details: { name: "H" } }, [away]: { score: scores[1], details: { name: "A" } } },
+  /* v3.06: the away club needs a SKATER holding its goals. With only a goalie there, the club's
+     `score` claimed goals no player had scored, which real EA data never does and which the
+     importer no longer believes: the score is the sum of the players' goals now. */
   players: { [home]: { p1: { playername: "HomeGuy", position: "center", skgoals: String(scores[0]), toiseconds: String(toi) } },
-             [away]: { p2: { playername: "AwayGuy", position: "goalie", glsaves: "5", glshots: String(5 + scores[0]), glga: String(scores[0]), toiseconds: String(toi) } } } });
+             [away]: { p2: { playername: "AwayGuy", position: "goalie", glsaves: "5", glshots: String(5 + scores[0]), glga: String(scores[0]), toiseconds: String(toi) },
+                       p3: { playername: "AwaySkater", position: "center", skgoals: String(scores[1]), toiseconds: String(toi) } } } });
 const run = async (raw, opts) => { const s = summary(); await ingestOne(normalizeMatch(raw), raw, s, [normalizeMatch(raw)], opts); return s; };
 const PUCK = "2026-10-21T21:00:00-04:00";
 const G900 = { id: "g900", season_id: "s1", home_team_id: "tA", away_team_id: "tB", scheduled_at: PUCK };

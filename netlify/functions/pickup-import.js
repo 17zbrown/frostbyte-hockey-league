@@ -85,10 +85,11 @@ async function authUser(token) {
 // A PROXIED attempt must use undici's OWN fetch: on Node 24 the global fetch silently drops the
 // `dispatcher` option, so the ProxyAgent would be ignored. The direct attempt deliberately uses
 // global fetch instead, which keeps the handler stubbable from tools/*.test.mjs.
-async function eaFetch(url) {
+const EA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+async function eaFetch(url, opts = {}) {
   const { ProxyAgent, fetch: uFetch } = await import("undici");
   const headers = {
-    "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": EA_UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
     "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
     "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
@@ -99,22 +100,37 @@ async function eaFetch(url) {
      residential and a datacenter address. So try DIRECT first: it needs no paid proxy and is a hop
      faster. The residential proxy stays only as a fallback for the day EA starts refusing this
      range again — a lapsed proxy can no longer take the whole EA pipeline down with it, which is
-     exactly what happened when IPRoyal expired and every import went dark. */
-  const routes = PROXY ? [null, PROXY, PROXY] : [null, null, null];
-  let last = "";
+     exactly what happened when IPRoyal expired and every import went dark.
+
+     v3.06: report what EVERY route said, not just the last. This loop used to keep only the final
+     error, so a lapsed proxy's "fetch failed" masked whatever the direct attempt had actually
+     answered, and the staff desk showed "EA unreachable (fetch failed)" whichever leg was really
+     broken. `timeoutMs` and `tries` let an interactive caller (the club search on the stats desk)
+     wait longer and only once, inside Netlify's own 10-second budget, instead of spending it on
+     three identical attempts. */
+  const perTry = opts.timeoutMs || 2800;
+  const routes = PROXY
+    ? (opts.tries === 1 ? [null, PROXY] : [null, PROXY, PROXY])
+    : (opts.tries === 1 ? [null] : [null, null, null]);
+  const said = [];
   for (const proxy of routes) {
+    const label = proxy ? "proxy" : "direct";
     try {
-      const opts = { headers, signal: AbortSignal.timeout(2800) };
-      if (proxy) opts.dispatcher = new ProxyAgent(proxy);
+      const o = { headers, signal: AbortSignal.timeout(perTry) };
+      if (proxy) o.dispatcher = new ProxyAgent(proxy);
       /* the direct attempt uses global fetch so tests can stub it; only a PROXIED attempt needs
          undici's own fetch, because Node's global fetch silently drops `dispatcher` */
-      const r = await (proxy ? uFetch(url, opts) : fetch(url, opts));
+      const r = await (proxy ? uFetch(url, o) : fetch(url, o));
       if (r.ok) return r.json();
-      last = `EA ${r.status}`;
-      if (r.status !== 403) throw new Error(last);   // only a 403 is worth trying another route
-    } catch (e) { last = String(e.message || e); }
+      said.push(`${label}: EA ${r.status}`);
+      if (r.status !== 403) break;   // only a 403 is worth trying another route
+    } catch (e) {
+      const cause = e && e.cause ? ` (${e.cause.code || e.cause.message || e.cause})` : "";
+      said.push(`${label}: ${String((e && e.message) || e)}${cause}`);
+    }
   }
-  throw new Error(`EA unreachable (${last}${last.includes("403") ? " — EA is throttling; try again in a moment" : ""})`);
+  const all = said.join("; ") || "no route answered";
+  throw new Error(`EA unreachable (${all}${all.includes("403") ? " — EA is throttling this host; the VM lane still reaches it" : ""})`);
 }
 const eaSearchClubs = (name) =>
   eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);

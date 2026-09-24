@@ -1,0 +1,70 @@
+-- v3.06 (2026-09-23, game night one) — two live corrections.
+--
+-- ============================================================================================
+-- 1. A WAIVED PLAYER WAS HANDED STRAIGHT BACK TO HIS CLUB
+--
+-- Commissioner: "it looks like Dallas just wavied a player but you instantly put them back on
+-- their team according to the discord updates. If a player is waived, they go back to the free
+-- agent pool where any team can pick them up from the free agency tab in the team HQ."
+--
+-- Reproduced twice in the transaction log, 14 and 26 seconds after each waive:
+--   22:51:46  waive  Stars waived atlasx27x.
+--   22:52:00  sign   League-office placement — joins DAL's training camp as depth (Rule 2.8)
+--   22:55:34  waive  Stars waived atlasx27x.
+--   22:56:00  sign   League-office placement — joins DAL's training camp as depth (Rule 2.8)
+--
+-- CAUSE. waive_player deletes the roster spot and sets the registration back to 'pending'.
+-- distribute_unproven_rookies (cron 'rookie-distribution', every 2 minutes) places every
+-- registrant who has no roster spot and no active contract — which is exactly what a waived player
+-- is. The sweep exists to seat the UNDRAFTED class after draft night (Rule 2.8); a player a club
+-- has released is not undrafted, he is a free agent. The two were indistinguishable in the data,
+-- so the waiver is now RECORDED rather than inferred.
+--
+--   alter table public.season_registrations add column if not exists waived_at timestamptz;
+--   waive_player:                 ... set status = 'pending', waived_at = now() ...
+--   distribute_unproven_rookies:  ... and sr.waived_at is null ...
+--
+-- auto_assign_latecomers needs no change: it only seats players who HAVE an active or signed
+-- contract, and a waived player's is expired.
+--
+-- Rehearsed with rollback: distribute_unproven_rookies(true) forced, atlasx27x. left alone.
+-- Repaired by hand: the roster spot the sweep created was removed, the contract it wrote expired
+-- (three had accumulated, one per loop), waived_at stamped. His GAME STATS were never touched and
+-- are still credited to him: the commissioner confirmed the move happened after the games, and
+-- stats live on the box score, not on the roster spot.
+--
+-- ============================================================================================
+-- 2. THE SCORE OF A DISCONNECTED GAME WAS EA'S PLACEHOLDER, NOT WHAT WAS PLAYED
+--
+-- Commissioner: "The Canucks vs Stars game claims to be a 6-2W for VAN after the 2 game sessions
+-- they needed to complete their full game but I need you to match the stats correctly."
+--
+-- The 10:10 PM DAL vs VAN game arrived as two sittings that add to a full game (1200s + 2400s =
+-- 3600s). It was filed DAL 3-3 VAN: a TIE, which Rule 4.1 does not allow.
+--
+--   sitting            EA club `score`     sum of that club's players' goals
+--   1372621350197      VAN 3, DAL 0        VAN 2, DAL 0
+--   1374750190188      DAL 3, VAN 0        VAN 4, DAL 2
+--
+-- Both sittings carry EA's 3-0 did-not-finish placeholder. The players' own goals total VAN 6,
+-- DAL 2, which is what the commissioner reported.
+--
+-- THE EVIDENCE THAT MAKES THIS SAFE TO GENERALISE: across all ELEVEN clean, full-length games of
+-- the first game night, EA's club `score` equalled the sum of that club's players' goals EXACTLY,
+-- every time. The only disagreements in the whole night were the two disconnected sittings above.
+-- So normalizeMatch now takes `score` from the players and keeps EA's number beside it:
+--
+--   const scored  = players.reduce((n, p) => n + (p.goals || 0), 0);
+--   const eaScore = +(c.score || 0);
+--   return { ..., score: scored, ea_score: eaScore, score_disputed: scored !== eaScore, ... };
+--
+-- Summing the goals is also what makes a MERGE arithmetically sound: two sittings of one game add
+-- up player by player, whereas two DNF placeholders add up to nonsense.
+--
+-- Repaired by hand: the game's score was rebuilt from its own box score (which was already
+-- correct) to DAL 2 - 6 VAN. The Discord final post does not re-fire, because
+-- notify_discord_game_final only runs on the transition INTO 'final'.
+--
+-- Four test fixtures had to be made realistic rather than have their assertions bent: they set a
+-- club `score` while giving the away club only a goalie, so no player had scored the club's goals.
+-- Real EA payloads never look like that.

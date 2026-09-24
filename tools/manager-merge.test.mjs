@@ -19,7 +19,10 @@ const rawSitting = (id, ts, homeGoals, awayGoals, flip, toi) => {
   };
   const players = {
     "111": { h1: { playername: "HomeGuy", position: "center", skgoals: String(homeGoals), skshots: "4", toiseconds: String(toi), ratingOffense: "80", ratingDefense: "70", ratingTeamplay: "75" } },
-    "222": { t1: { playername: "AwayGuy", position: "goalie", glsaves: "5", glshots: String(5 + homeGoals), glga: String(homeGoals), toiseconds: String(toi) } },
+    /* v3.06: the away club needs a skater carrying its goals — the score is read from the players
+       now, and a club `score` no player scored is a payload EA does not produce. */
+    "222": { t1: { playername: "AwayGuy", position: "goalie", glsaves: "5", glshots: String(5 + homeGoals), glga: String(homeGoals), toiseconds: String(toi) },
+             t2: { playername: "AwaySkater", position: "center", skgoals: String(awayGoals), skshots: "3", toiseconds: String(toi), ratingOffense: "78", ratingDefense: "72", ratingTeamplay: "74" } },
   };
   const order = flip ? ["222", "111"] : ["111", "222"];
   return { matchId: id, timestamp: ts,

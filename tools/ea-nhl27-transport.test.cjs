@@ -22,15 +22,19 @@ let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
 console.log("— the EA transport tries DIRECT before the paid proxy");
-A("pickup-import puts the direct route first", /const routes = PROXY \? \[null, PROXY, PROXY\] : \[null, null, null\];/.test(pickup));
-A("ingest-stats puts the direct route first", /const routes = EA_PROXY \? \[null, EA_PROXY, EA_PROXY\] : \[null, null, null\];/.test(ingest));
+/* v3.06: the route list gained a one-try mode for interactive callers, so pin the PROPERTY (the
+   direct attempt is first, and a missing proxy never arms one) rather than the literal line. */
+A("pickup-import puts the direct route first", /const routes = PROXY\s*\n?\s*\? \(opts\.tries === 1 \? \[null, PROXY\] : \[null, PROXY, PROXY\]\)/.test(pickup));
+A("ingest-stats puts the direct route first", /const routes = EA_PROXY\s*\n?\s*\? \(opts\.tries === 1 \? \[null, EA_PROXY\] : \[null, EA_PROXY, EA_PROXY\]\)/.test(ingest));
+A("...and with no proxy configured every route is direct",
+  /: \(opts\.tries === 1 \? \[null\] : \[null, null, null\]\)/.test(pickup) && /: \(opts\.tries === 1 \? \[null\] : \[null, null, null\]\)/.test(ingest));
 A("ea-poll puts the direct route first", /const routes = PROXY \? \[null, PROXY\] : \[null\];/.test(poll));
 A("...and none of them arms a dispatcher before the first attempt",
   !/if \(PROXY\) opts\.dispatcher = new ProxyAgent\(PROXY\);\s*\n\s*const r = await \(PROXY \? uFetch : fetch\)/.test(pickup) &&
   !/let dispatcher;\s*\n\s*if \(PROXY\) \{ dispatcher = new ProxyAgent\(PROXY\); \}/.test(poll));
 A("a proxied attempt still uses undici's fetch (global fetch drops `dispatcher`)",
-  /await \(proxy \? uFetch\(url, opts\) : fetch\(url, opts\)\)/.test(pickup) &&
-  /await \(proxy \? uFetch\(url, opts\) : fetch\(url, opts\)\)/.test(ingest));
+  /await \(proxy \? uFetch\(url, o\) : fetch\(url, o\)\)/.test(pickup) &&
+  /await \(proxy \? uFetch\(url, o\) : fetch\(url, o\)\)/.test(ingest));
 /* clubErrors is a STRING channel: its first entry becomes lastError and is rendered straight into
    the Automations chip tooltip, so an object there reads "[object Object]" and the operator learns
    nothing. The first cut of this change pushed an object — caught in adversarial review. */

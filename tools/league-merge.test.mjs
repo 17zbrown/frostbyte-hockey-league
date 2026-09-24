@@ -19,9 +19,17 @@ const rawSitting = (id, ts, homeGoals, awayGoals, flip, toi) => {
     "111": { details: { name: "Bruins EA" }, score: String(homeGoals), ppg: "1", ppo: "2", result: "1" },
     "222": { details: { name: "Leafs EA" }, score: String(awayGoals), ppg: "0", ppo: "1", result: "2" },
   };
+  /* v3.06: the away club needs a SKATER carrying its goals. Its only player used to be a goalie,
+     so the club's `score` claimed goals no player had scored — something real EA data never does
+     (checked against all eleven clean games of the first game night: club score and the sum of its
+     players' goals agreed exactly, every time). The importer now takes the score from the players,
+     so a fixture that disagrees with itself is testing a payload EA does not produce. */
   const players = {
     "111": { h1: { playername: "HomeGuy", position: "center", skgoals: String(homeGoals), skshots: "4", toiseconds: String(toi), ratingOffense: "80", ratingDefense: "70", ratingTeamplay: "75" } },
-    "222": { t1: { playername: "AwayGuy", position: "goalie", glsaves: "5", glshots: String(5 + homeGoals), glga: String(homeGoals), toiseconds: String(toi) } },
+    "222": {
+      t1: { playername: "AwayGuy", position: "goalie", glsaves: "5", glshots: String(5 + homeGoals), glga: String(homeGoals), toiseconds: String(toi) },
+      t2: { playername: "AwaySkater", position: "center", skgoals: String(awayGoals), skshots: "3", toiseconds: String(toi), ratingOffense: "78", ratingDefense: "72", ratingTeamplay: "74" },
+    },
   };
   const order = flip ? ["222", "111"] : ["111", "222"];
   return { matchId: id, timestamp: ts,
