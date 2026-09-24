@@ -133,7 +133,10 @@ function finish() {
   A("...naming the group rule and the camp exemption",
     /held to his\s+group \(Rule 2\.1\)/.test(body.replace(/\s+/g, " ")) && /training-camp player fills any position/.test(body));
   A("...and why the check is by group", /without saying which side he played/.test(body));
-  A("the changelog opens at 3.00", obj.rulebook.changelog[0].version === "3.00", obj.rulebook.changelog[0].version);
+  /* pin that the release EXISTS, not that it is newest: "newest" breaks on every later release,
+     which teaches people to re-point pins without reading them */
+  A("the changelog records 3.00", obj.rulebook.changelog.some((c) => c.version === "3.00"),
+    obj.rulebook.changelog[0].version);
 
   console.log("\n" + (fail ? "FAIL " + fail + " of " + n : "PASS " + n));
   process.exit(fail ? 1 : 0);
