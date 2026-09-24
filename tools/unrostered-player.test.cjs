@@ -60,6 +60,26 @@ console.log("\n— the decision record");
   A("...and names the one residual timing risk", /residual false-alarm vector is timing/.test(rec) && /Rule 2\.4/.test(rec));
 }
 
+console.log("\n— position compliance (v3.00)");
+{
+  A("the record cites the existing rule rather than inventing one",
+    /public\.lineup_slot_ok/.test(rec) && /is NOT restated here/.test(rec));
+  A("it records that camp players fill any position", /a training-camp player fills any position/.test(rec));
+  A("it records that active-roster players are locked to their group", /locked to his group/.test(rec));
+  A("BY GROUP is recorded as the reason, with the evidence",
+    /BY GROUP, NEVER BY EXACT POSITION/.test(rec) && /center, defenseMen, goalie, leftWing, rightWing/.test(rec));
+  A("...and why: the game never says which side a defenseman played", /never says which side/.test(rec));
+  A("...and what comparing exact positions would have done",
+    /would flag every defenseman in\s*--? ?the league/.test(rec.replace(/\n/g, " ")) || /flag every defenseman/.test(rec));
+  A("it skips a player already reported as unrostered, so one player is not two problems",
+    /already reported by the unrostered check/.test(rec));
+  A("the NEGATIVE rehearsal is recorded first, and is the one that matters",
+    /NEGATIVE \(the one that matters\)/.test(rec) && /raised ZERO flags/.test(rec));
+  A("...covering a camp player in goal", /TRAINING-CAMP player in goal/.test(rec));
+  A("the POSITIVE rehearsal caught all three crossings", /exactly 3 flags/.test(rec));
+  A("...and proved the notice is clickable and routed", /link_view 'game'/.test(rec) && /officiating staffer/.test(rec));
+}
+
 console.log("\n— the triage card shows it");
 {
   const live = R("src/live/part_live.js");
@@ -109,7 +129,11 @@ function finish() {
   A("...and the player who cannot be identified at all", /cannot be identified as a member at all/.test(body));
   A("...and that it is referred, not ruled automatically", /referred to the department that owns it/.test(body));
   A("...and points at Chapter 7 for the consequence", /Chapter 7/.test(body));
-  A("the changelog opens at 2.99", obj.rulebook.changelog[0].version === "2.99", obj.rulebook.changelog[0].version);
+  A("4.2 says positions are checked too", /against the position each player is rostered at/.test(body));
+  A("...naming the group rule and the camp exemption",
+    /held to his\s+group \(Rule 2\.1\)/.test(body.replace(/\s+/g, " ")) && /training-camp player fills any position/.test(body));
+  A("...and why the check is by group", /without saying which side he played/.test(body));
+  A("the changelog opens at 3.00", obj.rulebook.changelog[0].version === "3.00", obj.rulebook.changelog[0].version);
 
   console.log("\n" + (fail ? "FAIL " + fail + " of " + n : "PASS " + n));
   process.exit(fail ? 1 : 0);

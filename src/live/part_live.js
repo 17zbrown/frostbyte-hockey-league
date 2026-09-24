@@ -8451,7 +8451,7 @@ CG.staffAttentionCard = function(){
      cannot identify at all. A bell scrolls away; this is the surface that says work is waiting.
      Seven rolling days, because the audit log has no resolved state and a lifetime count would
      never clear. The notice itself links to the game. */
-  if (n(a.ineligible_players_7d)>0) items.push({ label:n(a.ineligible_players_7d)+" box score"+(n(a.ineligible_players_7d)===1?"":"s")+" with a player his club doesn\u2019t hold (7d)", go:"#/hub/officials", warn:true });
+  if (n(a.ineligible_players_7d)>0) items.push({ label:n(a.ineligible_players_7d)+" roster flag"+(n(a.ineligible_players_7d)===1?"":"s")+" on a box score (7d)", go:"#/hub/officials", warn:true });
   if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
 
   /* Season readiness — things that must be TRUE before a date, not tickets waiting to be worked.

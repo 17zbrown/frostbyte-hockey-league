@@ -133,3 +133,46 @@ commit;
 -- the club before anyone reads the flag. Rule 2.4's three-game minimum service blocks a waive or
 -- trade before a player has played three games, which covers the opening weeks; beyond that the
 -- notice itself says the roster is read as it stands now and points at the transaction log.
+
+-- ============================================================================================
+-- v3.00 (same night) — POSITION COMPLIANCE, from the commissioner's follow-up: "track box score
+-- positions with roster vs tc roles as well to make sure a roster player does not play a position
+-- they are not allowed to play."
+--
+-- The rule already exists and is NOT restated here. public.lineup_slot_ok(pid, want, season, team,
+-- stage) is what refuses an illegal slot when a lineup is FILED, and it says two things:
+--     if sq = 'tc' then return;        -- a training-camp player fills any position
+--     if grp <> p_want then raise ...  -- an active-roster player is locked to his group
+-- A filed lineup cannot police what happens after the puck drops, so review_game_records now
+-- mirrors the same two rules against the BOX SCORE, which is what actually happened.
+--
+-- BY GROUP, NEVER BY EXACT POSITION. Verified against 10 real archived EA payloads: the only
+-- position strings the game ever sends are
+--     center, defenseMen, goalie, leftWing, rightWing
+-- so EA reports BOTH defensemen as "defenseMen" and never says which side. mapPos turns that into
+-- 'D' while the roster says 'LD' or 'RD'. Comparing exact positions would flag every defenseman in
+-- the league, every game. public.pos_group collapses G / D+LD+RD / everything-else, and the check
+-- compares those.
+--
+-- Spliced into the per-player loop, before the filed-lineup lookup:
+--     if v_rostered and coalesce(v_squad,'pro') <> 'tc' and v_pos is not null
+--        and not exists (<admin_audit dedup on 'out_of_position'>) then
+--       select string_agg(distinct gs.position::text, ', ') into v_played
+--         from public.game_stats gs
+--        where gs.game_id = g.id and gs.team_id = r.team_id and gs.profile_id = r.profile_id
+--          and public.pos_group(gs.position) is distinct from public.pos_group(v_pos::hockey_position);
+--       if v_played is not null then <notify officiating + staff room + log 'out_of_position'>; end if;
+--     end if;
+-- It skips a player with no roster row on purpose: he is already reported by the unrostered check,
+-- and two flags for one player would read as two problems.
+--
+-- _staff_attention()'s ineligible_players_7d now counts 'out_of_position' as well.
+--
+-- REHEARSED with rollback, both directions, against a real fixture:
+--   NEGATIVE (the one that matters): a legal box score raised ZERO flags, built from the two cases
+--     most likely to cry wolf: a rostered LD/RD recorded as EA records him ('D'), a center playing
+--     'LW' (forwards are interchangeable inside the group), the goaltender in goal, and a
+--     TRAINING-CAMP player in goal.
+--   POSITIVE: a defenseman at center, a forward in goal and the goaltender at right wing raised
+--     exactly 3 flags; each notice carried link_view 'game' with the game id and reached an
+--     officiating staffer; a second review_game_records() added none.
