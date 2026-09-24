@@ -1097,8 +1097,23 @@ tr.squad-head .caption{margin-left:6px}
   -webkit-backdrop-filter:blur(12px) saturate(1.4);backdrop-filter:blur(12px) saturate(1.4);
   cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .25s ease}
 .railgame:hover{border-color:var(--viz-accent)}
-.railgame .rg-line{display:flex;align-items:center;gap:8px;font-family:var(--f-disp);font-weight:700;
-  font-size:14.5px;color:var(--ink)}
+.railgame .rg-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:4px;
+  font-family:var(--f-disp);font-weight:700;font-size:14.5px;color:var(--ink)}
+/* v3.03: the crest helper renders at TWICE the size it is asked for (the artwork carries its own
+   padding), so CG.crest(code,22) is a 44px box. Two of those, the two club codes and the LIVE pill
+   need ~230px, and the tonight grid's column is 232px minus 32px of padding. The row had no wrap
+   and no shrink, so the matchup overflowed and `margin-left:auto` carried the pill clean outside
+   the card. Two rules fix it and neither depends on the column staying any particular width:
+   the crests are sized for this module, and the row may wrap so the pill drops to its own line
+   rather than out of the box. */
+.railgame .rg-line .crest{width:30px;height:32px;flex:0 0 auto}
+.railgame .rg-line .chip{flex:0 0 auto}
+/* v3.03: the watch links. Twitch purple so they read as "go there", not as league furniture. */
+.rg-watch{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+.rg-watch .tw-go{background:#9146FF;border-color:#9146FF;color:#fff;cursor:pointer;
+  font-size:9.5px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px;max-width:100%}
+.rg-watch .tw-go:hover,.rg-watch .tw-go:focus-visible{filter:brightness(1.12)}
+.rg-watch .tw-go svg{flex:0 0 auto}
 .railgame .rg-meta{font-family:var(--f-mono);font-size:11px;color:var(--steel);letter-spacing:.05em}
 .railgame .rg-t{font-family:var(--f-mono);font-size:11.5px;color:var(--amber-ink)}
 

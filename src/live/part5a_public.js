@@ -21,8 +21,23 @@ CG.emptyRow = function(cols, title, note){
 /* ---- Twitch (ported from the classic site): profiles.twitch + profiles.live ----
    Twitch purple is used ONLY on Twitch elements (brand use), never as site color. */
 CG.TWITCH_PURPLE = "#9146ff";
+/* v3.03 (commissioner): a game shows LIVE only while it is actually being played, and only if
+   somebody in THAT matchup is actually on air. The window is puck drop to thirty minutes later,
+   which is also what keeps one slot's badge out of the next: the night's games start 35 minutes
+   apart, so a wider window would light the 9:35 card while the 9:00 game was still on.
+   Before this there was no clock at all, so a single streamer lit every game his club played
+   that night, including ones fifty minutes away. */
+CG.GAME_LIVE_MS = 30*60000;
+CG.gameOnAir = function(g){
+  if (!g || !g.at) return false;
+  var now = CG.now();
+  return now >= g.at && now <= g.at + CG.GAME_LIVE_MS;
+};
 CG.liveStreamers = function(g){
-  /* rostered players on either club who are flagged live with a handle */
+  /* rostered players on either club who are flagged live with a handle, and only while the game
+     they are playing is on air. profiles.live is set by the twitch-live-sync function from the
+     Twitch API, not by anyone remembering to flip a switch. */
+  if (!CG.gameOnAir(g)) return [];
   return CG.lg.players.filter(function(p){
     return (p.team===g.home || p.team===g.away) && p.twitchLive && p.twitch;
   });
@@ -792,8 +807,16 @@ CG.roadModule = function(pre){
           (streamers.length?' <span class="chip chip-live" style="font-size:9px;padding:1px 8px;margin-left:auto"><span class="live-dot"></span>LIVE</span>':"")+'</span>'+
         '<span class="rg-t">'+(pre?CG.fmtDay(g.at):CG.fmtTime(g.at))+'</span>'+
         '<span class="rg-meta">'+esc(CG.TEAM[g.away].name)+' at '+esc(CG.TEAM[g.home].name)+
-          (g.feature?' · <b style="color:var(--viz-accent)">MARQUEE</b>':"")+
-          (streamers.length?' · streaming: '+streamers.map(function(p){ return esc(p.tag); }).join(", "):"")+'</span></a>';
+          (g.feature?' · <b style="color:var(--viz-accent)">MARQUEE</b>':"")+'</span>'+
+        /* Watch links. This card is an <a>, and an <a> inside an <a> is invalid HTML that browsers
+           silently tear apart, so the chip is a role=link span with its own delegated handler
+           (CG.twitchChip's real anchor is used on the matchup band, which is a div). */
+        (streamers.length
+          ? '<span class="rg-watch">'+streamers.map(function(p){
+              return '<span class="chip tw-go" role="link" tabindex="0" data-twitch="'+esc(p.twitch)+'" '+
+                'title="Watch '+esc(p.tag)+' on Twitch">'+CG.ic("play",11)+esc(p.tag)+'</span>';
+            }).join("")+'</span>'
+          : "")+'</a>';
     }).join("");
   } else {
     /* Pre-season, no slate yet — the real dates, so the module carries its weight instead of

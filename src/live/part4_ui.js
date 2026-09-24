@@ -1554,12 +1554,26 @@ document.addEventListener("click", function(e){
     }
     return;
   }
+  /* v3.03: a watch link inside a card that is itself a link. It must be checked BEFORE data-go,
+     or the card would swallow the click and route to the matchup instead of opening the stream. */
+  var tw = e.target.closest("[data-twitch]");
+  if (tw){
+    e.preventDefault(); e.stopPropagation();
+    var h = String(tw.getAttribute("data-twitch") || "")
+      .trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?twitch\.tv\//i, "").split(/[/?#]/)[0];
+    if (h) window.open("https://twitch.tv/" + encodeURIComponent(h), "_blank", "noopener");
+    return;
+  }
   var go = e.target.closest("[data-go]");
   if (go){ location.hash = go.getAttribute("data-go"); return; }
 });
 document.addEventListener("keydown", function(e){
   if (e.key==="/" && !e.target.closest("input,textarea,select")){ e.preventDefault(); CG.openPalette(); }
   if (e.key==="Escape"){ CG.closeOverlay(); var pal=$("#palette"); if (pal) pal.remove(); CG.closeMobileNav(); }
+  /* a watch chip announces itself as a link, so it has to behave like one on the keyboard */
+  if ((e.key==="Enter"||e.key===" ") && e.target.getAttribute && e.target.getAttribute("data-twitch")){
+    e.preventDefault(); e.stopPropagation(); e.target.click(); return;
+  }
   /* keyboard activation for data-go rows/cards */
   if ((e.key==="Enter"||e.key===" ") && e.target.getAttribute && e.target.getAttribute("data-go") && !e.target.closest("a,button,input,select,textarea")){
     e.preventDefault(); location.hash = e.target.getAttribute("data-go");
