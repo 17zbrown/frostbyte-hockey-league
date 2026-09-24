@@ -111,3 +111,25 @@ commit;
 --
 -- Re-rehearsed with rollback after all three: 2 flags, link_view 'game' with the game id, at least
 -- one officiating staffer notified, and the unidentified check reaching somebody.
+
+-- ---- False-alarm verification (the check is only worth having if it stays quiet) ----
+--
+-- The check asks ONE question: does this player have a roster_spots row for THIS club in THIS
+-- season? It deliberately does not look at squad, status or origin, so every legitimate way to be
+-- in a club's box score passes:
+--   * training camp (squad 'tc')            a call-up is legal; the WEEKLY CAP check polices usage
+--   * loans (origin preseason_random, etc.) they hold a roster_spots row like anyone else
+--   * management (Owner / GM / AGM)         verified live: every seated Owner, GM and AGM this
+--                                           season has a roster_spots row for their own club, so
+--                                           a manager dressing can never trigger this
+--   * emergency call-ups (Rule 5.3)         must come from the roster by definition
+-- Membership is this check's question; USAGE is the weekly-cap check's, and WHO WAS FILED is the
+-- off-sheet check's. Three different questions, deliberately not merged.
+--
+-- Rehearsed with rollback: a clean box score of 8 real roster members for a real fixture (camp
+-- players and management included) raised ZERO flags when the game was set final.
+--
+-- The one residual false-alarm vector is timing: a player rostered at puck drop who is moved off
+-- the club before anyone reads the flag. Rule 2.4's three-game minimum service blocks a waive or
+-- trade before a player has played three games, which covers the opening weeks; beyond that the
+-- notice itself says the roster is read as it stands now and points at the transaction log.

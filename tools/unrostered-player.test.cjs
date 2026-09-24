@@ -48,6 +48,16 @@ console.log("\n— the decision record");
   A("it records why the triage count is a rolling window, not a total",
     /ineligible_players_7d/.test(rec) && /append-only with no resolved state/.test(rec));
   A("...and that resolving a flag is not built", /NOT built/.test(rec));
+
+  /* the check is only worth having if it stays quiet on a legal lineup */
+  A("it records what legitimately passes, so nobody narrows the question later",
+    /training camp \(squad 'tc'\)/.test(rec) && /loans \(origin preseason_random/.test(rec) && /management \(Owner \/ GM \/ AGM\)/.test(rec));
+  A("...verified against live seats rather than assumed",
+    /every seated Owner, GM and AGM this\s*--\s*season has a roster_spots row/.test(rec.replace(/\r/g, "")));
+  A("...and the false-alarm rehearsal is recorded", /raised ZERO flags/.test(rec));
+  A("it separates membership from usage from who-was-filed",
+    /Three different questions, deliberately not merged/.test(rec));
+  A("...and names the one residual timing risk", /residual false-alarm vector is timing/.test(rec) && /Rule 2\.4/.test(rec));
 }
 
 console.log("\n— the triage card shows it");
