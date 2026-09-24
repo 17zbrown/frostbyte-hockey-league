@@ -1053,7 +1053,13 @@
       return html;
     };
   }
-  /* ---- results: the winning score carries the weight (both were identical before) ---- */
+  /* ---- results: the winning score carries the weight ----
+     v3.10: the base card marks the LOSER with .lose now, so the winner is simply the score
+     without it. This used to match on '<span class="gc-score num">N</span>', which the
+     scoreboard rewrite turned into '<span class="gc-score num away">N</span>' — a silent miss,
+     because the replace is inside a try/catch and a no-op replace throws nothing. Keyed on the
+     side rather than on the number: two clubs can score the same, and String.replace would then
+     have painted whichever appeared first. */
   if (CG.gameCard){
     var _gcard = CG.gameCard;
     CG.gameCard = function(g, opts){
@@ -1062,9 +1068,9 @@
         if (g && g.score && g.home && g.away){
           var hs = g.score[g.home], as = g.score[g.away];
           if (hs != null && as != null && hs !== as){
-            var win = hs > as ? hs : as;
-            html = html.replace('<span class="gc-score num">' + win + '</span>',
-              '<span class="gc-score num pv-final">' + win + '</span>');
+            var side = hs > as ? "home" : "away";
+            html = html.replace(new RegExp('(<span class="gc-score num ' + side + ')("[^"]*>)'),
+              '$1 pv-final$2');
           }
         }
       } catch(e){}

@@ -46,8 +46,17 @@ A("the game-stats desk hides its diagnostic column on phones", /class="tbl keepc
 
 console.log("— public pages");
 A("no .shell ever gets the padding shorthand (it wiped the phone gutters)", !/class="shell" style="padding:\d/.test(all));
-A("game cards wrap each side as one unit", /<span class="side away">'\+CG\.crest\(g\.away,26\)/.test(pub) && /<span class="side home">'\+CG\.crest\(g\.home,26\)/.test(pub) && /\.gamecard \.gc-match \.side\.home::before\{content:"at"/.test(css));
-A("...and keep the status chip on phones", /\.gamecard \.gc-tag\{display:inline-flex;grid-column:2;justify-self:start\}/.test(css) && !/\.gamecard \.gc-tag\{display:none\}/.test(css));
+/* v3.10 — the card became a scoreboard: the away club reads name-then-crest so its badge sits
+   beside the score, the home club crest-then-name, and each score is its own element so the phone
+   can move it back beside its own club. This pin used to demand `<span class="side away">'+
+   CG.crest(g.away,26)`, which is the old order at the old size. What must not break is the
+   phone contract: one club per line, its own score right-aligned, and the home line saying "at". */
+A("game cards keep each side as one unit", /<span class="side '\+which\+'">/.test(pub) && /which==="away" \? nm\+CG\.crest\(code,19\) : CG\.crest\(code,19\)\+nm/.test(pub));
+A("...with the home line marked 'at' on phones", /\.gamecard \.gc-match \.side\.home::before\{content:"at"/.test(css));
+A("...and each club's score stacked on its own row, not hidden", /\.gamecard \.gc-score\.away\{grid-column:2;grid-row:1\}/.test(css) && /\.gamecard \.gc-score\.home\{grid-column:2;grid-row:2\}/.test(css));
+A("...with a grid track that can shrink below its own minimum on a narrow phone",
+  /repeat\(auto-fill,minmax\(min\(540px,100%\),1fr\)\)/.test(css));
+A("...and keep the status chip on phones", /\.gamecard \.gc-tag\{display:inline-flex;grid-column:2;justify-self:start;min-width:0\}/.test(css) && !/\.gamecard \.gc-tag\{display:none\}/.test(css));
 A("the stat band is a 2×2 on phones", /\.statline\{display:grid;grid-template-columns:1fr 1fr;gap:0 14px\}/.test(css));
 A("the club page: short tab labels, paired stat tiles, OVR beside the name", /'Roster<span class="hide-xs"> &amp; stats<\/span>'/.test(pub) && /class="grid g4 team-stats"/.test(css.length ? pub : "") && /<th class="tleft">Player<\/th>'\+\(archived\?"":'<th>OVR<\/th>'\)\+'<th>POS<\/th><th class="hide-xs-col">#<\/th>/.test(pub));
 /* v2.61: the hero is a named-area grid on phones (crest + badge on the top line, the words beneath) */

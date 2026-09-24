@@ -143,18 +143,32 @@ CG.gameCard = function(g){
   else if (Math.abs(g.at - CG.now()) < 10*3600000 && g.at > CG.now()) tag = '<span class="chip chip-live"><span class="live-dot"></span>Tonight</span>';
   else if (g.at < CG.now()) tag = '<span class="chip chip-warn">Awaiting result</span>';
   else tag = '<span class="chip">'+(g.stage==="preseason"?"Pre-season · Wk "+g.week:g.stage==="playoff"?"Playoffs · Wk "+g.week:"Week "+g.week)+'</span>';
-  /* "Wed, Sep 23" -> weekday over date over time. .gc-when is a fixed grid track (74px / 60px
+  /* "Wed, Sep 23" -> weekday over date over time. .gc-when is a fixed grid track (78px / 62px
      on mobile), so the date stacks under the weekday instead of widening the column. */
   var day = CG.fmtDay(g.at), wd = day.split(",")[0], mmdd = day.slice(wd.length+1).trim();
-  return '<div class="gamecard" data-go="#/matchup/'+g.id+'" role="link" tabindex="0">'+
+  /* v3.10 — a scoreboard, not a sentence. The score used to sit glued to its club's name
+     ("Mammoth0"), which read as one word and left the middle of a full-width card empty. The two
+     clubs now flank a centred scoreline, so the crests, the numbers and the status chip land on
+     the same x in every card of the list; that alignment IS the organisation.
+     Each score is its own element rather than one block, so the phone layout can move it back
+     beside its own club without a second copy in the markup. */
+  var aw = res ? res.score[g.away] : null, hm = res ? res.score[g.home] : null;
+  var side = function(code, which){
+    var nm = '<span class="gc-nm">'+esc(CG.TEAM[code].name)+'</span>';
+    return '<span class="side '+which+'">'+(which==="away" ? nm+CG.crest(code,19) : CG.crest(code,19)+nm)+'</span>';
+  };
+  /* the loser is dimmed rather than the winner shouted; a tie leaves both level */
+  var sc = function(v, mine, other, which){
+    return '<span class="gc-score num '+which+(mine<other?" lose":"")+'">'+v+'</span>';
+  };
+  return '<div class="gamecard'+(res?"":" upcoming")+'" data-go="#/matchup/'+g.id+'" role="link" tabindex="0">'+
     '<div class="gc-when"><b>'+esc(wd)+'</b>'+
-      '<span style="display:block;font-size:11px;color:var(--ink);margin:2px 0 3px">'+esc(mmdd)+'</span>'+
+      '<span class="gc-date">'+esc(mmdd)+'</span>'+
       '<span>'+CG.fmtTime(g.at)+'</span></div>'+
-    '<div class="gc-match"><span class="side away">'+CG.crest(g.away,26)+esc(CG.TEAM[g.away].name)+
-      (res?'<span class="gc-score num">'+res.score[g.away]+'</span>':"")+'</span>'+
-      '<span class="at">'+(res?"—":"@")+'</span>'+
-      '<span class="side home">'+CG.crest(g.home,26)+esc(CG.TEAM[g.home].name)+
-      (res?'<span class="gc-score num">'+res.score[g.home]+'</span>':"")+'</span></div>'+
+    '<div class="gc-match">'+side(g.away,"away")+
+      (res ? sc(aw,aw,hm,"away")+'<span class="at">&ndash;</span>'+sc(hm,hm,aw,"home")
+           : '<span class="at">@</span>')+
+      side(g.home,"home")+'</div>'+
     '<span class="gc-tag">'+tag+'</span></div>';
 };
 
@@ -1650,7 +1664,7 @@ CG.ROUTES.schedule = function(param, qs){
     var lab = (grp.stage==="preseason"?"Pre-season · Week ":grp.stage==="playoff"?"Playoffs · Week ":"Week ")+grp.week;
     return '<div style="margin-bottom:30px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'+
       '<span class="eyebrow chr">'+lab+'</span>'+(k===nowKey?'<span class="chip chip-live"><span class="live-dot"></span>Next up</span>':"")+'</div>'+
-      '<div class="stack" style="gap:9px">'+grp.games.map(CG.gameCard).join("")+'</div></div>';
+      '<div class="gamelist">'+grp.games.map(CG.gameCard).join("")+'</div></div>';
   }).join("") : (
     /* Two different empty states. Before the draft there is no slate at all, so blaming the
        visitor's filters ("clear a filter or two") reads as a broken page — which is what every
@@ -2116,7 +2130,7 @@ CG.ROUTES.team = function(code, qs){
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Exhibition finals from '+esc(SD.label)+' — archived for the record.</span></div></div>';
     } else {
       var games = lg.schedule.filter(function(g){ return g.home===code||g.away===code; });
-      body += '<div class="stack" style="gap:9px">'+games.map(CG.gameCard).join("")+'</div>';
+      body += '<div class="gamelist">'+games.map(CG.gameCard).join("")+'</div>';
     }
   }
   /* the former "Team stats" tab is consolidated into the Roster & stats tab above */

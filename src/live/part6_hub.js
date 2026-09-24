@@ -2670,7 +2670,7 @@ CG.hubStatsEntry = function(){
   return '<div style="margin-bottom:20px"><span class="eyebrow chr">Statistician grant</span><h1 class="h-sec" style="margin-top:8px">Stats entry desk</h1>'+
     '<p class="lede" style="margin-top:8px">Finals get entered here (or in the Control Center) and flow instantly into standings, player stats, and ratings.</p></div>'+
     (missing.length
-      ? '<div class="stack" style="gap:10px">'+missing.map(CG.gameCard).join("")+'</div>'
+      ? '<div class="gamelist">'+missing.map(CG.gameCard).join("")+'</div>'
       : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("check",22)+'</div><b>Every played game has a verified final</b>'+
         '<p>48 of 48 through Week 6. Tonight’s four games will appear here after puck drop — or enter them live from the Control Center as commissioner.</p></div></div>')+
     '<div class="note" style="margin-top:16px">Staff permissions are modular — this seat has <b>stats entry</b> and <b>complaints review</b> only. It can’t publish news, touch the rulebook, or see the audit log.</div>';

@@ -1176,20 +1176,61 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
 /* the provisional-OVR note under a badge: light-card token by default, on-dark on the
    profile hero — the surface decides, so no call site has to pass a colour */
 .ovr-prov{color:var(--steel)} .hero-ovr .ovr-prov{color:var(--on-ink-dim)}
-.gamecard{display:grid;grid-template-columns:74px 1fr auto;gap:16px;align-items:center;background:var(--paper);
+/* v3.10 — a night of games is a GRID, not one column of very wide rows. On the club schedule at
+   1440px a single card measured 1228px wide with 326px of dead space to the left of the away club
+   and 322px to the right of the home club: 53% of the row was empty, and on an ultrawide it is
+   worse. auto-fill means the column count follows the container, so a narrow pane, a phone and a
+   sidebar all collapse to one column with no breakpoint to maintain. 540px is the width below
+   which the scoreboard inside a card starts to crowd.
+   min(540px,100%) and NOT a bare 540px: minmax() treats its first argument as a hard minimum, so
+   on a 375px phone every card was laid out 540px wide and the scores sat off the right edge of
+   the screen. min() lets the track shrink to the container when the container is the smaller. */
+.gamelist{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(540px,100%),1fr));gap:10px;align-items:start}
+.gamecard{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:16px;align-items:center;background:var(--paper);
   border:1.5px solid var(--line);border-radius:var(--r-m);padding:14px 18px;cursor:pointer;
   transition:transform .15s,border-color .15s,box-shadow .15s}
+/* .gamecard is borrowed as a generic clickable row in the hub and the control centre (the trade
+   picker, the holiday toggles, the department filters), each with its own inline template, so the
+   tighter padding a real fixture wants is scoped to the fixture lists and cannot reach them. */
+.gamelist .gamecard{padding:11px 18px;gap:18px}
 .gamecard:hover{border-color:var(--ink);transform:translateX(3px);box-shadow:var(--sh-1)}
-/* the when-track holds day / date / time stacked in a fixed 74px column, so it drives the card's
-   height — stretch the rule and centre the stack rather than widening the track */
+/* the when-track holds day / date / time stacked in a fixed column, so it drives the card's
+   height — stretch the rule and centre the stack rather than widening the track.
+   92px is not arbitrary: "10:10 PM ET" is the longest string it holds, and at 78px it wrapped to
+   two lines, which made that one card 90px tall in a list of 76px cards. nowrap so a wrap can
+   never silently change a row's height again. */
 .gamecard .gc-when{border-right:1px solid var(--line);padding-right:14px;align-self:stretch;
   display:flex;flex-direction:column;justify-content:center}
 .gamecard .gc-when b{font-family:var(--f-disp);font-weight:800;font-size:14px;display:block;line-height:1.2}
-.gamecard .gc-when span{display:block;font-family:var(--f-mono);font-size:10.5px;line-height:1.35;color:var(--steel)}
-.gamecard .gc-match{display:flex;align-items:center;gap:10px;font-family:var(--f-disp);font-weight:700;font-size:14.5px;flex-wrap:wrap}
-.gamecard .gc-match .at{font-family:var(--f-mono);font-size:10px;color:var(--steel);margin:0 2px}
-.gamecard .gc-score{font-family:var(--f-disp);font-weight:900;font-size:19px;letter-spacing:.02em}
-.gamecard .gc-tag{justify-self:end}
+.gamecard .gc-when span{display:block;font-family:var(--f-mono);font-size:10.5px;line-height:1.35;color:var(--steel);white-space:nowrap}
+.gamecard .gc-when .gc-date{font-size:11px;color:var(--ink);margin:2px 0 3px}
+/* v3.10 — the scoreboard. Five tracks, so the crests, the numbers and the dash sit on the same x
+   in every card of a list: away name+crest | away score | dash | home score | crest+home name.
+   The 1fr flanks are what spend the width the old flex row left empty in the middle. */
+.gamecard .gc-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto minmax(0,1fr);
+  align-items:center;column-gap:12px;font-family:var(--f-disp);font-weight:700;font-size:14.5px}
+/* a fixture with no result has three children, not five, so it needs its own template or the
+   two clubs would sit in the score tracks and stop lining up with the cards above and below */
+.gamecard.upcoming .gc-match{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+.gamecard .gc-match .side{display:flex;align-items:center;gap:10px;min-width:0}
+.gamecard .gc-match .side.away{justify-content:flex-end;text-align:right}
+.gamecard .gc-match .side.home{justify-content:flex-start}
+.gamecard .gc-nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* CG.crest renders at TWICE the size it is asked for, so 19 draws a 38px box; pin it here so a
+   long club name can never squash the badge */
+.gamecard .gc-match .crest{width:34px;height:34px;flex:0 0 auto}
+.gamecard .gc-match .at{font-family:var(--f-mono);font-size:11px;color:var(--steel)}
+/* tabular figures: a 1 and a 4 take the same width, so scores stay in column down the list */
+.gamecard .gc-score{font-family:var(--f-disp);font-weight:900;font-size:21px;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;min-width:15px;text-align:center}
+.gamecard .gc-score.lose{color:var(--steel)}
+/* The chip lane sizes to ITS OWN chip rather than reserving the widest one in the league. The
+   right edges still line up down the list, which is the alignment that reads; reserving 118px for
+   "Awaiting result" on every card instead stole 66px from the club names on every FINAL card, and
+   at two columns that was enough to start truncating "Red Wings". nowrap so the chip can never
+   take a second line and change the row height. */
+.gamecard .gc-tag{justify-self:end;display:flex;justify-content:flex-end;min-width:0}
+.gamecard .gc-tag .chip{white-space:nowrap}
 /* three stories abreast, in the height the single-slide carousel used for one */
 .newsrow{display:grid;grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:16px;align-items:stretch}
 .newsrow>div{display:flex}
@@ -1662,10 +1703,15 @@ details.rb-history[open]>summary::after{content:"–"}
   .mx-side,.mx-side.away{flex-direction:column;text-align:center;justify-items:center}
   .rk-line{grid-template-columns:1fr}
   .rk-line.d2,.rk-line.g1{max-width:100%}
-  .gamecard{grid-template-columns:72px 1fr;grid-template-rows:auto auto;row-gap:6px}
+  .gamecard{grid-template-columns:72px minmax(0,1fr);grid-template-rows:auto auto;row-gap:8px;gap:14px}
   .gamecard .gc-when{padding-right:10px;grid-row:1/3}
   .gamecard .gc-when span{white-space:nowrap}
-  .gamecard .gc-tag{display:inline-flex;grid-column:2;justify-self:start}
+  .gamecard .gc-tag{display:inline-flex;grid-column:2;justify-self:start;min-width:0}
+  /* the flanks stop earning their width here: tighten the gutters and the badge rather than
+     letting a club name ellipsis away while empty space sits either side of the score */
+  .gamecard .gc-match{column-gap:9px;font-size:13.5px}
+  .gamecard .gc-match .crest{width:30px;height:30px}
+  .gamecard .gc-score{font-size:19px}
   footer.site .ft-top{grid-template-columns:1fr 1fr}
   /* Column hiding is a LAST resort: it makes the hidden data unreachable and unsortable.
      Keep it only for tables that carry a compact summary (standings). Stat-dense tables opt
@@ -1827,10 +1873,20 @@ details.rb-history[open]>summary::after{content:"–"}
   .modal .mo-b{padding:18px 16px}
   .modal .mo-f{flex-wrap:wrap;padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-radius:0}
   .modal .mo-f .btn{flex:1 1 auto;justify-content:center}
-  /* the game card: away, then "at" home, each side one unbreakable unit; the score stays with its club */
-  .gamecard .gc-match{flex-direction:column;align-items:flex-start;gap:4px}
+  /* v3.10 — the phone gets the same information as a stacked scoreboard: one club per line with
+     its own score right-aligned, which is how every scores app on a phone reads. The score spans
+     are separate elements precisely so they can move back beside their own club here, with no
+     second copy in the markup and nothing hidden. */
+  .gamecard .gc-match{grid-template-columns:minmax(0,1fr) auto;row-gap:5px;column-gap:10px}
+  .gamecard.upcoming .gc-match{grid-template-columns:minmax(0,1fr) auto}
+  .gamecard .gc-match .side.away{grid-column:1;grid-row:1;justify-content:flex-start;text-align:left}
+  .gamecard .gc-match .side.home{grid-column:1;grid-row:2}
+  .gamecard .gc-score.away{grid-column:2;grid-row:1}
+  .gamecard .gc-score.home{grid-column:2;grid-row:2}
   .gamecard .gc-match .at{display:none}
-  .gamecard .gc-match .side{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;min-width:0}
+  .gamecard.upcoming .gc-match .at{display:block;grid-column:2;grid-row:1/3;align-self:center}
+  .gamecard .gc-match .side{gap:8px;white-space:nowrap;min-width:0}
+  /* away reads first, so the home line says so rather than relying on the order alone */
   .gamecard .gc-match .side.home::before{content:"at";font:11px var(--f-mono);color:var(--steel);margin-right:2px}
   /* the approval queue: summary on line one, chip and buttons on line two */
   .tasklist .titem{flex-wrap:wrap}
