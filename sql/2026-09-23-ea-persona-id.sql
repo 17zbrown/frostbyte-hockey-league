@@ -69,3 +69,39 @@ commit;
 --      any route, so the league only ever has to recognise a member once. It fills a NULL only
 --      (`ea_player_id=is.null` in the filter, so a concurrent writer cannot be clobbered), logs a
 --      409 rather than throwing, and can never fail an import.
+
+-- ---- v3.07: matching the rest of game night one, and a squad that changed after the game ----
+--
+-- The commissioner corrected one member's EA ID (Chase Pidgeon -> "Itz_Pidgeon") and asked which
+-- others could be matched. Running the new resolver over every unmatched row, then using POSITION
+-- as a second, independent signal, resolved five more. Each was linked only where the name the
+-- game reports AND the position he played both pointed at the same member:
+--
+--   NYI  Itz_Pidgeon   1009015295480  -> Chase Pidgeon   exact ea_id after the commissioner's fix
+--   NYI  Dmb Dex225    1004693596770  -> dmbdex255       played LW, is a LW, box name IS his site name
+--   NYI  N0Tsurprised  1005173977114  -> Easy pickins    played D, is a RD, only candidate left
+--   UTA  I Kolosov I   1883618070     -> Kolosov         played G, is UTA's rostered G, name matches
+--   UTA  l Setty l     186209497      -> Bad News Kells  played C, is a C, ea_id "Setkells18"
+--   SEA  Maniac x98    385937586      -> Maniac          confirmed by the commissioner
+--
+-- 130 of 133 box-score lines matched; 53 members carry their EA account id.
+--
+-- REFUSED, and this is the point of having two signals: the commissioner said DAL's goalie was
+-- atlasx27x. The data says otherwise, and says it plainly. In the SAME 9:00 PM game (PIT v DAL):
+--   ATLASX27X    persona 1448733393  position C  3600s  1G 1A
+--   vDarkiee___  persona 1004486290545  position G  3600s  14 saves
+-- One human is not the centre and the goalie of the same game for the full sixty minutes. So
+-- vDarkiee___ was left unmatched and handed back to the commissioner rather than welded to the
+-- wrong person. DAL's rostered goalies who did not appear that night: Belly l32l (JXCKSXN__9),
+-- papadimez (PapaDimez), Rob (imdarkkkk).
+--
+-- A SQUAD CAN CHANGE AFTER THE GAME. Maniac played goal for SEA while he was on the TRAINING CAMP
+-- squad, which Rule 2.1 expressly allows (a camp player fills any position). He has since been
+-- promoted to the active roster, where he is a LW. review_game_records reads roster_spots as it
+-- stands NOW, so a re-run would have called that a violation. Two changes:
+--   * the out-of-position notice now says the squad is read as it stands now, and that a player
+--     who was in camp on the night and has been promoted since is not in violation;
+--   * a case can be CLEARED and stay cleared: the dedup guard now also skips when an
+--     admin_audit row with action 'position_cleared' exists for that game and player. Two such
+--     rows were written for Maniac's games, carrying the reason.
+-- Rehearsed with rollback: re-running review_game_records over both games raised nothing.
