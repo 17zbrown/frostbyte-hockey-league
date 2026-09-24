@@ -472,34 +472,12 @@ CG.exportCSV = function(name, rows){
   a.download = name; a.click(); URL.revokeObjectURL(a.href);
   CG.toast("Exported "+name, "ok");
 };
-CG.sortTable = function(wrapEl){
-  $$("th.sortable", wrapEl).forEach(function(th){
-    th.setAttribute("tabindex","0"); th.setAttribute("role","button");
-    th.setAttribute("aria-sort", th.classList.contains("sorted") ? (th.classList.contains("asc")?"ascending":"descending") : "none");
-  });
-  wrapEl.addEventListener("keydown", function(e){
-    if ((e.key==="Enter"||e.key===" ") && e.target.closest("th.sortable")){ e.preventDefault(); e.target.closest("th.sortable").click(); }
-  });
-  wrapEl.addEventListener("click", function(e){
-    var th = e.target.closest("th.sortable"); if (!th) return;
-    var table = th.closest("table"), tbody = table.tBodies[0];
-    var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
-    var asc = th.classList.contains("sorted") && !th.classList.contains("asc");
-    $$("th", table).forEach(function(x){ x.classList.remove("sorted","asc"); if (x.classList.contains("sortable")) x.setAttribute("aria-sort","none"); });
-    th.classList.add("sorted"); if (asc) th.classList.add("asc");
-    th.setAttribute("aria-sort", asc?"ascending":"descending");
-    var rows = $$("tbody tr", table);
-    rows.sort(function(a,b){
-      var av = a.children[idx].getAttribute("data-v")||a.children[idx].textContent;
-      var bv = b.children[idx].getAttribute("data-v")||b.children[idx].textContent;
-      var an = parseFloat(av), bn = parseFloat(bv);
-      var cmp = (!isNaN(an)&&!isNaN(bn)) ? an-bn : String(av).localeCompare(String(bv));
-      return asc ? cmp : -cmp;
-    });
-    rows.forEach(function(r){ tbody.appendChild(r); });
-  });
-};
-
+/* v3.12 — CG.sortTable is gone. It bound click-to-sort to th.sortable and was wired up in exactly
+   ONE place (Stat Central), while nine headers on the Team HQ roster table carried class="sortable"
+   and did nothing at all, because nobody ever called it for that table. Every .tbl on the site is
+   now sorted by CG.tableFilters in part_live.js, which needs no per-view wiring, sorts a position
+   column in rink order, keeps section separators in place and honours the same data-v override
+   this function used. The class="sortable" left in the markup is harmless and now finally works. */
 /* ---------- notifications ---------- */
 CG.baseNotifs = function(){
   var r = CG.role(), lg = CG.lg, n = [];

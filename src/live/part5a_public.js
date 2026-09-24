@@ -986,7 +986,8 @@ CG.pulseModule = function(){
   var cards = [];
 
   /* ---- registrations by position ---- */
-  var POS = [["C","C"],["LW","LW"],["RW","RW"],["LD","LD"],["RD","RD"],["G","G"]];
+  /* v3.12 — rink order, LW C RW LD RD G, like every other position list on the site */
+  var POS = [["LW","LW"],["C","C"],["RW","RW"],["LD","LD"],["RD","RD"],["G","G"]];
   var byPos = {};
   regs.forEach(function(r){ if (r.position) byPos[r.position] = (byPos[r.position]||0) + 1; });
   var posRows = POS.filter(function(p){ return byPos[p[0]]; })
@@ -2018,8 +2019,11 @@ CG.ROUTES.team = function(code, qs){
   if (tab==="stats") tab="roster";   /* "Team stats" merged into "Roster & stats" — keep old links working */
   var pr = lg.powerRankings.find(function(p){ return p.team===code; });
   var roster = lg.byTeam[code].slice().sort(function(a,b){
-    var ord = {C:0,LW:1,RW:2,LD:3,RD:4,G:5};
-    return ord[a.pos]-ord[b.pos] || a.depth-b.depth;
+    /* v3.12 — rink order. CG.splitSquads sorts the two squad blocks the same way, but this array
+       also feeds the club's stat panels below, so the source order is fixed here too rather than
+       relying on a later re-sort that only the table sees. */
+    var ord = CG.POS_RANK;
+    return (ord[a.pos]||99)-(ord[b.pos]||99) || a.depth-b.depth;
   });
   /* management comes from the real owner/GM/AGM assignment (p.mgmt) in both builds;
      a club may not have named all three yet, so every use below is guarded. */
@@ -2692,7 +2696,8 @@ CG.posSplit = function(rows){
 };
 CG.posSplitTable = function(split){
   if (!split) return "";
-  var order = ["C","LW","RW","LD","RD","D","G"];
+  /* v3.12 — rink order. "D" is the legacy un-sided bucket and sits with the defensemen. */
+  var order = ["LW","C","RW","LD","RD","D","G"];
   var have = order.filter(function(k){ return split[k] && split[k].gp>0; });
   if (have.length < 2) return "";
   var sk = have.filter(function(k){ return k!=="G"; });
@@ -3070,7 +3075,6 @@ CG.AFTER.stats = function(param, qs){
   $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){ location.hash="#/stats?tab="+b.getAttribute("data-tab"); }); });
   var st = $("#sTeam"); if (st) st.addEventListener("change", function(){ location.hash="#/stats?tab="+tab+"&team="+this.value+"&min="+($("#sMin")?$("#sMin").value:3); });
   var sm = $("#sMin"); if (sm) sm.addEventListener("change", function(){ location.hash="#/stats?tab="+tab+"&team="+(st?st.value:"")+"&min="+this.value; });
-  CG.sortTable($("#statTbl").closest(".tblwrap"));
   $("#csvStats").addEventListener("click", function(){
     var rows = $$("#statTbl tr").map(function(tr){
       return $$("th,td",tr).map(function(c){ return c.textContent.trim().replace(/\s+/g," "); });

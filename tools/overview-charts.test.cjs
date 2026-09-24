@@ -123,7 +123,10 @@ assert("goaltenders show 12 / 50 (a 5-goaltender ceiling x 10 clubs)", /Goaltend
 assert("corner value is signups over the league's TOTAL spots (15 x 10), not the summed ceilings", out.includes("67 / 150") && !out.includes("67 / 210"));
 assert("the subtitle says the figures are ceilings on a 15-spot roster", /10 clubs × 15 spots — at most 9 forwards, 7 defensemen, 5 goaltenders each \(Rule 2\.1\)/.test(out));
 assert("note reports coverage and the thinnest group", /67 of 150 active-roster spots have a registrant/.test(out) && /thinnest among defensemen \(15 for 70\)/.test(out));
-assert("...and the exact-position split, for balance", /by position: 15 center, 13 left wing, 12 right wing, 8 left defense, 7 right defense, 12 goaltender/.test(out));
+/* v3.12 — the split reads in RINK order now (LW, C, RW, LD, RD, G), not centers first. The
+   commissioner asked for that order everywhere it applies, and a note that listed centers first
+   while every roster and chart beside it started at left wing was the odd one out. */
+assert("...and the exact-position split, for balance", /by position: 13 left wing, 15 center, 12 right wing, 8 left defense, 7 right defense, 12 goaltender/.test(out));
 assert("no stale per-club framing", !/ \/ 10</.test(out) && !out.includes("starting jobs"));
 // the bar FILL is the true ratio against each row's own capacity, not the series max
 const rowWidth = (label) => {

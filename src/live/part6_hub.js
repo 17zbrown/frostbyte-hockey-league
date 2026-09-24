@@ -451,7 +451,9 @@ CG.hubAvailability = function(){
        rule as the rest of Team HQ (v2.86). A commissioner who still plays was shown HIS club's
        grid under the previewed club's name, which is worse than showing nothing. */
     var clubCode = (CG.previewClub && CG.previewClub()) || (me && me.team ? me.team : CG.myClub());
-    var roster = (lg.byTeam[clubCode]||[]).slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || a.pos.localeCompare(b.pos); });
+    /* v3.12 — rink order. localeCompare on the position STRING sorted this alphabetically
+       (C, G, LD, LW, RD, RW), which put the goaltender second in every availability grid. */
+    var roster = (lg.byTeam[clubCode]||[]).slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (CG.POS_RANK[a.pos]||99)-(CG.POS_RANK[b.pos]||99); });
     var gridCols = 4 + CG.WEEK8.nights.length, gridCamp = roster.some(CG.isCamp);
     var nightGames = {};
     CG.WEEK8.nights.forEach(function(n){ nightGames[n.key] = CG.clubGamesOnNight ? CG.clubGamesOnNight(clubCode, n) : []; });
@@ -882,7 +884,8 @@ CG.hubLineup = function(qs){
     '<div class="rk-line g1">'+CG.luSlot("G", slots.G, locked)+'</div>'+
   '</div></div>';
   var bench = '<div class="card"><div class="card-h"><h3>Bench — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span></div>'+
-    '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || a.pos.localeCompare(b.pos)||a.depth-b.depth; }).map(function(p, i, arr){
+    /* v3.12 — rink order; this was alphabetical by position string too (see the availability grid) */
+    '<div class="card-b bench">'+roster.slice().sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (CG.POS_RANK[a.pos]||99)-(CG.POS_RANK[b.pos]||99)||a.depth-b.depth; }).map(function(p, i, arr){
       var av = CG.avFor(p.id);
       /* v2.72: camp players sit in their own group at the end of the bench */
       var groupHead = (i===0 && !CG.isCamp(p) && arr.some(CG.isCamp)) ? '<div class="bench-h">Active roster</div>' : (CG.isCamp(p) && (i===0 || !CG.isCamp(arr[i-1]))) ? '<div class="bench-h">Training camp · any position · 3 a week</div>' : "";

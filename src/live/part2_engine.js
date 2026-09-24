@@ -85,6 +85,24 @@ CG.GAMERTAGS = [
 
 CG.POS_SLOTS = ["LW","LW","C","C","RW","RW","LD","LD","RD","RD","G","G"];
 CG.POS_NAME = { LW:"Left Wing", C:"Center", RW:"Right Wing", LD:"Left Defense", RD:"Right Defense", G:"Goaltender" };
+/* v3.12 — rink order, LW C RW LD RD G, as a rank anyone can sort by. It lives HERE, beside the
+   names, because part5a_public.js and part6_hub.js both use it and part_live.js loads after both:
+   referencing it from there worked only because every call happens at render time, which is the
+   kind of luck that breaks the first time a build ships without part_live. */
+CG.POS_RANK = { LW:1, C:2, RW:3, LD:4, RD:5, G:6 };
+/* the same order spelled out, so a column rendered with CG.POS_NAME sorts identically */
+CG.POS_RANK_LONG = { "left wing":1, "center":2, "right wing":3, "left defense":4, "right defense":5, "goaltender":6 };
+/* rink order for any list of players: LW, C, RW, LD, RD, G, then a stable tiebreak by name */
+CG.byPosition = function(getPos, getName){
+  getPos = getPos || function(p){ return p && p.pos; };
+  getName = getName || function(p){ return (p && (p.tag || p.gamertag || p.name)) || ""; };
+  return function(a, b){
+    var ra = CG.POS_RANK[String(getPos(a)||"").toUpperCase()] || 99;
+    var rb = CG.POS_RANK[String(getPos(b)||"").toUpperCase()] || 99;
+    return ra - rb || String(getName(a)).localeCompare(String(getName(b)));
+  };
+};
+
 CG.SKATER_ARCH = { LW:["Sniper","Power Forward","Grinder"], C:["Playmaker","Two-Way Forward","Sniper"], RW:["Sniper","Power Forward","Playmaker"],
                    LD:["Offensive Defenseman","Shutdown","Two-Way Defenseman"], RD:["Two-Way Defenseman","Shutdown","Offensive Defenseman"] };
 CG.G_ARCH = ["Butterfly","Hybrid","Standup"];

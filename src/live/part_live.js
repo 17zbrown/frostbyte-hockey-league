@@ -5955,7 +5955,9 @@ CG.admPreseason = function(){
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Rosters</h3><span class="chip">max '+rosterMax+' per club · click to expand</span></div>'+
     '<div class="card-b club-led">'+
     CG.TEAMS.map(function(t){
-      var players=(lg.byTeam[t.code]||[]).slice().sort(function(a,b){ var o={G:0,LD:1,RD:2,C:3,LW:4,RW:5}; return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (o[a.pos]==null?9:o[a.pos])-(o[b.pos]==null?9:o[b.pos]); });
+      /* v3.12 — rink order. This map ran goalies FIRST, so every club roster in the Control
+         Center opened on its goaltenders and disagreed with the club page and Team HQ. */
+      var players=(lg.byTeam[t.code]||[]).slice().sort(function(a,b){ var o=CG.POS_RANK; return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (o[a.pos]||99)-(o[b.pos]||99); });
       /* v2.72: camp sits outside the active roster (Rule 2.1): the N/max reads the active roster only */
       var campN=players.filter(CG.isCamp).length, n=players.length-campN, pct=Math.round(100*n/rosterMax);
       return '<details><summary>'+
@@ -7917,7 +7919,7 @@ CG.fileActionRequest = function(type){
       CG.toast("Position changes closed "+CG.fmtFull(pcDl)+" — your position is set for this season","err");
       return;
     }
-    var posOpts = ["C","LW","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
+    var posOpts = ["LW","C","RW","LD","RD","G"].map(function(p){ return '<option value="'+p+'">'+esc(CG.POS_NAME[p]||p)+'</option>'; }).join("");
     fields += '<div class="grid g2" style="gap:12px">'+
       '<label class="fld"><span>Current position</span><select id="acCur">'+posOpts+'</select></label>'+
       '<label class="fld"><span>Requested position</span><select id="acReq">'+posOpts+'</select></label></div>'+
@@ -9709,7 +9711,7 @@ CG.overviewCharts = function(){
      them. Names come from CG.POS_NAME, spots from CG.ROSTER_QUOTA — no second copy of either. */
   /* v2.41: spots are counted by position GROUP (Rule 2.1 — 9 forwards / 6 defensemen / 2 goaltenders
      per club); the exact-position split rides in the note, since it is balance, not a rule */
-  var GRPS = ["F","D","G"], POSN = ["C","LW","RW","LD","RD","G"];
+  var GRPS = ["F","D","G"], POSN = ["LW","C","RW","LD","RD","G"];
   var clubs = (CG.TEAMS||[]).length || 10;
   var spotsAt = function(g){ return (CG.ROSTER_QUOTA[g]||0) * clubs; };
   /* v2.51: in the basic format the group figures are ceilings that overlap (9 F / 7 D / 5 G on a
@@ -12918,6 +12920,13 @@ CG.campChip = function(sz){ return '<span class="chip chip-warn'+(sz==="xs"?' ch
 CG.splitSquads = function(list){
   var out = { active:[], camp:[] };
   (list||[]).forEach(function(p){ (CG.isCamp(p) ? out.camp : out.active).push(p); });
+  /* v3.12 (commissioner): every squad list reads in rink order, LW C RW LD RD G, rather than in
+     whatever order the rows arrived. This is the shared splitter behind BOTH the public club page
+     and Team HQ, so ordering it here orders both and cannot drift apart later. A leaderboard is
+     never sorted through this function, which is the point: a list ranked by a statistic must keep
+     its ranking. */
+  out.active.sort(CG.byPosition());
+  out.camp.sort(CG.byPosition());
   return out;
 };
 CG.tradeStats = function(pid){
@@ -13233,18 +13242,78 @@ CG.bootLive = async function(){
 };
 
 /* ================================================================
-   PER-COLUMN TABLE FILTERS — every .tbl on the site gets a funnel
-   toggle in its last header cell; switching it on reveals a filter
-   row with one input per column. Matching is diacritic-folded
-   substring per cell; a row hides only when it fails a column that
-   actually has a value typed. Rows whose cell count doesn't match
-   the header (round separators, colspan notes) are never hidden.
+   SORTABLE, SEARCHABLE TABLES — every .tbl on the site gets its
+   header cells made clickable to sort, plus one search box.
+
+   v3.12, commissioner: "make the filter function less clunky and
+   just allow each column header to be clickable and sorted that
+   way". It used to hide behind a funnel in the LAST header cell,
+   and opening it inserted one text input per column — a whole row
+   of boxes to answer a question a click on a heading answers. The
+   sort is the primary interaction now, and the filter is a single
+   search box across the whole table rather than N per-column ones.
+
+   Sorting rules that matter:
+     - a POSITION column sorts in rink order (LW, C, RW, LD, RD, G),
+       never alphabetically, which is what a hockey person expects
+       and is the same order the lineup builder uses;
+     - a cell may override its own sort key with data-sort, so a
+       column of crests or money can sort by what it means;
+     - numbers sort numerically (currency, commas and % stripped),
+       records like 2-1-0 by their parts, everything else by text;
+     - blanks always sink to the bottom, in both directions.
+
+   A table is only made sortable when EVERY body row has the same
+   cell count as the header: a table with separator or colspan rows
+   would otherwise have them flung to one end. Those tables keep the
+   search box, which never reorders anything.
+
    A MutationObserver enhances tables from EVERY render path — the
    router, async loaders, modals — so nothing needs per-view wiring.
-   Opt out with data-nofilter on the table.
+   Opt out with data-nofilter (both) or data-nosort (sorting only).
    ================================================================ */
 CG.tableFilters = function(root){
-  var fold = function(s){ s=String(s==null?"":s); try{ s=s.normalize("NFKD"); }catch(e){} return s.replace(/[̀-ͯ]/g,"").toLowerCase(); };
+  var fold = function(s){ s=String(s==null?"":s); try{ s=s.normalize("NFKD"); }catch(e){} return s.replace(/[\u0300-\u036f]/g,"").toLowerCase(); };
+  var NUM = /^-?[$]?\s*-?[\d,]*\.?\d+\s*[%kmKM]?$/;
+  var REC = /^\d+-\d+(-\d+)?$/;
+  /* what one cell is worth when the column is sorted. data-sort wins, so a cell showing a crest
+     or a formatted salary can say what it actually means. */
+  function cellKey(cell){
+    if (!cell) return "";
+    if (!cell.getAttribute) return (cell.textContent || "").trim();
+    /* data-sort is this system's override; data-v is the one the old per-table sorter used and
+       35 cells across Stat Central still carry it, so both are honoured rather than one silently
+       losing to the rendered text */
+    var d = cell.getAttribute("data-sort");
+    if (d == null) d = cell.getAttribute("data-v");
+    return d != null ? d : (cell.textContent || "").trim();
+  }
+  function colKind(body, col, nCols){
+    var pos = 0, num = 0, seen = 0;
+    for (var r=0;r<body.rows.length;r++){
+      var row = body.rows[r]; if (row.cells.length !== nCols) continue;
+      var t = cellKey(row.cells[col]); if (!t) continue;
+      seen++;
+      if (CG.POS_RANK[t.toUpperCase()] || CG.POS_RANK_LONG[t.toLowerCase()]) pos++;
+      else if (NUM.test(t) || REC.test(t)) num++;
+    }
+    if (!seen) return "text";
+    if (pos / seen >= 0.6) return "pos";
+    if (num / seen >= 0.6) return "num";
+    return "text";
+  }
+  function valueOf(t, kind){
+    if (t === "") return null;                       /* blank: always last */
+    if (kind === "pos") return CG.POS_RANK[t.toUpperCase()] || CG.POS_RANK_LONG[t.toLowerCase()] || 98;
+    if (kind === "num"){
+      if (REC.test(t)){ var p = t.split("-"); return (+p[0]||0)*1e6 - (+p[1]||0)*1e3 - (+p[2]||0); }
+      var mult = /[kK]\s*$/.test(t) ? 1e3 : /[mM]\s*$/.test(t) ? 1e6 : 1;
+      var n = parseFloat(t.replace(/[$,%\s]/g,"").replace(/[kKmM]$/,""));
+      return isNaN(n) ? null : n * mult;
+    }
+    return fold(t);
+  }
+
   ((root||document).querySelectorAll ? (root||document) : document).querySelectorAll("table.tbl:not([data-tf])").forEach(function(tbl){
     if (tbl.hasAttribute("data-nofilter")) { tbl.setAttribute("data-tf","skip"); return; }
     var thead = tbl.tHead, body = tbl.tBodies && tbl.tBodies[0];
@@ -13254,63 +13323,124 @@ CG.tableFilters = function(root){
     if (hrow.cells.length < 2){ tbl.setAttribute("data-tf","skip"); return; }
     tbl.setAttribute("data-tf","1");
 
+    /* ---- the search box: ONE input, matched against the whole row ---- */
     var lastTh = hrow.cells[hrow.cells.length-1];
     var btn = document.createElement("button");
     btn.className = "tbl-fbtn"; btn.type = "button";
-    btn.setAttribute("aria-label","Filter this table by column");
+    btn.setAttribute("aria-label","Search this table");
     btn.setAttribute("aria-expanded","false");
-    btn.setAttribute("data-tip","Filter by column");
+    btn.setAttribute("data-tip","Search this table");
     btn.textContent = "⌕";
     lastTh.appendChild(btn);
 
-    var frow = null;
+    var frow = null, finput = null;
     function ensureRow(){
       if (frow) return frow;
       frow = thead.insertRow(-1);
       frow.className = "tbl-filter";
-      for (var c=0;c<hrow.cells.length;c++){
-        var th = document.createElement("th");
-        th.colSpan = hrow.cells[c].colSpan || 1;
-        var name = (hrow.cells[c].textContent||"").replace(/[⌕↑↓]/g,"").trim() || ("column "+(c+1));
-        var inp = document.createElement("input");
-        inp.type = "search"; inp.placeholder = "filter…";
-        inp.setAttribute("aria-label","Filter by "+name);
-        inp.setAttribute("data-fcol", String(c));
-        th.appendChild(inp);
-        frow.appendChild(th);
-      }
+      var th = document.createElement("th");
+      th.colSpan = nCols;
+      finput = document.createElement("input");
+      finput.type = "search"; finput.placeholder = "Search this table…";
+      finput.setAttribute("aria-label","Search this table");
+      th.appendChild(finput);
+      frow.appendChild(th);
       frow.addEventListener("input", apply);
+      /* the search row must never be treated as a sortable heading */
+      frow.addEventListener("click", function(e){ e.stopPropagation(); });
       return frow;
     }
     function apply(){
-      var wants = [];
-      if (frow) frow.querySelectorAll("input").forEach(function(inp){
-        var v = fold(inp.value.trim());
-        if (v) wants.push({ col:+inp.getAttribute("data-fcol"), v:v });
-      });
+      var want = finput ? fold(finput.value.trim()) : "";
       for (var r=0;r<body.rows.length;r++){
         var row = body.rows[r], show = true;
-        if (wants.length && row.cells.length === hrow.cells.length){
-          for (var w=0;w<wants.length;w++){
-            var cell = row.cells[wants[w].col];
-            if (cell && fold(cell.textContent).indexOf(wants[w].v) < 0){ show = false; break; }
-          }
-        }
-        /* respect other filter systems (e.g. the Users search) — only take a row back if
-           we hid it ourselves */
+        if (want && row.cells.length === hrow.cells.length) show = fold(row.textContent).indexOf(want) >= 0;
         if (!show){ row.style.display = "none"; row.setAttribute("data-tf-hidden","1"); }
         else if (row.getAttribute("data-tf-hidden")){ row.style.display = ""; row.removeAttribute("data-tf-hidden"); }
       }
     }
-    btn.addEventListener("click", function(){
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();                       /* the heading it sits in must not sort */
       var open = btn.getAttribute("aria-expanded")==="true";
       btn.setAttribute("aria-expanded", String(!open));
       btn.classList.toggle("on", !open);
-      if (!open){ ensureRow().style.display = ""; var f=frow.querySelector("input"); if (f) f.focus(); }
-      else if (frow){ frow.style.display = "none"; frow.querySelectorAll("input").forEach(function(i){ i.value=""; }); apply(); }
+      if (!open){ ensureRow().style.display = ""; finput.focus(); }
+      else if (frow){ frow.style.display = "none"; finput.value=""; apply(); }
     });
+
+    /* ---- sorting: every heading is a control ---- */
+    if (tbl.hasAttribute("data-nosort")) return;
+
+    /* A roster table is NOT one flat list: "Active roster — 15" and "Training camp" are colspan
+       separator rows, and the club page's most-used table has both. Sorting the body flat would
+       fling those to one end and merge the two squads. So the body is split into SECTIONS at every
+       row whose cell count does not match the header, each section sorts within itself, and the
+       separators stay exactly where the page put them. Captured once, before any sort, so the
+       sections never drift. */
+    var segs = [], cur = { sep: null, rows: [] };
+    for (var r2=0;r2<body.rows.length;r2++){
+      var rw2 = body.rows[r2];
+      if (rw2.cells.length !== hrow.cells.length){ segs.push(cur); cur = { sep: rw2, rows: [] }; }
+      else cur.rows.push(rw2);
+    }
+    segs.push(cur);
+    if (!segs.some(function(g){ return g.rows.length > 1; })) return;   /* nothing to order */
+
+    var kinds = [], dir = {}, idx = new Map();
+    for (var c=0;c<hrow.cells.length;c++) kinds.push(colKind(body, c, hrow.cells.length));
+    var seq = 0;
+    segs.forEach(function(g){ g.rows.forEach(function(rw){ idx.set(rw, seq++); }); });  /* render order */
+
+    function sortBy(col){
+      var asc = dir[col] !== "asc";               /* first click ascending, then toggle */
+      dir = {}; dir[col] = asc ? "asc" : "desc";
+      var kind = kinds[col];
+      var frag = document.createDocumentFragment();
+      segs.forEach(function(g){
+        var rows = g.rows.slice();
+        rows.sort(function(a,b){
+          var va = valueOf(cellKey(a.cells[col]), kind), vb = valueOf(cellKey(b.cells[col]), kind);
+          if (va === null && vb === null) return idx.get(a) - idx.get(b);
+          if (va === null) return 1;              /* blanks sink, whichever way the column points */
+          if (vb === null) return -1;
+          var d = va < vb ? -1 : va > vb ? 1 : 0;
+          return (asc ? d : -d) || (idx.get(a) - idx.get(b));
+        });
+        if (g.sep) frag.appendChild(g.sep);
+        rows.forEach(function(rw){ frag.appendChild(rw); });
+      });
+      body.appendChild(frag);
+      for (var k=0;k<hrow.cells.length;k++){
+        var th = hrow.cells[k];
+        th.setAttribute("aria-sort", k===col ? (asc?"ascending":"descending") : "none");
+        th.classList.toggle("sorted", k===col);
+        th.classList.toggle("desc", k===col && !asc);
+      }
+    }
+    for (var c2=0;c2<hrow.cells.length;c2++){
+      (function(col){
+        var th = hrow.cells[col];
+        th.classList.add("tbl-sort");
+        /* a table may render already sorted and say so in its markup (Stat Central ships its
+           leaders descending and marks that column). Adopt that state so the arrow tells the
+           truth on arrival and the first click flips it rather than re-applying what is there. */
+        if (th.classList.contains("sorted")){
+          dir[col] = "desc";
+          th.setAttribute("aria-sort","descending");
+          th.classList.add("desc");
+        } else th.setAttribute("aria-sort","none");
+        if (!th.hasAttribute("tabindex")) th.setAttribute("tabindex","0");
+        th.setAttribute("role","columnheader");
+        th.setAttribute("data-tip","Sort by "+((th.textContent||"").replace(/[⌕↑↓]/g,"").trim() || "this column"));
+        th.addEventListener("click", function(){ sortBy(col); });
+        th.addEventListener("keydown", function(e){
+          if (e.key === "Enter" || e.key === " "){ e.preventDefault(); sortBy(col); }
+        });
+      })(c2);
+    }
   });
 };
+
 (function(){
   var pending = null;
   var kick = function(){ pending = null; try{ CG.tableFilters(document); }catch(e){} };
