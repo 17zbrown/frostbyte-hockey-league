@@ -8430,7 +8430,7 @@ CG.staffAttentionCard = function(){
       pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
       pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
       active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
-      unmatched_ea:null, finals_missing_stats:null,
+      unmatched_ea:null, finals_missing_stats:null, ineligible_players_7d:null,
       /* votes the office has already loaded for the desk — open, and still short a ballot */
       votes_awaiting_ballots:((CG._staffExtras&&CG._staffExtras.votes)||[]).filter(function(v){
         var cast = Object.keys(v.tally||{}).reduce(function(s,k){ return s+(v.tally[k]||0); },0);
@@ -8447,6 +8447,11 @@ CG.staffAttentionCard = function(){
   if (n(a.votes_awaiting_ballots)>0) items.push({ label:n(a.votes_awaiting_ballots)+" staff vote"+(n(a.votes_awaiting_ballots)===1?"":"s")+" awaiting your ballot", go:"#/hub/staffdesk", warn:false });
   if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
   if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
+  /* v2.99, Rule 4.2: a box score naming a player his club does not hold, or a skater the league
+     cannot identify at all. A bell scrolls away; this is the surface that says work is waiting.
+     Seven rolling days, because the audit log has no resolved state and a lifetime count would
+     never clear. The notice itself links to the game. */
+  if (n(a.ineligible_players_7d)>0) items.push({ label:n(a.ineligible_players_7d)+" box score"+(n(a.ineligible_players_7d)===1?"":"s")+" with a player his club doesn\u2019t hold (7d)", go:"#/hub/officials", warn:true });
   if (n(a.active_suspensions)>0) items.push({ label:n(a.active_suspensions)+" active suspension"+(n(a.active_suspensions)===1?"":"s"), go:"#/hub/staffdesk", warn:false });
 
   /* Season readiness — things that must be TRUE before a date, not tickets waiting to be worked.

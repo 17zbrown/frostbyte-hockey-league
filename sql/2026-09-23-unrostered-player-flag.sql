@@ -85,3 +85,29 @@ commit;
 -- likeSafe; this one did not. Each token is escaped now and the tokens are still joined with `*`.
 -- Without it the new check has a blind spot: a ringer quietly resolved to a rostered player looks
 -- perfectly clean.
+
+-- ---- Corrections applied the same evening, after a read-only audit of the above ----
+--
+-- 1. THE DEPARTMENT IS OFFICIATING, not transactions. I picked transactions for consistency with
+--    the three sibling flags, without checking what the rulebook already says. It says this:
+--      Rule 5.2  "Dressing an ineligible player results in forfeiture of the game in which the
+--                 player dressed, without prejudice to further discipline under Chapter 7."
+--      Rule 5.3  machine-detected lineup trouble is reported to the league office's officials desk.
+--      Rule 7.1  a matter is routed to the department that must act on it.
+--    Transactions holds neither the forfeit nor the discipline capability. v_dept := 'officiating'.
+--
+-- 2. EVERY ONE OF THESE NOTICES POINTED AT THE HOME PAGE. They passed link_view 'transactions',
+--    and CG.notifRoute maps that to "#/home" (part_live.js: case "transactions": return "#/home").
+--    A staffer got a flag with nothing to click through to. All five notices in this function now
+--    pass link_view 'game' with the game id, which opens the box score. That fixes the three
+--    pre-existing flags (weekly cap, off the filed lineup, no lineup filed) as well as the two new
+--    ones: they had been dead-ending since they were written.
+--
+-- 3. public._staff_attention() gained 'ineligible_players_7d', so the Staff Desk triage card shows
+--    the work instead of relying on a bell that scrolls away. A ROLLING SEVEN DAYS deliberately:
+--    admin_audit is append-only with no resolved state, so a lifetime count would be a nag that
+--    never clears and the card would stop meaning "outstanding". Resolving or dismissing a flag is
+--    NOT built; the notice, which now links to the game, carries the case.
+--
+-- Re-rehearsed with rollback after all three: 2 flags, link_view 'game' with the game id, at least
+-- one officiating staffer notified, and the unidentified check reaching somebody.

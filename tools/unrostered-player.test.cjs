@@ -39,6 +39,24 @@ console.log("\n— the decision record");
 
   A("it records the rehearsal and its result", /REHEARSED with rollback/.test(rec) && /exactly 2 flags/.test(rec));
   A("...including that no Discord call escaped the rollback", /pg_net is transactional/.test(rec) && /never sent/.test(rec));
+
+  /* the three corrections, each of which a future reader could otherwise undo by "tidying" */
+  A("it records that the desk is officiating, with the rules that say so",
+    /THE DEPARTMENT IS OFFICIATING/.test(rec) && /Rule 5\.2/.test(rec) && /Rule 7\.1/.test(rec));
+  A("it records that the notices used to dead-end on the home page",
+    /POINTED AT THE HOME PAGE/.test(rec) && /link_view 'game'/.test(rec));
+  A("it records why the triage count is a rolling window, not a total",
+    /ineligible_players_7d/.test(rec) && /append-only with no resolved state/.test(rec));
+  A("...and that resolving a flag is not built", /NOT built/.test(rec));
+}
+
+console.log("\n— the triage card shows it");
+{
+  const live = R("src/live/part_live.js");
+  A("the card reads the new key", /ineligible_players_7d/.test(live));
+  A("...and sends the staffer to the officials' desk", /go:"#\/hub\/officials", warn:true/.test(live));
+  A("...and the local fallback declares it, so an offline card does not read undefined",
+    /unmatched_ea:null, finals_missing_stats:null, ineligible_players_7d:null,/.test(live));
 }
 
 console.log("\n— the matcher cannot hide the thing the check looks for");
