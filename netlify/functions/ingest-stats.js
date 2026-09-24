@@ -261,7 +261,10 @@ async function fuzzyProfile(gt) {
   const escTok = (t) => t.replace(/([\\%_])/g, "\\$1");
   for (const pat of [toks.map(escTok).join("*"), `*${toks.map(escTok).join("*")}*`]) {
     const q = encodeURIComponent(pat);
-    const rows = await sbGet(`profiles?or=(ea_id.ilike.${q},platform_gamertag.ilike.${q},gamertag.ilike.${q},discord_username.ilike.${q})&select=id&limit=2`);
+    /* v3.02: discord_username is gone from here. A Discord handle is not evidence about who was
+       in an EA lobby, and it is the one field a member can change at will without telling the
+       league. The three that remain are all in-game identities. */
+    const rows = await sbGet(`profiles?or=(ea_id.ilike.${q},platform_gamertag.ilike.${q},gamertag.ilike.${q})&select=id&limit=2`);
     const ids = [...new Set((rows || []).map((r) => r.id))];
     if (ids.length === 1) return ids[0];
     if (ids.length > 1) return null;   // ambiguous — a looser pattern can only get MORE ambiguous
@@ -294,7 +297,12 @@ function liveLookups(seasonId) {
     // 2) site gamertag — exact (case-insensitive), and never a guess between two people
     gamertag: async (gt) =>
       uniq(((await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`)) || []).map((r) => r.id)),
-    // 3) EA id captured at signup for this season — same rule
+    // 3) the EA ID on the member's own profile — the field Settings writes and registration
+    //    requires. v3.02: this was missing from the exact chain entirely; a box-score name is an
+    //    EA identity, so it belongs here and it belongs FIRST.
+    profileEaId: async (gt) =>
+      uniq(((await sbGet(`profiles?ea_id=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`)) || []).map((r) => r.id)),
+    // 4) EA id captured at signup for this season — same rule
     regEaId: async (gt) => seasonId
       ? uniq(((await sbGet(`season_registrations?season_id=eq.${seasonId}&ea_id=ilike.${encodeURIComponent(likeSafe(gt))}&select=profile_id&limit=2`)) || []).map((r) => r.profile_id))
       : [],
@@ -322,7 +330,7 @@ function gameLookups(entries, seasonId) {
     }
     return m;
   };
-  let priorP = null, tagP = null, regP = null;
+  let priorP = null, tagP = null, regP = null, profEaP = null;
   return {
     prior: async (eaPlayerId) => {
       if (!eaIds.length) return null;
@@ -338,6 +346,11 @@ function gameLookups(entries, seasonId) {
       if (!names.length) return [];
       tagP ||= sbGet(`profiles?${orIlike("gamertag", names)}&select=id,gamertag`).then((rows) => groupByName(rows, "gamertag", "id"));
       return [...((await tagP).get(gt.toLowerCase()) || [])];
+    },
+    profileEaId: async (gt) => {
+      if (!names.length) return [];
+      profEaP ||= sbGet(`profiles?${orIlike("ea_id", names)}&select=id,ea_id`).then((rows) => groupByName(rows, "ea_id", "id"));
+      return [...((await profEaP).get(gt.toLowerCase()) || [])];
     },
     regEaId: async (gt) => {
       if (!seasonId || !names.length) return [];
@@ -357,19 +370,32 @@ async function resolveProfile(entry, seasonId, cache, src) {
   let pid = null;
   const gt = cleanTag(entry.gamertag);
   if (gt) {
-    // 1) prior link by EA persona id
+    /* v3.02 (commissioner, game night 1): "make sure you are tracking player EA IDs instead of
+       using their discord usernames". A box-score name is an EA identity, so it is matched against
+       EA identities FIRST and against site or Discord names only after. The old order asked the
+       site gamertag second and the EA ID third, which is how "Lokharov l14l" resolved to a
+       duplicate, unrostered profile whose gamertag happened to match, while the rostered profile
+       carrying ea_id "Lokharovl14l" was never reached. Verified against the whole of game night
+       one: that was the only name where the two disagreed, and nobody resolved by Discord name
+       alone. */
+    // 1) prior link by EA persona id — the strongest EA identity there is
     pid = await L.prior(entry.ea_player_id);
-    // 2) site gamertag — exact, and never a guess between two people
+    // 2) the EA ID on the member's profile
     if (!pid) {
-      const ids = await L.gamertag(gt);
+      const ids = await L.profileEaId(gt);
       if (ids.length === 1) pid = ids[0];
     }
-    // 3) EA id captured at signup for this season — same rule
+    // 3) the EA ID captured at signup for this season
     if (!pid && seasonId) {
       const ids = await L.regEaId(gt);
       if (ids.length === 1) pid = ids[0];
     }
-    // 4) squashed-pattern fallback across every name field a player owns
+    // 4) only now the site gamertag — exact, and never a guess between two people
+    if (!pid) {
+      const ids = await L.gamertag(gt);
+      if (ids.length === 1) pid = ids[0];
+    }
+    // 5) squashed-pattern fallback across the names a player is known by IN GAME
     if (!pid) pid = await fuzzyProfile(gt);
   }
   cache.set(key, pid);

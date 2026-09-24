@@ -1,0 +1,64 @@
+-- v3.01 (2026-09-23, game night 1, live) — box scores imported but no game could go final.
+--
+-- SYMPTOM, reported by the commissioner mid-game-night: "You dont seem to be automatically
+-- inputing the game stats. Instead you just sent notifications to add them manually."
+--
+-- WHAT WAS ACTUALLY HAPPENING. The import was working. Three 9:00 PM games had all twelve
+-- game_stats rows each. What failed was the very next write, the one that stamps the game:
+--
+--   PATCH games?id=eq.a50ed45f-... -> 400
+--   {"code":"21000","message":"DELETE requires a WHERE clause"}
+--
+-- SQLSTATE 21000 with that message is **pg_safeupdate**, which Supabase preloads on the API roles'
+-- sessions. It refuses any UPDATE or DELETE with no WHERE clause. Three functions carried one:
+--
+--   check_playoff_clinches(uuid)   delete from _clinch_calc;                         <- the one that fired
+--   check_playoff_clinches(uuid)   update _clinch_calc set maxpts = pts + 2*remaining;
+--   start_next_season(uuid)        delete from public.role_conflict_exemptions;
+--
+-- check_playoff_clinches runs inside trg_playoff_clinches on public.games, so EVERY attempt to mark
+-- a game final through PostgREST aborted. The box score had already been written by an earlier,
+-- separate request, so the result was: stats present, game still 'scheduled', scores null,
+-- ea_match_id null. ingest-stats archives the EA payload as 'unmatched' BEFORE filing and only
+-- rewrites it to 'ingested' afterwards, so the archive row stayed 'unmatched' -- and an
+-- 'unmatched' row is exactly what bot/staff-alerts.mjs routes to the Statistics desk as
+-- "EA import needs a match. Link it by hand in the Stats manager." Hence the manual-entry
+-- notifications: the alert was correct, the thing it was reporting was this.
+--
+-- WHY NOBODY CAUGHT IT. Every rehearsal of "set a game final", including several the same evening,
+-- ran through a direct SQL connection (the MCP, the SQL editor, psql). Those sessions do NOT
+-- preload pg_safeupdate, so the unqualified DELETE is perfectly legal there. The guard exists only
+-- on the path the application actually uses. Season 1's first game night was the first time a
+-- LEAGUE game was ever filed through the API; pickup games use different tables and never touch
+-- this trigger.
+--
+-- LESSON, worth more than the fix: a rehearsal on a direct SQL connection does not exercise the
+-- API role's session settings. When the thing under test is written by PostgREST, "it works in the
+-- SQL editor" proves less than it appears to.
+
+begin;
+
+-- `where true` is not noise here; it is what keeps the statement legal on the API roles.
+-- public.check_playoff_clinches(uuid):
+--   BEFORE  delete from _clinch_calc;
+--   AFTER   delete from _clinch_calc where true;
+--   BEFORE  update _clinch_calc set maxpts = pts + 2*remaining;
+--   AFTER   update _clinch_calc set maxpts = pts + 2*remaining where true;
+-- public.start_next_season(uuid):
+--   BEFORE  delete from public.role_conflict_exemptions;
+--   AFTER   delete from public.role_conflict_exemptions where true;
+--
+-- (Applied with public._splice_fn so the rest of each function is untouched. Asserted afterwards
+--  that no function in `public` still carries an unqualified write of either kind.)
+
+commit;
+
+-- The sweep that must stay empty. Run it after any migration that adds a function:
+--
+--   select p.proname
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--    where n.nspname = 'public' and p.prokind = 'f'
+--      and p.prosrc ~* 'delete\s+from\s+[a-zA-Z_."]+\s*;';
+--
+-- A temp table is not an exemption: pg_safeupdate does not care that _clinch_calc is temporary and
+-- was created four lines earlier.
