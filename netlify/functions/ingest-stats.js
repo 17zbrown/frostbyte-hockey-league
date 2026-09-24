@@ -471,20 +471,38 @@ async function logAttempt(norm, raw, status, reason, gameId) {
   } catch (e) { console.log("ea_ingest_log write failed:", String(e.message || e)); return false; }
 }
 /* Status-only touch for a match whose payload is ALREADY archived. EA re-serves the same recent
-   matches on every poll, so the dedupe path re-uploaded a full match body dozens of times per
-   game; this sends the status columns only. It is an UPSERT on the match id, not a PATCH: a PATCH
-   on a row that is not there affects nothing and says nothing, which is how a status could go
-   unrecorded for good. Upserting the same columns lands whether or not the row exists (a row
-   born this way has no payload, and the next batch's prefetch — which counts only rows WITH a
-   payload as archived — uploads it). */
+   matches on every poll, so the dedupe path would re-upload a full match body dozens of times per
+   game; this sends the status columns only.
+
+   v3.08 — this used to be an UPSERT on the match id, chosen over a PATCH because a PATCH on a row
+   that is not there affects nothing and says nothing. THE UPSERT NEVER ONCE WORKED. `payload` is
+   NOT NULL with no default, and Postgres checks NOT NULL against the proposed tuple BEFORE the
+   ON CONFLICT arbiter resolves to an UPDATE — so an upsert that omits payload dies with 23502
+   even though the row exists and would only have been updated. The throw was caught and logged,
+   so every status after the first archive was lost in silence: on game night one all ten imported
+   games sat at `unmatched`, which is what the statistics desk reads as "EA import needs a match",
+   and the merge dedupe (which looks for `merged`) could have merged a lag-out sitting twice.
+
+   So: PATCH, and then actually look. An UPDATE that matches no row comes back 200 with an empty
+   array and no error, which is a false success — the representation is what tells the two apart.
+   When the row is genuinely missing the caller is told, and `archive` falls back to a full insert
+   on the next pass because the batch prefetch counts only rows WITH a payload as archived. */
 async function touchAttempt(eaMatchId, status, reason, gameId) {
   try {
-    await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", [{
-      ea_match_id: eaMatchId, status, reason: reason || null, game_id: gameId || null,
-      last_attempt_at: new Date().toISOString()
-    }], "resolution=merge-duplicates,return=minimal");
-    return true;
-  } catch (e) { console.log("ea_ingest_log touch failed:", String(e.message || e)); return false; }
+    const r = await fetch(
+      `${SB_URL}/rest/v1/ea_ingest_log?ea_match_id=eq.${encodeURIComponent(eaMatchId)}`,
+      { method: "PATCH", headers: sbHeaders({ Prefer: "return=representation" }),
+        body: JSON.stringify({ status, reason: reason || null, game_id: gameId || null,
+                               last_attempt_at: new Date().toISOString() }) });
+    if (!r.ok) {
+      console.warn(`ea_ingest_log touch failed: ${r.status} ${(await r.text()).slice(0, 200)}`);
+      return false;
+    }
+    const back = await r.json().catch(() => []);
+    if (Array.isArray(back) && back.length) return true;
+    console.warn(`ea_ingest_log touch matched no row for match ${eaMatchId} — its archive row is missing`);
+    return false;
+  } catch (e) { console.warn("ea_ingest_log touch failed:", String(e.message || e)); return false; }
 }
 
 /* ---- The batch context: what the archive and the schedule already know about every match in
@@ -724,7 +742,10 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   await postGameRecaps(game, rows, homeScore, awayScore, summary).catch((e) =>
     console.warn("recap notifications failed (the import itself is unaffected):", String(e && e.message || e)));
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: game.id, score: `${homeScore}-${awayScore}`, players: rows.length, linked });
-  await archive(ctx, norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id);
+  /* the game is filed either way, but a lost status leaves the archive reading `unmatched`, which
+     the statistics desk reads as work it has to do by hand. Say so rather than swallow it. */
+  if (!(await archive(ctx, norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id)))
+    summary.errors.push({ ea_match_id: norm.ea_match_id, error: `game ${game.id} is filed, but its archive row could not be marked ingested — it will read as unmatched on the statistics desk` });
 }
 
 // ---- "Your night": one notification per linked player, carrying their own stat line ----
@@ -1047,8 +1068,34 @@ async function leagueBoxRows(game, clubByTeam, cache = new Map()) {
       });
     }
   }
+  await applyCreditWithdrawals(game.id, rows);
   await learnPersonas(rows);
   return rows;
+}
+
+/* v3.08 — Rule 6.3: a withdrawal of personal credit is the LAST word on a box-score line.
+   It deliberately does NOT live inside the matcher. resolveProfile would find the member again
+   anyway: his persona id is still on his profile, and his other games still teach the `prior`
+   step. So the withdrawal is applied to the finished rows, after resolution, or the next poll of
+   the same match (and every Rule 4.3 re-merge, which DELETEs the game's lines and re-POSTs them)
+   would quietly hand the credit back.
+
+   The line itself is untouched. Only profile_id goes, and skater_name already carries the EA name,
+   so the club keeps the line in its box score and the game keeps its score; downstream, an
+   unlinked row gets a synthetic `ea:<row id>` key and renders without touching anyone's totals.
+
+   If the withdrawals cannot be read, this THROWS and the filing is abandoned with the existing
+   rows left alone. Re-crediting someone the league office removed is worse than not filing. */
+async function applyCreditWithdrawals(gameId, rows) {
+  const list = await sbGet(
+    `stat_credit_withdrawals?game_id=eq.${encodeURIComponent(gameId)}&select=ea_player_id`);
+  if (!Array.isArray(list) || !list.length) return;
+  const off = new Set(list.map((w) => String(w.ea_player_id)));
+  let n = 0;
+  for (const r of rows) {
+    if (r.profile_id && r.ea_player_id && off.has(String(r.ea_player_id))) { r.profile_id = null; n++; }
+  }
+  if (n) console.log(`ingest: ${n} line(s) stay uncredited on game ${gameId} (Rule 6.3 withdrawal)`);
 }
 
 /* v3.04 — the system only has to recognise a member ONCE. Whenever a box-score row resolves to a

@@ -589,7 +589,7 @@ async function gameReminders(games, teamById, now, errors) {
         : `🔒 Server picks are locked for the night (Rule 4.2). One or more servers had not settled when this went out — the schedule desk has the final word. The codes are yours alone: rostered players and your front office, never a public channel.`,
       open.length
         ? `📋 Lineups lock 30 minutes before each game's OWN puck drop (Rule 5.3), so ${open.length === mine.length ? "every sheet is" : "the rest are"} still open: ${open.map((g) => `the ${fmtTime(g.scheduled_at).replace(" ET", "")} sheet until ${fmtTime(new Date(Date.parse(g.scheduled_at) - NIGHT_LOCK_MS).toISOString()).replace(" ET", "")}`).join(", ")}.`
-        : `📋 Every sheet for tonight is locked. After the lock a change is an emergency call-up only, and each player you change costs the club one in-game minor in that game; the door shuts 10 minutes after puck drop (Rule 5.3).`,
+        : `📋 Every sheet for tonight is locked, which publishes it to your opponent but does not close it. You can still change a line at no cost until 10 minutes after puck drop, as long as the player is on your active roster or in training camp and the positions still work. The other club is told automatically (Rule 5.3).`,
       `https://chelgamingleague.com/#/hub/schedule`);
     const res = await postChannel(team.discord_channel_id, lines.join("\n"));
     if (!res.ok) {
@@ -703,7 +703,7 @@ async function lineupReminder(season, games, teamById, cfg, now, dry, forced, er
     + `\n**All of tonight's sheets are due by ${fmtTime(new Date(dl).toISOString())}**, when the night's first game locks.`
     + (missing ? `\nStill to file tonight: **${missing} of ${total}** (${short}).` : `\nEvery sheet for tonight is already filed. Nothing to do.`)
     + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
-    + `\nEach later game still has its own lock 30 minutes before its own puck drop, so a sheet can be changed until then at no cost. After a game locks, a change is an emergency call-up only and **each player you change costs the club one in-game minor in that game** (Rule 5.3).`;
+    + `\nEach later game still has its own lock 30 minutes before its own puck drop. The lock publishes the sheet to your opponent, it does not close it: you can still change a line **at no cost** until 10 minutes after puck drop, provided the player is on your active roster or in training camp and the lineup still meets the position rules and the appearance limits. A change after the lock is reported to the other club automatically (Rule 5.3).`;
   if (dry) return { day: ymd, dueAt: new Date(dl).toISOString(), games: tonight.length, missing, total, body };
   const ref = `${season.id}-${ymd}`;
   if (!(await claim("lineup_reminder", ref))) return `already posted for ${ymd}`;
@@ -898,7 +898,7 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
       + `\nSheets filed for the week so far: **${total - sheets} of ${total}**${still ? ` (still to file: ${still})` : ""}.`
       + `\nTeam HQ, Lineups: https://chelgamingleague.com/#/hub/lineup`
       + `\nAvailability still outstanding: ${(missing || []).length} player${(missing || []).length === 1 ? "" : "s"}; each club's list is in its own room.`
-      + `\nThe lock is unchanged: each game locks 30 minutes before its own puck drop. After the lock a change is an emergency call-up only, and **each player you change costs the club one in-game minor in that game** (two swaps, two minors; moving the same six between positions costs nothing). The door shuts 10 minutes after puck drop, and the filed sheet is then the record (Rule 5.3).`;
+      + `\nThe lock is unchanged: each game locks 30 minutes before its own puck drop. What the lock does is publish the sheet to your opponent; it does not close it. You can still change a line **at no cost**, with no permission needed, until 10 minutes after puck drop, provided the player is on your active roster or in training camp and the lineup still meets the position rules and the appearance limits. Late changes are reported to the other club automatically. From then the box score, not the filed sheet, is the record (Rule 5.3).`;
   };
   if (dry) return { week: wk, closes, missing: (missing || []).length, sheetsOwed: Object.values(owed).reduce((a, b) => a + b, 0), clubs: Object.keys(byClub).map((tid) => clubBody(tid)), management: mgmtBody() };
 

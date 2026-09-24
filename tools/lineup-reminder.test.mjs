@@ -99,8 +99,17 @@ console.log("— the call itself");
   A("...counting only tonight's sheets (6 slots, 1 filed)", /Still to file tonight: \*\*5 of 6\*\*/.test(c), c.split("\n")[3]);
   A("...naming the clubs", /BOS 2/.test(c) && /DAL 3/.test(c), c.split("\n")[3]);
   A("it does NOT claim the later games lock then (Rule 5.3)",
-    /own lock 30 minutes before its own puck drop/.test(c) && /can be changed until then at no cost/.test(c));
-  A("...and still names the price of a post-lock change", /one in-game minor in that game/.test(c));
+    /own lock 30 minutes before its own puck drop/.test(c));
+  /* v3.08 — this block used to demand "the price of a post-lock change": one in-game minor per
+     player. v3.05 abolished that penalty on the commissioner's ruling, so the pin was holding a
+     post in place that promised clubs a punishment the league no longer has. Re-pointed at what
+     Rule 5.3 says now: the lock publishes the sheet, it does not close it. */
+  A("...and it says what the lock actually does",
+    /publishes the sheet to your opponent, it does not close it/.test(c), c.split("\n").pop().slice(0, 150));
+  A("...that a late change is free", /at no cost/.test(c) && !/in-game minor/.test(c));
+  A("...with the conditions it still has to meet",
+    /active roster or in training camp/.test(c) && /position rules/.test(c) && /appearance limits/.test(c));
+  A("...and that the opponent is told", /reported to the other club automatically/.test(c));
   A("no link preview", posts[0].flags === 4);
 }
 

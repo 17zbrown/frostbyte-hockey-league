@@ -105,13 +105,15 @@ export function route(table, row, extra = {}) {
       cta: "Listed on the Officials' desk if it needs a second look." };
   }
 
-  if (table === "ea_ingest_log") {
-    /* only the unmatched ones are work; a clean import is not news */
-    if (String(row.status || "") !== "unmatched") return null;
-    return { dept: "statistics", kind: "EA import needs a match",
-      line: `Match \`${row.ea_match_id || "?"}\` came back from EA without a fixture to attach to.`,
-      cta: "Link it by hand in the Stats manager, or merge it if it is a lag-out session." };
-  }
+  /* v3.09 (commissioner, 2026-09-24): "You fixed the problem with the automatic stats so you dont
+     need to send the statistics room a link to the manual entry since they can do that at their
+     staff desk." This used to ping Statistics for every `unmatched` archive row with a "link it by
+     hand in the Stats manager" CTA. Two things made it noise: the import works now, and on the
+     first game night the status touch was failing with 23502 (see the archive-status fix), so
+     TEN clean imports sat marked unmatched and raised a false alarm each.
+     An unmatched row is still visible on the Statistics desk, where the tools to resolve it live.
+     It no longer interrupts anyone. */
+  if (table === "ea_ingest_log") return null;
 
   if (table === "staff_votes") {
     const depts = Array.isArray(row.departments) ? row.departments.filter((d) => DESK_PATH[d]) : [];
@@ -335,9 +337,10 @@ export function createStaffAlerter(env, opts = {}) {
     let swept = 0; const before = sum.announced;
     for (const [table, spec] of Object.entries(TABLE_KEYS)) {
       try {
-        /* ea_ingest_log is only work while it is still unmatched; anything since resolved is not */
-        const filter = table === "ea_ingest_log" ? "&status=eq.unmatched" : "";
-        const rows = await sbGet(`${table}?${spec.ts}=gte.${encodeURIComponent(since)}${filter}&select=*&limit=200`);
+        /* v3.09: ea_ingest_log no longer announces at all, so do not sweep it either — fetching
+           200 rows a tick to route every one of them to null is pure cost. */
+        if (table === "ea_ingest_log") continue;
+        const rows = await sbGet(`${table}?${spec.ts}=gte.${encodeURIComponent(since)}&select=*&limit=200`);
         for (const row of rows || []) { swept++; await announce(table, row); }
       } catch (e) { note(e); }
     }

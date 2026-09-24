@@ -95,17 +95,37 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/teams?id=in.")) { const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(","); return J(TEAMS.filter((t) => ids.includes(t.id)).map((t) => ({ ...t, name: t.id, code: t.id }))); }
   if (u.includes("/rest/v1/ea_ingest_log?or=")) return J(world.logs);
   if (u.includes("/rest/v1/ea_ingest_log") && m === "POST") { writes.logPosts.push(JSON.parse(opts.body)); return NIL(); }
-  if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") { writes.logPatches.push(JSON.parse(opts.body)); return NIL(); }
+  if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") {
+    const body = JSON.parse(opts.body);
+    writes.logPatches.push(body);
+    /* v3.08 — the status touch now asks for the row back, because an UPDATE that matches nothing
+       returns 200 and an empty array with no error. A 204 here would model a PostgREST that was
+       never asked for a representation, and would read to the importer as "no such row". */
+    const id = decodeURIComponent((u.match(/ea_match_id=eq\.([^&]+)/) || [])[1] || "");
+    return J([{ ea_match_id: id, ...body }]);
+  }
   if (u.includes("/rest/v1/game_stats?ea_player_id=in.")) return J([]);          // the roster's prior links, one query
   if (u.includes("/rest/v1/game_stats") && m === "DELETE") return NIL();
   if (u.includes("/rest/v1/game_stats") && m === "POST") { writes.statPosts.push(JSON.parse(opts.body)); return NIL(); }
+  /* v3.08 — Rule 6.3 withdrawals, read once per game before the rows are filed */
+  if (u.includes("/rest/v1/stat_credit_withdrawals?")) {
+    const g = (u.match(/game_id=eq\.([^&]+)/) || [])[1];
+    return J((world.withdrawals || []).filter((w) => w.game_id === g).map((w) => ({ ea_player_id: w.ea_player_id })));
+  }
+  /* only the PERSONA lookup answers, so each EA player resolves to his own profile or to nobody;
+     answering every profiles query with the same list would link all three to one member */
+  if (u.includes("/rest/v1/profiles?ea_player_id=in.") && m === "GET") {
+    const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
+    return J((world.profiles || []).filter((pr) => ids.includes(String(pr.ea_player_id))));
+  }
+  if (u.includes("/rest/v1/profiles?") && m === "PATCH") return J([]);   // learnPersonas
   if (u.includes("/rest/v1/profiles?")) return J([]);
   if (u.includes("/rest/v1/season_registrations?")) return J([]);
   if (u.includes("/rest/v1/notifications") && (m === "DELETE" || m === "POST")) return NIL();
   if (u.includes("/rest/v1/app_config")) return J([]);
   throw new Error("unexpected fetch " + m + " " + u);
 };
-const reset = () => { world.open = []; world.finals = []; world.logs = []; world.clubOnly = {}; for (const k of Object.keys(writes)) writes[k].length = 0; };
+const reset = () => { world.open = []; world.finals = []; world.logs = []; world.clubOnly = {}; world.withdrawals = []; world.profiles = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
 const summary = () => ({ received: 1, ingested: [], skipped: [], unmatched: [], errors: [] });
 /* an EA match between two clubs that ENDED at `end` (ISO) and ran `toi` seconds of game clock */
 const ea = (id, end, home, away, toi = 3600, scores = [3, 2]) => ({ matchId: id, timestamp: Math.floor(ms(end) / 1000),
@@ -189,7 +209,10 @@ console.log("— Rule 4.3: a disconnected game's full-length replay is merged in
   const s = await run(replay);
   A("merged into the 9:00 game", s.ingested.length === 1 && s.ingested[0].resumed === true && s.ingested[0].game_id === "g900", JSON.stringify(s));
   A("the 9:00 game carries the combined score (everything earned in the abandoned sitting counts, 4.3 P0)", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.home_score === 3 && p.body.away_score === 1));
-  A("the merge is archived as merged", writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "merged"));
+  /* v3.08 — the merge's own archive row is a status TOUCH now (a PATCH), not an upsert. */
+  A("the merge is archived as merged",
+    writes.logPatches.some((r) => r.status === "merged") ||
+    writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "merged"));
 }
 
 console.log("— ...and a single-period replay (drop early in the third, 4.3 P5) merges the same way");
@@ -272,11 +295,53 @@ console.log("— refusals are archived once, then only touched (EA re-serves the
   const first = writes.logPosts[writes.logPosts.length - 1][0];
   A("the first sighting uploads the payload", writes.logPosts.length === 1 && first.payload && first.payload.matchId === "t1" && first.status === "unmatched");
   seenLog = true; await run(raw); seenLog = false;
-  const touch = writes.logPosts[writes.logPosts.length - 1][0];
-  A("the second sighting is a status touch, not a payload upload", writes.logPosts.length === 2 && !("payload" in touch) && touch.status === "unmatched" && touch.ea_match_id === "t1", JSON.stringify(touch));
-  /* an upsert on the match id, never a PATCH: a PATCH on a row that is not there affects nothing
-     and says nothing, so a status could go unrecorded for good */
-  A("...as an upsert keyed on the match id, never a PATCH", writes.logPatches.length === 0);
+  const touch = writes.logPatches[writes.logPatches.length - 1];
+  A("the second sighting is a status touch, not a payload upload",
+    writes.logPosts.length === 1 && writes.logPatches.length === 1 && !("payload" in touch) && touch.status === "unmatched",
+    JSON.stringify(touch));
+  /* v3.08 — this pin used to read "as an upsert keyed on the match id, never a PATCH", on the
+     reasoning that a PATCH on a row that is not there affects nothing and says nothing. The
+     upsert said nothing either, and worse: `payload` is NOT NULL, and Postgres checks NOT NULL
+     against the proposed tuple BEFORE the ON CONFLICT arbiter can turn the insert into an update,
+     so an upsert that omits payload dies 23502 on a row that exists. It had never once worked.
+     The answer to "a write that says nothing" is not a different verb, it is to LOOK at what came
+     back, which is what the touch does now. */
+  A("...as a PATCH that asks for the row back, so a miss cannot read as success",
+    writes.logPatches.length === 1 && writes.logPosts.length === 1);
+}
+
+console.log("— Rule 6.3: a withdrawn credit survives the filing that would otherwise restore it");
+{
+  /* the whole point of the withdrawal record: every filing path DELETEs a game's lines and
+     re-POSTs them, and the matcher WILL find the member again from his persona. Proved here by
+     filing the same match twice: once linked, once withdrawn, with nothing else changed. */
+  reset(); world.open = [G900]; world.profiles = [{ id: "pfHome", ea_player_id: "p1" }];
+  await run(ea("w1", at(38), 111, 222));
+  const linked = writes.statPosts[0].find((r) => r.ea_player_id === "p1");
+  A("without a withdrawal the persona resolves to its member", linked && linked.profile_id === "pfHome", JSON.stringify(linked));
+
+  reset(); world.open = [G900]; world.profiles = [{ id: "pfHome", ea_player_id: "p1" }];
+  world.withdrawals = [{ game_id: "g900", ea_player_id: "p1" }];
+  const s = await run(ea("w1", at(38), 111, 222));
+  const rows = writes.statPosts[0];
+  const off = rows.find((r) => r.ea_player_id === "p1");
+  A("with one on record the line is filed to nobody", off && off.profile_id === null, JSON.stringify(off));
+  A("...but the line itself is still filed, in full",
+    off && off.goals === 3 && off.skater_name === "HomeGuy" && off.team_id === "tA", JSON.stringify(off));
+  A("...the club keeps every one of its lines", rows.length === 3, String(rows.length));
+  A("...the game still goes final with the same score",
+    writes.gamePatches.some((pt) => pt.url.includes("id=eq.g900") && pt.body.status === "final" && pt.body.home_score === 3 && pt.body.away_score === 2));
+  A("...and nobody else on the sheet is touched",
+    rows.filter((r) => r.profile_id === null).length === 3 && s.ingested.length === 1);
+  A("the summary counts him as unlinked, not as a missing player",
+    s.ingested[0].players === 3 && s.ingested[0].linked === 0, JSON.stringify(s.ingested[0]));
+
+  /* and it is scoped to the game it was recorded against */
+  reset(); world.open = [G935]; world.profiles = [{ id: "pfHome", ea_player_id: "p1" }];
+  world.withdrawals = [{ game_id: "g900", ea_player_id: "p1" }];
+  await run(ea("w2", "2026-10-21T22:13:00-04:00", 111, 222));
+  const other = writes.statPosts[0].find((r) => r.ea_player_id === "p1");
+  A("a withdrawal on one game does not follow him to another", other && other.profile_id === "pfHome", JSON.stringify(other));
 }
 
 console.log("— the commissioner's re-ingest is deliberately relaxed to a day either side");

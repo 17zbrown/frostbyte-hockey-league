@@ -77,6 +77,15 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/teams?id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(t.id)).map((t) => ({ ...t, name: t.id, code: t.id }))); }
   if (u.includes("/rest/v1/ea_ingest_log?or=")) return J(world.logs);
   if (u.includes("/rest/v1/ea_ingest_log") && m === "POST") return NIL();
+  /* v3.08 — the status touch is a PATCH that asks for the row back: an UPDATE matching nothing
+     returns 200 and an empty array with no error, so the representation is what proves it landed.
+     Returning 204 here would model a reply the importer must read as "no such row". */
+  if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") {
+    const id = decodeURIComponent((u.match(/ea_match_id=eq\.([^&]+)/) || [])[1] || "");
+    return J([{ ea_match_id: id, ...JSON.parse(opts.body) }]);
+  }
+  /* Rule 6.3 withdrawals: none in this suite, but the importer asks once per game */
+  if (u.includes("/rest/v1/stat_credit_withdrawals?")) return J([]);
   if (u.includes("/rest/v1/game_stats?ea_player_id=in.")) return J(inList(u).filter((id) => world.prior[id]).map((id) => ({ ea_player_id: id, profile_id: world.prior[id] })));
   if (u.includes("/rest/v1/game_stats") && m === "DELETE") return NIL();
   if (u.includes("/rest/v1/game_stats") && m === "POST") {
@@ -116,6 +125,10 @@ const ea = (id, end, home, away, toi = 3600, scores = [3, 2], rosterH = { p1: "H
 const post = async (matches) => JSON.parse((await handler({ httpMethod: "POST", headers: { "x-ingest-key": "ingest" }, body: JSON.stringify({ matches }) })).body);
 const of = (pred) => calls.filter((c) => pred(c));
 const isLogPost = (c) => c.m === "POST" && c.u.includes("/rest/v1/ea_ingest_log");
+/* v3.08 — a status-only touch is a PATCH now, not an upsert. The upsert omitted `payload`, which
+   is NOT NULL, and Postgres checks NOT NULL before ON CONFLICT can turn the insert into an
+   update, so it died 23502 every time and the throw was swallowed. */
+const isLogTouch = (c) => c.m === "PATCH" && c.u.includes("/rest/v1/ea_ingest_log");
 const isStatDel = (c) => c.m === "DELETE" && c.u.includes("/rest/v1/game_stats");
 const isStatPost = (c) => c.m === "POST" && c.u.includes("/rest/v1/game_stats");
 const isGamePatch = (c) => c.m === "PATCH" && c.u.includes("/rest/v1/games?id=eq.");
@@ -133,13 +146,15 @@ console.log("— a fresh filing: the payload is archived BEFORE the box score an
   A("...and it lands before game_stats is deleted, before it is posted, and before the game is patched",
     idx(isLogPost) < idx(isStatDel) && idx(isStatDel) < idx(isStatPost) && idx(isStatPost) < idx(isGamePatch),
     calls.filter((c) => isLogPost(c) || isStatDel(c) || isStatPost(c) || isGamePatch(c)).map((c) => `${c.m} ${c.u.replace(/^.*\/rest\/v1\//, "").split("?")[0]}`).join(" → "));
-  const final = of(isLogPost).slice(-1)[0];
+  const final = of(isLogTouch).slice(-1)[0];
   A("the archive row is then finished as `ingested` with the game id — a status touch, no second upload of the body",
-    final !== stage && final.body[0].status === "ingested" && final.body[0].game_id === "g900" && !("payload" in final.body[0]), JSON.stringify(final.body[0]));
+    final && final.body.status === "ingested" && final.body.game_id === "g900" && !("payload" in final.body), JSON.stringify(final && final.body));
+  A("...and only one body was ever uploaded for this match", of(isLogPost).length === 1);
   A("the game row is patched exactly once, to final", of(isGamePatch).length === 1 && of(isGamePatch)[0].body.status === "final" && of(isGamePatch)[0].body.ea_match_id === "m1");
   A("no per-match dedupe lookups: the batch prefetch is the only games?ea_match_id query, and the only archive lookup",
-    of((c) => c.m === "GET" && c.u.includes("games?ea_match_id=")).length === 1 && of((c) => c.m === "GET" && c.u.includes("ea_ingest_log?ea_match_id=")).length === 1
-      && !calls.some((c) => c.u.includes("ea_match_id=eq.")));
+    of((c) => c.m === "GET" && c.u.includes("games?ea_match_id=")).length === 1 && of((c) => c.m === "GET" && c.u.includes("ea_ingest_log?ea_match_id=in.")).length === 1
+      /* a PATCH names one match id by design; what must not happen is a per-match READ */
+      && !calls.some((c) => c.m === "GET" && c.u.includes("ea_match_id=eq.")));
 }
 
 console.log("\n— a Rule 4.3 resume: the replay's payload is archived before the merged box score is written");
@@ -154,9 +169,9 @@ console.log("\n— a Rule 4.3 resume: the replay's payload is archived before th
   const stage = of(isLogPost)[0];
   A("the replay's payload is archived first", stage && stage.body[0].payload && stage.body[0].payload.matchId === "r1b" && idx(isLogPost) < idx(isStatDel) && idx(isStatDel) < idx(isGamePatch),
     calls.filter((c) => isLogPost(c) || isStatDel(c) || isStatPost(c) || isGamePatch(c)).map((c) => `${c.m} ${c.u.replace(/^.*\/rest\/v1\//, "").split("?")[0]}`).join(" → "));
-  const final = of(isLogPost).slice(-1)[0];
+  const final = of(isLogTouch).slice(-1)[0];
   A("...and finished as `merged` (what the next poll's dedupe reads) without re-uploading the body",
-    final.body[0].status === "merged" && final.body[0].game_id === "g900" && !("payload" in final.body[0]), JSON.stringify(final.body[0]));
+    final && final.body.status === "merged" && final.body.game_id === "g900" && !("payload" in final.body), JSON.stringify(final && final.body));
 }
 
 console.log("\n— an ABANDONED game: a club moved on to another opponent, so nobody is coming back");
@@ -267,9 +282,9 @@ console.log("\n— a batch: filed matches cost nothing, one prefetch covers the 
   A("ONE archive prefetch, counting only rows that hold a payload", preLog.length === 1 && /payload=not\.is\.null/.test(preLog[0].u));
   A("the consistent filed match touched nothing (no lookups, no writes)",
     !calls.some((c) => c.u.includes("done") && c.m !== "GET") && !calls.some((c) => c.m === "GET" && c.u.includes("ea_match_id=eq.done")));
-  const heal = of((c) => isLogPost(c) && c.body[0].ea_match_id === "stale");
+  const heal = of((c) => isLogTouch(c) && c.u.includes("ea_match_id=eq.stale"));
   A("the filed match with a stale archive row got exactly one status touch, to `ingested` + its game, without the body",
-    heal.length === 1 && heal[0].body[0].status === "ingested" && heal[0].body[0].game_id === "gY" && !("payload" in heal[0].body[0]), JSON.stringify(heal.map((c) => c.body[0])));
+    heal.length === 1 && heal[0].body.status === "ingested" && heal[0].body.game_id === "gY" && !("payload" in heal[0].body), JSON.stringify(heal.map((c) => c.body)));
   A("the merged match wrote nothing", !calls.some((c) => c.m !== "GET" && JSON.stringify(c.body || "").includes("mrg")));
   A("no fixture lookups ran for any skipped match — only the new one asked for the pair's night",
     of((c) => c.m === "GET" && c.u.includes("games?or=") && c.u.includes("scheduled_at=gte.")).length === 1);

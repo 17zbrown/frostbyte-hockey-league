@@ -1,0 +1,40 @@
+-- v3.09 — one notice per game, and only for what the commissioner asked to be interrupted for.
+--
+-- "dont send so many alerts about problems with games. Send out 1 message per alert and send them
+--  all in one notice instead of spamming. You fixed the problem with the automatic stats so you
+--  dont need to send the statistics room a link to the manual entry since they can do that at
+--  their staff desk. Only remind the staff when you see a player breaking their position lock
+--  rules depending on if they are Roster or TC, if they break their game limit rules, or if you
+--  sense a player not linked to anyone on the team."
+--
+-- WHERE THE SPAM CAME FROM. public.review_game_records raised each finding the instant it found
+-- it, INSIDE a per-player loop, and each one fired TWO things: notify_department (a site
+-- notification for every commissioner and every officiating staffer, 7 people today) and
+-- notify_staff_ch('casework', ..., true), a Discord post that PINGS the staff role. A game with
+-- three findings was 21 notifications and 3 pings. The first night recorded 12 unidentified-player
+-- findings and 4 unrostered-player findings across three slots.
+--
+-- THE CHANGE. The checks are untouched. They now append to an array, and one notice goes out at
+-- the end of the pass: one notify_department, one notify_staff_ch, listing every finding under the
+-- fixture and its start time. Each finding still writes its own log_admin_action row, because the
+-- audit row IS the dedup key and the Staff Desk list, and dropping it would make a re-poll
+-- re-alert. A pass with no NEW findings returns before it notifies anything.
+--
+-- WHAT STOPPED ALERTING. lineup_not_filed is still recorded, but no longer pings: Rule 5.3 has
+-- made the filed sheet a preview since v3.05, and it is not on the commissioner's list.
+-- Weekly-cap findings used to go to notify_commissioners; they are in the single notice now, which
+-- goes to the officiating desk. No one loses sight of it: notify_department includes every
+-- commissioner by definition.
+--
+-- WHY IT CONSOLIDATES CLEANLY. review_records_on_stats_write_trg is AFTER INSERT FOR EACH
+-- STATEMENT over a transition table, looping distinct game_id, so the whole 12-row box-score POST
+-- produces exactly one pass over a COMPLETE box score. A row-level trigger would have fragmented
+-- the notice no matter what this function did.
+--
+-- REHEARSED against the real SEA v DAL game with its audit rows cleared, then rolled back
+-- (pg_net is transactional, so nothing reached Discord):
+--   notifications created 7, distinct titles 1 ("2 things to check on SEA v DAL"),
+--   recipients 7, findings re-recorded 3, second call created 0.
+-- Before the change the same game was 3 findings x (7 notifications + 1 ping).
+--
+-- The deployed definition is the source of truth; see the function body for the inline reasoning.

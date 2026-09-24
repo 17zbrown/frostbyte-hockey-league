@@ -45,10 +45,31 @@ function reset(over = {}) {
      and it made these blocks pass or fail by the hour. Compressing keeps a night inside one ET day
      at any hour without changing what is being tested. */
   const sp = over.spacing ?? 35;
+  /* ...and the same hazard at the OTHER end of the clock. A block that starts its night in the
+     past (`leadH` negative, to test the catch-up) can CROSS midnight ET when the suite runs in
+     the small hours: at 00:14 ET a first game "24 minutes ago" is yesterday while the rest are
+     today, so the night splits in two and the post correctly covers only one of them.
+     Only a night that genuinely straddles the boundary is moved, and it is moved WHOLE, so a
+     block that means "the last game has already started" (leadH -2, entirely inside yesterday)
+     is left exactly as it was. */
+  const etMinNow = (() => {
+    const f = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
+    const [h, m] = f.format(new Date()).split(":").map(Number);
+    return h * 60 + m;
+  })();
+  const dayStart = Date.now() - etMinNow * MIN;          // today's ET midnight
+  const span = sp * 2 * MIN;
+  const firstAdj = (() => {
+    const straddles = (first < dayStart) !== ((first + span) < dayStart);
+    if (!straddles) return first;
+    const fwd = dayStart + MIN;                          // slide the night wholly into today
+    if (fwd + span >= Date.now()) return fwd;
+    return dayStart - MIN - span;                        // or wholly into yesterday
+  })();
   games = over.games || [
-    { id: "g1", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(first).toISOString(), game_code: "AAA111" },
-    { id: "g2", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t2", away_team_id: "t1", scheduled_at: new Date(first + sp * MIN).toISOString(), game_code: "BBB222" },
-    { id: "g3", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(first + sp * 2 * MIN).toISOString(), game_code: "CCC333" },
+    { id: "g1", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(firstAdj).toISOString(), game_code: "AAA111" },
+    { id: "g2", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t2", away_team_id: "t1", scheduled_at: new Date(firstAdj + sp * MIN).toISOString(), game_code: "BBB222" },
+    { id: "g3", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(firstAdj + sp * 2 * MIN).toISOString(), game_code: "CCC333" },
   ];
   cfgRows = over.cfgRows || [{ key: "discord_mgmt_room_management_announcements_id", value: "mgmtroom" }];
   boardGate = over.boardGate ?? null;   // null = honor the real lock; true/false = force

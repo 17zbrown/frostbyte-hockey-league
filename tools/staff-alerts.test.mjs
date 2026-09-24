@@ -38,9 +38,15 @@ console.log("\n— each arrival finds its own desk");
     route("action_requests", { id: "c6", type: "position_change" }).suppressed === "commissioner-only");
   A("an unknown case type is suppressed, not misrouted",
     /unrouted/.test(route("action_requests", { id: "c7", type: "something_new" }).suppressed || ""));
-  A("an unmatched EA import -> statistics",
-    route("ea_ingest_log", { id: "e1", status: "unmatched", ea_match_id: "77" }).dept === "statistics");
-  A("a clean EA import is not news", route("ea_ingest_log", { id: "e2", status: "matched" }) === null);
+  /* v3.09 — these two used to pin "an unmatched EA import -> statistics". The commissioner
+     retired that alert: "you dont need to send the statistics room a link to the manual entry
+     since they can do that at their staff desk." The automatic import works now, and on game
+     night one a broken status write left ten CLEAN imports marked unmatched, so the alert was
+     mostly false. Unmatched rows are still listed on the Statistics desk; they just do not
+     interrupt anyone. Re-pointed at the new contract: this table routes nowhere, ever. */
+  A("an unmatched EA import no longer routes anywhere",
+    route("ea_ingest_log", { id: "e1", status: "unmatched", ea_match_id: "77" }) === null);
+  A("...and neither does a clean one", route("ea_ingest_log", { id: "e2", status: "matched" }) === null);
   A("a game incident -> officials", route("game_incidents", { id: "i1", kind: "late_start" }).dept === "officiating");
   A("a vote fans out to the departments it targets", (() => {
     const r = route("staff_votes", { id: "v1", title: "T", departments: ["officiating", "media"] });
@@ -164,11 +170,12 @@ console.log("\n— failures never pretend to have delivered");
   reset();
   const S2 = createStaffAlerter(ENV);
   /* NO `id` field — ea_ingest_log genuinely has no id column, it is keyed on ea_match_id. An
-     earlier version of this fixture invented one, which hid a bug that dropped every EA alert. */
+     earlier version of this fixture invented one, which hid a bug that dropped every EA alert.
+     v3.09: the alert itself is retired, so what this now proves is that announcing one is inert
+     AND cheap: nothing posted, and no claim burned on a message that was never going to be sent. */
   await S2.announce("ea_ingest_log", { status: "unmatched", ea_match_id: "9911", first_seen_at: "2026-08-05T19:00:00Z" });
-  A("an unmatched import reaches the stats room", posts.length === 1 && posts[0].channel === "chan-stats");
-  A("...naming the match id", /9911/.test(text(posts[0])));
-  A("...claimed under its real key, not `undefined`", claimed[0] === "ea_ingest_log:9911:statistics");
+  A("an unmatched import posts nothing", posts.length === 0, JSON.stringify(posts));
+  A("...and claims nothing", claimed.length === 0, JSON.stringify(claimed));
 }
 
 console.log("\n— an unknown outcome keeps its claim; a rejection is retried (audit 2026-09-17, P2-12)");

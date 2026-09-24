@@ -23,7 +23,7 @@ const GUIDES = [
   { key: "loadout", forum: "both", tag: "Rules", title: "Banned X-Factors, builds, loadouts and cosmetics",
     body: "Six abilities banned at every tier, two more at Red tier only, no pre-built loadouts, no special-character cosmetics, no enforcer build, builds locked to your position — and what happens if you load in with one. Rulebook 4.5." },
   { key: "lineup", forum: "management", tag: "Lineups", title: "How to set your lineups",
-    body: "Three saved lines, the night plan, dressing the week, the per-game page, the 30-minute lock and emergency call-ups — and how the six-game week is counted from the box score. Rulebook 5.2 · 5.3 · 8.3." },
+    body: "Three saved lines, the night plan, dressing the week, the per-game page, the 30-minute lock and free late changes — and how the six-game week is counted from the box score. Rulebook 5.2 · 5.3 · 8.3." },
   { key: "tradehub", forum: "management", tag: "Trades", title: "How to make a trade",
     body: "Build an offer, propose it, counter, decline or accept — players for players, live the moment the other club accepts. Rulebook 2.3 · 2.4 · 2.5 · 2.6." },
   { key: "waive", forum: "management", tag: "Waivers", title: "How to waive a player",

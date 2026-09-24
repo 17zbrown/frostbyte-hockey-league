@@ -147,11 +147,20 @@ console.log("\n— the management announcement");
   A("it carries the outstanding availability count", /Availability still outstanding: 3 players/.test(mg.content));
   A("it does NOT claim lineups lock at the availability deadline (Rule 5.3 is unchanged)",
     /locks 30 minutes before its own puck drop/.test(mg.content) && !/lineups lock at 7:30/i.test(mg.content));
-  /* the door is not free: Rule 5.3 charges one in-game minor per player changed, and a post that
-     names the door without the price reads as a grace period */
-  A("...and it names the PRICE of a post-lock change, not just the door",
-    /one in-game minor/.test(mg.content) && /two swaps, two minors/.test(mg.content) && /same six between positions costs nothing/.test(mg.content),
-    mg.content.split("\n").pop().slice(0, 140));
+  /* v3.08 — this pin used to demand the PRICE of a post-lock change: "one in-game minor per
+     player changed". v3.05 abolished that penalty outright on the commissioner's ruling ("If a
+     team needs a last minute switch, they are free to do so"), so the pin was asserting a rule
+     the league no longer has, and the post it was holding in place was telling clubs to expect a
+     penalty that does not exist. Re-pointed at what Rule 5.3 says now: the lock PUBLISHES the
+     sheet, a late change is free, and the opponent is told. */
+  A("...and it says what the lock actually does, not that it shuts the sheet",
+    /publish the sheet to your opponent/.test(mg.content) && /it does not close it/.test(mg.content),
+    mg.content.split("\n").pop().slice(0, 160));
+  A("...and that a late change costs nothing",
+    /at no cost/.test(mg.content) && !/in-game minor/.test(mg.content));
+  A("...and that the other club is told", /reported to the other club automatically/.test(mg.content));
+  A("...and it still names the conditions a late change has to meet",
+    /active roster or in training camp/.test(mg.content) && /position rules/.test(mg.content));
   A("the lineup builder is linked", /#\/hub\/lineup/.test(mg.content));
 }
 
