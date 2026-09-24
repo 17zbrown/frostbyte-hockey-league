@@ -16,6 +16,9 @@
 //                                                                exactly what it would post)
 //   GET  /api/discord-ops?post=lineup-reminder                  send tonight's lineup call now
 //   GET  /api/discord-ops?post=server-reminder                  ask for tonight's server picks now
+//   GET  /api/discord-ops?post=game-night                       send tonight's club game-night post
+//                                                               (&dry=1 shows the night without posting;
+//                                                                it can never be forced before the lock)
 //
 // The key: app_config.diag_key, sent as ?key=… or the x-diag-key header — the same check those
 // branches always had. A missing or wrong key is a 404, never a 401, so a probe learns nothing.
@@ -26,7 +29,7 @@
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (SUPABASE_ANON_KEY
 // as the apikey for session checks when set). Node 18+.
 import { OPS_ROUTES, runOp, opsKeyOk, runSweep } from "./discord-sync.js";
-import { runAvailabilityReminder, runLineupReminder, runServerPickReminder } from "./discord-scheduler.js";
+import { runAvailabilityReminder, runLineupReminder, runServerPickReminder, runGameNight } from "./discord-scheduler.js";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -79,6 +82,10 @@ export default async (req) => {
   if (params.get("post") === "server-reminder") {
     if (!(await opsKeyOk(req))) return notFound();
     return json(await runServerPickReminder({ dry: params.get("dry") === "1" }));
+  }
+  if (params.get("post") === "game-night") {
+    if (!(await opsKeyOk(req))) return notFound();
+    return json(await runGameNight({ dry: params.get("dry") === "1" }));
   }
 
   /* everything else is an op from the routing table, key-gated */

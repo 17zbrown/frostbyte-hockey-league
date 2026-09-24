@@ -109,6 +109,10 @@ console.log("\n— the nightly ask for picks that are still open");
   A("the post lists the servers", /\$\{SERVER_LIST\.join\(", "\)\}/.test(sched));
   A("it points at the desk that sets them", /#\/hub\/schedule/.test(sched));
   A("the ops door can send it early", /post=server-reminder/.test(ops) && /runServerPickReminder/.test(ops));
+  A("the game-night post has the same door", /post=game-night/.test(ops) && /runGameNight/.test(ops));
+  A("...and it can never be forced before the lock, because the board is the gate",
+    /It cannot be forced EARLY/.test(sched));
+  A("...and a dry run takes no claims", /a dry run must not take the claims/.test(sched));
   A("the scheduler exports that door", /export async function runServerPickReminder/.test(sched));
 
   /* what counts as an answer: a row of nulls is not one */

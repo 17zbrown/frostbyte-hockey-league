@@ -1412,7 +1412,13 @@ CG.loadManagerData = async function(){
       if (upIds.length){
         jobs.push(CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds)
           .then(function(vv){ (vv && !vv.error && vv.data || []).forEach(function(v){ if(v.team_id===myTid) CG.lg._vetoes[v.game_id]=v; }); }, function(){}));
-        upcoming.filter(function(g){ return CG.now() >= g.at - (CG.VETO_LOCK_MS||1800000); }).forEach(function(g){
+        /* Rule 4.2: a night settles TOGETHER at its first puck drop minus 30, which is what
+           CG.codeReleaseAt answers. Gating on each game's own T-30 meant the second and third
+           games of a night read "resolving…" for an hour after the database had settled them. */
+        upcoming.filter(function(g){
+          var lock = CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at - (CG.VETO_LOCK_MS||1800000);
+          return CG.now() >= lock;
+        }).forEach(function(g){
           jobs.push(CG.sb.rpc("resolve_game_server",{p_game:g.id}).then(function(r){ if(r && !r.error && r.data) CG.lg._servers[g.id]=r.data; }).catch(function(){}));
         });
       }

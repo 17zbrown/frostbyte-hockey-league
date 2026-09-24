@@ -569,17 +569,23 @@ async function gameReminders(games, teamById, now, errors) {
       const row = byGame[g.id] || {};
       const oppId = g.home_team_id === tid ? g.away_team_id : g.home_team_id;
       const ha = g.home_team_id === tid ? "vs" : "@";
-      const srv = row.server ? `server **${row.server}**` : `server **${DEFAULT_SERVER}**`;
+      /* Say what the resolver settled, never a guess. The standard server is only the answer when
+         neither club picked AND it was not the away club's veto, which is the resolver's call:
+         asserting it here would put a wrong server in a message that calls itself final. */
+      const srv = row.server ? `server **${row.server}**` : "**server still settling** — check the schedule desk";
       const code = row.game_code ? `lobby \`${row.game_code}\`` : "lobby code pending — ask the league office";
       lines.push(`• ${ha} ${teamTag(teamById, oppId)} · ${fmtTime(g.scheduled_at)} · ${srv} · ${code}`);
     }
     /* Rule 5.3: a LINEUP locks 30 minutes before its OWN puck drop, so at the night's lock only
        the first game's sheet is shut. Say which are still open rather than implying all of them. */
     const open = mine.filter((g) => Date.parse(g.scheduled_at) - NIGHT_LOCK_MS > nowMs);
+    const allSettled = mine.every((g) => (byGame[g.id] || {}).server);
     lines.push("",
-      `🔒 Server picks are locked for the night and the servers above are final (Rule 4.2). The codes are yours alone: rostered players and your front office, never a public channel.`,
+      allSettled
+        ? `🔒 Server picks are locked for the night and the servers above are final (Rule 4.2). The codes are yours alone: rostered players and your front office, never a public channel.`
+        : `🔒 Server picks are locked for the night (Rule 4.2). One or more servers had not settled when this went out — the schedule desk has the final word. The codes are yours alone: rostered players and your front office, never a public channel.`,
       open.length
-        ? `📋 Lineups lock 30 minutes before each game's own puck drop. Still open: ${open.map((g) => fmtTime(g.scheduled_at) + " until " + fmtTime(new Date(Date.parse(g.scheduled_at) - NIGHT_LOCK_MS).toISOString())).join(" · ")} (Rule 5.3).`
+        ? `📋 Lineups lock 30 minutes before each game's OWN puck drop (Rule 5.3), so ${open.length === mine.length ? "every sheet is" : "the rest are"} still open: ${open.map((g) => `the ${fmtTime(g.scheduled_at).replace(" ET", "")} sheet until ${fmtTime(new Date(Date.parse(g.scheduled_at) - NIGHT_LOCK_MS).toISOString()).replace(" ET", "")}`).join(", ")}.`
         : `📋 Every sheet for tonight is locked. After the lock a change is an emergency call-up only, and each player you change costs the club one in-game minor in that game; the door shuts 10 minutes after puck drop (Rule 5.3).`,
       `https://chelgamingleague.com/#/hub/schedule`);
     const res = await postChannel(team.discord_channel_id, lines.join("\n"));
@@ -935,6 +941,28 @@ export async function runAvailabilityReminder({ dry = false } = {}) {
   const errors = [], unconfigured = [];
   const availability = await availabilityReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
   return { availability, errors, unconfigured, ok: errors.length === 0 };
+}
+/* the club game-night post, same door: /api/discord-ops?post=game-night (&dry=1 to look first).
+   It cannot be forced EARLY: night_board still refuses to hand out a night that has not locked,
+   which is the point of putting the gate in the database. This door is for re-sending a night
+   whose post failed, and for looking at what would go out. */
+export async function runGameNight({ dry = false } = {}) {
+  const w = await loadWorld();
+  if (!w) return { skipped: "no season" };
+  const errors = [];
+  if (dry) {
+    /* a dry run must not take the claims: read the board and show the night, post nothing */
+    const nights = {};
+    for (const g of w.games) { if (!g.voided) (nights[etParts(new Date(g.scheduled_at)).ymd] ||= []).push(g); }
+    const nowMs = Date.now();
+    const ymd = Object.keys(nights).sort().find((d) => Math.max(...nights[d].map((g) => Date.parse(g.scheduled_at))) > nowMs);
+    if (!ymd) return { gameNight: "no game night ahead" };
+    let board = [];
+    try { board = await sbRpc("night_board", { p_day: ymd }); } catch (e) { return { gameNight: `night board failed: ${String(e.message || e)}` }; }
+    return { gameNight: { day: ymd, locked: Array.isArray(board) && board.length > 0, games: (board || []).length, board } };
+  }
+  const reminders = await gameReminders(w.games, w.teamById, new Date(), errors);
+  return { reminders, errors, ok: errors.length === 0 };
 }
 /* the night's server picks, same door: /api/discord-ops?post=server-reminder */
 export async function runServerPickReminder({ dry = false } = {}) {

@@ -128,7 +128,9 @@ console.log("\n— at the lock, one message per club with everything in it");
   A("it says the picks are locked and the servers final", /Server picks are locked for the night/.test(c));
   A("it says the codes are not for a public channel", /never a public channel/.test(c));
   A("it does NOT claim every sheet is locked — only the first game's is (Rule 5.3)",
-    /Lineups lock 30 minutes before each game's own puck drop/.test(c) && /Still open:/.test(c));
+    /Lineups lock 30 minutes before each game's OWN puck drop/.test(c) && /the rest are still open/.test(c));
+  A("...and it names each open sheet with its own deadline, in words",
+    /the \d?\d:\d\d [AP]M sheet until \d?\d:\d\d [AP]M/.test(c), c.split("\n").find((l) => /sheet until/.test(l)));
   A("no link preview", bos.flags === 4);
   A("the board was asked for exactly one night", new Set(boardCalls).size === 1, boardCalls.join(","));
 }
@@ -146,12 +148,12 @@ console.log("\n— it never double-posts, and it catches up");
   A("a tick after puck drop still delivers the night", clubPosts().length === 2, String(clubPosts().length));
   const c = clubPosts()[0].content;
   A("...and still lists the game already under way", (c.match(/^• /gm) || []).length === 3);
-  A("...and says the remaining sheets are still open", /Still open:/.test(c));
+  A("...and says the remaining sheets are still open", /still open:/.test(c));
 
   reset({ leadH: -0.1 });                 // the first game is under way, the last is not
   await tick();
   const late = clubPosts()[0];
-  A("a catch-up mid-night still names the sheets still open", late && /Still open:/.test(late.content));
+  A("a catch-up mid-night still names the sheets still open", late && /still open:/.test(late.content));
 
   reset({ leadH: -2 });                   // the night's LAST game has already started
   const over = await (await tick()).json();
@@ -168,6 +170,28 @@ console.log("\n— a club with no Discord room is reported, never silently dropp
   const errs = JSON.stringify(body.errors || []);
   A("the roomless club is named in errors", /VAN has no Discord room/.test(errs), errs.slice(0, 160));
   A("...and its opponent is still posted to", clubPosts().length === 1);
+}
+
+console.log("\n— it never asserts a server the resolver did not choose");
+{
+  reset({ leadH: 0.5 });
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u, i) => {
+    if (String(u).includes("rpc/night_board")) {
+      const rows = nightBoard(JSON.parse(i.body).p_day).map((r, k) => (k === 1 ? { ...r, server: null } : r));
+      return new Response(JSON.stringify(rows), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return real(u, i);
+  };
+  await tick();
+  globalThis.fetch = real;
+  const c = clubPosts()[0].content;
+  const settling = c.split("\n").find((l) => /settling/.test(l)) || "";
+  A("an unsettled game says so", /still settling/.test(c), settling);
+  A("...and that line names NO server at all, standard or otherwise", settling && !/server \*\*/.test(settling), settling);
+  A("...and it points at where the answer will be", /check the schedule desk/.test(settling));
+  A("...and the post drops the word 'final' when one is missing", !/servers above are final/.test(c));
+  A("the settled games in the same post still name their own server", /server \*\*NA Central\*\*/.test(c));
 }
 
 console.log("\n— a voided game is never announced");

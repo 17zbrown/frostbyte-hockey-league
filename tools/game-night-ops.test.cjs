@@ -114,6 +114,11 @@ A("nothing offers the door as free", !/emergency call-up to swap a player now/.t
 }
 
 console.log("\n— the desk cards that people watch a game night through");
+/* v2.97: the same night-vs-game distinction on the resolver call. Rule 4.2 settles a night
+   together; gating on each game's own T-30 left the later games reading "resolving..." for an
+   hour after the database had answered. */
+A("the browser asks the resolver on the NIGHT's lock, not each game's own",
+  /var lock = CG\.codeReleaseAt \? CG\.codeReleaseAt\(g\) : g\.at - \(CG\.VETO_LOCK_MS\|\|1800000\);/.test(live));
 A("the club's schedule reads the NIGHT's release, not each game's own puck drop",
   /var codeReleased = CG\.now\(\) >= \(CG\.codeReleaseAt \? CG\.codeReleaseAt\(g\) : g\.at - 30\*60000\);/.test(live));
 A("the office's readiness card repaints itself every 30 seconds", /CG\._readyIv = setInterval\(function\(\)\{/.test(live) && /\}, 30000\);/.test(live.slice(live.indexOf("CG._readyIv = setInterval"))));
