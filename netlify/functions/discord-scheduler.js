@@ -305,7 +305,10 @@ async function loadWorld() {
   const teams = await sbGet("teams?select=id,name,code,division,discord_channel_id,discord_role_id");
   const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
   const cfg = Object.fromEntries((await sbGet("app_config?select=key,value")).map((c) => [c.key, c.value]));
-  const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,stage,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,game_code,forfeit_team_id,voided&order=scheduled_at`);
+  /* v2.98: no game_code here. The private lobby codes come from public.night_board, which hands
+     them over only once the night has locked. Pulling them into every 5-minute tick with the
+     service key, where nothing reads them, was a masked column fetched for no reason. */
+  const games = await sbGet(`games?season_id=eq.${season.id}&select=id,week,stage,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,forfeit_team_id,voided&order=scheduled_at`);
   return { season, teams, teamById, cfg, games };
 }
 

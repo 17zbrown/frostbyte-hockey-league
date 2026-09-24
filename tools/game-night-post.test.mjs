@@ -26,7 +26,7 @@ const TEAMS = [
   { id: "t3", code: "VAN", name: "Canucks", discord_channel_id: null, discord_role_id: "r3" },
 ];
 
-let games, posts, claims, released, boardCalls, boardGate, cfgRows;
+let games, posts, claims, released, boardCalls, boardGate, cfgRows, fetched = [];
 
 /* A night of three games 35 minutes apart, the first of them `leadH` hours from now. The night's
    lock is first puck drop minus 30 minutes, so leadH 0.5 is exactly the lock. */
@@ -39,7 +39,7 @@ function reset(over = {}) {
   ];
   cfgRows = over.cfgRows || [{ key: "discord_mgmt_room_management_announcements_id", value: "mgmtroom" }];
   boardGate = over.boardGate ?? null;   // null = honor the real lock; true/false = force
-  posts = []; claims = new Set(); released = []; boardCalls = [];
+  posts = []; claims = new Set(); released = []; boardCalls = []; fetched = [];
 }
 reset();
 
@@ -64,6 +64,7 @@ const etYmd = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New
 
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url), m = (init.method || "GET").toUpperCase();
+  fetched.push(u);
   const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
   if (u.includes("/rest/v1/rpc/night_board")) return J(nightBoard(JSON.parse(init.body).p_day));
   if (u.includes("/rest/v1/rpc/week_availability_deadline")) return J(null);
@@ -98,7 +99,15 @@ const tick = () => mod.default(new Request("https://x/.netlify/functions/discord
 /* only the club game-night post: the tick also fires the lineup and server-pick asks */
 const clubPosts = () => posts.filter((p) => /Game night\./.test(p.content || ""));
 
-console.log("— before the night locks, nothing goes out");
+console.log("— the codes come from the board, and only from the board");
+{
+  reset({ leadH: 1.25 });
+  await tick();
+  const sel = fetched.find((u) => u.includes("/rest/v1/games?"));
+  A("the scheduler's own games query no longer pulls the lobby codes", sel && !/game_code/.test(sel), sel && sel.slice(sel.indexOf("select="), sel.indexOf("select=") + 130));
+}
+
+console.log("\n— before the night locks, nothing goes out");
 {
   reset({ leadH: 1.25 });                 // 75 minutes out: exactly where the old bug fired
   const body = await (await tick()).json();
