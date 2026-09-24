@@ -31,7 +31,14 @@ let games, posts, claims, released, boardCalls, boardGate, cfgRows, fetched = []
 /* A night of three games 35 minutes apart, the first of them `leadH` hours from now. The night's
    lock is first puck drop minus 30 minutes, so leadH 0.5 is exactly the lock. */
 function reset(over = {}) {
-  const first = Date.now() + (over.leadH ?? 1.25) * H;
+  /* `anchor: true` pins the night at 9:00 PM ET two days out, so its three games cannot straddle
+     midnight ET and split into two nights. A night IS an ET calendar day, so before this these
+     assertions passed or failed depending on the hour the suite ran: after about 10:30 PM ET,
+     now + 0.5h + 70min lands on tomorrow. Content blocks use the anchor and open the gate with
+     `boardGate`; only the WINDOW blocks need a real clock offset. */
+  const first = over.anchor
+    ? (() => { const d = new Date(Date.now() + 2 * 86400000); d.setUTCHours(1, 0, 0, 0); return d.getTime(); })()
+    : Date.now() + (over.leadH ?? 1.25) * H;
   games = over.games || [
     { id: "g1", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(first).toISOString(), game_code: "AAA111" },
     { id: "g2", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t2", away_team_id: "t1", scheduled_at: new Date(first + 35 * MIN).toISOString(), game_code: "BBB222" },
@@ -123,7 +130,7 @@ console.log("\n— before the night locks, nothing goes out");
 
 console.log("\n— at the lock, one message per club with everything in it");
 {
-  reset({ leadH: 0.5 });                  // the lock exactly
+  reset({ anchor: true, boardGate: true });                  // the lock exactly
   const body = await (await tick()).json();
   A("both roomed clubs are posted to", clubPosts().length === 2, String(body.reminders));
   const bos = clubPosts().find((p) => p.channel === "ch1");
@@ -137,7 +144,8 @@ console.log("\n— at the lock, one message per club with everything in it");
   A("it says the picks are locked and the servers final", /Server picks are locked for the night/.test(c));
   A("it says the codes are not for a public channel", /never a public channel/.test(c));
   A("it does NOT claim every sheet is locked — only the first game's is (Rule 5.3)",
-    /Lineups lock 30 minutes before each game's OWN puck drop/.test(c) && /the rest are still open/.test(c));
+    /Lineups lock 30 minutes before each game's OWN puck drop/.test(c) && /still open: the /.test(c),
+    c.split("\n").find((l) => /Lineups lock/.test(l)));
   A("...and it names each open sheet with its own deadline, in words",
     /the \d?\d:\d\d [AP]M sheet until \d?\d:\d\d [AP]M/.test(c), c.split("\n").find((l) => /sheet until/.test(l)));
   A("no link preview", bos.flags === 4);
@@ -146,7 +154,7 @@ console.log("\n— at the lock, one message per club with everything in it");
 
 console.log("\n— it never double-posts, and it catches up");
 {
-  reset({ leadH: 0.5 });
+  reset({ anchor: true, boardGate: true });
   await tick();
   const firstRound = clubPosts().length;
   await tick();
@@ -183,7 +191,7 @@ console.log("\n— a club with no Discord room is reported, never silently dropp
 
 console.log("\n— it never asserts a server the resolver did not choose");
 {
-  reset({ leadH: 0.5 });
+  reset({ anchor: true, boardGate: true });
   const real = globalThis.fetch;
   globalThis.fetch = async (u, i) => {
     if (String(u).includes("rpc/night_board")) {
@@ -205,7 +213,7 @@ console.log("\n— it never asserts a server the resolver did not choose");
 
 console.log("\n— a voided game is never announced");
 {
-  reset({ leadH: 0.5 });
+  reset({ anchor: true, boardGate: true });
   games[1].voided = true;
   await tick();
   const c = clubPosts()[0].content;
@@ -214,7 +222,7 @@ console.log("\n— a voided game is never announced");
 
 console.log("\n— if the board cannot be read, nothing is invented");
 {
-  reset({ leadH: 0.5 });
+  reset({ anchor: true, boardGate: true });
   const real = globalThis.fetch;
   globalThis.fetch = async (u, i) => (String(u).includes("rpc/night_board")
     ? new Response("boom", { status: 500 }) : real(u, i));

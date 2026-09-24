@@ -1,0 +1,57 @@
+-- v3.05 (2026-09-23) — the filed lineup is a preview, and a late switch is free.
+--
+-- Commissioner: "the locked lineups are just so teams can roughly see their opponent lineup. If a
+-- team needs a last minute switch, they are free to do so as long as the switch is with a player
+-- also on their roster or TC squad and follows the rules of their position locks and game
+-- requirements."
+--
+-- This reverses the v2.78 / v2.81 regime outright. What went:
+--   * the refusal to accept a lineup after the T-30 lock without an "emergency" flag
+--   * one in-game minor per player changed
+--   * the emergency call-up ceremony in the builder and every warning attached to it
+--   * the flag for a player appearing who was not on the filed sheet
+-- What stayed, because the ruling is explicit that it stays ("as long as the switch is with a
+-- player also on their roster or TC squad and follows the rules of their position locks and game
+-- requirements"): every eligibility check, and they all run on a late filing exactly as on an
+-- early one, because they sit ABOVE the lock test in set_game_lineup:
+--   * the active-contract check          a dressed player belongs to this club
+--   * lineup_slot_ok on all six slots    Rule 2.1 position groups; camp fills any position
+--   * weekly_cap / player_week_games     Rule 5.2
+--   * series_cap + playoff_min_gp        Rule 8.3
+--
+-- public.set_game_lineup(...), spliced:
+--   1. DELETED the post-lock refusal:
+--        if v_locked and not coalesce(p_emergency, false) then
+--          raise exception 'Lineups lock 30 minutes before puck drop. An emergency call-up can
+--            still swap a player — at the cost of one in-game penalty per change (Rule 5.3).'
+--      p_emergency stays in the signature so existing callers keep working; it no longer means
+--      anything, because nothing is being excused.
+--   2. REWORDED the T+10 guard. It still refuses, because a game under way is not previewed:
+--        'This game is already under way. The sheet on file was the preview your opponent saw; it
+--         is not edited after puck drop. Who actually played is read from the box score (Rule 5.3).'
+--   3. penalties_owed stops accruing: the INSERT writes 0 and the UPDATE sets 0. post_lock,
+--      post_lock_by, post_lock_at and post_lock_count are KEPT: they record that the sheet changed
+--      late, which is still worth knowing, and they are not a debt.
+--   4. the "you are dressed" notification no longer warns about a price.
+--
+-- public._post_lock_notices(...) rewritten. The opponent is STILL told, and that is now the whole
+-- point: the sheet they are looking at must be the current one. Removed: the flag to the
+-- commissioners and to the officials' desk (there is nothing to rule on), every mention of what is
+-- owed, and the @ ping on the Discord post. Kept: the club_notify to the opponent, and the
+-- admin_audit line as a record rather than an alarm.
+--
+-- public.review_game_records(...): the 'lineup_discrepancy' check is DELETED. On the first game
+-- night it fired 13 times and 11 were legal switches under this ruling (rostered or camp players
+-- in their own position group); the other 2 were one duplicate-profile artifact. Its real concerns
+-- are covered by checks that ask who may PLAY rather than who was PREDICTED, all of which remain:
+--   unrostered_player     Rule 4.2   on neither the roster nor the camp
+--   out_of_position       Rule 2.1   played outside his position group
+--   weekly_cap_violation  Rule 5.2   too many games
+--   unidentified_player   Rule 4.2   the league cannot identify him at all
+--   lineup_not_filed      Rule 5.3   no sheet was filed at all
+--
+-- REHEARSED with rollback against a real future fixture:
+--   * filed before the lock, then the clock moved inside the lock;
+--   * a LEGAL late switch (a forward for a forward) was ACCEPTED with p_emergency false,
+--     penalties_owed 0, post_lock true;
+--   * an ILLEGAL late switch (a defenseman at center) was still REFUSED.

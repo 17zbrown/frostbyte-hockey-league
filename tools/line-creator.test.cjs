@@ -191,9 +191,10 @@ console.log("\n— locks and caps cannot be planned around");
   A("...with p_emergency false — the plan can never bypass the lock", /p_emergency:false/.test(src6));
   A("no direct insert into game_lineups anywhere in the creator",
     !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
-  A("a locked night shows the lock instead of a Dress button",
-    /* v2.85 widened: the per-game picker and the Clear button sit between the two */
-    /open\.length[\s\S]{0,900}Locked/.test(src6));
+  A("a published night shows that, instead of a Dress button",
+    /* v2.85 widened: the per-game picker and the Clear button sit between the two.
+       v3.05: "Locked" became "Published", because the lock no longer closes anything. */
+    /open\.length[\s\S]{0,900}Published/.test(src6));
   A("a refused dress surfaces the rule's own message", /the rules refused: /.test(src6));
   A("saving a line goes through set_team_line", /CG\.sb\.rpc\("set_team_line"/.test(src6));
   A("planning a night goes through set_team_line_night", /CG\.sb\.rpc\("set_team_line_night"/.test(src6));
@@ -203,7 +204,7 @@ console.log("\n— locks and caps cannot be planned around");
   /* a locked Wednesday: the Dress button must be replaced by the lock */
   CG.now = () => wedGame.at - 10 * 60000;
   const h = CG.hubLines({});
-  A("inside T-30 the planned night reads Locked", /Locked/.test(h) && !/lc-dress/.test(h));
+  A("inside T-30 the planned night reads Published", /Published/.test(h) && !/lc-dress/.test(h));
   CG.now = () => NOW;
 }
 
@@ -309,14 +310,17 @@ console.log("\n— training camp, the week button, and the penalty price");
     /Training camp — fills any position \(Rule 2\.1\)/.test(h) && /data-rcard="p-tc1"/.test(h));
   A("...draggable like anyone else", /data-rcard="p-tc1" draggable="true"/.test(h));
   A("camp cards say what they are", /Camp · Center/.test(h));
-  A("a locked night offers the emergency door, priced",
-    /#\/hub\/lineup\?game='\+games\[games\.length-1\]\.id/.test(src6) && /one in-game penalty per change \(Rule 5\.3\)/.test(src6));
-  A("dressed penalties surface as a chip", /serves '\+owed\+' penalt/.test(src6));
+  /* v3.05: the commissioner made a late switch free, so the door is not "priced" and there is no
+     debt to show. What must hold is that the way in still exists and is described as free. */
+  A("a published night still offers a way to change a sheet",
+    /#\/hub\/lineup\?game='\+games\[games\.length-1\]\.id/.test(src6) && /Change a sheet/.test(src6));
+  A("...described as free, up to puck drop", /free, up to puck drop \(Rule 5\.3\)/.test(src6));
+  A("no penalty chip, because nothing is owed", !/serves '\+owed\+' penalt/.test(src6));
   A("Dress the week exists and walks each planned night", /id="lcDressWeek"/.test(src6) && /dressNight\(n\.key, null, function\(err, dressed, queued\)/.test(src6));
   A("...through the same single write path", (src6.match(/CG\.sb\.rpc\("set_game_lineup"/g)||[]).length === 2);
   A("...reporting refusals, counting games", /Dressed "\+okN\+" game/.test(src6));
-  A("the emergency confirm names the cost",
-    /EACH player changed costs the club one in-game penalty/.test(src6));
+  A("the confirm for a late change says the opponent is told, and that it costs nothing",
+    /Your opponent can already see this sheet, so they are told what changed/.test(src6) && /There is no cost/.test(src6));
   /* v2.95 REVERSED deliberately: the per-game page is now LISTED, as "Game lineups". It was
      routed but unlisted, so the only way in was a link from somewhere else. Both surfaces are in
      the club nav: the board builds lines and dresses nights, the game page changes one game and

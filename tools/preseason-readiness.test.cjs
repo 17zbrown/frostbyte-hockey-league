@@ -39,10 +39,12 @@ console.log("\n— nothing claims success the server never gave");
 {
   A("the EA club link checks for a zero-row (RLS-blocked) write",
     /ea_club_id: eaId\|\|null[\s\S]{0,160}\.select\("id"\)/.test(live) && /the database refused the write/.test(live));
+  /* v3.05: the wording changed with the rule (there is no emergency call-up), but the property
+     these pin is unchanged: nothing claims success before the RPC answers. */
   A("the lineup is only 'submitted' once the RPC answers",
-    /save\(emg\?"Emergency call-up sent…":"Sending lineup…"\);/.test(live === live ? hub : hub));
+    /save\(emg\?"Saving the change…":"Sending lineup…"\);/.test(hub));
   A("...and the success notification moved into the callback",
-    /if \(okN\)\{[\s\S]{0,220}save\(emg\?"Emergency call-up submitted"/.test(hub));
+    /if \(okN\)\{[\s\S]{0,220}save\(emg\?"Lineup change saved"/.test(hub));
   A("...with demo mode still reporting locally", /if \(!\(CG\.LIVE_MODE && CG\.sb\)\)\{/.test(hub));
 }
 

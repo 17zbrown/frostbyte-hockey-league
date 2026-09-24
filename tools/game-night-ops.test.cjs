@@ -92,19 +92,32 @@ A("the week's nights are built from the whole schedule, not the unplayed remaind
   /schedule\.filter\(function\(g\)\{ return \(g\.week\|\|1\)===avWk && \(g\.stage\|\|"regular"\)===avStage; \}\)\.forEach/.test(live)
   && !/futureG\.filter\(function\(g\)\{ return \(g\.week\|\|1\)===avWk/.test(live));
 
-console.log("\n— the emergency call-up door (Rule 5.3)");
-A("one definition of when it closes, ten minutes after puck drop", /CG\.emergencyClosed = function\(g\)\{ return CG\.now\(\) >= \(g\.at \|\| Date\.parse\(g\.scheduled_at\)\) \+ 10\*60000; \};/.test(pub));
-A("the header stops offering the button once it is shut", /CG\.emergencyClosed\(game\)\s*\n?\s*\? '<span class="caption">The door closed 10 minutes after puck drop/.test(hub));
-A("...and the submit handler says so rather than letting the RPC refuse", /if \(pastLock && CG\.emergencyClosed\(game\)\)\{ CG\.toast\("Emergency call-ups closed 10 minutes after puck drop/.test(hub));
-/* v2.81: the door costs one in-game minor per player changed (Rule 5.3 second paragraph). Every
-   place that offers it must say so, or it reads as a free grace period. The submit confirm always
-   did; the button, the banner, the locked-edit refusal and the confirm that OPENS the mode did not. */
-A("the price is named where the mode is opened", /Each player you change costs the club ONE IN-GAME MINOR, served in this game/.test(hub));
-A("...on the banner that stays on screen while it is open", /Each player you change costs the club one in-game minor, served in this game<\/b>/.test(hub));
-A("...on the button that opens it", /title="Swap a player after the lock: one in-game minor per player changed \(Rule 5\.3\)"/.test(hub));
-A("...and when an edit to a locked sheet is refused", /An emergency call-up can still swap a player, at one in-game minor per player changed/.test(hub));
-A("...and the submit confirm still does", /EACH player changed costs the club one in-game penalty, served in this game \(Rule 5\.3\)/.test(hub));
-A("nothing offers the door as free", !/emergency call-up to swap a player now/.test(hub) && !/The change is recorded against the club\./.test(hub));
+console.log("\n— the sheet is a preview, and a late change is free (Rule 5.3, v3.05)");
+/* The commissioner reversed the v2.78/v2.81 rule outright: "the locked lineups are just so teams
+   can roughly see their opponent lineup. If a team needs a last minute switch, they are free to do
+   so as long as the switch is with a player also on their roster or TC squad and follows the rules
+   of their position locks and game requirements."
+   These pins used to demand that the price be named in five places. There is no price. What must
+   hold now is the opposite: nothing threatens one, and the sheet stays editable until the game is
+   actually under way. */
+A("one definition of when the sheet finally closes, ten minutes after puck drop", /CG\.emergencyClosed = function\(g\)\{ return CG\.now\(\) >= \(g\.at \|\| Date\.parse\(g\.scheduled_at\)\) \+ 10\*60000; \};/.test(pub));
+A("...and it is documented as publication, not closure", /only PUBLISHES it\s*\n?\s*to the opponent/.test(pub.replace(/\s+/g, " ")) || /only PUBLISHES it to the opponent/.test(pub.replace(/\s+/g, " ")));
+A("the 30-minute lock no longer gates editing", /function isLocked\(\)\{ return CG\.emergencyClosed\(game\); \}/.test(hub));
+A("the submit handler refuses only once the game is under way", /if \(CG\.emergencyClosed\(game\)\)\{ CG\.toast\("This game is under way, so the sheet is closed/.test(hub));
+A("NOTHING threatens a penalty for a late change any more",
+  !/in-game minor/i.test(hub) && !/in-game penalty/i.test(hub), (hub.match(/.{0,60}in-game (minor|penalt).{0,60}/i)||[])[0]);
+/* the phrase may survive in a comment explaining what was removed; it may not survive in
+   anything a member reads, and the state it drove must be gone entirely */
+{
+  const hubCode = hub.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  A("...and the emergency call-up ceremony is gone with it",
+    !/luEmergency/.test(hubCode) && !/Emergency call-up/.test(hubCode),
+    (hubCode.match(/.{0,50}(luEmergency|Emergency call-up).{0,50}/) || [])[0]);
+}
+A("the published sheet says a change is free, and on what condition",
+  /You can still change it right up to puck drop at <b>no cost<\/b>/.test(hub) && /on your roster or in your camp and plays his own position/.test(hub));
+A("the confirm says the opponent is told rather than that a price is paid",
+  /Your opponent can already see this sheet, so they are told what changed/.test(hub) && /There is no cost/.test(hub));
 {
   const src = pub.slice(pub.indexOf("CG.emergencyClosed = function"), pub.indexOf("\n", pub.indexOf("CG.emergencyClosed = function")));
   const CG = { now: () => T + 9 * 60000 }; new Function("CG", src)(CG);

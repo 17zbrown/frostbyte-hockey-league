@@ -130,7 +130,7 @@ CG.hubNav = function(section){
     if (CG.LIVE_MODE && CG.can("lineup.build") && CG.hubGameStats) club.push(["gamestats","Game stats","chart"]);
     /* TWO lineup surfaces, both listed (v2.95). The board (#/hub/lines) is where a club builds
        its lines and dresses whole nights; the per-game page (#/hub/lineup) is where it changes
-       ONE game, and it is also the emergency call-up door (Rule 5.3). It was routed but unlisted,
+       ONE game, and it is where a published sheet is changed late (Rule 5.3). It was routed but unlisted,
        so the only way in was a link from somewhere else, which is no way to find a page. */
     if (CG.can("lineup.build")) club.push(["lines","Lineup builder","grid"]);
     if (CG.can("lineup.build")) club.push(["lineup","Game lineups","cal"]);
@@ -807,10 +807,13 @@ CG.hubLineup = function(qs){
   var dbLu = (CG.lg._lineups||{})[club+":"+game.id];
   var lockAt = game.at - 30*60000;
   var rawLocked = CG.now() >= lockAt;
-  /* Emergency call-up: once a game locks, management can still swap a player after the deadline.
-     A per-game flag flips the builder back into an editable, clearly-flagged emergency mode. */
-  var emergency = !!(CG._luEmergency && CG._luEmergency[game.id]);
-  var locked = rawLocked && !emergency;
+  /* v3.05 (commissioner): the lock PUBLISHES the sheet to the opponent so they can roughly see
+     who they face. It does not close it. A club may still switch a player right up to puck drop,
+     free, provided he is on the roster or in the camp and plays his own position (Rule 5.3), which
+     the database checks on every filing. Editing stops only once the game is genuinely under way,
+     which is the same instant set_game_lineup stops accepting one. */
+  var shut = CG.emergencyClosed(game);          /* the game is under way: the box score is the record */
+  var locked = shut;
   var status = saved ? saved.status : (dbLu ? "submitted" : "draft");
   var slots = saved ? saved.slots
     : (dbLu ? { LW:dbLu.lw||null, C:dbLu.center||null, RW:dbLu.rw||null, LD:dbLu.ld||null, RD:dbLu.rd||null, G:dbLu.goalie||null } : {});
@@ -841,7 +844,7 @@ CG.hubLineup = function(qs){
        lineup for one game, so it is named that on the page and in the nav. */
     '<h1 class="h-sec" style="margin-top:8px">Game lineup'+nightSwitch+'</h1>'+
     (game.stage==="preseason" ? '<div class="note" style="margin-top:10px"><b style="font-family:var(--f-disp)">Pre-season game.</b> No weekly caps, and your Owner, GM and AGM can be dressed at any position — get as many players into games as you can (Rules 0.4 and 5.2).</div>' : '')+
-    '<p class="lede" style="margin-top:8px">One game, one lineup. Day-to-day lines live in the <a href="#/hub/lines" style="font-weight:700;border-bottom:2px solid var(--chrome)">Lineup builder</a> — this page adjusts a single night, and after the '+CG.fmtTime(lockAt)+' lock every change costs one in-game penalty (Rule 5.3).</p></div>';
+    '<p class="lede" style="margin-top:8px">One game, one lineup. Day-to-day lines live in the <a href="#/hub/lines" style="font-weight:700;border-bottom:2px solid var(--chrome)">Lineup builder</a>, this page adjusts a single night. At '+CG.fmtTime(lockAt)+' the sheet is published to your opponent, and you can still change it after that, free, right up to puck drop (Rule 5.3).</p></div>';
   /* the night plan reaching the real game: when this night has a planned line, offer it as a
      one-click fill. Fill only — submitting stays an explicit second step. */
   var planSlot = (lg._linePlan||{})[CG.gameNight(game)];
@@ -853,7 +856,7 @@ CG.hubLineup = function(qs){
       /* "Set for the whole night" — one submit dresses every not-yet-locked game of this night with
          the same six. Pre-lock only; each game still runs the weekly-cap + suspension checks. */
       var nightGs = CG.nightGames(club, CG.gameNight(game));
-      if (emergency || nightGs.length < 2) return "";
+      if (shut || nightGs.length < 2) return "";
       return '<label class="chk" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" '+
         'title="Submit these six for all '+nightGs.length+' of tonight\u2019s games at once">'+
         '<input type="checkbox" id="luWholeNight"> whole night ('+nightGs.length+' games)</label>';
@@ -861,18 +864,18 @@ CG.hubLineup = function(qs){
     /* v2.85: withdraw the sheet. Nothing could unfile a game before, so a club that had filled its
        week had no way to give a player his games back short of finding a replacement with room. */
     (dbLu && !rawLocked ? '<button class="btn btn-ghost btn-sm" id="luRemove" title="Withdraw this sheet: the six come off this game and get the game back in their week (Rule 5.2)">Remove lineup</button>' : "")+
-    '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(emergency?"Submit emergency call-up":(status==="submitted"?"Resubmit":"Submit lineup"))+'</button>';
-  var bar = '<div class="note '+(emergency?"red":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
-    '<b style="font-family:var(--f-disp)">Status: '+(emergency?"Emergency call-up":(rawLocked?"Locked":status))+'</b>'+
-    (rawLocked&&!emergency?'<span class="caption">locked '+CG.fmtTime(lockAt)+' (Rule 5.3)</span>':(saved&&saved.at?'<span class="caption">last saved '+CG.fmtFull(saved.at)+'</span>':""))+
+    '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(status==="submitted"?"Resubmit":"Submit lineup")+'</button>';
+  var bar = '<div class="note '+(shut?"":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
+    '<b style="font-family:var(--f-disp)">Status: '+(shut?"Game under way":(rawLocked?"Published":status))+'</b>'+
+    (rawLocked&&!shut?'<span class="caption">your opponent can see this sheet since '+CG.fmtTime(lockAt)+'</span>'
+      :(saved&&saved.at?'<span class="caption">last saved '+CG.fmtFull(saved.at)+'</span>':""))+
     '<span style="margin-left:auto;display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;min-width:0">'+
-    (!rawLocked ? editControls
-      : emergency ? editControls+'<button class="btn btn-ghost btn-sm" id="luEmCancel">Cancel</button>'
-      : '<span class="lock">'+CG.ic("lock",14)+'Locked</span>'+(CG.emergencyClosed(game)
-          ? '<span class="caption">The door closed 10 minutes after puck drop. The sheet on file is the record (Rule 5.3).</span>'
-          : '<button class="btn btn-ghost btn-sm" id="luEmergency" title="Swap a player after the lock: one in-game minor per player changed (Rule 5.3)">Emergency call-up</button>'))+
+    (shut ? '<span class="lock">'+CG.ic("lock",14)+'Closed</span><span class="caption">The game is under way. Who actually played is read from the box score (Rule 5.3).</span>'
+          : editControls)+
     '</span></div>'+
-    (emergency?'<div class="note red" style="margin-bottom:18px;font-size:13px;line-height:1.5">This game locked at '+CG.fmtTime(lockAt)+'. Emergency call-ups are for a genuine no-show. <b>Each player you change costs the club one in-game minor, served in this game</b> (two swaps, two minors; moving the same six between positions costs nothing, Rule 5.3). The opponent and the officials are told the moment you submit. Change only the player you must.</div>':"");
+    (rawLocked && !shut
+      ? '<div class="note" style="margin-bottom:18px;font-size:13px;line-height:1.5">This sheet is <b>published</b>: your opponent can see roughly who they face. You can still change it right up to puck drop at <b>no cost</b>, as long as the player you bring in is on your roster or in your camp and plays his own position (Rule 5.3). Your opponent is told when you do, so the lineup they are looking at stays the current one.</div>'
+      : "");
   var rink = '<div class="rink"><div class="rk-rows">'+
     '<div class="rk-line">'+["LW","C","RW"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
     '<div class="rk-line d2">'+["LD","RD"].map(function(pos){ return CG.luSlot(pos, slots[pos], locked); }).join("")+'</div>'+
@@ -928,9 +931,9 @@ CG.AFTER._lineup = function(){
   var sel = null;
   /* the availability night (n1/n2) covering this game — null when it's outside the window */
   var avNightKey = CG.nightAvKey(game);
-  /* In emergency-call-up mode the deadline is deliberately overridden for management. */
-  function inEmergency(){ return !!(CG._luEmergency && CG._luEmergency[game.id]); }
-  function isLocked(){ return CG.now() >= game.at - 30*60000 && !inEmergency(); }
+  /* v3.05: the only moment the sheet stops being editable is when the game is genuinely under way.
+     The 30-minute lock publishes it to the opponent; it no longer closes it. */
+  function isLocked(){ return CG.emergencyClosed(game); }
   function msg(t, bad){ var el=$("#luMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
   function save(what, status){
     state.at = CG.now();
@@ -948,7 +951,7 @@ CG.AFTER._lineup = function(){
   function avState(p){ var nk = CG.nightAvKey(game); return (nk && CG.avGame) ? CG.avGame(CG.avFor(p.id), nk, game.id) : "nr"; }
   function avWarn(p){ return avState(p)==="no" ? p.tag+" is marked not available for this game (dressed anyway; check that he can play)." : null; }
   function validate(p, pos){
-    if (isLocked()) return "The lineup locked at "+CG.fmtTime(game.at-30*60000)+" (Rule 5.3). An emergency call-up can still swap a player, at one in-game minor per player changed.";
+    if (isLocked()) return "This game is under way, so the sheet is closed. Who actually played is read from the box score (Rule 5.3).";
     if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
@@ -1071,21 +1074,21 @@ CG.AFTER._lineup = function(){
   var sub = $("#luSubmit");
   if (sub) sub.addEventListener("click", function(){
     var pastLock = CG.now() >= game.at - 30*60000;
-    if (pastLock && !inEmergency()){ CG.toast("Lineup is locked (Rule 5.3) — use an emergency call-up","err"); return; }
-    /* v2.78: the door can close while the builder sits open. Say so here rather than let the RPC
-       answer with a refusal the club cannot read (Rule 5.3). */
-    if (pastLock && CG.emergencyClosed(game)){ CG.toast("Emergency call-ups closed 10 minutes after puck drop. The filed sheet is the record (Rule 5.3).","err"); return; }
+    /* v3.05: a late change is free. The one moment the sheet closes is when the game is under way,
+       which is also when set_game_lineup stops accepting one; say so here rather than let the RPC
+       answer with a refusal the club cannot read. */
+    if (CG.emergencyClosed(game)){ CG.toast("This game is under way, so the sheet is closed. The box score is the record (Rule 5.3).","err"); return; }
     var missing = ["LW","C","RW","LD","RD","G"].filter(function(pos){ return !state.slots[pos]; });
-    if (missing.length){ CG.toast("Fill every slot first — missing "+missing.join(", "), "err"); return; }
-    var emg = pastLock;   /* submitting after the lock is, by definition, an emergency call-up */
-    CG.confirm(emg?"Confirm emergency call-up?":"Submit this lineup?",
-      emg?"This game already locked. EACH player changed costs the club one in-game penalty, served in this game (Rule 5.3) — the opponent already sees the locked lineup, so change only who you must."
-         :"Your six starters go to the league office and release to the opponent when the lineup locks, 30 minutes before puck drop. You can resubmit until the lock.",
-      emg?"Submit emergency call-up":"Submit lineup", function(){
+    if (missing.length){ CG.toast("Fill every slot first, missing "+missing.join(", "), "err"); return; }
+    var emg = pastLock;   /* a change after the sheet was published: free, but the opponent is told */
+    CG.confirm(emg?"Change your published lineup?":"Submit this lineup?",
+      emg?"Your opponent can already see this sheet, so they are told what changed. There is no cost, as long as the player you bring in is on your roster or in your camp and plays his own position (Rule 5.3)."
+         :"Your six starters go to the league office and are published to the opponent when the sheet locks, 30 minutes before puck drop. You can change it after that too, right up to puck drop.",
+      emg?"Save the change":"Submit lineup", function(){
       /* Do NOT claim it is submitted yet — the server may refuse (lock, suspension, roster
          shape). Keep the slots, leave the status alone, and only report success below when the
          RPC actually answers. A refused write used to leave a permanent green "submitted". */
-      save(emg?"Emergency call-up sent…":"Sending lineup…");
+      save(emg?"Saving the change…":"Sending lineup…");
       /* Persist through the server-enforced lock. set_game_lineup() rejects post-lock edits unless
          p_emergency is set, which only club management can do (Rule 5.3) — the lock is enforced in
          the database, so no client can bypass it. */
@@ -1108,13 +1111,12 @@ CG.AFTER._lineup = function(){
               if (i >= targets.length){
                 save(qN ? "Sent to the Owner for approval" : "Not sent");
                 if (qN) CG.toast("Sent "+qN+" lineup"+(qN===1?"":"s")+" to the Owner for approval — dressed when they approve"+(qFail?" ("+qFail+" could not be sent)":""),"ok");
-                if (qN && CG._luEmergency) delete CG._luEmergency[game.id];
                 if (qN) CG.reloadLeague();
                 return;
               }
               var g = targets[i], oppc = g.home===club ? g.away : g.home;
               CG.mgmtQueue("set_game_lineup", Object.assign({ p_game:g.id, p_emergency:(g.id===game.id?emg:false) }, slots6),
-                (emg?"emergency call-up":"dress the lineup")+" vs "+((CG.TEAM[oppc]||{}).name||oppc)+" · "+CG.fmtDay(g.at)+" "+CG.fmtTime(g.at), { quiet:true })
+                (emg?"change the published lineup":"dress the lineup")+" vs "+((CG.TEAM[oppc]||{}).name||oppc)+" · "+CG.fmtDay(g.at)+" "+CG.fmtTime(g.at), { quiet:true })
                 .then(function(q){ if (q===true) qN++; else if (q) qFail++; qnext(i+1); });
             })(0);
             return;
@@ -1124,15 +1126,14 @@ CG.AFTER._lineup = function(){
             if (i >= targets.length){
               if (okN){
                 /* only now is it true */
-                save(emg?"Emergency call-up submitted":"Lineup submitted to the league office","submitted");
-                CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted",
+                save(emg?"Lineup change saved":"Lineup submitted to the league office","submitted");
+                CG.pushNotif("check", emg?"Lineup change saved":"Lineup submitted",
                   "vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
-                CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
+                CG.audit(emg?"Lineup changed after publication":"Lineup submitted",""+key);
               }
               if (errs.length) CG.toast((okN?("Dressed "+okN+"; "):"")+"refused: "+errs.join("; "),"err");
               else if (wholeNight) CG.toast("Submitted for all "+okN+" game"+(okN===1?"":"s")+" tonight","ok");
-              else CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
-              if (CG._luEmergency) delete CG._luEmergency[game.id];
+              else CG.toast(emg?"Lineup change saved":"Lineup submitted","ok");
               CG.renderChrome();
               return;
             }
@@ -1150,25 +1151,16 @@ CG.AFTER._lineup = function(){
       /* success is reported from the RPC callback above — in demo mode (no Supabase) there is
          no server to answer, so report it here instead */
       if (!(CG.LIVE_MODE && CG.sb)){
-        save(emg?"Emergency call-up submitted":"Lineup submitted to the league office","submitted");
-        CG.pushNotif("check", emg?"Emergency call-up submitted":"Lineup submitted","vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
-        CG.audit(emg?"Emergency call-up":"Lineup submitted",""+key);
-        CG.toast(emg?"Emergency call-up submitted":"Lineup submitted","ok");
+        save(emg?"Lineup change saved":"Lineup submitted to the league office","submitted");
+        CG.pushNotif("check", emg?"Lineup change saved":"Lineup submitted","vs "+CG.TEAM[game.home===club?game.away:game.home].name+(emg?" — post-lock swap recorded.":" — locks "+CG.fmtTime(game.at-30*60000)+"."),"#/hub/lineup");
+        CG.audit(emg?"Lineup changed after publication":"Lineup submitted",""+key);
+        CG.toast(emg?"Lineup change saved":"Lineup submitted","ok");
         CG.renderChrome();
       }
     });
   });
-  var emBtn = $("#luEmergency");
-  if (emBtn) emBtn.addEventListener("click", function(){
-    CG.confirm("Start an emergency call-up?","This game locked at "+CG.fmtTime(game.at-30*60000)+". Use this only for a genuine no-show. Each player you change costs the club ONE IN-GAME MINOR, served in this game: two swaps are two minors, and moving the same six between positions costs nothing (Rule 5.3). The opponent and the officials are told the moment you submit, and the door shuts 10 minutes after puck drop.","Enable call-up", function(){
-      CG._luEmergency = CG._luEmergency||{}; CG._luEmergency[game.id]=true; CG.router();
-    });
-  });
-  var emCancel = $("#luEmCancel");
-  if (emCancel) emCancel.addEventListener("click", function(){
-    if (CG._luEmergency) delete CG._luEmergency[game.id];
-    CG.router();
-  });
+  /* v3.05: the emergency call-up toggle is gone with the penalty it existed to warn about. The
+     sheet simply stays editable until the game is under way. */
   document.querySelectorAll(".srv-sel").forEach(function(el){
     el.addEventListener("change", function(){ CG.saveVeto(el.getAttribute("data-veto-game"), el); });
   });
@@ -1427,15 +1419,15 @@ CG.hubLines = function(qs){
                 return '<option value="'+sl+'"'+(gs===sl?" selected":"")+(r?"":" disabled")+'>'+esc((r&&r.name)?r.name:("Line "+sl))+(r?"":" (empty)")+'</option>';
               }).join("")+'</select></label>';
           }).join("")+'</div>' : "")+
-        (owed ? '<span class="chip chip-loss" style="font-size:9.5px" title="Post-lock changes cost one in-game penalty each (Rule 5.3)">serves '+owed+' penalt'+(owed===1?"y":"ies")+'</span>' : "")+
+        /* v3.05: a change after publication costs nothing, so there is no debt to display. */
         (prow
           ? (open.length
               ? '<button class="btn btn-ghost btn-sm lc-dress"'+(toDress.length?"":" disabled")+' data-night="'+n.key+'" title="'+
                   (toDress.length ? 'Submit each game with the line set for it'+(distinct.length>1?' ('+distinct.length+' different lines tonight)':'') : 'Set a line on at least one game')+'">'+
                   (dressedN?"Redress":"Dress")+' '+toDress.length+' game'+(toDress.length===1?"":"s")+'</button>'+
                 (dressedN ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="Withdraw the filed sheets for this night\u2019s games. Everyone on them gets those games back in his week (Rule 5.2).">Clear '+open.length+'</button>' : "")
-              : '<span class="lock" title="Every game this night has locked">'+CG.ic("lock",13)+'Locked</span>'+
-                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Swap a player after the lock — one in-game penalty per change (Rule 5.3)">Emergency call-up</a>')
+              : '<span class="lock" title="Every game this night is published to the opponent">'+CG.ic("lock",13)+'Published</span>'+
+                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Change a published sheet: free, up to puck drop (Rule 5.3)">Change a sheet</a>')
           : '<span class="caption">pick a line to enable dressing</span>')+
       '</div>';
     }).join("") : '<div class="card-b"><span class="caption">No upcoming games — the plan fills in once the schedule does.</span></div>')+

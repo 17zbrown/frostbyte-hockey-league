@@ -106,7 +106,9 @@ function finish(){
     A("...and a refused squad move re-enables its button", /if \(q===CG\.MGMT_FAILED\) btn\.disabled = false;/.test(live) && /if \(q===CG\.MGMT_FAILED\) swapBtn\.disabled = false;/.test(live));
     A("the trade-block toggle decides synchronously and the click skips its success toast when queued", /if \(CG\.setOnBlock\(pid, !on\)\) return;/.test(hub) && /if \(CG\.mgmtAccess && CG\.mgmtAccess\("roster"\)==="approve"\)\{\n    CG\.mgmtQueue\("roster_block"/.test(live));
     A("the draft board under approval sends one request after the ranking settles and keeps the local ranking across reloads", /CG\._boardQueueT = setTimeout\(/.test(live) && /if \(waiting\) CG\.lg\._myBoard = CG\._boardLocal\.slice\(\); else CG\._boardLocal = null;/.test(live));
-    A("an emergency call-up sent for approval leaves emergency mode", /if \(qN && CG\._luEmergency\) delete CG\._luEmergency\[game\.id\];/.test(hub));
+    /* v3.05: emergency mode no longer exists (a late switch is free), so there is no mode to
+       leave. What still matters is that a queued lineup does not claim to be filed. */
+    A("a lineup sent for approval says queued, not submitted", /done\(null, "queued"\)/.test(hub));
     A("the last-loaded policy stands in during a rebuild (no raw gate refusal in the window)", /\|\| CG\._mgmtPolicyCache \|\| \{\}/.test(live));
     A("dressing from a saved line reports 'queued' instead of claiming dressed", /done\(null, "queued"\)/.test(hub) && /else if \(queued\) qN\+\+; else okN\+\+;/.test(hub));
     A("the prototype build has a no-op queue so load order never matters", /if \(!CG\.mgmtQueue\) CG\.mgmtQueue = function\(\)\{ return Promise\.resolve\(false\); \};/.test(hub));
