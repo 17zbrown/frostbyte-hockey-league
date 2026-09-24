@@ -491,57 +491,97 @@ async function weeklyStandings(games, teamById, cfg, errors, unconfigured) {
   return `posted standings (${rows.length} clubs)`;
 }
 
-// A reminder becomes eligible 35 min out and STAYS eligible until puck drop, rather than living in a
-// 25-35 min slot. On a healthy */5 cron the first eligible tick is still ~30-35 min out, so the normal
-// timing is unchanged — but if that tick is lost to a cold start or a deploy, every later tick is a
-// catch-up instead of the reminder vanishing for the night. claim() is what keeps this idempotent:
-// the first tick to post takes the (team, night) row and every later tick short-circuits on it, so a
-// wider window can never double-post. Games already under way are filtered out above, which is what
-// closes the window at puck drop.
-// v2.78: 75, not 35. Lineups lock 30 minutes before each game (Rule 5.3), so a reminder that only
-// became eligible at T-35 landed in the last five minutes before the lock, and if that one cron tick
-// was late, after it. At 75 a club has three quarters of an hour to file, and the claim per club per
-// ET night still makes a wider window impossible to double-post.
-const REMINDER_LEAD_MAX = 75;
+/* ---------- (C) the club's game-night post ----------
+   Commissioner's ruling (2026-09-23): ONE message per club per night, and it WAITS for the night
+   to lock so that everything can be in it at once. Before v2.97 it went out as soon as a club's
+   first game was 75 minutes away, with the private lobby codes already in it: 45 minutes before
+   Rule 4.2 releases them, and while the server picks were still open, so the servers could not be
+   in it at all and a second message would have been needed to carry them.
+
+   THE GATE IS THE DATABASE, not this file. public.night_board(day) returns no rows until the
+   night has locked (its first scheduled puck drop minus 30 minutes, public.night_lock_at), so an
+   early tick has nothing to post even if the clock here were wrong. The board also SETTLES each
+   game's server on its way through, so a game no longer waits for a manager to open the site
+   before it has one.
+
+   The window then stays open until the night's last game starts, so a tick lost to a cold start
+   or a deploy is a catch-up rather than a night with no post. claim() per (club, night) is what
+   makes that safe: the first tick to post takes the row and every later tick short-circuits. */
 /* The league's servers and the standard one, mirroring CG.SERVERS / CG.DEFAULT_SERVER in the
    browser and public.server_options() / public.default_server() in the database, which is what
    actually resolves a game. Quoted in the nightly ask so a club never has to go looking. */
 const SERVER_LIST = ["NA Northeast", "NA Southeast", "NA Central", "NA West"];
 const DEFAULT_SERVER = "NA Central";
+/* Rule 4.2 again, for the "not yet" line only: the post itself is gated by the board, never by
+   this number. nightLockAt() below is the same definition and is shared with the lineup reminder. */
+const NIGHT_LOCK_MS = 30 * 60000;
 
 async function gameReminders(games, teamById, now, errors) {
-  const nowMs = now.getTime(), byTeam = {};
+  const nowMs = now.getTime();
+  /* THE night in play: the earliest ET day whose LAST game has not started yet. That is the whole
+     window. It opens at the night's lock (the board refuses anything earlier) and closes when the
+     night's last puck drop passes, because after that a post naming games already under way helps
+     nobody dress. A night part-way through still posts, codes and all, which is the point of a
+     catch-up: a cron tick lost between the lock and the last puck drop does not cost a club its
+     message. Games already under way stay IN the post, so it lists the whole night either way. */
+  const nights = {};
   for (const g of games) {
-    if (g.status === "final" || g.voided || new Date(g.scheduled_at).getTime() < nowMs) continue;
-    for (const tid of [g.home_team_id, g.away_team_id]) (byTeam[tid] = byTeam[tid] || []).push(g);
+    if (g.voided) continue;
+    (nights[etParts(new Date(g.scheduled_at)).ymd] ||= []).push(g);
   }
-  let posted = 0;
-  for (const tid in byTeam) {
+  const ymd = Object.keys(nights).sort()
+    .find((d) => Math.max(...nights[d].map((g) => Date.parse(g.scheduled_at))) > nowMs);
+  if (!ymd) return "no game night ahead";
+  const tonight = nights[ymd].slice().sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
+  const lockMs = Date.parse(tonight[0].scheduled_at) - NIGHT_LOCK_MS;
+
+  /* ONE definition of "the night has locked", and it is the database's. An empty board means the
+     night is not ready, whatever the clock here thinks. */
+  let board = [];
+  try {
+    board = await sbRpc("night_board", { p_day: ymd });
+  } catch (e) {
+    errors.push(`game reminder ${ymd}: could not read the night board — ${String(e.message || e)}`);
+    return `night board failed: ${String(e.message || e)}`;
+  }
+  if (!Array.isArray(board) || !board.length) {
+    return `${ymd}: the night locks at ${fmtTime(new Date(lockMs).toISOString())}, nothing to post yet`;
+  }
+  const byGame = Object.fromEntries(board.map((r) => [r.game_id, r]));
+
+  /* every club playing tonight, with its own games */
+  const byTeam = {};
+  for (const g of tonight) for (const tid of [g.home_team_id, g.away_team_id]) (byTeam[tid] = byTeam[tid] || []).push(g);
+
+  let posted = 0, skipped = 0;
+  for (const tid of Object.keys(byTeam)) {
     const team = teamById[tid];
-    if (!team || !team.discord_channel_id){
+    if (!team || !team.discord_channel_id) {
       /* v2.78: say so. This used to drop a club's whole game-night post with the run still green. */
-      errors.push({ gameReminder: `${(team && team.code) || tid} has no Discord room — its game-night reminder was not posted` });
+      errors.push({ gameReminder: `${(team && team.code) || tid} has no Discord room — its game-night post was not sent` });
       continue;
     }
-    const list = byTeam[tid].sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
-    const firstMs = new Date(list[0].scheduled_at).getTime(), mins = (firstMs - nowMs) / 60000;
-    if (mins > REMINDER_LEAD_MAX) continue;
-    const nightYmd = etParts(new Date(list[0].scheduled_at)).ymd;
-    const tonight = list.filter((g) => etParts(new Date(g.scheduled_at)).ymd === nightYmd);
-    const ref = `${tid}:${nightYmd}`;
-    if (!(await claim("game_reminder", ref))) continue;
-    const nm = (id) => nameOf(teamById, id);
-    const lines = [`${teamTag(teamById, tid)} 🚨 **Game night!** You've got ${tonight.length} matchup${tonight.length > 1 ? "s" : ""} tonight:`, ""];
-    for (const g of tonight) {
-      // the opponent is a club too — render it as its role pill, not bold text
+    const ref = `${tid}:${ymd}`;
+    if (!(await claim("game_reminder", ref))) { skipped++; continue; }
+    const mine = byTeam[tid];
+    const lines = [`${teamTag(teamById, tid)} 🚨 **Game night.** ${mine.length} matchup${mine.length > 1 ? "s" : ""} tonight, and everything below is settled:`, ""];
+    for (const g of mine) {
+      const row = byGame[g.id] || {};
       const oppId = g.home_team_id === tid ? g.away_team_id : g.home_team_id;
       const ha = g.home_team_id === tid ? "vs" : "@";
-      lines.push(`• ${ha} ${teamTag(teamById, oppId)} — ${fmtTime(g.scheduled_at)}${g.game_code ? ` · lobby \`${g.game_code}\`` : ""}`);
+      const srv = row.server ? `server **${row.server}**` : `server **${DEFAULT_SERVER}**`;
+      const code = row.game_code ? `lobby \`${row.game_code}\`` : "lobby code pending — ask the league office";
+      lines.push(`• ${ha} ${teamTag(teamById, oppId)} · ${fmtTime(g.scheduled_at)} · ${srv} · ${code}`);
     }
-    // On a catch-up post the lock has already passed, so don't tell them to go set a lineup they can't change.
-    lines.push("", mins >= 30
-      ? "⏰ Lineups + server picks lock **30 minutes before puck drop** — set yours: https://chelgamingleague.com"
-      : `⏰ Puck drop in about ${Math.max(1, Math.round(mins))} min — lineups + server picks are already locked: https://chelgamingleague.com`);
+    /* Rule 5.3: a LINEUP locks 30 minutes before its OWN puck drop, so at the night's lock only
+       the first game's sheet is shut. Say which are still open rather than implying all of them. */
+    const open = mine.filter((g) => Date.parse(g.scheduled_at) - NIGHT_LOCK_MS > nowMs);
+    lines.push("",
+      `🔒 Server picks are locked for the night and the servers above are final (Rule 4.2). The codes are yours alone: rostered players and your front office, never a public channel.`,
+      open.length
+        ? `📋 Lineups lock 30 minutes before each game's own puck drop. Still open: ${open.map((g) => fmtTime(g.scheduled_at) + " until " + fmtTime(new Date(Date.parse(g.scheduled_at) - NIGHT_LOCK_MS).toISOString())).join(" · ")} (Rule 5.3).`
+        : `📋 Every sheet for tonight is locked. After the lock a change is an emergency call-up only, and each player you change costs the club one in-game minor in that game; the door shuts 10 minutes after puck drop (Rule 5.3).`,
+      `https://chelgamingleague.com/#/hub/schedule`);
     const res = await postChannel(team.discord_channel_id, lines.join("\n"));
     if (!res.ok) {
       errors.push(`game reminder ${team.name || tid}: ${res.error}`);
@@ -550,7 +590,7 @@ async function gameReminders(games, teamById, now, errors) {
     }
     posted++;
   }
-  return `sent ${posted} reminder(s)`;
+  return `${ymd}: posted ${posted} game-night message(s)${skipped ? `, ${skipped} already sent` : ""}`;
 }
 
 // (D) Daily nudge to #staff-casework: for every pending application, @ the reviewers who still owe a
@@ -612,7 +652,7 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
    first puck drop and stays open until that first lock, claimed once per ET day. */
 const LINEUP_LEAD_MS = 4 * 60 * 60 * 1000;
 /* THE definition of "tonight's lineups are due": the night's first puck drop minus the lock. */
-const nightLockAt = (list) => Math.min(...list.map((g) => Date.parse(g.scheduled_at))) - 30 * 60000;
+const nightLockAt = (list) => Math.min(...list.map((g) => Date.parse(g.scheduled_at))) - NIGHT_LOCK_MS;
 async function lineupReminder(season, games, teamById, cfg, now, dry, forced, errors, unconfigured) {
   const sw = String(cfg.lineup_reminder_enabled ?? "").trim().toLowerCase();
   if (["off", "0", "false", "no", "paused"].includes(sw)) return `paused (app_config.lineup_reminder_enabled=${sw})`;
@@ -752,9 +792,9 @@ async function serverPickReminder(season, games, teamById, cfg, now, dry, forced
    public.availability_missing. The post-deadline nudge reads the same two, so the reminder that
    goes out a day earlier can never name a different set of players than the nudge that follows it.
 
-   The window OPENS at the deadline minus 24 hours and stays open until the deadline, exactly as
-   REMINDER_LEAD_MAX does for game night: a tick lost to a cold start or a deploy becomes a
-   catch-up, not a missed week. What makes a wide window safe is the claim, one per club per week
+   The window OPENS at the deadline minus 24 hours and stays open until the deadline, the same
+   shape every timed post here uses: a tick lost to a cold start or a deploy becomes a catch-up,
+   not a missed week. What makes a wide window safe is the claim, one per club per week
    plus one for the front offices, so the first tick inside the window posts and every later tick
    is refused. A club whose post fails keeps its own retry without re-posting to the other seven. */
 const AVAIL_LEAD_MS = 24 * 60 * 60 * 1000;

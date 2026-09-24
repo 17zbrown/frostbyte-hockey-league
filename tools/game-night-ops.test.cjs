@@ -121,10 +121,19 @@ A("...and stops when the office leaves the page or a dialog opens",
   /location\.hash\.indexOf\("\/admin\/schedule"\) < 0\)\{ clearInterval\(CG\._readyIv\)/.test(live)
   && /if \(ov && ov\.innerHTML\.trim\(\)\) return;/.test(live.slice(live.indexOf("CG._readyIv = setInterval"), live.indexOf("CG._readyIv = setInterval") + 700)));
 
-console.log("\n— the club reminder lands BEFORE the lineups lock");
-A("the lead is wider than the 30-minute lock", (() => { const m = sched.match(/const REMINDER_LEAD_MAX = (\d+);/); return m && Number(m[1]) >= 60; })(),
-  (sched.match(/const REMINDER_LEAD_MAX = (\d+);/) || [])[1]);
-A("a voided game is not announced", /if \(g\.status === "final" \|\| g\.voided \|\|/.test(sched));
+console.log("\n— the club's game-night post waits for the night to lock");
+/* Commissioner's ruling (2026-09-23), reversing the v2.78 lead: the post must WAIT for the night
+   to lock so the codes and the settled servers can be in ONE message. A lead constant here would
+   be the old bug. The gate is the database's night board, not this file's clock. */
+A("there is no early-lead constant left", !/REMINDER_LEAD_MAX/.test(sched));
+A("the post is gated on the night board, not on a clock", /await sbRpc\("night_board", \{ p_day: ymd \}\)/.test(sched));
+A("an empty board posts nothing and says when the night locks",
+  /if \(!Array\.isArray\(board\) \|\| !board\.length\) \{/.test(sched) && /nothing to post yet/.test(sched));
+A("one message carries the time, the server and the code", /\$\{srv\} \u00b7 \$\{code\}/.test(sched));
+A("a voided game is not announced", /for \(const g of games\) \{\n    if \(g\.voided\) continue;/.test(sched));
+A("the window closes when the night's LAST game starts, so a dead cron cannot post at midnight",
+  /\.find\(\(d\) => Math\.max\(\.\.\.nights\[d\]\.map\(\(g\) => Date\.parse\(g\.scheduled_at\)\)\) > nowMs\)/.test(sched));
+A("the whole night goes in one post, claimed once per club per night", /claim\("game_reminder", ref\)/.test(sched) && /const ref = `\$\{tid\}:\$\{ymd\}`;/.test(sched));
 A("a club with no Discord room is REPORTED, not skipped in silence", /errors\.push\(\{ gameReminder: /.test(sched));
 
 console.log("\n— a Rule 4.3 merge that ends level");

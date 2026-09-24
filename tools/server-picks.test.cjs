@@ -146,7 +146,8 @@ console.log("\n— the rulebook carries the procedure it is cited for");
   A("4.2 says a player's suggestion is advisory", /Those answers are advisory/.test(body));
   A("10.1 defines the standard server", /Standard server/.test(s101.paragraphs.join(" ")));
   A("10.1 defines the veto", /the one server the Away club declares it/.test(s101.paragraphs.join(" ")));
-  A("the changelog opens at 2.96", obj.rulebook.changelog[0].version === "2.96", obj.rulebook.changelog[0].version);
+  A("4.2 records the notice the office owes each club", /the league office posts each club, in its own club room, a single notice/.test(body));
+  A("...and that none of it goes out early", /Nothing of that notice is sent before the night\s+locks/.test(body.replace(/\s+/g, " ")) || /Nothing of that notice is sent before the night locks/.test(body));
 }
 
 console.log("\n" + (fail ? "FAIL " + fail + " of " + n : "PASS " + n));
