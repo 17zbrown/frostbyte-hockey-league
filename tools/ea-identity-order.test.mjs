@@ -28,12 +28,15 @@ console.log("— the order is written down in the order it runs");
 {
   const body = src.slice(src.indexOf("async function resolveProfile"), src.indexOf("cache.set(key, pid)"));
   const at = (needle) => body.indexOf(needle);
-  A("1st: the EA persona id link", at("L.prior(entry.ea_player_id)") > -1);
-  A("2nd: the EA ID on the profile", at("L.profileEaId(gt)") > at("L.prior(entry.ea_player_id)"));
-  A("3rd: the EA ID from registration", at("L.regEaId(gt)") > at("L.profileEaId(gt)"));
-  A("4th: only then the site gamertag", at("L.gamertag(gt)") > at("L.regEaId(gt)"),
+  A("1st: EA's persona id, held on the profile", at("L.profilePersona(entry.ea_player_id)") > -1);
+  A("2nd: the same persona seen in an earlier box score", at("L.prior(entry.ea_player_id)") > at("L.profilePersona(entry.ea_player_id)"));
+  A("3rd: the EA ID on the profile", at("L.profileEaId(gt)") > at("L.prior(entry.ea_player_id)"));
+  A("4th: the EA ID from registration", at("L.regEaId(gt)") > at("L.profileEaId(gt)"));
+  A("5th: only then the site gamertag", at("L.gamertag(gt)") > at("L.regEaId(gt)"),
     `gamertag at ${at("L.gamertag(gt)")}, regEaId at ${at("L.regEaId(gt)")}`);
   A("last: the squashed fallback", at("fuzzyProfile(gt)") > at("L.gamertag(gt)"));
+  A("the id is asked before any name at all",
+    at("L.profilePersona(entry.ea_player_id)") < at("L.profileEaId(gt)") && at("L.profilePersona(entry.ea_player_id)") < at("L.gamertag(gt)"));
   A("the reason is recorded next to the code, not just in a commit",
     /box-score name is an EA identity/i.test(body) && /Lokharov/.test(body));
 }
@@ -58,12 +61,12 @@ console.log("\n— both lookup sources offer the new step, or a whole box score 
      bug class this file exists to stop. */
   const live = src.slice(src.indexOf("function liveLookups"), src.indexOf("/* The same three lookups"));
   const game = src.slice(src.indexOf("function gameLookups"), src.indexOf("async function resolveProfile"));
-  for (const step of ["prior", "profileEaId", "regEaId", "gamertag"]) {
+  for (const step of ["profilePersona", "prior", "profileEaId", "regEaId", "gamertag"]) {
     A(`liveLookups offers ${step}`, new RegExp(`\\b${step}:`).test(live));
     A(`gameLookups offers ${step}`, new RegExp(`\\b${step}:`).test(game));
   }
   A("the prefetch has its own memo for the new step", /profEaP \|\|= sbGet/.test(game));
-  A("...declared with the others", /let priorP = null, tagP = null, regP = null, profEaP = null;/.test(game));
+  A("...declared with the others", /let priorP = null, tagP = null, regP = null, profEaP = null, personaP = null;/.test(game));
   A("...and it is case-insensitive like its siblings", /orIlike\("ea_id", names\)/.test(game));
 }
 
@@ -75,6 +78,20 @@ console.log("\n— two people matching a name is still nobody");
   const fz = src.slice(src.indexOf("async function fuzzyProfile"), src.indexOf("const cleanTag"));
   A("the fuzzy step refuses on two", /if \(ids\.length > 1\) return null/.test(fz));
   A("...and each lookup asks for two so it can tell", (src.match(/limit=2/g) || []).length >= 4);
+}
+
+console.log("\n— the system only has to recognise a member once");
+{
+  A("personas are learned after the rows are built", /await learnPersonas\(rows\);/.test(src));
+  A("...only filling a NULL, never overwriting", /ea_player_id=is\.null/.test(src));
+  A("...and the reason that filter is there is written down", /a concurrent writer cannot be clobbered/.test(src));
+  A("a persona already claimed by another profile is logged, not thrown",
+    /r\.status === 409/.test(src) && /duplicate account\?/.test(src));
+  A("...so learning can never fail an import", /the import is unaffected/.test(src));
+  A("a row with no profile or no persona is skipped", /if \(!r\.profile_id \|\| !r\.ea_player_id\) continue;/.test(src));
+  A("one profile is written at most once per box score", /if \(!seen\.has\(key\)\) seen\.set\(key/.test(src));
+  A("the database refuses two profiles claiming one persona (recorded)",
+    /a unique index refuses to give one persona to two profiles/.test(src));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

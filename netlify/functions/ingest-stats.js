@@ -297,9 +297,13 @@ function liveLookups(seasonId) {
     // 2) site gamertag — exact (case-insensitive), and never a guess between two people
     gamertag: async (gt) =>
       uniq(((await sbGet(`profiles?gamertag=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`)) || []).map((r) => r.id)),
-    // 3) the EA ID on the member's own profile — the field Settings writes and registration
+    // v3.04: EA's own persona id, held on the profile. The ONLY identifier in an EA payload that
+    //    is not a display name, so it is asked before every name.
+    profilePersona: async (eaPlayerId) =>
+      uniq(((await sbGet(`profiles?ea_player_id=eq.${encodeURIComponent(String(eaPlayerId))}&select=id&limit=2`)) || []).map((r) => r.id)),
+    // the EA ID on the member's own profile — the field Settings writes and registration
     //    requires. v3.02: this was missing from the exact chain entirely; a box-score name is an
-    //    EA identity, so it belongs here and it belongs FIRST.
+    //    EA identity, so it belongs here and it belongs before the site name.
     profileEaId: async (gt) =>
       uniq(((await sbGet(`profiles?ea_id=ilike.${encodeURIComponent(likeSafe(gt))}&select=id&limit=2`)) || []).map((r) => r.id)),
     // 4) EA id captured at signup for this season — same rule
@@ -330,7 +334,7 @@ function gameLookups(entries, seasonId) {
     }
     return m;
   };
-  let priorP = null, tagP = null, regP = null, profEaP = null;
+  let priorP = null, tagP = null, regP = null, profEaP = null, personaP = null;
   return {
     prior: async (eaPlayerId) => {
       if (!eaIds.length) return null;
@@ -346,6 +350,20 @@ function gameLookups(entries, seasonId) {
       if (!names.length) return [];
       tagP ||= sbGet(`profiles?${orIlike("gamertag", names)}&select=id,gamertag`).then((rows) => groupByName(rows, "gamertag", "id"));
       return [...((await tagP).get(gt.toLowerCase()) || [])];
+    },
+    profilePersona: async (eaPlayerId) => {
+      if (!eaIds.length) return [];
+      personaP ||= sbGet(`profiles?ea_player_id=in.(${eaIds.map(encodeURIComponent).join(",")})&select=id,ea_player_id`)
+        .then((rows) => {
+          const m = new Map();
+          for (const r of rows || []) {
+            const k = String(r.ea_player_id);
+            if (!m.has(k)) m.set(k, new Set());
+            m.get(k).add(r.id);
+          }
+          return m;
+        });
+      return [...((await personaP).get(String(eaPlayerId)) || [])];
     },
     profileEaId: async (gt) => {
       if (!names.length) return [];
@@ -378,24 +396,29 @@ async function resolveProfile(entry, seasonId, cache, src) {
        carrying ea_id "Lokharovl14l" was never reached. Verified against the whole of game night
        one: that was the only name where the two disagreed, and nobody resolved by Discord name
        alone. */
-    // 1) prior link by EA persona id — the strongest EA identity there is
-    pid = await L.prior(entry.ea_player_id);
-    // 2) the EA ID on the member's profile
+    // 1) EA's persona id, recorded on the profile. v3.04: the one identifier EA sends that is not
+    //    a display name. Once learned (below) a member matches on it forever, whatever he renames
+    //    himself to and whatever he typed into the EA ID box.
+    const byPersona = await L.profilePersona(entry.ea_player_id);
+    if (byPersona.length === 1) pid = byPersona[0];
+    // 2) the same persona seen in an earlier box score (covers anyone linked before the column existed)
+    if (!pid) pid = await L.prior(entry.ea_player_id);
+    // 3) the EA ID on the member's profile
     if (!pid) {
       const ids = await L.profileEaId(gt);
       if (ids.length === 1) pid = ids[0];
     }
-    // 3) the EA ID captured at signup for this season
+    // 4) the EA ID captured at signup for this season
     if (!pid && seasonId) {
       const ids = await L.regEaId(gt);
       if (ids.length === 1) pid = ids[0];
     }
-    // 4) only now the site gamertag — exact, and never a guess between two people
+    // 5) only now the site gamertag — exact, and never a guess between two people
     if (!pid) {
       const ids = await L.gamertag(gt);
       if (ids.length === 1) pid = ids[0];
     }
-    // 5) squashed-pattern fallback across the names a player is known by IN GAME
+    // 6) squashed-pattern fallback across the names a player is known by IN GAME
     if (!pid) pid = await fuzzyProfile(gt);
   }
   cache.set(key, pid);
@@ -993,7 +1016,44 @@ async function leagueBoxRows(game, clubByTeam, cache = new Map()) {
       });
     }
   }
+  await learnPersonas(rows);
   return rows;
+}
+
+/* v3.04 — the system only has to recognise a member ONCE. Whenever a box-score row resolves to a
+   profile by any route, EA's persona id for that row is written onto the profile if it has none.
+   From the next game on he matches on the id, before any name is considered, so a rename, a
+   mismatched EA ID box or a console persona that differs from the EA account name can never cost
+   him his stats again.
+
+   Deliberately conservative, because a wrong link here is worse than no link:
+     - only fills a NULL; an id already on a profile is never overwritten;
+     - `ea_player_id=is.null` in the filter means a concurrent writer cannot be clobbered;
+     - a unique index refuses to give one persona to two profiles (that IS a duplicate account and
+       should fail loudly), and a 409 is logged, not thrown, so it can never fail an import;
+     - a row with no profile or no persona is skipped rather than guessed at. */
+async function learnPersonas(rows) {
+  const seen = new Map();
+  for (const r of rows || []) {
+    if (!r.profile_id || !r.ea_player_id) continue;
+    const key = String(r.profile_id);
+    if (!seen.has(key)) seen.set(key, String(r.ea_player_id));
+  }
+  if (!seen.size) return;
+  let learned = 0;
+  for (const [profileId, persona] of seen) {
+    try {
+      const r = await fetch(
+        `${SB_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&ea_player_id=is.null`,
+        { method: "PATCH", headers: sbHeaders({ Prefer: "return=representation" }),
+          body: JSON.stringify({ ea_player_id: persona }) });
+      if (r.status === 409) { console.log(`ingest: persona ${persona} is already another profile's — duplicate account?`); continue; }
+      if (!r.ok) { console.warn(`ingest: could not learn persona ${persona}: ${r.status} ${(await r.text()).slice(0, 120)}`); continue; }
+      const back = await r.json().catch(() => []);
+      if (Array.isArray(back) && back.length) learned++;
+    } catch (e) { console.warn("ingest: learning a persona failed (the import is unaffected):", String(e && e.message || e)); }
+  }
+  if (learned) console.log(`ingest: learned ${learned} EA persona id(s) — those members now match on id, not on a name`);
 }
 
 export const handler = async (event) => {

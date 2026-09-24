@@ -284,7 +284,7 @@ CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
    so a signed-out scraper cannot harvest members' Discord identities from /rest/v1/profiles.
    Keep this in sync with the GRANT in the lock_down_profiles_columns migration. */
 CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,twitch,live,"+
-  "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone,preferred_server";
+  "overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone,preferred_server,ea_player_id";
 /* games: everything but the private lobby code and the server pick. Those two columns are no
    longer granted to the API roles (v2.57, Rule 4.2): they are read through the games_public view,
    which masks them unless the database's can_see_match() says the reader is on one of the two
@@ -12642,7 +12642,14 @@ CG.hubSettings = function(){
     '<div class="grid g2" style="align-items:start"><div class="card"><div class="card-h"><h3>League profile</h3></div><div class="card-b">'+
     '<label class="fld"><span>Display name / gamertag</span><input value="'+esc(p.gamertag||p.display_name||"")+'" readonly style="background:var(--ice);color:var(--steel)">'+
     '<span class="hint">Synced automatically from your Discord display name every few minutes — change it there and it flows here.</span></label>'+
-    '<label class="fld"><span>EA ID</span><input id="sEaLive" value="'+esc(p.ea_id||"")+'"><span class="hint">Used to link your EA box scores to your profile — required to register.</span></label>'+
+    '<label class="fld"><span>EA ID</span><input id="sEaLive" value="'+esc(p.ea_id||"")+'">'+
+    /* v3.04: six members typed their EA ACCOUNT name here while the game reports their console
+       persona, so their box scores matched nobody. Say which one the league needs. Once a box
+       score has found them once the persona id is stored and the name stops mattering at all. */
+    '<span class="hint">'+(p.ea_player_id
+      ? '<b style="color:var(--green,#2F9E44)">Linked to your EA account.</b> Your box scores find you automatically now, whatever you rename yourself to.'
+      : 'Enter the name that appears on your <b>EA box score</b>, exactly as it shows in game. If your EA login and your in-game name are different, the league needs the in-game one: that is the only name the game reports. Required to register.')+
+    '</span></label>'+
     '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
     '<label class="fld"><span>Suggested server</span><select id="sSrvLive"><option value="">No preference</option>'+
       (CG.SERVERS||[]).map(function(x){ return '<option value="'+esc(x)+'"'+((p.preferred_server||"")===x?" selected":"")+'>'+esc(x)+'</option>'; }).join("")+

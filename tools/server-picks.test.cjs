@@ -58,7 +58,9 @@ console.log("\n— the standard server");
 
 console.log("\n— a player's suggested server");
 {
-  A("the column rides down with the league load", /departments,timezone,preferred_server"/.test(live));
+  /* name the column, not its neighbours: this list grows and a pin on the trailing item breaks
+     every time something is appended after it */
+  A("the column rides down with the league load", /CG\.PROFILE_PUBLIC_COLS = [\s\S]{0,240}preferred_server/.test(live));
   A("every roster player carries it", /server: p\.preferred_server \|\| null,/.test(live));
   A("Settings offers the choice", /id="sSrvLive"/.test(live));
   A("No preference is a real answer", /<option value="">No preference<\/option>/.test(live));
