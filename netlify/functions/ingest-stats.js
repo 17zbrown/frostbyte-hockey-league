@@ -253,7 +253,13 @@ function mergeSegments(segments) {
 async function fuzzyProfile(gt) {
   const toks = gt.split(/\s+/).filter(Boolean);
   if (!toks.length) return null;
-  for (const pat of [toks.join("*"), `*${toks.join("*")}*`]) {
+  /* v2.99: escape the LIKE metacharacters in each TOKEN, then join with `*`. `*` is the wildcard
+     this step exists to use; `_` is one by accident, and gamertags are full of underscores, so
+     "Dangle_47" matched "DangleX47" here exactly as the exact-match steps were fixed not to.
+     A single wrong match is the worst outcome available: the stat line is welded to the wrong
+     human, and the unrostered-player check downstream sees a rostered player and stays quiet. */
+  const escTok = (t) => t.replace(/([\\%_])/g, "\\$1");
+  for (const pat of [toks.map(escTok).join("*"), `*${toks.map(escTok).join("*")}*`]) {
     const q = encodeURIComponent(pat);
     const rows = await sbGet(`profiles?or=(ea_id.ilike.${q},platform_gamertag.ilike.${q},gamertag.ilike.${q},discord_username.ilike.${q})&select=id&limit=2`);
     const ids = [...new Set((rows || []).map((r) => r.id))];
