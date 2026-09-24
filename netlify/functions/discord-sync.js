@@ -299,6 +299,11 @@ async function announceDepartures(gone, profByDiscord, codeByTeam, registered, s
    The grace window exists for the same reason trackDepartures has its census guards — a
    kick-and-rejoin or a bad read must never cost anyone their sign-up date. */
 const SIGNUP_REMOVAL_GRACE_HOURS = 24;
+/* The window a ROSTERED member gets to come back before his sign-up is revoked and his club loses
+   him. Measured from the notice in his club's room, never from when the census saw him leave, so
+   nobody is removed who was not warned and given the whole window (public.sweep_roster_departures
+   holds the clock in roster_departure_notices). */
+const ROSTER_DEPARTURE_GRACE_HOURS = 24;
 async function removeDepartedSignups(sum) {
   let removed = [];
   try {
@@ -2384,6 +2389,20 @@ export async function runSweep(opts = {}) {
      first. */
   try { await removeDepartedSignups(sum); }
   catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); }
+
+  /* v3.11 — the same rule for a member the census finds ROSTERED rather than merely signed up.
+     He cannot be told himself: Discord refuses a bot DM to anyone who shares no server with it,
+     which the league proved 5 for 5 on exactly this population. So the club's room is told, with
+     @cghl management on it, and the club reaches him by whatever means it has.
+     Sits right here, immediately after the census, for the same reason the sign-up sweep does:
+     the notice and the removal must read a fresh in_guild, not one the role passes have aged. */
+  try {
+    const acted = (await sbPost("rpc/sweep_roster_departures",
+      { p_grace_hours: ROSTER_DEPARTURE_GRACE_HOURS }, "return=representation")) || [];
+    if (acted.length) {
+      sum.rosterDepartures = acted.map((a) => `${a.action}: ${a.gamertag}${a.club ? " (" + a.club + ")" : ""}`);
+    }
+  } catch (e) { sum.errors.push({ rosterDepartures: String(e.message || e) }); }
 
   // the Team Management category + its rooms (private to the front office) and the FAQ forums —
   // both keyed by stored id, so a rename is followed rather than duplicated

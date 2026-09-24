@@ -136,7 +136,17 @@ export function createClubNotices(env, opts = {}) {
       }
       if (!(await claim(ref))) { sum.skipped++; return "claimed-elsewhere"; }
       try {
-        await post(t.discord_channel_id, { embeds: [buildNoticeEmbed(row, actor)], allowed_mentions: { parse: [] } });
+        /* v3.11 — a notice may carry ONE role mention (ping_role_id). The role has to be named in
+           BOTH the content and allowed_mentions.roles: content alone renders the mention but
+           Discord suppresses the notification, and allowed_mentions alone pings nobody because
+           there is no mention in the body to allow. Everything without the column behaves exactly
+           as before, mentions suppressed, because the default is null. */
+        const ping = row.ping_role_id ? String(row.ping_role_id) : null;
+        await post(t.discord_channel_id, {
+          ...(ping ? { content: `<@&${ping}>` } : {}),
+          embeds: [buildNoticeEmbed(row, actor)],
+          allowed_mentions: ping ? { parse: [], roles: [ping] } : { parse: [] },
+        });
       } catch (e) {
         const msg = String(e.message || e).slice(0, 200);
         if (e.provable) {

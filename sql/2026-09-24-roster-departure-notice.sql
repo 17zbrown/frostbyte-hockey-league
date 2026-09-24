@@ -1,0 +1,53 @@
+-- v3.11 — Rule 1.1 extended: leaving the Discord costs a ROSTERED player his spot, after his club
+-- has been given a day to reach him.
+--
+-- Commissioner: "Can you instead send a reminder to their team's channel and @cghl management that
+--  they left and they have 24 hours to return or their signup is revoked and they are removed from
+--  the team so the management can reach out themselves?"
+--
+-- WHY THE CLUB AND NOT THE PLAYER. The first ask was a DM to the player. Discord refuses a bot DM
+-- to anyone who shares no server with it, and the league's own data proves it on exactly this
+-- population: of 38 DMs ever attempted, the 33 to members still in the guild all delivered and the
+-- 5 to members who had left were ALL refused 403 "Cannot send messages to this user". Those 5 are
+-- the 5 people in question. So the club is told, with @cghl management on it, and the club reaches
+-- him by whatever means it has.
+--
+-- THE NOTICE IS THE CLOCK. roster_departure_notices holds one row per (profile, season): when the
+-- club was told and when the window shuts. The window runs from notified_at and NOT from when the
+-- census saw him go, so nobody is ever removed who was not warned and given the whole window. The
+-- five who left on Sep 20-21 therefore get a fresh 24 hours from their notice, not a removal on
+-- the first tick.
+--
+-- WHAT THE SWEEP DOES, in one pass (public.sweep_roster_departures):
+--   A notice   rostered + out of the guild + no open notice -> notice row + club room + ping
+--   B rejoined open notice + back in the guild              -> cancel, tell the club, nothing lost
+--   C expire   open notice + past deadline + still out      -> revoke the registration (archived to
+--              season_registration_removals), delete the roster spot, transaction row, tell the club
+-- Idempotent: rehearsed, a second pass in the same tick returns 0 actions.
+--
+-- A FRONT OFFICE SEAT IS NEVER REMOVED AUTOMATICALLY. An Owner, GM or AGM who leaves is reported to
+-- the operations desk and left to the league office. protect_manager_spot would have raised on the
+-- delete anyway; catching it first turns a hard error into a decision someone actually sees.
+--
+-- THREE GUARDS STAND BETWEEN THE SWEEP AND THE DELETE, and all three had to be answered:
+--   trg_mgmt_gate_block  -> app.mgmt_approved = the team id (the Owner's own permission gate)
+--   protect_manager_spot -> skipped above rather than bypassed
+--   guard_roster_waive   -> app.office_removal = '1' (see below)
+-- guard_roster_waive blocks a waive once moves are locked and let ONLY a commissioner through. The
+-- sweep runs as the service role, not as a person, so at the trade deadline it would have been
+-- refused and departed members would have sat on rosters exactly when a spot matters most. A
+-- league-office removal is not a club waive, so it gets one named, transaction-local flag.
+--
+-- THE DELETE FAILS LOUD: row_count is checked and a removal that touched no roster spot raises
+-- rather than stamping removed_at over nothing.
+--
+-- TRAP, and it cost a rolled-back transaction: adding p_ping_role to club_notify with a DEFAULT
+-- creates an OVERLOAD, not a replacement. Two club_notify functions would have left the existing
+-- 7-argument callers binding to the old one, which cannot ping. DROP the old signature, then
+-- CREATE. The in-transaction assertion (count of club_notify = 1) is what caught it.
+--
+-- See the deployed definitions for the bodies. Rehearsed end to end against the 5 real departures
+-- and rolled back: 5 notified / 0 removed / roster untouched / 5 club notices all carrying role
+-- 1537932345494085664; a second pass 0; one rejoin cancelled and kept his spot; the clock moved
+-- past the deadline removed the other 4, archived their registrations and wrote 4 transactions;
+-- a final pass 0. Rollback verified: 0 notices left behind, the archive back to its prior count.
