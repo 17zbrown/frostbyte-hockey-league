@@ -7707,11 +7707,28 @@ CG.AFTER._admTeams = function(){
 CG.ACTION_META = {
   complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
   appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
-  trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s management for a move — private to your club." },
+  trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s front office for a move. It goes to your Owner, GM and AGM, and to nobody else (Rule 2.3)." },
   position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." }
 };
 CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
 CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
+/* v3.23 — what the league office's desks count as CASEWORK.
+   Commissioner: "Remember trade requests go to the team management of the player requesting the
+   trade... Not the league staff." A manager-routed case is a club matter: it is filed to a club's
+   front office, answered there, and the league office only sees it as the appeal path. It must not
+   appear on a staff desk, in the open-case count, or in the ticket archive's filters, because every
+   one of those says "this is ours to action".
+   Non-commissioner staff cannot even READ these any more (the action_requests select policy scopes
+   its staff clause to a non-manager route), so for them this filter is belt and braces. For a
+   commissioner, who can still read them, it is the whole thing. */
+CG.staffCases = function(){
+  return ((CG.lg && CG.lg._actionReqs) || []).filter(function(a){ return (a.route || "") !== "manager"; });
+};
+/* the other half: a club's own front office reading what its players filed */
+CG.clubCases = function(teamId){
+  return ((CG.lg && CG.lg._actionReqs) || []).filter(function(a){
+    return (a.route || "") === "manager" && a.team_id === teamId; });
+};
 CG.loadActionRequests = async function(){
   if (!CG.sb || !CG.lg || !CG.auth.user) return;
   CG._actionLoadError = null;
@@ -7760,9 +7777,12 @@ CG.rerenderIfShowingCases = function(){
 CG.refreshActions = function(){
   CG.loadActionRequests().then(CG.rerenderIfShowingCases);
 };
-/* dashboard tiles + counts read this — map real rows to the prototype shape */
+/* dashboard tiles + counts read this, and every one of its callers is a LEAGUE OFFICE count:
+   the Control Center overview, the admin dashboard, and the "open cases in the league office"
+   nudge. So it reads CG.staffCases: a club's trade request is not the league office's open case.
+   A member's own cases come from `mine` in hubComplaintsLive, not from here. */
 CG.visibleComplaints = function(){
-  return (CG.lg._actionReqs||[]).map(function(a){
+  return CG.staffCases().map(function(a){
     var closed = a.status==="resolved"||a.status==="denied";
     return { caseId:(a.id||"").slice(0,8), category:(CG.ACTION_META[a.type]||{}).label||a.type,
       status: closed?"Resolved":"Under review", assignedTo:"", confidential:false,
@@ -7871,8 +7891,10 @@ CG.hubComplaintsLive = function(opts){
   var review = isCommish || (CG.role()==="staff" && !(CG.mediaOnlyStaff && CG.mediaOnlyStaff()));
   var all = (CG.lg._actionReqs||[]);
   var uid = CG.auth.user && CG.auth.user.id;
+  /* MINE is the raw list on purpose: a player must always see the trade request he filed. The
+     review queue is not, because that is the league office's desk and a club matter is not on it. */
   var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
-  var queue = review && !opts.mineOnly ? all : mine;
+  var queue = review && !opts.mineOnly ? CG.staffCases() : mine;
   /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
   var flt = review ? (CG._caseFilter||"all") : null;
   if (review){
@@ -8004,7 +8026,9 @@ CG.fileActionRequest = function(type){
   }
   if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
   fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
-    '<p class="caption">'+(meta.route==="manager"?"Private to your club’s management.":"Goes to the league office — commissioners are notified instantly.")+'</p>';
+    '<p class="caption">'+(meta.route==="manager"
+      ? "Private to your club’s front office. Your Owner, GM and AGM are notified on the site and on Discord. The league office does not receive it (Rule 2.3)."
+      : "Goes to the league office. Commissioners are notified instantly.")+'</p>';
   CG.modal("File — "+esc(meta.label), fields,
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="acGo">Submit</button>');
   CG.wireMemberPicker("acTarget");
@@ -8029,7 +8053,7 @@ CG.fileActionRequest = function(type){
       btn.disabled=false;
       if (r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
       if (CG.closeOverlay) CG.closeOverlay();
-      CG.toast(meta.route==="manager"?"Sent to your club’s management":"Filed — the league office has it","ok");
+      CG.toast(meta.route==="manager"?"Sent to your club’s front office":"Filed. The league office has it","ok");
       CG.refreshActions();
     });
   });
@@ -8504,7 +8528,7 @@ CG.staffAttentionCard = function(){
   var a = CG._staffAttention, lg = CG.lg;
   /* client fallback for the counts the RPC would provide */
   if (!a){
-    var oc = (lg._actionReqs||[]).filter(function(x){ return x.status!=="resolved" && x.status!=="denied"; }).length;
+    var oc = CG.staffCases().filter(function(x){ return x.status!=="resolved" && x.status!=="denied"; }).length;
     a = { open_cases:oc, oldest_case_hours:null, sla_breached:0,
       pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
       pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
@@ -9387,7 +9411,7 @@ CG.AFTER._applicationDetail = function(){
    page (the case thread or the application response), so the whole history is browsable. */
 CG.allTickets = function(){
   var lg = CG.lg || {}, out = [];
-  (lg._actionReqs||[]).forEach(function(a){
+  CG.staffCases().forEach(function(a){
     var meta = CG.ACTION_META[a.type] || { label:a.type, icon:"flag" };
     var closed = a.status==="resolved" || a.status==="denied";
     out.push({ group:a.type, typeLabel:meta.label, icon:meta.icon||"flag",
@@ -9449,7 +9473,10 @@ CG.hubTicketArchive = function(){
       '<span class="caption">'+(t.at?CG.fmtDay(t.at):"")+'</span>'+
       '<span class="caption" aria-hidden="true">→</span></div>';
   }
-  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["trade_request","Trade requests"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"],["management","GM / AGM"]];
+  /* v3.23: "Trade requests" is gone from the archive's filters. It is a club matter and
+     CG.staffCases no longer feeds any rows of that type into this list, so the chip would have
+     filtered an always-empty set and told staff it was theirs. */
+  var typeF = [["all","All"],["complaint","Complaints"],["appeal","Appeals"],["position_change","Position changes"],["staff","Staff apps"],["owner","Owner apps"],["management","GM / AGM"]];
   var statusF = [["all","All"],["open","Open / pending"],["closed","Resolved / decided"]];
 
   var h = '<div style="margin-bottom:18px"><a class="sec-link" href="#/hub/staffdesk">'+CG.ic("back",14)+' Staff Desk</a>'+
@@ -9480,7 +9507,7 @@ CG.AFTER._ticketArchive = function(){
 };
 CG.hubStaffDesk = function(){
   var lg = CG.lg;
-  var reqs = (lg._actionReqs||[]);
+  var reqs = CG.staffCases();
   /* terminal statuses are 'resolved' and 'denied' — a denied case is closed, not open */
   var open = reqs.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
   /* warnings live in the same table but never count as suspensions */

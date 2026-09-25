@@ -1,0 +1,63 @@
+-- v3.23: a trade request is a CLUB matter, and goes to the club's front office.
+--
+-- Commissioner, 2026-09-25: "Remember trade requests go to the team management of the player
+--  requesting the trade... Not the league staff."
+--
+-- ============================================================================
+-- WHAT WAS ACTUALLY WRONG, and only one of the four was the obvious one
+-- ============================================================================
+-- 1. notify_action_request notified teams.gm_profile_id ALONE. A club whose Owner or AGM runs
+--    roster moves got nothing at all. The read side had been right the whole time: is_gm_of(team)
+--    covers Owner, GM and AGM despite its name, so who could READ the case and who was TOLD about
+--    it had always disagreed. Worth stating because it is the kind of split nobody notices: the
+--    right people could see it, so it looked like it worked.
+-- 2. It ALSO called notify_commissioners for every manager-routed case, which is exactly the
+--    league staff the instruction rules out.
+-- 3. _staff_attention counted manager-routed rows in open_cases, oldest_case_hours and
+--    sla_breached, so a club's private request aged on the league office's 48-hour SLA clock, on a
+--    desk that cannot act on it.
+-- 4. The action_requests SELECT policy did not scope its staff clause by route, so every
+--    non-media staffer could read any club's trade requests.
+-- And the filer's own receipt said "Staff will review it", about a case no staffer would open.
+--
+-- ============================================================================
+-- WHAT IT DOES NOW
+-- ============================================================================
+-- The manager branch loops the club's THREE seats, gives each a site notification pointing at the
+-- case thread, and queues a Discord DM to each seat that has a linked account (a roster request
+-- that sits unread for a week is the same as no request). A seat with no Discord simply does not
+-- get a DM; it must never break the filing, so the insert is a SELECT that yields no row.
+--
+-- THE ONE EXCEPTION, deliberate: a club with NO front office at all. Without it the request reaches
+-- nobody while the player is told it was delivered. The league office is notified in that case
+-- only, and the commissioner read below is what lets them then open it.
+--
+-- Commissioners keep read access. They are the appeal path, and the no-front-office fallback hands
+-- them a case they must be able to open. NON-COMMISSIONER STAFF LOSE IT: the policy's staff clause
+-- is now scoped to `coalesce(route,'') <> 'manager'`.
+--
+-- Client: CG.staffCases() is the single definition of "league casework" (everything except
+-- manager-routed) and all four staff consumers read it: the Officials' desk, the Staff Desk, the
+-- attention card's client fallback, and the ticket archive. The archive's "Trade requests" filter
+-- chip is gone, because it would now filter an always-empty set while still telling staff it was
+-- theirs. CG.clubCases(teamId) is the other half, for the club's own front office.
+--
+-- Rule 2.3 gained a paragraph: the request goes to the Owner, GM and AGM and to nobody else, the
+-- league office neither receives it nor rules on it, a club is under no obligation to act, a player
+-- is under no obligation to explain, the no-front-office case is covered, and a request is not a
+-- trade (any move that follows is an ordinary trade needing both clubs).
+--
+-- ============================================================================
+-- REHEARSED, rolled back. pg_net is transactional, so nothing was sent.
+-- ============================================================================
+-- Filed a real trade request as a real SEA player and asserted: 0 commissioners notified, bells =
+-- seats + the filer, at least one Discord DM queued, the staff desk open-case count UNCHANGED, and
+-- the filer's receipt saying it went to management and not the league office. Then filed a
+-- COMPLAINT in the same transaction and asserted the opposite: commissioners notified, and the
+-- staff desk count up by exactly one. A change that quietly broke complaints while fixing trade
+-- requests would otherwise have looked like a success.
+--
+-- TRAP the rehearsal hit first: `profile_id not in (select unnest(array[owner,gm,agm]))` is NULL
+-- for every row when any seat is NULL, so it matches nothing. The first run reported "no
+-- non-management player" on a club carrying twenty. Use `is distinct from` per seat.
+-- Second trap: the notifications table's column is link_param, not param.

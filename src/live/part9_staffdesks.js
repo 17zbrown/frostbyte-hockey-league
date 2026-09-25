@@ -403,7 +403,8 @@ CG.deskOfficials = function(){
   /* warnings are split OUT of lg.suspensions at the loader (lg.warnings) — filtering suspensions
      for mode==="warning" found nothing, so the desk showed zero warnings however many existed */
   var warns = (lg.warnings||[]).filter(function(s){ return s.status==="active"; });
-  var open = (lg._actionReqs||[]).filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
+  /* v3.23: CG.staffCases drops manager-routed club matters; a trade request is not officiating */
+  var open = CG.staffCases().filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
 
   var h = CG.deskHead("Officiating · game nights", "Officials’ desk",
     "Rule on the night: forfeits, voids, and discipline. Everything here is the league record the moment you save it.");
