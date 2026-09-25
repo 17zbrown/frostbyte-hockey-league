@@ -1,0 +1,91 @@
+-- v3.20: Rule 4.6, a club that could not use its own EASHL club played one fixture under another.
+--
+-- Commissioner, 2026-09-25: "The VAN vs PIT game was unique. VAN had to use an outside club due to
+--  a game problem so treat that outside club as VAN for this game 1 game only." Then, on the
+--  scoreline: "the game ended in a 6-5 win for the Canucks."
+--
+-- THE GAME. Sep 24, 10:10 PM ET, PIT (home) v VAN (away), fixture cf73a10d. Vancouver played as
+-- LG ThunderBirds, EA club 10200. The importer had already fetched the match (1420582190495) and
+-- refused it with "one club is not linked to an EA club", leaving the fixture 'scheduled' with no
+-- score. The payload: ThunderBirds 6, CGHL Pittsburgh Penguins 5, a full 3600 seconds of game
+-- clock, no disconnect flags, 6 a side. Five of the six ThunderBirds were Canucks by EA persona,
+-- and the sixth (the goaltender, YTBlood_GH0ST) resolved once the commissioner corrected his EA ID:
+-- Young Grasshopper, VAN active roster, position G, playing G.
+--
+-- ============================================================================
+-- WHY NOT JUST REPOINT teams.ea_club_id
+-- ============================================================================
+-- Because it is not true, and it does not stay put. Setting VAN.ea_club_id = 10200 would make every
+-- ThunderBirds lobby, forever, a Vancouver league game, and would make Vancouver's own club stop
+-- importing. It also loses the fact that this happened. The whole point of the fix below is that the
+-- substitution is SCOPED: one fixture, recorded, reversible, and visible.
+--
+-- ============================================================================
+-- game_club_substitutions (game_id, ea_club_id) -> team_id
+-- ============================================================================
+-- Plus reason (required), created_by, created_at. unique (game_id, team_id): one substitute per side.
+-- Index on ea_club_id, because that is the direction the importer reads it.
+--
+-- THREE GUARDS, in a BEFORE trigger so every path answers them, not just the RPC. Each was
+-- rehearsed and each fired:
+--   1. the substitute stands in for one of THIS fixture's two clubs, never a third party;
+--   2. an EA club a league club already owns is refused: that is a mis-link to correct in the
+--      Control Center, and accepting it here would let one club file as another;
+--   3. the game must still be 'scheduled'. Afterwards the score is published, and changing which
+--      club a box score belonged to is a ruling and not an import setting.
+--
+-- Grants follow the recorded trap: pg_default_acl still grants a new table arwdDxtm to BOTH anon
+-- and authenticated, and `revoke ... from public` does not touch a role-specific grant.
+--   alter table ... enable row level security;
+--   revoke all on public.game_club_substitutions from anon, authenticated, public;
+--   grant select on public.game_club_substitutions to authenticated;
+--   create policy gcs_read_staff ... using (public.is_stats_staff() or public.is_commissioner());
+-- Asserted in-transaction: zero anon/PUBLIC grants, RLS on, and exactly ONE definition of each
+-- function (a defaulted argument makes an overload, not a replacement).
+--
+-- set_game_club_substitution(game, ea_club_id, team, reason) and
+-- clear_game_club_substitution(game, ea_club_id): both gated to is_stats_staff() or
+-- is_commissioner(), both fail loud, both log_admin_action. The reason is mandatory: a substitution
+-- with no explanation is indistinguishable from a mistake six weeks later.
+--
+-- ============================================================================
+-- THE IMPORTER: netlify/functions/ingest-stats.js, ingestOne
+-- ============================================================================
+-- One seam. Club resolution used to be:
+--   const teams = await sbGet(`teams?ea_club_id=in.(...)`);
+--   if (teams.length < 2) { refuse }
+--   const teamByClub = ...
+-- teamByClub is now built FIRST, then unresolved club ids are looked up in the substitution table,
+-- and the refusal tests the RESOLVED count. Everything downstream (fixture window, home/away sides,
+-- score assignment, game_stats.team_id, the lag-out merge) works unchanged, because by then the
+-- clubs are ordinary CGHL teams.
+--
+-- THE PIN IS THE WHOLE POINT:
+--   .filter((g) => !pinnedGames || pinnedGames.includes(g.id));
+-- applied to `gamesAll`, the open-fixture set, so EVERY path inherits it: the window rule, the
+-- relaxed commissioner replay, and the no-fixture refusal. Without it a substitution would turn an
+-- outside club into a permanent second identity and any lobby it ever played would file as a league
+-- game. A substitution is additionally scoped by its own fixture's WINDOW, so the same outside club
+-- can be borrowed again on another night, by another club, with no ambiguity. Two candidates in one
+-- window is nobody, the same rule as everywhere else in this importer.
+--
+-- The refusal text changed, and that matters more than it looks. It used to say only "link the
+-- club's EA id", which is exactly the wrong advice here: following it would have repointed
+-- Vancouver at somebody else's club permanently. It now offers both answers and names Rule 4.6.
+--
+-- ============================================================================
+-- RULEBOOK
+-- ============================================================================
+-- New Rule 4.6 "Playing under another club": the game counts in full, the office must be told and
+-- records the substitution against that one fixture before filing, a club's own EA club is never
+-- repointed, every player is still held to Rules 2.1 / 5.2 / 5.3, and the borrowed club may not be
+-- used to dress a player the club does not hold (that is Rule 4.2). Rule 6.2 amended in the same
+-- pass: an import requires the two clubs' linked EA clubs "or a club substitution recorded for that
+-- fixture under Rule 4.6".
+--
+-- Tests: tools/game-window.test.mjs gained a Rule 4.6 block that proves the file, the SIDES, the
+-- team_id on the rows, and four refusals (a fixture the substitution does not name, a lobby outside
+-- the window, two substitutions in one window, and no substitution at all). Re-pinned:
+-- tools/launch-correctness.test.cjs pinned `gamesAll` as a single line; it now pins the four
+-- open-fixture conditions and the substitution filter separately. tools/ingest-batch.test.mjs
+-- answers the new query with [] so the batch behaves exactly as before.

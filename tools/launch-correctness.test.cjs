@@ -51,8 +51,12 @@ console.log("\n— the availability deadline is 7:30pm ET across the DST change"
 
 console.log("\n— the EA auto-import only attaches to an open fixture");
 {
+  /* v3.20 re-pinned: the same four conditions, now on their own line because a Rule 4.6
+     substitution filter was chained after them. The invariant is what is pinned, not the line. */
   A("a box score may file only on an open fixture: scheduled, unclaimed, not voided, not forfeit-ruled (v2.37: filtered from the pair's whole night)",
-    /const gamesAll = pairAll\.filter\(\(g\) => g\.status === "scheduled" && g\.ea_match_id == null && !g\.voided && g\.forfeit_team_id == null\);/.test(ingest));
+    /const gamesAll = pairAll\s*\n?\s*\.filter\(\(g\) => g\.status === "scheduled" && g\.ea_match_id == null && !g\.voided && g\.forfeit_team_id == null\)/.test(ingest));
+  A("...and a club that borrowed another may file only on the fixture its substitution names (Rule 4.6)",
+    /\.filter\(\(g\) => !pinnedGames \|\| pinnedGames\.includes\(g\.id\)\);/.test(ingest));
 }
 
 console.log("\n— stale rules copy is corrected");

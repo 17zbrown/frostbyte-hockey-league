@@ -78,6 +78,9 @@ globalThis.fetch = async (url, opts = {}) => {
     return J({ ok: true, winner: "w", kept_result: true, score: "2-1" });
   }
   if (u.includes("/rest/v1/teams?ea_club_id=not.is.null")) return J(TEAMS.map((t) => ({ ...t, code: t.id })));
+  /* v3.20 Rule 4.6 — no club in this file borrowed another, so the substitution table is empty and
+     the batch behaves exactly as before. */
+  if (u.includes("/rest/v1/game_club_substitutions?")) return J([]);
   if (u.includes("/rest/v1/teams?ea_club_id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(String(t.ea_club_id)))); }
   if (u.includes("/rest/v1/teams?id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(t.id)).map((t) => ({ ...t, name: t.id, code: t.id }))); }
   if (u.includes("/rest/v1/ea_ingest_log?or=")) return J(world.logs);

@@ -622,18 +622,49 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
 
   // map both clubs -> our teams
   const ids = norm.clubs.map((c) => c.ea_club_id);
+  const matchEndMs = (norm.ts || 0) * 1000;
   const teams = await sbGet(`teams?ea_club_id=in.(${ids.map(encodeURIComponent).join(",")})&select=id,ea_club_id`);
-  if (teams.length < 2) {
+  const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
+  /* Rule 4.6: a club whose own EASHL club could not be used plays the fixture under an outside
+     club, and the league office records WHICH FIXTURE before it is filed. Here that record is
+     read back: the outside club id resolves to the CGHL club that borrowed it, and `pinnedGames`
+     then confines this match to that fixture and no other. The pin is the whole point. Without it
+     the substitution would turn an outside club into a permanent second identity for a league
+     club, and any lobby it ever played would file as a league game.
+     Scoped by the fixture's own window as well as the club id, so the same outside club can be
+     borrowed again on another night, by another club, without the two being confusable. */
+  let pinnedGames = null;
+  const unresolved = ids.filter((c) => !teamByClub[c]);
+  if (unresolved.length && matchEndMs) {
+    const subs = await sbGet(`game_club_substitutions?ea_club_id=in.(${unresolved.map(encodeURIComponent).join(",")})&select=game_id,ea_club_id,team_id`) || [];
+    const fx = subs.length
+      ? await sbGet(`games?id=in.(${subs.map((s) => s.game_id).join(",")})&select=id,scheduled_at`) || []
+      : [];
+    const when = Object.fromEntries(fx.map((g) => [g.id, g.scheduled_at]));
+    const live = subs.filter((s) => when[s.game_id] && matchInWindow(matchEndMs, when[s.game_id], winBefore, winAfter));
+    for (const cid of unresolved) {
+      const mine = live.filter((s) => String(s.ea_club_id) === String(cid));
+      if (mine.length !== 1) continue;   // two fixtures in one window is nobody, same rule as everywhere else
+      teamByClub[cid] = mine[0].team_id;
+      pinnedGames = (pinnedGames || []).concat(mine[0].game_id);
+    }
+  }
+  if (Object.keys(teamByClub).length < 2) {
     /* An unknown opponent is either a club outside the league (a scrimmage — never staff work) or
        a league club that has not linked its EA id yet (its game cannot import until it does — and
        THAT is staff work). The tell: does the club we do know have a fixture whose window holds
        this match? If so the unknown side is very likely the scheduled opponent, unlinked. */
-    const known = teams[0] && teams[0].id, endMs = (norm.ts || 0) * 1000;
+    const known = teams[0] && teams[0].id, endMs = matchEndMs;
     const nearby = known && endMs
       ? await sbGet(`games?or=(home_team_id.eq.${known},away_team_id.eq.${known})&voided=not.is.true&scheduled_at=gte.${encodeURIComponent(new Date(endMs - (opts.relaxed ? 86400000 : GAME_WINDOW_AFTER_MS)).toISOString())}&scheduled_at=lte.${encodeURIComponent(new Date(endMs + (opts.relaxed ? 86400000 : GAME_WINDOW_BEFORE_MS)).toISOString())}&select=id&limit=1`)
       : [];
     if (nearby.length || opts.relaxed) {
-      const why = "one club is not linked to an EA club (teams.ea_club_id) — if this is the scheduled game, link the club's EA id and file it from the fixture desk";
+      /* Two different answers, and telling staff only the first one is how a one-night substitution
+         gets "fixed" by permanently repointing a club's ea_club_id at somebody else's club. */
+      const why = "one club in this match is not a league club. If it is the scheduled opponent playing "
+        + "under its own EA club for the first time, link that club's EA id. If the club had a game "
+        + "problem and borrowed an outside club for this fixture only, record a club substitution on "
+        + "the fixture instead (Rule 4.6), then re-import";
       summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
       await archive(ctx, norm, raw, "unmatched", why);
     } else {
@@ -643,7 +674,6 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
     }
     return;
   }
-  const teamByClub = Object.fromEntries(teams.map((t) => [String(t.ea_club_id), t.id]));
   const tA = teamByClub[ids[0]], tB = teamByClub[ids[1]];
 
   // THE MATCHUP RULE (shared/game-window.cjs): a box score is filed only on an OPEN fixture between
@@ -653,7 +683,6 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   // are all refused and left for the fixture desk, where staff file by hand if one ever was the
   // league game.
   const or = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
-  const matchEndMs = (norm.ts || 0) * 1000;
   // The pair's fixtures around this match, every status: the OPEN ones are where a box score may
   // file; the rest (claimed, ruled, final) tell the window rule which slot is which on a playoff
   // night and whether this pair was scheduled at all.
@@ -664,7 +693,12 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   // Only auto-attach to a genuinely open fixture: scheduled, not voided, not forfeit-ruled. Without
   // these filters an EA payload could mark a voided game final again, or overwrite a staff forfeit
   // ruling's score with the played numbers while leaving the ruling in place (Rule 3.2 / 4.3).
-  const gamesAll = pairAll.filter((g) => g.status === "scheduled" && g.ea_match_id == null && !g.voided && g.forfeit_team_id == null);
+  const gamesAll = pairAll
+    .filter((g) => g.status === "scheduled" && g.ea_match_id == null && !g.voided && g.forfeit_team_id == null)
+    /* a substituted club may file on the ONE fixture its substitution names. Applied to the open
+       set itself so every path below inherits it: the window rule, the relaxed commissioner
+       replay, and the no-fixture refusal that follows. */
+    .filter((g) => !pinnedGames || pinnedGames.includes(g.id));
   const siblings = pairAll.filter((g) => !g.voided);
   if (!matchEndMs) {
     // EA stamps every match; without the end time the window cannot be checked, and a box score

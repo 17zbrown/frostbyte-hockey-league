@@ -93,6 +93,18 @@ globalThis.fetch = async (url, opts = {}) => {
     return J(open.concat(fin));
   }
   if (u.includes("/rest/v1/games?id=eq.") && m === "PATCH") { writes.gamePatches.push({ url: u, body: JSON.parse(opts.body) }); return NIL(); }
+  /* v3.20 Rule 4.6 — a club that borrowed an outside EASHL club for ONE fixture. Answering [] by
+     default is what keeps every other case in this file honest: the substitution must be the only
+     thing that changes behavior. */
+  if (u.includes("/rest/v1/game_club_substitutions?ea_club_id=in.")) {
+    const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
+    return J((world.subs || []).filter((x) => ids.includes(String(x.ea_club_id))));
+  }
+  if (u.includes("/rest/v1/games?id=in.")) {
+    const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
+    return J(world.open.concat(world.finals, world.held || []).filter((g) => ids.includes(g.id))
+      .map((g) => ({ id: g.id, scheduled_at: g.scheduled_at })));
+  }
   if (u.includes("/rest/v1/teams?ea_club_id=in.")) {
     const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
     return J(TEAMS.filter((t) => ids.includes(String(t.ea_club_id))));
@@ -130,7 +142,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/app_config")) return J([]);
   throw new Error("unexpected fetch " + m + " " + u);
 };
-const reset = () => { world.open = []; world.finals = []; world.held = []; world.logs = []; world.clubOnly = {}; world.withdrawals = []; world.profiles = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
+const reset = () => { world.open = []; world.finals = []; world.held = []; world.logs = []; world.clubOnly = {}; world.withdrawals = []; world.subs = []; world.profiles = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
 const summary = () => ({ received: 1, ingested: [], skipped: [], unmatched: [], errors: [] });
 /* an EA match between two clubs that ENDED at `end` (ISO) and ran `toi` seconds of game clock */
 const ea = (id, end, home, away, toi = 3600, scores = [3, 2]) => ({ matchId: id, timestamp: Math.floor(ms(end) / 1000),
@@ -180,7 +192,14 @@ console.log("— an unknown opponent: staff work only when the known club has a 
   reset(); world.open = [G900];                                            // tA plays tB at 9:00
   world.clubOnly = { tA: [G900] };
   const s1 = await run(ea("x1", at(30), 111, 999));                        // tA vs an EA club nobody linked, inside tA's window
-  A("inside the known club's window: unmatched, telling staff to link and file", s1.unmatched.length === 1 && /not linked to an EA club/.test(s1.unmatched[0].reason), JSON.stringify(s1));
+  /* v3.20: the reason now offers BOTH answers. Telling staff only "link the EA id" is how a
+     one-night substitution gets "fixed" by repointing a club's ea_club_id at somebody else's club
+     permanently, which is the opposite of what happened. */
+  A("inside the known club's window: unmatched, and staff are told both answers",
+    s1.unmatched.length === 1 && /not a league club/.test(s1.unmatched[0].reason)
+      && /link that club's EA id/.test(s1.unmatched[0].reason)
+      && /record a club substitution/.test(s1.unmatched[0].reason)
+      && /Rule 4\.6/.test(s1.unmatched[0].reason), JSON.stringify(s1));
   reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
   const s2 = await run(ea("x2", at(-300), 111, 999));                      // the same pair five hours before tA's game
   A("outside it: a scrimmage against an outside club — archived as ignored, not flagged", s2.skipped.length === 1 && s2.unmatched.length === 0 && writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "ignored"), JSON.stringify(s2));
@@ -397,6 +416,52 @@ console.log("— the commissioner's re-ingest is deliberately relaxed to a day e
   world.open = [G900, THU];                                                // Wednesday's slot still open, Thursday's too
   const s3 = await run(ea("r3", "2026-10-23T00:05:00-04:00", 111, 222), { relaxed: true });   // Thursday's game, 3 h 5 min after its puck drop
   A("relaxed picks the NEAREST fixture, so Thursday's box score never lands on Wednesday's open slot", s3.ingested.length === 1 && s3.ingested[0].game_id === "gthu", JSON.stringify(s3));
+}
+
+/* ============================================================================
+ * v3.20 Rule 4.6 — a club that could not use its own EASHL club played one fixture under an
+ * outside club. 2026-09-24: Vancouver played PIT v VAN as "LG ThunderBirds" (EA club 10200).
+ * ========================================================================= */
+console.log("\n— Rule 4.6: a borrowed club files on the ONE fixture its substitution names");
+{
+  reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  const s1 = await run(ea("s1", at(30), 111, 999));
+  A("the outside club is read as tB, and the game is filed",
+    s1.ingested.length === 1 && s1.ingested[0].game_id === "g900", JSON.stringify(s1));
+  A("...with the score on the right side",
+    writes.gamePatches.some((w) => w.body.status === "final" && w.body.home_score === 3 && w.body.away_score === 2),
+    JSON.stringify(writes.gamePatches.map((w) => w.body)));
+  A("...and the box score rows carry tB, never the outside club",
+    writes.statPosts.flat().some((r) => r.team_id === "tB") && !writes.statPosts.flat().some((r) => r.team_id === "999"));
+
+  /* THE POINT OF THE PIN. The same outside club, the same two sides, a DIFFERENT open fixture in
+     window. Without pinnedGames the borrowed club would be a permanent second identity for tB and
+     this would file too. */
+  reset(); world.open = [{ ...G900, id: "gOTHER" }]; world.clubOnly = { tA: [{ ...G900, id: "gOTHER" }] };
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  const s2 = await run(ea("s2", at(30), 111, 999));
+  A("a fixture the substitution does NOT name is refused", s2.ingested.length === 0, JSON.stringify(s2));
+  A("...and no game row is touched", writes.gamePatches.length === 0);
+
+  /* scoped by the fixture's own window too, so the club can be borrowed again another night */
+  reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  const s3 = await run(ea("s3", at(-300), 111, 999));
+  A("a lobby five hours before the fixture is still not the league game", s3.ingested.length === 0, JSON.stringify(s3));
+
+  /* two substitutions live in one window is nobody, the same rule as every other ambiguity here */
+  reset(); world.open = [G900, { ...G900, id: "gTWIN" }]; world.clubOnly = { tA: [G900] };
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" },
+                { game_id: "gTWIN", ea_club_id: "999", team_id: "tB" }];
+  const s4 = await run(ea("s4", at(30), 111, 999));
+  A("two fixtures claiming the same borrowed club is refused, not guessed",
+    s4.ingested.length === 0 && s4.unmatched.length + s4.skipped.length === 1, JSON.stringify(s4));
+
+  /* and with NO substitution recorded, nothing changed */
+  reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
+  const s5 = await run(ea("s5", at(30), 111, 999));
+  A("with no substitution on record the match is still refused", s5.ingested.length === 0, JSON.stringify(s5));
 }
 
 console.log(ok ? "\nPASS" : "\nFAIL");
