@@ -1,0 +1,40 @@
+-- v3.17 — a removed roster spot is kept, so putting a player back is a lookup and not archaeology.
+--
+-- Written straight after three Utah waivers had to be reversed by hand. roster_spots is DELETED
+-- outright on a waive, so position, salary, jersey, squad and origin vanish the moment it happens.
+-- All of it was reconstructed from club notices, which worked only because those notices happened
+-- to quote the right details, and one thing was lost for good: B Bunny's jersey number was never
+-- written anywhere, so he came back wearing a different one. season_registrations has had an
+-- archive table for exactly this reason since the departed-signup rule. This is the roster half.
+--
+-- public.roster_spot_removals keeps the whole row, plus why and who:
+--   reason      travels in app.roster_reason, which callers already set: waive_player writes
+--               'waived', admin_remove_from_roster 'removed by the league office', the Rule 1.1
+--               departure sweep 'left the league Discord'. A delete with NO reason set is still
+--               archived, unlabelled, because an unexplained removal is the one most worth having.
+--   removed_by  auth.uid() at the time.
+-- Written by an AFTER DELETE FOR EACH ROW trigger, so every path is covered: the waiver, the
+-- league office, the departure sweep, and anything added later. Nothing has to remember to call it.
+--
+-- public.reinstate_roster_spot(removal_id) puts him back and handles, in order, the three things
+-- that pushed back when this was done by hand:
+--   contracts_one_active       a profile can hold several expired contracts. Revive exactly ONE,
+--                              the most recently touched, or the unique index rejects the lot.
+--   roster_spots_origin_check  restore his REAL original origin. 'reinstated' is not an allowed
+--                              value, and inventing one would have been a lie about how he arrived.
+--   place_new_roster_spot      forces a depth_random origin into camp UNCONDITIONALLY, ignoring an
+--                              explicit squad. If the archive says he was on the active roster the
+--                              promotion is replayed as an UPDATE, which is what happened to him
+--                              the first time round.
+-- It refuses a removal that was already reinstated, refuses if he is on a roster again, and fails
+-- loud if he does not end up on the squad the archive says he was on.
+--
+-- status is archived as TEXT and cast back on reinstatement on purpose: retiring an enum value
+-- later must not make an old archive row unreadable.
+--
+-- REHEARSED end to end and rolled back. Removed a real active-roster player (Ciznasty, C #7,
+-- $2.75M, pro, origin 'assigned'), then reinstated him:
+--   archived with its reason, reinstated, and every field came back IDENTICAL
+--   his contract went back to active on the club
+--   a second reinstatement of the same removal was refused
+--   a training-camp player reinstated separately came back to CAMP, not the active roster
