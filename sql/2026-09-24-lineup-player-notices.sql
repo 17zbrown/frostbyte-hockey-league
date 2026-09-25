@@ -1,0 +1,43 @@
+-- v3.14 — nobody stops being scheduled without being told.
+--
+-- Commissioner: "Make sure all individuals who get scheduled get a notification in the website as
+--  well." (following the club-room lineup notices in v3.13)
+--
+-- WHAT WAS ALREADY RIGHT. set_game_lineup has told players since v2.95: "You are dressed vs X"
+-- when a club adds you, "You are no longer dressed vs X" when it takes you off.
+--
+-- THE AUDIT. game_lineups has exactly three writers, and two of them told nobody:
+--   set_game_lineup                 INSERT/UPSERT  notified            OK
+--   clear_game_lineup               DELETE         notified NOBODY     the whole sheet comes down
+--                                                                      and all six are silently
+--                                                                      undressed
+--   clear_lineups_on_roster_remove  UPDATE         notified the CLUB   the player pulled from his
+--                                                                      club's filed lineups was the
+--                                                                      only one never told
+-- No fourth path exists: game_lineups carries blanket INSERT/UPDATE/DELETE grants to anon and
+-- authenticated (the default-privileges trap again) but RLS is ON with a SELECT policy and NO
+-- write policy, so the client cannot write a lineup directly. The three functions are the whole
+-- surface, which is what makes "all individuals" a claim that can actually be checked.
+--
+-- ADDED, all of them site notifications on the game:
+--   _notify_lineup_pulled   the six on a withdrawn sheet, and the player pulled off by a roster move
+--   _notify_lineup_moves    a player kept on the sheet but MOVED to another position. He is still
+--                           scheduled and what he is scheduled to do has changed. The v2.95
+--                           comment calls a shuffle "nothing to send", which is right for coming
+--                           and going and wrong for a man who now has to play a different position.
+--
+-- THE BUG THE REHEARSAL CAUGHT. The first version of the roster-removal notice looped every filed
+-- lineup the CLUB had rather than the ones he was on, because by the time it ran the UPDATE above
+-- had already nulled him out of every slot and there was nothing left to match on. Measured: the
+-- club had 4 filed lineups, he was on 1, and he got 4 notices. The game ids are now collected
+-- inside the existing loop, while the sheet still names him, and it was easier to rewrite that
+-- trigger function whole than to splice around its own loop.
+--
+-- REHEARSED end to end against a real fixture (DET vs PIT, Sep 30) and rolled back:
+--   sheet filed                     -> 6 notices, 6 distinct people, nobody twice
+--   resubmitted unchanged           -> 0
+--   one winger swapped              -> 2 (one told he is off, one told he is on)
+--   same six, two positions swapped -> 2 ("moved you from C to LW ... You are still dressed")
+--   sheet withdrawn                 -> 6 ("taken its lineup for this game down")
+--   withdrawn again                 -> 0
+--   player removed from the roster  -> exactly 1, for the 1 lineup he was on (4 before the fix)
