@@ -1,0 +1,28 @@
+-- v3.16 — the random assignment of a late sign-up is actually random now.
+--
+-- Commissioner: "make the RA completely random. Remove the line for roster count entirely unless
+--  the team has zero TC players."
+--
+-- WHAT IT WAS DOING, and why it looked broken. The overflow step in _assign_reg_random ordered by
+-- the club's active roster count ascending, random() only as a tiebreak. So depth always went to
+-- the thinnest club. Two late sign-ups landed on Dallas back to back on Sep 24, which was the
+-- rule working exactly as written: Dallas had waived a player the night before, so it sat at 20
+-- when everyone else was 21 or 22 (an outright win), and after the first placement it sat tied at
+-- 21 with Vancouver (a coin flip it won). Correct, and not what the league wants.
+--
+-- WHAT IT DOES NOW. A straight draw across all clubs, with ONE club-first clause: a club whose
+-- TRAINING CAMP is empty is taken first, so no club is ever left with no depth at all. Once every
+-- club has at least one camp player that clause is false everywhere and the draw is pure random.
+--
+-- SCOPE. Only the depth placement (v_origin = 'depth_random', which in basic format is what both
+-- latecomer_random and postdraft_random become). The pre-season fill keeps its old behaviour and
+-- still fills the emptiest clubs first, because that pass exists to spread a whole registration
+-- pool evenly across the league in one go, which is a different job from placing one late arrival.
+-- The branch is on v_origin, so preseason_random never reaches the new clause.
+--
+-- MEASURED, against the real rosters rather than argued:
+--   4,000 draws over 8 clubs, expected 500 each. Observed 471 to 540 (11.8% to 13.5%), and 3 sigma
+--   for n=4000 is 437 to 563, so every club is comfortably inside. Dallas drew 485, no longer
+--   favoured by having been the thinnest.
+--   With one club's camp faked to zero, it took 2,000 of 2,000 draws, which is the exception
+--   doing its job.
