@@ -166,11 +166,19 @@ CG.playoffRoad = function(lg, clubCode){
 /* v3.25 — a forfeit nobody skated in does not count. Mirrors the same clause in the database's
    player_week_games; if the two ever disagree the page says a player has room and the gate refuses
    him, or worse the other way round. Ice time is the test on both sides. */
+/* v3.30 — A RESULT'S BOX IS KEYED BY CLUB CODE. box[g.home] and box[g.away]; "home" and "away" are
+   not keys and never have been (see the builder: `var box={}; box[g.home]={}; box[g.away]={};`).
+   Every other reader in the app gets this right; the three in this counter did not, and the cost
+   was invisible because undefined simply fell through. It is one helper now. */
+CG.boxSides = function(g, res){
+  var box = res && res.box;
+  if (!g || !box) return [];
+  return [box[g.home], box[g.away]].filter(Boolean);
+};
 CG.forfeitNoIce = function(g, res){
   if (!g || !g.forfeit) return false;
-  var box = res && res.box;
-  if (!box) return true;                       /* ruled 1-0, no player statistics at all (Rule 3.2) */
-  var sides = [box.home || {}, box.away || {}];
+  var sides = CG.boxSides(g, res);
+  if (!sides.length) return true;              /* ruled 1-0, no player statistics at all (Rule 3.2) */
   for (var i = 0; i < sides.length; i++){
     var ids = Object.keys(sides[i]);
     for (var j = 0; j < ids.length; j++) if ((+sides[i][ids[j]].toi || 0) > 0) return false;
@@ -186,9 +194,14 @@ CG.weekGamesFor = function(pid, game, club, opts){
     /* Rule 3.2 forfeit with nobody on the ice: not a game anybody played, so not a game against
        anybody's week. A Rule 4.3 forfeit after disconnections DID have ice time and still counts. */
     if (CG.forfeitNoIce(g, res)) return;
-    var box = res && res.box, hasBox = !!(box && (Object.keys(box.home||{}).length || Object.keys(box.away||{}).length));
+    /* v3.30: this read box.home / box.away, which are undefined for every game ever played, so
+       hasBox was ALWAYS false and every final game fell through to the filed-lineup branch below.
+       A player dressed on a sheet who never took a shift was charged a game anyway, which is how
+       the Islanders' Team HQ showed 6 of 6 for a player the database had at 5. */
+    var sides = CG.boxSides(g, res);
+    var hasBox = sides.some(function(sd){ return Object.keys(sd).length > 0; });
     if ((g.status === "final" || (res && res.entered)) && hasBox){
-      if ((box.home && box.home[pid]) || (box.away && box.away[pid])) n++;
+      if (sides.some(function(sd){ return !!sd[pid]; })) n++;
       return;
     }
     var lu = (lg._lineups || {})[club + ":" + g.id];

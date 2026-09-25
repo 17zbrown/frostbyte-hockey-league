@@ -1,0 +1,74 @@
+-- v3.30: the weekly game counter was reading a result box that does not exist.
+--
+-- Commissioner, 2026-09-25: "XxVaughnX36 still appears to be showing 6/6 games on the NYI Team HQ.
+--  Can you list exactly why, and how to fix it since he only has 3 games played this week?"
+--
+-- ============================================================================
+-- THE CAUSE, IN ONE LINE
+-- ============================================================================
+-- A result's box score is keyed BY CLUB CODE. The builder writes:
+--     var box={}; box[g.home]={}; box[g.away]={};
+-- so a game between the Islanders and the Bruins produces box.NYI and box.BOS. There is no
+-- box.home and no box.away, and there never has been.
+--
+-- CG.weekGamesFor read box.home and box.away:
+--     var box = res && res.box, hasBox = !!(box && (Object.keys(box.home||{}).length || Object.keys(box.away||{}).length));
+--     if ((g.status === "final" || (res && res.entered)) && hasBox){
+--       if ((box.home && box.home[pid]) || (box.away && box.away[pid])) n++;
+--       return;
+--     }
+-- Both are undefined for every game ever played, so hasBox was ALWAYS false, the box-score branch
+-- NEVER ran, and every final game fell through to the filed-lineup branch underneath it.
+--
+-- The effect: the client counted a player's week purely from the sheets his club filed, and never
+-- from who actually took a shift. A player dressed on a sheet who did not play was charged a game
+-- anyway. The database, which has its own correct counter in player_week_games, did not agree, so
+-- Team HQ and the league record have been giving different numbers since v2.55.
+--
+-- Why it was invisible: undefined simply falls through. Nothing threw, nothing logged, and the
+-- number it produced was plausible. It only showed up when a club noticed a player at 6 of 6 whose
+-- stats page showed 3.
+--
+-- ============================================================================
+-- XxVaughnX36, NYI, WEEK 1, GAME BY GAME
+-- ============================================================================
+--   Wed 9:00  NYI v SEA   forfeit (SEA), nobody skated, he was not filed   no
+--   Wed 9:35  VAN v NYI   he played                                        YES
+--   Wed 10:10 BOS v NYI   FILED, DID NOT DRESS        <- the extra game    no
+--   Thu 9:00  NYI v DAL   forfeit (NYI), nobody skated, he was filed       no
+--   Thu 9:35  UTA v NYI   he played                                        YES
+--   Thu 10:10 NYI v DET   he played                                        YES
+--   Fri 9:00  NYI v PIT   filed, still to play                             YES
+--   Fri 9:35  SEA v NYI   filed, still to play                             YES
+--   Fri 10:10 NYI v VAN   not filed                                        no
+-- Three played plus two filed is FIVE. The builder said six because of the Wednesday 10:10 game he
+-- was dressed for but never played, which only the box score can reveal and which the broken read
+-- could never see.
+--
+-- ============================================================================
+-- A SECOND BUG, MINE, FROM YESTERDAY
+-- ============================================================================
+-- CG.forfeitNoIce (v3.25) made the same mistake. For a Rule 4.3 forfeit that DID have ice time, it
+-- looked in box.home and box.away, found nothing, concluded no ice time, and would have skipped a
+-- game that must count. It gave the right answer for a Rule 3.2 forfeit only by accident, because
+-- an empty box and an unreadable box look the same.
+--
+-- Both now go through ONE helper:
+--     CG.boxSides = function(g, res){ var box = res && res.box; if (!g || !box) return [];
+--       return [box[g.home], box[g.away]].filter(Boolean); };
+-- Three readers existed and all three were wrong. A grep for box.home across src/live now returns
+-- only the comment explaining this.
+--
+-- ============================================================================
+-- THE TEST THAT COULD NOT HAVE CAUGHT IT
+-- ============================================================================
+-- Worth recording plainly: the v3.25 test block I wrote for the forfeit rule built its fixtures as
+--     box: { home: { p1: { toi: 1800 } }, away: {} }
+-- the same wrong shape as the code. It passed against the bug and failed against the fix. A test
+-- written from the same misunderstanding as the code cannot catch that misunderstanding. The block
+-- now uses real club codes, and one new assertion states the rule directly: a box keyed the old way
+-- yields NO sides at all, so a wrong shape can never again look like a valid empty one.
+--
+-- Verified with the real fixtures, results and filed lineups of NYI's week 1, run through the
+-- SHIPPED functions pulled out of index.html: the builder returns 5 of 6 and full=false, which
+-- matches player_week_games exactly.
