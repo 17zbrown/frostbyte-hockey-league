@@ -12559,7 +12559,33 @@ CG.AFTER._hubGameStats = function(){
 /* Messages as a hub section (#/hub/messages) — the DM UI renders inside the
    player hub shell instead of holding its own top-level nav slot. */
 CG._origHubRoute = CG.ROUTES.hub;
+/* v3.24 — the club side of Rule 2.3. A trade request is filed to a club's front office and the
+   league office never sees it, so the front office needs somewhere to READ one. Until now the only
+   way to reach a case was the notification link: miss the bell and the request was invisible. */
+CG.hubClubRequests = function(){
+  var t = CG.myManagedTeam();
+  if (!t) return '<div class="note">This account doesn’t run a club. Player requests belong to a club’s front office.</div>';
+  var teamId = ((CG.lg && CG.lg._codeToId) || {})[t.code] || null;
+  var all = CG.clubCases(teamId);
+  var open = all.filter(function(a){ return a.status!=="resolved" && a.status!=="denied"; });
+  var closed = all.filter(function(a){ return a.status==="resolved" || a.status==="denied"; });
+  var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · front office</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Player requests</h1>'+
+    '<p class="lede" style="margin-top:8px">What your own players have asked of you. These come to the Owner, GM and AGM and to nobody else: the league office does not receive them and does not rule on them (Rule 2.3). You are under no obligation to act on one.</p></div>';
+  h += '<div class="card-h" style="padding:0 0 12px;border:0"><h3>Open ('+open.length+')</h3></div>';
+  h += open.length
+    ? '<div class="stack" style="gap:12px">'+open.map(function(a){ return CG.actionCard(a, true); }).join("")+'</div>'
+    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing open</b>'+
+      '<p>A request from one of your players lands here, and every seat in the front office is notified on the site and on Discord.</p></div></div>';
+  if (closed.length) h += '<div class="card-h" style="padding:22px 0 12px;border:0"><h3>Answered ('+closed.length+')</h3></div>'+
+    '<div class="stack" style="gap:12px">'+closed.map(function(a){ return CG.actionCard(a, true); }).join("")+'</div>';
+  return h;
+};
 CG.ROUTES.hub = function(param, qs){
+  if (param==="clubrequests"){
+    return CG.can("roster.manage") ? CG.hubShell("clubrequests", CG.hubClubRequests())
+                                   : CG.unauthorized("Player requests are a front-office tool.");
+  }
   /* v2.38: a page the Owner withheld from this seat is not reachable by URL either */
   var pageKey = param==="lineup" ? "lines" : param;
   if (CG.mgmtAccess && CG.MGMT_PAGES.some(function(x){ return x[0]===pageKey; }) && CG.mgmtAccess(pageKey)==="hidden"){

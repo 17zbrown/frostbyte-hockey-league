@@ -87,13 +87,25 @@ console.log("\n— media-only staff see the newsroom, not the league office");
   CG.auth = CG.auth || {};
   CG.auth.profile = { departments: ["media"] };
   CG.hasDept = (d) => (CG.auth.profile.departments || []).indexOf(d) >= 0;
-  const nav = CG.hubNav("");
-  A("no Staff desk tab for media-only staff", !nav.includes("staffdesk"));
-  A("their Newsroom desk still shows", nav.includes("newsroom"));
+  /* v3.24 re-pinned: hubNav renders ONE dashboard, and section "" belongs to My Hub, so the staff
+     entries are no longer in it by design. What this block is really about is which STAFF TOOLS a
+     media-only staffer has, so it asserts the group itself, and then that the staff sidebar really
+     does render them. */
+  const staffKeys = () => CG.hubGroups().staff.map((it) => it[0]).join(",");
+  A("no Staff desk tab for media-only staff", !staffKeys().includes("staffdesk"), staffKeys());
+  A("their Newsroom desk still shows", staffKeys().includes("newsroom"), staffKeys());
   A("the route agrees with the nav", CG.ROUTES.hub("staffdesk", {}).includes("don\u2019t have access"));
+  A("and the Staff sidebar renders what the group holds", CG.hubNav("newsroom").includes("newsroom"));
   CG.auth.profile = { departments: ["media", "statistics"] };
-  const nav2 = CG.hubNav("");
-  A("media PLUS another department keeps the Staff desk", nav2.includes("staffdesk") && nav2.includes("newsroom"));
+  A("media PLUS another department keeps the Staff desk",
+    staffKeys().includes("staffdesk") && staffKeys().includes("newsroom"), staffKeys());
+
+  /* THE v3.24 SEPARATION: My Hub shows only My Hub. */
+  const myNav = CG.hubNav("");
+  A("My Hub's sidebar carries no staff tool at all", !myNav.includes(">Staff desk") && !myNav.includes(">Newsroom"));
+  A("...and no Team HQ tool either", !myNav.includes(">Roster") && !myNav.includes(">Trade Hub"));
+  A("...while the Staff sidebar carries no My Hub tool", !CG.hubNav("staffdesk").includes(">Settings"));
+  A("the switcher offers the other dashboards", myNav.includes("hs-switch") && myNav.includes("dash=staff"));
   CG.role = () => "commish";
   CG.auth.profile = { departments: [] };
   A("commissioners are never media-scoped", CG.hubNav("").includes("staffdesk"));

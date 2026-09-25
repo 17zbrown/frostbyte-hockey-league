@@ -1,0 +1,65 @@
+-- v3.24: one dashboard at a time (no database change; recorded here because this is where the
+-- decisions live).
+--
+-- Commissioner, 2026-09-25: "Can you separate the different dashboards to make each one feel less
+--  messy? If I click on 'My Hub' I shouldn't see the staff desk or team HQ. I should only see the
+--  dashboard I choose from the 'dashboards' dropdown."
+--
+-- ============================================================================
+-- WHAT IT WAS
+-- ============================================================================
+-- CG.hubNav built three groups (My Hub, Staff, Team HQ) and then rendered ALL of them, always, one
+-- under the other, on every hub page. The Dashboards menu only changed where you LANDED; the
+-- sidebar was identical wherever you went. A commissioner who also runs a club read a sidebar with
+-- roughly twenty five entries, every tool in the league, whichever dashboard he had picked.
+-- The design was deliberate once: CG.hubTabs still says "the tabs are ADDITIVE, not either/or".
+-- That is the thing being changed.
+--
+-- ============================================================================
+-- WHAT IT IS NOW
+-- ============================================================================
+-- CG.hubGroups() is the data (unchanged: the same three lists, same permissions, same order).
+-- CG.hubNav() renders exactly ONE of them, headed by its name, with a switcher above it.
+--
+-- WHICH ONE, in order:
+--   1. an explicit ?dash=me|club|staff in the hash wins, and is remembered for the session;
+--   2. otherwise the section decides, so a deep link or a notification never drops you into the
+--      wrong sidebar;
+--   3. where a section belongs to SEVERAL dashboards the remembered choice breaks the tie.
+-- Case 3 is not hypothetical: Availability is ONE page worn by two hats. #/hub/availability is the
+-- player's own form AND the front office's roster grid, listed in both groups with different
+-- labels. Nothing in the URL distinguishes them, so only the choice can.
+--
+-- Every entry in the sidebar carries ?dash= as well, so moving around inside a dashboard keeps you
+-- in it. The switcher is in the SIDEBAR and not only in the masthead: with one group showing, a
+-- member deep in Team HQ needs the way back where his eye already is. A member with a single hat
+-- gets no switcher, because there is nowhere to switch to and it would be noise.
+--
+-- THE LANDING PAGE IS A PREFERENCE, NOT THE FIRST ENTRY. CG.HUB_DASH_LANDING names the page each
+-- dashboard wants (club: roster, then management, then lines) and falls back to the first entry the
+-- seat actually has. The first attempt used the first listed entry, and Team HQ opened on
+-- Availability, because that is what the club list begins with: opening a front office on the
+-- availability grid rather than the roster is not what anyone means by "Team HQ". The fallback
+-- matters just as much: an Owner may withhold the Roster page from a seat (Rule 2.6), and a
+-- hardcoded #/hub/roster would then open a refusal. Verified: with roster.manage withheld, Team HQ
+-- opens #/hub/lines, which is in that seat's own group.
+--
+-- ============================================================================
+-- AND THE GAP IT EXPOSED
+-- ============================================================================
+-- Separating Team HQ made it obvious that a trade request had no home there. Under Rule 2.3 a
+-- request is filed to a club's front office and the league office never sees it, but there was NO
+-- page that listed one: the only way to reach a case was the notification link, so a seat that
+-- missed the bell never saw the request at all. Team HQ now has "Player requests"
+-- (CG.hubClubRequests, #/hub/clubrequests), open cases then answered ones, reading CG.clubCases
+-- for that club and nothing else, gated on roster.manage.
+--
+-- TRAP, and it cost a round trip: a hash-only navigate does NOT reload the document, so the browser
+-- kept running the OLD build while serving from a rebuilt file. The verification read
+-- "CG.hubGroups is not a function" against code that was plainly there. Add a query param to force
+-- a real load when checking a local build.
+--
+-- Verified in a browser against the real functions, for mgmt, staff and commissioner: one group
+-- heading per sidebar, no Team HQ or staff tool in My Hub, no personal tool in Team HQ, every entry
+-- carrying its own ?dash=, and the ambiguous Availability section following the remembered choice
+-- both ways.

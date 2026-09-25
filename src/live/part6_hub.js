@@ -93,7 +93,15 @@ CG.tradePlayerLine = function(pid){
 /* v2.38: the management-permissions queue is installed by part_live; in the prototype build every
    move is simply made (the wrapper resolves false), so these pages never depend on load order. */
 if (!CG.mgmtQueue) CG.mgmtQueue = function(){ return Promise.resolve(false); };
-CG.hubNav = function(section){
+/* v3.24 — ONE dashboard at a time.
+   Commissioner: "Can you separate the different dashboards to make each one feel less messy? If I
+   click on My Hub I shouldn't see the staff desk or team HQ. I should only see the dashboard I
+   choose from the dashboards dropdown."
+   The three groups below are unchanged; what changed is that the sidebar used to render ALL of
+   them, always, so a commissioner who also runs a club read a sidebar with every tool in the
+   league on it whichever dashboard he had picked. hubGroups() is now the data and hubNav() shows
+   exactly one group. */
+CG.hubGroups = function(){
   var r = CG.role();
   /* the sidebar is split by hat: personal tools under "My Hub", club management
      under "Team HQ" (complaints is a player tool, so it stays out of Team HQ) */
@@ -135,11 +143,51 @@ CG.hubNav = function(section){
     if (CG.can("lineup.build")) club.push(["lines","Lineup builder","grid"]);
     if (CG.can("lineup.build")) club.push(["lineup","Game lineups","cal"]);
     if (CG.can("trades.manage")) club.push(["tradehub","Trade Hub","swap"]);
+    /* v3.24: a player's trade request goes to this front office and to nobody else (Rule 2.3), and
+       until now there was NO page that listed one. The only way in was the notification link, so a
+       seat that missed the bell never saw the request at all. */
+    if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubClubRequests) club.push(["clubrequests","Player requests","flag"]);
     if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);
     if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubDraftLive) club.push(["draft","Draft","play"]);
     /* v2.38: pages the Owner withheld from this seat are not listed (and not routable) */
     if (CG.mgmtAccess) club = club.filter(function(it){ return CG.mgmtAccess(it[0]) !== "hidden"; });
   }
+  return { me: mine, staff: staffTools, club: club };
+};
+CG.HUB_DASH_META = { me:["My Hub","home"], club:["Team HQ","users"], staff:["Staff","flag"] };
+CG._hubDashPick = null;   /* the last explicit choice, remembered for the session */
+/* Which dashboard is showing. An explicit ?dash= wins and is remembered; otherwise the section
+   decides, because a deep link or a notification must not drop you into the wrong sidebar. Only
+   where a section belongs to SEVERAL dashboards (Availability is both a player's own form and the
+   front office's grid, one page, two hats) does the remembered choice break the tie. */
+CG.hubDash = function(section){
+  var g = CG.hubGroups(), keys = ["me","club","staff"].filter(function(k){ return (g[k]||[]).length; });
+  if (!keys.length) return "me";
+  var want = (String(location.hash||"").match(/[?&]dash=(me|club|staff)(?:&|$)/)||[])[1] || null;
+  if (want && keys.indexOf(want)>=0) { CG._hubDashPick = want; return want; }
+  var owners = keys.filter(function(k){ return g[k].some(function(it){ return it[0]===section; }); });
+  if (owners.length === 1) return owners[0];
+  if (owners.length > 1) return (CG._hubDashPick && owners.indexOf(CG._hubDashPick)>=0) ? CG._hubDashPick : owners[0];
+  /* a section in no group at all (a routed-but-unlisted page) keeps whatever is remembered */
+  return (CG._hubDashPick && keys.indexOf(CG._hubDashPick)>=0) ? CG._hubDashPick : keys[0];
+};
+/* Where a dashboard OPENS. Each names the page it wants to land on, and falls back to its first
+   listed entry when that seat does not have it, so a dashboard never opens on a page the Owner
+   withheld (Rule 2.6) and never on a hardcoded route that 404s for half the league.
+   The preference matters: Team HQ's first listed entry is Availability, and opening a front office
+   on the availability grid rather than the roster is not what anyone means by "Team HQ". */
+CG.HUB_DASH_LANDING = { me: [""], club: ["roster","management","lines"], staff: ["staffdesk"] };
+CG.hubDashHref = function(key){
+  var items = CG.hubGroups()[key] || [];
+  if (!items.length) return null;
+  var has = function(k){ return items.some(function(it){ return it[0]===k; }); };
+  var want = (CG.HUB_DASH_LANDING[key]||[]).filter(has)[0];
+  var sec = want !== undefined ? want : items[0][0];
+  return "#/hub" + (sec ? "/"+sec : "") + "?dash=" + key;
+};
+CG.hubNav = function(section){
+  var g = CG.hubGroups(), dash = CG.hubDash(section);
+  var keys = ["me","club","staff"].filter(function(k){ return (g[k]||[]).length; });
   function render(items){
     return items.map(function(it){
       var badge = "";
@@ -154,12 +202,18 @@ CG.hubNav = function(section){
         var openN = CG.visibleComplaints().filter(function(c){ return c.status!=="Resolved"; }).length;
         if (openN) badge = '<span class="hs-n">'+openN+'</span>';
       }
-      return '<a href="#/hub'+(it[0]?"/"+it[0]:"")+'" class="'+(section===it[0]?"on":"")+'">'+CG.ic(it[2],15)+it[1]+badge+'</a>';
+      return '<a href="#/hub'+(it[0]?"/"+it[0]:"")+'?dash='+dash+'" class="'+(section===it[0]?"on":"")+'">'+CG.ic(it[2],15)+it[1]+badge+'</a>';
     }).join("");
   }
-  return '<nav class="hub-side" aria-label="Hub sections"><div class="hs-group">My Hub</div>'+render(mine)+
-    (staffTools.length?'<div class="hs-group">Staff</div>'+render(staffTools):"")+
-    (club.length?'<div class="hs-group">Team HQ</div>'+render(club):"")+'</nav>';
+  /* the switcher stays in the sidebar as well as the masthead: with only one group showing, a
+     member deep in Team HQ needs the way back where his eye already is */
+  var switcher = keys.length < 2 ? "" :
+    '<div class="hs-switch" role="group" aria-label="Dashboards">'+keys.map(function(k){
+      var m = CG.HUB_DASH_META[k];
+      return '<a href="'+CG.hubDashHref(k)+'" class="'+(k===dash?"on":"")+'"'+(k===dash?' aria-current="page"':'')+'>'+CG.ic(m[1],14)+m[0]+'</a>';
+    }).join("")+'</div>';
+  return '<nav class="hub-side" aria-label="Hub sections">'+switcher+
+    '<div class="hs-group">'+CG.HUB_DASH_META[dash][0]+'</div>'+render(g[dash]||[])+'</nav>';
 };
 CG.hubShell = function(section, inner){
   var notice = "";

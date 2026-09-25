@@ -558,10 +558,18 @@ CG.managesClub = function(){
 CG.hubTabs = function(){
   var r = CG.role();
   if (r==="guest") return [];
-  var tabs = [["My Hub","#/hub","home"]];
-  if (r==="mgmt" || CG.managesClub()) tabs.push(["Team HQ","#/hub/roster","users"]);
+  /* v3.24: each entry carries ?dash=, which is what tells the hub sidebar WHICH dashboard to show.
+     Picking one from this menu now changes the whole page, not just where it lands. The href comes
+     from CG.hubDashHref so a dashboard opens its own first listed tool rather than a hardcoded
+     page a seat may not have access to; the fallbacks keep this working in the prototype build,
+     where part6_hub's helpers are present but a seat's permissions are not. */
+  var href = function(key, fallback){
+    return (CG.hubDashHref && CG.hubDashHref(key)) || fallback;
+  };
+  var tabs = [["My Hub", href("me","#/hub?dash=me"), "home"]];
+  if (r==="mgmt" || CG.managesClub()) tabs.push(["Team HQ", href("club","#/hub/roster?dash=club"), "users"]);
   /* the commissioner is league staff too — the desk is additive, like Team HQ */
-  if (r==="staff" || r==="commish") tabs.push(["Staff Desk","#/hub/staffdesk","flag"]);
+  if (r==="staff" || r==="commish") tabs.push(["Staff Desk", href("staff","#/hub/staffdesk?dash=staff"), "flag"]);
   if (r==="commish") tabs.push(["Control Center","#/admin","gear"]);
   return tabs;
 };

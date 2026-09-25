@@ -1618,6 +1618,17 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
    All colours come from the flipping design tokens so every chart adapts to light + dark. */
 .viz-card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:16px 18px}
 
+/* v3.24 — the dashboard switcher at the head of the hub sidebar. With one group showing at a time,
+   a member deep in Team HQ needs the way back where his eye already is, not only in the masthead. */
+.hs-switch{display:flex;flex-wrap:wrap;gap:4px;padding:0 0 12px;margin-bottom:10px;
+  border-bottom:1px solid var(--line-soft)}
+.hs-switch>a{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;
+  font-family:var(--f-mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--steel);border:1px solid var(--line);text-decoration:none;white-space:nowrap}
+.hs-switch>a:hover{border-color:var(--ink);color:var(--ink)}
+.hs-switch>a.on{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:700}
+
+
 /* ============================================================================
    v3.22 PROFILE SLAB — the player profile as ONE box the width of the page.
    Commissioner: "Clean up the player profiles so all the smaller module boxes fit into one larger
