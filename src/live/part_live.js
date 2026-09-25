@@ -1436,10 +1436,22 @@ CG.loadManagerData = async function(){
   try {
     var q = await Promise.all([
       CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("season_number").order("round"),
-      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,note,created_at, profiles(gamertag,ea_id,platform,jersey_number)"),
+      /* v3.32: `note` was dropped from this table in v3.25 when the sign-up note box was retired,
+         and this select still asked for it. PostgREST refuses the WHOLE query for one unknown
+         column, so every registration vanished from the Control Center and Draft & placement read
+         "no sign-ups" in the middle of a season with 179 of them. */
+      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number)"),
       CG.sb.from("draft_state").select("*")
     ]);
-    var regs = (q[1]&&!q[1].error&&q[1].data)||[];
+    /* ...and it failed SILENTLY, because an error fell back to [] and an empty board looks exactly
+       like a league where nobody has signed up. Say it out loud and keep what we already had. */
+    if (q[1] && q[1].error){
+      CG.lg._regLoadError = q[1].error.message || "the sign-up query failed";
+      if (CG.toast) CG.toast("Couldn’t load registrations: "+CG.lg._regLoadError, "err");
+    } else {
+      CG.lg._regLoadError = null;
+    }
+    var regs = (q[1]&&!q[1].error&&q[1].data) || CG.lg._registrationsRaw || [];
     CG.lg._registrationsRaw = regs;
     if ((q[0]&&!q[0].error) || (q[1]&&!q[1].error)){
       if (q[0]&&!q[0].error) CG.lg._draftPicksRaw = q[0].data||[];
@@ -6004,8 +6016,16 @@ CG.rfaOffseasons = function(){
   var v = parseInt((CG._siteCfg && CG._siteCfg.rfa_offseasons) || "", 10);
   return (v && v > 0 && v < 30) ? v : CG.RFA_OFFSEASONS_DEFAULT;
 };
-CG.admPreseason = function(){
-  var lg=CG.lg, s=CG.SEASON||{};
+CG.admPreseason = function(qs){
+  qs = qs || {};
+  var lg=CG.lg;
+  /* v3.32 (commissioner): "That page should show season we are currently in and I should be able
+     to toggle to the new season when the signups open at the trade deadline."
+     It read CG.SEASON and nothing else, so there was no way to look at next season's pool even
+     once it was taking sign-ups. The season in the URL wins; otherwise the season being PLAYED. */
+  var seasons = (CG.SEASONS||[]).slice().sort(function(a,b){ return (a.number||0)-(b.number||0); });
+  var s = (qs.season && seasons.find(function(x){ return String(x.number)===String(qs.season); }))
+        || CG.SEASON || seasons[0] || {};
   var regs=(lg._registrationsRaw||[]).filter(function(r){ return !r.season_id || r.season_id===s.id; }), apps=lg._ownerApps||[], sapps=lg._staffApps||[];
   var rosterMax=s.roster_max||CG.fmt("roster_max"), rosteredIds=lg._rosteredIds||{};
   var assigned=regs.filter(function(r){ return rosteredIds[r.profile_id]; }).length;
@@ -6018,6 +6038,26 @@ CG.admPreseason = function(){
   var h='<div style="margin-bottom:18px"><h2 class="h-sec">'+(basicS?'Draft &amp; placement':'Pre-season central')+'</h2>'+
     '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>'+
     (basicS ? '<div class="note" style="margin-bottom:18px"><b>'+CG.FORMAT_NAME.basic+'</b> — this season has no pre-season and no pre-season loans. Everyone registered by the cutoff enters the draft; ten minutes after it concludes, anyone undrafted is placed on a club as depth at the league minimum, and late sign-ups are placed the same way until the movement deadline (Rule 2.8). The loan tools below are inert here.</div>' : '');
+  /* the switcher: every season that has a row, with the one taking sign-ups marked, so the office
+     can look at next season's pool the moment the trade deadline opens it */
+  if (seasons.length > 1){
+    h += '<div class="seg" role="tablist" aria-label="Season" style="margin-bottom:16px">'+
+      seasons.map(function(x){
+        var on = x.id === s.id;
+        return '<a role="tab" aria-selected="'+on+'" class="'+(on?"on":"")+'" href="#/admin/preseason?season='+esc(x.number)+'">'+
+          esc(x.name || ("Season "+x.number))+
+          (x.id === ((CG.SEASON||{}).id) ? '<span class="chip chip-chrome" style="margin-left:6px;font-size:8px">now playing</span>' : '')+
+          (x.registration_open ? '<span class="chip chip-win" style="margin-left:6px;font-size:8px">sign-ups open</span>' : '')+
+        '</a>'; }).join("")+'</div>';
+  }
+  /* a failed registrations query used to read as a league where nobody had signed up. v3.25 dropped
+     a column this select still asked for, PostgREST refused the whole query, and this page showed
+     zero registrations mid-season. Never let that look like an empty pool again. */
+  if (lg._regLoadError){
+    h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
+      '<span><b style="font-family:var(--f-disp)">The sign-up list did not load.</b> '+esc(lg._regLoadError)+
+      ' The counts below are whatever was already in hand and may be wrong. Reload before acting on them.</span></div>';
+  }
   var kpis=[[regs.length,"Registered players","",""],
     [faN,"Unsigned · need a club","","fa"],
     [assigned+" / "+regs.length,"Rostered","","ros"],
@@ -6087,13 +6127,20 @@ CG.admPreseason = function(){
         var statusChip= declined?'<span class="chip chip-loss">Declined</span>'
                 : on?((isMgmt?'<span class="chip chip-chrome" style="font-size:9px">'+esc((pl.mgmt||"").toUpperCase())+'</span> ':'')+'<span class="chip chip-win">Rostered</span>')
                 : '<span class="chip '+ps.chip+'">'+esc(ps.label)+'</span>';
+        /* v3.32: withdrawing from the SEASON, which is not the same as releasing to the pool. The
+           roster spot goes with the sign-up, so the player is out of the season rather than sitting
+           in it as a free agent. Refused for a seated manager: vacate the seat first (Rule 2.6). */
+        var wdBtn = seatHolder ? ''
+          : '<button class="btn btn-ghost btn-sm" data-reg-withdraw="'+r.id+'" data-name="'+nm+'"'+
+            (on?' data-club="'+esc(club||"")+'"':'')+' title="Remove this sign-up from the season entirely'+
+            (on?", and take the roster spot with it":"")+'">Withdraw</button>';
         var actions= declined
-          ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+nm+'">Reinstate</button>'
+          ? '<button class="btn btn-ghost btn-sm" data-reg-reinstate="'+r.id+'" data-name="'+nm+'">Reinstate</button>'+wdBtn
           : on
-          ? '<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+r.profile_id+'" data-club="'+esc(club||"")+'" data-name="'+nm+'"'+(isMgmt?' data-mgmt="1"':'')+'>Remove from roster</button>'
+          ? '<button class="btn btn-ghost btn-sm rm-btn" data-reg-remove="'+r.profile_id+'" data-club="'+esc(club||"")+'" data-name="'+nm+'"'+(isMgmt?' data-mgmt="1"':'')+'>Remove from roster</button>'+wdBtn
           : '<span class="fa-assign"><select data-assign-team="'+r.id+'" class="fa-club"><option value="">Club…</option>'+clubOpts+'</select>'+
             '<button class="btn btn-chrome btn-sm" data-assign="'+r.id+'" data-prof="'+r.profile_id+'" data-pos="'+esc(r.position||"C")+'" data-name="'+nm+'" disabled>Assign</button>'+
-            '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+nm+'">Decline</button></span>';
+            '<button class="btn btn-ghost btn-sm" data-reg-decline="'+r.id+'" data-name="'+nm+'">Decline</button>'+wdBtn+'</span>';
         return '<tr class="reg-row-'+st+'" data-reg-status="'+st+'" data-reg-name="'+esc((prof.gamertag||"").toLowerCase()+" "+(prof.ea_id||"").toLowerCase())+'">'+
           '<td class="tleft"><span class="playercell">'+(av?'<img src="'+av+'" alt="" class="pc-av">':'')+'<span style="min-width:0"><span class="nm">'+esc(prof.gamertag||"—")+'</span><small class="mono">'+esc(prof.ea_id||"no EA ID")+'</small></span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td>'+
@@ -6215,6 +6262,28 @@ CG.AFTER._preseason = function(){
   document.querySelectorAll("[data-reg-decline]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-reg-decline"), name=this.getAttribute("data-name");
     CG.confirm("Decline "+name+"’s registration?","They’re kept out of random assignment and the draft pool until reinstated. If they’re already rostered, waive them from the club first.","Decline", function(){ CG.setRegStatus(id,"declined",name); });
+  }); });
+  /* v3.32 — withdraw a sign-up from the SEASON. Declining keeps the row and holds him out of the
+     draft; this removes the sign-up itself, and takes the roster spot with it so he is out of the
+     season rather than left sitting in it as a free agent. The confirm says which of the two it
+     will be, because one of them takes a player off a club's squad tonight. */
+  document.querySelectorAll("[data-reg-withdraw]").forEach(function(b){ b.addEventListener("click", function(){
+    var el=this, id=el.getAttribute("data-reg-withdraw"), name=el.getAttribute("data-name"), club=el.getAttribute("data-club");
+    CG.confirm("Withdraw "+name+" from the season?",
+      (club ? "This removes the sign-up AND the roster spot with "+club+". "+name+" comes off that squad, the club is told in its room, and any contract ends. "
+            : "This removes the sign-up entirely. "+name+" leaves the pool and is not in the draft or any placement. ")+
+      "It is archived and can be seen in the league office record, but it is not a one-click undo: he signs up again from the Register page while registration is open. "+
+      "To hold someone out of the draft WITHOUT removing him, use Decline instead.",
+      "Withdraw from the season", function(){
+        el.disabled = true;
+        CG.sb.rpc("office_withdraw_registration", { p_registration:id, p_reason:null }).then(function(r){
+          el.disabled = false;
+          if (r.error){ CG.toast("Couldn’t withdraw: "+r.error.message, "err"); return; }
+          var d = r.data || {};
+          CG.toast(name+" withdrawn from the season"+(d.had_spot?" and off "+(d.club||"his club"):""), "ok");
+          CG.reloadLeague();
+        });
+      });
   }); });
   document.querySelectorAll("[data-reg-reinstate]").forEach(function(b){ b.addEventListener("click", function(){
     CG.setRegStatus(this.getAttribute("data-reg-reinstate"),"pending",this.getAttribute("data-name"));

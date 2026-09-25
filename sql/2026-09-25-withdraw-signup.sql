@@ -1,0 +1,67 @@
+-- v3.32: the Draft & placement tab shows a season again, switches between them, and can withdraw a
+-- sign-up from the season.
+--
+-- Commissioner: "that tab is also showing no signups even though we are in the middle of the
+--  season. That page should show season we are currently in and I should be able to toggle to the
+--  new season when the signups open at the trade deadline." And: "add a button in the Draft &
+--  Placement tab to manually remove player signups so I can withdrawal them from the season instead
+--  of just making them a free agent."
+--
+-- ============================================================================
+-- 1. WHY IT SHOWED NOTHING. MY REGRESSION, FROM THIS MORNING.
+-- ============================================================================
+-- v3.25 dropped the note column from season_registrations when the sign-up note box was retired.
+-- CG.loadManagerData still asked for it:
+--     .select("id,profile_id,season_id,status,position,scout_ovr,note,created_at, profiles(...)")
+-- PostgREST refuses the WHOLE query for one unknown column, so the call 400'd and
+-- CG.lg._registrationsRaw became []. Every registration vanished from the Control Center: Draft &
+-- placement read "no sign-ups" in the middle of a season holding 180 of them.
+--
+-- And nobody noticed for hours because the failure was SILENT:
+--     var regs = (q[1] && !q[1].error && q[1].data) || [];
+-- an error fell back to [] and an empty board looks exactly like a league where nobody has signed
+-- up. It now records the error, toasts it, KEEPS whatever it already had rather than blanking the
+-- board, and the page prints a red notice saying the counts may be wrong. That is the same
+-- fail-loud rule this repo already applies to writes; it was missing on this read.
+--
+-- Lesson worth keeping: dropping a column is not done when the column is dropped. Grep every
+-- select for it. One survivor takes out every query it appears in, not just the field.
+--
+-- ============================================================================
+-- 2. WHICH SEASON, AND SWITCHING
+-- ============================================================================
+-- The page read CG.SEASON and nothing else, so there was no way to look at next season's pool even
+-- once it was taking sign-ups. CG.admPreseason now takes the query string: ?season=<number> wins,
+-- otherwise the season being PLAYED. A switcher lists every season, marking the one "now playing"
+-- and the one with "sign-ups open", which from Sat Oct 17 will be two different seasons (v3.29).
+--
+-- ============================================================================
+-- 3. WITHDRAWING A SIGN-UP
+-- ============================================================================
+-- public.withdraw_registration is the PLAYER's door. It refuses once he is placed and once
+-- registration closes, and it says in terms that "withdrawals now go through the league office".
+-- There was no league office door. public.office_withdraw_registration(registration, reason) is it.
+--
+-- It withdraws from the SEASON, so the roster spot goes with the sign-up. Leaving the spot behind
+-- is exactly the "just makes them a free agent" outcome the commissioner does not want: the
+-- contract is expired, the club is told in its room, and the player is notified.
+--
+-- Gated to is_commissioner() or is_staff(). A SEATED manager is refused outright and the message
+-- says to vacate the seat first (Rule 2.6): a withdrawal must never quietly empty a front office.
+-- The archive is written BEFORE the row stops existing, into season_registration_removals, the same
+-- table and the same order the departed-signup sweep uses, so there is one place to look.
+--
+-- Rehearsed in a rolled-back transaction across all three doors: a rostered non-manager (sign-up
+-- count down one, ZERO roster spots left, archived, no surviving active contract), a seated GM
+-- (refused with SEATED), and a signed-in member who is not the office (refused with
+-- NOT_AUTHORIZED).
+--
+-- TRAP, and it bit a second time in one day: `profile_id not in (select unnest(array[owner,gm,agm]))`
+-- is NULL for every row when any seat is NULL, so it matches nothing. The first rehearsal reported
+-- "no rostered non-manager to test with" in a league where nearly everyone qualifies. Use
+-- `is distinct from` per seat. This is the same trap recorded in the trade-routing work this
+-- afternoon, which is how it was recognized in seconds the second time.
+--
+-- The UI keeps Decline and Withdraw as different things, and the confirm says which is which:
+-- Decline holds a player out of the draft and keeps the row; Withdraw removes the sign-up and, if
+-- he has one, the roster spot with it.
