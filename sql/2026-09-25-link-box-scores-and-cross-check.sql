@@ -1,0 +1,85 @@
+-- v3.19: the box score names the commissioner fixed, linked, and the whole season cross checked.
+--
+-- Commissioner, 2026-09-25: "I believe I fixed all the missing box score gamertags. Please link and
+--  cross check with roster vs tc and positioning rules and such."
+--
+-- ============================================================================
+-- 1. LINKED. 13 of 241 rows carried no member; 12 now resolve.
+-- ============================================================================
+-- Matched on profiles.ea_id, and each one to EXACTLY ONE profile. Two candidates is nobody, and
+-- none of these had two:
+--
+--   box score name      member                              EA persona
+--   LSF_Chunkydunks  -> Chunkydunks21 (BOS)                 1825808738
+--   BeLchy01         -> Don't Draft Me Reno Garden Shed (BOS) 1884272681
+--   KrautKillaKody   -> cako (DET)                          311682661
+--   Masterpip16      -> Pip (SEA)                           1873861402
+--   I Cashout X      -> oKniesy (UTA)                       1874324022
+--   Scorezeaux       -> Scorezov (VAN)                      306408512
+--
+-- Two games each. Every one was checked four ways before the write: exactly one candidate, on the
+-- club the row was recorded for, on that club's ACTIVE roster, and in the position group he played.
+--
+-- Matched with lower(p.ea_id) = lower(gs.skater_name), deliberately NOT ilike. Several of these
+-- names contain underscores, and in a LIKE pattern an underscore is a single-character wildcard:
+-- `LSF_Chunkydunks` would have matched `LSFxChunkydunks` too, which is how a confident wrong link
+-- gets made. Same blind spot recorded in v3.00.
+--
+-- Their EA persona ids were learned onto the profiles in the same pass, so none of these six ever
+-- has to be matched on a name again. Only NULLs were filled: a persona already claimed by another
+-- member was refused rather than overwritten. 87 members now carry a persona.
+--
+-- The Rule 6.3 credit withdrawal was respected. A line the league office has taken off somebody is
+-- never re-credited by a linking pass.
+--
+-- ============================================================================
+-- 2. CROSS CHECKED. All 241 rows, against Rules 2.1, 4.2 and 5.2.
+-- ============================================================================
+-- Weekly game limits (Rule 5.2): clean. No player over his cap in any week of the season.
+--
+-- Seven rows read as violations. All seven are explained and none is new:
+--
+--   atlasx27x (DAL, 3 games)  reads as on no DAL squad because he was waived AFTER those games.
+--                             Already ruled: the games were legal and the stats count.
+--   Maniac (SEA, 2 games)     an LW who played G. Already ruled and logged: he was in camp then,
+--                             and a camp player fills any position.
+--   biz (SEA, 2 games)        an RD who played RW, and NEVER FLAGGED until this pass. The club
+--                             notices carry the timestamps: "To training camp: biz" at
+--                             Sep 23 9:13 PM, "To the active roster: biz" at Sep 23 10:47 PM, and
+--                             both games (9:35 and 10:10) fall inside that window. Legal.
+--                             It went unflagged at the time because when the check ran he was
+--                             still in camp, and the check reads the squad as it stands now.
+--
+-- After the clearances, a full re-run of review_game_records over every final regular-season game
+-- raised ZERO new findings.
+--
+-- ============================================================================
+-- 3. 'unrostered_cleared' ADDED to review_game_records.
+-- ============================================================================
+-- Mirroring 'position_cleared', which has done the same job for Rule 2.1 since v3.00. A ruling on
+-- an unrostered-player finding had nowhere to live: the roster is read as it stands NOW and not as
+-- it stood that night, so a player whose move happened after the game he played is raised again on
+-- every later pass. atlasx27x had been raised once and ruled on once; his other two games would
+-- have paged the Officials' desk again on the next run, with the same answer.
+--
+--   if not v_rostered and not exists (select 1 from public.admin_audit a
+--                                      where a.action in ('unrostered_player','unrostered_cleared')
+--                                      and a.target_id = p_game::text
+--                                      and a.detail->>'player' = v_name) then
+--
+-- A ruling is an admin_audit row, which is already the dedup key for every other finding (v3.09),
+-- so this adds no new table and no new place to look.
+--
+-- ============================================================================
+-- 4. STILL OPEN, and it needs a person.
+-- ============================================================================
+-- DAL's goaltender in the Sep 23 9:00 PM game reports as `vDarkiee___`, EA persona 1004486290545,
+-- and matches no member on gamertag, ea_id or persona.
+--
+-- Elimination does not close it either. Dallas dressed a different six than it filed that night,
+-- which Rule 5.3 allows, and the two lists share only two names:
+--   filed:     xW3RMZx (C), Zurion (G), Jaylen (LD), Lokharov14 (LW), Trxtterr (RD), FluffyPanda789 (RW)
+--   played:    atlasx27x (C), PghReaper (D), Trxtterr (D), vDarkiee___ (G), Lokharov14 (LW), Winkle_09 (RW)
+-- The filed goaltender was Zurion, who is a different member with a different persona. So the one
+-- inference that would name him is not available, and guessing a member into a box score is worse
+-- than leaving the row unmatched. It stays on the Officials' desk.
