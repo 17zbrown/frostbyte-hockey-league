@@ -67,7 +67,9 @@ console.log("\n— the published rule");
     /or under a club substitution recorded for that fixture under Rule 4\.6/.test(r62.paragraphs.join(" ")),
     r62.paragraphs[0].slice(0, 200));
   A("...and 6.2 says what happens when the office was not told", /without the office recording it under Rule 4\.6/.test(r62.paragraphs.join(" ")));
-  A("the changelog records it", obj.rulebook.changelog[0].version === "3.20");
+  /* pin that the entry EXISTS, never that it is newest: the next release makes "newest" false and
+     the assertion would fail for a reason that has nothing to do with Rule 4.6 */
+  A("the changelog records it", obj.rulebook.changelog.some((e) => e.version === "3.20"));
 }
 
 console.log("\n— the decision record");

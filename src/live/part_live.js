@@ -3406,15 +3406,56 @@ CG.ROUTES.brand = function(){
   return h;
 };
 
-CG.promptEaId = function(){
-  CG.modal("Add your EA ID",
-    '<label class="fld"><span>EA ID / gamertag used in-game</span><input id="eaInput" placeholder="e.g. YourEAName" value="'+esc((CG.auth.profile||{}).ea_id||"")+'"></label><p class="caption">Shown to league staff for lobby verification; hidden from the public directory unless you opt in.</p>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="eaSave">Save EA ID</button>');
-  document.getElementById("eaSave").addEventListener("click", function(){
-    var v=(document.getElementById("eaInput").value||"").trim();
-    if(v.length<2){ CG.toast("Enter your EA ID","err"); return; }
-    CG.saveEaId(v);
+/* v3.21 — the three things the league needs before a member can sign up, asked ONCE. This used to
+   be an EA-ID-only modal, which meant a member with no console on file was refused by the database
+   with no way to fix it from the page that refused him. `CG.regMissing` is the single definition of
+   what is missing, so the page, the button and this modal cannot disagree. */
+CG.regMissing = function(pr){
+  pr = pr || CG.auth.profile || {};
+  var out=[];
+  if(!String(pr.ea_id||"").trim()) out.push("ea");
+  if(!String(pr.platform||"").trim()) out.push("plat");
+  if(!String(pr.platform_gamertag||"").trim()) out.push("tag");
+  return out;
+};
+CG.promptEaId = function(){   /* kept as the name every caller already uses */
+  var pr=CG.auth.profile||{};
+  CG.modal("Your player details",
+    '<p class="caption" style="margin-bottom:14px">The league needs these three before you can sign up. The EA ID is how your box scores find you; the console name is how your club adds you and gets you into a party.</p>'+
+    '<label class="fld"><span>EA ID (exactly as it shows on your box score)</span>'+
+      '<input id="eaInput" placeholder="e.g. YourEAName" value="'+esc(pr.ea_id||"")+'">'+
+      '<span class="hint">If your EA login and your in-game name differ, the league needs the in-game one: that is the only name the game reports.</span></label>'+
+    '<label class="fld"><span>Console</span><select id="eaPlat">'+CG.platOptions(pr.platform||"","Pick your console")+'</select>'+
+      '<span class="hint">CGHL is played on console.</span></label>'+
+    '<label class="fld"><span id="eaTagLbl">'+esc(CG.platTag(pr.platform||""))+'</span>'+
+      '<input id="eaTag" value="'+esc(pr.platform_gamertag||"")+'" placeholder="'+esc(CG.platTag(pr.platform||""))+'">'+
+      '<span class="hint">Shown to your club\u2019s management and to league staff, never publicly.</span></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="eaSave">Save and continue</button>');
+  document.getElementById("eaPlat").addEventListener("change", function(){
+    document.getElementById("eaTagLbl").textContent=CG.platTag(this.value);
+    document.getElementById("eaTag").placeholder=CG.platTag(this.value);
   });
+  document.getElementById("eaSave").addEventListener("click", function(){
+    var ea=(document.getElementById("eaInput").value||"").trim(),
+        plat=document.getElementById("eaPlat").value,
+        tag=(document.getElementById("eaTag").value||"").trim();
+    if(ea.length<2){ CG.toast("Enter your EA ID","err"); return; }
+    if(!plat){ CG.toast("Pick the console you play on","err"); return; }
+    if(tag.length<2){ CG.toast("Enter your "+CG.platTag(plat),"err"); return; }
+    CG.savePlayerDetails(ea, plat, tag);
+  });
+};
+CG.savePlayerDetails = async function(ea, plat, tag){
+  if(!CG.sb||!CG.auth.user) return;
+  /* .select() + a zero-row check: an RLS-refused UPDATE returns 0 rows and NO error, and these three
+     silently failing to save costs the player his whole registration. */
+  var r = await CG.sb.from("profiles").update({ ea_id:ea, platform:plat, platform_gamertag:tag })
+            .eq("id", CG.auth.user.id).select("id");
+  if(r.error){ CG.toast("Couldn\u2019t save: "+r.error.message,"err"); return; }
+  if(!(r.data||[]).length){ CG.toast("That didn\u2019t save \u2014 your sign-in may have expired. Sign in again and retry.","err"); return; }
+  CG.auth.profile.ea_id=ea; CG.auth.profile.platform=plat; CG.auth.profile.platform_gamertag=tag;
+  if(CG.closeOverlay) CG.closeOverlay();
+  CG.toast("Saved","ok"); CG.router();
 };
 CG.saveEaId = async function(v){
   if(!CG.sb||!CG.auth.user) return;
@@ -3429,14 +3470,31 @@ CG.saveEaId = async function(v){
 CG.registerForSeason = async function(position, note){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   var s=CG.regSeason(); if(!s||!s.registration_open){ CG.toast("Registration isn’t open","err"); return; }
-  if(!CG.auth.profile.ea_id){ CG.toast("Add your EA ID first","err"); CG.promptEaId(); return; }
+  /* v3.21: the database refuses a sign-up without all three (require_registration_details). Ask for
+     them here so the member is never handed a raw database refusal he cannot act on. */
+  var miss=CG.regMissing();
+  if(miss.length){
+    CG.toast(miss.length===1 ? "One more detail first" : "A few details first","err");
+    CG.promptEaId(); return;
+  }
   if(!CG.auth.profile.in_guild){
     try { var fr=await CG.sb.from("profiles").select("in_guild").eq("id",CG.auth.user.id).maybeSingle(); if(fr.data&&fr.data.in_guild) CG.auth.profile.in_guild=true; } catch(e){}
     if(!CG.auth.profile.in_guild){ CG.toast("Join the Chel Gaming Discord to register","err"); return; }
   }
   var payload={ season_id:s.id, profile_id:CG.auth.user.id, position:position||"C", note:(note||"").trim()||null };
   var r=await CG.sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
-  if(r.error){ CG.toast("Couldn’t register: "+r.error.message,"err"); return; }
+  if(r.error){
+    /* the server is the authority on this, not the check above: if it says a detail is missing,
+       reopen the same form rather than leaving the member reading a database message */
+    var m=String(r.error.message||"");
+    if(/^DETAILS:/.test(m)||/DETAILS: /.test(m)){
+      CG.toast(m.replace(/^.*DETAILS:\s*/,""),"err");
+      try { var fp=await CG.sb.from("profiles").select("ea_id,platform,platform_gamertag").eq("id",CG.auth.user.id).maybeSingle();
+            if(fp&&fp.data) Object.assign(CG.auth.profile, fp.data); } catch(e){}
+      CG.promptEaId(); return;
+    }
+    CG.toast("Couldn\u2019t register: "+m,"err"); return;
+  }
   CG.auth.registration=payload;
   CG.pingDiscordSync();   /* registering changes their Discord roles (Player / Free Agent) — don't wait for the cron */
   CG.toast("You’re registered for Season "+(s.number||1)+"!","ok");
@@ -6534,9 +6592,11 @@ CG.userEditModal = function(id){
     fld("Gamertag","ueGT",pr.gamertag)+
     fld("Display name","ueDN",pr.display_name)+
     fld("EA gamertag (exact)","ueEA",pr.ea_id,'placeholder="as it appears in NHL"')+
-    '<label class="fld"><span>Platform</span><select id="uePlat">'+
-      ["","PlayStation 5","Xbox Series X|S","PC"].map(function(p){ return '<option value="'+esc(p)+'"'+((pr.platform||"")===p?" selected":"")+'>'+(p||"—")+'</option>'; }).join("")+
-      '</select></label>'+
+    /* v3.21: this list used to be its own ("PlayStation 5" / "Xbox Series X|S" / "PC") while the
+       member's settings page wrote "PS5" / "XSX", which is how profiles.platform ended up holding
+       four spellings of two consoles. Both read CG.PLATFORMS now. */
+    '<label class="fld"><span>Console</span><select id="uePlat">'+CG.platOptions(pr.platform||"","—")+'</select></label>'+
+    fld("Xbox gamertag / PSN name","ueTag",pr.platform_gamertag,'placeholder="the name on their console"')+
     fld("Time zone","ueTZ",pr.timezone,'placeholder="e.g. Eastern"')+
     fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
     fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
@@ -6553,6 +6613,7 @@ CG.userEditModal = function(id){
       display_name:(document.getElementById("ueDN").value||"").trim()||null,
       ea_id:(document.getElementById("ueEA").value||"").trim()||null,
       platform:document.getElementById("uePlat").value||null,
+      platform_gamertag:(document.getElementById("ueTag").value||"").trim()||null,
       timezone:(document.getElementById("ueTZ").value||"").trim()||null,
       jersey_number:isNaN(jer)?null:Math.max(1,Math.min(99,jer)),
       overall:isNaN(ovr)?null:Math.max(40,Math.min(99,ovr)),
@@ -12520,18 +12581,32 @@ CG.AFTER.hub = function(param, qs){
   var clEa=document.getElementById("clEaBtn"); if(clEa) clEa.addEventListener("click", CG.promptEaId);   /* the Get-set-up checklist's EA button */
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });
   if (document.getElementById("dcAcctCard")) CG.loadDiscordAccounts();
+  /* the field's own label is the question; it has to change the moment the console does, or an Xbox
+     player is left reading "PSN Name" over the box he is typing his gamertag into */
+  var pl=document.getElementById("sPlatLive");
+  if (pl) pl.addEventListener("change", function(){
+    var lbl=document.getElementById("sTagLiveLbl"), inp=document.getElementById("sTagLive");
+    if (lbl) lbl.textContent=CG.platTag(this.value);
+    if (inp) inp.placeholder=CG.platTag(this.value);
+  });
   var sl=document.getElementById("sSaveLive");
   if (sl) sl.addEventListener("click", function(){
     var ea=(document.getElementById("sEaLive").value||"").trim(), plat=document.getElementById("sPlatLive").value;
+    var tagEl=document.getElementById("sTagLive"), ptag=tagEl?(tagEl.value||"").trim():"";
     var srvEl=document.getElementById("sSrvLive"), srv=srvEl?srvEl.value:null;
     if (ea && ea.length<2){ CG.toast("EA ID looks too short","err"); return; }
+    /* the list is the league's, same rule as the server below: a console the league does not play
+       on is refused here rather than written and then rejected by the database CHECK */
+    if (plat && !CG.PLATFORMS.some(function(x){ return x.id===plat; })){ CG.toast("CGHL is played on console","err"); return; }
+    if (ptag && ptag.length<2){ CG.toast(CG.platTag(plat)+" looks too short","err"); return; }
     /* The list is the league's, not this form's: a server the league no longer plays on is refused
        here rather than written and then quietly ignored by the resolver. */
     if (srv && (CG.SERVERS||[]).indexOf(srv)<0){ CG.toast("That server is not one the league plays on","err"); return; }
-    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null, preferred_server:srv||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
+    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null, platform_gamertag:ptag||null, preferred_server:srv||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
       if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
       if(!(r.data||[]).length){ CG.toast("That didn’t save — your sign-in may have expired. Sign in again and retry.","err"); return; }
-      CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null; CG.auth.profile.preferred_server=srv||null;
+      CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null;
+      CG.auth.profile.platform_gamertag=ptag||null; CG.auth.profile.preferred_server=srv||null;
       /* the club's board reads lg.players, so update the loaded row too: the suggestion shows up
          on the Schedule desk immediately instead of after the next full league load */
       ((CG.lg&&CG.lg.players)||[]).forEach(function(lp){ if(lp.id===CG.auth.user.id) lp.server=srv||null; });
@@ -12652,7 +12727,14 @@ CG.hubSettings = function(){
       ? '<b style="color:var(--green,#2F9E44)">Linked to your EA account.</b> Your box scores find you automatically now, whatever you rename yourself to.'
       : 'Enter the name that appears on your <b>EA box score</b>, exactly as it shows in game. If your EA login and your in-game name are different, the league needs the in-game one: that is the only name the game reports. Required to register.')+
     '</span></label>'+
-    '<label class="fld"><span>Platform</span><select id="sPlatLive">'+["","PS5","XSX","PC"].map(function(x){ return '<option value="'+x+'"'+((p.platform||"")===x?" selected":"")+'>'+(x||"—")+'</option>'; }).join("")+'</select></label>'+
+    '<label class="fld"><span>Console</span><select id="sPlatLive">'+CG.platOptions(p.platform||"","Pick your console")+'</select>'+
+    '<span class="hint">CGHL is played on console. Required to register.</span></label>'+
+    /* v3.21: the league had no way to reach a member in party chat or send him a friend request,
+       because it only ever held his EA name. The label follows the console he picked, since asking
+       an Xbox player for his PSN name is asking the wrong question. */
+    '<label class="fld"><span id="sTagLiveLbl">'+esc(CG.platTag(p.platform||""))+'</span>'+
+    '<input id="sTagLive" value="'+esc(p.platform_gamertag||"")+'" placeholder="'+esc(CG.platTag(p.platform||""))+'">'+
+    '<span class="hint">The name your console shows, so club management and the league can add you and get you into a party. This is not your EA name unless they happen to match. Required to register.</span></label>'+
     '<label class="fld"><span>Suggested server</span><select id="sSrvLive"><option value="">No preference</option>'+
       (CG.SERVERS||[]).map(function(x){ return '<option value="'+esc(x)+'"'+((p.preferred_server||"")===x?" selected":"")+'>'+esc(x)+'</option>'; }).join("")+
     '</select><span class="hint">The server you play best on. Your club\u2019s management sees the whole roster\u2019s answers when it sets each game\u2019s server picks and veto (Rule 4.2). It is a suggestion, not a vote: the picks stay management\u2019s. Leave it on <b>No preference</b> if you play anywhere.</span></label>'+

@@ -1,0 +1,106 @@
+-- v3.21: CGHL is a console league, and a sign-up says which console and which name on it.
+--
+-- Commissioner, 2026-09-25: "Add a box in the player profile editor to add their Xbox Gamertag/PSN
+--  name. Make it a requirement when signing up to add the EA ID, select the platform type (remove PC
+--  option), and fill in their Gamertag/PSN name." And: "Make a separate type box in the player
+--  profile settings for their console gamertag/PSN name."
+--
+-- ============================================================================
+-- WHAT WAS ACTUALLY THERE, which changed the shape of the fix
+-- ============================================================================
+-- The columns already existed and were nearly empty, and the reason was worth finding:
+--
+--   profiles.platform held FOUR spellings of TWO consoles:
+--     XSX 13, PS5 13, "Xbox Series X|S" 6, "PlayStation 5" 3, and 223 with nothing.
+--   profiles.platform_gamertag: 7 rows out of 258.
+--   season_registrations.ea_id / platform / platform_gamertag: NULL on ALL 179 rows.
+--
+-- The four spellings were not members typing freely. There were THREE platform pickers in the
+-- client, each with its own list, all including PC:
+--   src/live/part_live.js  (Control Center player modal)  ["PlayStation 5","Xbox Series X|S","PC"]
+--   src/live/part_live.js  (the member's own settings)    ["PS5","XSX","PC"]
+--   src/live/part6_hub.js  (the demo settings page)       ["PS5","XSX","PC"]
+-- Staff editing a member wrote one spelling and the member editing himself wrote the other. So the
+-- data was not dirty, it was faithfully recording a bug.
+--
+-- And season_registrations.ea_id being NULL on every row meant the importer's
+-- gameLookups.regEaId step, which looks a box score name up against the EA ID captured at sign-up,
+-- had NEVER ONCE resolved anybody. It has been dead code since it was written.
+--
+-- ============================================================================
+-- ONE VOCABULARY
+-- ============================================================================
+-- CG.PLATFORMS in src/live/part2_engine.js is now the only console list, and it loads before every
+-- page that draws a picker:
+--   { id:"XSX", label:"Xbox",        tag:"Xbox Gamertag" }
+--   { id:"PS5", label:"PlayStation", tag:"PSN Name" }
+-- `tag` is the one that earns its place: asking an Xbox player for his "PSN name" is asking the
+-- wrong question, so the field's own LABEL follows the console he picked, live, on change.
+-- CG.platLabel / CG.platTag / CG.platOptions are the three accessors; all three pickers use them,
+-- and the two places that displayed the raw stored value now show the console instead of the code.
+-- PC is absent, which is an eligibility statement and is why Rule 1.1 now says so out loud.
+--
+-- Backfilled: "Xbox Series X|S" -> XSX, "PlayStation 5" -> PS5, in both tables. Then
+--   alter table public.profiles add constraint profiles_platform_ck
+--     check (platform is null or platform in ('XSX','PS5'));
+--   (and the same on season_registrations)
+-- so a fifth spelling cannot come back. NULL stays legal: 223 existing members have no console on
+-- file and forcing one would break every unrelated profile write. The REQUIREMENT lives at the gate.
+--
+-- ============================================================================
+-- THE GATE: ONE function, not a second one
+-- ============================================================================
+-- The rehearsal found an existing guard before writing a new one, which changed the design: the
+-- trigger `require_guild_before_register` ran `require_guild_membership()`, which since v2.59 had
+-- ALSO been checking the EA ID. Its name had stopped being true, and adding a second guard beside it
+-- would have meant two functions refusing sign-ups for overlapping reasons with different wording.
+--
+-- Renamed to `public.require_registration_details()` and extended. It now, in order:
+--   1. SNAPSHOTS ea_id / platform / platform_gamertag from the profile onto the registration row, on
+--      EVERY path and BOTH operations, filling only what the row does not already carry. This is
+--      what makes regEaId work, and it is why the trigger is now BEFORE INSERT OR UPDATE and not
+--      INSERT only;
+--   2. on INSERT, refuses a member outside the Discord (unchanged);
+--   3. on INSERT, returns early for trusted_writer() or is_commissioner(), the same door v2.59 used,
+--      so the office can still register somebody by hand and fix the details after;
+--   4. otherwise names EVERY missing detail in one message, and words the third one after the
+--      console chosen: "your PSN name" for PS5, "your Xbox gamertag" for XSX, and "your Xbox
+--      gamertag or PSN name" when no console has been picked yet.
+-- Backfilled the snapshot for all 179 existing registrations from their profiles: 179 now carry an
+-- EA ID, 29 a console, 5 a console name.
+--
+-- ============================================================================
+-- THE CLIENT
+-- ============================================================================
+-- The database gate went live first, so the client had to collect these in the same push or a new
+-- member would meet a raw database refusal with nothing on the page able to fix it:
+--   * the member's own settings page gained a Console picker and a SEPARATE console-name box whose
+--     label re-renders on change, both saved with the existing profile save;
+--   * CG.regMissing() is the single definition of what is missing, so the page, the button and the
+--     modal cannot disagree;
+--   * CG.promptEaId (the name every caller already used) went from an EA-ID-only modal to all three
+--     in one form, because a member missing his console was being asked for his EA ID;
+--   * registerForSeason checks CG.regMissing() first, AND treats a server-side DETAILS refusal as
+--     the authority: it re-reads the profile and reopens the same form rather than leaving the
+--     member reading a database message;
+--   * the Control Center player modal gained the console-name field and lost its private list.
+--
+-- Rule 1.1 rewritten: three things are required, CGHL is played on console, the EA ID is public and
+-- the console name is shown to the club's management and league staff rather than publicly, and all
+-- three are correctable on the profile without undoing a game already recorded.
+--
+-- ============================================================================
+-- TRAPS
+-- ============================================================================
+-- 1. `text[] || 'a literal'` resolves to anyarray || anyarray and dies with "malformed array
+--    literal". Every element needs ::text. The rehearsal caught it on the first run.
+-- 2. THE REHEARSAL LIED TO ME ONCE. Setting in_guild=false under the member's own session to prove
+--    the Discord check still fires did nothing, because guard_profile_role() silently REVERTS
+--    in_guild (along with role, banned, overall, departments, discord_id, is_admin) for anyone who
+--    is not a trusted writer. The assertion failed and looked like the gate was broken; the gate was
+--    fine and the rehearsal was testing nothing. Write that column as a trusted writer, then assert
+--    the value actually changed before relying on it.
+--    The same function is why this change needed no new RLS: it does NOT revert ea_id, platform or
+--    platform_gamertag, so a member can write all three himself. Proven in the rehearsal.
+-- 3. profiles.id references auth.users, so a fabricated member cannot be inserted even inside a
+--    transaction that will roll back. Rehearse against a real profile and restore it.

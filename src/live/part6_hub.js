@@ -2719,7 +2719,7 @@ CG.hubSettings = function(){
     '<label class="fld"><span>Display name / gamertag</span><input id="sTag" value="'+esc(prefs.tag||((me||{}).tag||p.label))+'" readonly style="background:var(--ice);color:var(--steel)">'+
     '<span class="hint">Synced automatically from your Discord display name every 5 minutes — change it there and it flows here.</span></label>'+
     '<label class="fld"><span>EA ID</span><input id="sEa" value="'+esc(prefs.ea||((me||{}).eaId||""))+'"><span class="hint">Shown to league staff for lobby verification; hidden from the public directory unless you opt in.</span></label>'+
-    '<div class="grid g2"><label class="fld"><span>Platform</span><select id="sPlat">'+["PS5","XSX","PC"].map(function(x){ return '<option'+((prefs.plat||((me||{}).platform))===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
+    '<div class="grid g2"><label class="fld"><span>Console</span><select id="sPlat">'+CG.platOptions(prefs.plat||((me||{}).platform)||"","Pick your console")+'</select></label>'+
     '<label class="fld"><span>Time zone</span><select id="sTz">'+["Eastern","Central","Mountain","Pacific"].map(function(x){ return '<option'+((prefs.tz||"Eastern")===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label></div>'+
     '<div class="grid g2"><label class="fld"><span>Primary position</span><select id="sPos1">'+["LW","C","RW","LD","RD","G"].map(function(x){ return '<option'+(((me||{}).pos)===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
     '<label class="fld"><span>Secondary position</span><select id="sPos2"><option>—</option>'+["LW","C","RW","LD","RD"].map(function(x){ return "<option>"+x+"</option>"; }).join("")+'</select></label></div>'+

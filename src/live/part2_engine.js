@@ -106,7 +106,31 @@ CG.byPosition = function(getPos, getName){
 CG.SKATER_ARCH = { LW:["Sniper","Power Forward","Grinder"], C:["Playmaker","Two-Way Forward","Sniper"], RW:["Sniper","Power Forward","Playmaker"],
                    LD:["Offensive Defenseman","Shutdown","Two-Way Defenseman"], RD:["Two-Way Defenseman","Shutdown","Offensive Defenseman"] };
 CG.G_ARCH = ["Butterfly","Hybrid","Standup"];
-CG.PLATFORMS = ["PS5","PS5","PS5","XSX","XSX","PC"];
+/* v3.21 — ONE console vocabulary, and the only one. profiles.platform had accumulated FOUR
+   spellings of two consoles ("XSX", "Xbox Series X|S", "PS5", "PlayStation 5") because the Control
+   Center's player modal and the member's own settings page each wrote their own. `id` is what the
+   database stores and is CHECK-constrained to these two values; `label` is what a member reads; and
+   `tag` matters most, because asking an Xbox player for his "PSN name" is asking the wrong question.
+   PC is deliberately absent: CGHL is played on console. */
+CG.PLATFORMS = [
+  { id:"XSX", label:"Xbox",        tag:"Xbox Gamertag" },
+  { id:"PS5", label:"PlayStation", tag:"PSN Name" }
+];
+CG.platLabel = function(id){
+  for (var i=0;i<CG.PLATFORMS.length;i++) if (CG.PLATFORMS[i].id===id) return CG.PLATFORMS[i].label;
+  return id || "";
+};
+/* what to CALL the console name field. With no console chosen yet the question has to cover both. */
+CG.platTag = function(id){
+  for (var i=0;i<CG.PLATFORMS.length;i++) if (CG.PLATFORMS[i].id===id) return CG.PLATFORMS[i].tag;
+  return "Xbox Gamertag or PSN Name";
+};
+/* <option> list for a platform picker. blank = an explicit "not set yet" row. */
+CG.platOptions = function(sel, blank){
+  return (blank ? '<option value=""'+(sel?"":" selected")+'>'+blank+'</option>' : '')
+    + CG.PLATFORMS.map(function(x){
+        return '<option value="'+x.id+'"'+(sel===x.id?" selected":"")+'>'+x.label+'</option>'; }).join("");
+};
 
 CG.buildPlayers = function(rng){
   var players = [], id = 0, tagIdx = 0;
@@ -122,7 +146,7 @@ CG.buildPlayers = function(rng){
         id:"p"+(id++), tag:tag, team:team.code, pos:pos, depth:(slot%2)+1,
         talent:talent, arch:archList[Math.floor(rng()*archList.length)],
         jersey: pos==="G" ? (slot===10?31:35) : (2 + Math.floor(rng()*88)),
-        platform: CG.PLATFORMS[Math.floor(rng()*CG.PLATFORMS.length)],
+        platform: rng() < .55 ? "PS5" : "XSX",
         rookie: rng() < .22, shoots: rng()<.6?"L":"R",
         gritty: rng() < .18,           /* high-PIM tendency */
         eaId: tag.replace(/[^A-Za-z0-9]/g,"") + "_EA",

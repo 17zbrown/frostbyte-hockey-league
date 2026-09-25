@@ -2337,7 +2337,8 @@ CG.ROUTES.player = function(pid, qs){
           /* v2.61: every identity label is the same outlined chip; Message is the one filled action */
           (p.rookie?'<span class="chip chip-ink" style="border-color:#39434B">Rookie</span>':"")+
           (!archived && CG.isCamp(p)?'<span class="chip chip-ink" style="border-color:#39434B" title="Training camp: fills any position, up to 3 games a week (Rules 2.1, 5.2)">Training camp</span>':"")+
-          (p.platform && p.platform!=="—" ? '<span class="chip chip-ink" style="border-color:#39434B">'+esc(p.platform)+'</span>' : "")+
+          /* v3.21: the stored value is a code (XSX / PS5); show the console, not the code */
+          (p.platform && p.platform!=="—" ? '<span class="chip chip-ink" style="border-color:#39434B">'+esc(CG.platLabel(p.platform))+'</span>' : "")+
           CG.eaIdChip(p.eaId)+
           /* the envelope: one click into a DM with this player (hidden on your own profile) */
           (CG.auth && CG.auth.user && CG.auth.user.id!==p.id
@@ -2837,7 +2838,7 @@ CG.AFTER.player = function(pid, qs){
     CG.sb.from("profiles").select("gamertag,ea_id,platform").eq("id", pid).maybeSingle().then(function(r){
       var hdr = document.getElementById("acctHdr"); if (!hdr) return;
       if (r && r.data) hdr.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp);font-size:16px;flex:1">'+esc(r.data.gamertag||"Player")+'</b>'+
-        (r.data.platform?'<span class="chip chip-ink" style="border-color:#39434B">'+esc(r.data.platform)+'</span>':"")+
+        (r.data.platform?'<span class="chip chip-ink" style="border-color:#39434B">'+esc(CG.platLabel(r.data.platform))+'</span>':"")+
         CG.eaIdChip(r.data.ea_id)+
         (CG.auth && CG.auth.user && CG.auth.user.id!==pid
           ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(pid)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
