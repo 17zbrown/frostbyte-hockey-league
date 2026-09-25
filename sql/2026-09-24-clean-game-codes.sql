@@ -1,0 +1,40 @@
+-- v3.15 — lobby codes no longer read as anything crude.
+--
+-- Commissioner: "Can you edit the game codes and any future game codes to account for potential
+--  profanity combinations like 69 being next to each other and such?"
+--
+-- ONE LIST, in public.game_code_ok(text), used by the generator, by the rotation below and by any
+-- future sweep, so the thing that issues codes and the thing that audits them can never disagree:
+--   69      the one that was asked about
+--   420     drug reference
+--   666
+--   88      and by extension 1488; a recognised hate number
+--   8008    reads as BOOBS upside down, and so covers 58008 and 80085
+--   911
+--   187     US police code for homicide
+--   1312    ACAB
+-- Matching is by SUBSTRING, because the complaint is about digits landing next to each other.
+--
+-- NOT banned: 13 and 14 alone. They mean something only in company and cost a large slice of the
+-- pool for very little. Measured over all 900,000 six-digit codes: the list removes 100,420 and
+-- leaves 799,580, which is 88.8%, for a league that uses 450 codes a season. The JS twin in
+-- netlify/functions/discord-interactions.js was measured the same way from 200,000 draws: 11.1%
+-- rejected, and 0 leaks out of 200,000 generated codes.
+--
+-- WHAT WAS CHANGED, AND WHAT DELIBERATELY WAS NOT. 22 of the 216 existing codes matched the list.
+-- rotate_game_code reissues one game's code and REFUSES two cases on its own rather than trusting
+-- the caller to remember them:
+--   a game that is not 'scheduled'  — it has been played; the record stands
+--   a night that has already locked — night_lock_at has published the code to the two clubs, and
+--                                     changing it now would send them to a lobby that does not exist
+-- So 19 were reissued and 3 were left: two finished games from Sep 23, and tonight's PIT v VAN,
+-- whose night had already locked. Those three still match the list and that is the correct answer.
+--
+-- Verified after: 216 games, 216 distinct codes, none malformed, 19 rotations in admin_audit.
+-- The audit records the code that was REPLACED and not the new one: it exists to explain a change,
+-- not to be a second place a live lobby code can be read from.
+--
+-- set_game_code's retry ceiling went from 50 to 200 for the same reason the percentage is recorded
+-- above: 11% of draws are now rejected on content, so a long run of misses means the list has grown
+-- until there is nothing clean left, and it should say so rather than hand out something the league
+-- said it would not.

@@ -584,9 +584,26 @@ function applyServer(lobby, userId, idx) {
   if (s.vetoed == null) return { error: `The Away captain (<@${s.captains[1]}>) vetoes a server first.` };
   if (idx === s.vetoed) return { error: `**${SERVERS[idx]}** was vetoed — pick one of the other ${SERVERS.length - 1}.` };
   s.server = SERVERS[idx] || SERVERS[0];
-  s.code = String(Math.floor(100000 + Math.random() * 900000));
+  s.code = cleanLobbyCode();
   lobby.status = "done";
   return { view: doneView(lobby), status: "done", state: s };
+}
+
+/* v3.15 (commissioner): "account for potential profanity combinations like 69 being next to each
+   other and such". The same list the league games use, which lives in SQL as public.game_code_ok;
+   a pickup lobby code is read out in Discord exactly like a league one, so it gets the same
+   treatment. Keep the two in step: if one list changes, change the other.
+     69, 420, 666, 88 (and so 1488), 8008 (and so 58008 / 80085), 911, 187, 1312
+   11.2% of the six-digit pool is rejected, so a draw almost never needs a second try; the loop is
+   bounded anyway so a bad list can never spin here forever. */
+const LOBBY_CODE_BANNED = /(69|420|666|88|8008|911|187|1312)/;
+function cleanLobbyCode() {
+  for (let i = 0; i < 200; i++) {
+    const c = String(Math.floor(100000 + Math.random() * 900000));
+    if (!LOBBY_CODE_BANNED.test(c)) return c;
+  }
+  /* unreachable with the list above; if it ever is reached, a readable code still beats none */
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 /* ---------- the one sanctioned room ---------- */
