@@ -185,29 +185,50 @@ CG.forfeitNoIce = function(g, res){
   }
   return true;
 };
-CG.weekGamesFor = function(pid, game, club, opts){
-  var lg = CG.lg || {}, n = 0, exclude = (opts && opts.excludeGame) || game.id;
-  var stage = game.stage || "regular";
+/* v3.31 — ONE traversal of a player's week that returns the REASON for every game, not just a
+   total. The count is now a filter over this ledger, so the number a manager reads and the
+   explanation he gets can never drift apart: they are the same walk.
+   This exists because a bare "6/6" is unarguable and unfixable. An Owner saw 6 on the builder and
+   3 on the stats page, and nothing on either told him what the difference was. */
+CG.WEEK_VERDICT = {
+  played:  { counts:true,  label:"Played",                    why:"He took a shift, so the box score counts it." },
+  filed:   { counts:true,  label:"On the filed sheet",        why:"Not played yet. A filed lineup counts against the week the moment it is filed (Rule 5.2)." },
+  editing: { counts:false, label:"The game you are building", why:"Counted separately while you build it." },
+  sat:     { counts:false, label:"Dressed, did not play",     why:"He was on the sheet but took no shift, and the box score is the record (Rule 5.2)." },
+  forfeit: { counts:false, label:"Forfeit, nobody skated",    why:"A forfeit no player took the ice for is nobody's game (Rule 3.2)." },
+  voided:  { counts:false, label:"Voided",                    why:"A voided game counts for no one." },
+  out:     { counts:false, label:"Not dressed",               why:"He is not on this sheet and did not play." }
+};
+CG.weekLedger = function(pid, game, club, opts){
+  var lg = CG.lg || {}, exclude = (opts && opts.excludeGame) || game.id;
+  var stage = game.stage || "regular", rows = [];
   (lg.schedule || []).forEach(function(g){
-    if (g.id === exclude || (g.stage || "regular") !== stage || g.week !== game.week || g.voided) return;
+    if ((g.stage || "regular") !== stage || g.week !== game.week) return;
     var res = (lg.allResults || lg.results || []).find(function(r){ return r.id === g.id; });
-    /* Rule 3.2 forfeit with nobody on the ice: not a game anybody played, so not a game against
-       anybody's week. A Rule 4.3 forfeit after disconnections DID have ice time and still counts. */
-    if (CG.forfeitNoIce(g, res)) return;
-    /* v3.30: this read box.home / box.away, which are undefined for every game ever played, so
-       hasBox was ALWAYS false and every final game fell through to the filed-lineup branch below.
-       A player dressed on a sheet who never took a shift was charged a game anyway, which is how
-       the Islanders' Team HQ showed 6 of 6 for a player the database had at 5. */
-    var sides = CG.boxSides(g, res);
-    var hasBox = sides.some(function(sd){ return Object.keys(sd).length > 0; });
-    if ((g.status === "final" || (res && res.entered)) && hasBox){
-      if (sides.some(function(sd){ return !!sd[pid]; })) n++;
-      return;
+    var v = "out";
+    if (g.id === exclude) v = "editing";
+    else if (g.voided) v = "voided";
+    else if (CG.forfeitNoIce(g, res)) v = "forfeit";
+    else {
+      var sides = CG.boxSides(g, res);
+      if ((g.status === "final" || (res && res.entered)) && sides.some(function(sd){ return Object.keys(sd).length > 0; })){
+        v = sides.some(function(sd){ return !!sd[pid]; }) ? "played" : "sat";
+      } else {
+        var lu = (lg._lineups || {})[club + ":" + g.id];
+        if (lu && [lu.center, lu.lw, lu.rw, lu.ld, lu.rd, lu.goalie].indexOf(pid) >= 0) v = "filed";
+      }
     }
-    var lu = (lg._lineups || {})[club + ":" + g.id];
-    if (lu && [lu.center, lu.lw, lu.rw, lu.ld, lu.rd, lu.goalie].indexOf(pid) >= 0) n++;
+    rows.push({ id:g.id, at:g.at, home:g.home, away:g.away, status:g.status,
+                verdict:v, counts:!!CG.WEEK_VERDICT[v].counts });
   });
-  return n;
+  return rows.sort(function(a,b){ return (a.at||0)-(b.at||0); });
+};
+/* Rule 5.2 (v2.55): the games already counted against a player's week (or playoff series), the
+   way the database counts them in player_week_games — a final game with a box score counts by the
+   box score (he played it or he did not), every other game by the lineup his club filed. Mirrors
+   the gate in set_game_lineup so the per-game page can say no at assignment time. */
+CG.weekGamesFor = function(pid, game, club, opts){
+  return CG.weekLedger(pid, game, club, opts).filter(function(r){ return r.counts; }).length;
 };
 /* Rule 5.2 (v2.83): a player's WHOLE week, the game in hand included — what weekGamesFor counts,
    without excluding the game being edited. This is the number a manager needs to SEE before he
@@ -218,20 +239,69 @@ CG.weekUsedFor = function(pid, club, game){
   if (!game) return null;
   return CG.weekGamesFor(pid, game, club, { excludeGame: "__none__" });
 };
-/* "4/6" for a player's week, and whether he is at the cap. `game` is any game of the week. */
+/* "4/6" for a player's week, and whether he is at the cap. `game` is any game of the week.
+   v3.31: it also carries the SPLIT and the ledger behind it, so the chip can say 3 played and 2
+   filed rather than a flat 5 that agrees with no other number on the site. */
 CG.weekLoad = function(p, club, game){
   if (!p || !game) return null;
-  var cap = CG.gameCapFor(p, game), used = CG.weekUsedFor(p.id, club, game);
-  return { used: used, cap: cap, left: Math.max(0, cap - used), full: used >= cap };
+  var rows = CG.weekLedger(p.id, game, club, { excludeGame: "__none__" });
+  var cap = CG.gameCapFor(p, game);
+  var used = rows.filter(function(r){ return r.counts; }).length;
+  var by = function(v){ return rows.filter(function(r){ return r.verdict === v; }).length; };
+  return { used:used, cap:cap, left:Math.max(0, cap-used), full:used >= cap,
+           played:by("played"), filed:by("filed"), sat:by("sat"), forfeit:by("forfeit"),
+           rows:rows, pid:p.id, tag:p.tag, club:club, week:game.week, gameId:game.id };
 };
-/* the chip the line creator and the bench both wear */
+/* the chip the line creator and the bench both wear.
+   v3.31: it says what it is MADE OF, and it opens. A hover title is invisible on a phone and easy
+   to miss on a desk, so the split is in the chip itself (3+2) and a click shows the week game by
+   game. An Owner should never have to ask why a number is what it is. */
 CG.weekLoadChip = function(load, size){
   if (!load) return "";
   var cls = load.full ? "chip-loss" : (load.left <= 1 ? "chip-warn" : "");
-  return '<span class="chip '+cls+'" style="font-size:'+(size==="xs"?9:10)+'px" title="'+
-    (load.full ? "At the weekly limit (Rule 5.2): dressed in "+load.used+" of "+load.cap+" games this week, counting games already filed. A voided game, and a forfeit nobody took the ice for, count for no one."
-               : "Dressed or played in "+load.used+" of "+load.cap+" games this week (Rule 5.2). A voided game, and a forfeit nobody took the ice for, count for no one.")+
-    '">'+load.used+'/'+load.cap+'</span>';
+  var split = (load.played != null && load.filed != null && (load.played + load.filed) === load.used && load.used > 0)
+    ? load.played + "+" + load.filed : null;
+  var tip = (load.full ? "At the weekly limit (Rule 5.2). " : "")
+    + load.used + " of " + load.cap + " games used this week"
+    + (split ? ": " + load.played + " played and " + load.filed + " on a filed sheet." : ".")
+    + (load.sat ? " " + load.sat + " game" + (load.sat === 1 ? "" : "s") + " he was dressed for but did not play do not count." : "")
+    + (load.forfeit ? " " + load.forfeit + " forfeit" + (load.forfeit === 1 ? "" : "s") + " nobody took the ice for do not count." : "")
+    + " Click for the week game by game.";
+  return '<button type="button" class="chip wk-chip '+cls+'" style="font-size:'+(size==="xs"?9:10)+'px;cursor:pointer" '+
+    'data-weekledger="'+esc(load.pid)+'" data-wl-club="'+esc(load.club)+'" data-wl-game="'+esc(load.gameId)+'" '+
+    'title="'+esc(tip)+'" aria-label="'+esc((load.tag||"This player")+": "+tip)+'">'+
+    load.used+'/'+load.cap+(split?'<span class="wk-split">'+split+'</span>':'')+'</button>';
+};
+/* the week, game by game, with a reason on every line. This is the answer to "why does it say six
+   when he has played three", and it is one click from the number that raised the question. */
+CG.weekLedgerModal = function(pid, club, gameId){
+  var lg = CG.lg || {};
+  var game = (lg.schedule || []).find(function(g){ return g.id === gameId; });
+  var p = CG.playerById ? CG.playerById(lg, pid) : null;
+  if (!game) { CG.toast("That week is no longer on the schedule", "err"); return; }
+  var load = CG.weekLoad(p || { id: pid }, club, game);
+  if (!load) return;
+  var row = function(r){
+    var m = CG.WEEK_VERDICT[r.verdict] || CG.WEEK_VERDICT.out;
+    var when = r.at ? CG.fmtDay(r.at) + " " + CG.fmtTime(r.at) : "";
+    var vs = (r.home === club) ? "vs " + (CG.TEAM[r.away] ? CG.TEAM[r.away].name : r.away)
+                               : "at " + (CG.TEAM[r.home] ? CG.TEAM[r.home].name : r.home);
+    return '<div class="wk-row'+(m.counts?" on":"")+'">'+
+      '<span class="wk-tick">'+(m.counts ? CG.ic("check",14) : "")+'</span>'+
+      '<span class="wk-when">'+esc(when)+'</span>'+
+      '<span class="wk-vs">'+esc(vs)+'</span>'+
+      '<span class="wk-verdict">'+esc(m.label)+'</span>'+
+      '<span class="wk-why caption">'+esc(m.why)+'</span></div>';
+  };
+  CG.modal((p && p.tag ? p.tag : "This player") + " · week " + game.week,
+    '<div class="wk-sum"><b class="num">'+load.used+' of '+load.cap+'</b>'+
+      '<span class="caption">games used'+(load.full?", at the limit":"")+'</span>'+
+      '<span class="wk-sum-split caption">'+load.played+' played · '+load.filed+' on a filed sheet'+
+      (load.sat?' · '+load.sat+' dressed but did not play':'')+
+      (load.forfeit?' · '+load.forfeit+' forfeit not counted':'')+'</span></div>'+
+    '<div class="wk-ledger">'+load.rows.map(row).join("")+'</div>'+
+    '<p class="caption" style="margin-top:12px">A filed sheet counts the moment it is filed, so a club can spend a player'+"\u2019"+'s week before a puck drops (Rule 5.2). Free a game by taking him off a sheet he has not played yet.</p>',
+    '<button class="btn btn-ghost" data-close>Close</button>');
 };
 /* the cap that applies to one player in one game: the series cap in the playoffs, else the weekly cap */
 CG.gameCapFor = function(p, game){
@@ -5396,6 +5466,20 @@ CG.dmResolveMedia = function(active){
     }).catch(function(){ delete CG._dm.mediaPending[m.media_path]; });
   })).then(function(){ if (got && location.hash.indexOf("/messages")>=0) CG.router(); });
 };
+/* v3.31 — the week-load chip opens its own ledger. Delegated at the document level for the same
+   reason as the envelope chips below: these chips are drawn by the line creator, the bench strip
+   and the roster page, several of which re-render without their AFTER hook running again. */
+if (typeof document !== "undefined" && !CG._wkDelegated){
+  CG._wkDelegated = true;
+  document.addEventListener("click", function(ev){
+    var el = ev.target && ev.target.closest ? ev.target.closest("[data-weekledger]") : null;
+    if (!el) return;
+    ev.preventDefault(); ev.stopPropagation();   /* the chip sits on draggable player cards */
+    CG.weekLedgerModal(el.getAttribute("data-weekledger"),
+                       el.getAttribute("data-wl-club"),
+                       el.getAttribute("data-wl-game"));
+  }, true);
+}
 /* The envelope chips ([data-pm]) live on both player-profile variants — one of which is injected
    asynchronously after the AFTER hook has already run — so the click wiring is delegated at the
    document level rather than bound per-render. Runs before the href navigates. */

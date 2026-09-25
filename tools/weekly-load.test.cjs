@@ -3,14 +3,17 @@ const fs = require("fs"), path = require("path");
 const live = fs.readFileSync(path.join(__dirname, "..", "src/live/part_live.js"), "utf8");
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
+/* v3.31: also lifts plain objects (CG.WEEK_VERDICT), not just functions */
 const cut = (name) => {
-  const i = live.indexOf("CG." + name + " = function");
+  let i = live.indexOf("CG." + name + " = function");
+  if (i < 0) i = live.indexOf("CG." + name + " = {");
+  if (i < 0) throw new Error("cut(): no CG." + name + " in part_live.js");
   const j = live.indexOf("\n};", i);
   return live.slice(i, j + 3);
 };
 /* the real key names, as public.format_rules publishes them */
 const CG = { FORMAT_RULES: { basic: { cap_skater: 6, cap_goalie: 6, cap_camp: 3, series_cap: 4 } }, seasonFormat: () => "basic" };
-new Function("CG", cut("weeklyCap") + cut("seriesCap") + cut("boxSides") + cut("forfeitNoIce") + cut("weekGamesFor") + cut("gameCapFor") + cut("weekUsedFor") + cut("weekLoad") + cut("weekLoadChip"))(CG);
+new Function("CG", "esc", "CG_ic", cut("weeklyCap") + cut("seriesCap") + cut("boxSides") + cut("forfeitNoIce") + cut("WEEK_VERDICT") + cut("weekLedger") + cut("weekGamesFor") + cut("gameCapFor") + cut("weekUsedFor") + cut("weekLoad") + cut("weekLoadChip"))(CG, (x) => String(x == null ? "" : x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])), (k) => "");
 const wk = (n) => ({ id: "g" + n, week: 1, stage: "regular", status: "scheduled", voided: false });
 CG.lg = {
   schedule: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(wk),
@@ -26,7 +29,12 @@ A("the whole week counts, including the game in hand", CG.weekUsedFor("p1", "BOS
 A("...while weekGamesFor still excludes the game being edited", CG.weekGamesFor("p1", wk(1), "BOS") === 5, String(CG.weekGamesFor("p1", wk(1), "BOS")));
 const load = CG.weekLoad(P, "BOS", wk(4));
 A("the load reads 6 of 6, no room left", load.used === 6 && load.cap === 6 && load.left === 0 && load.full === true, JSON.stringify(load));
-A("the chip says so and explains it counts FILED games", /6\/6/.test(CG.weekLoadChip(load)) && /counting games already filed/.test(CG.weekLoadChip(load)));
+/* v3.31 re-pinned: the wording moved into a tooltip that now states the SPLIT rather than a generic
+   "counting games already filed". The invariant is that the chip shows the total and says filed
+   sheets are in it. */
+A("the chip says so and explains that filed sheets are in the number",
+  /6\/6/.test(CG.weekLoadChip(load)) && /on a filed sheet/.test(CG.weekLoadChip(load)),
+  CG.weekLoadChip(load).slice(0, 220));
 CG.lg._lineups["BOS:g9"] = { lw: null };
 const load2 = CG.weekLoad(P, "BOS", wk(4));
 A("dropping him from one night frees exactly one", load2.used === 5 && load2.left === 1 && load2.full === false, JSON.stringify(load2));
@@ -158,6 +166,87 @@ console.log("\n— a final game counts by the BOX SCORE, which means reading the
   A("...and a forfeit box whose every line is zero ice time is still skipped",
     CG.forfeitNoIce({ id: "gY", home: "DAL", away: "UTA", forfeit: "DAL" },
       { id: "gY", box: { DAL: { a: { toi: 0 } }, UTA: { b: {} } } }) === true);
+}
+
+/* ============================================================================
+ * v3.31 — the number explains itself.
+ * Commissioner: "What can we change about that to make it easier for management to understand and
+ * fix these situations or make it so this confusion does not happen?"
+ * The count is now a filter over a LEDGER that carries a reason for every game, so the number and
+ * the explanation are the same walk and cannot drift.
+ * ========================================================================= */
+console.log("\n— every game of the week carries a reason");
+{
+  const V = "vaughn";
+  const mk = (id, status, home, away, forfeit) => ({ id, week: 1, stage: "regular", status, voided: false, home, away, forfeit: forfeit || null, at: Number(id.slice(1)) * 1000 });
+  CG.lg = {
+    schedule: [
+      mk("g1", "final", "NYI", "SEA", "SEA"),
+      mk("g2", "final", "VAN", "NYI"),
+      mk("g3", "final", "BOS", "NYI"),
+      mk("g4", "final", "NYI", "DAL", "NYI"),
+      mk("g5", "scheduled", "NYI", "PIT"),
+      mk("g6", "scheduled", "SEA", "NYI"),
+      { ...mk("g7", "scheduled", "NYI", "VAN"), voided: true },
+    ],
+    allResults: [], _lineups: {},
+  };
+  const six = (t) => { const o = {}; for (let k = 0; k < 6; k++) o[t + k] = { toi: 3600 }; return o; };
+  const res = (id, home, away, played, forfeited) => {
+    const box = {}; box[home] = forfeited ? {} : six(id + "h"); box[away] = forfeited ? {} : six(id + "a");
+    if (played) box.NYI[V] = { toi: 3600 };
+    CG.lg.allResults.push({ id, entered: true, box });
+  };
+  res("g1", "NYI", "SEA", false, true);
+  res("g2", "VAN", "NYI", true);
+  res("g3", "BOS", "NYI", false);
+  res("g4", "NYI", "DAL", false, true);
+  ["g3", "g4", "g5", "g6", "g7"].forEach((id) => { CG.lg._lineups["NYI:" + id] = { center: V, lw: null, rw: null, ld: null, rd: null, goalie: null }; });
+  const ref = CG.lg.schedule[4];
+  const rows = CG.weekLedger(V, ref, "NYI", { excludeGame: "__none__" });
+  const verdict = (id) => (rows.find((r) => r.id === id) || {}).verdict;
+
+  A("every game of the week is on the ledger, none dropped", rows.length === 7, String(rows.length));
+  A("a game he played reads 'played'", verdict("g2") === "played");
+  A("a game he was FILED for but did not dress reads 'sat', which is the whole confusion",
+    verdict("g3") === "sat", verdict("g3"));
+  A("a forfeit nobody skated reads 'forfeit'", verdict("g1") === "forfeit" && verdict("g4") === "forfeit");
+  A("a filed game still to play reads 'filed'", verdict("g5") === "filed" && verdict("g6") === "filed");
+  A("a voided game reads 'voided'", verdict("g7") === "voided");
+  A("the ledger is in time order", rows.every((r, i) => i === 0 || rows[i - 1].at <= r.at));
+
+  A("the COUNT is exactly the rows that count, so it cannot drift from the reasons",
+    CG.weekUsedFor(V, "NYI", ref) === rows.filter((r) => r.counts).length);
+  A("...and that is 3", CG.weekUsedFor(V, "NYI", ref) === 3, String(CG.weekUsedFor(V, "NYI", ref)));
+
+  const load = CG.weekLoad({ id: V, pos: "C", squad: "pro", tag: "XxVaughnX36" }, "NYI", ref);
+  A("the load carries the split", load.played === 1 && load.filed === 2 && load.used === 3,
+    JSON.stringify({ p: load.played, f: load.filed, u: load.used }));
+  A("...and the split always reconciles to the total", load.played + load.filed === load.used);
+  A("...and it names what did NOT count", load.sat === 1 && load.forfeit === 2,
+    JSON.stringify({ sat: load.sat, ff: load.forfeit }));
+  A("the game being edited is on the ledger but not counted",
+    CG.weekLedger(V, ref, "NYI").find((r) => r.id === ref.id).verdict === "editing"
+    && CG.weekLedger(V, ref, "NYI").find((r) => r.id === ref.id).counts === false);
+
+  console.log("\n— the chip says what it is made of, and opens");
+  const chip = CG.weekLoadChip(load);
+  A("it shows the total", /3\/6/.test(chip));
+  A("...and the split beside it", /class="wk-split">1\+2</.test(chip), chip.slice(0, 200));
+  A("it is a real button, not a hover-only tooltip", /<button type="button" class="chip wk-chip/.test(chip));
+  A("...carrying what the ledger needs to open", /data-weekledger="vaughn"/.test(chip) && /data-wl-club="NYI"/.test(chip) && /data-wl-game="g5"/.test(chip));
+  A("the tooltip explains the split in words", /1 played and 2 on a filed sheet/.test(chip));
+  A("...and names what was excluded", /did not play do not count/.test(chip) && /nobody took the ice for do not count/.test(chip));
+  A("it is reachable by a screen reader", /aria-label="XxVaughnX36: /.test(chip));
+  A("a player with nothing used still renders a plain chip",
+    !/wk-split/.test(CG.weekLoadChip({ used: 0, cap: 6, left: 6, full: false, played: 0, filed: 0, pid: "x", club: "NYI", gameId: "g5" })));
+
+  console.log("\n— every verdict declares whether it counts, in one table");
+  A("the table covers every verdict the ledger can produce",
+    rows.concat(CG.weekLedger(V, ref, "NYI")).every((r) => !!CG.WEEK_VERDICT[r.verdict]));
+  A("only played and filed count", Object.keys(CG.WEEK_VERDICT).filter((k) => CG.WEEK_VERDICT[k].counts).sort().join(",") === "filed,played");
+  A("every verdict carries a reason a manager can read",
+    Object.keys(CG.WEEK_VERDICT).every((k) => CG.WEEK_VERDICT[k].why && CG.WEEK_VERDICT[k].label));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

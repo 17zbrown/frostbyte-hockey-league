@@ -1618,6 +1618,35 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
    All colours come from the flipping design tokens so every chart adapts to light + dark. */
 .viz-card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:16px 18px}
 
+/* v3.31 — the weekly game count, made arguable. The chip carries its own split (3+2) and opens a
+   ledger, because a bare 6/6 with a hover tooltip is invisible on a phone and unanswerable on a
+   desk: an Owner reading 6 on the builder and 3 on the stats page had nothing to reconcile them. */
+.wk-chip{border:none;font:inherit;font-family:var(--f-mono);display:inline-flex;align-items:center;gap:5px}
+.wk-chip:hover{outline:1.5px solid var(--ink);outline-offset:1px}
+.wk-chip .wk-split{opacity:.62;font-size:.86em;letter-spacing:.02em}
+.wk-sum{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;padding:0 0 14px;
+  border-bottom:1px solid var(--line-soft);margin-bottom:6px}
+.wk-sum .num{font-size:24px}
+.wk-sum-split{flex-basis:100%;color:var(--steel)}
+.wk-ledger{display:grid;gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);
+  border-radius:var(--r-s,10px);overflow:hidden}
+.wk-row{display:grid;grid-template-columns:22px 130px 1fr 150px;gap:4px 10px;align-items:baseline;
+  padding:9px 12px;background:var(--paper)}
+.wk-row.on{background:var(--ice)}
+.wk-row .wk-tick{color:var(--green,#2F9E44)}
+.wk-row .wk-when{font-family:var(--f-mono);font-size:10.5px;color:var(--steel);white-space:nowrap}
+.wk-row .wk-vs{font-weight:600;min-width:0}
+.wk-row .wk-verdict{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--steel);text-align:right}
+.wk-row.on .wk-verdict{color:var(--ink);font-weight:700}
+.wk-row .wk-why{grid-column:2 / -1;color:var(--steel);line-height:1.5}
+@media (max-width:620px){
+  .wk-row{grid-template-columns:22px 1fr}
+  .wk-row .wk-verdict{grid-column:2;text-align:left}
+  .wk-row .wk-why{grid-column:2}
+}
+
+
 /* v3.28 — the cap outlook when there is only ONE season to show (the basic format, where every
    contract ends with its season). It used to be a single narrow card in a four-column grid with
    three empty columns beside it. The figures run across the full width now, and the list of

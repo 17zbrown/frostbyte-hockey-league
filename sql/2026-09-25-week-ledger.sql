@@ -1,0 +1,67 @@
+-- v3.31: the weekly game count explains itself.
+--
+-- Commissioner, 2026-09-25, after the 6-of-6 confusion: "What can we change about that to make it
+--  easier for management to understand and fix these situations or make it so this confusion does
+--  not happen?"
+--
+-- ============================================================================
+-- WHAT ACTUALLY CONFUSED PEOPLE, WHICH WAS NOT THE BUG
+-- ============================================================================
+-- v3.30 fixed the arithmetic. The confusion was separate and would have happened anyway:
+--   1. the number was a bare "6/6" with no statement of what was in it;
+--   2. its only explanation was a `title` tooltip, which is invisible on a phone and easy to miss
+--      on a desk;
+--   3. there was NO WAY TO SEE which games made it up, so a disagreement could only be escalated,
+--      never checked;
+--   4. two numbers existed for one player (the stats page's games played, and the builder's games
+--      used) and nothing anywhere reconciled them.
+-- An Owner reading 6 on the builder and 3 on the stats page had no way to find out that the gap was
+-- one game he was dressed for and did not play, plus two Friday sheets already filed.
+--
+-- ============================================================================
+-- THE CHANGE: the count is now a FILTER OVER A LEDGER
+-- ============================================================================
+-- CG.weekLedger(pid, game, club, opts) walks the week ONCE and returns a row per game carrying a
+-- verdict. CG.weekGamesFor is now
+--     CG.weekLedger(...).filter(function(r){ return r.counts; }).length
+-- so the number a manager reads and the explanation he is given are the same walk and cannot drift.
+-- Previously an explanation would have been a second implementation of the same rules, which is how
+-- the client and the database came to disagree in the first place.
+--
+-- CG.WEEK_VERDICT is the one table of what each verdict means and whether it counts:
+--     played   counts   He took a shift, so the box score counts it.
+--     filed    counts   Not played yet. A filed lineup counts the moment it is filed (Rule 5.2).
+--     editing  no       Counted separately while you build it.
+--     sat      no       On the sheet but took no shift, and the box score is the record.
+--     forfeit  no       A forfeit no player took the ice for is nobody's game (Rule 3.2).
+--     voided   no       A voided game counts for no one.
+--     out      no       Not on this sheet and did not play.
+-- Exactly two of the seven count, and the test asserts that list rather than trusting it.
+--
+-- ============================================================================
+-- WHAT MANAGEMENT SEES NOW
+-- ============================================================================
+-- * The chip carries its own split: "5/6" with "3+2" beside it, so the total is visibly made of
+--   three played and two filed. A player with nothing used gets no split, because 0+0 is noise.
+-- * The chip is a BUTTON. Clicking it opens the week game by game: every fixture of the week, in
+--   time order, with the verdict and the reason on each line and the ones that count highlighted.
+--   The summary line reads "3 played, 2 on a filed sheet, 1 dressed but did not play, 2 forfeits
+--   not counted", which is the exact sentence that was missing.
+-- * The modal closes with the thing a manager actually needs to DO: a filed sheet counts the moment
+--   it is filed, so a game is freed by taking him off a sheet he has not played yet.
+-- * The tooltip still exists for hover, but it is no longer the only explanation, and it now names
+--   the split and the exclusions rather than repeating the rule in the abstract.
+-- * aria-label carries the player's name and the whole sentence, so it is not a mouse-only feature.
+--
+-- Delegated at the document level for the same reason as the message chips: these chips are drawn
+-- by the line creator, the bench strip and the roster page, several of which re-render without
+-- their AFTER hook running again. The handler captures and stops propagation because the chip sits
+-- on draggable player cards.
+--
+-- ============================================================================
+-- WHAT THIS DOES NOT DO
+-- ============================================================================
+-- It does not change any rule, any count, or any refusal. player_week_games is untouched. This is
+-- entirely about whether a manager can answer his own question, and the test for it asserts the
+-- reasons, not just the totals: that a game he was filed for but did not dress reads "sat", which
+-- is the single fact the whole confusion turned on.
