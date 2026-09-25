@@ -39,6 +39,15 @@ const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT = process.env.DISCORD_BOT_TOKEN;
 const GUILD = process.env.DISCORD_GUILD_ID;
+
+/* v3.22 — a member's name in CGHL is his DISCORD name, never a per-server nickname. Ranked
+   global display name, then username. member.nick is deliberately not consulted: a nickname is a
+   per-server label anyone with the permission can set, and it was becoming the name the whole
+   league saw. TWIN: bot/handlers.mjs has the same function; change one, change the other. */
+function discordName(m) {
+  const u = (m && m.user) || {};
+  return String(u.global_name || u.username || "").trim();
+}
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 const sbHead = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" });
@@ -190,7 +199,7 @@ async function trackDepartures(memberById, memberListOk, links, teams, sum) {
     const link = profByDiscord.get(id);
     rows.push({ discord_id: id,
       username: (m.user && (m.user.username || m.user.global_name)) || null,
-      display_name: m.nick || (m.user && m.user.global_name) || null,
+      display_name: discordName(m) || null,
       profile_id: (link && link.profile_id) || null,
       is_bot: !!(m.user && m.user.bot),
       joined_guild_at: m.joined_at || null,
@@ -1748,7 +1757,13 @@ async function syncLinkedMembers(ctx, sum, outOfTime) {
       // empty name (a nick of spaces would blank the tag the whole site keys on), and never a
       // tag another profile already holds in any case — the unique index is case-sensitive, the
       // site is not, so "SNIPER" beside "Sniper" would be two players nothing can tell apart.
-      const disp = String(mem.nick || (mem.user && (mem.user.global_name || mem.user.username)) || "").trim();
+      //
+      // v3.22 (commissioner): "Their display name is only their discord name." This read
+      // mem.nick FIRST, so a per-server nickname silently became the name the whole league saw,
+      // on the roster, in the box scores and in the directory. It is the DISCORD name now, and a
+      // nickname is ignored whoever set it. discordName() below is the one definition; its twin
+      // lives in bot/handlers.mjs and the two must not drift.
+      const disp = discordName(mem);
       if (disp && disp !== m.gamertag) {
         const holder = tagOwner.get(disp.toLowerCase());
         if (holder && holder !== m.profile_id) {
@@ -1901,7 +1916,7 @@ export const ops = {
       if (m.user && m.user.bot) continue;
       const link = byDiscord[String(m.user.id)];
       const has = new Set(m.roles || []);
-      const nm = m.nick || (m.user && (m.user.global_name || m.user.username));
+      const nm = discordName(m);   /* the same name the site shows, so an audit line is recognizable */
       if (!link) { if (nsu && has.has(nsu)) out.unlinkedWearingNotSignedUp.push(nm); continue; }
       out.linked++;
       const isReg = registered.has(link.profile_id);

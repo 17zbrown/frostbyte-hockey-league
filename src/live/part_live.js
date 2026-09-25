@@ -2988,7 +2988,12 @@ CG.ROUTES.register = function(){
       '<p>'+(s.status==="active"?"Season "+s.number+" is already underway.":"Registration for the next season hasn’t opened yet — watch the announcements channel.")+'</p>'+
       '<a class="btn btn-ghost" style="margin-top:16px" href="#/schedule">View the schedule</a></div></div></div>';
   }
-  var p = CG.auth.profile, reg = CG.auth.registration, eaMissing = !p.ea_id;
+  var p = CG.auth.profile, reg = CG.auth.registration;
+  /* v3.21: what the league still needs, from the one definition the modal and the submit path use */
+  var detailsMissing = CG.regMissing(p);
+  var missingWords = detailsMissing.map(function(k){
+    return k==="ea" ? "your EA ID" : k==="plat" ? "the console you play on" : "your "+CG.platTag(p.platform).toLowerCase();
+  }).join(detailsMissing.length===2 ? " and " : ", ").replace(/, ([^,]*)$/, detailsMissing.length>2 ? " and $1" : ", $1");
   /* Rule 2.5: a contract never replaces registration — spell out what an unsigned deal costs */
   var snumR = s.number||1;
   /* active first; else a deal SIGNED for this season in last season's exclusive window (v2.34) —
@@ -3037,12 +3042,23 @@ CG.ROUTES.register = function(){
     : "";
   statusCard = guildCard + statusCard;
   var body = '<div class="card"><div class="card-h"><h3>'+(reg?"Update registration":"Register")+'</h3><span class="chip '+(reg?"chip-win":"chip-chrome")+'">'+(reg?"Registered":"Open")+'</span></div><div class="card-b">'+
-    (eaMissing ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">You need your <b>EA ID</b> on file to register.</span><button class="btn btn-ghost btn-sm" id="regEaBtn">Add EA ID</button></div>'
-                : '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>')+
+    /* v3.21: this asked for the EA ID alone, so a member with an EA ID and no console was told he
+       was ready, clicked Submit, and met a refusal. It names whatever is actually missing now, and
+       CG.regMissing is the one definition it and the button and the modal all read. */
+    (detailsMissing.length
+      ? '<div class="note red" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
+        '<span style="flex:1">The league needs <b>'+esc(missingWords)+'</b> before you can register.</span>'+
+        '<button class="btn btn-ghost btn-sm" id="regEaBtn">Add '+(detailsMissing.length>1?"them":"it")+'</button></div>'
+      : '<div class="grid g2" style="gap:12px;margin-bottom:4px">'+
+        '<label class="fld"><span>EA ID (on file)</span><input value="'+esc(p.ea_id)+'" disabled style="opacity:.7"></label>'+
+        '<label class="fld"><span>Console (on file)</span><input value="'+esc(CG.platLabel(p.platform))+'" disabled style="opacity:.7"></label>'+
+        '<label class="fld"><span>'+esc(CG.platTag(p.platform))+' (on file)</span><input value="'+esc(p.platform_gamertag||"")+'" disabled style="opacity:.7"></label>'+
+        '<label class="fld"><span>&nbsp;</span><button class="btn btn-ghost btn-sm" id="regEaBtn" style="width:100%">Change these</button></label>'+
+        '</div>')+
     '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" role="group" aria-label="Primary position">'+
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
-    '<button class="btn btn-chrome" id="regSubmit"'+(eaMissing?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
+    '<button class="btn btn-chrome" id="regSubmit"'+(detailsMissing.length?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
     '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1). By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';

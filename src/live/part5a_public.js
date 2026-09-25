@@ -2301,6 +2301,32 @@ CG.eaIdChip = function(eaId){
     ? '<span class="chip chip-ink" style="border-color:#39434B" title="EA ID: search this name in NHL to find him">EA ID · <b style="margin-left:4px">'+esc(eaId)+'</b></span>'
     : '<span class="chip chip-ink" style="border-color:#39434B;color:var(--on-ink-dim)" title="No EA ID on file: box scores cannot be matched to this player until he adds one">EA ID not set</span>';
 };
+/* v3.22 — lay modules into ONE slab the width of the page.
+   Takes [{html, wide}] and returns a .pslab whose every ROW sums to twelve columns, so no row is
+   ever part empty and no panel ever ends higher or lower than the one beside it (a grid row makes
+   its cells equal height for free; two independent columns never could).
+   `wide` means the module wants the whole row: a strip of KPI tiles or a table reads badly at half
+   width. Everything else pairs two-up, and a lone leftover takes the full row rather than leaving
+   a gap beside it. Empty strings are dropped first, so a missing module re-pairs the rest instead
+   of leaving a hole. */
+CG.slab = function(mods){
+  var list = (mods||[]).filter(function(m){ return m && m.html; });
+  if (!list.length) return "";
+  var rows = [], i = 0;
+  while (i < list.length){
+    if (list[i].wide){ rows.push([list[i]]); i += 1; continue; }
+    /* pair with the next module only if that one is happy at half width too */
+    if (i+1 < list.length && !list[i+1].wide){ rows.push([list[i], list[i+1]]); i += 2; }
+    else { rows.push([list[i]]); i += 1; }
+  }
+  return '<div class="pslab">'+rows.map(function(row, ri){
+    var span = 12 / row.length;
+    return row.map(function(m, ci){
+      return '<div class="pmod" style="grid-column:span '+span+'"'+
+        (ri===0?' data-row0':'')+(ci===0?' data-col0':'')+'>'+m.html+'</div>';
+    }).join("");
+  }).join("")+'</div>';
+};
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
   pid = pid || (qs && (qs.id || qs.pid)) || null;  /* accept legacy #/player?id=… links */
@@ -2404,13 +2430,13 @@ CG.ROUTES.player = function(pid, qs){
          ["Pass%", s.passAtt?Math.round(100*s.pass/s.passAtt)+"%":"—"],["Poss/GP",(s.gp&&s.poss!=null)?CG.fmtToi(s.poss/s.gp):"—"],
          ["Shot att.", s.sat||0],["Interceptions", s.intc||0],["Pen. drawn", s.pdrawn||0],["Deflections", s.defl||0],["Saucer", s.saucer||0],
          ["EA OFF", s._ratN?(+s.ratOff).toFixed(1):"—"],["EA DEF", s._ratN?(+s.ratDef).toFixed(1):"—"],["EA TP", s._ratN?(+s.ratTeam).toFixed(1):"—"]];
-    var advCard = hasAdv ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Advanced — from EA box scores</h3><span class="chip chip-chrome">Auto-imported</span></div><div class="card-b">'+
+    var advCard = hasAdv ? '<div class="card"><div class="card-h"><h3>Advanced — from EA box scores</h3><span class="chip chip-chrome">Auto-imported</span></div><div class="card-b">'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
       advCells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
       '<p class="caption" style="margin-top:12px">Every figure is pulled automatically from the EA NHL match record — no manual entry.</p></div></div>' : '';
     /* pre-season line — separate from the season, but part of the overall rating */
     var ps = preS;
-    var preCard = (ps && ps.gp>0) ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Pre-season</h3><span class="chip">'+ps.gp+' GP · counts toward overall</span></div><div class="card-b">'+
+    var preCard = (ps && ps.gp>0) ? '<div class="card"><div class="card-h"><h3>Pre-season</h3><span class="chip">'+ps.gp+' GP · counts toward overall</span></div><div class="card-b">'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
       (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
            : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
@@ -2438,34 +2464,34 @@ CG.ROUTES.player = function(pid, qs){
        gauges (goalies get goaltending gauges). Gated on s.gp (season only) — a player with just
        pre-season games has an all-zero season line, which would collapse the radar to its floor,
        so they keep the numeric pre-season card without the misleading shape. */
-    var playerViz = (isEmpty || archived || (s.gp||0)<1) ? "" : (isG
-      ? '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
-          '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(s), CG.leagueDNA(lg, true, null, p.id), p.tag, "Average goaltender")+'</div>'+
-          '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
+    /* v3.22: these were one `grid g2` wrapper. They are two independent modules now, so the slab
+       can pair them with each other or with whatever else is present when one is absent. */
+    var vizDna = "", vizEff = "";
+    if (!(isEmpty || archived || (s.gp||0)<1)){
+      vizDna = isG
+        ? '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(s), CG.leagueDNA(lg, true, null, p.id), p.tag, "Average goaltender")+'</div>'
+        : '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), CG.leagueDNA(lg, false, CG.posGroup && CG.posGroup(p.pos), p.id), p.tag, "Average of other "+(CG.posGroupLabel && CG.posGroup ? CG.posGroupLabel(CG.posGroup(p.pos)) : "players"))+'</div>';
+      vizEff = isG
+        ? '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
             CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
             CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
             CG.vizGauge(s.qs||0, Math.max(s.gp,1), ""+(s.qs||0), "Quality starts","var(--steel)")+
-          '</div></div></div>'
-      : '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
-          '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), CG.leagueDNA(lg, false, CG.posGroup && CG.posGroup(p.pos), p.id), p.tag, "Average of other "+(CG.posGroupLabel && CG.posGroup ? CG.posGroupLabel(CG.posGroup(p.pos)) : "players"))+'</div>'+
-          '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
+          '</div></div>'
+        : '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
             CG.vizGauge(s.shots?(s.g/s.shots*100):0,20,(s.shots?Math.round(s.g/s.shots*100):0)+"%","Shooting %")+
             CG.vizGauge(s.p||0, Math.max(s.gp*3,1), ((s.p||0)/Math.max(1,s.gp)).toFixed(2), "Pts / GP","var(--steel)")+
             CG.vizGauge(s.hits||0, Math.max(s.gp*5,1), ""+(s.hits||0), "Hits","var(--gold)")+
-          '</div></div></div>');
+          '</div></div>';
+    }
     /* by-position split: only for the live season (archived seasons kept aggregates, not rows),
        and it hides itself unless the player really logged games at 2+ positions */
     var posCard = archived ? "" : CG.posSplitTable(CG.posSplit((CG.lg.posSplitRows||{})[p.id]));
-    var leftTop = isEmpty ? emptyCard :
-      playerViz +
-      '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
-      cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
-      posCard +
-      '<div class="card" style="margin-top:18px"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
+    var kpiStrip = '<div class="pm-pad"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
+      cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div></div>';
+    var scoutCard = '<div class="card"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
     if (isEmpty) sideCard = "";   /* the fresh-sheet card already explains the scouted overall */
-    body += '<div class="grid g23"><div>'+ leftTop +preCard+advCard+'</div>'+
-      '<div class="stack">'+sideCard+(archived?"":
+    var contractCard = archived ? "" : (
         '<div class="card"><div class="card-h"><h3>Contract</h3>'+
         (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>'
                :(CG.signedExtensionOf&&CG.signedExtensionOf(p.id))?'<span class="chip chip-win">Signed thru S'+esc(String(CG.signedExtensionOf(p.id).end_season))+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
@@ -2477,7 +2503,21 @@ CG.ROUTES.player = function(pid, qs){
           : (CG.signedExtensionOf&&CG.signedExtensionOf(p.id))
             ? "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. He has re-signed: "+CG.fmtMoney(CG.signedExtensionOf(p.id).salary)+" a season from Season "+CG.signedExtensionOf(p.id).start_season+" through Season "+CG.signedExtensionOf(p.id).end_season+", in force with that season’s cap year (Rule 2.5)."
             : "Counts against the club’s $"+(CG.CAP/1000000)+"M cap. Contracts run one to three seasons; a deal in its final season may be extended by the club that holds it, and one that ends returns the player to free agency (Rule 2.5).")+'</p>'+
-        '</div></div>')+CG.broadcastCard(p)+'</div></div>';
+        '</div></div>');
+    /* v3.22 — ONE slab, in reading order: two viz panels, the season line, the rating beside the
+       contract, the words beside the broadcast, then the wide strips. CG.slab fills every row, so a
+       player with no broadcast card, no pre-season and no advanced line gets a tight slab instead
+       of a page of half-empty rows. */
+    body += CG.slab(isEmpty
+      ? [{ html: emptyCard, wide: true },
+         { html: contractCard }, { html: CG.broadcastCard(p) }]
+      : [{ html: vizDna }, { html: vizEff },
+         { html: kpiStrip, wide: true },
+         { html: sideCard }, { html: contractCard },
+         { html: scoutCard }, { html: CG.broadcastCard(p) },
+         { html: posCard, wide: true },
+         { html: preCard, wide: true },
+         { html: advCard, wide: true }]);
   }
   if (tab==="log"){
     var log = SD.glog[p.id];

@@ -1,0 +1,63 @@
+-- v3.22: the player profile is ONE box the width of the page (no database change; recorded here
+-- because this is where the decisions live).
+--
+-- Commissioner, 2026-09-25, with a screenshot of the Broadcast card: "Move these boxes around in the
+--  player profile so they are next to each other if there is space for it. Clean up the player
+--  profiles so all the smaller module boxes fit into one larger box the size of the page. I dont
+--  want any gaps in the middle of the boxes and I do not want any boxes to stick out lower, higher,
+--  or more to the side than any other box on the page."
+--
+-- ============================================================================
+-- MEASURE FIRST
+-- ============================================================================
+-- The profile was `<div class="grid g23"><div>LEFT</div><div class="stack">RIGHT</div></div>`: two
+-- INDEPENDENT columns. Measured in the browser at 1440px on a real player (Kxrpov-, 6 GP):
+--   left column   y 476 -> 1787
+--   right rail    y 476 -> 1046
+-- **741px of dead column down the right side of the page.** That is the "sticking out lower" in the
+-- instruction, and it is not a spacing bug: two columns of independent cards can only line up by
+-- coincidence, and the taller one always leaves the other short.
+--
+-- ============================================================================
+-- THE FIX: stop having two columns
+-- ============================================================================
+-- A grid ROW makes its cells equal height for free. So the whole profile body is now ONE grid, and
+-- every module is a cell in it. `.pslab` is a 12-column grid with gap:0, one border, one radius and
+-- overflow:hidden; `.pmod` panels divide with hairlines instead of margins. Nothing can end higher
+-- or lower than the panel beside it, because they are the same row.
+--
+-- CG.slab(mods) takes [{html, wide}] and fills EVERY row to twelve columns:
+--   * empty strings are dropped first, so a missing module re-pairs the rest instead of leaving a
+--     hole (most profiles have no broadcast card, no pre-season line, or no advanced line);
+--   * `wide` modules take the whole row (a strip of KPI tiles or a table reads badly at half width);
+--   * everything else pairs two-up, and a LONE LEFTOVER takes the full row rather than sitting
+--     beside a gap.
+-- That last rule is the one that makes the promise true in every case, and it is why the algorithm
+-- is a function rather than a fixed span map: the module list is different for almost every player.
+--
+-- Reading order: the two viz panels, the season line, the rating beside the contract, the scouting
+-- words beside the broadcast card, then the wide strips (position split, pre-season, advanced).
+--
+-- `data-row0` and `data-col0` suppress the top and left hairline on the outside edges. Without them
+-- the border reads double-thick exactly where the eye goes to check alignment.
+--
+-- ============================================================================
+-- VERIFIED BY MEASUREMENT, NOT BY LOOKING
+-- ============================================================================
+-- An assertion pass in the browser over the real page checked four invariants per profile: every
+-- row's panels share one bottom edge, every row spans the full slab width, no vertical gap between
+-- rows, and no panel escapes the slab.
+--   played player   (7 panels, 5 rows) at 1440px: ZERO problems
+--   empty player    (2 panels, 2 rows) at 1440px: ZERO problems
+--   played player   at 390px: one panel per row, ZERO problems, no sideways scroll
+--   goaltender      at 390px: one panel per row, ZERO problems, no sideways scroll
+-- Before: panels at x 106..899 and 917..1334 with a 741px height mismatch.
+-- After:  every panel starts at 107 and ends at 1333, and every row ends level.
+--
+-- TRAP, and it is in the notes for a reason: the Browser pane reported
+-- document.visibilityState === "hidden", which suspends IntersectionObserver, so the scroll-reveal
+-- animations never fire and a SCREENSHOT of this page shows blank bands that are not really there.
+-- Layout still computes, so getBoundingClientRect is trustworthy when a screenshot is not. Measure.
+--
+-- Not touched: the pickup-game box score at part5a_public.js still uses `grid g23`. It is a
+-- different page (two club box scores side by side), where two columns are the right answer.

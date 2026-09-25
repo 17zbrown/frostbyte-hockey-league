@@ -412,7 +412,12 @@ console.log("\n— P2-12: a delivered club notice never loses its claim");
   globalThis.fetch = base;
 }
 
-console.log("\n— P2-13: the nickname -> gamertag sync refuses a case-insensitive collision and an empty name");
+/* v3.22 RE-POINTED. This block used to drive the sync from the SERVER NICKNAME, which is exactly
+   what the commissioner asked to stop ("Their display name is only their discord name"). The
+   protections it guards are unchanged and still pinned below; only the name the sync reads has
+   moved, from member.nick to the Discord display name. The nickname is now actively asserted to be
+   IGNORED, which is the new contract and the thing most likely to be undone by accident. */
+console.log("\n— P2-13: the Discord-name -> gamertag sync refuses a case-insensitive collision and an empty name");
 {
   const links = [
     { profile_id: "p1", discord_id: "d1", gamertag: "Sniper", role: "player", team_id: null, discord_username: "u1" },
@@ -421,10 +426,11 @@ console.log("\n— P2-13: the nickname -> gamertag sync refuses a case-insensiti
     { profile_id: "p4", discord_id: "d4", gamertag: "Fresh", role: "player", team_id: null, discord_username: "u4" },
   ];
   const memberById = new Map([
-    ["d1", { user: { id: "d1", username: "u1", global_name: "Sniper" }, nick: "SNIPER", roles: [] }],   // own tag, different case: fine
-    ["d2", { user: { id: "d2", username: "u2", global_name: "Wheels" }, nick: "sniper", roles: [] }],   // someone else's tag: refused
-    ["d3", { user: { id: "d3", username: "u3", global_name: "Dangles" }, nick: "   ", roles: [] }],     // blank nick: fall through to global name, unchanged
-    ["d4", { user: { id: "d4", username: "u4", global_name: "Fresh" }, nick: "Brand New", roles: [] }], // a free name: renamed
+    // every nick below is a DECOY: the sync must read global_name and ignore the nickname entirely
+    ["d1", { user: { id: "d1", username: "u1", global_name: "SNIPER" }, nick: "Nickname One", roles: [] }],  // own tag, different case: fine
+    ["d2", { user: { id: "d2", username: "u2", global_name: "sniper" }, nick: "Nickname Two", roles: [] }],  // someone else's tag: refused
+    ["d3", { user: { id: "d3", username: "u3", global_name: "Dangles" }, nick: "Nickname Three", roles: [] }], // unchanged
+    ["d4", { user: { id: "d4", username: "u4", global_name: "Brand New" }, nick: "Nickname Four", roles: [] }], // a free name: renamed
   ]);
   const tagOwner = new Map([["sniper", "p1"], ["wheels", "p2"], ["dangles", "p3"], ["fresh", "p4"], ["taken", "p9"]]);
   const ctx = { links, bannedIds: new Set(), guildBans: new Set(), memberById, memberListOk: true, markGuild: async () => {}, avatarById: {}, tagOwner,
@@ -436,7 +442,12 @@ console.log("\n— P2-13: the nickname -> gamertag sync refuses a case-insensiti
   A("a member re-casing their OWN tag is renamed", renames.some(([id, t]) => id === "p1" && t === "SNIPER"));
   A("a nickname that is another player's tag in different case is refused", !renames.some(([id]) => id === "p2"));
   A("...and counted", sum.renameCollisions === 1, String(sum.renameCollisions));
-  A("a blank nickname never blanks the tag (falls through to the global name)", !renames.some(([id]) => id === "p3"));
+  A("an unchanged Discord name writes nothing", !renames.some(([id]) => id === "p3"));
+  /* THE v3.22 CONTRACT: four members each carry a distinct server nickname and not one of them
+     reached a gamertag. A nickname is a per-server label anyone with the permission can set, and it
+     was becoming the name the whole league saw. */
+  A("no server nickname reaches a gamertag, for any of the four",
+    !renames.some(([, t]) => /^Nickname /.test(t)), JSON.stringify(renames));
   A("a free name is taken", renames.some(([id, t]) => id === "p4" && t === "Brand New"));
   A("...and the ownership map follows the rename, so the old name is free and the new one is held", !tagOwner.has("fresh") && tagOwner.get("brand new") === "p4");
   A("two renames counted", sum.renamed === 2, String(sum.renamed));
@@ -444,10 +455,11 @@ console.log("\n— P2-13: the nickname -> gamertag sync refuses a case-insensiti
 
   /* a whitespace-only global name with no nick: nothing written */
   reset();
-  const ctx2 = { ...ctx, links: [links[2]], memberById: new Map([["d3", { user: { id: "d3", username: "", global_name: "  " }, nick: null, roles: [] }]]) };
+  const ctx2 = { ...ctx, links: [links[2]], memberById: new Map([["d3", { user: { id: "d3", username: "", global_name: "  " }, nick: "A Perfectly Good Nickname", roles: [] }]]) };
   const sum2 = { checked: 0, renamed: 0, roleUpdated: 0, notInServer: 0, errors: [] };
   await I.syncLinkedMembers(ctx2, sum2, () => false);
-  A("a member whose every Discord name is blank is not renamed to nothing", !sbPatches.some((p) => "gamertag" in p.body) && sum2.renamed === 0);
+  A("a member whose every Discord name is blank is not renamed to nothing, and his nickname is not used as a fallback either",
+    !sbPatches.some((p) => "gamertag" in p.body) && sum2.renamed === 0);
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

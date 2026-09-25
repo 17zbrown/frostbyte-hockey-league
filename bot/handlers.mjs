@@ -15,8 +15,16 @@
 // "a POST /messages is never re-sent on an unknown outcome" are decided once.
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID.
+//
+// v3.22 — a member's name in CGHL is his DISCORD name, never a per-server nickname. This file used
+// to rank `m.nick` first, so a nickname became the name the whole league saw. TWIN: the same
+// function lives in netlify/functions/discord-sync.js; change one, change the other.
 
 import { buildDepartureEmbed } from "../shared/departure-card.mjs";
+
+function discordName(m) {
+  return String((m && (m.globalName || m.username)) || "").trim() || null;
+}
 
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
@@ -231,7 +239,7 @@ export function createHandlers(env, opts = {}) {
       try {
         const links = await sbGet(`discord_links?discord_id=eq.${encodeURIComponent(m.id)}&select=profile_id`);
         const row = { discord_id: String(m.id), username: m.username || m.globalName || null,
-          display_name: m.nick || m.globalName || null, is_bot: false,
+          display_name: discordName(m), is_bot: false,
           joined_guild_at: m.joinedAt || new Date().toISOString(),
           last_seen: new Date().toISOString(), present: true };
         if (links[0] && links[0].profile_id) row.profile_id = links[0].profile_id;
@@ -305,7 +313,7 @@ export function createHandlers(env, opts = {}) {
       const joinedAt = (known && known.joined_guild_at) || m.joinedAt || null;
       const days = joinedAt ? Math.max(0, Math.round((Date.now() - Date.parse(joinedAt)) / 86400000)) : null;
       const username = (known && known.username) || m.username || m.globalName || null;
-      const displayName = (known && known.display_name) || m.nick || m.globalName || null;
+      const displayName = (known && known.display_name) || discordName(m);
 
       // Record first (the part that must survive), announce after — same order as the sweep.
       await sbPost("guild_departures", [{

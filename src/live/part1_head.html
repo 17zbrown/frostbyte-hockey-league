@@ -1617,6 +1617,45 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 /* ---------- data-viz (radar + radial gauges) ----------
    All colours come from the flipping design tokens so every chart adapts to light + dark. */
 .viz-card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:16px 18px}
+
+/* ============================================================================
+   v3.22 PROFILE SLAB — the player profile as ONE box the width of the page.
+   Commissioner: "Clean up the player profiles so all the smaller module boxes fit into one larger
+   box the size of the page. I dont want any gaps in the middle of the boxes and I do not want any
+   boxes to stick out lower, higher, or more to the side than any other box on the page."
+   It was a 2-column grid with a right rail: at 1440px the rail ended 741px above the left column,
+   leaving a dead strip down the right of the page. A grid ROW makes its cells equal height for
+   free, so the fix is to stop having two independent columns at all. CG.slab() fills every row to
+   twelve columns, so a row can never be part empty either.
+   Panels are divided by hairlines and share the slab's single outer border: no gaps between them,
+   and nothing sticking out past anything else. ========================================== */
+.pslab{display:grid;grid-template-columns:repeat(12,1fr);gap:0;
+  background:var(--glass,var(--paper));border:1px solid var(--glass-line,var(--line));
+  border-radius:var(--r-m);overflow:hidden;
+  -webkit-backdrop-filter:blur(14px) saturate(1.5);backdrop-filter:blur(14px) saturate(1.5)}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  .pslab{background:var(--paper);border-color:var(--line)}}
+.pslab>.pmod{grid-column:span 12;min-width:0;display:flex;flex-direction:column;
+  border-top:1px solid var(--line-soft);border-left:1px solid var(--line-soft)}
+/* the slab already draws the outside; a panel on the top row or the left edge must not draw it
+   again, or the border reads double-thick exactly where the eye checks alignment */
+.pslab>.pmod[data-row0]{border-top:0}
+.pslab>.pmod[data-col0]{border-left:0}
+/* a card inside the slab IS the panel: it gives up its own frame and fills the cell, so every
+   panel in a row ends at the same baseline whatever it contains */
+.pslab>.pmod>.card,.pslab>.pmod>.viz-card{border:0;border-radius:0;background:transparent;
+  box-shadow:none;margin:0 !important;flex:1;display:flex;flex-direction:column;min-width:0}
+.pslab>.pmod>.card>.card-b,.pslab>.pmod>.viz-card{flex:1}
+.pslab>.pmod>.card>.card-h{border-radius:0}
+.pslab .pm-pad{padding:16px 18px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.pslab .pm-pad>.grid{width:100%}
+/* the empty-state art panel keeps its own bleed */
+.pslab>.pmod>.card[data-bleed]{padding:0}
+@media (max-width:880px){
+  /* one panel per row on a phone: a half-width panel here is narrower than its own contents */
+  .pslab>.pmod{grid-column:span 12 !important;border-left:0}
+}
+
 .viz-card .vch{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .viz-card .vch h4{font-family:var(--f-disp);font-weight:800;font-size:14px;margin:0}
 .viz-card .vch .vsub{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel)}
