@@ -89,3 +89,23 @@
 -- tools/launch-correctness.test.cjs pinned `gamesAll` as a single line; it now pins the four
 -- open-fixture conditions and the substitution filter separately. tools/ingest-batch.test.mjs
 -- answers the new query with [] so the batch behaves exactly as before.
+
+-- ============================================================================
+-- WHAT ACTUALLY HAPPENED, and one trap
+-- ============================================================================
+-- The substitution was recorded at 11:08 PM ET. Nothing else had to be done: the EA poller on the
+-- VM was still inside the fixture's window, re-fetched 1420582190495 on its next pass, resolved
+-- 10200 to Vancouver and filed the game. Final PIT 5 VAN 6, 12 box score lines, 12 of 12 linked to
+-- members, every Vancouver line filed for VAN and not for the borrowed club. review_game_records
+-- then raised nothing: Pittsburgh's natsubi87 is rostered C and played LW, which is the same
+-- position group, and Delagray924 was in the training camp, which fills any position.
+--
+-- TRAP, and it cost five junk audit rows. The RPC was called as
+--   select (public.set_game_club_substitution(...)).*;
+-- `(f(...)).*` RE-EVALUATES the function ONCE PER OUTPUT COLUMN. The return type has six columns,
+-- so the function body ran six times and log_admin_action wrote six identical rows, all sharing one
+-- transaction timestamp. The table itself was fine (on conflict do update made it idempotent), which
+-- is exactly why it was easy to miss: the visible state was correct and the audit trail was not.
+-- The five extras were deleted, one kept. Call a composite-returning function as
+--   select * from public.set_game_club_substitution(...);
+-- Any function with a side effect is UNSAFE to call with the (f()).* form.
