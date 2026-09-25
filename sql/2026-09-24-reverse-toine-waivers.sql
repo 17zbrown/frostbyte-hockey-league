@@ -1,0 +1,51 @@
+-- 2026-09-24 — three Utah waivers reversed, and one gap in the data model they exposed.
+--
+-- Commissioner: "remove all recent management actions made by Toine on the Utah Mammoth".
+--
+-- WHAT TOINE ACTUALLY DID. Three waivers, 9:15 and 9:16 PM ET, all on Utah:
+--   B Bunny (LW), Bad News Kells (C), LogicalSense1 (LD)
+-- Nothing else. His only other entry is his own availability on Sep 21, which is not a management
+-- action. waive_player requires the caller to hold an Owner/GM/AGM seat, so he held one at 9:15;
+-- he holds none now (the commissioner pulled him at 9:22) and cannot repeat it.
+--
+-- WHY IT MATTERED MORE THAN THREE ROSTER ROWS. The commissioner had set Utah's sheets for all
+-- three of tonight's games at 8:44 PM with B Bunny at LW and Toine at RW. The waiver pulled
+-- B Bunny from three filed lineups; removing Toine emptied RW. Utah went into a 9:00 PM game, and
+-- was about to go into 9:35 and 10:10, with two of six slots empty.
+--
+-- WHAT WAS RESTORED, and where each value came from, because roster_spots keeps NO history:
+--   position     the club notices that announced each waiver: (LW), (C), (LD)
+--   salary       the contract row the waiver expired: 750000 / 2250000 / 1500000
+--   jersey       the signing notices: Kells #9, LogicalSense1 #12. B Bunny's was never recorded
+--                anywhere, so he took the lowest free number, #3.
+--   squad        all three were on the ACTIVE roster when waived. B Bunny had been moved up from
+--                camp at 7:28 PM that evening.
+--   origin       how each arrived: free_agency for the two signings, depth_random for B Bunny's
+--                post-draft placement.
+--
+-- THREE THINGS THE DATABASE PUSHED BACK ON, each caught by an assertion rather than shipped:
+--   contracts_one_active       B Bunny holds two expired contracts at the same salary, so matching
+--                              on salary tried to revive both. Take the most recently updated one.
+--   roster_spots_origin_check  'reinstated' is not an allowed origin. The honest answer was each
+--                              player's real original origin, not a new word for "we put him back".
+--   place_new_roster_spot      forces a depth_random origin into camp UNCONDITIONALLY, ignoring an
+--                              explicit squad. That would have left Utah with no left wing on its
+--                              active roster while the assertion said 12 players were back. The
+--                              promotion is replayed as an UPDATE instead, exactly as it happened
+--                              at 7:28 PM, rather than falsifying the origin to dodge the trigger.
+--
+-- sign_free_agent was deliberately NOT used: in the basic format it forces every salary to the
+-- 750000 minimum, which would have cut Kells from 2.25M and LogicalSense1 from 1.5M, reassigned
+-- their numbers, and written it into the transaction log as a fresh signing rather than a reversal.
+--
+-- Verified before commit, with the transaction refusing unless all of it held: 12 on the active
+-- roster, exactly 1 left wing, 0 still flagged waived, 3 active contracts on Utah, cap 22.5M of 50M.
+-- Then B Bunny was put back at LW on the 9:35 and 10:10 sheets, which is the sheet the commissioner
+-- had already set. RW was left empty on purpose: that slot is empty because the commissioner
+-- removed Toine, which is his own action and not one to reverse.
+--
+-- THE GAP THIS EXPOSED. roster_spots is deleted outright on a waive, so position, salary, jersey,
+-- squad and origin are gone the moment it happens. Everything above was reconstructed from club
+-- notices, which is archaeology, not a record. season_registrations has an archive table for
+-- exactly this reason; roster_spots should have one too, so the next reversal is a lookup rather
+-- than a reconstruction that happens to be possible.
