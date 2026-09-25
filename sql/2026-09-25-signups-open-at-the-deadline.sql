@@ -1,0 +1,57 @@
+-- v3.29: next season's sign-ups open when the movement deadline passes, not when its week starts.
+--
+-- Commissioner, 2026-09-25: "Can you set the season 2 signups to open just after the trade deadline
+--  as well as open owner applications as well?"
+--
+-- ============================================================================
+-- MOST OF THIS WAS ALREADY BUILT. ONE THING WAS THREE DAYS EARLY.
+-- ============================================================================
+-- public.flip_season_status() already closes the current season's sign-ups and opens the next
+-- season's, and pg_cron already runs it every ten minutes (job 'season-status-flip'). A repo grep
+-- finds no caller, which is misleading: the schedule lives in the DATABASE, in cron.job, not in
+-- netlify/functions. Check cron.job before concluding an automation is dead.
+--
+-- What was wrong was WHEN. The condition was:
+--     (select coalesce(max(g.week),0) from games g
+--       where g.season_id = s.id and g.status='final' and stage='regular' and not voided)
+--       >= s.trade_deadline_week
+-- which is true the moment ANY game of the deadline week goes final, and that is the START of that
+-- week. Season 1's deadline week opens Wed Oct 14; its movement deadline is Sat Oct 17 at midnight
+-- (movement_deadline_at: midnight at the end of the Friday of the deadline week). So sign-ups would
+-- have opened three days early, and three days before Rule 2.4 actually closes movement.
+--
+-- The rulebook was already right and the code disagreed with it. Rule 1.1 and Rule 0.9 both say
+-- registration opens "when the previous season's movement deadline passes". So the condition is now
+--     public.moves_locked(s.id)
+-- the same function every other deadline check in the league asks, which also honors the
+-- commissioner's moves_lock_override: locking movement early opens the next sign-up early, on
+-- purpose. The old `trade_deadline_week is null` fallback to playoffs_start_at is kept, because
+-- moves_locked returns false when a season has no deadline week at all.
+--
+-- ============================================================================
+-- OWNER APPLICATIONS NEEDED NOTHING
+-- ============================================================================
+-- They already follow. The owner-application page reads the season that is TAKING SIGN-UPS, not the
+-- season being played:
+--     var s = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};
+-- and closes on that season's own owner_app_deadline. So the moment Season 2 takes sign-ups, owner
+-- applications are Season 2's and are open, because Season 2's deadline (Fri Jan 22 2027) is in the
+-- future. Today they read closed, correctly, because Season 1 is still the registering season and
+-- its owner-application window shut on Wed Sep 09.
+--
+-- ============================================================================
+-- WHEN THIS ACTUALLY HAPPENS
+-- ============================================================================
+--   Season 1 movement deadline   Sat Oct 17 2026, 12:00 AM ET
+--   Season 2 sign-ups open       the next cron tick after that, within ten minutes
+--   Owner applications open      the same moment, closing Fri Jan 22 2027, 8:00 PM ET
+--
+-- Rehearsed both directions in a rolled-back transaction: with the deadline in the future nothing
+-- flips, and with moves_lock_override set to 'locked' Season 1 closes and Season 2 opens in the
+-- same pass. Asserted again after applying, against the live rows, that running it today changes
+-- nothing.
+--
+-- FLAGGED TO THE COMMISSIONER, not changed: Season 2 is currently calendared for a Feb 13 draft and
+-- a Feb 17 start, while Season 1 ends Oct 30. That leaves sign-ups open for about four months. The
+-- dates are the commissioner's to set and there is no rule against a long window, so this only
+-- reports it.
