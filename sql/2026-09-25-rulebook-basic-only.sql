@@ -1,0 +1,101 @@
+-- v3.26: the published rulebook states the format in force, and states it correctly.
+--
+-- Commissioner, 2026-09-25: "Rewrite the rulebook to match this change." And: "Make sure the
+--  rulebook shows only the current formatted rules since we shelved the more detailed version with
+--  the preseason for now. Keep it in your back pocket though." And, on the pre-season: "Preseason
+--  is unlimited availability so it would not matter for preseason."
+--
+-- ============================================================================
+-- FIRST, A CORRECTION TO MY OWN READING
+-- ============================================================================
+-- I reported that Rule 0.1 promised an Appendix A that did not exist. That was wrong, and it was
+-- wrong because I read the STORED data instead of the RENDERED book. Appendix A is built at render
+-- time: CG.rulebookForFormat (src/live/part5b_public2.js) walks every section, publishes
+-- `paragraphs` as binding law and the section's sibling `full` array as a shelved twin, then pushes
+-- a chapter numbered "A" titled "The full format, on the shelf". Twenty-one of the fifty sections
+-- carry a `full` array, so the book has been format-split section by section for some time. The
+-- back pocket the commissioner asked for already existed.
+--
+-- ============================================================================
+-- WHAT A FOUR-WAY AUDIT OF ALL 50 SECTIONS ACTUALLY FOUND
+-- ============================================================================
+-- Every chapter was classified paragraph by paragraph against public.format_rules('basic') and then
+-- adversarially re-checked. Chapters 6 through 10 came back entirely clean. The findings that
+-- mattered were not format leakage at all: SIX PLACES WHERE THE BOOK WAS FALSE AS PUBLISHED.
+--
+--   0.2  "No club may draft until all three seats are held (Rule 2.8)."
+--        Rule 2.8 says an Owner and a General Manager, and the AGM seat may be filled afterward.
+--        public.draft_management_gaps() tests owner_profile_id and gm_profile_id and nothing else,
+--        so start_draft() lets a club draft with its AGM seat empty. The book contradicted both the
+--        rule it cited and the code that enforces it.
+--   0.5  "If a club's clock expires during the draft, the league office selects the highest-ranked
+--        available player on that club's own board." Rule 2.8 says the selection is SKIPPED and no
+--        player is taken on the club's behalf, and the draft room says the same to members in as
+--        many words. A club reading Chapter 0 would have expected to be auto-drafted.
+--   0.6  "The active roster remains the players the club drafted and its management." This denies
+--        the FIRST of the two placement passes in Rule 2.8: a club with a selection it never used
+--        receives a random player ONTO ITS ACTIVE ROSTER, not into its camp.
+--   1.1  a registration confirmed and "assigned them to a club or to the free agent pool". There is
+--        no free agent pool: Rule 2.2 says so in terms.
+--   2.6  the roster-move notification list promised notices for "a contract offer and its answer"
+--        and "a pre-season loan", and the permissions list gated "a contract or extension offer".
+--        None of those three moves exists under the basic format.
+--   6.2  a literal double comma, "under Rule 4.6,, and it must finish", introduced by my own v3.20
+--        edit and shipped.
+--
+-- All six corrected, each against the rule and the code it contradicted.
+--
+-- ============================================================================
+-- FORMAT LEAKAGE, WHICH WAS THE SMALLER PROBLEM
+-- ============================================================================
+-- 2.1 LED with the full format's shape: "its composition by position group, the number of forwards,
+-- defensemen and goaltenders", and offered the basic shape as an option ("may be published as").
+-- Under basic the composition IS complete lines plus flex players, and the per-group maxima are
+-- DERIVED from it: 2 lines + 3 flex = 15, which is exactly the F9 / D7 / G5 that format_rules
+-- reports. Rewritten to state the in-force form; the quota text was already in the shelved twin.
+--
+-- 0.4 and 0.6 each carried a rationale paragraph that argued BY CONTRAST, opening with a
+-- present-tense description of the shelved stage ("A pre-season occupies two game-weeks...", "A
+-- free-agency period exists to price players..."). Chapter 0 is titled "how our season works AND
+-- WHY", so the rationale keeps its job; it now explains the rule that is in force instead of the
+-- one that is not. The full model is not lost: the `full` arrays of 0.4 and 0.6 describe the
+-- pre-season and free agency properly, and render as Appendix A.0.4 and A.0.6.
+--
+-- 0.1 keeps the clause that establishes the two formats and points at Appendix A, because without
+-- it the appendix is unexplained and Rule 2.2's cross-reference to "the rights provisions of
+-- Appendix A" dangles. It no longer enumerates the shelved model's features in the binding text.
+--
+-- DELIBERATELY KEPT: every sentence of the form "the basic format has no pre-season", "no
+-- free-agency period", "draft picks are not tradeable assets". Those are rules, not descriptions of
+-- the other format, and a constitution should say what is not in force.
+--
+-- ON THE PRE-SEASON AND THE WEEKLY CAP: the commissioner is right that it makes no difference.
+-- Pre-season availability is unlimited, so the v3.25 forfeit rule changes nothing there, and no
+-- pre-season provision is in force to change.
+--
+-- ============================================================================
+-- THE APPENDIX WAS SHELVING LAW THAT IS IN FORCE
+-- ============================================================================
+-- A `full` array replaces a WHOLE section, so a paragraph identical under both formats was being
+-- reprinted into Appendix A under a "not in force" chip. Appendix A.8.1 was telling members that
+-- the East and West divisions do not apply this season, and A.8.3 that the regular season's
+-- overtime rules do not. Four paragraphs were affected, one of them byte-identical to its twin.
+-- rulebookForFormat now filters the SHELVED COPY against the in-force text and shelves only what
+-- differs; a section whose every paragraph matches is not shelved at all. The binding side is
+-- untouched, so nothing about what is in force changed.
+--
+-- ============================================================================
+-- AND THE FORFEIT RULING REACHED THE SHELVED TEXT
+-- ============================================================================
+-- v3.25 corrected Rules 3.2, 4.3 and 5.2 but not 5.2's shelved twin, which still carried "A
+-- forfeited game counts toward these totals under Rule 3.2 and cannot be undone to restore a
+-- player's availability". The nature of a forfeit does not change with the season format and Rule
+-- 3.2 has no twin, so the appendix has to agree. Corrected. Chapter 0 also now answers the question
+-- a member actually asks after a forfeit: whether it costs him one of his six.
+--
+-- Test: tools/rulebook-basic-only.test.cjs, which pins all six falsehoods as fixed, checks each
+-- against the rule it used to contradict, runs the REAL rulebookForFormat for both formats and
+-- asserts no in-force paragraph is reprinted under a "not in force" chip, and sweeps every chapter
+-- for an in-force paragraph that asserts a shelved institution rather than denying it.
+-- Re-pinned: tools/season-format.test.cjs and tools/roster-shape.test.cjs both pinned 2.1's old
+-- wording; both now check that the IN-FORCE shape is the one stated.

@@ -42,8 +42,12 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
     /A club may carry any number of training-camp players in addition to its active roster/.test(r21) &&
     /the commissioner may publish a camp limit as a season setting, and where none is published camp is unlimited/.test(r21) &&
     /camp is carried outside the active roster, not outside the payroll/.test(r21));
-  A("...and the active-roster shape is now a season setting the commissioner publishes, by position group",
-    /commissioner shall determine, for each season, the size of the active roster and its composition by position group/.test(r21) &&
+  /* v3.26: the shape is still a published season setting; what changed is that 2.1 now states the
+     IN-FORCE form (complete lines plus flex players) instead of leading with the full format's
+     per-group quota and offering lines-plus-flex as an alternative. */
+  A("...and the active-roster shape is a season setting the commissioner publishes, as lines plus flex",
+    /commissioner shall determine, for each season, the size and composition of the active roster/.test(r21) &&
+    /The composition is published as a number of complete lines together with a number of additional players of any position/.test(r21) &&
     /A forward may be dressed at center or at either wing/.test(r21) && /a defenseman may be dressed on either side/.test(r21) && /a goaltender may be dressed only in goal/.test(r21));
   A("the shelved full-format text still carries the seventeen-man, 2-goaltender shape (v2.41)",
     /up to three \(3\) training-camp players beyond its seventeen active spots/.test(r21f) &&

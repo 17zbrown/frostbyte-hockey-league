@@ -271,7 +271,18 @@ CG.rulebookForFormat = function(rb, fmt){
       var binding = (fmt === "full" && s.full) ? s.full : s.paragraphs;
       var other = fmt === "full" ? (s.full ? s.paragraphs : null) : (s.full || null);
       var title = (fmt === "full" && s.fullTitle) ? s.fullTitle : s.title;
-      if (other) shelved.push({ id:"A."+s.id, of:s.id, title:(fmt === "full" ? s.title : (s.fullTitle || s.title)), paragraphs: other.slice() });
+      /* v3.26 — shelve only what actually DIFFERS. A `full` array replaces a WHOLE section, so a
+         paragraph that reads the same under both formats was reprinted into the appendix under a
+         "not in force" chip: Appendix A.8.1 was telling members that the East and West divisions
+         do not apply this season, and A.8.3 that the regular season's overtime rules do not. The
+         binding side is untouched; this filters the SHELVED COPY only, and a section whose every
+         paragraph matches is not shelved at all. */
+      if (other){
+        var inForce = {};
+        binding.forEach(function(t){ inForce[t] = 1; });
+        var differs = other.filter(function(t){ return !inForce[t]; });
+        if (differs.length) shelved.push({ id:"A."+s.id, of:s.id, title:(fmt === "full" ? s.title : (s.fullTitle || s.title)), paragraphs: differs });
+      }
       return Object.assign({}, s, { title:title, paragraphs: binding.slice() });
     }) });
   });
