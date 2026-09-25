@@ -1997,10 +1997,15 @@ CG.hubRoster = function(qs){
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(payroll)+'</b><span>Active payroll</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px;color:'+(space<0?"var(--red)":"var(--green)")+'">'+CG.fmtMoney(space)+'</b><span>Cap space</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(CG.CAP)+'</b><span>Salary cap</span></div></div>';
+  /* v3.28 (commissioner): "I want the actual roster to appear directly under the active payroll,
+     cap space, and salary cap boxes." Everything that used to sit between them, the cap outlook,
+     the squads card and the eligibility trackers, is built into `tail` and appended AFTER the
+     roster instead. The page still computes in the same order; only the order it PRINTS changed. */
+  var tail = "";
   /* v2.34 — the cap outlook: this season and the next three, from the same arithmetic every cap
      check uses (team_cap_outlook), so what management plans against is what the guards enforce.
      Filled in AFTER._roster; the placeholder keeps the page from jumping when it lands. */
-  h += '<div class="card" style="margin-bottom:20px" id="capOutlookCard"><div class="card-h"><h3>Cap outlook</h3><span class="chip">'+(CG.fmt("extensions")?'This season + 3':'This season')+'</span></div>'+
+  tail += '<div class="card" style="margin-bottom:20px" id="capOutlookCard"><div class="card-h"><h3>Cap outlook</h3><span class="chip">'+(CG.fmt("extensions")?'This season + 3':'This season')+'</span></div>'+
        '<div class="card-b" id="capOutlookBody"><p class="caption">Loading your commitments…</p></div></div>';
   /* v2.34 — between the rollover and this season's free agency, the players whose deals just ended
      are not on the roster but the club still holds their rights: they can be re-signed from here. */
@@ -2115,7 +2120,7 @@ CG.hubRoster = function(qs){
       return '<div><b class="num" style="font-size:22px;color:'+(over?"var(--red)":"inherit")+'">'+nv+(cap!=null?' / '+cap:'')+'</b>'+
         '<span class="caption" style="display:block">'+label+'</span></div>';
     }
-    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
+    tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp'+(loanSq.length?' · '+loanSq.length+' loaned':'')+(depthSq.length?' · '+depthSq.length+' depth':'')+'</span></div><div class="card-b">'+
       '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),CG.ROSTER_QUOTA.F)+
       meter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),CG.ROSTER_QUOTA.D)+
@@ -2142,7 +2147,7 @@ CG.hubRoster = function(qs){
     if (r5.length && !draftDone5){
       var short5 = r5.filter(function(r){ return !r.done; });
       var exempt5 = r5.filter(function(r){ return r.exempt; }).length;
-      h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+CG.PRESEASON_MIN_GP+' — draft eligibility</h3>'+
+      tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+CG.PRESEASON_MIN_GP+' — draft eligibility</h3>'+
         (short5.length ? '<span class="chip chip-warn">'+short5.length+' still short</span>'
                        : '<span class="chip chip-win">everyone covered</span>')+'</div><div class="card-b">'+
         (short5.length ? '<div class="stack" style="gap:9px">'+short5.map(function(r){
@@ -2166,7 +2171,7 @@ CG.hubRoster = function(qs){
   if (CG.playoffRoad && CG.playoffMinGp()){
     var prRoad = CG.playoffRoad(lg, club), minGp = CG.playoffMinGp();
     var shortGp = prRoad.filter(function(r){ return !r.done; }), leftGp = prRoad.length ? prRoad[0].left : 0;
-    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+minGp+' — playoff eligibility</h3>'+
+    tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+minGp+' — playoff eligibility</h3>'+
       (shortGp.length ? '<span class="chip chip-warn">'+shortGp.length+' still short</span>' : '<span class="chip chip-win">everyone eligible</span>')+'</div><div class="card-b">'+
       (prRoad.length ? '<div class="stack" style="gap:9px">'+prRoad.map(function(r){
           var pct = Math.round(Math.min(1, r.gp/minGp)*100), danger = !r.reachable;
@@ -2181,7 +2186,7 @@ CG.hubRoster = function(qs){
   }
   /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
      The card states the caps that DO exist. */
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
+  tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
     (CG.playoffMinGp() ? '<span class="chip">'+CG.playoffMinGp()+' games to be playoff-eligible</span>' : '<span class="chip chip-win">every rostered player is playoff-eligible</span>')+'</div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
       '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
@@ -2210,6 +2215,7 @@ CG.hubRoster = function(qs){
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1"><b>'+esc(r.tag)+'</b> <span class="caption">was '+CG.fmtMoney(r.salary)+' through Season '+r.end+'</span>'+(oo?' <span class="chip chip-live">'+(CG.offerAwaitsClub(oo)?'His ask':'Offer out')+'</span>':'')+'</span>'+
           '<button class="btn btn-chrome btn-sm" data-extend="'+esc(r.id)+'">Re-sign</button></div>'; }).join("")+'</div></div>' : '')+
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(CG.playoffMinGp() ? 'A player needs '+CG.playoffMinGp()+' regular-season games to be dressed in the playoffs — the Road to '+CG.playoffMinGp()+' card tracks it (Rule 8.3). ' : 'Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). ')+'Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him immediately and clears his cap hit; '+(CG.isBasic() ? 'any club with room in his position group may then sign him at the league minimum, on a deal to the end of the season, until the movement deadline (Rule 2.2).' : 'any club may then sign him under the free-agency rules (Rule 2.2).')+'</span></div></div>';
+  h += tail;
   return h;
 };
 CG.renderCapOutlook = function(rows){
@@ -2217,15 +2223,38 @@ CG.renderCapOutlook = function(rows){
   if (!rows || !rows.length){ body.innerHTML = '<p class="caption">No outlook yet — the season has no cap set.</p>'; return; }
   /* basic format: every contract ends with the season, so only this season's sheet means anything */
   if (!CG.fmt("extensions")) rows = rows.filter(function(r){ return r.current; });
+  /* v3.28 (commissioner, with a screenshot): "Either fill the space better or shrink the box."
+     This was always a four-across grid of season cards, which is right for the full format's
+     "this season + 3". Under the basic format every contract ends with the season, so the filter
+     above leaves exactly ONE card, and one card in a four-column grid is a narrow box beside three
+     empty ones. With a single season the same numbers are laid out ACROSS the width instead, and
+     the long list of expiring names gets the room it needs rather than wrapping in a column a
+     quarter of the page wide. Several seasons still render as cards. */
+  var solo = rows.length === 1;
   var cols = rows.map(function(r){
     var deals = r.deals||[], neg = r.space < 0, ending = deals.filter(function(d){ return d.final; });
+    var money = function(v){ return '<b class="num" style="font-size:22px;color:'+(v<0?"var(--red)":"var(--ink)")+'">'+CG.fmtMoney(v)+'</b>'; };
+    if (solo){
+      return '<div class="cap-solo">'+
+        '<div class="cs-figs">'+
+          '<div><b class="num" style="font-size:26px;color:'+(neg?"var(--red)":"var(--green)")+'">'+CG.fmtMoney(r.space)+'</b><span>Cap space</span></div>'+
+          '<div>'+money(r.committed)+'<span>Committed</span></div>'+
+          '<div>'+money(r.management)+'<span>Front office</span></div>'+
+          '<div><b class="num" style="font-size:22px">'+deals.length+'</b><span>Player deal'+(deals.length===1?'':'s')+'</span></div>'+
+        '</div>'+
+        (r.expiring_after>0
+          ? '<div class="cs-off"><span class="caption">'+CG.fmtMoney(r.expiring_after)+' comes off after Season '+r.season+'</span>'+
+            '<p class="small" style="color:var(--steel);margin:6px 0 0;line-height:1.6">'+ending.map(function(d){ return esc(d.name); }).join(", ")+'</p></div>'
+          : '')+
+      '</div>';
+    }
     return '<div class="kpi" style="cursor:default;align-items:stretch;text-align:left;padding:14px">'+
       '<div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-family:var(--f-disp)">Season '+r.season+'</b>'+(r.current?'<span class="chip chip-chrome">now</span>':'')+'</div>'+
       '<b class="num" style="font-size:22px;color:'+(neg?"var(--red)":"var(--green)")+';margin-top:6px">'+CG.fmtMoney(r.space)+'</b><span>cap space</span>'+
       '<div class="caption" style="margin-top:8px;line-height:1.5">'+CG.fmtMoney(r.committed)+' committed<br>'+deals.length+' player deal'+(deals.length===1?'':'s')+' · '+CG.fmtMoney(r.management)+' front office'+
       (r.expiring_after>0?'<br><span style="color:var(--steel)">'+CG.fmtMoney(r.expiring_after)+' comes off after this season ('+ending.map(function(d){ return esc(d.name); }).join(", ")+')</span>':'')+'</div></div>';
   }).join("");
-  body.innerHTML = '<div class="grid g4" style="gap:12px">'+cols+'</div>'+
+  body.innerHTML = (solo ? cols : '<div class="grid g4" style="gap:12px">'+cols+'</div>')+
     (CG.fmt("extensions")
       ? '<p class="caption" style="margin-top:12px">Each season’s figure counts every deal signed for it — current contracts that run that far, extensions already signed, and the three front-office seats at their fixed values (Rule 2.6). A new deal that starts next season is checked against <b>next</b> season’s space, not this one’s: contracts turn over when a season’s free agency opens, and that is when what is coming off your books comes off (Rule 2.5).</p>'
       : '<p class="caption" style="margin-top:12px">Every player deal — your picks, depth placements and any waived player you sign — runs to the end of this season and comes off the books with it; the three front-office seats count at their fixed values (Rule 2.6). Nothing carries into next season: everyone re-enters the draft (Rule 2.5).</p>');

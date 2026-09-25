@@ -1618,6 +1618,21 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
    All colours come from the flipping design tokens so every chart adapts to light + dark. */
 .viz-card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r-m);padding:16px 18px}
 
+/* v3.28 — the cap outlook when there is only ONE season to show (the basic format, where every
+   contract ends with its season). It used to be a single narrow card in a four-column grid with
+   three empty columns beside it. The figures run across the full width now, and the list of
+   expiring deals gets the width to read as a sentence instead of a column of shouting mono. */
+.cap-solo{display:grid;gap:14px}
+.cap-solo .cs-figs{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.cap-solo .cs-figs>div{display:flex;flex-direction:column;gap:2px;padding:12px 14px;
+  background:var(--ice);border:1px solid var(--line-soft);border-radius:var(--r-s,10px);min-width:0}
+.cap-solo .cs-figs>div>span{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--steel)}
+.cap-solo .cs-off{padding:12px 14px;border:1px dashed var(--line);border-radius:var(--r-s,10px)}
+.cap-solo .cs-off .caption{font-weight:700;color:var(--ink)}
+@media (max-width:560px){ .cap-solo .cs-figs{grid-template-columns:repeat(2,1fr)} }
+
+
 /* v3.24 — the dashboard switcher at the head of the hub sidebar. With one group showing at a time,
    a member deep in Team HQ needs the way back where his eye already is, not only in the masthead. */
 .hs-switch{display:flex;flex-wrap:wrap;gap:4px;padding:0 0 12px;margin-bottom:10px;
