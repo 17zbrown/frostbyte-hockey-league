@@ -1,0 +1,51 @@
+-- v3.18 — a sitting that did not reach the end of regulation is not a result.
+--
+-- Commissioner: "you didnt notice the game with the lag out again and posted an unfinished score...
+--  fix the already announced score and fix this process for the future."
+--
+-- THE GAME. SEA v PIT, the 9:35 PM slot on Sep 24.
+--   10:02:40 PM  a 40-minute sitting arrived and was filed as a finished game, SEA 2 PIT 3, and
+--                the score went to the scores channel.
+--   10:14:40 PM  the 20-minute continuation arrived and merged correctly to a full 3600 seconds:
+--                SEA 4 PIT 3.
+-- For twelve minutes the league was told PIT had won a game SEA actually won. THE WINNER FLIPPED,
+-- not just the score.
+--
+-- EA had said so twice in that first payload and neither was consulted on the way in:
+--   the clock read 2400 of 3600
+--   winnerByDnf and winnerByGoalieDnf were both 1
+-- segElapsed() already computed that number; it was only ever read by the MERGE, to decide whether
+-- a game was still open, never by the filing path to decide whether to publish a result at all.
+--
+-- WHY IT WAS NOT A ONE-LINE FIX. ingestContinuation found its candidate with
+-- `status=eq.final` — the merge searched for games that were ALREADY FINAL but whose clocks did
+-- not add up. `final` was load-bearing for the merge. Simply holding the first sitting would have
+-- left the continuation with nothing to attach to and the game would never have filed at all,
+-- which is worse than publishing it early.
+--
+-- THE FIX, in four parts:
+--  1. ingestOne now gates on the clock. A sitting under regulation (and not overtime) is HELD: the
+--     box score is still written, because it is real and the merge needs it, and ea_match_id is
+--     still stamped so the fixture is claimed and the same sitting is not reprocessed every poll.
+--     What is withheld is the RESULT. No status, no score, so notify_discord_game_final never
+--     fires and the standings do not move. The archive row reads 'incomplete' and says how many
+--     minutes were played.
+--  2. ingestContinuation looks for `status=in.(final,scheduled)`, so a HELD game is a merge
+--     target. ea_match_id=not.is.null still keeps the list to fixtures that have taken a sitting,
+--     so an untouched game is never one.
+--  3. The automatic merge now sets status:'final'. It never had to before, because it only ever
+--     merged into games that were already final. WITHOUT THIS the held game would have taken its
+--     correct merged score and never become a result. The test caught it; nothing else would have.
+--  4. public.review_held_games(), from discord-sync: once the fixture's window has closed and the
+--     rest of the game never came, it goes to the Statistics desk. The game was abandoned rather
+--     than disconnected and a person has to rule it, Rule 4.3 or Rule 3.2. Silence is the one
+--     outcome that must not happen.
+--
+-- AND THE SCORE THAT WAS ALREADY OUT. notify_discord_game_final only ever posted on the transition
+-- INTO final, so the merge that corrected 2-3 to 4-3 announced nothing and the channel kept the
+-- wrong number for good. It now also posts when the SCORE CHANGES on a game that is already final.
+-- Rehearsed and rolled back: a score change queues a post, a no-op update stays silent.
+-- The SEA v PIT correction was posted by hand as well, since that one predates the fix.
+--
+-- normalizeMatch now carries `dnf` (winnerByDnf / winnerByGoalieDnf) through as a second, named
+-- witness to the clock, and it appears in the reason on a held game.

@@ -71,9 +71,14 @@ globalThis.fetch = async (url, opts = {}) => {
     return J(seenLog ? ids.map((id) => ({ ea_match_id: id, status: "unmatched", game_id: null })) : []);
   }
   const pairRows = (rows, u) => { const p = pairOf(u); return rows.filter((g) => p && ((g.home_team_id === p[0] && g.away_team_id === p[1]) || (g.home_team_id === p[1] && g.away_team_id === p[0]))); };
-  if (u.includes("/rest/v1/games?") && u.includes("status=eq.final")) {
-    /* the resume-candidate query: finals only, never ruled or voided */
-    return J(pairRows(world.finals, u).filter((g) => !g.voided && g.forfeit_team_id == null).map((g) => ({ ...g, status: "final" })));
+  if (u.includes("/rest/v1/games?") && u.includes("status=in.(final,scheduled)")) {
+    /* v3.18 — the resume-candidate query takes HELD games as well as finals. A first sitting that
+       fell short leaves the game 'scheduled' but carrying its ea_match_id, and that is exactly
+       what a continuation belongs to. Never a ruled or voided game. */
+    const fin = pairRows(world.finals, u).filter((g) => !g.voided && g.forfeit_team_id == null)
+      .map((g) => ({ ...g, status: "final" }));
+    const held = pairRows(world.held || [], u).map((g) => ({ ...g, status: "scheduled" }));
+    return J(fin.concat(held));
   }
   if (u.includes("/rest/v1/games?or=(home_team_id.eq.") && !u.includes(",away_team_id.eq.") === false && /or=\(home_team_id\.eq\.(\w+),away_team_id\.eq\.\1\)/.test(u)) {
     /* the known-club-only query (one linked side): its fixtures whose window holds the match */
@@ -125,7 +130,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/app_config")) return J([]);
   throw new Error("unexpected fetch " + m + " " + u);
 };
-const reset = () => { world.open = []; world.finals = []; world.logs = []; world.clubOnly = {}; world.withdrawals = []; world.profiles = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
+const reset = () => { world.open = []; world.finals = []; world.held = []; world.logs = []; world.clubOnly = {}; world.withdrawals = []; world.profiles = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
 const summary = () => ({ received: 1, ingested: [], skipped: [], unmatched: [], errors: [] });
 /* an EA match between two clubs that ENDED at `end` (ISO) and ran `toi` seconds of game clock */
 const ea = (id, end, home, away, toi = 3600, scores = [3, 2]) => ({ matchId: id, timestamp: Math.floor(ms(end) / 1000),
@@ -233,7 +238,13 @@ console.log("— a COMPLETE game is never resumed: on a playoff night, game two'
   world.logs = [{ ea_match_id: "c1", payload: first }];
   world.open = [G935];
   const s = await run(ea("c2", at(50), 111, 222, 900, [0, 1]));            // game two, abandoned early
-  A("filed on the 9:35 slot, not merged into the finished game", s.ingested.length === 1 && s.ingested[0].game_id === "g935" && !s.ingested[0].resumed, JSON.stringify(s));
+  /* v3.18 — the point of this block is unchanged: the short sitting belongs to game TWO's slot and
+     must not be merged into the completed game one. What changed is that a 15-minute sitting is no
+     longer filed as a RESULT; it is held on that slot until the rest of the game turns up. */
+  A("lands on the 9:35 slot, not merged into the finished game",
+    (s.held || []).length === 1 && s.held[0].game_id === "g935" && !s.ingested.length, JSON.stringify(s));
+  A("...and no result was published for it",
+    !writes.gamePatches.some((p) => p.url.includes("id=eq.g935") && p.body.status === "final"));
   A("the finished game's score is untouched", !writes.gamePatches.some((p) => p.url.includes("id=eq.g900")));
   reset();
   const ot = ea("o1", at(35), 111, 222, 4014, [3, 2]);                      // game one complete in overtime
@@ -308,6 +319,35 @@ console.log("— refusals are archived once, then only touched (EA re-serves the
      back, which is what the touch does now. */
   A("...as a PATCH that asks for the row back, so a miss cannot read as success",
     writes.logPatches.length === 1 && writes.logPosts.length === 1);
+}
+
+console.log("— a sitting short of regulation is HELD, and the continuation finals it (SEA v PIT, Sep 24)");
+{
+  /* The real one: a 40-minute sitting arrived first and was filed as SEA 2 PIT 3, the score went
+     out, and the 20-minute continuation corrected it to 4-3 twelve minutes later. The announced
+     winner was wrong for those twelve minutes. */
+  reset(); world.open = [G900];
+  const first = ea("dnf1", at(38), 111, 222, 2400, [2, 3]);
+  const s1 = await run(first);
+  A("the short sitting is held, not filed", (s1.held || []).length === 1 && !s1.ingested.length, JSON.stringify(s1));
+  A("...it says how much was played", /40 of 60 minutes played/.test(s1.held[0].reason), s1.held[0].reason);
+  A("...the box score is still written", writes.statPosts.length === 1 && writes.statPosts[0].length > 0);
+  A("...the fixture is claimed, so the same sitting is not reprocessed",
+    writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.ea_match_id === "dnf1"));
+  A("...but NO result is published: no status, no score",
+    !writes.gamePatches.some((p) => p.body.status !== undefined || p.body.home_score !== undefined));
+  A("...and the archive says it is incomplete",
+    writes.logPatches.concat(writes.logPosts.flat()).some((r) => r && r.status === "incomplete"));
+
+  /* now the rest of the game arrives and finds the HELD fixture */
+  reset(); world.held = [{ ...G900, ea_match_id: "dnf1" }];
+  world.logs = [{ ea_match_id: "dnf1", payload: first }];
+  const s2 = await run(ea("dnf2", at(58), 111, 222, 1200, [2, 0]));
+  A("the continuation merges into the held game", s2.ingested.length === 1 && s2.ingested[0].resumed === true
+    && s2.ingested[0].game_id === "g900", JSON.stringify(s2));
+  A("...and only NOW is it final, with both sittings added up",
+    writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.status === "final"
+      && p.body.home_score === 4 && p.body.away_score === 3), JSON.stringify(writes.gamePatches.map((p) => p.body)));
 }
 
 console.log("— Rule 6.3: a withdrawn credit survives the filing that would otherwise restore it");

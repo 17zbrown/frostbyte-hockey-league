@@ -2404,6 +2404,16 @@ export async function runSweep(opts = {}) {
     }
   } catch (e) { sum.errors.push({ rosterDepartures: String(e.message || e) }); }
 
+  /* v3.18 — a game held for the rest of its clock that never got it. The importer holds a sitting
+     short of regulation instead of publishing it as a result (SEA v PIT, Sep 24, went out as a
+     40-minute 2-3 and the announced winner was wrong). Almost always the continuation lands within
+     minutes. When it does not, the game was abandoned rather than disconnected and a person has to
+     rule it, so once the fixture's window has closed it goes to the Statistics desk. */
+  try {
+    const held = (await sbPost("rpc/review_held_games", { p_grace_hours: 3 }, "return=representation")) || [];
+    if (held.length) sum.heldGames = held.map((h) => `${h.fixture} (${h.played_minutes} min)`);
+  } catch (e) { sum.errors.push({ heldGames: String(e.message || e) }); }
+
   // the Team Management category + its rooms (private to the front office) and the FAQ forums —
   // both keyed by stored id, so a rename is followed rather than duplicated
   try { await ensureMgmtCategory(guildChannels, roleId, sum); } catch (e) { sum.errors.push({ mgmtCategory: String(e.message || e) }); }

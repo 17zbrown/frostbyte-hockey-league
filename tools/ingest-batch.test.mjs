@@ -47,7 +47,10 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/ea_ingest_log?ea_match_id=in.") && u.includes("payload=not.is.null"))
     return J(inList(u).filter((id) => world.archived[id]).map((id) => ({ ea_match_id: id, ...world.archived[id] })));
   const pairRows = (rows) => { const p = pairOf(u); return rows.filter((g) => p && ((g.home_team_id === p[0] && g.away_team_id === p[1]) || (g.home_team_id === p[1] && g.away_team_id === p[0]))); };
-  if (u.includes("/rest/v1/games?") && u.includes("status=eq.final")) {
+  /* two different callers land here: the abandoned-game sweep still asks for status=eq.final, and
+     the resume-candidate query asks for status=in.(final,scheduled) since v3.18, because a first
+     sitting short of regulation is HELD and leaves the game scheduled. */
+  if (u.includes("/rest/v1/games?") && (u.includes("status=eq.final") || u.includes("status=in.(final,scheduled)"))) {
     /* the abandoned-game sweep asks per TEAM: or=(home_team_id.eq.T,away_team_id.eq.T) */
     const one = u.match(/home_team_id\.eq\.([^,)]+),away_team_id\.eq\.([^,)]+)/);
     if (one && one[1] === one[2]) {
@@ -55,7 +58,9 @@ globalThis.fetch = async (url, opts = {}) => {
       return J(world.finals.filter((g) => g.home_team_id === t || g.away_team_id === t)
         .map((g) => ({ status: "final", voided: false, forfeit_team_id: null, ...g })));
     }
-    return J(pairRows(world.finals).map((g) => ({ ...g, status: "final" })));
+    const fin = pairRows(world.finals).map((g) => ({ ...g, status: "final" }));
+    if (!u.includes("status=in.(final,scheduled)")) return J(fin);
+    return J(fin.concat(pairRows(world.held || []).map((g) => ({ ...g, status: "scheduled" }))));
   }
   if (u.includes("/rest/v1/games?") && u.includes("scheduled_at=gte.")) {
     const open = pairRows(world.open).map((g) => ({ status: "scheduled", ea_match_id: null, voided: false, forfeit_team_id: null, ...g }));
@@ -106,7 +111,7 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 const reset = () => {
   calls.length = 0;
-  world.open = []; world.finals = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = [];
+  world.open = []; world.finals = []; world.held = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = [];
 };
 /* an EA match between two clubs that ENDED at `end` and ran `toi` seconds of game clock, with the
    given rosters ({eaPlayerId: name}) on each side */

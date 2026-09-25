@@ -119,8 +119,13 @@ function normalizeMatch(raw) {
        beside it so a disagreement can be reported rather than silently papered over. */
     const scored = players.reduce((n, p) => n + (p.goals || 0), 0);
     const eaScore = +(c.score || 0);
+    /* v3.18: EA states a disconnect outright. winnerByDnf / winnerByGoalieDnf are set on the club
+       AWARDED the did-not-finish win, and they are what turns `score` into the 3-0 placeholder
+       above. Carried through as a second, independent witness to the clock: on the SEA v PIT
+       sitting that was wrongly filed as a result, both flags were 1 and the clock read 2400. */
+    const dnf = +(c.winnerByDnf || 0) === 1 || +(c.winnerByGoalieDnf || 0) === 1;
     return { ea_club_id: String(cid), name: c.details ? c.details.name : null,
-             score: scored, ea_score: eaScore, score_disputed: scored !== eaScore,
+             score: scored, ea_score: eaScore, score_disputed: scored !== eaScore, dnf,
              ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), result: +(c.result || 0), players };
   };
   const clubs = [club(clubIds[0]), club(clubIds[1])];
@@ -128,7 +133,8 @@ function normalizeMatch(raw) {
   // CGHL plays continuous sudden-death OT and no shootout (Rule 4.1), so any non-regulation
   // finish is overtime. If either club reports 5 or 6, the game went to OT.
   const wentOt = clubs.some((c) => c.result === 5 || c.result === 6);
-  return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), ts: +raw.timestamp || 0, clubs, went_ot: wentOt };
+  return { ea_match_id: String(raw.matchId), et_day: etDayUnix(raw.timestamp), ts: +raw.timestamp || 0,
+           clubs, went_ot: wentOt, dnf: clubs.some((c) => c.dnf) };
 }
 
 // ---- Merge the sittings of a disconnected game into one box score ----
@@ -728,6 +734,36 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
     return;
   }
   const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
+
+  /* v3.18 — A SITTING THAT DID NOT REACH THE END OF REGULATION IS NOT A RESULT.
+     SEA v PIT, Sep 24: a 40-minute sitting arrived at 10:02 PM and was filed as a finished game,
+     SEA 2 PIT 3. The 20-minute continuation arrived at 10:14 and merged to the true SEA 4 PIT 3,
+     but the score had already gone out and the announced WINNER was wrong. EA had said so twice
+     in that payload: the clock read 2400 of 3600, and winnerByDnf and winnerByGoalieDnf were both
+     set. Neither was consulted on the way in; the clock was only ever read by the merge.
+     The box score is still written (it is real, and the merge needs it) and ea_match_id is still
+     stamped so the fixture is claimed and the same sitting is not reprocessed every poll. What is
+     withheld is the RESULT: no status, no score, so notify_discord_game_final never fires and the
+     standings do not move. ingestContinuation looks for scheduled games too, so the continuation
+     finds this one and the merge finals it with the full clock. */
+  const elapsed = segElapsed(norm);
+  const complete = elapsed >= REGULATION_S || !!norm.went_ot;
+  if (!complete) {
+    await sbSend("PATCH", `games?id=eq.${game.id}`,
+      { ea_match_id: norm.ea_match_id,
+        home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+      "return=minimal");
+    ctx.filed.set(String(norm.ea_match_id), game.id);
+    const why = `held: ${Math.round(elapsed / 60)} of ${Math.round(REGULATION_S / 60)} minutes played`
+      + `${norm.dnf ? " and EA flagged a disconnect" : ""} — waiting for the rest of the game (Rule 4.3)`;
+    summary.held = summary.held || [];
+    summary.held.push({ ea_match_id: norm.ea_match_id, game_id: game.id, elapsed, reason: why });
+    console.log(`ingest: game ${game.id} held — ${why}`);
+    if (!(await archive(ctx, norm, raw, "incomplete", why, game.id)))
+      summary.errors.push({ ea_match_id: norm.ea_match_id, error: `game ${game.id} is held, but its archive row could not be marked incomplete` });
+    return;
+  }
+
   await sbSend("PATCH", `games?id=eq.${game.id}`,
     { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id,
       went_ot: !!norm.went_ot,
@@ -813,7 +849,11 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
   const probe = !!sibling;   // an open same-pair fixture could take this match instead
   const orC = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
   // a forfeit-ruled or voided game is never a resume target (Rule 3.2 / 4.3 P7: the ruling stands)
-  const finals = await sbGet(`games?${orC}&status=eq.final&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id`);
+  /* v3.18: scheduled games too, not only finals. A first sitting that fell short is now HELD —
+     it carries its ea_match_id and its box score but no result — and that held game is exactly
+     what this continuation belongs to. ea_match_id=not.is.null still keeps the list to fixtures
+     that have actually taken a sitting, so an untouched game is never a merge target. */
+  const finals = await sbGet(`games?${orC}&status=in.(final,scheduled)&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id`);
   const matchEndMs = (norm.ts || 0) * 1000;
   const inWindow = finals
     .filter((g) => matchInWindow(matchEndMs, g.scheduled_at, winBefore, winAfter))
@@ -937,8 +977,14 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     console.log(`ingest: game ${cand.id} was written by another writer while replay ${norm.ea_match_id} was being merged — skipped`);
     return R(true);
   }
+  /* v3.18 — status:'final' is now REQUIRED here, not redundant. This path used to merge only into
+     games that were already final, so it never had to say so. A first sitting short of regulation
+     is HELD now and leaves the game 'scheduled', and this merge is what completes it: without the
+     status the game would carry a correct merged score and never actually be a result. Setting it
+     on a game that was already final is harmless — notify_discord_game_final posts on the
+     transition, and separately on a score that changed, which is what a merge legitimately does. */
   await sbSend("PATCH", `games?id=eq.${cand.id}`,
-    { home_score: homeClub.score, away_score: awayClub.score, went_ot: !!merged.went_ot,
+    { status: "final", home_score: homeClub.score, away_score: awayClub.score, went_ot: !!merged.went_ot,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
 
