@@ -1,0 +1,85 @@
+-- v3.27: losing a front-office seat costs the seat, not the roster spot.
+--
+-- Commissioner, 2026-09-25: "If a member of management is removed by their owner, that player should
+--  not be demoted on the roster, but only of their management duties. They shall assume a league
+--  minimum salary OR if they were in a management position that has a salary, they retain that
+--  number. Please reverse any management removals that automatically re assigned the dropped manager
+--  to another team."
+--
+-- ============================================================================
+-- WHAT WAS HAPPENING, AND WHY IT MOVED HIM TO ANOTHER CLUB
+-- ============================================================================
+-- public._set_team_seat, on vacating a seat, did this:
+--     delete from public.roster_spots where season_id = ... and profile_id = v_prev;
+--     update public.season_registrations set status='pending' ...
+-- whenever the spot existed only because of the seat (origin 'assigned', never drafted).
+--
+-- That second step was not the dangerous one. THE DELETE WAS. Both placement paths select on
+-- exactly one thing:
+--     and not exists (select 1 from public.roster_spots rs where rs.season_id = ... and rs.profile_id = ...)
+-- (auto_assign_latecomers, and the post-draft placement). So removing the roster spot is precisely
+-- what hands a removed manager to the next sweep.
+--
+-- It is not hypothetical. fearasaphobia, the Islanders' Assistant GM:
+--   12:03:26  NYI club notice, his availability for the week
+--   14:22:06  Islanders parted ways with Assistant GM fearasaphobia
+--             his NYI spot deleted: pro, C, #2, $2,000,000
+--   14:24:00  DET club notice, "Post-draft placements, 1 player: fearasaphobia (C, camp)"
+-- Two minutes from removed to another club's training camp, at the league minimum.
+--
+-- ============================================================================
+-- THE RULE NOW
+-- ============================================================================
+--     update public.roster_spots
+--        set salary = greatest(coalesce(salary,0), 750000)
+--      where season_id = v_season and profile_id = v_prev;
+--
+-- greatest() IS the commissioner's sentence in one expression:
+--   Owner and GM seats pay $0     -> greatest(0, 750000)       = the league minimum
+--   an Assistant GM seat pays $2M -> greatest(2000000, 750000) = retained
+--   a player who EARNED more before taking the seat keeps what he earned.
+-- The pay scale is a per-season setting (seasons.owner_salary / gm_salary / agm_salary), currently
+-- 0 / 0 / 2,000,000, so "a management position that has a salary" means the AGM seat and no other.
+-- $750,000 is the league minimum from Rule 2.5, the same figure legal_salary() enforces, and
+-- $2,000,000 is a legal figure under its $250,000 step rule, so a retained salary is never illegal.
+--
+-- The club, the squad, the position and the jersey number are all untouched. The management
+-- contract BECOMES an ordinary player contract at that figure rather than expiring: every roster
+-- spot in this league carries a matching active contract, and expiring his would have left him
+-- rostered with none. The club is told in its room.
+--
+-- TRAP the rehearsal caught: block_noncommish_salary() refuses any salary change by a non
+-- commissioner, and an Owner removing his GM is not a commissioner. It honored app.retention_sync
+-- only. The seat machinery already announces itself with app.mgr_sync, which guard_roster_cap,
+-- guard_roster_immutable, protect_manager_spot and notify_roster_* all honor, so that guard now
+-- honors it too: the same named door, not a new one. The AGM case passed the rehearsal silently
+-- because greatest(2000000, 750000) changes nothing; only the GM case on $0 tripped it.
+--
+-- ============================================================================
+-- THE REVERSAL
+-- ============================================================================
+-- fearasaphobia is back on the Islanders: pro, C, #2, $2,000,000, origin 'assigned', one active
+-- contract, no seat (the Owner's removal stands; it is the demotion that was undone, not the
+-- removal). His Detroit spot and the contract that placement created were deleted first, the
+-- Detroit spot archived with its reason, so that reinstate_roster_spot revived the RIGHT contract:
+-- it takes the most recently touched EXPIRED one, and an expired Detroit row would have been newer
+-- than the Islanders one. Asserted after: NYI / pro / C / #2 / $2M, exactly one roster spot, exactly
+-- one active contract, not a manager contract, and no front-office seat.
+-- Both clubs remain legal: NYI 15/15 active at $27.5M of $50M, DET 15/15 at $27.25M.
+--
+-- NOT REVERSED, and reported to the commissioner instead: Toine and HAGERS were demoted the same
+-- way on 2026-09-24 (removed 21:22, replaced into UTA's training camp at 21:24 on depth_random),
+-- but they landed back on their OWN club rather than another one, which is not what the instruction
+-- names. HAGERS has since been re-seated as Utah's GM. Both predate roster_spot_removals, so there
+-- is no archive of what they held, and putting them back means choosing a squad and a salary rather
+-- than restoring a record. That is a decision about two members' standing, and it is the
+-- commissioner's.
+--
+-- Rulebook 2.6 gained what the code itself used to say it lacked. It read only "A player is
+-- protected while he holds a management role ... until the role is vacated" and then said nothing
+-- about the vacating, which is why the old code raised a notice to the office reading "Rule 2.6
+-- does not say what his salary becomes". It says now.
+-- Also corrected in the same pass: the Owner's remove-manager confirmation claimed "every club must
+-- hold all three seats before the entry draft begins, and the draft will not start while a seat is
+-- empty". That is the same falsehood v3.26 removed from Chapter 0. The draft needs the Owner and GM
+-- seats only.

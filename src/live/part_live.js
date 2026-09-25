@@ -9023,7 +9023,13 @@ CG.removeManager = function(role, name){
   if (role!=="gm" && role!=="agm"){ CG.toast("An Owner removes the GM or AGM only","err"); return; }
   var label = role==="gm"?"General Manager":"Assistant GM";
   CG.confirm("Remove "+name+" as "+label+"?",
-    "This takes effect at once: the seat becomes vacant, their management contract ends with it, the move posts to the transaction wire, and the league office is told. Nominate a successor afterwards — every club must hold all three seats before the entry draft begins, and the draft will not start while a seat is empty (Rule 2.8).",
+    /* v3.27: two corrections in one line of copy. Removing a manager no longer touches his roster
+       spot, and it never should have; and the draft needs the Owner and GM seats only, which is
+       what Rule 2.8 and the draft gate have always said. */
+    name+" keeps his roster spot with the club, at the same position and the same number. Only the seat ends: "+
+    "his cap hit becomes the league minimum unless the seat he held paid more, in which case he keeps that figure (Rule 2.6). "+
+    "This takes effect at once, the move posts to the transaction wire, and the league office is told. "+
+    "Nominate a successor when you have one; the Assistant GM seat may sit empty, and only the Owner and GM seats are needed before the draft (Rule 2.8).",
     "Remove", function(){
       CG.sb.rpc("owner_remove_manager", { p_team_code:m.club, p_role:role }).then(function(r){
         if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
