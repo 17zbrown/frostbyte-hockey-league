@@ -1,0 +1,41 @@
+-- v3.13 — a club's own room is told when its lineup is set, changed or withdrawn.
+--
+-- Commissioner: "Can you also send out notifications to each team's channel whenever their lineups
+--  are set and edited if that happens?"
+--
+-- WHAT WAS ALREADY THERE, and what was missing. set_game_lineup told the PLAYERS it dressed
+-- (v2.95) and _post_lock_notices told the OPPONENT about a post-lock change (v2.57, reworded in
+-- v3.05). The club's own front office and room were told nothing at all: management could file a
+-- sheet, change it, or take it down and no one in the room would see it happen.
+--
+-- public._post_lineup_notice(game, team, old_row, new_players, diff, uid, locked), called from
+-- set_game_lineup immediately after the _post_lock_notices branch, plus a club_notify spliced into
+-- clear_game_lineup inside its `if v_n > 0` block so withdrawing an EMPTY sheet says nothing.
+--
+-- THE BUG THE REHEARSAL CAUGHT, and it would have shipped silently. The first version guarded on
+-- the caller's v_diff. set_game_lineup computes v_diff ONLY inside `if v_locked then`, so it is 0
+-- for every ordinary pre-lock edit, which is the common case and the entire point of the notice.
+-- The rehearsal filed a sheet (1 notice, right), resubmitted it (0, right) and then swapped a
+-- winger, which produced 0 as well. p_diff is now ignored on purpose and the comparison is made
+-- inside the helper, from the sheet that WAS on file against the sheet that is on file now.
+--
+-- The comparison is POSITIONAL, not set-based: moving the same six between positions is a real
+-- edit to a club's own sheet, and reads as "The same six, moved between positions." The player
+-- notifications correctly treat that as nothing to tell the players; the club is a different
+-- audience. A save that changes neither the six nor their positions still says nothing, which is
+-- what keeps a room quiet when somebody just presses save.
+--
+-- The sheet is printed in rink order, LW C RW LD RD G, matching v3.12.
+-- No role ping: a lineup being filed is routine, and club_notify's ping argument defaults to null.
+--
+-- REHEARSED end to end against a real fixture (DET vs PIT, Sep 30) and rolled back. Five calls,
+-- three notices:
+--   set                      -> "Lineup set vs PIT ... LW The Old Fart · C Porky · RW All Of Toxic ..."
+--   resubmit, nothing moved  -> silent
+--   swap a winger            -> "Lineup changed vs PIT ... Out All Of Toxic, in CorRye ..."
+--   withdraw                 -> "Lineup withdrawn vs PIT ... nobody is dressed for this game yet"
+--   withdraw again           -> silent
+--
+-- TRAP worth keeping: both notices in a single transaction share created_at, because now() is the
+-- transaction's start time. Ordering a rehearsal's rows by created_at returns them in an arbitrary
+-- order and made the swap look like it had produced the wrong text. Order by ctid instead.
