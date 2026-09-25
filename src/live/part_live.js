@@ -163,12 +163,29 @@ CG.playoffRoad = function(lg, clubCode){
    way the database counts them in player_week_games — a final game with a box score counts by the
    box score (he played it or he did not), every other game by the lineup his club filed. Mirrors
    the gate in set_game_lineup so the per-game page can say no at assignment time. */
+/* v3.25 — a forfeit nobody skated in does not count. Mirrors the same clause in the database's
+   player_week_games; if the two ever disagree the page says a player has room and the gate refuses
+   him, or worse the other way round. Ice time is the test on both sides. */
+CG.forfeitNoIce = function(g, res){
+  if (!g || !g.forfeit) return false;
+  var box = res && res.box;
+  if (!box) return true;                       /* ruled 1-0, no player statistics at all (Rule 3.2) */
+  var sides = [box.home || {}, box.away || {}];
+  for (var i = 0; i < sides.length; i++){
+    var ids = Object.keys(sides[i]);
+    for (var j = 0; j < ids.length; j++) if ((+sides[i][ids[j]].toi || 0) > 0) return false;
+  }
+  return true;
+};
 CG.weekGamesFor = function(pid, game, club, opts){
   var lg = CG.lg || {}, n = 0, exclude = (opts && opts.excludeGame) || game.id;
   var stage = game.stage || "regular";
   (lg.schedule || []).forEach(function(g){
     if (g.id === exclude || (g.stage || "regular") !== stage || g.week !== game.week || g.voided) return;
     var res = (lg.allResults || lg.results || []).find(function(r){ return r.id === g.id; });
+    /* Rule 3.2 forfeit with nobody on the ice: not a game anybody played, so not a game against
+       anybody's week. A Rule 4.3 forfeit after disconnections DID have ice time and still counts. */
+    if (CG.forfeitNoIce(g, res)) return;
     var box = res && res.box, hasBox = !!(box && (Object.keys(box.home||{}).length || Object.keys(box.away||{}).length));
     if ((g.status === "final" || (res && res.entered)) && hasBox){
       if ((box.home && box.home[pid]) || (box.away && box.away[pid])) n++;
@@ -199,8 +216,8 @@ CG.weekLoadChip = function(load, size){
   if (!load) return "";
   var cls = load.full ? "chip-loss" : (load.left <= 1 ? "chip-warn" : "");
   return '<span class="chip '+cls+'" style="font-size:'+(size==="xs"?9:10)+'px" title="'+
-    (load.full ? "At the weekly limit (Rule 5.2): dressed in "+load.used+" of "+load.cap+" games this week, counting games already filed"
-               : "Dressed or played in "+load.used+" of "+load.cap+" games this week (Rule 5.2)")+
+    (load.full ? "At the weekly limit (Rule 5.2): dressed in "+load.used+" of "+load.cap+" games this week, counting games already filed. A voided game, and a forfeit nobody took the ice for, count for no one."
+               : "Dressed or played in "+load.used+" of "+load.cap+" games this week (Rule 5.2). A voided game, and a forfeit nobody took the ice for, count for no one.")+
     '">'+load.used+'/'+load.cap+'</span>';
 };
 /* the cap that applies to one player in one game: the series cap in the playoffs, else the weekly cap */
@@ -2552,7 +2569,7 @@ CG._smRenderList = function(body){
     /* forfeit rulings: the staff act for no-shows and before-game forfeits (Rule 3.2) */
     var forfeitCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Forfeit a game</h3><span class="chip chip-warn">Rule 3.2</span></div>'+
       '<div class="card-b">'+
-      '<p class="caption" style="margin:0 0 12px;max-width:78ch">For a club that didn’t show, couldn’t ice six, or forfeited before the scheduled time. Recorded as a 1–0 regulation win for the club that showed, with no individual player statistics. If the game was actually played after a disconnect, use the lag-out merge instead — and by convention the winning club’s management enters that one themselves from Team HQ.</p>'+
+      '<p class="caption" style="margin:0 0 12px;max-width:78ch">For a club that didn’t show, couldn’t ice six, or forfeited before the scheduled time. Recorded as a 1–0 regulation win for the club that showed, with no individual player statistics, and it counts toward nobody’s weekly game cap on either club, because nobody took the ice (Rule 5.2). If the game was actually played after a disconnect, use the lag-out merge instead: that one keeps its statistics and does count. By convention the winning club’s management enters it themselves from Team HQ.</p>'+
       '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
       '<select id="smFfGame" style="flex:1;min-width:240px"><option value="">Pick a game…</option>'+lgGames.map(function(g){
         return '<option value="'+esc(g.id)+'" data-home="'+esc(g.home)+'" data-away="'+esc(g.away)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" · ")+g.away+" @ "+g.home+" · "+CG.fmtDay(g.at)+" · "+(g.status==="final"?"final":"scheduled"))+'</option>';
@@ -3057,7 +3074,6 @@ CG.ROUTES.register = function(){
         '</div>')+
     '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" role="group" aria-label="Primary position">'+
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
-    '<label class="fld"><span>Note to the league office (optional)</span><textarea id="regNote" rows="3" placeholder="Availability or anything the commissioner should know…">'+esc((reg&&reg.note)||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(detailsMissing.length?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
     '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1). By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
@@ -3071,7 +3087,7 @@ CG.AFTER.register = function(){
     document.querySelectorAll("[data-regpos]").forEach(function(x){ var on=x===el; x.classList.toggle("chip-chrome", on); x.setAttribute("aria-pressed", on); });
   }); });
   var ea=document.getElementById("regEaBtn"); if(ea) ea.addEventListener("click", CG.promptEaId);
-  var sub=document.getElementById("regSubmit"); if(sub) sub.addEventListener("click", function(){ CG.registerForSeason(sel, (document.getElementById("regNote")||{}).value||""); });
+  var sub=document.getElementById("regSubmit"); if(sub) sub.addEventListener("click", function(){ CG.registerForSeason(sel); });
   var wd=document.getElementById("regWithdraw"); if(wd) wd.addEventListener("click", function(){
     var sReg = CG.regSeason() || {};
     CG.confirm("Withdraw your Season "+(sReg.number||"")+" sign-up?",
@@ -3483,7 +3499,10 @@ CG.saveEaId = async function(v){
   if(!(r.data||[]).length){ CG.toast("That didn’t save — your sign-in may have expired. Sign in again and retry.","err"); return; }
   CG.auth.profile.ea_id=v; if(CG.closeOverlay) CG.closeOverlay(); CG.toast("EA ID saved","ok"); CG.router();
 };
-CG.registerForSeason = async function(position, note){
+/* v3.25 — the "Note to the league office" box is gone. It wrote to a side table nothing ever read:
+   58 members wrote one and no page, RPC or feed surfaced a single word of it. Rather than build a
+   reader for a field nobody asked for, the commissioner retired the box and the notes with it. */
+CG.registerForSeason = async function(position){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   var s=CG.regSeason(); if(!s||!s.registration_open){ CG.toast("Registration isn’t open","err"); return; }
   /* v3.21: the database refuses a sign-up without all three (require_registration_details). Ask for
@@ -3497,7 +3516,7 @@ CG.registerForSeason = async function(position, note){
     try { var fr=await CG.sb.from("profiles").select("in_guild").eq("id",CG.auth.user.id).maybeSingle(); if(fr.data&&fr.data.in_guild) CG.auth.profile.in_guild=true; } catch(e){}
     if(!CG.auth.profile.in_guild){ CG.toast("Join the Chel Gaming Discord to register","err"); return; }
   }
-  var payload={ season_id:s.id, profile_id:CG.auth.user.id, position:position||"C", note:(note||"").trim()||null };
+  var payload={ season_id:s.id, profile_id:CG.auth.user.id, position:position||"C" };
   var r=await CG.sb.from("season_registrations").upsert(payload,{onConflict:"season_id,profile_id"});
   if(r.error){
     /* the server is the authority on this, not the check above: if it says a detail is missing,

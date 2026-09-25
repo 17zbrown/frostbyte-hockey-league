@@ -1,0 +1,72 @@
+-- v3.25: a forfeit nobody skated in is not a game against anybody's week. And the sign-up note box
+-- is retired.
+--
+-- ============================================================================
+-- 1. THE NOTE BOX (commissioner: "those notes can be removed and the box where they type it can
+--    be too.")
+-- ============================================================================
+-- The sign-up page carried "Note to the league office (optional)". A trigger moved whatever was
+-- typed into public.registration_notes and nulled season_registrations.note in the same operation,
+-- and then NOTHING read it. Not a page, not an RPC, not a Discord feed. The only object in the
+-- whole database that mentioned the table was the trigger that filled it. 58 members had written
+-- one, the most recent that morning, and the site could not show a word of it to anybody.
+--
+-- Dropped: the trigger zz_move_registration_note, the function move_registration_note(), the table
+-- public.registration_notes with its 58 rows, and the column season_registrations.note.
+-- Client: the textarea, the argument to CG.registerForSeason, and note from the insert payload.
+--
+-- Asserted before dropping: the only OTHER function mentioning new.note is trg_mgmt_gate_trades,
+-- which is a trigger on public.trades and has its own note column. Asserted after: the function,
+-- the table and the column are gone, the 179 registrations are intact, and the six other triggers
+-- on season_registrations still stand.
+--
+-- This is irreversible. There is no archive: an archive would have defeated the point of removing
+-- member-written text the commissioner asked to be removed.
+--
+-- ============================================================================
+-- 2. THE CAP (commissioner: "Make sure to not count games that were forfeited with no ice time
+--    towards the player games per week cap... If a forfeit happens due to too many disconnects,
+--    those games do count, but if there is a forfeit from a team being too late, that does not.")
+-- ============================================================================
+-- THE TWO CASES WERE ALREADY IN THE DATA, which is what made the test obvious:
+--   NYI 1-0 SEA   SEA forfeited    0 box rows      0 seconds of ice time
+--   NYI 0-1 DAL   NYI forfeited    0 box rows      0 seconds
+--   DAL 0-3 UTA   DAL forfeited   12 box rows  16,386 seconds
+-- The first two are Rule 3.2 lateness, recorded 1-0 with no player statistics by design. The third
+-- is Rule 4.3, where the sittings that were played are merged and every statistic is kept.
+--
+-- So ICE TIME is the test, not the existence of a box-score row and not the forfeit flag:
+--   and not (g.forfeit_team_id is not null
+--            and not exists (select 1 from public.game_stats gs
+--                             where gs.game_id = g.id and coalesce(gs.time_on_ice_seconds,0) > 0))
+-- added to public.player_week_games. The clause is GAME level, not club level, on purpose: nobody
+-- played it, so it is nobody's game. The club that turned up and was awarded the win is no more
+-- charged than the club that did not.
+--
+-- WHY IT MATTERED IMMEDIATELY. player_week_games counts a final game WITHOUT a box score by the
+-- lineup the club filed, so both lateness forfeits were charging every player on both filed sheets.
+-- 24 player-weeks were affected and EIGHT players were sitting at 6 of 6 for a game nobody played:
+-- AdzukiLetan66, biz, Chase Pidgeon, Getzlaf 15x, Kay, Maniac, MFN_Steve15 and Saqoy. All eight are
+-- at 5 of 6 now and have a game back this week. The played forfeit still counts, and counts by box
+-- score, so only the twelve who actually skated in it are charged.
+--
+-- Client twin: CG.forfeitNoIce + CG.weekGamesFor in src/live/part_live.js. The two must agree or
+-- the page tells a manager he has room while the database refuses the lineup, or worse the other
+-- way round. Ice time is the test on both sides. The client helper treats a forfeit with no result
+-- row, an empty box, or a box whose every toi is zero or missing as no ice time, and one second
+-- anywhere as a played game.
+--
+-- Rulebook, four edits in the same pass, because the old text said the opposite in two places:
+--   3.2 lost "The game still counts toward each player's weekly appearance total under Rule 5.2,
+--       and that cannot be undone to restore availability" and gained the reverse, including that
+--       the club that turned up is not charged either.
+--   5.2 paragraph 1 now names it beside a voided game.
+--   5.2 paragraph 4 was "A forfeited game counts toward these totals under Rule 3.2 and cannot be
+--       reversed": replaced with the distinction between a 3.2 forfeit and a 4.3 forfeit, and why.
+--   4.3's third-disconnection paragraph now says its forfeit DOES count, because it was played.
+-- Also swept: the staff forfeit tool's help text, the weekly-load chip tooltip, and the lineup
+-- guide's step 12.
+--
+-- Test: tools/weekly-load.test.cjs gained a Rule 3.2 block covering no box score, an all-zero box
+-- score, a real 4.3 box score, the opponent's players, an ordinary game, and six cases of the
+-- helper itself.
