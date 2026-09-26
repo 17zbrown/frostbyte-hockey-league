@@ -1,0 +1,88 @@
+-- v3.35: a trade that has not happened is nobody else's business.
+--
+-- Commissioner, 2026-09-26: "dont show trade offers edits or declines publicly. Only show accepted
+--  trades."
+--
+-- ============================================================================
+-- THE LEAK WAS THE CLUB ROOM, AND ONLY THE CLUB ROOM
+-- ============================================================================
+-- Every trade event ran through public.club_notify, which does two things: it creates a site
+-- notification for the Owner, GM and AGM, and it inserts a row into public.club_notices. The bot
+-- posts every club_notices row into teams.discord_channel_id.
+--
+-- THE SITE HALF WAS ALWAYS PRIVATE. The Discord half never was. A club has exactly one channel
+-- column, discord_channel_id, and exactly one role, discord_role_id, and both are the WHOLE CLUB,
+-- not its front office. So "Trade offer from the Mammoth: they send Lekkerimaki1748, Ciznasty for
+-- invisty" was posted where invisty reads it. A member could learn from his own club's room that he
+-- had been offered away in a deal that fell through, or never happened at all.
+--
+-- What had already gone out, all delivered:
+--     26  trade offers            Sep 19 10:47 PM to Sep 26 6:38 AM
+--     12  offers withdrawn        Sep 26 6:38 to 6:39 AM
+--      8  offers declined         Sep 26 7:02 to 8:08 AM
+--      2  completed trades        Sep 19 (correct, and unchanged)
+-- 46 posts about trades that never completed, 20 of them in the ninety minutes before the ruling.
+--
+-- ============================================================================
+-- WHAT WAS ALREADY RIGHT, VERIFIED RATHER THAN ASSUMED
+-- ============================================================================
+-- Everything else about trade visibility was already correct, and it was worth proving before
+-- changing anything, because a fix aimed at the wrong layer would have left the real one open.
+--   * RLS on public.trades: SELECT is (is_gm_of(from_team_id) or is_gm_of(to_team_id) or
+--     is_commissioner()), plus has_department('transactions'). A member who is not in the deal reads
+--     NOTHING, whatever the client asks for.
+--   * No SECURITY DEFINER reader exposes trades. The only two definers that touch the table are
+--     accept_trade and reverse_trade, both actions, both gated inside (reverse_trade is granted to
+--     anon but refuses anyone who is not a commissioner or transactions staff, so the grant is untidy
+--     rather than open).
+--   * The client reads trades in three places: the staff desk (transactions department), Team HQ's
+--     incoming offers (status='proposed', own club), and CG.loadTrades, which has NO status filter
+--     but feeds only CG.incomingOffers and CG.outgoingOffers, both gated on CG.myManagedTeam().
+--   * public.transactions is written for a trade by accept_trade and reverse_trade ONLY, so the
+--     public transaction log and the #transactions channel have always carried completed trades and
+--     nothing else. Rule 2.3 already said that is the rule.
+--   * Nothing writes a news item for a trade.
+--
+-- ============================================================================
+-- THE CHANGE
+-- ============================================================================
+-- 1. club_notify gains p_room boolean default true. False keeps the notice to the three seats and
+--    out of the club room. DROP + CREATE, never CREATE OR REPLACE: a new defaulted argument makes an
+--    OVERLOAD, and two club_notify functions would leave the eight-argument callers bound to the old
+--    one. The signature count is asserted to be exactly 1 afterwards. Same trap, same remedy, as
+--    v3.11.
+-- 2. notify_trade_proposed passes false for BOTH clubs. The offer still reaches the front office on
+--    the site, and the league office as before.
+-- 3. notify_trade_status passes false for 'declined' and 'cancelled'. 'accepted' keeps both room
+--    posts. So does 'reversed': a reversal moves real players back onto real rosters and Rule 2.3
+--    requires both clubs to be told, so it is not an unfinished deal being gossiped about.
+-- 4. An incoming offer now also DMs the RECEIVING club's three seats, through public.discord_dms,
+--    the lane Rule 2.3 paragraph 4 already uses for a player's trade request. The room was how
+--    management heard about an offer quickly; the DM keeps that without telling the roster. The
+--    SENDING club gets no DM, because it just made the offer. A seat with no linked Discord simply
+--    gets none, and must never break the offer.
+--
+-- ============================================================================
+-- REHEARSED WITH ROLLBACK, INCLUDING THE BASELINE
+-- ============================================================================
+-- First the baseline, to prove the leak rather than infer it: cloning a real UTA to NYI offer as
+-- 'proposed' under the OLD code wrote 2 club_notices rows. Then the same clone under the new code,
+-- walked through its whole life in one rolled-back transaction, asserting at each step:
+--     proposed   0 new club_notices, site notifications written, exactly as many DMs as the
+--                receiving club has seats with a linked Discord, and NONE to the sending club
+--     declined   0 new club_notices
+--     cancelled  0 new club_notices
+--     accepted   2 new club_notices
+--     reversed   2 more
+-- The only room posts in the entire lifecycle were "Trade completed" and "Trade reversed by the
+-- league office", one per club each.
+--
+-- ============================================================================
+-- STILL OUT THERE
+-- ============================================================================
+-- The 46 messages already posted are live in the club rooms. Deleting them is an outward-facing act
+-- on three clubs' history and was left for the commissioner to ask for.
+--
+-- NOT CHANGED, and worth a separate decision: a club room also carries "On the trade block:
+-- <player>" when its own management lists somebody. That is not an offer, and a trade block exists
+-- to be advertised (v2.72 posts it to #trade-block), so it was left alone.
