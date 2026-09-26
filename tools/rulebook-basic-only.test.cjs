@@ -43,7 +43,7 @@ console.log("\n— six places the book was FALSE, not merely out of format");
 
   A("1.1 no longer sends a registration to a free agent pool the basic format does not have",
     !/assigned them to a club or to the free agent pool/.test(sec("1.1")));
-  A("...and 2.2 still says there is no such market", /no free-agency period and no open market for player contracts/.test(sec("2.2")));
+  A("...and 2.2 still says there is no such market", /no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
 
   A("2.6 no longer promises notices for a contract offer or a pre-season loan",
     !/a contract offer and its answer/.test(sec("2.6")) && !/pre-season loan/.test(sec("2.6")));

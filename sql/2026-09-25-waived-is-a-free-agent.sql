@@ -1,0 +1,62 @@
+-- v3.33: a waived player is a free agent, and clubs can actually see him.
+--
+-- Commissioner, 2026-09-25: "when a player is waived they go to free agency pool for teams to pick
+--  up."
+--
+-- ============================================================================
+-- THE RULE WAS RIGHT. THE STAMP WAS RIGHT. NOTHING READ THE STAMP.
+-- ============================================================================
+-- public.waive_player has stamped season_registrations.waived_at since v3.06, and its own comment
+-- says "He is a free agent now and waits for a club to sign him (Rule 2.2)". The stamp exists
+-- precisely so the post-draft sweep does not hand a waived player straight back to a club, which it
+-- did twice within seconds before v3.06.
+--
+-- But NOTHING ever read the stamp:
+--   * public.registration_pool(), the RPC the whole site boots from, did not return waived_at;
+--   * the Control Center's own select did not ask for it either.
+-- So the client could not tell a waived player from an undrafted one. CG.poolState fell through to
+--     if (lg.isReturning(pid)) return "free_agent";
+--     return "undrafted_fa";      // label: "Awaiting placement"
+-- and isReturning is false for anyone who has never been drafted and has no prior season, which in
+-- Season 1 is most of the league. The free-agent board filters on exactly that state
+--     return ps==="free_agent" || ps==="rfa";
+-- so a waived first-year player appeared on NO board.
+--
+-- THE LIVE CASUALTY: B Bunny was waived at 7:15 PM tonight. He was the league's only unrostered
+-- registrant, he had never been drafted, and he was therefore invisible to every club while being
+-- labelled "Awaiting placement" for a placement that was never coming, because the waived_at stamp
+-- deliberately kept the post-draft sweep from placing him. He could only have been rescued by the
+-- league office, by hand, if anyone had noticed.
+--
+-- ============================================================================
+-- THE FIX, END TO END
+-- ============================================================================
+-- 1. registration_pool() returns waived_at. A RETURNS TABLE cannot gain a column with CREATE OR
+--    REPLACE, so it is dropped and recreated; anon must keep EXECUTE or the PUBLIC pool board goes
+--    blank for signed-out visitors, and that is asserted rather than assumed. Also asserted: it
+--    still returns every row it did before (178).
+-- 2. The Control Center select asks for waived_at.
+-- 3. CG.poolState checks it BEFORE isReturning:
+--        if (reg.waived_at) return { key:"free_agent", label:"Waived", chip:"chip-warn" };
+--    Being waived is a fact about right now and OUTRANKS whether he happens to have been drafted
+--    before. The label says "Waived" rather than "Free agent" so a manager reading the board knows
+--    why the player is available. Rostered still outranks both: the moment a club signs him he
+--    reads Rostered again.
+--
+-- ============================================================================
+-- AND THE RULEBOOK NEVER SAID WHERE HE GOES
+-- ============================================================================
+-- Rule 2.2 permitted the signing but never named the destination, and its first line, "The basic
+-- format has no free-agency period and no open market", read to a scanning member as "there are no
+-- free agents here" while the site carries a board called Free agents. Both fixed:
+--   2.2[0] now distinguishes the two: no WINDOW and no bidding MARKET, but there are free agents,
+--          and it points forward to the paragraph that defines them.
+--   2.2[2] now opens with what happens: a player who is waived becomes a free agent at that moment,
+--          leaves the roster, his contract ends, and he enters a pool every club can see. He is not
+--          returned to the draft, not placed by the office, and nothing happens automatically; he
+--          stays a free agent until a club signs him or the season ends.
+--
+-- Verified by running the SHIPPED CG.poolState out of index.html against the board's own filter: a
+-- waived never-drafted player, a waived returning player, an unrostered never-waived player (still
+-- correctly Awaiting placement, because the league WILL place him), a returning unrostered player,
+-- a waived player who has since been signed, and a declined registration.

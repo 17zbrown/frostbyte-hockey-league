@@ -90,7 +90,8 @@ console.log("\n— the rulebook says what the site does (v2.28)");
     /weekly appearance cap in the regular season, counted across the game-week/.test(sec("5.2")) && /In the playoffs the cap of Rule 8\.3 applies in its place/.test(sec("5.2")));
   A("[full] 5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(secFull("5.2")));
   /* BASIC format is now the live standard: waived-player signing, players-only trades */
-  A("[basic] 2.2: no free-agency period or open market", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));
+  A("[basic] 2.2: no free-agency period and no open market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
+  A("[basic] 2.2: ...but it does not claim the league has no free agents", /It does have free agents, and the next paragraph but one says who they are/.test(sec("2.2")));
   A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /the league office confirms nothing and has no part in the move/.test(sec("2.2")));
   A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player at the league minimum salary/.test(sec("2.2")));
   A("[basic] 2.3: trades are players only — no pick is a trade asset", /Draft picks are not tradeable assets in the basic format: a trade consists of players for players, and an offer that includes a draft pick is refused at the point of entry/.test(sec("2.3")));

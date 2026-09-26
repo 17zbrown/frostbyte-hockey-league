@@ -1440,7 +1440,7 @@ CG.loadManagerData = async function(){
          and this select still asked for it. PostgREST refuses the WHOLE query for one unknown
          column, so every registration vanished from the Control Center and Draft & placement read
          "no sign-ups" in the middle of a season with 179 of them. */
-      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number)"),
+      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at,waived_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number)"),
       CG.sb.from("draft_state").select("*")
     ]);
     /* ...and it failed SILENTLY, because an error fell back to [] and an empty board looks exactly
@@ -6006,6 +6006,14 @@ CG.poolState = function(pid){
   var served = lg.serviceSeasons ? lg.serviceSeasons(pid) : 0;
   if (CG.fmt("rights") && served > 0 && served < CG.rfaOffseasons())
     return { key:"rfa", label:"Restricted free agent", chip:"chip-warn" };
+  /* v3.33 — A WAIVED PLAYER IS A FREE AGENT, whatever else he is. waive_player has stamped
+     waived_at since v3.06 and nothing read it, so a waived player who had never been drafted fell
+     through to "Awaiting placement" below: the free-agent board filters on this state, so he was
+     invisible to every club, while the same stamp deliberately stops the post-draft sweep from
+     placing him. He was in a hole with no way out of it but the league office.
+     Checked before isReturning on purpose: being waived is a fact about right now and outranks
+     whether he happens to have been drafted before. */
+  if (reg.waived_at) return { key:"free_agent", label:"Waived", chip:"chip-warn" };
   if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
   return { key:"undrafted_fa", label:"Awaiting placement", chip:"chip-warn" };   /* v2.33: placed automatically ten minutes after the draft (Rule 2.8) */
 };

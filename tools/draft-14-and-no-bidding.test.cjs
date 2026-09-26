@@ -43,7 +43,7 @@ A("...shown on the Build-the-board card too", /The draft cannot start yet<\/b> â
 
 console.log("â€” rookie bidding is gone");
 for (const id of ["0.6", "2.2", "2.5"]) A(`section ${id} no longer mentions rookie bidding`, !/rookie bidding/i.test(sec(id)));
-A("basic Rule 2.2 says there is no free-agency period at all", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));
+A("basic Rule 2.2 says there is no free-agency period and no bidding market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
 A("...every leftover and late registrant is placed as depth, not signed", /is placed on a club by the league office as depth at the league minimum/.test(sec("2.2")));
 A("...and there are no rights classes in the basic format", /The basic format recognizes no classes of player rights/.test(sec("2.2")) && /no player is restricted/.test(sec("2.2")));
 A("(full) Rule 2.2 says free agency is for ended contracts, not rookies", /for players whose contracts have ended/.test(secFull("2.2")) && /It is not for rookies/.test(secFull("2.2")));

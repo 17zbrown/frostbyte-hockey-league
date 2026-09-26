@@ -203,7 +203,7 @@ console.log("— the rulebook says the same thing");
   A("[basic] Rule 2.5 says no extensions, no re-signings and no held rights", /The basic format provides for no contract extension, no re-signing and no retained player rights/.test(sec("2.5")));
   A("[basic] ...and every contract runs a term of exactly one season", /a term of one \(1\) season — the season in which it is signed/.test(sec("2.5")));
   A("[basic] ...so a club cannot claim a player for a future season", /A club may not offer a player terms for a future season, and nothing a club does in a season confers any claim on a player for the next/.test(sec("2.5")));
-  A("[basic] Rule 2.2 has no free-agency period or open market", /The basic format has no free-agency period and no open market for player contracts/.test(sec("2.2")));
+  A("[basic] Rule 2.2 has no free-agency period and no open market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
   A("[basic] ...and there are no rights classes", /The basic format recognizes no classes of player rights: no club holds a player's rights once his season ends, and no player is restricted/.test(sec("2.2")));
 }
 console.log(ok ? "\nPASS" : "\nFAIL"); process.exit(ok ? 0 : 1);
