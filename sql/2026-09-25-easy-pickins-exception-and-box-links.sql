@@ -1,0 +1,71 @@
+-- 2026-09-25: a one-time out-of-position exception, and the last three box score lines linked.
+--
+-- ============================================================================
+-- 1. EASY PICKINS, OUT OF POSITION, NYI v PIT (Sep 25, 9:00 PM, week 1)
+-- ============================================================================
+-- Commissioner: "for the recent game where Easy Pickens played out of position, you can forget that
+--  as we made a 1 time exception for that."
+--
+-- review_game_records raised it at 9:33 PM: he is on NYI's ACTIVE roster as RD and the box score has
+-- him at C. True positive, and the match is sound: the line reads `N0Tsurprised`, which is not his
+-- EA ID on file (Greenegg3), but his EA persona id 1005173977114 is recorded on his profile and that
+-- is what matched. Persona id is the authority; a name is not.
+--
+-- CLEARED with log_admin_action('position_cleared'), which is the mechanism v3.04 built for exactly
+-- this and which review_game_records' own dedup guard honours:
+--     and not exists (select 1 from public.admin_audit a
+--                      where a.action in ('out_of_position','position_cleared')
+--                        and a.target_id = p_game::text and a.detail->>'player' = v_name)
+-- The original out_of_position row is KEPT. The finding happened and the audit log is append-only;
+-- the ruling sits beside it rather than erasing it, and carries its reason.
+--
+-- DURABILITY REHEARSED, and rehearsed the way that could actually fail. Inside a rolled-back
+-- transaction the clear was written, the out_of_position row was DELETED so the clear was the only
+-- thing left standing between the reviewer and a fresh raise, and review_game_records was re-run:
+-- zero new audit rows, zero new flag notices, no out_of_position. That is the case that matters,
+-- because with the finding row present the guard would have passed on its own and proved nothing.
+--
+-- NO RULEBOOK CHANGE, and it was worth checking rather than assuming. Rule 2.1[2] says the camp
+-- player is "the sole exception" to the position assignment, but 2.1 governs where a player may be
+-- DRESSED, and he was dressed at RD, which his assignment permits. What the box score shows is
+-- governed by Rule 5.3[2]: "the record is the box score, not the filed sheet ... or appearing
+-- outside his position group, is reported automatically to the league office and dealt with under
+-- Rules 4.2, 2.1 and 5.2 AS THE CASE REQUIRES." That last phrase is the discretion, already in the
+-- book, and Rule 5.2's mandatory forfeiture attaches to DRESSING an ineligible player, which did not
+-- happen. So the exception is founded as written and no clause had to be invented for it.
+--
+-- ============================================================================
+-- 2. THREE BOX SCORE LINES LINKED, and the season is now down to one unknown
+-- ============================================================================
+-- Commissioner: "I also filled in the correct EA/gamertags for the other players."
+--
+--   line          member         matched on                club  rostered  played  persona learned
+--   lnvisty    -> invisty        ea_id (byte identical)    NYI   LW        LW      1842117194
+--   foodude56  -> Patrick Kane   platform_gamertag (PS5)   NYI   LW        RW      1005204520392
+--   MrSpooof   -> Spoof          ea_id                     VAN   LD        D       1005592866731
+--
+-- Each was checked the four ways v3.19 established before any write: EXACTLY ONE candidate across
+-- ea_id, platform_gamertag, gamertag and persona; on the club the row was recorded for; on that
+-- club's ACTIVE roster; and in the position group he played. No Rule 6.3 credit withdrawal touched
+-- any of them. Every persona was unclaimed, and only NULLs were filled.
+--
+-- foodude56 matched on the CONSOLE gamertag, not the EA ID, which is a new key for this job: EA
+-- reports the persona name, and on PS5 that is usually the PSN online id. Corroborated by the filed
+-- sheet, which had Patrick Kane at RW, the position the line played.
+--
+-- lnvisty matches invisty's ea_id byte for byte (hex 6c6e7669737479 both sides), so the importer did
+-- not miss it: the ea_id was filled in after the 9:33 PM import.
+--
+-- Each link was rehearsed with rollback first and each applied pass then re-ran
+-- review_game_records, asserting the newly linked players opened NO new finding: once a line has a
+-- profile it enters the per-player loop and is checked for roster, position group and weekly cap.
+-- Both NYI players are within week 1 (1 and 2 of 6).
+--
+-- STILL OPEN, unchanged: DAL's goaltender in the Sep 23 9:00 PM game, `vDarkiee___`, persona
+-- 1004486290545, matches no member on gamertag, ea_id, console gamertag or persona. One unmatched
+-- line in the season.
+--
+-- WORTH THE COMMISSIONER'S ATTENTION: two of NYI's six skaters carry an EA ID that is not what EA
+-- reports. Easy pickins has Greenegg3 on file and plays as N0Tsurprised; Patrick Kane has
+-- 2tonechevy96 on file and plays as foodude56. Both now carry a persona id, so both are immune to
+-- it, but a member whose EA ID is wrong and whose persona is unknown is unmatchable on arrival.

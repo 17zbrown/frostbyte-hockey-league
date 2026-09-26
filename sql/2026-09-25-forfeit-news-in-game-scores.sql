@@ -1,0 +1,73 @@
+-- v3.34: forfeit news lives in #game-scores, and every forfeit path actually says something.
+--
+-- Commissioner, 2026-09-25: "you do not need to send a message about a team forfeiting a game in
+--  the transactions chat. That can go in game scores instead."
+--
+-- ============================================================================
+-- THE MESSAGE HE MEANT WAS A DUPLICATE IN THE WRONG ROOM
+-- ============================================================================
+-- declare_forfeit and undo_forfeit each ended with
+--     insert into public.transactions (season_id, type, description) values (g.season_id,'other',v_desc);
+-- and public.transactions carries an AFTER INSERT trigger, notify_discord_transaction, which posts
+-- every row to #transactions. That insert was the ONLY reason a forfeit ever reached #transactions.
+--
+-- It was also redundant. declare_forfeit sets status='final', which fires
+-- notify_discord_game_final, which has posted the forfeit to #game-scores since it was written:
+--     🏒 **Final (forfeit)** — HOME 1–0 AWAY _(X forfeited)_
+--     🏒 **Voided** — HOME vs AWAY did not play (excluded from the standings).
+-- So a forfeit was announced twice, once in the right channel and once in the wrong one.
+--
+-- And the row was invisible on the site the whole time. CG.TX_MOVE_TYPES (src/live/part5a_public.js)
+-- is a WHITELIST of roster-move types, deliberately so that a new activity type cannot leak into
+-- the transaction log by default, and 'other' is not in it. So the row fed one Discord post and
+-- nothing else. It is deleted rather than re-routed: a forfeit is a game result, not a transaction.
+-- The ruling is recorded with log_admin_action('forfeit_declared') instead, which is where every
+-- other league-office ruling already lives, and the #staff-casework post is unchanged because
+-- declaring a forfeit is still the officiating desk's work.
+--
+-- ============================================================================
+-- THEN THE SAME QUESTION, ASKED OF ALL FOUR PATHS
+-- ============================================================================
+-- There are two forfeit families and the routing was only right in one of four places.
+--
+--   declare_forfeit        officiating desk, Rule 3.2   posted to BOTH channels   -> #game-scores only
+--   undo_forfeit           officiating desk, reversal    #transactions only        -> #game-scores
+--   forfeit_game           statistics staff, Rule 3.2    #game-scores (correct)    unchanged
+--   unforfeit_game         statistics staff, reversal     NOTHING, ANYWHERE        -> #game-scores
+--   forfeit_abandoned_game the importer, Rule 4.3         NOTHING, ANYWHERE        -> #game-scores
+--
+-- TWO REVERSALS WERE ANNOUNCED NOWHERE, and dropping the transactions row would have made the
+-- first of them silent too. notify_discord_game_final fires on entering 'final' or on a score
+-- change while final. Both reversals return the game to 'scheduled', so neither branch runs: the
+-- channel went on saying a club forfeited a game the league had since decided it did not. Fixed the
+-- same way v3.18 fixed a corrected score, and for the same reason: the channel that announced a
+-- result announces that it no longer stands.
+--     🏒 **Reversed** — the forfeit on HOME vs AWAY no longer stands. The game is back on the schedule.
+--
+-- THE RULE 4.3 LANE WAS SILENT FOR A DIFFERENT REASON. forfeit_abandoned_game stamps
+-- forfeit_team_id on an ALREADY final game and never touches the status or the score, by design,
+-- because the club ahead on the ice keeps the win and both clubs keep every statistic. So the
+-- trigger cannot fire for it either: #game-scores had announced an ordinary Final and the forfeit
+-- ruling was never said out loud.
+--     🏒 **Forfeit (Rule 4.3)** — HOME 4–3 AWAY stands. AWAY abandoned the game and is charged with
+--     the forfeit; every statistic earned in it counts.
+--
+-- Every new post is wrapped in its own begin/exception block and pings nobody, matching
+-- notify_discord_game_final: a Discord outage must never be able to fail a ruling.
+--
+-- ============================================================================
+-- REHEARSED WITH ROLLBACK, TWICE, ASSERTING ON THE QUEUE AND NOT ON THE CODE
+-- ============================================================================
+-- net.http_request_queue is a plain table, so a rolled-back rehearsal queues nothing and sends
+-- nothing. Both rehearsals counted rows in it per webhook url rather than trusting the function
+-- text, then rolled back:
+--   * declare_forfeit on a scheduled Oct 30 game: transactions count unchanged, ZERO posts to the
+--     #transactions url, exactly ONE to the #game-scores url; then undo_forfeit on the same game:
+--     still nothing to #transactions, one more to #game-scores, status back to 'scheduled'.
+--   * forfeit_abandoned_game then unforfeit_game on tonight's real NYI 3-4 PIT: one post each, the
+--     decoded bodies read correctly, and afterwards the game was re-checked outside the transaction
+--     and is still final 3-4 with no forfeit stamped and no audit row left behind.
+--
+-- Nothing in the rulebook had to change. Rule 6.1 names the transaction log part of the official
+-- record and Rules 2.3 and 2.5 say what is posted to it (trades, reversals, signings); no rule ever
+-- said a forfeit appears there, and Rule 3.2 does not say where a forfeit is announced.
