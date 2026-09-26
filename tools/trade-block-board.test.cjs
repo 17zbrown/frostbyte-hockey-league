@@ -103,10 +103,13 @@ console.log("\n— the action, and when it is refused");
   A("a movable player gets a live Add to trade button",
     /data-block-get="Ready"[^>]*data-block-club="UTA"[^>]*>Add to trade</.test(h), h.match(/<button[^>]*data-block-get[\s\S]{0,80}/));
 
+  /* v3.40 (commissioner announcement, 2026-09-26): a trade no longer waits on three games. The board
+     stopped asking, so a player with no games at all is addable. The WAIVE minimum is untouched and
+     is asserted in the roster page's own test. */
   CG = mk(players, draft0(), 3);
   h = CG.tradeBlockCard("NYI");
-  A("Rule 2.4 short of minimum service disables the button", /disabled title="Rule 2\.4: Ready has played 0 of 3">0 of 3 GP</.test(h));
-  A("...and it is not clickable", !/data-block-get="Ready"/.test(h));
+  A("a player short of the old minimum service is addable now", /data-block-get="Ready"/.test(h));
+  A("...and carries no games-short chip", !/of 3 GP/.test(h), (h.match(/.{0,40}of 3 GP.{0,20}/) || [])[0]);
 
   CG = mk(players, { partner: "UTA", offP: [], reqP: ["Ready"], offK: [], reqK: [], ret: {} }, 0);
   h = CG.tradeBlockCard("NYI");
@@ -158,7 +161,7 @@ console.log("\n— wired into the live hub, above the builder");
   A("the Add to trade handler is bound in the live AFTER hook",
     /CG\.AFTER\._tradehubLive[\s\S]*data-block-get/.test(live));
   A("...it switches partner and clears the other club's side", /if\(d\.partner!==code\)\{ d\.reqP=\[\]; d\.reqK=\[\]; CG\._counteringId=null; d\.partner=code; \}/.test(live));
-  A("...refuses a player who cannot be moved", /var mv=CG\.canMovePlayer\(p\); if\(mv\)\{ CG\.toast\(mv\.text,"err"\); return; \}/.test(live));
+  A("...no longer asks the minimum-service question (v3.40)", !/canMovePlayer/.test(live.slice(live.indexOf("data-block-get"), live.indexOf("data-block-get") + 1400)));
   A("...and refuses one who is no longer on a roster", /no longer on a roster/.test(live));
   A("blockListings documents the three exclusions", /the same three exclusions as CG\.tRoster/.test(live));
 }

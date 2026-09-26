@@ -14,7 +14,14 @@ const sec = {}; rb.chapters.forEach(c => c.sections.forEach(s => { sec[s.id] = s
 const p21 = sec["2.1"].paragraphs.join(" "), p24 = sec["2.4"].paragraphs.join(" ");
 
 console.log("— the rulebook says it");
-A("Rule 2.1 states squad changes are unlimited", /move a player between the active roster and training camp at any time and without limit, in either direction/.test(p21));
+A("Rule 2.1 states squad changes are unlimited in number", /move a player between the active roster and training camp without limit, in either direction/.test(p21));
+/* v3.40 added the ONE restriction: a weekly window, not a count. "at any time" had to go. */
+A("...but not at any time: the weekly freeze is the one restriction",
+  /the roster freezes each week from Wednesday at 7:30 PM Eastern Time/.test(p21) &&
+  /until midnight Eastern at the end of Friday, and no player may be called up or sent down in that window/.test(p21));
+A("...with the reason stated", /The week's games are played against the roster a club held when the week's first puck dropped/.test(p21));
+A("...and a league-office door for a club that cannot ice a lineup",
+  /The league office may move a player in the window where a club would otherwise be unable to ice a lineup/.test(p21));
 A("...and no longer caps them at three", !/three \(3\) times/.test(p21) && !/swap cap/.test(p21));
 A("...and camp itself is unlimited unless a camp limit is published (v2.51)", /may carry any number of training-camp players/.test(p21) && !/carries no more than three players in camp/.test(p21));
 A("Rule 2.4 says the deadline never touches roster<->camp moves", /is not restricted by the deadline \(Rule 2\.1\)/.test(p24));

@@ -1003,7 +1003,11 @@ CG.AFTER._lineup = function(){
      PRE-SEASON game so does the club's Owner, GM or AGM (v2.39: get as many players scheduled as
      possible). The database makes the same test (lineup_slot_ok). */
   var preGame = game.stage==="preseason";
-  function flex(p){ return p.squad==="tc" || (preGame && !!p.mgmt); }
+  /* v3.40: "Position locks are being removed entirely (for now)." With locks off every rostered
+     player fills any slot, so flex() is true for everybody and the group test below never fires.
+     The database agrees (lineup_slot_ok returns early), and the weekly caps are untouched. */
+  var locksOn = !CG.posLocksOn || CG.posLocksOn();
+  function flex(p){ return !locksOn || p.squad==="tc" || (preGame && !!p.mgmt); }
   /* v2.76: what the player told the club about THIS game — information for management, never a gate */
   function avState(p){ var nk = CG.nightAvKey(game); return (nk && CG.avGame) ? CG.avGame(CG.avFor(p.id), nk, game.id) : "nr"; }
   function avWarn(p){ return avState(p)==="no" ? p.tag+" is marked not available for this game (dressed anyway; check that he can play)." : null; }
@@ -1551,7 +1555,8 @@ CG.AFTER._lines = function(qs){
        and while the club's next game is a pre-season game, so does its Owner, GM or AGM (v2.39).
        set_team_line makes the same test; dressing the line into a regular-season game is
        re-checked against that game. */
-    if (p.squad!=="tc" && !(preAhead && p.mgmt)){
+    /* v3.40: only while position locks are on (see the lineup builder above) */
+    if ((!CG.posLocksOn || CG.posLocksOn()) && p.squad!=="tc" && !(preAhead && p.mgmt)){
       var want = pos==="G" ? "G" : (pos==="LD"||pos==="RD") ? "D" : "F";
       if (CG.posGroup(p.pos)!==want)
         return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — "+CG.POS_NAME[pos]+" needs a "+(want==="G"?"goaltender":want==="D"?"defenseman":"forward")+".";
@@ -1971,6 +1976,14 @@ function squadBtn(p){
   if (!p.spotId) return "";
   var club = CG.myClub();
   var title = 'Squad changes are unlimited all season (Rule 2.1)';
+  /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it
+     anyway; this says so before the click instead of after it. */
+  var fz = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
+  if (fz.on){
+    return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(fz.why)+'">'+
+      (p.squad==="tc" ? "Call up" : "To camp")+'</button>'+
+      '<span class="chip chip-warn chip-xs" title="'+esc(fz.why)+'">frozen</span>';
+  }
   if (squadRoom(club, p)){
     var to = p.squad==="tc" ? "pro" : "tc";
     return '<button class="btn btn-ghost btn-sm" data-squad="'+p.spotId+'" data-squad-to="'+to+'" title="'+title+'">'+
@@ -2067,14 +2080,14 @@ CG.hubRoster = function(qs){
         : '<div class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
           extBtn+squadBtn(p)+
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
+          '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
           (function(){ var mv = CG.canMovePlayer ? CG.canMovePlayer(p) : null;
-            /* Rule 2.4 minimum service (v2.74): the two moves that take a player off the club wait for his games */
+            /* Rule 2.4 minimum service: only the WAIVE waits for his games now (v3.40). A club may
+               trade a player the day he signs. */
             return mv
-              ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">Trade</button>'+
-                '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">Waive</button>'+
+              ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">Waive</button>'+
                 '<span class="chip chip-warn chip-xs" title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</span>'
-              : '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
-                '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button>'; })()+'</div>');
+              : '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button>'; })()+'</div>');
     var gp = (lg.pstats[p.id]||{}).gp||0;
     var rp = regPos[p.id];
     var posCell = (loan && rp && rp !== p.pos)

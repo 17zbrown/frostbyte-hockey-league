@@ -132,15 +132,39 @@ CG.seriesCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat
   return r.series_cap != null ? r.series_cap : CG.weeklyCap(Object.assign({}, o, { stage:"playoff" })); };
 /* Rule 8.3: regular-season games a player needs to be playoff-eligible (0 = no floor) */
 CG.playoffMinGp = function(s){ return CG.fmt("playoff_min_gp", s) || 0; };
-/* Rule 2.4 minimum service (v2.74): regular-season games this season before a club may waive or
-   trade a player (0 = none). Mirrors public.can_move_player(): null when movable, else the reason. */
+/* Rule 2.4 minimum service: regular-season games this season before a club may WAIVE a player
+   (0 = none). Mirrors public.can_move_player(): null when movable, else the reason.
+   v3.40 (commissioner announcement, 2026-09-26): "Players will no longer need to play 3 games
+   before they can be traded. The 3-game minimum before a player can be waived will remain." The
+   name is unchanged so nothing else has to move; what changed is that the trade paths no longer
+   ask it. Both halves are enforced in the database. */
 CG.minServiceGp = function(s){ var sn = s || CG.SEASON; if (sn && sn.min_service_gp != null) return sn.min_service_gp; return CG.fmt("min_service_gp", s) || 0; };
+/* v3.40: position locks are a season setting now, off for Season 1 by the commissioner's
+   announcement of 2026-09-26. Mirrors public.position_locks_on(); the database is the real gate, and
+   the builder only uses this to decide what to refuse before a manager wastes a click. */
+/* v3.40, the weekly roster movement freeze (commissioner announcement, 2026-09-26): "Teams cannot
+   move players between training camp and the active roster from Wednesday at 7:30 PM ET through
+   Friday at 11:59 PM ET." Mirrors public.roster_freeze_at(); the database is the gate, this only
+   stops a manager clicking a button that would be refused. Computed in Eastern wall-clock so it
+   lands on the same minute either side of a daylight-saving change. */
+CG.rosterFreeze = function(at){
+  var d = new Date(at || CG.now());
+  var f = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", weekday:"short", hour:"2-digit", minute:"2-digit", hour12:false });
+  var parts = {}; f.formatToParts(d).forEach(function(x){ parts[x.type] = x.value; });
+  var dow = parts.weekday, mins = (parseInt(parts.hour,10)||0)*60 + (parseInt(parts.minute,10)||0);
+  var on = dow==="Thu" || dow==="Fri" || (dow==="Wed" && mins >= 19*60+30);
+  return { on: on, reopens: on ? "Saturday 12:00 AM ET" : null,
+    why: "Rule 2.1: the roster is frozen from Wednesday 7:30 PM until Friday midnight ET. Call-ups and send-downs reopen Saturday." };
+};
+
+CG.posLocksOn = function(s){ var sn = s || CG.SEASON; return !!(sn && sn.position_locks); };
+
 CG.canMovePlayer = function(p){
   if (!p) return null;
   var need = CG.minServiceGp(); if (!need) return null;
   var gp = ((CG.lg && CG.lg.pstats && CG.lg.pstats[p.id]) || {}).gp || 0;
   if (gp >= need) return null;
-  return { gp: gp, need: need, text: "Rule 2.4: "+(p.tag||"this player")+" has played "+gp+" of the "+need+" regular-season games a player needs this season before he can be waived or traded." };
+  return { gp: gp, need: need, text: "Rule 2.4: "+(p.tag||"this player")+" has played "+gp+" of the "+need+" regular-season games a player needs this season before he can be waived." };
 };
 /* a club's published composition in words: "two full lines plus three players of any position" or "9 F / 6 D / 2 G" */
 CG.rosterShapeWords = function(s){ var r = CG.FORMAT_RULES[CG.seasonFormat(s)];
@@ -13295,12 +13319,10 @@ CG.tradeBlockCard = function(club){
       '<th class="tleft">Player</th><th>Club</th><th>Pos</th><th>OVR</th><th class="tleft">This season</th>'+
       '<th>Cap hit</th><th class="tright">Action</th></tr></thead><tbody>'+
       league.map(function(p){
-        var mv = CG.canMovePlayer(p), st = CG.tradeStats(p.id);
+        var st = CG.tradeStats(p.id);   /* v3.40: no minimum service before a trade */
         var already = d.reqP.indexOf(p.id) >= 0 && d.partner === p.team;
         var btn;
-        if (mv){
-          btn = '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</button>';
-        } else if (already){
+        if (already){
           btn = '<span class="chip chip-win">In your draft</span>';
         } else {
           btn = '<button class="btn btn-chrome btn-sm" data-block-get="'+p.id+'" data-block-club="'+esc(p.team)+'">Add to trade</button>';
@@ -13449,7 +13471,7 @@ CG.tradePlayerRow = function(pid, opts){
       (p ? '<a class="nm" href="'+CG.playerRoute(p)+'" style="font-weight:700">'+esc(name)+'</a>' : '<b class="nm">'+esc(name)+'</b>')+
       '<small style="display:block;color:var(--steel)">'+(p ? esc(CG.POS_NAME[p.pos]||p.pos)+' · '+CG.fmtMoney(p.salary)+(p.mgmt?' · management':'') : 'not on a roster')+'</small></span></span>'+
     '<span class="tr-chips">'+(p&&CG.isCamp(p)?CG.campChip("xs"):'')+(p&&p.origin==="depth_random"?'<span class="chip chip-ink chip-xs">Depth</span>':'')+
-      (function(){ var mv = p && CG.canMovePlayer(p); return mv ? '<span class="chip chip-warn chip-xs" title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</span>' : ''; })()+
+
       (sx?'<span class="chip chip-chrome chip-xs">signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+'</span>':'')+'</span>'+
     '<span class="tr-stats mono">'+(st ? esc(st.line) : '—')+'</span>'+
     '<span class="tr-ovr"><b class="num">'+(p ? (p.overall||70) : '—')+'</b><small>OVR</small></span>'+
@@ -13515,7 +13537,7 @@ CG.tradePicker = function(side){
   var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; })
     .sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (b.overall||0)-(a.overall||0); });
   var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
-  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; var mv=CG.canMovePlayer(p); return '<button class="gamecard" '+(mv?'disabled title="'+esc(mv.text)+'"':'data-tpick-p="'+p.id+'"')+' style="grid-template-columns:auto 1fr auto;text-align:left;cursor:'+(mv?'not-allowed;opacity:.55':'pointer')+';width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+(mv?' <span class="chip chip-warn chip-xs">'+mv.gp+' of '+mv.need+' GP</span>':'')+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
+  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
   var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
   CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players'+(CG.minServiceGp()?' · a player needs '+CG.minServiceGp()+' regular-season games this season before he can be traded (Rule 2.4)':'')+'</span>'+(pHtml||'<span class="caption">none available</span>')+
     (CG.fmt("pick_trades") ? '<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>') : '<span class="caption" style="margin-top:8px">Players only — draft picks are not traded in the basic format (Rule 2.3).</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');
@@ -13581,7 +13603,6 @@ CG.AFTER._tradehubLive = function(qs){
   document.querySelectorAll("[data-block-get]").forEach(function(b){ b.addEventListener("click", function(){
     var pid=this.getAttribute("data-block-get"), code=this.getAttribute("data-block-club"), d=CG.liveTrade();
     var p=CG.tPlayer(pid); if(!p){ CG.toast("That player is no longer on a roster — reload","err"); return; }
-    var mv=CG.canMovePlayer(p); if(mv){ CG.toast(mv.text,"err"); return; }
     if(d.partner!==code){ d.reqP=[]; d.reqK=[]; CG._counteringId=null; d.partner=code; }
     if(d.reqP.indexOf(pid)<0) d.reqP.push(pid);
     CG.toast(p.tag+" added — "+((CG.TEAM[code]||{}).name||code)+" send", "ok");

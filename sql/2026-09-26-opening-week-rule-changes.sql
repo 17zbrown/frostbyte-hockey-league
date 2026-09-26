@@ -1,0 +1,89 @@
+-- v3.40: the three rule changes from the league office's opening-week announcement.
+--
+-- Commissioner, 2026-09-26, quoting the announcement to the league:
+--   * "Position locks are being removed entirely(for now). The existing maximums of 6 games for
+--      rostered players and 3 games for TC players will remain."
+--   * "Players will no longer need to play 3 games before they can be traded. The 3-game minimum
+--      before a player can be waived will remain."
+--   * "A weekly roster movement freeze is being added. Teams cannot move players between training
+--      camp and the active roster from Wednesday at 7:30 PM ET through Friday at 11:59 PM ET. This
+--      applies to both call-ups and send-downs."
+--
+-- ============================================================================
+-- 1. POSITION LOCKS: A SETTING, NOT A DELETION
+-- ============================================================================
+-- "(for now)" is doing work in that sentence, so the lock is a season setting rather than deleted
+-- code: seasons.position_locks boolean, default false, read through public.position_locks_on().
+-- A later season turns it back on without anyone touching a function.
+--
+-- ONE enforcement point in the database. public.lineup_slot_ok() is called by guard_lineup_positions,
+-- set_game_lineup and set_team_line, so the early return added to it covers all three. What it still
+-- refuses is unchanged and matters: a player who is not on this club's active roster cannot be
+-- dressed. What is gone is WHERE he may be dressed.
+--
+-- Two places that would otherwise have contradicted the announcement within hours:
+--   * review_game_records raised 'out_of_position' on any box score showing a player outside his
+--     group. With games tonight that would have paged the Officials' desk about every legal lineup.
+--     It now checks position_locks_on(g.season_id) as well.
+--   * the client's lineup builder and line creator each made the same test. Both now read
+--     CG.posLocksOn(), the mirror of the SQL function.
+-- The roster COMPOSITION is untouched: what a club may carry and where it may dress him are now two
+-- questions, and only the second was answered by the announcement.
+--
+-- ============================================================================
+-- 2. MINIMUM SERVICE: A WAIVE RULE ONLY
+-- ============================================================================
+-- public.can_move_player() was asked by four callers. Two were trades and are gone:
+--     accept_trade            the re-check at acceptance
+--     guard_trade_insert      the loop over every player in the offer
+-- and two remain:
+--     waive_player            the rule the announcement kept
+--     the client's roster page, on the Waive button alone
+-- The function keeps its name so nothing else had to move, and its message stopped saying "or
+-- traded", which would have been a lie told to a manager reading a tooltip.
+--
+-- accept_trade is long, so the minimum-service block was removed with a text replace inside a DO
+-- block that asserts the text actually shrank before executing the result, rather than by re-typing
+-- a hundred lines and hoping the rest came back identical.
+--
+-- ============================================================================
+-- 3. THE WEEKLY FREEZE
+-- ============================================================================
+-- public.roster_freeze_at(timestamptz default now()) is the one definition, computed in Eastern
+-- WALL CLOCK rather than as a fixed offset, so the window lands on 7:30 PM local on both sides of a
+-- daylight-saving change. Verified at every corner: Wed 7:29 PM open, Wed 7:30 PM frozen, Thursday
+-- frozen, Fri 11:59 PM frozen, Sat 00:00 open, Tuesday open, and the same two Wednesday probes again
+-- after the November 1 fall back.
+--
+-- It is enforced on the TRIGGER, guard_squad_move, and not on set_roster_squad and swap_roster_squad.
+-- Both doors go through the trigger, and so will any door added later.
+--
+-- Two bypasses, both deliberate: is_commissioner(), because Rule 2.1 now gives the league office a
+-- door for a club that would otherwise be unable to ice a lineup, and trusted_writer(), because the
+-- league's own automation must not be blocked by the day of the week.
+--
+-- Rule 5.3 is unaffected and was checked: a club may still change its lineup after the lock, and
+-- dressing a camp player has never required moving him to the active roster.
+--
+-- ============================================================================
+-- REHEARSED, ROLLED BACK
+-- ============================================================================
+-- Position locks, as a commissioner: a defenseman passed lineup_slot_ok at forward; a player from
+-- ANOTHER club was still refused; and setting position_locks back to true restored the refusal.
+-- Minimum service: the message now ends "before he can be waived."; accept_trade no longer calls it;
+-- waive_player still does.
+-- The freeze, as K U R B i O (VAN's owner, not a commissioner and not a trusted writer), because the
+-- first attempt as a commissioner sailed through and the bypass was the reason: with the window
+-- open the move applied; with it forced on, a send-down was refused and so was a call-up.
+--
+-- ============================================================================
+-- THE RULEBOOK
+-- ============================================================================
+-- 2.1   composition separated from dressing; the lock named as a season setting and recorded as
+--       lifted for Season 1; the weekly freeze written into the squad-movement paragraph
+-- 2.3   the minimum-service proviso struck from the trade rule
+-- 2.4   minimum service is a waive rule, and says so, with the date it changed
+-- 5.2   dressing by group applies "where the position lock is in force"; the appearance limits are
+--       stated as untouched, because that is the half of the announcement most easily lost
+-- 5.3   a box score outside a player's group is a finding only while the lock is in force
+-- 10.1  "minimum service" redefined; "position lock" defined; the settings list extended

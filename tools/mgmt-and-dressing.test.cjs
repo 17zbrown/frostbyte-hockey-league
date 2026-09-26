@@ -43,8 +43,16 @@ console.log("\n— the dressing rule is group-based");
 {
   const r21 = sec("2.1");
   A("Rule 2.1 lets a player dress anywhere in his group", /Each club ices from an active roster shaped by position group/.test(r21));
-  A("...forward at center or wing, defenseman either side", /A forward may be dressed at center or at either wing/.test(r21) && /a defenseman may be dressed on either side/.test(r21));
-  A("...but never a skater in goal or a goalie out of it", /a goaltender may be dressed only in goal/.test(r21) && /only in goal does the declared position bind/.test(r21));
+  /* v3.40 lifted the position lock and made it a season setting, so the group-dressing rule moved
+     from "what is in force" to "what is in force WHEN THE LOCK IS ON", and now lives in Rule 5.2. */
+  A("...the lock is a season setting now", /Whether that assignment governs where he may be dressed is a season setting, the position lock/.test(r21));
+  A("...and it is off for Season 1", /The lock is not in force for Season 1/.test(r21));
+  A("...so any rostered player may be dressed anywhere", /any player on a club's roster may be dressed at any position/.test(r21));
+  const r52 = sec("5.2");
+  A("...while the group rule survives for a season that turns the lock back on",
+    /a rostered forward may be dressed at any forward position, a rostered defenseman at either defense position, a goaltender only in goal/.test(r52));
+  A("...and the appearance limits were not touched by any of it",
+    /the appearance limits of this rule apply to him unchanged/.test(r52) && /the appearance limits of Rule 5\.2 were not touched by that decision/.test(r21));
   A("...and the old 'only at his assigned position' wording is gone", !/only at his assigned position/.test(r21));
   A("the changelog records v2.26", rb.changelog.some((c) => c.version === "2.26" && /any position within his group/.test(c.summary)));
 }

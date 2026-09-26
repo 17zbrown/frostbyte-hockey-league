@@ -48,7 +48,13 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   A("...and the active-roster shape is a season setting the commissioner publishes, as lines plus flex",
     /commissioner shall determine, for each season, the size and composition of the active roster/.test(r21) &&
     /The composition is published as a number of complete lines together with a number of additional players of any position/.test(r21) &&
-    /A forward may be dressed at center or at either wing/.test(r21) && /a defenseman may be dressed on either side/.test(r21) && /a goaltender may be dressed only in goal/.test(r21));
+    /the forward group may hold centers, left wings and right wings in any mix/.test(r21) &&
+    /the defense group may hold left and right defensemen in any mix/.test(r21) &&
+    /the goaltending group holds only goaltenders/.test(r21));
+  /* v3.40 split the two questions apart: what a club may CARRY (this rule, unchanged) and where it
+     may DRESS him (the position lock, now a setting and lifted for Season 1). */
+  A("...and composition is now distinguished from dressing",
+    /Where a club may dress each of those players is a separate question, governed by the position lock/.test(r21));
   A("the shelved full-format text still carries the seventeen-man, 2-goaltender shape (v2.41)",
     /up to three \(3\) training-camp players beyond its seventeen active spots/.test(r21f) &&
     /two \(2\) goaltenders, the one position locked to its exact role/.test(r21f));

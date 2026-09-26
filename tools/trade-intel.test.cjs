@@ -48,14 +48,20 @@ console.log("— the value model, run for real");
   const row = CG.tradePlayerRow("b", { rm: "reqp:b" });
   A("a player row carries the season line, the OVR, the value, the camp chip and a remove control", /4-2-0 · \.920 SV%/.test(row) && />78</.test(row) && /Camp</.test(row) && /data-trade-rm="reqp:b"/.test(row) && /href="#\/player\/b"/.test(row));
   A("a player no longer on a roster still renders by name", /Ghosted/.test(CG.tradePlayerRow("ghost")) && /not on a roster/.test(CG.tradePlayerRow("ghost")));
-  A("a player short of minimum service carries the count on his row (Rule 2.4)", /0 of 3 GP/.test(CG.tradePlayerRow("c")) && !/of 3 GP/.test(CG.tradePlayerRow("a")));
+  /* v3.40: a trade no longer waits on three games, so no row carries a games-short count. The WAIVE
+     minimum is untouched and still greys out the Waive button on the roster page. */
+  A("no trade row carries a games-short count any more (v3.40)",
+    !/of 3 GP/.test(CG.tradePlayerRow("c")) && !/of 3 GP/.test(CG.tradePlayerRow("a")));
   CG.tradeDetailModal({ id: "t", from_team_id: "t1", to_team_id: "t2", offered_profile_ids: ["a"], requested_profile_ids: ["b", "c"], status: "accepted", note: "fair", created_at: "2026-09-20T01:00:00Z" }, { footHtml: "<b id=x>Send back</b>" });
   A("the detail view names both clubs, lists every player, keeps the note and carries the caller's footer", ctx.opened && ctx.opened.t === "Bruins ⇄ Red Wings" && (ctx.opened.b.match(/class="trow"/g)||[]).length === 3 && /fair/.test(ctx.opened.b) && /Trade balance/.test(ctx.opened.b) && /Send back/.test(ctx.opened.f));
 }
 
 console.log("— Rule 2.4 minimum service is enforced on the site");
 A("the roster page disables Trade and Waive with the count until three games", /var mv = CG\.canMovePlayer \? CG\.canMovePlayer\(p\) : null;/.test(hub) && /disabled title="'\+esc\(mv\.text\)\+'">Waive<\/button>/.test(hub));
-A("the trade picker greys such players out", /var mv=CG\.canMovePlayer\(p\); return '<button class="gamecard" '\+\(mv\?'disabled title="'\+esc\(mv\.text\)\+'"':'data-tpick-p="'\+p\.id\+'"'\)/.test(live));
+A("the trade picker no longer greys anybody out for games played (v3.40)",
+  /return '<button class="gamecard" data-tpick-p="'\+p\.id\+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%">/.test(live));
+A("...and the waive gate is still there for the roster page",
+  /before he can be waived\."/.test(live) && /CG\.canMovePlayer = function\(p\)/.test(live));
 A("the figure is a format rule with a season overlay, mirroring public.min_service_gp", /min_service_gp:3,/.test(live) && /min_service_gp:0,/.test(live) && /CG\.minServiceGp = function\(s\)\{ var sn = s \|\| CG\.SEASON; if \(sn && sn\.min_service_gp != null\) return sn\.min_service_gp;/.test(live));
 console.log("— wired into the desk and the hub");
 A("desk rows open the trade and the reverse button stops the click", /data-trade-open="'\+t\.id\+'" role="button" tabindex="0"/.test(desk) && /function openTrade\(id\)/.test(desk) && /e\.stopPropagation\(\); openReverse\(/.test(desk) && /txDetailReverse/.test(desk));
