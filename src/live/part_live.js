@@ -13334,7 +13334,10 @@ CG.hubTradeHubLive = function(qs){
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
     '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
   '</div></div>';
-  return h+inc+outCard+CG.tradeBlockCard(club)+build;
+  /* v3.37 (commissioner): Build a trade stays at the top of the page. The block board is a long
+     table and it had pushed the builder down; the builder is the tool, so it comes first and
+     everything that feeds it follows. Add to trade scrolls back up to it, below. */
+  return h+build+inc+outCard+CG.tradeBlockCard(club);
 };
 /* ================================================================
    TRADE INTEL (v2.72): every trade opens to its players' numbers, with a balance reading
@@ -13538,6 +13541,15 @@ CG.AFTER._tradehubLive = function(qs){
     if(d.reqP.indexOf(pid)<0) d.reqP.push(pid);
     CG.toast(p.tag+" added — "+((CG.TEAM[code]||{}).name||code)+" send", "ok");
     CG.router();
+    /* v3.37: the builder is above the board now, so adding from here would drop a player into a card
+       the manager cannot see. Take him to it. Deferred a tick because the router rebuilds the DOM,
+       and it honours prefers-reduced-motion like the rest of the site. */
+    setTimeout(function(){
+      var el=document.getElementById("tradeAddOff")||document.getElementById("tradePropose");
+      var card=el&&el.closest?el.closest(".card"):null; if(!card||!card.scrollIntoView) return;
+      var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      card.scrollIntoView({ behavior: reduce?"auto":"smooth", block:"start" });
+    },0);
   }); });
   var clr=document.getElementById("tradeClear"); if(clr) clr.addEventListener("click", function(){ CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; CG._counteringId=null; CG.router(); });
   var pr=document.getElementById("tradePropose"); if(pr) pr.addEventListener("click", CG.proposeTrade);

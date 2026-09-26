@@ -28,9 +28,16 @@
 -- ============================================================================
 -- THE CARD
 -- ============================================================================
--- CG.blockListings() + CG.tradeBlockCard(club) in part_live.js, rendered by CG.hubTradeHubLive
--- BETWEEN "Offers you've sent" and "Build a trade", because Add to trade drops the player into the
--- builder immediately below it.
+-- CG.blockListings() + CG.tradeBlockCard(club) in part_live.js, rendered by CG.hubTradeHubLive.
+--
+-- PLACEMENT, corrected the same day (v3.37). It first went between "Offers you've sent" and "Build a
+-- trade", on the reasoning that Add to trade drops the player into the builder immediately below it.
+-- The commissioner's answer: "keep the 'build a trade' at the top of the page though." He is right,
+-- and the first reasoning was upside down. The board is a long table, so putting it above the builder
+-- pushed the tool off the screen to make room for the list that feeds it. The builder is what a
+-- manager came to the page for; the order is now builder, incoming offers, offers sent, block.
+-- Add to trade therefore scrolls the builder back into view, deferred a tick because the router
+-- rebuilds the DOM, and honouring prefers-reduced-motion.
 --
 -- Three exclusions, the same ones CG.tRoster applies, because a row you cannot act on is worse than
 -- no row:

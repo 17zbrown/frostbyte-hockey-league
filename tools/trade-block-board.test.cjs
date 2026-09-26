@@ -147,7 +147,13 @@ console.log("\n— it is a real table, so sorting and the phone layer apply");
 console.log("\n— wired into the live hub, above the builder");
 {
   const live = R("src/live/part_live.js");
-  A("the live Trade Hub renders it", /return h\+inc\+outCard\+CG\.tradeBlockCard\(club\)\+build;/.test(live));
+  A("the live Trade Hub renders it, with Build a trade FIRST (v3.37)",
+    /return h\+build\+inc\+outCard\+CG\.tradeBlockCard\(club\);/.test(live),
+    (live.match(/return h\+[^;]*;/) || [])[0]);
+  A("...and the board is last, after the offers", /outCard\+CG\.tradeBlockCard\(club\);/.test(live));
+  A("adding from the board scrolls back up to the builder",
+    /card\.scrollIntoView\(\{ behavior: reduce\?"auto":"smooth", block:"start" \}\)/.test(live));
+  A("...honouring prefers-reduced-motion", /prefers-reduced-motion: reduce/.test(live));
   A("...and the prototype hub is untouched", /CG\.hubTradeHub = function\(qs\)\{ return CG\.LIVE_MODE \? CG\.hubTradeHubLive\(qs\) : CG\._protoTradeHub\(qs\); \}/.test(live));
   A("the Add to trade handler is bound in the live AFTER hook",
     /CG\.AFTER\._tradehubLive[\s\S]*data-block-get/.test(live));
