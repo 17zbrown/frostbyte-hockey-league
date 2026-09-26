@@ -1,0 +1,60 @@
+-- v3.48: a .885 goaltender no longer outranks a forward with 19 points in four games.
+--
+-- Commissioner, 2026-09-26: "a goalie with a .885 save percentage should not beat out a forward with
+--  19 points in 4 games."
+--
+-- He was right, and the cause was the SCALE, not the weight.
+--
+-- ============================================================================
+-- THE SCALE RAN FROM A NUMBER NOBODY HAS EVER POSTED
+-- ============================================================================
+-- Save percentage carries 55% of a goaltender's rating, the single heaviest component anywhere in
+-- the system, and it was scored as
+--     (savepct - 0.500) / (0.950 - 0.500)
+-- A .500 save percentage means letting in every second shot. It has never happened and it never
+-- will. The league's actual spread over the opening week, eighteen goaltenders:
+--     best  .952   worst .561   median around .81
+-- Measuring a .885 against an impossible floor scored it 85 out of 100, so an ordinary good line
+-- read as very nearly elite. Every goaltender in the league was scoring well on the component that
+-- decides most of his rating, which is the same as not measuring it at all.
+--
+-- Goals against had the same defect: a zero at 8.00 per game. 8.00 is a blowout nobody survives, so
+-- the floor priced nothing. 6.00 is already a night to forget.
+--
+--     save %   (savepct - 0.500)/(0.950 - 0.500)  ->  (savepct - 0.700)/(0.950 - 0.700)
+--     GAA      (8 - gaa)/(8 - 1.2)                ->  (6 - gaa)/(6 - 1.2)
+--
+-- What the save percentage component now scores, against what it scored before:
+--     .952  100 -> 100      .885   85 ->  74      .859   80 ->  64
+--     .845   77 ->  58      .829   73 ->  52      .795   66 ->  38
+--     .745   54 ->  18      .688   42 ->   0
+-- Elite is still elite. The middle is now told apart from the top, which is the whole job.
+--
+-- ============================================================================
+-- THE COMPARISON HE MADE
+-- ============================================================================
+--     Saqoy      C, 19 points in 4 games (10G 9A, 4.75 per game)   87   unchanged
+--     Ferdzy...  G, .885 and a 2.00 GAA over 3 games               88 -> 84
+-- The forward now outranks the goaltender, and no skater rating moved by a point: every skater
+-- anchor was left exactly as it was. Only the goaltending scale changed.
+--
+-- Goaltenders across the league: 93, 84, 80, 72, 71, 70, 65, 63, 62, 55, 44. Their average falls
+-- from 78.0 to 69.0 against a skater average of 71.7, which is what a league posting .78 to .86
+-- should look like. The best goaltender in the league is untouched at 93, on a .952 and a 1.00 GAA.
+--
+-- Still one rating of 90 or better in the league and none at 95 or better, so v3.47 stands.
+--
+-- ============================================================================
+-- WHAT THIS DOES NOT FIX, and it is worth the commissioner knowing
+-- ============================================================================
+-- Scorezov has 33 points in 6 games, 5.50 per game, the most productive skater in the league by a
+-- distance, and he is an 82. He maxes points, goals, shooting percentage and shots, and is then
+-- pulled down by hits (20), blocked shots (0), takeaway minus giveaway (0, at -12.67 per game) and
+-- passing (4, at 51.9%). The skater formula is a weighted average across nine or ten facets, so a
+-- player who is overwhelming at the one that wins games cannot rise above the middle eighties if he
+-- does nothing else. That is a deliberate design and it may well be the right one, but it is why the
+-- league's leading scorer sits below four players with fewer points. Changing it is a separate
+-- decision and was not made here.
+--
+-- The refresh asserted is_commissioner() first and counted rows that actually moved, per the trap
+-- recorded in v3.47: profiles.guard_profile_role reverts an overall write in silence otherwise.
