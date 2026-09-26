@@ -1,0 +1,65 @@
+-- v3.45: no automatic placement may hand a waived player back to a club.
+--
+-- Commissioner, 2026-09-26: "jglehan29 was randomly placed on the redwings just now, after they
+--  waived them about 5 minutes ago. Why did that player rejoin the red wings?"
+--
+-- ============================================================================
+-- WHAT HAPPENED, TO THE SECOND
+-- ============================================================================
+--   6:05:46 PM ET   DET waived jglehan29. waive_player deleted the roster spot, ended the contract
+--                   and stamped season_registrations.waived_at, which is exactly what it should do.
+--   6:10:00 PM ET   auto_assign_latecomers ran and placed him back into DET's training camp,
+--                   origin depth_random. Four minutes and fourteen seconds later.
+--
+-- ============================================================================
+-- WHY: v3.06 GUARDED ONE SWEEP AND THERE ARE FOUR
+-- ============================================================================
+-- waived_at exists precisely to stop this. v3.06 added the guard to ONE caller:
+--     distribute_unproven_rookies:  and sr.waived_at is null
+--       -- v3.06: a waived player is a free agent, not an undrafted one
+-- and nowhere else. public._assign_reg_random, the function that actually creates the spot, has
+-- four callers and only that one carried the check:
+--     trg_autoassign_new_reg        no check
+--     preseason_random_assign       no check
+--     auto_assign_latecomers        NO CHECK, and this is the one that ran
+--     distribute_unproven_rookies   has it
+-- auto_assign_latecomers selects registrations that are not 'declined', have no roster spot, no
+-- draft pick and no active contract. A waived player satisfies every one of those: the waiver
+-- deleted his spot and ended his contract, and his registration stays 'pending'. He reads as an
+-- unplaced late sign-up, and 'fill' mode seats him on a club with room, which can be and here was
+-- the club that had just waived him.
+--
+-- ============================================================================
+-- THE FIX GOES IN THE PLACER, NOT IN THE SWEEP
+-- ============================================================================
+-- The guard now sits in _assign_reg_random itself, one line after the 'declined' check, so all four
+-- callers and anything added later are covered by one definition. Patching auto_assign_latecomers
+-- alone would have repeated the v3.06 mistake in a different place, which is how this surfaced at all.
+--
+-- A club signs a waived player itself (Rule 2.2). The league office does not do it for them.
+--
+-- ============================================================================
+-- REHEARSED BY REPLAYING THE EXACT EVENT, ROLLED BACK
+-- ============================================================================
+-- jglehan29's spot deleted to put him back in the state the waiver left him, then:
+--   1. _assign_reg_random returned false for him directly
+--   2. auto_assign_latecomers(force) ran and left him with no roster spot
+--   3. with waived_at cleared, the SAME registration placed again, so the guard stops a waived
+--      player and nothing else. A guard that also froze ordinary placement would be a worse bug.
+--
+-- ============================================================================
+-- BLAST RADIUS
+-- ============================================================================
+-- Every registration in the season with waived_at set and a roster spot created AFTER it:
+-- jglehan29 alone. He is the only player this reached, and his spot is still there pending the
+-- commissioner's word, because removing a player from a club is his call and not a cleanup.
+--
+-- ============================================================================
+-- AND, FROM THE SAME READING: Toine
+-- ============================================================================
+-- The new read=channel door settled the question v3.43 could not:
+--   #trade-block   Sep 25 11:38:43 PM   "UTA have listed Toine on the trade block"
+--   #transactions  Sep 26  2:59:38 PM   "SEA traded Jonsyy- to UTA for Toine, I WeaponX I"
+-- Utah listed him; Seattle acquired him fifteen hours later and never listed him. Same fault as Kaz
+-- Kanada, fixed at the source in v3.43. Cleared, silently, with the evidence in admin_audit. That is
+-- the second and last stale listing.
