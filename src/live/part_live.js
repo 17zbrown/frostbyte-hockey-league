@@ -102,7 +102,7 @@ CG.FORMAT_RULES = {
   /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
      the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and a
      16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67) */
-  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:3,
+  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
   full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0, min_service_gp:0,

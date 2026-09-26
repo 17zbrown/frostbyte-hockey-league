@@ -62,7 +62,13 @@ A("the trade picker no longer greys anybody out for games played (v3.40)",
   /return '<button class="gamecard" data-tpick-p="'\+p\.id\+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%">/.test(live));
 A("...and the waive gate is still there for the roster page",
   /before he can be waived\."/.test(live) && /CG\.canMovePlayer = function\(p\)/.test(live));
-A("the figure is a format rule with a season overlay, mirroring public.min_service_gp", /min_service_gp:3,/.test(live) && /min_service_gp:0,/.test(live) && /CG\.minServiceGp = function\(s\)\{ var sn = s \|\| CG\.SEASON; if \(sn && sn\.min_service_gp != null\) return sn\.min_service_gp;/.test(live));
+/* v3.41: both formats now carry 0. The machinery stays, so a later season can set a number again. */
+A("the figure is still a format rule with a season overlay, mirroring public.min_service_gp",
+  (live.match(/min_service_gp:0,/g) || []).length === 2 && !/min_service_gp:3,/.test(live) &&
+  /CG\.minServiceGp = function\(s\)\{ var sn = s \|\| CG\.SEASON; if \(sn && sn\.min_service_gp != null\) return sn\.min_service_gp;/.test(live));
+A("...and nobody is short of it, so no move waits on games played",
+  (function(){ var CG2 = { SEASON:{}, FORMAT_RULES:{ basic:{ min_service_gp:0 } }, fmt:function(){ return 0; } };
+    return (CG2.SEASON.min_service_gp != null ? CG2.SEASON.min_service_gp : CG2.fmt("min_service_gp")) === 0; })());
 console.log("— wired into the desk and the hub");
 A("desk rows open the trade and the reverse button stops the click", /data-trade-open="'\+t\.id\+'" role="button" tabindex="0"/.test(desk) && /function openTrade\(id\)/.test(desk) && /e\.stopPropagation\(\); openReverse\(/.test(desk) && /txDetailReverse/.test(desk));
 A("the hub's offer cards carry stat rows, a Details button and the balance card", /data-trade-open="'\+tr\.id\+'">Details</.test(live) && /CG\.tradeBalanceCard\(fromCode, tr\.offered_profile_ids/.test(live) && /return CG\.tradePlayerRow\(pid\); \}\);/.test(live));

@@ -813,3 +813,40 @@ returns jsonb language sql immutable as $$
       "salary_cap":50000000,"weeks":6,"trade_deadline_week":4,"draft_rounds":15,"draft_snake":true,"max_contract_years":1,
       "extensions":false,"rights":false,"pick_trades":false,"preseason":false,"fa_window":false,"playoff_per_div":3,"playoff_best_of":7}'::jsonb
   end $$;
+
+-- ============================================================================
+-- v3.41 (2026-09-26): minimum service drops to zero in the basic format.
+-- ============================================================================
+-- Commissioner: "Allow teams to waive players with 0 games played as well."
+--
+-- Earlier the same day v3.40 removed the minimum before a TRADE and, following the league office's
+-- opening-week announcement, kept it before a WAIVER. This removes it there too, so nothing a club
+-- does with its own roster waits on games played.
+--
+-- It is set to 0 rather than torn out. public.can_move_player() already returns null the moment the
+-- figure is 0, which is why no function had to change: the one edit is this literal. A later season
+-- can set a number again and every tool enforces it at once.
+--
+-- The LAST literal in this file is the one in force; tools/season-format.test.cjs compares it
+-- against the client's CG.FORMAT_RULES key by key, which is how a change made in one and not the
+-- other is caught.
+create or replace function public.format_rules(p_format text)
+ returns jsonb language sql immutable as $function$
+  select case when p_format = 'full' then
+    '{"format":"full","roster_max":17,"quota":{"F":9,"D":6,"G":2},"lines":null,"flex":null,"camp_max":3,"cap_skater":3,"cap_goalie":6,"cap_camp":3,"series_cap":null,"playoff_min_gp":0,"min_service_gp":0,
+      "salary_cap":40000000,"weeks":8,"trade_deadline_week":6,"draft_rounds":14,"draft_snake":false,"max_contract_years":3,
+      "extensions":true,"rights":true,"pick_trades":true,"preseason":true,"fa_window":true,"playoff_per_div":4,"playoff_best_of":7}'::jsonb
+  else
+    '{"format":"basic","roster_max":15,"quota":{"F":9,"D":7,"G":5},"lines":2,"flex":3,"camp_max":999,"cap_skater":6,"cap_goalie":6,"cap_camp":3,"series_cap":4,"playoff_min_gp":16,"min_service_gp":0,
+      "salary_cap":50000000,"weeks":6,"trade_deadline_week":4,"draft_rounds":15,"draft_snake":true,"max_contract_years":1,
+      "extensions":false,"rights":false,"pick_trades":false,"preseason":false,"fa_window":false,"playoff_per_div":3,"playoff_best_of":7}'::jsonb
+  end $function$;
+--
+-- Verified in the same transaction: min_service_gp(current season) = 0; a player with zero
+-- regular-season games returns null from can_move_player; ZERO players on any active roster are
+-- blocked; the full format is untouched; and roster_max, cap_skater, cap_camp, playoff_min_gp and
+-- salary_cap in the basic format are all unmoved.
+--
+-- Rulebook: 2.2 (a club may waive at any time), 2.4 (minimum service restricts neither move and
+-- survives as a setting at zero), 10.1 (the definition). This supersedes the line in the
+-- opening-week announcement that kept the minimum for waivers.

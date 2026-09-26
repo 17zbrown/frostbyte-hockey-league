@@ -50,9 +50,13 @@ console.log("\n— 2. a trade no longer waits on three games; a waiver still doe
     /'<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\+\s*\n\s*\(function\(\)\{ var mv = CG\.canMovePlayer/.test(hub));
   A("2.3 drops the proviso", /A traded player needs no minimum service: a club may trade a player on the day it acquires him/.test(sec("2.3")));
   A("...and the old proviso is gone", !/provided every player in the trade has appeared in three/.test(sec("2.3")));
-  A("2.4 is a waive rule now", /A club may not waive a player who has appeared in fewer than three \(3\) regular-season games/.test(sec("2.4")));
-  A("...and says so explicitly, with the date", /It does not apply to a trade: a club may trade a player it has never dressed/.test(sec("2.4")));
-  A("10.1 redefines minimum service", /before his club may waive him \(Rule 2\.4\); it does not restrict a trade/.test(sec("10.1")));
+  /* v3.41, hours later: the commissioner lifted the WAIVE minimum too, so 2.4 now restricts neither
+     and survives only as a season setting sitting at zero. The trade half of this change stands. */
+  A("2.4 restricts neither move now", /neither a trade nor a waiver requires a minimum number of appearances/.test(sec("2.4")));
+  A("...and records both liftings and their order", /the trade first and the waiver the same day/.test(sec("2.4")));
+  A("...while keeping the setting for a later season", /Minimum service remains a season setting/.test(sec("2.4")) && /The figure in force for the current season is zero/.test(sec("2.4")));
+  A("10.1 redefines minimum service (v3.41: a setting at zero)",
+    /it is a season setting and the figure in force is zero, so it restricts nothing at present/.test(sec("10.1")));
   A("the record names all four callers and which two went",
     /accept_trade/.test(flat) && /guard_trade_insert/.test(flat) && /waive_player/.test(flat));
   A("...and why accept_trade was edited by text replace", /rather than by re-typing a hundred lines/.test(flat));
