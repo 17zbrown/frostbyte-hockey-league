@@ -1,0 +1,64 @@
+-- v3.43: a traded player comes off the trade block.
+--
+-- Commissioner, 2026-09-26: "if a player gets listed to a team's trade block, and gets traded, make
+--  sure you remove them from the trade block since they have moved to another team."
+--
+-- ============================================================================
+-- THE BUG
+-- ============================================================================
+-- public.move_player(), which is how accept_trade moves a player, rewrote exactly two things:
+--     update public.roster_spots set team_id=p_team, jersey_number=coalesce(v_num,jersey_number)
+-- so on_block rode along to the new club. The player then sat on the acquiring club's trade block,
+-- listed by a decision that club never made, and shown to all 30 front offices on the board the Trade
+-- Hub grew in v3.36.
+--
+-- THE LIVE CASUALTY, and it is a clean one: Dallas listed Kaz Kanada at 10:46:37 PM on Sep 19 and
+-- traded him to Seattle at 10:47:59 PM, EIGHTY-TWO SECONDS later. He has been on Seattle's trade
+-- block ever since. Cleared, with the reason and both timestamps recorded in admin_audit.
+--
+-- ============================================================================
+-- WHERE THE FIX GOES
+-- ============================================================================
+-- public.reset_squad_on_team_change(), the BEFORE UPDATE OF team_id trigger that already answers
+-- "what does a player shed when he changes clubs" (squad to 'pro', squad_moves to 0, because Rule 2.1
+-- says a player acquired by trade joins his new club on the active roster). on_block joins it.
+-- Not in accept_trade and not in move_player: on the trigger, so every path that moves a player
+-- between clubs is covered, including any added later.
+--
+-- Reasoning, for the record: a listing is ONE CLUB'S statement that IT will hear offers on ITS
+-- player. It cannot outlive the player leaving. The club that made it no longer holds him; the club
+-- that now holds him never made it.
+--
+-- ============================================================================
+-- AND THE CHANNEL IS NOT TOLD
+-- ============================================================================
+-- notify_trade_block posts to #trade-block on any on_block change, so clearing the flag inside a
+-- trade would have posted "✅ SEA have taken Kaz Kanada off the trade block" under the name of a club
+-- that never listed him, immediately after the trade announcement. It now returns early when
+-- team_id changed in the same update, and also honours app.mgr_sync, the league's existing "this is
+-- a sync, not a member's move" flag, which is what let the Kaz Kanada cleanup run silently.
+--
+-- notify_squad_or_block already had the team-change guard, so the club rooms were never at risk.
+--
+-- ============================================================================
+-- REHEARSED WITH ROLLBACK: five checks on a REAL listed player and a REAL move
+-- ============================================================================
+--   1. after move_player he is on the new club and NOT on the block
+--   2. the squad reset still works (the behaviour this trigger already had)
+--   3. ZERO posts to the #trade-block url for the club change
+--   4. an ordinary listing, no club change, still posts
+--   5. and taking him off again still posts
+-- Counting rows in net.http_request_queue per webhook url, in a transaction that was rolled back, so
+-- nothing was sent.
+--
+-- ============================================================================
+-- ONE ROW LEFT ALONE, ON PURPOSE
+-- ============================================================================
+-- Toine is on Seattle's block and was acquired by Seattle from Utah at 2:59 PM today. Whether Utah
+-- listed him before the trade (this bug) or Seattle listed him after (a real decision) is NOT
+-- recoverable: block listings stopped writing club notices in v2.72, team_mgmt_moves has nothing,
+-- and pg_net clears delivered rows so the #trade-block post is gone. Clearing a listing Seattle may
+-- have made is a worse error than leaving one it did not, so it stands until the commissioner says.
+--
+-- Also still in the channel: the Sep 19 post announcing Dallas's listing of Kaz Kanada. Deleting a
+-- Discord message is an outward-facing act and was not done unasked.
