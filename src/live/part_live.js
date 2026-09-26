@@ -2685,6 +2685,29 @@ CG._smRenderList = function(body){
         '<button class="btn btn-chrome" id="smLgLoad">Load sittings</button></div></label>'+
         '<div id="smLgOut" style="margin-top:14px"></div>'+
       '</div></div>';
+    /* v3.42: correct a filed league result. public.stats_game_set_result has taken p_ot since it was
+       written and NOTHING called it, so a wrong score or a missing overtime flag on a league game had
+       no door on the site at all: the PIT 4-3 UTA game of Sep 25 was an overtime win and had to be
+       corrected by hand. The importer reads overtime from EA's result code (5 or 6), and a MERGED
+       lag-out does not carry one: that game's two sittings reported 16385 and 10. So the human who
+       rebuilds a merged game is the only one who knows, and until now there was nowhere to say it. */
+    var fixCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Correct a filed result</h3><span class="chip">Score and overtime</span></div>'+
+      '<div class="card-b">'+
+      '<p class="caption" style="margin:0 0 12px;max-width:78ch">For a game already filed: a wrong score, or an overtime finish the importer could not see. '+
+      'A merged lag-out game is the usual case, because EA reports overtime in a result code the resumed sittings do not carry, '+
+      'so the flag has to come from whoever rebuilt the game. Correcting a score announces it in the scores channel; the standings follow either change at once.</p>'+
+      '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+      '<select id="smFixGame" style="flex:1;min-width:240px"><option value="">Pick a game\u2026</option>'+lgGames.filter(function(g){ return g.status==="final"; }).map(function(g){
+        return '<option value="'+esc(g.id)+'" data-h="'+(g.homeScore==null?"":g.homeScore)+'" data-a="'+(g.awayScore==null?"":g.awayScore)+'" data-ot="'+(g.ot?1:0)+'">'+
+          esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" \u00b7 ")+g.away+" @ "+g.home+" \u00b7 "+CG.fmtDay(g.at)+" \u00b7 "+
+              (g.homeScore==null?"no score":g.home+" "+g.homeScore+"-"+g.awayScore+" "+g.away+(g.ot?" (OT)":"")))+'</option>';
+      }).join("")+'</select>'+
+      '<input id="smFixH" type="number" min="0" max="30" placeholder="home" style="width:88px">'+
+      '<input id="smFixA" type="number" min="0" max="30" placeholder="away" style="width:88px">'+
+      '<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input id="smFixOt" type="checkbox"><span>Ended in overtime</span></label>'+
+      '<button class="btn btn-chrome" id="smFixGo">Correct it</button></div></label>'+
+      '<div id="smFixOut" style="margin-top:10px"></div>'+
+      '</div></div>';
     /* forfeit rulings: the staff act for no-shows and before-game forfeits (Rule 3.2) */
     var forfeitCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Forfeit a game</h3><span class="chip chip-warn">Rule 3.2</span></div>'+
       '<div class="card-b">'+
@@ -2735,7 +2758,40 @@ CG._smRenderList = function(body){
         }).join("")+'</tbody></table></div>';
     }
     listCard += '</div>';
-    body.innerHTML = addCard + leagueCard + forfeitCard + incidentCard + listCard;
+    body.innerHTML = addCard + leagueCard + fixCard + forfeitCard + incidentCard + listCard;
+
+    /* v3.42: correct a filed result. stats_game_set_result is gated to statistics staff in the
+       database; this is the first thing on the site to call it. */
+    (function(){
+      var sel = document.getElementById("smFixGame"), h = document.getElementById("smFixH"),
+          a = document.getElementById("smFixA"), ot = document.getElementById("smFixOt"),
+          go = document.getElementById("smFixGo"), out = document.getElementById("smFixOut");
+      if (!sel || !go) return;
+      sel.addEventListener("change", function(){
+        var o = this.options[this.selectedIndex];
+        h.value = o.getAttribute("data-h") || ""; a.value = o.getAttribute("data-a") || "";
+        ot.checked = o.getAttribute("data-ot") === "1";
+      });
+      go.addEventListener("click", function(){
+        var id = sel.value;
+        if (!id){ CG.toast("Pick the game","err"); return; }
+        var hs = parseInt(h.value,10), as = parseInt(a.value,10);
+        if (!(hs>=0) || !(as>=0)){ CG.toast("Enter both scores","err"); return; }
+        if (hs === as){ CG.toast("A league game cannot end level \u2014 check the score","err"); return; }
+        if (ot.checked && Math.abs(hs-as) !== 1){
+          CG.toast("An overtime game is decided by one goal \u2014 check the score or the overtime box","err"); return;
+        }
+        var btn = this; btn.disabled = true;
+        CG.sb.rpc("stats_game_set_result", { p_game:id, p_home:hs, p_away:as, p_final:true, p_ot:ot.checked })
+          .then(function(r){
+            btn.disabled = false;
+            if (r.error){ out.innerHTML = '<span class="chip chip-warn">'+esc(r.error.message||"Couldn\u2019t correct it")+'</span>'; return; }
+            out.innerHTML = '<span class="chip chip-win">Corrected \u2014 the standings already read it</span>';
+            CG.toast("Result corrected","ok");
+            if (CG.reloadLeague) CG.reloadLeague();
+          });
+      });
+    })();
 
     /* --- wire the incident log --- */
     (function(){

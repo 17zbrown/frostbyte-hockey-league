@@ -1,0 +1,65 @@
+-- v3.42: PIT 4-3 UTA was an overtime win, and there was nowhere on the site to say so.
+--
+-- Commissioner, 2026-09-26: "just a heads up, the game between the penguins and mammoth that
+--  resulted in a 4-3 win for the penguins was an overtime win."
+--
+-- ============================================================================
+-- THE CORRECTION
+-- ============================================================================
+-- Game 0975e009, Sep 25 10:10 PM ET, week 1. went_ot false to true through
+-- public.stats_game_set_result(game, 4, 3, true, true), the sanctioned door, not a raw UPDATE.
+-- Score and status asserted unchanged either side of the call, and the ruling recorded with
+-- log_admin_action('result_corrected').
+--
+-- team_standings is a VIEW over games, so it moved by itself:
+--     UTA   6 losses -> 5 losses and 1 OTL,   6 points -> 7 points
+--     PIT   unchanged, a win is a win
+--
+-- The clock agreed with him before I changed anything: the longest time on ice in that box score is
+-- 4605 seconds, 1005 past regulation.
+--
+-- ============================================================================
+-- WHY NOTHING CAUGHT IT: EA'S RESULT CODE IS NOT A SMALL ENUM
+-- ============================================================================
+-- The importer reads overtime from the club result field:
+--     const wentOt = clubs.some((c) => c.result === 5 || c.result === 6);
+-- and for a merged game it reads only the deciding sitting, "only the final sitting can end in OT".
+-- This game was a MANUAL lag-out merge of two sittings, and the archived payloads show result codes
+-- of 16385 and 10 on both of them, with winnerByDnf and winnerByGoalieDnf set. 16385 is 0x4001: the
+-- field is a bit set, and the 5/6 test decodes a fraction of it. I am not guessing at the rest of
+-- the bits on the strength of one game.
+--
+-- So on a merged game the flag cannot be trusted to arrive from EA, and the person who rebuilt the
+-- game is the one who knows. The merge card even says "overtime from the deciding sitting", which is
+-- exactly the assumption that failed.
+--
+-- ============================================================================
+-- THE GAP THAT MADE THIS A MESSAGE TO ME
+-- ============================================================================
+-- public.stats_game_set_result(p_game, p_home, p_away, p_final, p_ot) has taken p_ot since it was
+-- written, is already gated to statistics staff, and NOTHING on the site called it. A wrong score or
+-- a missing overtime flag on a league game had no door at all: the only overtime checkbox in the
+-- client belongs to the PICKUP game editor.
+--
+-- The Stats Manager now has "Correct a filed result": pick a final fixture, the score and the
+-- overtime box prefill from what is on record, change either, and it calls that RPC.
+-- Two guards, because a correction is typed by hand:
+--   * a league game cannot end level;
+--   * an overtime game is decided by exactly one goal, so overtime with any other margin is refused.
+-- The second one is not pedantry. SEA 9-5 NYI also ran past regulation, 3912 seconds, and is NOT an
+-- overtime game: it is a merged lag-out with a four-goal margin. Time past regulation alone cannot
+-- tell the two apart, which is why the flag is a human's to set and why the margin is checked.
+--
+-- Verified in a browser against the demo layer: the card renders between the merge card and the
+-- forfeit card, picking a fixture prefills 4 and 3 and the overtime box from the game, and both
+-- guards fired with their own messages.
+--
+-- ============================================================================
+-- SURVEYED, since one wrong flag suggests others
+-- ============================================================================
+-- Every final regular-season game whose longest time on ice exceeds regulation:
+--     UTA 5-4 NYI   4431s   margin 1   already OT
+--     VAN 1-2 SEA   3646s   margin 1   already OT
+--     SEA 9-5 NYI   3912s   margin 4   correctly NOT OT (a merge)
+--     PIT 4-3 UTA   4605s   margin 1   corrected here
+-- No other game is mismarked.
