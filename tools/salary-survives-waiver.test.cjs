@@ -67,5 +67,22 @@ console.log("\n— the rules");
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.46"));
 }
 
+console.log("\n— the client half");
+{
+  const live = R("src/live/part_live.js");
+  A("the client no longer names a salary", !/p_salary:750000/.test(live));
+  A("...it passes null and lets the database decide", /p_salary:null/.test(live));
+  A("there is a client mirror of the read", /CG\.waivedSalaryOf = function\(pid\)/.test(live));
+  A("...defined before the page that uses it, not inside a call",
+    live.indexOf("CG.waivedSalaryOf = function") < live.indexOf("CG.hubFreeAgents = function"));
+  A("the dialog names his real salary and the cap room", /the salary he was already earning, which a waiver does not reduce \(Rule 2\.2\)/.test(live) && /of room\./.test(live));
+  A("the board row shows the figure", /He keeps this salary for the season \(Rule 2\.2\)/.test(live));
+  A("no page copy still promises the minimum", !/\$750K to the end of the season/.test(live) && !/the league minimum, \$750K/.test(live));
+  A("the record covers the client half", /THE CLIENT HALF, WHICH ALMOST SHIPPED WRONG/.test(flat));
+  A("...and the splice mistake, with the tool that finds it", /node --check. names the line in one second/.test(flat));
+  A("the unimplemented waiver period is flagged, not fixed",
+    /Rule 2\.5 describes a waiver system that does not exist/.test(flat) && /left for the commissioner to rule on/.test(flat));
+}
+
 console.log(`\n${n - fail}/${n} passed`);
 process.exit(fail ? 1 : 0);

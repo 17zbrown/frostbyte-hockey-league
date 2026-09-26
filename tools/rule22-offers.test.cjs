@@ -32,7 +32,9 @@ console.log("— the club offers, it does not sign");
   A("the free-agent board calls offer_free_agent", /rpc\("offer_free_agent",\{ p_registration:regId, p_salary:sal, p_years:yrs, p_note:note \}\)/.test(live));
   /* v2.57: the FULL format offers and the player decides; the BASIC format has no player-side step —
      the club signs a waived player outright at the minimum (sign_free_agent) and the button says Sign */
-  A("the full format offers; the basic format signs outright", /rpc\("offer_free_agent"/.test(live) && /rpc\("sign_free_agent",\{ p_registration:regId, p_salary:750000 \}/.test(live));
+  /* v3.46: the basic format still signs outright, but at HIS salary; p_salary is null so the
+     database reads his contract rather than the client naming a figure. */
+  A("the full format offers; the basic format signs outright", /rpc\("offer_free_agent"/.test(live) && /rpc\("sign_free_agent",\{ p_registration:regId, p_salary:null \}/.test(live));
   A("the direct signing is gated to the basic format", /if \(basicOffer\)\{[\s\S]{0,400}sign_free_agent/.test(live));
   A("the button says Offer in full and Sign in basic", /\(basicFA\?'Sign':'Offer'\)/.test(live));
   A("the modal collects salary, term and a note", /id="faSal"/.test(live) && /id="faYears"/.test(live) && /id="faNote"/.test(live));

@@ -13147,6 +13147,19 @@ CG.hubSettings = function(){
    (signing itself goes through the sign_free_agent RPC, which
    enforces the window, eligibility, and roster space server-side)
    ================================================================ */
+/* v3.46: what a waived player costs the club that signs him. Mirrors sign_free_agent's read in the
+   basic format: his own contract for this season, which the waiver expires but leaves the salary on.
+   The database is the authority and decides the figure; this is so a manager sees the cap hit BEFORE
+   he presses Sign, instead of being told $750K and charged $3.25M. */
+CG.waivedSalaryOf = function(pid){
+  var sn = CG.SEASON || {}, num = sn.number;
+  var rows = ((CG.lg && CG.lg._contractsRaw) || []).filter(function(c){
+    return c.profile_id === pid && !c.is_manager &&
+      (num == null || (c.start_season <= num && c.end_season >= num));
+  }).sort(function(a, b){ return Date.parse(b.updated_at || 0) - Date.parse(a.updated_at || 0); });
+  return (rows[0] && rows[0].salary) || null;
+};
+
 CG.hubFreeAgents = function(){
   var lg=CG.lg, s=CG.SEASON||{};
   /* seat else commissioner preview — the one Team HQ page that resolved the club from the raw
@@ -13193,7 +13206,7 @@ CG.hubFreeAgents = function(){
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
     '<h1 class="h-sec" style="margin-top:8px">'+(basicFA?'Waived players':'Free agents')+'</h1>'+
     (basicFA
-      ? '<p class="lede" style="margin-top:8px">Every waived player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Sign</b> puts him on your roster at the one deal the basic format allows — the league minimum, $750K, to the end of the season. No offer, no acceptance: clubs move players, players are not asked (Rule 2.2).</p>'
+      ? '<p class="lede" style="margin-top:8px">Every waived player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Sign</b> puts him on your roster to the end of the season at the salary he was already earning: a waiver does not reduce it, and it lands on your cap in full (Rule 2.2). No offer, no acceptance: clubs move players, players are not asked.</p>'
       : '<p class="lede" style="margin-top:8px">Every signable player without a club. <b>Approach</b> opens a direct message to talk it over; <b>Offer</b> sends real terms the player can accept, counter, or decline. He joins your roster the moment he accepts — the league office confirms nothing (Rule 2.2).</p></div>');
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+pool.length+'</b><span>'+(basicFA?'waived players':'free agents')+'</span></div>'+
@@ -13204,7 +13217,11 @@ CG.hubFreeAgents = function(){
       '<th class="tleft">Player</th><th>POS</th><th>Scout OVR</th>'+(basicFA?'':'<th>Pre-season</th>')+'<th class="tleft">Background</th><th class="tright">Actions</th></tr></thead><tbody>'+
       pool.map(function(r){
         var prof=r.profiles||{}, pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0};
-        var bg = basicFA ? '<span class="chip chip-warn">Waived</span>' : lg.isVeteran(r.profile_id) ? '<span class="chip">Veteran</span>' : '<span class="chip chip-win">'+pre.gp+' pre-season games</span>';
+        var bg = basicFA
+          ? '<span class="chip chip-warn">Waived</span>'+(function(){ var sv=CG.waivedSalaryOf(r.profile_id);
+              /* v3.46: the cap hit travels with him, so it belongs on the row and not only in the dialog */
+              return sv ? ' <span class="chip chip-xs" title="He keeps this salary for the season (Rule 2.2)">'+CG.fmtMoney(sv)+'</span>' : ''; })()
+          : lg.isVeteran(r.profile_id) ? '<span class="chip">Veteran</span>' : '<span class="chip chip-win">'+pre.gp+' pre-season games</span>';
         var full = rosterN>=rosterMax;
         /* v2.34: his old club holds his rights until free agency opens — nobody else may approach */
         var rh = CG.rightsHeldContractOf ? CG.rightsHeldContractOf(r.profile_id) : null;
@@ -13223,7 +13240,7 @@ CG.hubFreeAgents = function(){
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(basicFA
-        ? 'One button, one deal (Rule 2.2). A waived player signs at the league minimum — $750K to the end of the season — the moment you press Sign; he is not asked, the league office confirms nothing, and he is on your roster immediately. Your cap space and roster room are checked when you sign, and the move is logged for the whole league.</span></div>'
+        ? 'One button, one deal (Rule 2.2). A waived player signs the moment you press Sign, at the salary he was already earning, which a waiver does not reduce; he is not asked, the league office confirms nothing, and he is on your roster immediately. Your cap space and roster room are checked when you sign, and the move is logged for the whole league.</span></div>'
         : 'You offer, the player decides (Rule 2.2). Send terms and the player accepts, counters, or declines from his dashboard — the league office confirms nothing, and he joins your roster the moment he accepts. Your cap space, roster room, and the window are checked again both when you send and when he accepts.')+'</span></div>'
     :(basicFA
       ? '<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No waived players right now</b><p>This board lists players a club has waived. Undrafted and late-registering players are placed on clubs by the league office, not signed here (Rule 2.8) — so it fills only when a club lets someone go.</p></div></div>'
@@ -13255,16 +13272,21 @@ CG.AFTER._hubFreeAgents = function(){
       /* Rule 2.2, basic format (v2.57): there is no offer and no player-side step — the club signs
          the waived player outright at the league minimum. sign_free_agent does the roster, cap and
          deadline checks and logs the transaction. */
+      /* v3.46: he carries his OWN salary, not the minimum. p_salary is passed as null so the
+         database decides it from his contract and stays the single source of truth; the figure
+         below is only what we show the manager first. */
+      var sal = CG.waivedSalaryOf(pid) || 750000;
+      var salTxt = CG.fmtMoney(sal);
       CG.confirm("Sign "+esc(name)+"?",
-        "He joins your roster the moment you confirm — $750K to the end of the season, the one deal a waived player can sign in this format. He is not asked and the league office confirms nothing; the signing is logged for the whole league (Rule 2.2).",
+        "He joins your roster the moment you confirm, at "+salTxt+" to the end of the season — the salary he was already earning, which a waiver does not reduce (Rule 2.2). That is "+salTxt+" against your cap, and you have "+CG.fmtMoney(space)+" of room. He is not asked and the league office confirms nothing; the signing is logged for the whole league.",
         "Sign player", function(){
         var btn=b; btn.disabled=true;
-        CG.mgmtQueue("sign_free_agent", { p_registration:regId, p_salary:750000 }, "sign "+name+" at $750K to the end of the season").then(function(q){ if (q){ btn.disabled=false; return; }
-        CG.sb.rpc("sign_free_agent",{ p_registration:regId, p_salary:750000 }).then(function(r){
+        CG.mgmtQueue("sign_free_agent", { p_registration:regId, p_salary:null }, "sign "+name+" at "+salTxt+" to the end of the season").then(function(q){ if (q){ btn.disabled=false; return; }
+        CG.sb.rpc("sign_free_agent",{ p_registration:regId, p_salary:null }).then(function(r){
           btn.disabled=false;
           if (r.error){ CG.toast("Couldn’t sign: "+r.error.message,"err"); return; }
           if (CG.closeOverlay) CG.closeOverlay();
-          CG.toast(name+" signed — $750K to the end of the season. He’s on your roster.","ok");
+          CG.toast(name+" signed to the end of the season. He’s on your roster.","ok");
           CG.reloadLeague();
         });
         });
@@ -13274,7 +13296,7 @@ CG.AFTER._hubFreeAgents = function(){
     CG.modal("Offer terms to "+esc(name),
       (basicOffer
         ? '<label class="fld"><span>Salary</span><input id="faSal" type="number" value="0.75" readonly style="opacity:.7"></label>'+
-          '<p class="caption" style="margin-top:-6px">$750K to the end of the season — the one deal a waived player can sign in the basic format (Rule 2.2).</p>'
+          '<p class="caption" style="margin-top:-6px">He signs to the end of the season at the salary he was already earning; a waiver does not reduce it (Rule 2.2).</p>'
         : '<label class="fld"><span>Salary ($M per season)</span><input id="faSal" type="number" min="0.75" step="0.25" value="0.75"></label>'+
           '<label class="fld"><span>Term (seasons)</span><select id="faYears">'+
             [1,2,3].slice(0, CG.fmt("max_contract_years")).map(function(y){ return '<option value="'+y+'">'+y+' season'+(y>1?'s':'')+'</option>'; }).join("")+'</select></label>')+

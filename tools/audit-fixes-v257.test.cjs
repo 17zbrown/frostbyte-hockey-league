@@ -37,10 +37,15 @@ console.log("— the herd (P0-3): a games change is a delta rebuild, spread out"
 console.log("— the basic format signs a waived player outright (P0-1 as ruled by the commissioner)");
 {
   A("the board button says Sign in basic, Offer in full", /\(basicFA\?'Sign':'Offer'\)/.test(live));
-  A("Sign calls sign_free_agent at the minimum, through the approval queue first", /CG\.mgmtQueue\("sign_free_agent", \{ p_registration:regId, p_salary:750000 \}/.test(live) && /CG\.sb\.rpc\("sign_free_agent",\{ p_registration:regId, p_salary:750000 \}\)/.test(live));
+  /* v3.46: the salary is no longer the client's to name. It passes null and the database reads the
+     player's own contract, so a waiver cannot reduce what he earns. */
+  A("Sign calls sign_free_agent through the approval queue first, letting the DB set the salary",
+    /CG\.mgmtQueue\("sign_free_agent", \{ p_registration:regId, p_salary:null \}/.test(live) && /CG\.sb\.rpc\("sign_free_agent",\{ p_registration:regId, p_salary:null \}\)/.test(live));
+  A("...and the client no longer hardcodes the league minimum", !/p_salary:750000/.test(live));
+  A("...but it shows the manager the real figure first", /var sal = CG\.waivedSalaryOf\(pid\) \|\| 750000;/.test(live));
   A("the queue knows the page for it", /sign_free_agent:"freeagents"/.test(live));
   A("the offer / extension cards are gone in basic", /var offers = CG\.isBasic\(\) \? "" : \(CG\.offersCardHtml\(\)/.test(live));
-  A("the copy says players are not asked", /clubs move players, players are not asked \(Rule 2\.2\)/.test(live));
+  A("the copy says players are not asked", /clubs move players, players are not asked/.test(live));
 }
 
 console.log("— post-lock lineup changes (P1-4): the opponent can see it");

@@ -55,3 +55,36 @@
 -- depth placement carries the minimum; a waived player carries what he had). Rule 2.5 already said a
 -- CLAIMING club "assumes the player at his pre-waiver salary, reinstated as it stood", so the basic
 -- format was the odd one out and is now consistent with it.
+--
+-- ============================================================================
+-- THE CLIENT HALF, WHICH ALMOST SHIPPED WRONG
+-- ============================================================================
+-- A background map of the salary surface caught what the database change alone would have left: the
+-- page hardcoded the figure in four places and would have told a manager one number while charging
+-- him another.
+--   * the RPC call passed p_salary:750000 twice (the approval queue and the direct call). It now
+--     passes NULL, so the database reads his contract and stays the single source of truth. A client
+--     that names a salary is a client that can disagree with the rule.
+--   * the confirmation dialog said "$750K to the end of the season". It now names his real salary,
+--     says it is the salary he was already earning, and shows it against the club's remaining cap
+--     space, so the cap hit is known BEFORE the button is pressed.
+--   * the board lede and the one-button note both promised the league minimum. Rewritten.
+--   * each waived player's row now carries his salary as a chip, because the figure travels with him
+--     and a GM should not have to open a dialog to find out what a player costs.
+-- CG.waivedSalaryOf mirrors the database read (his contract for this season, most recent first).
+--
+-- A NOTE ON THAT EDIT: the helper was first spliced in at the first textual match of
+-- "CG.hubFreeAgents", which was the CALL inside CG.hubShell("freeagents", CG.hubFreeAgents()), not
+-- the definition. That produced a file that parsed nowhere and a sandboxed rulebook test whose
+-- catch(e){} swallowed the error and left CG undefined. `node --check` names the line in one second;
+-- reach for it before reading a swallowed stack.
+--
+-- ============================================================================
+-- FOUND WHILE MAPPING, NOT FIXED: Rule 2.5 describes a waiver system that does not exist
+-- ============================================================================
+-- Rule 2.5[3] still says "Waiving a player removes his cap hit from the club immediately and opens a
+-- twenty-four (24) hour waiver period. A claiming club assumes the player at his pre-waiver salary".
+-- There is no 24-hour window, no claim, and no claim RPC anywhere in sql/ or src/live/; Rule 2.2 says
+-- the opposite, that he becomes a free agent at the moment he is waived and nothing happens
+-- automatically. That paragraph is full-format machinery left in a basic-format book. It is a
+-- rulebook cleanup, not a behaviour change, and is left for the commissioner to rule on.
