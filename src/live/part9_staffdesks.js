@@ -853,7 +853,7 @@ CG.deskCommunity = function(){
      Rule 7.1 has always routed Discord conduct here; until today this desk could only warn, and had
      to hand anything heavier to a department that had not read the chat. The ceiling is Rule 7.2's
      staff ceiling, the same one officiating works under, and the database enforces every line of it:
-     no self, no commissioner, 10 games or 30 days, and a stated reason. */
+     no self, no commissioner, a heading, and 3, 6 or 9 games (v3.39, Rule 7.7). */
   var disc = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
   var warns = (lg.warnings||[]).filter(function(s){ return s.status==="active"; });
   var me = (CG.auth && CG.auth.profile && CG.auth.profile.id) || null;
@@ -869,9 +869,10 @@ CG.deskCommunity = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Moderation</h3>'+
     '<button class="btn btn-ink btn-sm" id="commSuspend">Suspend a member</button></div>'+
     '<div class="card-b"><p class="small" style="color:var(--steel);margin:0">Conduct in the Discord is this desk\u2019s to rule on (Rule 7.1). '+
-      'You can suspend up to <b>10 games or 30 days</b>, the same ceiling every staff desk works under (Rule 7.2). '+
-      'Say why: the member is told what you wrote, on the site and by direct message, and has 48 hours to appeal it (Rule 7.6). '+
-      'Longer than the ceiling, or anything about a commissioner or a staff member, is a commissioner ruling \u2014 leave the case open and hand it up.</p></div>'+
+      'A ruling is written under one or more headings \u2014 <b>vulgar language</b>, <b>slurs</b>, <b>posting inappropriate content</b>, <b>other</b> \u2014 '+
+      'and runs <b>3, 6 or 9 games</b> (Rule 7.7). Tick everything that applies: one outburst is often more than one thing. '+
+      'The member is told the headings and what you write, on the site and by direct message, and has 48 hours to appeal (Rule 7.6). '+
+      'Anything longer than nine games, an outright ban, or anything about a commissioner or a staff member is a commissioner ruling \u2014 leave the case open and hand it up.</p></div>'+
     (disc.length || warns.length
       ? disc.concat(warns).map(function(s){
           var mine = me && s.created_by === me;
@@ -916,7 +917,7 @@ CG.commSuspendPrompt = function(){
     var who = CG.readMemberPicker("commSusWho");
     if (!who.id){ CG.toast("Pick a member from the list so the suspension attaches to the right person","err"); return; }
     if (CG.closeOverlay) CG.closeOverlay();
-    CG.suspendUser(who.id, who.name);
+    CG.suspendUser(who.id, who.name, { conduct:true });
   });
 };
 

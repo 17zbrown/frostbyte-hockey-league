@@ -6712,37 +6712,82 @@ CG.setUserRole = function(profileId, role, selEl){
 };
 /* Club-role assignment now lives on each club's edit page (CG.teamForm → Front office) via
    type-ahead member pickers; the old per-user modals were removed with those buttons. */
-CG.suspendUser = function(profileId, name){
-  CG.modal("Suspend "+esc(name),
-    '<label class="fld"><span>Reason (shown on the profile’s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.2 — abusive conduct in lobby"></textarea></label>'+
-    '<div class="grid g2" style="gap:12px;margin-top:4px">'+
-    '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
-    '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
-    '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
-    '<p class="caption">A suspended member can’t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>',
+/* The conduct headings a community ruling is written under (v3.39). The SQL twin is
+   public.conduct_reasons(); if one list changes, change the other. Codes, not prose, so the same
+   conduct reads identically on every ruling and can be counted later. */
+CG.CONDUCT_REASONS = [
+  { code:"vulgar",        label:"Vulgar language" },
+  { code:"slurs",         label:"Slurs" },
+  { code:"inappropriate", label:"Posting inappropriate content" },
+  { code:"other",         label:"Other" }
+];
+/* The community ladder (Rule 7.7). Longer than this, or a ban, is a commissioner ruling. */
+CG.CONDUCT_LADDER = [3, 6, 9];
+
+/* ONE suspension modal. opts.conduct switches it to the community desk's form: the headings as
+   checkboxes (several at once, because one outburst is often more than one thing), and the ladder
+   instead of a free number. Everything below is re-checked in the database, which is the real gate. */
+CG.suspendUser = function(profileId, name, opts){
+  opts = opts || {};
+  var conduct = !!opts.conduct;
+  var body;
+  if (conduct){
+    body = '<p class="caption" style="margin-bottom:10px">For conduct in the Discord (Rule 7.1). Tick everything that applies.</p>'+
+      '<div class="fld"><span>What happened</span><div style="display:flex;flex-direction:column;gap:7px;margin-top:6px">'+
+      CG.CONDUCT_REASONS.map(function(r){
+        return '<label style="display:flex;gap:8px;align-items:center;cursor:pointer">'+
+          '<input type="checkbox" class="susCode" value="'+esc(r.code)+'">'+
+          '<span>'+esc(r.label)+'</span></label>';
+      }).join("")+'</div></div>'+
+      '<label class="fld" style="margin-top:10px"><span>What happened, in your words'+
+        ' <span class="caption" id="susNoteReq">(required if you tick Other)</span></span>'+
+        '<textarea id="susReason" rows="2" placeholder="Quote it or say where it was. The member is shown this."></textarea></label>'+
+      '<label class="fld" style="max-width:220px"><span>Length</span><select id="susGamesSel">'+
+        CG.CONDUCT_LADDER.map(function(g){ return '<option value="'+g+'">'+g+' games</option>'; }).join("")+
+      '</select></label>'+
+      '<p class="caption">Community rulings run 3, 6 or 9 games. Anything longer, and any ban, is a commissioner ruling (Rule 7.7). '+
+      'The member is told the headings you tick and what you write, on the site and by direct message, and has 48 hours to appeal (Rule 7.6).</p>';
+  } else {
+    body = '<label class="fld"><span>Reason (shown on the profile\u2019s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.4 dangerous contact, baseline"></textarea></label>'+
+      '<div class="grid g2" style="gap:12px;margin-top:4px">'+
+      '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
+      '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
+      '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
+      '<p class="caption">A suspended member can\u2019t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>';
+  }
+  CG.modal("Suspend "+esc(name), body,
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
   var modeSel=document.getElementById("susMode");
-  modeSel.addEventListener("change", function(){
+  if (modeSel) modeSel.addEventListener("change", function(){
     var byDate=this.value==="date";
     document.getElementById("susGamesWrap").style.display=byDate?"none":"";
     document.getElementById("susDateWrap").style.display=byDate?"":"none";
   });
   document.getElementById("susGo").addEventListener("click", function(){
     var reason=(document.getElementById("susReason").value||"").trim();
-    if(!reason){ CG.toast("Give the suspension a reason — it’s the league record","err"); return; }
-    var mode=modeSel.value, games=null, ends=null;
-    if (mode==="games"){
-      games=parseInt(document.getElementById("susGames").value,10);
-      if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
+    var mode, games=null, ends=null, codes=null;
+    if (conduct){
+      codes=[].slice.call(document.querySelectorAll(".susCode:checked")).map(function(c){ return c.value; });
+      if(!codes.length){ CG.toast("Tick at least one heading \u2014 what was it about the chat that broke the rules?","err"); return; }
+      if(codes.indexOf("other")>=0 && !reason){ CG.toast("\u201cOther\u201d says nothing on its own \u2014 write what happened","err"); return; }
+      mode="games"; games=parseInt(document.getElementById("susGamesSel").value,10);
+      if(CG.CONDUCT_LADDER.indexOf(games)<0){ CG.toast("Pick 3, 6 or 9 games","err"); return; }
     } else {
-      var v=document.getElementById("susDate").value;
-      if(!v){ CG.toast("Pick the end date","err"); return; }
-      ends=CG.etISO(v.slice(0,10), v.slice(11,16));
+      if(!reason){ CG.toast("Give the suspension a reason \u2014 it\u2019s the league record","err"); return; }
+      mode=modeSel.value;
+      if (mode==="games"){
+        games=parseInt(document.getElementById("susGames").value,10);
+        if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
+      } else {
+        var v=document.getElementById("susDate").value;
+        if(!v){ CG.toast("Pick the end date","err"); return; }
+        ends=CG.etISO(v.slice(0,10), v.slice(11,16));
+      }
     }
     var btn=this; btn.disabled=true;
-    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason }).then(function(r){
+    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason||null, p_codes:codes }).then(function(r){
       btn.disabled=false;
-      if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
+      if(r.error){ CG.toast("Couldn\u2019t suspend: "+r.error.message,"err"); return; }
       if(CG.closeOverlay) CG.closeOverlay();
       CG.toast(name+" suspended "+(mode==="games"?"for "+games+" game"+(games===1?"":"s"):"until "+CG.fmtFull(Date.parse(ends))),"ok");
       CG.reloadLeague();

@@ -30,7 +30,8 @@ console.log("\n— the desk can act");
 
 console.log("\n— it reuses the one suspension modal rather than growing a second");
 {
-  A("the prompt hands off to CG.suspendUser", /CG\.suspendUser\(who\.id, who\.name\)/.test(desks));
+  A("the prompt hands off to CG.suspendUser, in conduct mode since v3.39",
+    /CG\.suspendUser\(who\.id, who\.name, \{ conduct:true \}\)/.test(desks));
   A("CG.suspendUser is still the single definition", (live.match(/CG\.suspendUser = function/g) || []).length === 1);
   A("...and it still calls suspend_player", /rpc\("suspend_player"/.test(live));
   A("the picker covers the whole league, not just rostered players",
@@ -52,7 +53,7 @@ console.log("\n— lifting is scoped to what this desk issued");
 console.log("\n— the copy tells a moderator the actual rules");
 {
   A("the ceiling is stated", /10 games or 30 days/.test(desks));
-  A("the reason requirement is stated, with why", /has 48 hours to appeal it \(Rule 7\.6\)/.test(desks));
+  A("the reason requirement is stated, with why", /has 48 hours to appeal \(Rule 7\.6\)/.test(desks));
   A("...and that the member is told both ways", /on the site and by direct message/.test(desks));
   A("escalation is still named", /leave the case open and hand it up/.test(desks));
   A("the old 'suspensions belong to officiating' note is gone",
@@ -86,8 +87,8 @@ console.log("\n— the rulebook");
   rb.chapters.find((c) => c.num === 7).sections.forEach((x) => (s7[x.id] = x.paragraphs));
   A("7.1 no longer limits community to warnings",
     !/may issue warnings and escalate anything heavier/.test(s7["7.1"][1]));
-  A("...it may now suspend to the staff ceiling",
-    /may issue warnings and suspensions up to the staff ceiling of Rule 7\.2/.test(s7["7.1"][1]));
+  A("...it may now suspend, on its own scale since v3.39",
+    /may issue warnings and suspensions on the scale of Rule 7\.7/.test(s7["7.1"][1]));
   A("...and the principle is stated: a department rules on the conduct it sees",
     /A department rules on the conduct it sees/.test(s7["7.1"][1]) &&
     /the community department is not asked to decide a hit it never watched/.test(s7["7.1"][1]));

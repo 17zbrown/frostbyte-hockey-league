@@ -1,5 +1,9 @@
 -- v3.38: the community department can suspend, and the member is finally told.
 --
+-- SUPERSEDED IN PART, same day, by sql/2026-09-26-community-conduct-scale.sql (v3.39): the
+-- community ceiling is no longer Rule 7.2's 10 games / 30 days but Rule 7.7's ladder of 3, 6 or 9
+-- games, and a reason is now a set of headings rather than free prose. Everything else below stands.
+--
 -- Commissioner, 2026-09-26: "Allow the community staff to suspend members due to discord chat
 --  violations via the community desk in the staff desk on the website."
 --

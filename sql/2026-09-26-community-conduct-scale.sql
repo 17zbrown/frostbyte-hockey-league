@@ -1,0 +1,71 @@
+-- v3.39: community rulings get their own headings and their own scale.
+--
+-- Commissioner, 2026-09-26: "differentiate the reasons for suspensions to for the community staff to
+--  be discord chat based. Give their options for reasons to be Vulgar language, slurs, posting
+--  inappropriate content, and other items. allow for multiple selections of these reasons when a
+--  community staff is issuing the suspensions and it's length. Staff can do 3 games, 6 games, or 9
+--  games before requiring a commissioner to approve anything longer or an outright ban."
+--
+-- ============================================================================
+-- WHICH "STAFF" THE LADDER BINDS, and why it is not all of them
+-- ============================================================================
+-- Read alone, the last sentence could mean every staff desk. It cannot, and the rulebook settles it:
+-- Rule 7.4 makes a TWO-game suspension the mandatory baseline for dangerous contact. A ladder of
+-- 3, 6 or 9 would leave the officiating department unable to issue the sanction its own rule
+-- requires. So the scale binds the department the rest of the message is about, the community desk,
+-- and officiating keeps Rule 7.2's ceiling. Rehearsed both ways: as an officiating-only staffer the
+-- 2-game baseline, a 10-game ruling and a 20-day ruling all still issue, and 11 games is still
+-- refused.
+--
+-- PRECEDENCE where somebody holds both: the community ladder binds a moderator who holds ONLY
+-- community. A staffer who also holds officiating is an official and keeps the officiating ceiling.
+-- The narrower scale is about the kind of conduct this desk rules on, not about the person, and
+-- Rule 7.7 says so.
+--
+-- ============================================================================
+-- HEADINGS, NOT PROSE
+-- ============================================================================
+-- public.conduct_reasons() is the canonical list: vulgar, slurs, inappropriate, other. There is a JS
+-- twin, CG.CONDUCT_REASONS in src/live/part_live.js, because the desk renders the tick boxes; if one
+-- changes, change the other, and each says so. Same arrangement as the lobby-code ban list.
+--
+-- suspensions gained reason_codes text[]. The existing reason column is KEPT and composed from the
+-- headings plus the moderator's words by public.conduct_reason_text(), so the profile discipline
+-- record, the officials' desk, the member's notice and the staff-room post all keep working with no
+-- change: they read a sentence, and the sentence now reads "Slurs, Vulgar language, Other: in
+-- #general after a warning". Storing codes as well means the same conduct reads identically on every
+-- ruling and can be counted across a season, which free prose can never be.
+--
+-- ============================================================================
+-- WHAT THE DATABASE REFUSES A COMMUNITY-ONLY MODERATOR
+-- ============================================================================
+--   * a length that is not 3, 6 or 9            -> "Community suspensions are 3, 6 or 9 games..."
+--   * a date-based suspension at all            -> "...set in games: 3, 6 or 9"
+--   * no heading                                -> "Pick at least one heading"
+--   * 'other' with nothing written              -> '"Other" says nothing on its own'
+--   * a heading that is not on the list         -> "Not a conduct heading: <code>"
+-- and, unchanged from v3.38: not yourself, not a commissioner, and a stated reason.
+--
+-- suspend_player was DROPPED and re-created to take p_codes. A new defaulted parameter makes an
+-- OVERLOAD rather than a replacement, and two suspend_players would have left the old client bound
+-- to the one with no headings. The signature count is asserted to be exactly 1.
+--
+-- ============================================================================
+-- REHEARSED, ROLLED BACK, ELEVEN CHECKS
+-- ============================================================================
+-- As Altieri, who holds community and nothing else: 3, 6 and 9 all issue; 4 is refused; 10 is refused
+-- with the commissioner message; a date is refused; no heading is refused; bare 'other' is refused;
+-- a junk code is refused; and a ruling with THREE headings stored them in the order given, composed
+-- the sentence correctly, and reached the member with the headings in it.
+--
+-- ============================================================================
+-- THE CLIENT: ONE MODAL, TWO FORMS
+-- ============================================================================
+-- CG.suspendUser gained an opts argument rather than a twin. opts.conduct renders the tick boxes and
+-- the ladder; without it the form is exactly what Users and roles has always shown. A second modal
+-- would have drifted from the first the moment either changed.
+--
+-- Rulebook: new Rule 7.7 sets out the headings, that more than one may be recorded against a single
+-- course of conduct, the 3/6/9 scale, what needs a commissioner, and the precedence between this
+-- scale and Rule 7.2's ceiling. Rule 7.1 now points at 7.7 rather than at the general staff ceiling
+-- it was given yesterday.
