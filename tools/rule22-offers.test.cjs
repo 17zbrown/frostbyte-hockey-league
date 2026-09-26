@@ -93,7 +93,12 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("[basic] 2.2: no free-agency period and no open market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
   A("[basic] 2.2: ...but it does not claim the league has no free agents", /It does have free agents, and the next paragraph but one says who they are/.test(sec("2.2")));
   A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /the league office confirms nothing and has no part in the move/.test(sec("2.2")));
-  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player at the league minimum salary/.test(sec("2.2")));
+  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player on a contract running to the end of the season/.test(sec("2.2")));
+  /* v3.46: the signing is at HIS salary now, not the league minimum. */
+  A("[basic] 2.2: ...at the salary he was already earning", /at the salary he was already earning/.test(sec("2.2")));
+  A("[basic] 2.2: ...and a waiver does not reduce it", /A player keeps his salary for the whole season: being waived does not reduce it/.test(sec("2.2")));
+  A("[basic] 2.2: ...with the cap consequence spelled out", /the club that signs him takes on the figure his former club carried, against its own cap/.test(sec("2.2")));
+  A("[basic] 2.2: ...and the minimum kept only as a floor", /Where a player has no salary on record for the season, the league minimum applies as a floor/.test(sec("2.2")));
   A("[basic] 2.3: trades are players only — no pick is a trade asset", /Draft picks are not tradeable assets in the basic format: a trade consists of players for players, and an offer that includes a draft pick is refused at the point of entry/.test(sec("2.3")));
   /* by version, not by position: pinning changelog[0] made every LATER rulebook change fail this
      unrelated test (v2.29 did exactly that) */

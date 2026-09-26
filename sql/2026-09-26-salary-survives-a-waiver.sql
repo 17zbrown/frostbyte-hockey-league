@@ -1,0 +1,57 @@
+-- v3.46: a player keeps his salary for the whole season, even if he is waived.
+--
+-- Commissioner, 2026-09-26: "players keep their salary for the whole season even if they are waived."
+--
+-- ============================================================================
+-- THE LINE THAT DID IT
+-- ============================================================================
+-- public.sign_free_agent ended its salary calculation with
+--     v_salary := greatest(coalesce(p_salary, 750000), 750000);
+--     if public.season_is_basic(v_season.id) then v_salary := 750000; end if;
+-- so in the basic format EVERY signing of a waived player was forced to the league minimum,
+-- whatever he had been earning. A club could waive a $3.25M player and any club, including the one
+-- that waived him, could pick him up at $750,000. Being waived cost the player his salary and handed
+-- the league a discount on him.
+--
+-- ============================================================================
+-- WHAT IT READS NOW
+-- ============================================================================
+-- In the basic format the signing salary is the player's own, in this order:
+--   1. his contract for this season. contract_on_waive sets status='expired' and team_id=null but
+--      LEAVES THE SALARY on the row, so the figure survives the waiver untouched;
+--   2. failing that, the salary recorded on his last archived roster spot (roster_spot_removals,
+--      v3.17), which exists precisely so a removed spot remembers what it held;
+--   3. failing both, the league minimum, as a FLOOR for a player with no salary on record.
+-- Never as a reset. The full format is unchanged and still takes the offered salary.
+--
+-- apply_contract_on_roster needed nothing: after a waiver there is no ACTIVE contract, so it takes
+-- its else branch and writes a new contract at the roster spot's salary, which is now the carried
+-- figure. The cap is enforced where it always was, by guard_roster_cap on the insert, so a club that
+-- cannot fit the real salary is refused rather than quietly given a discount.
+--
+-- ============================================================================
+-- REHEARSED ON A REAL, EXPENSIVE PLAYER, ROLLED BACK
+-- ============================================================================
+-- The most expensive non-management active player in the league was waived by his own club and then
+-- signed by a different club, in one rolled-back transaction. Three assertions:
+--   * the new roster spot carries the SAME salary he was waived at
+--   * the contract written for the new club carries it too
+--   * and it is not 750000 unless that is genuinely what he earned
+-- Nobody currently waived is affected: all six are at the league minimum already. This matters from
+-- the first time a club waives somebody on a real salary, and Utah alone has a $3.25M and a $2.75M
+-- player listed on the trade block tonight.
+--
+-- ============================================================================
+-- THE READING I TOOK, SAID PLAINLY
+-- ============================================================================
+-- "Players keep their salary" is read as the PLAYER's salary following the PLAYER: he does not lose
+-- it by being waived, and the club that signs him takes it on. The other possible reading, that the
+-- WAIVING club keeps paying it as dead cap, is a different and much larger mechanic (the league has
+-- salary_retention and apply_retention for the full format) and would have been described as such.
+-- Rule 2.6 already uses the same words in the same sense for a manager who loses his seat: "A player
+-- who earned a larger salary before taking the seat keeps that salary."
+--
+-- Rulebook: 2.2 (signing at the salary he was earning, with the cap consequence stated), 2.5 (a
+-- depth placement carries the minimum; a waived player carries what he had). Rule 2.5 already said a
+-- CLAIMING club "assumes the player at his pre-waiver salary, reinstated as it stood", so the basic
+-- format was the odd one out and is now consistent with it.
