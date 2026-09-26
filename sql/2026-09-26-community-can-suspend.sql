@@ -1,0 +1,88 @@
+-- v3.38: the community department can suspend, and the member is finally told.
+--
+-- Commissioner, 2026-09-26: "Allow the community staff to suspend members due to discord chat
+--  violations via the community desk in the staff desk on the website."
+--
+-- ============================================================================
+-- THE BOOK ALREADY SAID HALF OF IT, AND CONTRADICTED ITSELF ON THE REST
+-- ============================================================================
+-- Rule 7.1 has always routed Discord conduct to the community department. But it ended
+--     "whose moderators may issue warnings and escalate anything heavier"
+-- while Rule 7.2 said, generically,
+--     "League staff may impose suspensions of up to ten (10) games or thirty (30) days"
+-- The code implemented 7.1: discipline_from_case carried an explicit carve-out,
+--     or (public.has_department('community') and p_mode = 'warning')
+-- and suspend_player did not mention community at all. So the department that reads the chat could
+-- only warn, and anything heavier went to a department that never saw it. Making community a full
+-- disciplinary desk removes the contradiction rather than creating one: 7.2's staff ceiling was
+-- already written to cover "league staff", and now it does.
+--
+-- ============================================================================
+-- FOUR FUNCTIONS
+-- ============================================================================
+-- 1. suspend_player: community joins officiating on the door. Every separation-of-duties guard is
+--    UNCHANGED and now applies to them: not yourself, not a commissioner, 10 games, 30 days.
+--    It also now REQUIRES a reason, from every desk. Rule 7.6 gives the member 48 hours to appeal on
+--    stated grounds, which cannot be done against a blank, and the column was nullable.
+--    It now writes an admin_audit row, which the direct path never did, stamping the issuer's
+--    departments AT ISSUE: a staffer's departments change, and the record should say which desk acted.
+--
+-- 2. discipline_from_case: the warning-only carve-out is gone; community rules from a case under the
+--    same ceiling. A reason is required for anything that is not a warning.
+--
+-- 3. lift_suspension: community may lift a suspension IT ISSUED (created_by = auth.uid()) and nothing
+--    else. Letting it suspend without letting it lift would send a moderator who got one wrong to go
+--    find an official; letting it lift anything would let it undo an on-ice ruling it never saw.
+--    It also used to `update ... where id=p_id` blind, so lifting an already-lifted row reported
+--    success and changed nothing. It now checks row_count and raises.
+--
+-- 4. notify_suspension: THE MEMBER IS TOLD. This is the part that was worse than the thing I was
+--    asked to fix. The trigger only ever posted to the staff casework channel. discipline_from_case
+--    happened to call create_notification itself, so a ruling made FROM A CASE reached the member and
+--    an identical ruling made DIRECTLY did not: he would have discovered it by being left out of a
+--    lineup. Rule 7.6 runs the appeal window from "the sanction being posted", which is meaningless
+--    against a sanction nobody posted to him.
+--    The notice moved INTO the trigger so every path is covered, including any added later, and the
+--    duplicate inside discipline_from_case was deleted in the same change. The member now gets a site
+--    notification and a Discord DM carrying the length, the grounds and the 48-hour window. The DM is
+--    wrapped in its own exception block: a member with no linked Discord simply does not get one, and
+--    Discord must never be able to fail a ruling.
+--
+-- ============================================================================
+-- REHEARSED AS A REAL COMMUNITY STAFFER, ROLLED BACK
+-- ============================================================================
+-- Altieri (79e68c9f) holds the community department and nothing else, so he is the exact subject:
+-- an hour ago the database refused him. Eight assertions inside one rolled-back transaction:
+--   1. he issued a 3-game suspension, and is_suspended() read it back as active
+--   2. the MEMBER got exactly one new site notification and exactly one new DM, and the notice
+--      carried both the grounds and the 48-hour window
+--   3. the admin_audit row named 'community' as the issuing desk
+--   4. 11 games was refused with the 10-game message
+--   5. 31 days was refused with the 30-day message
+--   6. suspending himself was refused
+--   7. suspending a commissioner was refused
+--   8. a blank reason was refused
+-- Afterwards, outside the transaction: 0 suspensions, 0 audit rows, 0 DMs, 0 member notices. Nothing
+-- leaked, and no Discord message was sent, because net.http_request_queue is a plain table.
+--
+-- ============================================================================
+-- THE CLIENT
+-- ============================================================================
+-- CG.deskCommunity gained a Moderation card; the registry entry's `after` was an empty function, so
+-- the desk had never bound a handler, and CG.AFTER._deskCommunity is new.
+-- CG.commSuspendPrompt picks the member with the existing member picker (the WHOLE league: a chat
+-- violation is not limited to rostered players, and the case-discipline modal's select is rostered
+-- players only) and then hands off to CG.suspendUser, the ONE suspension modal the site already has.
+-- A second modal would have drifted from the first.
+-- The card lists active discipline, and offers Lift only on rows the viewer issued; the others say
+-- "not yours to lift" rather than offering a button the database would refuse.
+-- CG.DEPT_CAPS.community gained discipline.suspend and discipline.lift.own. Those are cosmetic by
+-- the file's own admission; the database is the gate.
+--
+-- WHAT IS NOT ENFORCED, and should be said plainly: nothing in the data distinguishes a chat
+-- complaint from an on-ice one. action_requests.type is complaint / position_change / trade_request,
+-- with a free-text subject, and Rule 7.1's routing is a rule rather than a column. So a community
+-- moderator could in principle suspend for something on the ice. What stands against that is the
+-- stated reason, the audit row naming the desk, the staff-room post, the member's right of appeal,
+-- and Rule 7.1's new sentence that a department rules on the conduct it sees. A category on
+-- complaints would make it structural; that is a bigger change and was not made today.

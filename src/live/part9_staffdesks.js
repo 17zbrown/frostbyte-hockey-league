@@ -63,7 +63,9 @@ CG.DEPT_CAPS = {
   operations:   ["schedule.move", "codes.manage"],
   draft:        ["draft.run"],
   transactions: ["trades.review"],
-  community:    ["community.desk", "discipline.warn"],
+  /* v3.38: community rules on Discord conduct, so it suspends under Rule 7.2's staff ceiling like
+     officiating does, and may lift a suspension it issued itself (the DB scopes that one). */
+  community:    ["community.desk", "discipline.warn", "discipline.suspend", "discipline.lift.own"],
   statistics:   ["stats.manage"],
   media:        ["news.write", "rankings.publish"]
 };
@@ -845,10 +847,77 @@ CG.deskCommunity = function(){
       'so anyone here either signed up before that shipped or left the server. They get no game-night pings until they’re back in.</span></div></div>';
   }
 
-  h += CG.deskCeiling("Community handles the soft end of moderation: you can issue a <b>formal warning</b> from a case. "+
-    "Suspensions belong to the officiating department and bans to the commissioners — if something needs more than a warning, "+
-    "leave the case open and hand it up.");
+  /* ---- moderation (v3.38) -----------------------------------------------------------------
+     Commissioner, 2026-09-26: "Allow the community staff to suspend members due to discord chat
+     violations via the community desk in the staff desk on the website."
+     Rule 7.1 has always routed Discord conduct here; until today this desk could only warn, and had
+     to hand anything heavier to a department that had not read the chat. The ceiling is Rule 7.2's
+     staff ceiling, the same one officiating works under, and the database enforces every line of it:
+     no self, no commissioner, 10 games or 30 days, and a stated reason. */
+  var disc = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
+  var warns = (lg.warnings||[]).filter(function(s){ return s.status==="active"; });
+  var me = (CG.auth && CG.auth.profile && CG.auth.profile.id) || null;
+  var nameOf = function(pid){
+    var pr = (lg._profilesRaw||[]).find(function(x){ return x.id===pid; });
+    return (pr && (pr.gamertag || pr.display_name)) || "a member";
+  };
+  var lenOf = function(s){
+    return s.mode==="games" ? (s.games_total||"?")+" game"+(s.games_total===1?"":"s")
+         : s.mode==="seasons" ? "through Season "+(s.until_season||"?")
+         : s.ends_at ? "until "+CG.fmtDay(Date.parse(s.ends_at)) : "until further notice";
+  };
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Moderation</h3>'+
+    '<button class="btn btn-ink btn-sm" id="commSuspend">Suspend a member</button></div>'+
+    '<div class="card-b"><p class="small" style="color:var(--steel);margin:0">Conduct in the Discord is this desk\u2019s to rule on (Rule 7.1). '+
+      'You can suspend up to <b>10 games or 30 days</b>, the same ceiling every staff desk works under (Rule 7.2). '+
+      'Say why: the member is told what you wrote, on the site and by direct message, and has 48 hours to appeal it (Rule 7.6). '+
+      'Longer than the ceiling, or anything about a commissioner or a staff member, is a commissioner ruling \u2014 leave the case open and hand it up.</p></div>'+
+    (disc.length || warns.length
+      ? disc.concat(warns).map(function(s){
+          var mine = me && s.created_by === me;
+          return '<div class="card-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+            '<b style="font-family:var(--f-disp);flex:1;min-width:130px">'+esc(nameOf(s.profile_id))+'</b>'+
+            '<span class="chip '+(s.mode==="warning"?"":"chip-warn")+' chip-xs">'+esc(s.mode==="warning"?"warning":lenOf(s))+'</span>'+
+            '<span class="caption" style="flex:2;min-width:180px">'+esc(s.reason||"no reason recorded")+'</span>'+
+            (s.mode!=="warning" && mine
+              ? '<button class="btn btn-ghost btn-sm" data-comm-lift="'+esc(s.id)+'" data-name="'+esc(nameOf(s.profile_id))+'">Lift</button>'
+              : s.mode!=="warning"
+                ? '<span class="chip chip-xs" title="Only the desk that issued it, the officiating department or a commissioner can lift this">not yours to lift</span>'
+                : '')+
+            '</div>';
+        }).join("")
+      : '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="caption">Nobody is under discipline right now.</span></div>')+
+    '</div>';
   return h;
+};
+
+/* v3.38: the community desk had no handlers at all and an empty `after` in the registry. */
+CG.AFTER._deskCommunity = function(){
+  var b = document.getElementById("commSuspend");
+  if (b) b.addEventListener("click", function(){ CG.commSuspendPrompt(); });
+  document.querySelectorAll("[data-comm-lift]").forEach(function(x){
+    x.addEventListener("click", function(){
+      CG.liftUserSuspension(this.getAttribute("data-comm-lift"), this.getAttribute("data-name"));
+    });
+  });
+};
+
+/* Pick the member, then hand off to the ONE suspension modal the site already has
+   (CG.suspendUser, the same one Users & roles opens) rather than writing a second one that would
+   drift from it. The picker covers the whole league, because a chat violation is not limited to
+   rostered players. */
+CG.commSuspendPrompt = function(){
+  CG.modal("Suspend a member",
+    '<p class="caption" style="margin-bottom:12px">For conduct in the Discord (Rule 7.1). Pick the member, then set the length and the reason.</p>'+
+    CG.memberPickerField("commSusWho","Member","Start typing a name. Anyone in the league, rostered or not."),
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="commSusNext">Next</button>');
+  CG.wireMemberPicker("commSusWho");
+  document.getElementById("commSusNext").addEventListener("click", function(){
+    var who = CG.readMemberPicker("commSusWho");
+    if (!who.id){ CG.toast("Pick a member from the list so the suspension attaches to the right person","err"); return; }
+    if (CG.closeOverlay) CG.closeOverlay();
+    CG.suspendUser(who.id, who.name);
+  });
 };
 
 /* ---------------------------------------------------------------- *
@@ -895,7 +964,7 @@ CG.STAFF_DESKS = [
   { key:"opsdesk",     dept:"operations",   label:"Operations desk",    icon:"cal",    render:function(){ return CG.deskOperations(); },   after:function(){ CG.AFTER._deskOperations(); } },
   { key:"draftroom",   dept:"draft",        label:"Draft room",         icon:"play",   render:function(){ return CG.deskDraftRoom(); },    after:function(){ CG.AFTER._admDraft(); } },
   { key:"transdesk",   dept:"transactions", label:"Transactions desk",  icon:"swap",   render:function(){ return CG.deskTransactions(); }, after:function(){ CG.AFTER._deskTransactions(); } },
-  { key:"community",   dept:"community",    label:"Community desk",     icon:"users",  render:function(){ return CG.deskCommunity(); },    after:function(){ } },
+  { key:"community",   dept:"community",    label:"Community desk",     icon:"users",  render:function(){ return CG.deskCommunity(); },    after:function(){ CG.AFTER._deskCommunity(); } },
   { key:"statsmgr",    dept:"statistics",   label:"Stats manager",      icon:"chart",  render:function(qs){ return CG.hubStatsManager(qs); }, after:function(qs){ CG.AFTER._statsMgr(qs); } },
   { key:"newsroom",    dept:"media",        label:"Newsroom",           icon:"doc",    render:function(){ return CG.deskNewsroom(); },     after:function(){ CG.AFTER._admNewsLive(); CG.AFTER._admRankings(); } }
 ];
