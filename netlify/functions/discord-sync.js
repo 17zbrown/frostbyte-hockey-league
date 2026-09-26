@@ -1873,6 +1873,37 @@ export async function runOp(name) {
   try { return { status: 200, body: await ops[name]() }; }
   catch (e) { return { status: 500, body: { diagError: String(e.message || e) } }; }
 }
+/* v3.44: read a league channel's recent messages. The league's own bot, the league's own channels,
+   key-gated at the door like every other op, and read-only: no argument of this function can write.
+   Written because reconstructing a chain of events from #trade-block and #transactions had NO path
+   at all. A webhook is write-only, pg_net clears delivered rows so a sent post leaves no local copy,
+   and block listings stopped writing club notices in v2.72. The channel itself was the only record
+   and nothing could read it. Ordered newest first, exactly as Discord returns it. */
+export async function readChannel({ id, limit = 50, before = null } = {}) {
+  if (!BOT || !GUILD) return { skipped: "Discord bot not configured" };
+  if (!id || !/^\d{5,25}$/.test(String(id))) return { error: "Give a channel id" };
+  const n = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
+  const q = new URLSearchParams({ limit: String(n) });
+  if (before && /^\d{5,25}$/.test(String(before))) q.set("before", String(before));
+  const ch = await dApi("GET", `/channels/${id}`);
+  if (ch && ch.guild_id && String(ch.guild_id) !== String(GUILD)) {
+    return { error: "That channel is not in this guild" };   /* the bot only reads its own league */
+  }
+  const msgs = await dApi("GET", `/channels/${id}/messages?${q.toString()}`);
+  return {
+    channel: { id: ch && ch.id, name: ch && ch.name },
+    count: (msgs || []).length,
+    messages: (msgs || []).map((m) => ({
+      id: m.id,
+      at: m.timestamp,
+      author: (m.author && (m.author.global_name || m.author.username)) || null,
+      viaWebhook: !!m.webhook_id,
+      content: m.content || "",
+      embeds: (m.embeds || []).map((e) => [e.title, e.description].filter(Boolean).join(" :: ")),
+    })),
+  };
+}
+
 export const ops = {
   // Register the guild slash commands (idempotent bulk-overwrite). Only /join is advertised — this
   // replaces the old /lfg. (The handler still accepts an "lfg" name as a harmless safety net.)

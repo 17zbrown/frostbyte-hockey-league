@@ -7,6 +7,7 @@
 // there is still exactly one implementation of every op — this file only routes and gates.
 //
 //   GET  /api/discord-ops?diag=guild|staff|teamrooms|rolecheck   read-only diagnostics
+//   GET  /api/discord-ops?read=channel&id=…&limit=…&before=…     read a channel's recent messages
 //   GET  /api/discord-ops?register=commands                      (re)register the guild slash commands
 //   GET  /api/discord-ops?setup=community|staffmod               one-shot guild configuration
 //   GET  /api/discord-ops?reconcile=teams                        prune/provision the Team Rooms
@@ -28,7 +29,7 @@
 //
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (SUPABASE_ANON_KEY
 // as the apikey for session checks when set). Node 18+.
-import { OPS_ROUTES, runOp, opsKeyOk, runSweep } from "./discord-sync.js";
+import { OPS_ROUTES, runOp, opsKeyOk, runSweep, readChannel } from "./discord-sync.js";
 import { runAvailabilityReminder, runLineupReminder, runServerPickReminder, runGameNight } from "./discord-scheduler.js";
 
 const SB_URL = process.env.SUPABASE_URL;
@@ -86,6 +87,13 @@ export default async (req) => {
   if (params.get("post") === "game-night") {
     if (!(await opsKeyOk(req))) return notFound();
     return json(await runGameNight({ dry: params.get("dry") === "1" }));
+  }
+
+  /* v3.44: read a channel's recent messages, for reconstructing a chain of events from the
+     league's own record. Read-only and key-gated; it refuses a channel outside this guild. */
+  if (params.get("read") === "channel") {
+    if (!(await opsKeyOk(req))) return notFound();
+    return json(await readChannel({ id: params.get("id"), limit: params.get("limit"), before: params.get("before") }));
   }
 
   /* everything else is an op from the routing table, key-gated */
