@@ -13199,6 +13199,80 @@ CG.tPicks = function(code){
 };
 CG.pickLabel = function(k){ return k?("’"+String(k.season).slice(-2)+" R"+k.round+(k.origCode&&k.origCode!==k.ownerCode?" (via "+k.origCode+")":"")):"pick"; };
 CG.refreshTrades = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){ if(location.hash.indexOf("/tradehub")>=0 && CG.router) CG.router(); }); };
+/* ---- the league-wide trade block (v3.36) ---------------------------------------------------
+   Commissioner, 2026-09-26: "add a place in the Trade Hub of the team HQ where teams can see a list
+   of players on the trade blocks across the league."
+   A listing has always been public on purpose: putting a player on the block posts him to
+   #trade-block. But that channel was the ONLY place to read one, and it is a running log, so a
+   player listed and later unlisted leaves his post sitting there and a club that listed somebody
+   last week is invisible below the scroll. The flag lives on the roster spot and every club's spots
+   are already loaded (p.onBlock), so this is a view over data the browser is holding, not a new read.
+   It sits directly above Build a trade, because Add to trade drops the player into the builder below. */
+CG.blockListings = function(){
+  return (CG.lg.players||[]).filter(function(p){
+    /* the same three exclusions as CG.tRoster: management cannot be traded (Rule 2.6), and a
+       pre-season loan is not the club's asset to trade. A listing on either is a stale flag. */
+    return p && p.onBlock && !p.mgmt && p.origin !== "preseason_random";
+  });
+};
+CG.tradeBlockCard = function(club){
+  var lg = CG.lg, d = CG.liveTrade(), listed = CG.blockListings();
+  var mine = listed.filter(function(p){ return p.team === club; });
+  var league = listed.filter(function(p){ return p.team !== club; }).sort(function(a, b){
+    return (b.overall || 0) - (a.overall || 0) || String(a.team).localeCompare(String(b.team));
+  });
+  var clubs = {}; league.forEach(function(p){ clubs[p.team] = 1; });
+  var nClubs = Object.keys(clubs).length;
+
+  var head = '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Trade block</h3>'+
+    '<span class="chip '+(league.length?'chip-chrome':'')+'">'+league.length+' listed'+
+    (nClubs?' by '+nClubs+' club'+(nClubs===1?'':'s'):'')+'</span></div>';
+
+  var yours = '<div class="card-b" style="border-bottom:1px solid var(--line)">'+
+    '<span class="caption">Your listings, as the rest of the league sees them</span>'+
+    (mine.length
+      ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+mine.map(function(p){
+          return '<span class="chip" title="'+esc((CG.POS_NAME[p.pos]||p.pos)+' · '+CG.fmtMoney(p.salary))+'">'+esc(p.tag)+' <span class="mono" style="opacity:.7">'+esc(p.pos)+'</span></span>';
+        }).join("")+'</div>'
+      : '<p class="caption" style="margin-top:6px">You have nobody listed.</p>')+
+    '<p class="caption" style="margin-top:8px">List a player, or take one off, from the '+
+      '<a href="#/hub/roster" style="border-bottom:2px solid var(--chrome);font-weight:600">Roster tab</a>. '+
+      'A listing is public: it is posted to #trade-block and appears here for every club. An offer is not '+
+      '(Rule 2.3).</p></div>';
+
+  var body;
+  if (!league.length){
+    body = '<div class="card-b"><p class="small" style="color:var(--steel)">No other club is listing anybody right now. '+
+      'When one does, the player shows up here the moment the listing is made.</p></div>';
+  } else {
+    body = '<div class="tblwrap"><table class="tbl keepcols">'+
+      '<caption class="sr">Players listed on the trade block across the league</caption><thead><tr>'+
+      '<th class="tleft">Player</th><th>Club</th><th>Pos</th><th>OVR</th><th class="tleft">This season</th>'+
+      '<th>Cap hit</th><th class="tright">Action</th></tr></thead><tbody>'+
+      league.map(function(p){
+        var mv = CG.canMovePlayer(p), st = CG.tradeStats(p.id);
+        var already = d.reqP.indexOf(p.id) >= 0 && d.partner === p.team;
+        var btn;
+        if (mv){
+          btn = '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</button>';
+        } else if (already){
+          btn = '<span class="chip chip-win">In your draft</span>';
+        } else {
+          btn = '<button class="btn btn-chrome btn-sm" data-block-get="'+p.id+'" data-block-club="'+esc(p.team)+'">Add to trade</button>';
+        }
+        return '<tr><td class="tleft"><span class="playercell"><span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span>'+
+            (CG.isCamp(p) ? ' '+CG.campChip("xs") : '')+'</span></td>'+
+          '<td><span class="teamcell" style="justify-content:center">'+CG.crest(p.team,18)+
+            '<span class="mono" style="font-size:11px">'+esc((CG.TEAM[p.team]||{}).code || p.team)+'</span></span></td>'+
+          '<td class="tnum">'+esc(p.pos)+'</td>'+
+          '<td class="tnum">'+(p.overall == null ? '<span class="caption">—</span>' : p.overall)+'</td>'+
+          '<td class="tleft"><span class="caption">'+esc(st.line)+'</span></td>'+
+          '<td class="tnum">'+CG.fmtMoney(p.salary)+'</td>'+
+          '<td class="tright">'+btn+'</td></tr>';
+      }).join("")+'</tbody></table></div>';
+  }
+  return head + yours + body + '</div>';
+};
 CG.hubTradeHubLive = function(qs){
   var lg=CG.lg, club=CG.myClub(), t=CG.TEAM[club], d=CG.liveTrade();
   var myTid=(lg._codeToId||{})[club], trades=lg._myTrades||[];
@@ -13260,7 +13334,7 @@ CG.hubTradeHubLive = function(qs){
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
     '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
   '</div></div>';
-  return h+inc+outCard+build;
+  return h+inc+outCard+CG.tradeBlockCard(club)+build;
 };
 /* ================================================================
    TRADE INTEL (v2.72): every trade opens to its players' numbers, with a balance reading
@@ -13453,6 +13527,18 @@ CG.AFTER._tradehubLive = function(qs){
   var ao=document.getElementById("tradeAddOff"); if(ao) ao.addEventListener("click", function(){ CG.tradePicker("off"); });
   var ar=document.getElementById("tradeAddReq"); if(ar) ar.addEventListener("click", function(){ CG.tradePicker("recv"); });
   document.querySelectorAll("[data-trade-rm]").forEach(function(b){ b.addEventListener("click", function(){ var parts=this.getAttribute("data-trade-rm").split(":"), d=CG.liveTrade(), map={offp:"offP",offk:"offK",reqp:"reqP",reqk:"reqK"}, arr=d[map[parts[0]]]; if(arr){ var i=arr.indexOf(parts[1]); if(i>=0) arr.splice(i,1); } CG.router(); }); });
+  /* v3.36: Add to trade, from the league-wide block board. It sets the partner and drops the player
+     on THEIR side of the builder directly below. Switching partner clears the other club's side, the
+     same way the partner dropdown does, because a draft that mixes two clubs' players cannot be sent. */
+  document.querySelectorAll("[data-block-get]").forEach(function(b){ b.addEventListener("click", function(){
+    var pid=this.getAttribute("data-block-get"), code=this.getAttribute("data-block-club"), d=CG.liveTrade();
+    var p=CG.tPlayer(pid); if(!p){ CG.toast("That player is no longer on a roster — reload","err"); return; }
+    var mv=CG.canMovePlayer(p); if(mv){ CG.toast(mv.text,"err"); return; }
+    if(d.partner!==code){ d.reqP=[]; d.reqK=[]; CG._counteringId=null; d.partner=code; }
+    if(d.reqP.indexOf(pid)<0) d.reqP.push(pid);
+    CG.toast(p.tag+" added — "+((CG.TEAM[code]||{}).name||code)+" send", "ok");
+    CG.router();
+  }); });
   var clr=document.getElementById("tradeClear"); if(clr) clr.addEventListener("click", function(){ CG._liveTrade={partner:null,offP:[],reqP:[],offK:[],reqK:[],ret:{}}; CG._counteringId=null; CG.router(); });
   var pr=document.getElementById("tradePropose"); if(pr) pr.addEventListener("click", CG.proposeTrade);
   document.querySelectorAll("[data-trade-accept]").forEach(function(b){ b.addEventListener("click", function(){ CG.acceptTrade(this.getAttribute("data-trade-accept")); }); });

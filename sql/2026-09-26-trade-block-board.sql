@@ -1,0 +1,77 @@
+-- v3.36: the league's trade block, in the Trade Hub. No database change.
+--
+-- Commissioner, 2026-09-26: "add a place in the Trade Hub of the team HQ where teams can see a list
+--  of players on the trade blocks across the league."
+--
+-- Recorded here rather than in a migration because the whole point is that NOTHING in the database
+-- had to change, and the reason is worth keeping.
+--
+-- ============================================================================
+-- THE DATA WAS ALREADY IN EVERY BROWSER
+-- ============================================================================
+-- roster_spots.on_block is the flag, and roster_spots carries the policy "rosters readable by all",
+-- so every club's spots load for every visitor. part_live.js already mapped it onto every player as
+-- p.onBlock when it built the league. So this is a VIEW over data the browser was holding and
+-- throwing away, not a new read, and it needs no RPC, no policy and no column.
+--
+-- 21 players were listed across 6 clubs at the time it shipped, and none of them was visible
+-- anywhere on the site.
+--
+-- ============================================================================
+-- WHY THE CHANNEL WAS NOT ENOUGH
+-- ============================================================================
+-- Listing a player posts him to #trade-block, and that has always been the intent: a listing is
+-- public, which v3.35 left deliberately untouched when it made OFFERS private. But a channel is a
+-- running log, not a list. A player listed last week sits below the scroll, and a player listed and
+-- then taken off leaves his post sitting there for good. Neither answers "who is available now".
+--
+-- ============================================================================
+-- THE CARD
+-- ============================================================================
+-- CG.blockListings() + CG.tradeBlockCard(club) in part_live.js, rendered by CG.hubTradeHubLive
+-- BETWEEN "Offers you've sent" and "Build a trade", because Add to trade drops the player into the
+-- builder immediately below it.
+--
+-- Three exclusions, the same ones CG.tRoster applies, because a row you cannot act on is worse than
+-- no row:
+--   * the viewer's own club, which gets its own line ("as the rest of the league sees them")
+--   * management, which cannot be traded at all (Rule 2.6)
+--   * pre-season loans, which are not the club's asset to trade
+-- A listing on either of the last two was only ever a stale flag.
+--
+-- Rule 2.4 minimum service is shown, not discovered later: a player short of his three
+-- regular-season games gets a disabled button reading "2 of 3 GP" with the full reason on hover,
+-- exactly as the existing trade picker does. The click handler re-checks it, because a board can be
+-- stale and a disabled button is a hint rather than a guarantee.
+--
+-- Add to trade sets the partner and pushes the player onto THEIR side of the draft. Switching to a
+-- player from a different club CLEARS the other club's side first, the same thing the partner
+-- dropdown already does: a draft holding two clubs' players cannot be sent, and silently mixing them
+-- would fail at propose time with nothing to explain it.
+--
+-- It is a .tbl keepcols inside a .tblwrap, so v3.12's per-heading sorting and the v2.49 phone layer
+-- both apply without a line of new CSS.
+--
+-- ============================================================================
+-- VERIFIED IN A BROWSER, NOT ONLY IN A TEST
+-- ============================================================================
+-- Built against tools/demo/mgmt_layer.js (the live build on a stub session) and driven:
+--   * the card renders, chip reads "12 listed by 6 clubs", 7 live buttons and 5 disabled on
+--     minimum service
+--   * clicking one set partner=POL, put VelvetHands on their side, redrew his row as "In your
+--     draft" and relabelled the button "Propose to POL"
+--   * clicking a player from another club REPLACED the side rather than appending: partner=AUR,
+--     one player, not two
+--   * at 375px: no horizontal page scroll, the table scrolls inside its own wrap, the card and both
+--     chip rows stay inside the viewport
+--
+-- Test: tools/trade-block-board.test.cjs runs the SHIPPED CG.tradeBlockCard out of index.html
+-- against a made-up league, because the value of this card is entirely in who it includes and who it
+-- leaves out. One assertion in the first draft was written backwards ("a camp player carries the
+-- camp chip" asserted the chip was ABSENT, and passed because the fixture had no camp player). It
+-- was replaced with a fixture that has one.
+--
+-- Rulebook: Rule 2.3 gained a paragraph. The book had never mentioned the trade block at all, and
+-- after v3.35 made offers private a member could fairly ask why his name is on a public list. It now
+-- says a listing is the one part of a trade that is public before it is made, what it shows, and
+-- that it obliges nobody.
