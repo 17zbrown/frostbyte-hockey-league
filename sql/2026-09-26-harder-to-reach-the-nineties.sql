@@ -1,0 +1,70 @@
+-- v3.47: it is harder to reach the 90s, and much harder to pass 95.
+--
+-- Commissioner, 2026-09-26: "lets adjust the difficulty to reach the 90 overall score especially
+--  95+. I want it to be harder to reach the 90's."
+--
+-- ============================================================================
+-- MEASURED FIRST. EVERY 90 IN THE LEAGUE WAS A GOALTENDER.
+-- ============================================================================
+-- Before: 75 players with three or more games. Three at 90 or above, two at 95 or above, and all
+-- three were goalies. The best skater in the league was 87.
+--     lxlbmac24lxl   G  99   .952 SV%, 1.00 GAA, 0.33 SO/gp, 100% on breakaways, 3 games
+--     Ferdzyyyyyyy   G  96   .885 SV%, 2.00 GAA, 0.33 SO/gp, 100% on breakaways, 3 games
+--     the16thgunner  G  90
+-- The first of those held a PERFECT component score: 100 on all four. That is the shape of the
+-- problem, and it is not a curve problem alone: three of the four goalie components saturate on an
+-- ordinary good week.
+--
+-- ============================================================================
+-- FOUR ANCHORS, THEN THE CURVE
+-- ============================================================================
+-- A component scores 100 when it reaches its anchor. The goalie anchors described a good night
+-- rather than an elite season:
+--     save %        .920 was a perfect score  ->  .950
+--     GAA           2.00 was a perfect score  ->  1.20
+--     shutouts      0.30 per game was perfect ->  0.50
+--     breakaways    ANY sample scored in full ->  under five attempts it reads neutral (60)
+-- The last one mattered most for its size: a goalie who faced two breakaways and stopped both took
+-- the whole 12% weight at 100. Two shots is not evidence.
+--
+-- The skater anchors were NOT touched. No skater was near 90, so tightening them would have punished
+-- the wrong players for a problem they did not cause.
+--
+-- Then the top of the curve. It was linear: raw = 40 + score*0.59, every point worth the same
+-- everywhere. public._ovr_curve stretches the distance above a knee:
+--     raw <= 88   unchanged
+--     raw >  88   88 + (raw-88)^1.55 / 11^0.55
+-- Continuous at the knee and fixed at the ceiling, both asserted: 88 maps to 88 and 99 to 99. What
+-- changes is the middle. A raw 93 now reads 91, a raw 96 reads 95. Each further point of performance
+-- buys less rating, which is exactly "harder to reach the 90s, especially 95+".
+--
+-- ============================================================================
+-- AFTER
+-- ============================================================================
+--     at 90 or above     3  ->  1
+--     at 95 or above     2  ->  0
+--     league average    72.6 -> 72.6   (unchanged)
+--     players moved at all: 12 of 75. The bottom of the league did not move one point.
+-- Top eight now: 93 G, 88 G, 87, 87, 87, 87, 86, 86. The league's best goalie is a 93 on a .952 and
+-- a 1.00 GAA, which is what a 93 should look like.
+--
+-- ============================================================================
+-- THE TRAP THAT ATE THE FIRST APPLY
+-- ============================================================================
+-- The first refresh reported "104 refreshed" and changed NOTHING. profiles carries
+-- guard_profile_role, a BEFORE UPDATE trigger that silently reverts overall (and role, banned,
+-- departments, in_guild, discord_id) unless the writer is trusted_writer() or is_commissioner().
+-- The refresh transaction had never set request.jwt.claims, so every write was reverted in place, and
+-- the count I printed was the number of FUNCTION CALLS, not the number of rows that changed.
+-- The second pass asserts is_commissioner() up front and counts rows whose value actually moved,
+-- raising if that count is zero. Count what changed, never what you attempted.
+--
+-- ============================================================================
+-- NO RULEBOOK CHANGE, AND THAT WAS CHECKED
+-- ============================================================================
+-- The book says ratings "are compiled from regular-season play" (Rule 0.4) and never states the
+-- formula, the anchors or the curve. A rating is a tool the league publishes, not a rule it is bound
+-- by, so there is nothing in the book that this contradicts. The client carries no twin of the
+-- formula either: it reads the number from the database and explains the three-game settle in copy
+-- that is still accurate. The one client-side scale that touches save percentage is the goalie radar
+-- in part5a_public.js, which already ran to .95 and now agrees with the anchor by accident.
