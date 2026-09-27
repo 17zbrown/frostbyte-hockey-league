@@ -11727,7 +11727,7 @@ CG.declareForfeitPrompt = function(id){
 CG.admRatingsLive = function(){
   var lg = CG.lg;
   var list = lg.players.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr||0)-(lg.ratings[a.id].ovr||0); });
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from EA box scores after every final, position-weighted, regressed while samples are small. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from CGHL box scores after every final, each player measured against the league at his position, held toward 70 until his fifth game. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
     '<div class="card"><div class="card-h"><h3>Current overalls</h3><span class="chip">'+list.length+' rostered</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>Rostered players by overall</caption><thead><tr><th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>GP</th><th>OVR</th></tr></thead><tbody>'+
     list.map(function(p){ var s=lg.pstats[p.id];
@@ -11736,7 +11736,7 @@ CG.admRatingsLive = function(){
         '<td class="tnum">'+p.pos+'</td><td class="tleft">'+esc(CG.TEAM[p.team].code)+'</td><td>'+(s?s.gp:0)+'</td>'+
         '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">New players open at 70 and blend onto their computed rating across their first three games (overall_breakdown returns a provisional flag until then). The formula lives in the database (compute_overall) and reruns after every final. A commissioner CAN override a single rating from Users &amp; roles; nothing else hand-edits one.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">A rating is held toward 70 until a player’s fifth game (player_rating returns a provisional flag until then). The engine lives in the database (the cghl_* functions, v3.49): every stat is scored against the league’s own distribution at the player’s position, weighted into Shooting, Passing, Hand-eye, Physicality and Defense (Reflexes, Consistency and Clutchness for goaltenders), and the composite is placed on a 50 to 99 curve where the league median is 70 and 90 sits two standard deviations clear. It reruns for everyone after every final. A commissioner CAN override a single rating from Users &amp; roles; nothing else hand-edits one.</span></div></div>';
 };
 
 /* ================================================================

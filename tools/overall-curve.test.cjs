@@ -77,8 +77,8 @@ console.log("\n— no rulebook change, and it was checked");
   A("...and never states the formula", !/0\.59/.test(all) && !/save percentage of \./.test(all));
   A("the record says it checked", /NO RULEBOOK CHANGE, AND THAT WAS CHECKED/.test(flat));
   A("the client carries no twin", /The client carries no twin of the formula either/.test(flat));
-  A("...and the client copy is still true",
-    /New players open at 70 and blend onto their computed rating across their first three games/.test(R("src/live/part_live.js")));
+  A("...and the client copy of the day was true (superseded by v3.49, which the record says)",
+    /A rating is held toward 70 until a player’s fifth game/.test(R("src/live/part_live.js")));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.47"));
   A("no em dash or spaced hyphen", !/—/.test(rec) && !/ - /.test(rec));
 }

@@ -1,8 +1,9 @@
-/* The overall is provisional until five games — and now says so.
+/* The overall is provisional until five games, and says so.
    Run: node tools/ovr-provisional.test.cjs
 
-   The database blends it:  70 * (1 - gp/5) + computed * (gp/5), flagging provisional while gp < 5
-   (public.overall_breakdown). Season 1 opens with every player at a literal 70 and zero games, so
+   v3.49: the database holds a rating toward 70 by shrinking its standard score while the sample is
+   thin (public.cghl_confidence), and flags provisional while gp < 5 (public.cghl_settle_gp). Season 1
+   opened with every player at a literal 70 and zero games, so
    without a heads-up the badge reads as a scouting verdict on someone who has never taken a shift
    — and the surrounding copy actually claimed it WAS one ("the staff scouting number from
    registration"), which was never true: registration collects an EA ID, a position and a note. */
@@ -25,22 +26,24 @@ console.log("— the progress helper, driven");
     if (!m) { A("located CG." + fn, false); process.exit(1); }
     vm.runInContext(m[0], ctx);
   }
-  A("the threshold matches the database's three (v2.46)", ctx.CG.OVR_SETTLE_GP === 3);
+  A("the threshold matches the database's five (cghl_settle_gp, v3.49)", ctx.CG.OVR_SETTLE_GP === 5);
   const at = (gp) => { ctx.CG.lg = { careerGp: { p: gp } }; return ctx.CG.ovrProgress("p"); };
-  A("zero games: provisional, three to go", at(0).provisional && at(0).need === 3);
-  A("two games: provisional, one to go", at(2).provisional && at(2).need === 1);
-  A("three games: settled", at(3).provisional === false && at(3).need === 0);
+  A("zero games: provisional, five to go", at(0).provisional && at(0).need === 5);
+  A("two games: provisional, three to go", at(2).provisional && at(2).need === 3);
+  A("four games: still provisional", at(4).provisional && at(4).need === 1);
+  A("five games: settled", at(5).provisional === false && at(5).need === 0);
   A("more than five stays settled", at(40).provisional === false);
   A("an unknown player is treated as zero, not as settled", (() => {
     ctx.CG.lg = { careerGp: {} }; return ctx.CG.ovrProgress("nobody").provisional === true;
   })());
-  A("no league object never throws", (() => { ctx.CG.lg = null; return ctx.CG.ovrProgress("p").need === 3; })());
+  A("no league object never throws", (() => { ctx.CG.lg = null; return ctx.CG.ovrProgress("p").need === 5; })());
 
   ctx.CG.lg = { careerGp: { p: 2 } };
-  A("the note counts up, not down — '2 of 3 games'", /2 of 3 games/.test(ctx.CG.ovrNote("p")));
+  A("the note counts up, not down: '2 of 5 games'", /2 of 5 games/.test(ctx.CG.ovrNote("p")));
   A("...and says the word provisional", /Provisional/.test(ctx.CG.ovrNote("p")));
   A("...the chip form is compact", /chip-warn/.test(ctx.CG.ovrNote("p", "chip")));
-  A("...the title form explains WHY it is 70", /open at 70 and settle/.test(ctx.CG.ovrNote("p", "title")));
+  A("...the title form explains WHY it is near 70", /held toward 70 until the fifth game/.test(ctx.CG.ovrNote("p", "title")));
+  A("...without a dash as punctuation", !/—/.test(ctx.CG.ovrNote("p", "title")) && !/ - /.test(ctx.CG.ovrNote("p", "title")));
   ctx.CG.lg = { careerGp: { p: 9 } };
   A("a settled player gets no note at all", ctx.CG.ovrNote("p") === "" && ctx.CG.ovrNote("p", "chip") === "");
 }
@@ -58,7 +61,8 @@ console.log("\n— the copy no longer claims it is a scouting number");
 {
   A("the false 'scouting number from registration' line is gone", !/staff scouting number from registration/.test(pub));
   A("...and the other one too", !/The overall itself is the staff scouting number/.test(pub));
-  A("the directory explains the real rule", /Overalls open at 70 and settle onto a player's real rating over his first three games/.test(pub));
+  A("the directory explains the real rule", /measures a player against the league at his position from CGHL box scores alone, and stays pulled toward 70 until his fifth game/.test(pub));
+  A("...and nothing still says three games", !/settle[s]? onto (a player's|the) real rating (over|across) (his first )?three games/.test(pub) && !/first three games/.test(live));
   A("the profile says it is recomputed after every final", /recomputed after every final/.test(pub));
   A("the Control Center no longer claims nothing hand-edits a rating",
     !/the site never hand-edits a rating/.test(live) && /A commissioner CAN override a single rating/.test(live));

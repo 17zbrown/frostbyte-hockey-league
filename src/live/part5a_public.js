@@ -2210,7 +2210,7 @@ CG.ROUTES.players = function(param, qs){
   var nRostered = lg.players.length;
   var head = CG.pageHead("Player directory","Every skater. Every tendy.",
     esc((nRostered+unrostered.length)+" players — "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
-      "Overalls open at 70 and settle onto a player's real rating over his first three games; games, points, and save percentage come straight from EA box scores."));
+      "An overall measures a player against the league at his position from CGHL box scores alone, and stays pulled toward 70 until his fifth game; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
     '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+
@@ -2377,8 +2377,9 @@ CG.ROUTES.player = function(pid, qs){
             : '<span class="chip chip-loss">Suspended</span>') : "")+
         '</div></div>'+
       /* OVR comes from profiles.overall, which the database recomputes after every final
-         (compute_overall). It OPENS at 70 and blends onto the real rating across three games, so
-         until then the badge is shown with how far along it is rather than bare — see CG.ovrNote. */
+         (refresh_player_overall, on the v3.49 cghl_* engine). Until a player's fifth game the number
+         is held toward 70, so the badge is shown with how far along it is rather than bare; see
+         CG.ovrNote. */
       '<div class="hero-ovr" style="text-align:center" title="'+esc(CG.ovrNote(p.id,"title"))+'">'+
         '<span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink)">Overall</span>'+
@@ -2402,19 +2403,17 @@ CG.ROUTES.player = function(pid, qs){
       ? '<div class="card"><div class="card-h"><h3>'+esc(SD.label)+'</h3><span class="chip">Final</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">This season is archived — the line above is final and read-only. Overall ratings are computed per season, so archived seasons keep their stat lines while the rating on the header always reflects the current campaign.</p>'+
         '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/player/'+p.id+'">Back to the current season</a></div></div>'
-      /* the breakdown bars are computed from box scores. At zero games they read "Production 0 ·
-         Discipline 100" — a scouting verdict on a player who has never taken a shift, printed
-         right under a card that correctly says there are no conclusions yet. */
+      /* v3.49: the bars are the rating engine's own categories (player_rating, in the database),
+         fetched by CG.AFTER.player and painted into #ratingBreakBody so the page never resets. At zero
+         games there is nothing to break down, and saying so beats printing a verdict on a player who
+         has never taken a shift. */
       : (anyGp===0
         ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
           '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
-          'The '+r.ovr+' overall is recomputed after every final; it opens at 70 and settles onto the real rating across three games. Production, defense, and discipline bars '+
+          'The '+r.ovr+' overall is recomputed after every final and is held toward 70 until his fifth game. The category bars '+
           'appear here once box scores exist.</p></div></div>'
-        : '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
-        Object.keys(r.parts).map(function(k){
-          return '<div class="rbar"><span class="rb-lab">'+k+'</span><span class="rb-track"><span class="rb-fill" style="width:'+r.parts[k]+'%"></span></span><span class="rb-v num">'+r.parts[k]+'</span></div>';
-        }).join("")+
-        '<p class="caption" style="margin-top:10px">Bars are a weighted blend of recorded stats, regressed toward league average under small samples; the weights are commissioner-configurable. The overall is computed from the same box scores, opening at 70 and settling over five games.</p>'+
+        : '<div class="card" id="ratingBreak"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b" id="ratingBreakBody">'+
+          CG.ratingBars(r.bd, p.id)+
       '</div></div>');
     var scout = archived
       ? p.tag+" finished the preseason with "+(p.pos==="G"
@@ -2655,14 +2654,14 @@ CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
 CG.posGroupLabel = function(grp){
   return grp === "G" ? "goaltenders" : grp === "D" ? "defensemen" : "forwards";
 };
-/* How settled is a player's overall? The database blends it toward the real computed rating over
-   the first three games — overall_breakdown() returns exactly
-       70 * (1 - gp/3)  +  computed * (gp/3)
-   and flags provisional while gp < 3. Until then the number leans on the 70 everyone opens at, so
-   showing it bare invites the reader to treat a placeholder as a scouting verdict. We keep the
-   number (it is real, and it moves) and say how far along it is. Counted over every final game,
-   the same way the database counts it. */
-CG.OVR_SETTLE_GP = 3;   /* the database blends 70 → computed over this many games (was 5 through v2.45) */
+/* How settled is a player's overall? v3.49: the database rates a player against the league at his
+   position and shrinks that standard score toward zero (a rating of 70) while his sample is thin:
+   0.12 per game through four games, then gp/(gp+1.5) from the fifth (public.cghl_confidence). The
+   number is real and it moves, but until the fifth game it is deliberately held toward the middle,
+   so showing it bare invites the reader to treat a placeholder as a scouting verdict. We keep the
+   number and say how far along it is. Counted over every final game, the same way the database
+   counts it. Mirror of public.cghl_settle_gp(). */
+CG.OVR_SETTLE_GP = 5;   /* a rating is not fully earned until this many games (3 from v2.46 to v3.48) */
 CG.ovrProgress = function(pid){
   var gp = ((CG.lg && CG.lg.careerGp) || {})[pid] || 0;
   var need = Math.max(0, CG.OVR_SETTLE_GP - gp);
@@ -2674,10 +2673,25 @@ CG.ovrNote = function(pid, style){
   if (!pr.provisional) return "";
   var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games";
   if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + txt + '</span>';
-  if (style === "title") return "Provisional — " + txt + " played. Overalls open at 70 and settle onto the real rating over three games.";
+  if (style === "title") return "Provisional: " + txt + " played. A rating is held toward 70 until the fifth game, then measures the player against the league at his position.";
   /* the colour follows the SURFACE, not the call site: .caption is the light-card token and
      .hero-ovr .ovr-prov re-points it on the dark profile hero (part1_head.html) */
   return '<span class="caption ovr-prov" style="display:block;margin-top:4px">Provisional · ' + txt + '</span>';
+};
+/* v3.49: the Rating breakdown card's bars, from player_rating's breakdown. Each category is on
+   the same 50 to 99 scale as the overall, so the bar is drawn from 50 (empty) to 99 (full) and the
+   number beside it is the rating itself. No breakdown yet (first paint before the fetch lands, or a
+   player without a league game) gets one honest line rather than an empty card. */
+CG.ratingBars = function(bd, pid){
+  var comps = (bd && bd.components) || [];
+  if (!comps.length) return '<p class="small" style="color:var(--steel);line-height:1.65">Category ratings are computed from CGHL box scores after every final and appear here.</p>';
+  var pr = CG.ovrProgress(pid);
+  return comps.map(function(c){
+    var w = Math.max(0, Math.min(100, Math.round((c.score - 50) / 49 * 100)));
+    return '<div class="rbar"><span class="rb-lab">'+esc(c.label)+'</span><span class="rb-track"><span class="rb-fill" style="width:'+w+'%"></span></span><span class="rb-v num">'+c.score+'</span></div>';
+  }).join("")+
+  '<p class="caption" style="margin-top:10px">Each bar measures the player against the league at his position, from CGHL box scores alone, on the same 50 to 99 scale as the overall: the league median is 70 and the top tenth begins at 85.'+
+  (pr.provisional ? ' Held toward 70 until the fifth game ('+pr.gp+' of '+CG.OVR_SETTLE_GP+' played).' : '')+'</p>';
 };
 /* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
 CG.skaterDNA = function(s){
@@ -2903,6 +2917,22 @@ CG.AFTER.player = function(pid, qs){
   });
   var twC = $("#twChange");
   if (twC) twC.addEventListener("click", CG.setTwitchHandle);
+
+  /* v3.49: the Rating breakdown card's category bars come from the database engine (player_rating).
+     The cached breakdown paints instantly on a revisit and the fetch refreshes it in place; a final
+     since the last visit is the only thing that changes it. */
+  var rbb = document.getElementById("ratingBreakBody");
+  if (rbb && CG.sb){
+    var rt = CG.lg.ratings && CG.lg.ratings[pid];
+    var paintBd = function(bd){
+      if (!bd) return;
+      if (rt){ rt.bd = bd; rt.parts = {}; (bd.components||[]).forEach(function(c){ rt.parts[c.label] = c.score; }); }
+      var el = document.getElementById("ratingBreakBody"); if (el) el.innerHTML = CG.ratingBars(bd, pid);
+    };
+    CG.sb.rpc("player_rating", { p_profile: pid }).then(function(res){
+      if (res && !res.error && res.data) paintBd(res.data);
+    }, function(){});
+  }
 
   /* Pickup stats — into the Pickup Stats tab (rostered player) or the account-only section.
      Same league-style presentation via CG.renderPickupStats; runs only when a container exists. */
