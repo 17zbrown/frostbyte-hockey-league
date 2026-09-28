@@ -9400,6 +9400,8 @@ CG.hubManagement = function(){
                : "the Owner removes them first, then nominates the successor; ")+
     "an approval into a seat that is still held is refused and nothing moves. "+
     "A manager stays on the active roster for as long as he holds the seat, and a removed manager keeps his roster spot, his position and his number: only the seat ends (Rule 2.6). "+
+    /* v3.69 (commissioner, 2026-09-28, Q45): "Just the GM and AGM seats do. The Owner stays for now." */
+    "The GM and AGM seats end when the club’s season ends (out of the playoffs, eliminated, or the final played); the Owner’s seat continues. "+
     "Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</div>";
   return h;
 };
