@@ -2050,6 +2050,13 @@ function squadBtn(p){
     return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(sus))+'">'+CG.ic("lock",12)+' '+
       (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
   }
+  /* v3.61 (commissioner, 2026-09-28, Q29): "Management can never be sent to training camp, they must
+     stay on the active roster." The database refuses it for everyone (guard_squad_move); the button says
+     so before the click. A manager found in camp can still be called up. */
+  if (p.mgmt && p.squad!=="tc"){
+    return '<button class="btn btn-ghost btn-sm" disabled title="Management stays on the active roster: an Owner, GM or Assistant GM is never sent to training camp (Rule 2.6)">'+
+      CG.ic("lock",12)+' To camp</button>';
+  }
   var club = CG.myClub();
   var title = 'Squad changes are unlimited all season (Rule 2.1)';
   /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it

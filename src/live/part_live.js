@@ -9359,14 +9359,16 @@ CG.hubManagement = function(){
     h+=CG.appChatSection("management", a.id, {office:false});
   });
   h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
-    (m.isOwner ? "Nominate any player registered for the season who isn’t already under contract, on league staff, or holding a seat at another club — they don’t have to be on your roster. "
+    (m.isOwner ? (CG.seasonUnderway()
+                   ? "During the season you nominate from your own club: a player on your active roster or in your training camp, who isn’t on league staff (Rule 2.6). Between the end of the playoffs and the next draft you may nominate anyone signed up for the coming season. "
+                   : "It is the off-season, so you may nominate anyone signed up for the coming season who isn’t on league staff, on your club or not. Once the next draft starts, nominees come from your own roster (Rule 2.6). ")
                : "Only the club’s Owner nominates or removes a GM or AGM (Rule 2.6). ")+
     "The league office’s reviewers vote; on approval the nominee is seated automatically, and if denied nothing changes. "+
     "Each seat holds one person (Rule 2.6): to change a sitting GM or AGM, "+
     (m.isOwner ? "remove them first — that is your call alone, takes effect at once, and the league office is told — then nominate the successor; "
                : "the Owner removes them first, then nominates the successor; ")+
     "an approval into a seat that is still held is refused and nothing moves. "+
-    "A removed manager’s management contract ends with the seat, and a spot held only because of the seat is released with it. "+
+    "A manager stays on the active roster for as long as he holds the seat, and a removed manager keeps his roster spot, his position and his number: only the seat ends (Rule 2.6). "+
     "Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</div>";
   return h;
 };
@@ -9460,22 +9462,54 @@ CG.removeManager = function(role, name){
       });
     });
 };
+/* v3.61: the season window, mirroring the database's season_underway(). In season runs from the start of
+   a season's entry draft to the end of its playoffs; everything else is the off-season. CG.SEASON is the
+   active season when there is one, else the next season up, and its draft state is the one loaded. */
+CG.seasonUnderway = function(){
+  if (CG.SEASON && CG.SEASON.status==="active") return true;
+  var st = CG.lg && CG.lg.draftState;
+  return !!(st && ["live","paused","complete"].indexOf(st.status)>=0);
+};
+/* v3.61 (commissioner, 2026-09-28, Q27): the Owner may name a GM or AGM "as long as the named player is on
+   their roster. If it is the off season between the end of playoffs, and the draft of the next season, they
+   can freely sign anyone." In season the picker is the club's own roster and camp; the database refuses
+   anyone else (guard_mgmt_nominee). */
 CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
   var label = role==="gm"?"General Manager":"Assistant GM";
-  CG.modal("Nominate a "+label,
-    '<p class="caption" style="margin-bottom:12px">Pick any player signed up for the upcoming season who isn’t already under contract — they don’t have to be on your roster. The league office’s reviewers vote to approve the appointment.'+
+  var inSeason = CG.seasonUnderway();
+  var body;
+  if (inSeason){
+    var pool = ((CG.lg && CG.lg.byTeam && CG.lg.byTeam[m.club]) || []).filter(function(x){
+      return x.spotId && !x.mgmt && !(CG.isWaived && CG.isWaived(x.id));
+    }).sort(function(a,b){ return (a.squad==="tc")-(b.squad==="tc") || String(a.tag).localeCompare(String(b.tag)); });
+    if (!pool.length){ CG.toast("Nobody on your roster can take the seat right now","err"); return; }
+    body = '<p class="caption" style="margin-bottom:12px">During the season you name your '+label+' from your own club: a player on your active roster or in your training camp (Rule 2.6). '+
+      'A manager plays on the active roster, so a camp player you name comes up with the seat, and your active roster needs room for him in his position group. '+
+      'Between the end of the playoffs and the next draft you may name anyone signed up for the coming season. The league office’s reviewers vote to approve the appointment.</p>'+
+      '<label class="fld"><span>Player</span><select id="mgNomineeSel"><option value="">Pick a player on your club…</option>'+
+      pool.map(function(x){
+        return '<option value="'+esc(x.id)+'">'+esc(x.tag)+' · '+esc(x.pos)+(x.squad==="tc"?" · training camp":"")+'</option>';
+      }).join("")+'</select></label>';
+  } else {
+    body = '<p class="caption" style="margin-bottom:12px">It is the off-season, so you may name anyone signed up for the coming season, on your club or not (Rule 2.6). '+
+      'Once the next entry draft starts, a '+label+' is named from your own roster. The league office’s reviewers vote to approve the appointment.'+
       ' Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</p>'+
-    CG.memberPickerField("mgNominee","Player","Anyone registered for the season — start typing a gamertag")+
+      CG.memberPickerField("mgNominee","Player","Anyone signed up for the coming season. Start typing a gamertag");
+  }
+  CG.modal("Nominate a "+label,
+    body+
     '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
-  CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
+  if (!inSeason) CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
   var go = document.getElementById("mgGo");
   if (go) go.addEventListener("click", function(){
-    var pick = CG.readMemberPicker("mgNominee");
-    if(!pick || !pick.id){ CG.toast("Pick a member first","err"); return; }
+    var id = null;
+    if (inSeason){ id = ((document.getElementById("mgNomineeSel")||{}).value||"") || null; }
+    else { var pick = CG.readMemberPicker("mgNominee"); id = pick && pick.id; }
+    if(!id){ CG.toast(inSeason ? "Pick a player on your club first" : "Pick a member first","err"); return; }
     this.disabled = true;
-    CG.submitMgmtApp(role, pick.id, ((document.getElementById("mgPitch")||{}).value||"").trim()||null);
+    CG.submitMgmtApp(role, id, ((document.getElementById("mgPitch")||{}).value||"").trim()||null);
   });
 };
 CG.submitMgmtApp = function(role, nomineeId, pitch){
