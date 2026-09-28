@@ -877,7 +877,10 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
   };
   const clubBody = (tid) => {
     const team = teamById[tid] || {}, out = missByClub[tid] || [];
-    const head = `📋 **Week ${wk} availability closes ${closes}** (Rule 5.1, 90 minutes before the night's first puck drop).`;
+    /* v3.57 (Q41, commissioner: "game times will always stay the same"): the deadline is the fixed
+       7:30 PM Eastern on the week's first game day, which is how week_availability_deadline has always
+       computed it; the "90 minutes before" wording described a coincidence, not the rule. */
+    const head = `📋 **Week ${wk} availability closes ${closes}** (Rule 5.1: 7:30 PM Eastern on the week's first game day).`;
     const who = out.length
       ? `\nStill to answer (${out.length}): ` + out.map((m) => (m.discord_id ? `<@${m.discord_id}>` : m.gamertag)).join(" ")
         + `\nIt takes a minute, one answer per game: https://chelgamingleague.com/#/hub/availability`

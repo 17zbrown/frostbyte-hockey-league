@@ -628,11 +628,11 @@ CG.ROUTES.matchup = function(id){
          ["Periods","3 × 4:00"],
          ["Overtime","Continuous 4:00 periods — no shootout"],
          ["Sides","Match the site: the club listed Home selects Home, Away selects Away"],
-         ["Streaming", g.stage==="playoff" ? "Required — at least one stream per club" : "Optional in the regular season"]].map(function(kv){
+         ["Streaming", g.stage==="playoff" ? "Recommended, not required" : "Optional, recommended as evidence"]].map(function(kv){
           return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px"><span style="color:var(--steel)">'+kv[0]+'</span><b style="text-align:right">'+kv[1]+'</b></div>';
         }).join("")+
-        '<p class="caption" style="margin-top:10px">The server resolves from both clubs’ private picks 30 minutes before the night’s first puck drop — home names two choices, away holds a veto. Playoff games require at least one stream per club.'+
-        (g.stage==="playoff" ? ' Playoff rosters: a skater may be dressed in at most three games of this series, a goaltender in six (Rule 8.3).' : '')+
+        '<p class="caption" style="margin-top:10px">The server resolves from both clubs’ private picks 30 minutes before the night’s first puck drop — home names two choices, away holds a veto. Streaming is not required, in the playoffs or out of them, but a stream is the best evidence if anything illegal needs catching (Rule 6.2, commissioner, 2026-09-28).'+
+        (g.stage==="playoff" ? ' Playoff rosters: no player may be dressed in more than '+(CG.seriesCap ? CG.seriesCap({}) : 4)+' games of this series (Rule 8.3).' : '')+
         ' <a href="#/rulebook?rule=4.1" style="border-bottom:2px solid var(--chrome);font-weight:600">Rule 4 →</a></p></div></div>'+
       '<div class="card"><div class="card-h"><h3>Broadcast</h3>'+(g.feature?'<span class="chip chip-live"><span class="live-dot"></span>Twitch flag armed</span>':"")+'</div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel)">'+(g.feature?"Tonight’s marquee stream goes live 15 minutes before puck drop on the league channel. Twitch sync flags this card LIVE automatically the moment a rostered player starts streaming.":"No league stream scheduled — if a rostered player goes live on Twitch, this card flags LIVE automatically (5-minute sync).")+'</p>'+

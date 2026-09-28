@@ -11978,7 +11978,8 @@ CG.seasonForm = function(id){
       var regB = CG.gameNights(wedDay, shpS.weeks, shpS.nights, hKeys);
       var regStartB = regB.nights[0].wed, regEndB = regB.nights[regB.nights.length-1].fri;
       var poB = CG.gameNights(CG.dayAdd(regEndB,1), 1, shpS.nights, hKeys);
-      put("ssDraft",    CG.etISO(draftDay,"19:00"));
+      /* v3.57 (commissioner, 2026-09-28): "The draft shall be at 9PM." Auto-space wrote 7:00 PM. */
+      put("ssDraft",    CG.etISO(draftDay,"21:00"));
       put("ssRegDl",    CG.etISO(cutoffDay,"23:59"));
       put("ssStarts",   CG.etISO(regStartB,"21:00"));
       put("ssEnds",     CG.etISO(regEndB,"23:59"));
@@ -12023,7 +12024,7 @@ CG.seasonForm = function(id){
     var po = CG.gameNights(CG.dayAdd(regEnd,1), 1, shpS.nights, hKeys);
     if (offDay) put("ssOff", CG.etISO(offDay,"00:00"));
     put("ssPre",      CG.etISO(preStart,"21:00"));
-    put("ssDraft",    CG.etISO(draftDay,"19:00"));
+    put("ssDraft",    CG.etISO(draftDay,"21:00"));   /* v3.57: the draft is at 9 PM in either format */
     put("ssFaOpen",   CG.etISO(faOpenDay,"19:00"));
     put("ssFaClose",  CG.etISO(faCloseDay,"19:00"));
     put("ssStarts",   CG.etISO(regStart,"21:00"));
