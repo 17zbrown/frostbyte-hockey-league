@@ -1023,6 +1023,23 @@ CG.AFTER._lineup = function(){
     var cap = CG.gameCapFor(p, game), used = CG.weekGamesFor(p.id, game, club);
     /* v3.54: a recorded league-office exception for this player in this game lets him past it */
     if (used >= cap && !(CG.capExceptionFor && CG.capExceptionFor(game.id, p.id))) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already played or filed (Rule "+(game.stage==="playoff"?"8.3":"5.2")+"). Drop him from a game you have already dressed to free one.";
+    /* v3.65 (commissioner, 2026-09-28, Q14): "Roster players also must be prioritized in a lineup when
+       available." A camp player takes a spot only when no active-roster player of the same kind (goaltender
+       or skater) who said yes for this game, is not suspended and is within his limit is left out, counted
+       against the spots of that kind still open. set_game_lineup makes the same test on filing. */
+    if (p.squad==="tc"){
+      var goalSlot = pos==="G", kind = goalSlot ? ["G"] : ["LW","C","RW","LD","RD"];
+      var after = Object.assign({}, state.slots); after[pos] = p.id;
+      var onSheet = Object.values(after);
+      var open = kind.filter(function(s){ return !after[s]; }).length;
+      var left = (lg.byTeam[club]||[]).filter(function(x){
+        return x.squad!=="tc" && !CG.isWaived(x.id) && (goalSlot ? x.pos==="G" : x.pos!=="G") && onSheet.indexOf(x.id)<0 &&
+          avState(x)==="yes" && !lg.suspensions.some(function(s){ return s.playerId===x.id && s.status==="active"; }) &&
+          (CG.weekGamesFor(x.id, game, club) < CG.gameCapFor(x, game) || !!(CG.capExceptionFor && CG.capExceptionFor(game.id, x.id)));
+      });
+      if (left.length > open) return "Roster players come first (Rule 5.2): "+left.map(function(x){ return x.tag; }).join(", ")+(left.length===1?" is":" are")+
+        " available for this game and not in the lineup, so a training-camp player can’t take "+(goalSlot?"the goaltender’s":"a skater’s")+" spot. Dress "+(left.length===1?"him":"them")+" first.";
+    }
     return null;
   }
   function assign(pid, pos){
