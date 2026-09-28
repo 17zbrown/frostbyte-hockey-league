@@ -51,7 +51,14 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/profiles?id=eq.uid1")) return J([PROFILE]);
   if (u.includes("/rest/v1/games?id=eq.g1") && m === "GET") return J([GAME]);
   if (u.includes("/rest/v1/teams?id=in.")) return J(TEAMS);
-  if (u.includes("/rest/v1/ea_ingest_log") && m === "GET") return J(LOG);
+  if (u.includes("/rest/v1/ea_ingest_log") && m === "GET") {
+    /* v3.53: answer the two keyed reads by their keys (the restart reads the game's own sittings) */
+    const inM = u.match(/ea_match_id=in\.\(([^)]+)\)/);
+    if (inM) { const ids = decodeURIComponent(inM[1]).split(","); return J(LOG.filter((r) => ids.includes(r.ea_match_id))); }
+    const gm = u.match(/game_id=eq\.([^&]+)/);
+    if (gm) return J(LOG.filter((r) => r.game_id === gm[1]));
+    return J(LOG);
+  }
   if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") { writes.logPatches.push({ url: u, body: JSON.parse(opts.body) }); return J(null); }
   if (u.includes("/rest/v1/game_stats") && m === "DELETE") { writes.statDeletes++; return J(null); }
   if (u.includes("/rest/v1/game_stats") && m === "POST") { writes.statRows.push(...JSON.parse(opts.body)); return J(null); }
@@ -90,9 +97,10 @@ console.log("\n— candidates from the archive");
 
 console.log("\n— the merge");
 {
+  /* v3.53: sittings that add up to a full game (40 + 20 minutes), or the merge is held (below) */
   LOG = [
-    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 300) },
-    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 2, 1, true, 420) },
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 2400) },
+    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 2, 1, true, 1200) },
   ];
   const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
   A("the merge succeeds", res.ok === true && res.sittings === 2, JSON.stringify(res).slice(0, 100));
@@ -107,6 +115,55 @@ console.log("\n— the merge");
   A("provenance lands in the archive (first=ingested, rest=merged)",
     writes.logPatches.some((p) => p.url.includes("m1") && p.body.status === "ingested") &&
     writes.logPatches.some((p) => p.url.includes("m2") && p.body.status === "merged" && p.body.game_id === "g1"));
+}
+
+console.log("\n— v3.53: a manual merge short of a full, decided game is HELD, never published");
+{
+  for (const k of Object.keys(writes)) { if (Array.isArray(writes[k])) writes[k].length = 0; else writes[k] = 0; }
+  LOG = [
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 300) },
+    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 2, 1, true, 420) },
+  ];
+  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("the merge is accepted and says it is held", res.ok === true && res.held === true && /held until the rest of the game/.test(res.heldWhy || ""), JSON.stringify(res));
+  const gp = writes.gamePatches[0];
+  A("...the game carries no result", gp && gp.status === "scheduled" && gp.home_score === null && gp.away_score === null, JSON.stringify(gp));
+  A("...the box score is still written", writes.statRows.length > 0);
+  A("...and the first sitting is archived incomplete", writes.logPatches.some((p) => p.url.includes("m1") && p.body.status === "incomplete"));
+
+  /* level after sixty minutes: held for the overtime reload */
+  for (const k of Object.keys(writes)) { if (Array.isArray(writes[k])) writes[k].length = 0; else writes[k] = 0; }
+  LOG = [
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 2400) },
+    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 0, 1, false, 1200) },
+  ];
+  const lvl = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("level at sixty: held for the overtime reload", lvl.held === true && /overtime reload/.test(lvl.heldWhy || ""), JSON.stringify(lvl));
+
+  /* past sixty by one goal: an overtime result, read from the clock */
+  for (const k of Object.keys(writes)) { if (Array.isArray(writes[k])) writes[k].length = 0; else writes[k] = 0; }
+  LOG = [
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 1, false, 3600) },
+    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 1, 0, false, 300) },
+  ];
+  const ot = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("65 minutes, one goal: filed as an overtime result", ot.held === false && ot.wentOt === true && ot.inferredOt === true && writes.gamePatches[0].went_ot === true && writes.gamePatches[0].status === "final", JSON.stringify(ot));
+}
+
+console.log("\n— v3.53: a restarted game is re-filed from the restart alone (Rules 4.3 and 4.5)");
+{
+  for (const k of Object.keys(writes)) { if (Array.isArray(writes[k])) writes[k].length = 0; else writes[k] = 0; }
+  LOG = [
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 900) },
+    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 3, 1, false, 3600) },
+  ];
+  PROFILE = { role: "staff", departments: ["statistics"] };
+  const r = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m2"], restart: true } })).body);
+  A("staff may re-file from the restart alone", r.ok === true && r.score === "3-1" && r.held === false, JSON.stringify(r));
+  A("...the sitting left out is struck", r.struck >= 1 && writes.logPatches.some((p) => p.url.includes("m1") && p.body.status === "struck"), JSON.stringify(writes.logPatches));
+  A("...and the game reads the restart's score", writes.gamePatches[0] && writes.gamePatches[0].home_score === 3 && writes.gamePatches[0].away_score === 1 && writes.gamePatches[0].ea_match_id === "m2");
+  const noRestart = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m2"] } })).body);
+  A("without the restart flag, leaving the game's sitting out is still refused", /Include the sitting/.test(noRestart.error || "") && /Restarted/.test(noRestart.error || ""), noRestart.error);
 }
 
 console.log("\n— refusals that protect other games");

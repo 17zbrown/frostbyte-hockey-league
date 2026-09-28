@@ -2726,7 +2726,7 @@ CG._smRenderList = function(body){
       '<select id="smFfTeam" style="min-width:170px"><option value="">Who forfeited?</option></select>'+
       '<select id="smFfKind" style="min-width:230px">'+
         '<option value="noshow">No-show / late (Rule 3.2) — 1–0, stats deleted</option>'+
-        '<option value="dc3">Three disconnections (Rule 4.3) — keep the played result</option></select>'+
+        '<option value="dc3">Three disconnections, or abandoned (Rule 4.3): keep the played result</option></select>'+
       '<input id="smFfWhy" placeholder="Reason (no-show, couldn’t ice six…)" style="flex:1;min-width:180px">'+
       '<button class="btn btn-chrome" id="smFfGo">Rule forfeit</button>'+
       /* v3.52: only a commissioner reverses a ruling; staff report a mistake to them */
@@ -2734,7 +2734,7 @@ CG._smRenderList = function(body){
         ? '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button>'
         : '<button class="btn btn-ghost" id="smFfReport" title="Only a commissioner can reverse a forfeit">Report a mistake</button>')+
       '</div></label>'+
-      '<p class="caption" style="margin-top:10px">The three-disconnection kind needs the game’s sessions merged first (League lag-out merge above): it keeps the merged score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more. Forfeits are ruled the same way in the playoffs, and the series count reads them. Once a forfeit is recorded, only a commissioner can reverse it: if one was entered in error, pick the fixture and report the mistake, and the commissioners are told.</p>'+
+      '<p class="caption" style="margin-top:10px">The three-disconnections kind needs the game’s sittings in first, merged or held (League lag-out merge above): it keeps the played score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more. Use it too for a game abandoned before it finished (Rule 4.3.9), charging the club that was behind: a held game is ruled on the score its box score adds up to. Forfeits are ruled the same way in the playoffs, and the series count reads them. Once a forfeit is recorded, only a commissioner can reverse it: if one was entered in error, pick the fixture and report the mistake, and the commissioners are told.</p>'+
       '</div></div>';
     /* game incidents: the countable record behind Rules 3.2/4.3 — logging one computes the
        ruling AND announces it to both clubs' channels within a second (the VM bot listens). */
@@ -2749,7 +2749,7 @@ CG._smRenderList = function(body){
       '<select id="smInKind" style="min-width:140px"><option value="late_start">Late start</option><option value="disconnect">Disconnection</option></select>'+
       '<input id="smInMin" type="number" min="0" max="60" placeholder="Min late" style="width:90px">'+
       '<select id="smInPeriod" style="width:110px;display:none"><option value="">Period…</option><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">OT</option></select>'+
-      '<label class="fld" id="smInEarlyWrap" style="margin:0;flex-direction:row;align-items:center;gap:6px;display:none"><input id="smInEarly" type="checkbox"><span style="margin:0;white-space:nowrap">First 5:00 of the 3rd</span></label>'+
+      '<label class="fld" id="smInEarlyWrap" style="margin:0;flex-direction:row;align-items:center;gap:6px;display:none"><input id="smInEarly" type="checkbox"><span id="smInEarlyLbl" style="margin:0;white-space:nowrap">First 5:00 of the 3rd</span></label>'+
       '<input id="smInNotes" placeholder="Notes (optional)" style="flex:1;min-width:140px">'+
       '<button class="btn btn-chrome" id="smInGo">Log &amp; announce</button></div>'+
       '<div id="smInOut" style="margin-top:12px"></div>'+
@@ -2819,13 +2819,20 @@ CG._smRenderList = function(body){
             return '<option value="'+esc(id)+'">'+esc(code)+'</option>';
           }).join("") : '');
       });
+      /* v3.53: the early box means the first 5:00 of the 3rd (Rule 4.3.6) or, in the 1st, the first
+         10:00 (Q19: restart from the beginning); an overtime drop needs no box (Q20) */
       function syncKind(){
         var dc = kSel.value === "disconnect";
+        var per = document.getElementById("smInPeriod").value;
         document.getElementById("smInMin").style.display = dc ? "none" : "";
         document.getElementById("smInPeriod").style.display = dc ? "" : "none";
-        document.getElementById("smInEarlyWrap").style.display = dc ? "flex" : "none";
+        var early = dc && (per === "1" || per === "3");
+        document.getElementById("smInEarlyWrap").style.display = early ? "flex" : "none";
+        document.getElementById("smInEarlyLbl").textContent = per === "1" ? "First 10:00 of the 1st" : "First 5:00 of the 3rd";
+        if (!early) document.getElementById("smInEarly").checked = false;
       }
-      kSel.addEventListener("change", syncKind); syncKind();
+      kSel.addEventListener("change", syncKind);
+      document.getElementById("smInPeriod").addEventListener("change", syncKind); syncKind();
       go.addEventListener("click", function(){
         var gid2 = gSel.value, tid2 = tSel.value;
         if (!gid2 || !tid2){ CG.toast("Pick the game and the club","err"); return; }
@@ -2836,7 +2843,8 @@ CG._smRenderList = function(body){
           p_minutes_late: dc ? null : (parseInt(document.getElementById("smInMin").value, 10) || 0),
           p_period: dc ? (parseInt(document.getElementById("smInPeriod").value, 10) || null) : null,
           p_game_clock: null,
-          p_early_third: dc ? !!document.getElementById("smInEarly").checked : false,
+          p_early_third: dc && document.getElementById("smInPeriod").value === "3" ? !!document.getElementById("smInEarly").checked : false,
+          p_early_first: dc && document.getElementById("smInPeriod").value === "1" ? !!document.getElementById("smInEarly").checked : false,
           p_notes: (document.getElementById("smInNotes").value||"").trim() || null
         }).then(function(r){
           go.disabled = false;
@@ -2929,6 +2937,8 @@ CG._smRenderList = function(body){
                   '<div class="caption">'+(c.ts?CG.fmtFull(c.ts*1000):'')+'</div></div>'+
               '</div></div>';
             }).join("")+
+            /* v3.53: a restart re-files the game from the selected sittings and strikes the rest (Rules 4.3, 4.5) */
+            '<label class="fld" style="margin:6px 0 0;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="smLgRestart"><span style="margin:0">Restarted from the beginning: strike every sitting I leave out, with its statistics (an illegal loadout under Rule 4.5, or a stop inside the first ten minutes under Rule 4.3)</span></label>'+
             '<button class="btn btn-chrome" id="smLgMerge" style="margin-top:6px">Merge selected into this game</button>';
           out.querySelectorAll("[data-lgsel]").forEach(function(b2){ b2.addEventListener("click", function(){
             var on = this.getAttribute("aria-pressed")!=="true";
@@ -2941,15 +2951,21 @@ CG._smRenderList = function(body){
             var ids = [].slice.call(out.querySelectorAll('[data-lgsel][aria-pressed="true"]')).map(function(x){ return x.getAttribute("data-lgsel"); });
             if (!ids.length){ CG.toast("Select at least one sitting","err"); return; }
             var btn2 = this;
-            CG.confirm("Rebuild this game from "+ids.length+" sitting"+(ids.length===1?"":"s")+"?",
-              "The existing box score is REPLACED by the merge \u2014 stats summed, score aggregated, overtime from the deciding sitting. Standings and profiles update immediately.",
-              "Merge", function(){
+            var restart = !!(document.getElementById("smLgRestart")||{}).checked;
+            CG.confirm((restart ? "Re-file this game from " : "Rebuild this game from ")+ids.length+" sitting"+(ids.length===1?"":"s")+"?",
+              (restart
+                ? "Every sitting on this game that you did NOT select is struck from the record, with its statistics, and the game is re-filed from the selected sittings alone. "
+                : "The existing box score is REPLACED by the merge: stats summed, score aggregated. ")+
+              "It is published only if the sittings make a full game with a decided score; past sixty minutes by one goal is an overtime result, and past sixty by more than a goal is flagged (Rule 4.3). Standings and profiles update immediately.",
+              restart ? "Re-file" : "Merge", function(){
               btn2.disabled = true; btn2.textContent = "Merging\u2026";
-              CG._smLeagueApi({ leagueMerge: { gameId: gid, matchIds: ids } }).then(function(r2){
+              CG._smLeagueApi({ leagueMerge: { gameId: gid, matchIds: ids, restart: restart } }).then(function(r2){
                 btn2.disabled = false; btn2.textContent = "Merge selected into this game";
                 if (r2.error){ CG.toast(r2.error,"err"); return; }
-                out.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Merged.</b> '+r2.sittings+' sitting'+(r2.sittings===1?"":"s")+' \u2192 final '+esc(r2.score)+(r2.wentOt?" (OT)":"")+' \u00b7 '+r2.players+' player lines ('+r2.linked+' linked to profiles).</div>';
-                CG.toast("Game rebuilt from "+r2.sittings+" sittings","ok");
+                out.innerHTML = r2.held
+                  ? '<div class="note"><b style="font-family:var(--f-disp)">Merged and held.</b> '+r2.sittings+' sitting'+(r2.sittings===1?"":"s")+', '+esc(r2.score)+' so far. '+esc(r2.heldWhy||"")+(r2.struck?' '+r2.struck+' sitting'+(r2.struck===1?"":"s")+' struck.':'')+'</div>'
+                  : '<div class="note grn"><b style="font-family:var(--f-disp)">Merged.</b> '+r2.sittings+' sitting'+(r2.sittings===1?"":"s")+' \u2192 final '+esc(r2.score)+(r2.wentOt?(r2.inferredOt?" (OT, read from the clock)":" (OT)"):"")+' \u00b7 '+r2.players+' player lines ('+r2.linked+' linked to profiles).'+(r2.struck?' '+r2.struck+' sitting'+(r2.struck===1?"":"s")+' struck.':'')+(r2.overlong?' It ran past sixty minutes by more than a goal, so statistics staff were flagged.':'')+'</div>';
+                CG.toast(r2.held ? "Merged and held: not yet a full game" : "Game rebuilt from "+r2.sittings+" sittings","ok");
                 CG.reloadLeague && CG.reloadLeague();
               }).catch(function(e2){ btn2.disabled = false; btn2.textContent = "Merge selected into this game"; CG.toast(e2.message,"err"); });
             });
@@ -12957,10 +12973,13 @@ CG._gsOne = function(el){
                 /* the header above was rendered from the PRE-merge row — leaving it would sit a
                    stale "current result" directly above the new one and read as a contradiction */
                 var sc = document.getElementById("gsCurScore"), ln = document.getElementById("gsCurLines");
-                if (sc) sc.innerHTML = esc(String(res.score).replace("-","–"))+(res.wentOt?' <span class="caption" style="font-size:11px">(OT)</span>':'')+' <span class="caption" style="font-size:11px">('+esc(o.game.home)+' first)</span>';
+                if (sc) sc.innerHTML = res.held ? 'not final yet' : esc(String(res.score).replace("-","–"))+(res.wentOt?' <span class="caption" style="font-size:11px">(OT)</span>':'')+' <span class="caption" style="font-size:11px">('+esc(o.game.home)+' first)</span>';
                 if (ln) ln.textContent = res.players;
-                out.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Done.</b> '+res.sittings+' sitting'+(res.sittings===1?"":"s")+' combined into one game — final '+esc(res.score)+(res.wentOt?" (OT)":"")+', '+res.players+' player lines ('+res.linked+' matched to profiles). <a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to your games</a></div>';
-                CG.toast("Game rebuilt from "+res.sittings+" sittings","ok");
+                /* v3.53: a combined game is published only once it is a full game with a decided score */
+                out.innerHTML = res.held
+                  ? '<div class="note"><b style="font-family:var(--f-disp)">Combined and held.</b> '+res.sittings+' sitting'+(res.sittings===1?"":"s")+', '+esc(res.score)+' so far. '+esc(res.heldWhy||"")+' <a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to your games</a></div>'
+                  : '<div class="note grn"><b style="font-family:var(--f-disp)">Done.</b> '+res.sittings+' sitting'+(res.sittings===1?"":"s")+' combined into one game — final '+esc(res.score)+(res.wentOt?" (OT)":"")+', '+res.players+' player lines ('+res.linked+' matched to profiles). <a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to your games</a></div>';
+                CG.toast(res.held ? "Combined and held: not yet a full game" : "Game rebuilt from "+res.sittings+" sittings","ok");
                 CG.reloadLeague && CG.reloadLeague();
               }).catch(function(e){ btn.disabled = false; btn.textContent = "Combine the selected sittings into this game"; CG.toast(e.message,"err"); });
             });

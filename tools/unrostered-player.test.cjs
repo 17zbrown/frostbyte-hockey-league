@@ -124,14 +124,17 @@ function finish() {
   let s42 = null;
   for (const ch of obj.rulebook.chapters) for (const sec of ch.sections) if (sec.id === "4.2") s42 = sec;
   const body = (s42 ? s42.paragraphs : []).join(" ");
-  A("4.2 says every completed game is checked against both rosters", /Every completed game is checked against the two clubs' rosters/.test(body));
+  /* v3.53 (commissioner, 2026-09-28): "Playoff box scores do not need a review", so the review is
+     the regular season's; suspensions are checked in every game */
+  A("4.2 says every completed regular-season game is checked against both rosters", /Every completed regular-season game is checked against the two clubs' rosters/.test(body));
+  A("...playoff box scores are not reviewed, suspensions are checked everywhere", /Playoff box scores come from the same automatic record and are not put through this review/.test(body) && /Every game, playoffs included, is checked for a suspended player/.test(body));
   A("...covering the player the club does not hold", /neither its active roster nor its training camp/.test(body));
   A("...and the player who cannot be identified at all", /cannot be identified as a member at all/.test(body));
   A("...and that it is referred, not ruled automatically", /referred to the department that owns it/.test(body));
   A("...and points at Chapter 7 for the consequence", /Chapter 7/.test(body));
-  A("4.2 says positions are checked too", /against the position each player is rostered at/.test(body));
-  A("...naming the group rule and the camp exemption",
-    /held to his\s+group \(Rule 2\.1\)/.test(body.replace(/\s+/g, " ")) && /training-camp player fills any position/.test(body));
+  /* v3.53 (audit F-4-5): the position check applies only where the lock is in force (lifted v3.40) */
+  A("4.2 says positions are checked where the position lock is in force", /Where the position lock is in force \(Rule 2\.1\), a player on a club's active roster who appears in a box score at a position outside his position group/.test(body));
+  A("...naming the camp exemption", /training-camp player fills any position/.test(body));
   A("...and why the check is by group", /without saying which side he played/.test(body));
   /* pin that the release EXISTS, not that it is newest: "newest" breaks on every later release,
      which teaches people to re-point pins without reading them */

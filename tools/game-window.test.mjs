@@ -57,7 +57,7 @@ const { ingestOne, normalizeMatch } = await import("../netlify/functions/ingest-
 const TEAMS = [{ id: "tA", ea_club_id: 111 }, { id: "tB", ea_club_id: 222 }, { id: "tC", ea_club_id: 333 }];
 const world = { open: [], finals: [], logs: [] };
 let seenLog = false;   // does ea_ingest_log already hold the match's payload? (drives archive-vs-touch)
-const writes = { gamePatches: [], statPosts: [], logPosts: [], logPatches: [] };
+const writes = { gamePatches: [], statPosts: [], logPosts: [], logPatches: [], bells: [] };
 const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
 const NIL = () => new Response(null, { status: 204 });
 const pairOf = (u) => { const m = u.match(/home_team_id\.eq\.([^,)]+),away_team_id\.eq\.([^,)]+)/); return m ? [m[1], m[2]] : null; };
@@ -140,6 +140,8 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/season_registrations?")) return J([]);
   if (u.includes("/rest/v1/notifications") && (m === "DELETE" || m === "POST")) return NIL();
   if (u.includes("/rest/v1/app_config")) return J([]);
+  /* v3.53: a game past sixty minutes by more than a goal rings the statistics department's bell */
+  if (u.includes("/rest/v1/rpc/notify_department") && m === "POST") { writes.bells.push(JSON.parse(opts.body)); return J(null); }
   throw new Error("unexpected fetch " + m + " " + u);
 };
 const reset = () => { world.open = []; world.finals = []; world.held = []; world.logs = []; world.clubOnly = {}; world.withdrawals = []; world.subs = []; world.profiles = []; for (const k of Object.keys(writes)) writes[k].length = 0; };
@@ -233,6 +235,10 @@ console.log("— Rule 4.3: a disconnected game's full-length replay is merged in
   const s = await run(replay);
   A("merged into the 9:00 game", s.ingested.length === 1 && s.ingested[0].resumed === true && s.ingested[0].game_id === "g900", JSON.stringify(s));
   A("the 9:00 game carries the combined score (everything earned in the abandoned sitting counts, 4.3 P0)", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.home_score === 3 && p.body.away_score === 1));
+  /* v3.53 (Q18): 85 minutes decided by two goals is past sixty by more than a goal: filed as a
+     regulation result, and statistics staff are flagged */
+  A("...filed as regulation (two goals is not an overtime margin)", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.status === "final" && p.body.went_ot === false));
+  A("...and the statistics department's bell rings", writes.bells.length === 1 && writes.bells[0].p_dept === "statistics" && writes.bells[0].p_param === "g900", JSON.stringify(writes.bells));
   /* v3.08 — the merge's own archive row is a status TOUCH now (a PATCH), not an upsert. */
   A("the merge is archived as merged",
     writes.logPatches.some((r) => r.status === "merged") ||
@@ -313,7 +319,7 @@ console.log("— a series that runs ahead of the clock: game two ending before s
   world.finals = [{ ...G900, ea_match_id: "a1" }];                        // game one already filed (complete)
   world.logs = [{ ea_match_id: "a1", payload: ea("a1", at(14), 111, 222, 3600, [1, 0]) }];
   world.open = [G935];
-  const s = await run(ea("a2", at(22), 111, 222, 3600, [2, 2]));           // ends 9:22, before 9:25
+  const s = await run(ea("a2", at(22), 111, 222, 3600, [2, 1]));           // ends 9:22, before 9:25 (v3.53: decided; a level 60 would be held)
   A("filed on the 9:35 slot (its window opened at the previous sibling's puck drop)", s.ingested.length === 1 && s.ingested[0].game_id === "g935" && !s.ingested[0].resumed, JSON.stringify(s));
 }
 
@@ -462,6 +468,65 @@ console.log("\n— Rule 4.6: a borrowed club files on the ONE fixture its substi
   reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
   const s5 = await run(ea("s5", at(30), 111, 999));
   A("with no substitution on record the match is still refused", s5.ingested.length === 0, JSON.stringify(s5));
+}
+
+console.log("— v3.53 (Q18, Q19, Q20): a combined game is a result only at a full, decided game");
+{
+  /* a. two sittings still short of sixty minutes: merged, box score written, and HELD */
+  reset(); world.held = [{ ...G900, ea_match_id: "h1" }];
+  world.logs = [{ ea_match_id: "h1", payload: ea("h1", at(30), 111, 222, 2400, [1, 0]) }];
+  let s = await run(ea("h2", at(45), 111, 222, 600, [1, 1]));
+  A("short merge: held, not published", (s.held || []).length === 1 && s.held[0].merged_into === "h1" && !s.ingested.length, JSON.stringify(s));
+  A("...no status and no score on the game", !writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && ("status" in p.body || "home_score" in p.body)));
+  A("...the combined box score is written", writes.statPosts.length === 1);
+  A("...and the sitting is archived as merged, so the next one counts it", writes.logPatches.some((r) => r.status === "merged") || writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "merged"));
+
+  /* b. one sitting that ran the whole clock but is level: an overtime disconnection, held */
+  reset(); world.open = [G900];
+  s = await run(ea("l1", at(40), 111, 222, 3600, [2, 2]));
+  A("level at sixty: held for the overtime reload", (s.held || []).length === 1 && /overtime disconnection/.test(s.held[0].reason) && !s.ingested.length, JSON.stringify(s));
+  A("...no result published", !writes.gamePatches.some((p) => p.body.status === "final"));
+
+  /* c. the overtime reload joins it: past sixty by one goal is an overtime result (Q18, Q20) */
+  reset(); world.held = [{ ...G900, ea_match_id: "l1" }];
+  world.logs = [{ ea_match_id: "l1", payload: ea("l1", at(40), 111, 222, 3600, [2, 2]) }];
+  s = await run(ea("l2", at(50), 111, 222, 240, [1, 0]));
+  A("the overtime reload completes the level game", s.ingested.length === 1 && s.ingested[0].resumed === true, JSON.stringify(s));
+  A("...3-2 in overtime, read from the clock", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.status === "final" && p.body.home_score === 3 && p.body.away_score === 2 && p.body.went_ot === true), JSON.stringify(writes.gamePatches));
+  A("...an overtime result rings no bell", writes.bells.length === 0);
+  A("...and the first sitting is marked ingested now that its game is finished", writes.logPatches.some((r) => r.status === "ingested" && /completed by a Rule 4\.3 merge/.test(r.reason || "")));
+
+  /* d. past sixty by more than a goal: filed, not overtime, and flagged */
+  reset(); world.held = [{ ...G900, ea_match_id: "o1" }];
+  world.logs = [{ ea_match_id: "o1", payload: ea("o1", at(35), 111, 222, 2400, [3, 1]) }];
+  s = await run(ea("o2", at(55), 111, 222, 1500, [2, 0]));
+  A("65 minutes, 5-1: filed as a regulation result", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.status === "final" && p.body.home_score === 5 && p.body.away_score === 1 && p.body.went_ot === false), JSON.stringify(writes.gamePatches));
+  A("...and statistics staff are flagged", writes.bells.length === 1 && /past 60 minutes/.test(writes.bells[0].p_title), JSON.stringify(writes.bells));
+  A("...with a warning on the import", (s.warnings || []).some((w) => /statistics staff were flagged/.test(w.warning)), JSON.stringify(s.warnings));
+
+  /* e. stopped inside the first ten minutes, then a full game: restarted from the beginning (Q19) */
+  reset(); world.held = [{ ...G900, ea_match_id: "r1" }];
+  world.logs = [{ ea_match_id: "r1", payload: ea("r1", at(15), 111, 222, 400, [1, 0]) }];
+  s = await run(ea("r2", at(60), 111, 222, 3600, [2, 1]));
+  A("early stop: the first sitting is struck", writes.logPatches.some((r) => r.status === "struck" && /inside the first ten minutes/.test(r.reason || "")), JSON.stringify(writes.logPatches));
+  A("...the restart alone is the game: 2-1, not 3-1", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.status === "final" && p.body.home_score === 2 && p.body.away_score === 1 && p.body.ea_match_id === "r2"), JSON.stringify(writes.gamePatches));
+  A("...its box score carries only the restart's goals", writes.statPosts.length === 1 && writes.statPosts[0].reduce((a, r) => a + (r.goals || 0), 0) === 3, JSON.stringify(writes.statPosts));
+  A("...and says so", s.ingested.length === 1 && s.ingested[0].restarted === true && (s.warnings || []).some((w) => /restarted from the beginning/.test(w.warning)), JSON.stringify(s));
+
+  /* f. an early stop whose restart is itself short: struck, and the restart is held as the new first sitting */
+  reset(); world.held = [{ ...G900, ea_match_id: "q1" }];
+  world.logs = [{ ea_match_id: "q1", payload: ea("q1", at(10), 111, 222, 300, [0, 0]) }];
+  s = await run(ea("q2", at(40), 111, 222, 2000, [1, 0]));
+  A("early stop, short restart: the first is struck", writes.logPatches.some((r) => r.status === "struck"));
+  A("...the restart is held, owning the fixture", (s.held || []).length === 1 && s.held[0].restarted === true && writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.ea_match_id === "q2" && p.body.status === "scheduled" && p.body.home_score === null), JSON.stringify(writes.gamePatches));
+  A("...and archived incomplete (v3.53 widened the constraint to allow it)", writes.logPatches.some((r) => r.status === "incomplete") || writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "incomplete"));
+
+  /* g. stopped PAST ten minutes, then a whole game: combined under Rule 4.3, not struck */
+  reset(); world.held = [{ ...G900, ea_match_id: "w1" }];
+  world.logs = [{ ea_match_id: "w1", payload: ea("w1", at(20), 111, 222, 900, [1, 0]) }];
+  s = await run(ea("w2", at(60), 111, 222, 3600, [1, 0]));
+  A("a stop after ten minutes is never struck by the importer", !writes.logPatches.some((r) => r.status === "struck"));
+  A("...it is combined, 2-0 in 75 minutes, and flagged", writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.status === "final" && p.body.home_score === 2 && p.body.away_score === 0) && writes.bells.length === 1);
 }
 
 console.log(ok ? "\nPASS" : "\nFAIL");

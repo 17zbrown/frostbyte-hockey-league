@@ -38,20 +38,27 @@ export function ruling(inc) {
     detail: "Rule 4.3: the game ends as a forfeit loss, but ALL statistics are retained. Merge the sessions in the stats desk first, then rule the forfeit keeping the played result. It publishes as an FFL even if this club finished with more goals." };
   const third = (inc.period === 3);
   const early = third && inc.early_third === true;
+  /* v3.53 (commissioner, 2026-09-28). Q20: an overtime drop costs the disconnecting club a penalty,
+     and the clubs resume with a new overtime in the first period of the reloaded game. Q19: a drop
+     inside the first ten minutes of the first period restarts the game from the beginning. */
+  const ot = (inc.period === 4);
+  const earlyFirst = inc.period === 1 && inc.early_first === true;
+  const when = { third, early, ot, earlyFirst, clock: inc.game_clock };
   if (n === 2) return { penalties: 2, forfeit: false,
     headline: "Second disconnection — two penalties",
     detail: "Taken on the reload. The other club chooses: both at once for a 5-on-3, or one after the other for two 5-on-4s."
-      + timingNote(third, early, inc.game_clock) };
+      + timingNote(when) };
   return { penalties: 1, forfeit: false,
     headline: "Disconnection — one penalty",
-    detail: "Taken on the reload, within one minute of the game-clock time of the drop."
-      + timingNote(third, early, inc.game_clock) };
+    detail: "Taken on the reload." + timingNote(when) };
 }
 
-function timingNote(third, early, clock) {
+function timingNote({ third, early, ot, earlyFirst, clock }) {
+  if (ot) return " Overtime: reload and play the first period of the new game as sudden-death overtime, and take the penalty as soon as possible after puck drop. The league's import adds the overtime to the game.";
   if (early) return " This drop was inside the first five minutes of the third, so do not replay a full game: reload and play the entire first period as if it were the third, and take the penalties as soon as possible after puck drop.";
   if (third) return ` Third period — take it five minutes of game clock EARLIER than the drop${clock ? ` (${clock})` : ""}, to cover the real time the final minute eats.`;
-  return "";
+  if (earlyFirst) return " This drop was inside the first ten minutes of the first period, so restart the game from the beginning of the first period. The stopped sitting is struck and its statistics removed. Take the penalty within one minute of the game-clock time of the drop.";
+  return " Take it within one minute of the game-clock time of the drop.";
 }
 
 export function createIncidentNotifier(env, opts = {}) {

@@ -223,6 +223,10 @@ console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobod
   const clean = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
   A("without a ruling the club merges as before", clean.ok === true);
   A("...and its PATCH carries no forfeit_team_id either — the key is absent, not null", !("forfeit_team_id" in writes.gamePatches[0]));
+  /* v3.53: re-filing a restarted game strikes sittings and their statistics: statistics staff only */
+  reset(); UID = "bos-gm";
+  const rs = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], restart: true } });
+  A("a club cannot re-file a game as restarted", rs.statusCode === 403 && writes.statDeletes === 0 && writes.gamePatches.length === 0, rs.body);
 }
 
 console.log("\n— the archive is written before the game is touched, so a merge that dies mid-flight is never unattributed");

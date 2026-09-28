@@ -224,6 +224,63 @@ function segElapsed(seg) {
   return seg.clubs.reduce((m, c) => c.players.reduce((m2, p) => Math.max(m2, p.time_on_ice_seconds || 0), m), 0);
 }
 
+/* v3.53 — WHEN A GAME IS A RESULT. One test, shared by the automatic import, the continuation merge,
+   the manual merge and the abandoned-game sweep, so they can never disagree about whether a game is over.
+   Commissioner, 2026-09-28 (Q18): "Once it reaches a full game but keep in mind there may be a simulated
+   overtime played so if a game comes back over the 60 minutes had is only a 1 goal game, that probably
+   means it was an overtime win. Flag any games that go over the 60 minutes but is more than a 1 goal
+   game to staff." And (go-ahead #9): "the 2nd game may run long if they need to play an overtime."
+     finished    the clock reached a full game (or EA says overtime) AND the score is not level. This
+                 league has no ties (Rule 4.1), so a game level after sixty minutes is an overtime
+                 disconnection waiting for its overtime reload (Q20), not a result.
+     wentOt      EA's own overtime flag, or: past sixty minutes and decided by exactly one goal
+                 (inferredOt), because the reload that played the overtime is an ordinary game to EA.
+     overlong    past sixty minutes and decided by more than one goal: filed, and put in front of
+                 statistics staff. */
+const EARLY_RESTART_S = 600;   // Q19: stopped inside the first ten minutes of the first period = restart from the beginning
+function sittingsState(sittings) {
+  const ps = sittings.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const last = ps[ps.length - 1];
+  const total = ps.reduce((a, p2) => a + segElapsed(p2), 0);
+  const merged = ps.length > 1 ? mergeSegments(ps) : ps[0];
+  if (!merged || merged.error || !merged.clubs || merged.clubs.length !== 2)
+    return { error: (merged && merged.error) || "unreadable sittings", total, last, finished: false };
+  const margin = Math.abs((merged.clubs[0].score || 0) - (merged.clubs[1].score || 0));
+  const reachedFull = total >= REGULATION_S || segElapsed(last) >= REGULATION_S || !!last.went_ot;
+  const eaOt = !!merged.went_ot;
+  const inferredOt = !eaOt && total > REGULATION_S && margin === 1;
+  return { total, last, merged, margin, level: margin === 0, reachedFull,
+           finished: reachedFull && margin > 0, wentOt: eaOt || inferredOt, inferredOt,
+           overlong: total > REGULATION_S && margin > 1 };
+}
+
+/* The staff hear about a result the clock had to decide (an inferred overtime) and about a game that
+   ran past sixty minutes by more than a goal. Best effort: the filing already stands. */
+async function noteGameLength(game, st, summary) {
+  if (!st || (!st.inferredOt && !st.overlong)) return;
+  let fx = "a league game";
+  try {
+    const t = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code`);
+    const code = (id) => ((t || []).find((x) => x.id === id) || {}).code || "?";
+    fx = `${code(game.away_team_id)} @ ${code(game.home_team_id)}`;
+  } catch { /* the name is a courtesy */ }
+  const mins = Math.round(st.total / 60);
+  const [a, b] = st.merged.clubs.map((c) => c.score || 0);
+  const score = `${Math.max(a, b)}-${Math.min(a, b)}`;
+  (summary.warnings = summary.warnings || []);
+  if (st.inferredOt) {
+    summary.warnings.push({ game_id: game.id, warning: `filed as an overtime result: ${mins} minutes of play, decided by one goal` });
+    await tellStaff(`\u2139\ufe0f **Overtime read from the clock** \u00b7 ${fx}: the sittings add up to ${mins} minutes and the game was decided ${score}, by one goal, so it is filed as an overtime result (Rule 4.3). If it was decided in regulation, correct it in Control Center, Stats manager.`);
+  }
+  if (st.overlong) {
+    summary.warnings.push({ game_id: game.id, warning: `ran ${mins} minutes and was decided by ${st.margin} goals; statistics staff were flagged` });
+    const body = `${fx} ran ${mins} minutes of game clock and was decided ${score}. A game that goes past sixty minutes should be a one-goal overtime result (Rule 4.3), so a sitting may have been a full replay rather than the rest of the game. Check the sittings in the Stats manager.`;
+    await tellStaff(`\u26a0\ufe0f **Past 60 minutes by more than a goal** \u00b7 ${body}`);
+    try { await sbRpc("notify_department", { p_dept: "statistics", p_type: "flag", p_title: "A game ran past 60 minutes by more than a goal", p_body: body, p_view: "game", p_param: game.id }); }
+    catch (e) { console.warn("overlong flag bell failed:", String((e && e.message) || e)); }
+  }
+}
+
 function mergeSegments(segments) {
   const segs = segments.slice().sort((a, b) => a.ts - b.ts);
   const last = segs[segs.length - 1];
@@ -608,7 +665,8 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
        other lane. One write puts it right, and from then on the match is free again. */
     const row = ctx.log.get(String(norm.ea_match_id));
     if (!row) await archive(ctx, norm, raw, "ingested", "already ingested (dedupe) — payload archived late", filedOn);
-    else if (row.status !== "ingested" || row.game_id !== filedOn) {
+    /* v3.53: 'incomplete' is a held first sitting that owns its game, which is consistent too */
+    else if ((row.status !== "ingested" && row.status !== "incomplete") || row.game_id !== filedOn) {
       await touchAttempt(norm.ea_match_id, "ingested", "already ingested (dedupe)", filedOn);
       ctx.log.set(String(norm.ea_match_id), { status: "ingested", game_id: filedOn });
     }
@@ -617,6 +675,12 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   const row = ctx.log.get(String(norm.ea_match_id));
   if (row && row.status === "merged") {
     summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "already merged into a resumed game" });
+    return;
+  }
+  /* v3.53: a sitting struck from the record because its game restarted from the beginning (Q19)
+     stays struck; EA re-serves it on every poll */
+  if (row && row.status === "struck") {
+    summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "struck: its game was restarted from the beginning" });
     return;
   }
 
@@ -781,15 +845,20 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
      standings do not move. ingestContinuation looks for scheduled games too, so the continuation
      finds this one and the merge finals it with the full clock. */
   const elapsed = segElapsed(norm);
-  const complete = elapsed >= REGULATION_S || !!norm.went_ot;
+  /* v3.53: finished means a full clock AND a decided score; a level game at sixty minutes is an
+     overtime disconnection and waits for its overtime reload (Q20) */
+  const st1 = sittingsState([norm]);
+  const complete = st1.finished;
   if (!complete) {
     await sbSend("PATCH", `games?id=eq.${game.id}`,
       { ea_match_id: norm.ea_match_id,
         home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
       "return=minimal");
     ctx.filed.set(String(norm.ea_match_id), game.id);
-    const why = `held: ${Math.round(elapsed / 60)} of ${Math.round(REGULATION_S / 60)} minutes played`
-      + `${norm.dnf ? " and EA flagged a disconnect" : ""} — waiting for the rest of the game (Rule 4.3)`;
+    const why = st1.reachedFull
+      ? `held: level ${homeScore}-${awayScore} after ${Math.round(elapsed / 60)} minutes, an overtime disconnection. Waiting for the overtime reload (Rule 4.3)`
+      : `held: ${Math.round(elapsed / 60)} of ${Math.round(REGULATION_S / 60)} minutes played`
+        + `${norm.dnf ? " and EA flagged a disconnect" : ""} — waiting for the rest of the game (Rule 4.3)`;
     summary.held = summary.held || [];
     summary.held.push({ ea_match_id: norm.ea_match_id, game_id: game.id, elapsed, reason: why });
     console.log(`ingest: game ${game.id} held — ${why}`);
@@ -800,7 +869,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
 
   await sbSend("PATCH", `games?id=eq.${game.id}`,
     { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id,
-      went_ot: !!norm.went_ot,
+      went_ot: !!st1.wentOt,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
   ctx.filed.set(String(norm.ea_match_id), game.id);
@@ -812,6 +881,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   await postGameRecaps(game, rows, homeScore, awayScore, summary).catch((e) =>
     console.warn("recap notifications failed (the import itself is unaffected):", String(e && e.message || e)));
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: game.id, score: `${homeScore}-${awayScore}`, players: rows.length, linked });
+  await noteGameLength(game, st1, summary);
   /* the game is filed either way, but a lost status leaves the archive reading `unmatched`, which
      the statistics desk reads as work it has to do by hand. Say so rather than swallow it. */
   if (!(await archive(ctx, norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id)))
@@ -887,7 +957,7 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      it carries its ea_match_id and its box score but no result — and that held game is exactly
      what this continuation belongs to. ea_match_id=not.is.null still keeps the list to fixtures
      that have actually taken a sitting, so an untouched game is never a merge target. */
-  const finals = await sbGet(`games?${orC}&status=in.(final,scheduled)&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id`);
+  const finals = await sbGet(`games?${orC}&status=in.(final,scheduled)&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id,status`);
   const matchEndMs = (norm.ts || 0) * 1000;
   const inWindow = finals
     .filter((g) => matchInWindow(matchEndMs, g.scheduled_at, winBefore, winAfter))
@@ -902,14 +972,15 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     await archive(ctx, norm, raw, "unmatched", why);
     return R(true);
   };
-  /* 1. the candidate is the nearest same-pair final in window that is still UNFINISHED. A game is
+  /* 1. the candidate is the nearest same-pair game in window that is still UNFINISHED. A game is
      complete when its sittings' clocks add up to a full game (a single-period replay under 4.3 P5
      finishes the game it continues), when its last sitting ran the whole clock, or when it went
-     to overtime — a complete game is never resumed: on a playoff night it is the previous game,
-     not this one's first half. */
+     to overtime, AND (v3.53) its score is decided: a game level after sixty minutes is an overtime
+     disconnection, and the overtime reload belongs to it (Q20). A complete game is never resumed:
+     on a playoff night it is the previous game, not this one's first half. */
   let cand = null, priors = [], missingArchive = false;
   for (const g of inWindow) {
-    const logRows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(g.ea_match_id)},and(game_id.eq.${g.id},status.eq.merged))&select=ea_match_id,payload`);
+    const logRows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(g.ea_match_id)},and(game_id.eq.${g.id},status.eq.merged))&select=ea_match_id,status,payload`);
     const ps = [];
     for (const rowL of logRows) {
       if (!rowL.payload) continue;
@@ -917,10 +988,8 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
       if (n2 && !ps.some((x) => x.ea_match_id === n2.ea_match_id)) ps.push(n2);
     }
     if (!ps.length) { missingArchive = true; continue; }   // cannot be judged; see below
-    const sorted = ps.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    const last = sorted[sorted.length - 1];
-    const total = ps.reduce((a, p2) => a + segElapsed(p2), 0);
-    if (segElapsed(last) >= REGULATION_S || total >= REGULATION_S || last.went_ot) continue;   // finished
+    const stp = sittingsState(ps);
+    if (stp.error || stp.finished) continue;   // finished (or unreadable): never resumed
     cand = g; priors = ps; break;
   }
   if (!cand) {
@@ -971,22 +1040,77 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     return refuse(why);
   }
 
+  /* v3.53 (Q19): "If any games are restarted only 10 in game minutes into the first period, the game
+     shall just be restarted from the beginning of the first period." A game stopped inside its first
+     ten minutes is not resumed: the clubs start again, and the stopped sitting is struck from the
+     record with its statistics. This sitting then becomes the game's first, filed or held exactly
+     as a fresh one is. */
+  const priorTotal = priors.reduce((a, p2) => a + segElapsed(p2), 0);
+  if (priorTotal <= EARLY_RESTART_S) {
+    const clubByTeamR = {};
+    const teamRowsR = await sbGet(`teams?id=in.(${tA},${tB})&select=id,ea_club_id`);
+    for (const tr of teamRowsR) clubByTeamR[tr.id] = norm.clubs.find((c) => c.ea_club_id === String(tr.ea_club_id));
+    const hC = clubByTeamR[cand.home_team_id], aC = clubByTeamR[cand.away_team_id];
+    if (!hC || !aC) {
+      summary.errors.push({ ea_match_id: norm.ea_match_id, error: "restart could not map clubs to teams" });
+      await archive(ctx, norm, raw, "error", "restart could not map clubs to teams");
+      return R(true);
+    }
+    await stagePayload(ctx, norm, raw, cand.id);
+    const rowsR = await leagueBoxRows(cand, clubByTeamR, ctx.profiles);
+    await sbSend("DELETE", `game_stats?game_id=eq.${cand.id}`);
+    if (rowsR.length && !(await postBoxScore(rowsR))) {
+      summary.skipped.push({ ea_match_id: norm.ea_match_id, reason: "another writer filed this game first — left to it" });
+      return R(true);
+    }
+    const struckMins = Math.max(1, Math.round(priorTotal / 60));
+    for (const p2 of priors) {
+      const ok = await touchAttempt(p2.ea_match_id, "struck",
+        `struck: the game stopped after ${struckMins} minute${struckMins === 1 ? "" : "s"}, inside the first ten minutes of the first period, and was restarted from the beginning (Rule 4.3); ${norm.ea_match_id} replaces it`, cand.id);
+      ctx.filed.delete(String(p2.ea_match_id));
+      if (ok) ctx.log.set(String(p2.ea_match_id), { status: "struck", game_id: cand.id });
+      else summary.errors.push({ ea_match_id: p2.ea_match_id, error: `restart: sitting ${p2.ea_match_id} could not be marked struck; the next poll may try to file it again` });
+    }
+    const stR = sittingsState([norm]);
+    const ppgR = { home_ppg: hC.ppg, home_ppo: hC.ppo, away_ppg: aC.ppg, away_ppo: aC.ppo };
+    (summary.warnings = summary.warnings || []).push({ game_id: cand.id,
+      warning: `restarted from the beginning: ${priors.length} sitting${priors.length === 1 ? "" : "s"} of ${struckMins} minute${struckMins === 1 ? "" : "s"} struck with their statistics (Rule 4.3)` });
+    if (stR.finished) {
+      await sbSend("PATCH", `games?id=eq.${cand.id}`,
+        { status: "final", home_score: hC.score, away_score: aC.score, ea_match_id: norm.ea_match_id,
+          went_ot: !!stR.wentOt, ...ppgR }, "return=minimal");
+      ctx.filed.set(String(norm.ea_match_id), cand.id);
+      await postGameRecaps({ id: cand.id, home_team_id: cand.home_team_id, away_team_id: cand.away_team_id },
+        rowsR, hC.score, aC.score, summary).catch((e) =>
+        console.warn("recap failed (the filing itself is unaffected):", String(e && e.message || e)));
+      if (!(await archive(ctx, norm, raw, "ingested", `restart of a game stopped inside its first ten minutes (Rule 4.3): ${hC.score}-${aC.score}, ${rowsR.length} players`, cand.id)))
+        summary.errors.push({ ea_match_id: norm.ea_match_id, error: `game ${cand.id} is filed, but its archive row could not be marked ingested` });
+      summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, score: `${hC.score}-${aC.score}`, players: rowsR.length, restarted: true });
+    } else {
+      await sbSend("PATCH", `games?id=eq.${cand.id}`,
+        { status: "scheduled", home_score: null, away_score: null, went_ot: false, ea_match_id: norm.ea_match_id, ...ppgR },
+        "return=minimal");
+      ctx.filed.set(String(norm.ea_match_id), cand.id);
+      const why = `held: the restarted game has ${Math.round(segElapsed(norm) / 60)} of ${Math.round(REGULATION_S / 60)} minutes played — waiting for the rest of the game (Rule 4.3)`;
+      summary.held = summary.held || [];
+      summary.held.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, elapsed: segElapsed(norm), reason: why, restarted: true });
+      if (!(await archive(ctx, norm, raw, "incomplete", why, cand.id)))
+        summary.errors.push({ ea_match_id: norm.ea_match_id, error: `game ${cand.id} is held, but its archive row could not be marked incomplete` });
+    }
+    return R(true);
+  }
+
   const merged = mergeSegments(priors.concat([norm]));
   if (merged.error) {
     return refuse(merged.error);
   }
   /* Rule 4.3 resumes a lag-out game, so the sittings' goals ADD: that total is the real score.
-     What cannot stand is a level total. This league plays continuous overtime and has no shootout
-     (Rule 4.1), so a tie means the clubs replayed the game in full instead of resuming it, or one
-     sitting was filed twice. File it anyway (the box score is still the record) and put it in front
-     of the officials the same night: a level final charges BOTH clubs a loss until it is ruled on.
-     It travels as a WARNING, not an error, because the import itself worked. */
-  if (merged.clubs && merged.clubs.length === 2 && (merged.clubs[0].score || 0) === (merged.clubs[1].score || 0)) {
-    const lvl = `\u26a0\ufe0f **Resumed game ended level** \u00b7 EA match ${merged.ea_match_id}, merged from ${(merged.merged_from || []).join(" + ")}, finished ${merged.clubs[0].score} to ${merged.clubs[1].score}. A resumed game cannot end tied (Rule 4.1): the clubs likely replayed in full rather than resuming, or one sitting was filed twice. Rule on it in Control Center, Stats manager, before the table is read. A level final charges both clubs a loss.`;
-    (summary.warnings = summary.warnings || []).push({ ea_match_id: merged.ea_match_id,
-      warning: `merged game ended level (${merged.clubs[0].score}-${merged.clubs[1].score}); the officials were told` });
-    await tellStaff(lvl);
-  }
+     v3.53: the combined game is a RESULT only once it is finished by the same test a single sitting
+     meets (sittingsState): a full clock and a decided score. Short of that it is held, box score
+     written and no result, until the next sitting arrives. A level total after sixty minutes is an
+     overtime disconnection waiting for its overtime reload (Q20). This replaces the v3.18 rule that
+     filed a level merge as a double loss and asked the officials to rule on it. */
+  const st = sittingsState(priors.concat([norm]));
 
   // write exactly as a normal ingest writes, from the merged line
   const clubByTeam = {};
@@ -1011,16 +1135,41 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     console.log(`ingest: game ${cand.id} was written by another writer while replay ${norm.ea_match_id} was being merged — skipped`);
     return R(true);
   }
-  /* v3.18 — status:'final' is now REQUIRED here, not redundant. This path used to merge only into
-     games that were already final, so it never had to say so. A first sitting short of regulation
-     is HELD now and leaves the game 'scheduled', and this merge is what completes it: without the
-     status the game would carry a correct merged score and never actually be a result. Setting it
-     on a game that was already final is harmless — notify_discord_game_final posts on the
-     transition, and separately on a score that changed, which is what a merge legitimately does. */
+  const mins = Math.round(totalLen / 60);
+  if (!st.finished && cand.status !== "final") {
+    /* HELD after the merge: the combined box score is written (the next sitting's merge reads the
+       archive, not these rows), the game keeps no result, and this sitting is archived as merged so
+       the next continuation counts it. */
+    await sbSend("PATCH", `games?id=eq.${cand.id}`,
+      { home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+      "return=minimal");
+    const why = st.level && st.reachedFull
+      ? `merged and held: level ${homeClub.score}-${awayClub.score} after ${mins} minutes, waiting for the overtime reload (Rule 4.3)`
+      : `merged and held: the sittings add up to ${mins} of ${Math.round(REGULATION_S / 60)} minutes, waiting for the rest of the game (Rule 4.3)`;
+    const loggedH = await archive(ctx, norm, raw, "merged", `${why} — sitting ${priors.length + 1} of ${cand.ea_match_id}`, cand.id);
+    if (!loggedH) summary.errors.push({ ea_match_id: norm.ea_match_id, error: `merged into ${cand.ea_match_id} but the merge could not be archived — the next poll may merge it again; check ea_ingest_log` });
+    summary.held = summary.held || [];
+    summary.held.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, elapsed: totalLen, reason: why, merged_into: cand.ea_match_id });
+    return R(true);
+  }
+  if (!st.finished) {
+    /* a game published before v3.53 on a merge that was still short or level: keep the record the
+       table already reads, and put it in front of the officials */
+    (summary.warnings = summary.warnings || []).push({ game_id: cand.id, warning: `an already-published game was merged again and is still not a full, decided game (${homeClub.score}-${awayClub.score}, ${mins} minutes); the officials were told` });
+    await tellStaff(`\u26a0\ufe0f **Published game still unfinished** \u00b7 EA match ${cand.ea_match_id} was merged again and now reads ${homeClub.score}-${awayClub.score} after ${mins} minutes: not a full, decided game (Rule 4.3). It was published before v3.53 and stays on the table until someone rules. Check it in Control Center, Stats manager.`);
+  }
+  /* v3.18 — status:'final' is REQUIRED here, not redundant. A first sitting short of regulation is
+     HELD and leaves the game 'scheduled', and this merge is what completes it: without the status the
+     game would carry a correct merged score and never actually be a result. Setting it on a game that
+     was already final is harmless: notify_discord_game_final posts on the transition, and separately
+     on a score that changed, which is what a merge legitimately does. v3.53: overtime is EA's flag or
+     the clock's (sittingsState.wentOt). */
   await sbSend("PATCH", `games?id=eq.${cand.id}`,
-    { status: "final", home_score: homeClub.score, away_score: awayClub.score, went_ot: !!merged.went_ot,
+    { status: "final", home_score: homeClub.score, away_score: awayClub.score, went_ot: !!st.wentOt,
       home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
     "return=minimal");
+  /* the first sitting was archived 'incomplete' while the game was held; it owns a finished game now */
+  await touchAttempt(cand.ea_match_id, "ingested", `first sitting of a game completed by a Rule 4.3 merge (${priors.length + 1} sittings, ${totalLen}s of game clock)`, cand.id);
 
   // the first sitting already told everyone they lost 2-3; reissue from the merged truth
   await postGameRecaps({ id: cand.id, home_team_id: cand.home_team_id, away_team_id: cand.away_team_id },
@@ -1034,6 +1183,14 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
   if (!logged) summary.errors.push({ ea_match_id: norm.ea_match_id, error: `merged into ${cand.ea_match_id} but the merge could not be archived — the next poll may merge it again; check ea_ingest_log` });
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, merged_into: cand.ea_match_id,
     score: `${homeClub.score}-${awayClub.score}`, players: rows.length, resumed: true });
+  await noteGameLength(cand, st, summary);
+  /* a reload that was itself a whole game, after a game stopped past its first ten minutes: the clubs
+     may have restarted from the beginning (an illegal loadout under Rule 4.5, or a full replay)
+     instead of playing the rest. The importer cannot tell those apart, so it combines them under
+     Rule 4.3 and says so. */
+  if (incomingLen >= REGULATION_S) {
+    await tellStaff(`\ud83d\udd01 **A reload ran a whole game** \u00b7 EA match ${cand.ea_match_id}: an unfinished game of ${Math.round(priorTotal / 60)} minutes was followed by a sitting of ${Math.round(incomingLen / 60)} minutes, and the two were combined under Rule 4.3 (${homeClub.score}-${awayClub.score}). If the clubs restarted from the beginning instead (an illegal loadout under Rule 4.5, or a full replay), re-file it from the restarted sitting alone in Control Center, Stats manager.`);
+  }
   return R(true);
 }
 
@@ -1393,10 +1550,17 @@ export const handler = async (event) => {
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away || (home.ea_club_id == null && away.ea_club_id == null))
       return { statusCode: 422, body: JSON.stringify({ error: "Link a club's EA club first — search EA from the fixture page." }) };
+    /* v3.53: a RESTART re-files the game from the sittings selected and strikes every other sitting
+       on it, with its statistics. Rule 4.5 ("the game will be fully restarted and any stats will be
+       removed", commissioner 2026-09-28) and Rule 4.3's restart from the beginning. Staff only: it
+       deletes statistics a club earned on the ice. */
+    const restart = body.leagueMerge.restart === true;
+    if (restart && actor.via !== "staff")
+      return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff can re-file a restarted game." }) };
     /* the sitting already on the game must be part of the selection — leaving it out would orphan
-       a box score the standings already counted */
-    if (game.ea_match_id && matchIds.indexOf(String(game.ea_match_id)) < 0)
-      return { statusCode: 422, body: JSON.stringify({ error: `Include the sitting already on this game (${game.ea_match_id}) in the selection — the merge REPLACES the box score.` }) };
+       a box score the standings already counted (a restart strikes it instead, on purpose) */
+    if (!restart && game.ea_match_id && matchIds.indexOf(String(game.ea_match_id)) < 0)
+      return { statusCode: 422, body: JSON.stringify({ error: `Include the sitting already on this game (${game.ea_match_id}) in the selection — the merge REPLACES the box score. If the game was restarted from the beginning, tick "Restarted" to strike the sittings you leave out.` }) };
     const logRows = await sbGet(`ea_ingest_log?ea_match_id=in.(${matchIds.map(encodeURIComponent).join(",")})&select=ea_match_id,status,game_id,payload`);
     if ((logRows || []).length !== matchIds.length)
       return { statusCode: 404, body: JSON.stringify({ error: "A selected sitting has no archived payload — it was never seen by the poller." }) };
@@ -1451,6 +1615,9 @@ export const handler = async (event) => {
     norms.sort((x, y) => (x.ts || 0) - (y.ts || 0));
     const merged = norms.length > 1 ? mergeSegments(norms) : norms[0];
     if (merged.error) return { statusCode: 422, body: JSON.stringify({ error: merged.error }) };
+    /* v3.53: the same finished test as the automatic import (sittingsState). A manual merge short of a
+       full, decided game is written and HELD, never published. */
+    const st = sittingsState(norms);
     const clubByClubId = Object.fromEntries(merged.clubs.map((c) => [String(c.ea_club_id), c]));
     const homeEaId = home.ea_club_id != null ? String(home.ea_club_id) : derivedOpp.id;
     const awayEaId = away.ea_club_id != null ? String(away.ea_club_id) : derivedOpp.id;
@@ -1466,9 +1633,19 @@ export const handler = async (event) => {
     for (const row of logRows) {
       const first = row.ea_match_id === merged.ea_match_id;
       await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(row.ea_match_id)}`,
-        { status: first ? "ingested" : "merged", game_id: game.id, reason: first
-          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}`
+        { status: first ? (st.finished ? "ingested" : "incomplete") : "merged", game_id: game.id, reason: first
+          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}${st.finished ? "" : ", held: not yet a full, decided game"}${restart ? ", restarted from the beginning" : ""}`
           : `manually merged into ${merged.ea_match_id} by ${byWhom}` });
+    }
+    let struck = 0;
+    if (restart) {
+      const onGame = await sbGet(`ea_ingest_log?game_id=eq.${game.id}&select=ea_match_id,status`);
+      for (const r0 of onGame || []) {
+        if (matchIds.indexOf(String(r0.ea_match_id)) >= 0 || r0.status === "struck") continue;
+        await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(r0.ea_match_id)}`,
+          { status: "struck", reason: `struck by ${byWhom}: the game was restarted from the beginning (Rules 4.3 and 4.5), and its statistics were removed` });
+        struck++;
+      }
     }
     await sbSend("DELETE", `game_stats?game_id=eq.${game.id}`);
     if (rows.length && !(await postBoxScore(rows)))
@@ -1476,11 +1653,15 @@ export const handler = async (event) => {
     const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
     /* forfeit_team_id is deliberately NOT in this PATCH. A merge files what was played; whether
        a ruling stands over it is a commissioner's call, made with undo_forfeit (v3.52). */
-    await sbSend("PATCH", `games?id=eq.${game.id}`,
-      { status: "final", home_score: homeClub.score, away_score: awayClub.score,
-        ea_match_id: merged.ea_match_id, went_ot: !!merged.went_ot,
-        home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 },
+    await sbSend("PATCH", `games?id=eq.${game.id}`, st.finished
+      ? { status: "final", home_score: homeClub.score, away_score: awayClub.score,
+          ea_match_id: merged.ea_match_id, went_ot: !!st.wentOt,
+          home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 }
+      : { status: "scheduled", home_score: null, away_score: null, went_ot: false,
+          ea_match_id: merged.ea_match_id,
+          home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 },
       "return=minimal");
+    if (st.finished) await noteGameLength(game, st, { warnings: [] });
     /* Evidence linkage: attaching these sittings to this fixture proves the opponent's EA club.
        Link it so auto-imports cover them from now on; staff are told either way. */
     if (derivedOpp) {
@@ -1495,11 +1676,16 @@ export const handler = async (event) => {
     if (actor.via === "management") {
       await tellStaff(`🧩 **Lag-out merge by a club** — ${byWhom} rebuilt ${away.code} @ ${home.code}` +
         (game.week ? ` (week ${game.week})` : "") + ` from ${norms.length} sitting${norms.length === 1 ? "" : "s"}: ` +
-        `final ${homeClub.score}-${awayClub.score}${merged.went_ot ? " (OT)" : ""}, ${rows.length} player lines. ` +
+        `${st.finished ? "final" : "held (not yet a full, decided game)"} ${homeClub.score}-${awayClub.score}${st.wentOt ? " (OT)" : ""}, ${rows.length} player lines. ` +
         `Review it in the Stats Manager if anything looks off.`);
     }
+    const heldWhy = st.finished ? null
+      : (st.level && st.reachedFull
+        ? `Level ${homeClub.score}-${awayClub.score} after ${Math.round(st.total / 60)} minutes: held for the overtime reload (Rule 4.3).`
+        : `The sittings add up to ${Math.round(st.total / 60)} of ${Math.round(REGULATION_S / 60)} minutes: held until the rest of the game is merged (Rule 4.3).`);
     return { statusCode: 200, body: JSON.stringify({ ok: true, gameId: game.id,
-      score: `${homeClub.score}-${awayClub.score}`, wentOt: !!merged.went_ot,
+      score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
+      held: !st.finished, heldWhy, struck, overlong: !!st.overlong,
       sittings: norms.length, players: rows.length, linked, by: byWhom }) };
   }
 
@@ -1564,7 +1750,7 @@ export const handler = async (event) => {
      - it never rules a level game. Nobody is ahead, so there is no one to give the win to; the
        officials are told and it waits for a human;
      - it never touches a game that is already forfeit-ruled or voided.
-   Everything it does is reversible with unforfeit_game, and every ruling is logged and announced. */
+   Everything it does is reversible by a commissioner (undo_forfeit, v3.52), and every ruling is logged and announced. */
 async function closeOutAbandoned(ctx, summary, batch) {
   if (!batch || !batch.length) return;
   const clubsOf = (n) => n.clubs.map((c) => String(c.ea_club_id));
@@ -1591,7 +1777,10 @@ async function closeOutAbandoned(ctx, summary, batch) {
   for (const t of inBatch) {
     let finals;
     try {
-      finals = await sbGet(`games?or=(home_team_id.eq.${t.id},away_team_id.eq.${t.id})&status=eq.final&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,home_team_id,away_team_id,home_score,away_score,scheduled_at,ea_match_id,week,stage`);
+      /* v3.53: HELD games too. Since v3.18 an unfinished game is held (scheduled, carrying its
+         sittings) rather than published, and this read only finals, so the ruling ordered on
+         2026-09-23 could never fire. */
+      finals = await sbGet(`games?or=(home_team_id.eq.${t.id},away_team_id.eq.${t.id})&status=in.(final,scheduled)&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,status,home_team_id,away_team_id,home_score,away_score,scheduled_at,ea_match_id,week,stage`);
     } catch { continue; }
     for (const g of finals || []) {
       if (done.has(g.id)) continue;
@@ -1609,29 +1798,36 @@ async function closeOutAbandoned(ctx, summary, batch) {
         }
       } catch { continue; }
       if (!ps.length) continue;                       /* not judgeable without the payloads */
-      const sorted = ps.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
-      const last = sorted[sorted.length - 1];
-      const total = ps.reduce((a, p2) => a + segElapsed(p2), 0);
-      if (segElapsed(last) >= REGULATION_S || total >= REGULATION_S || last.went_ot) continue;   /* finished */
+      /* the same finished test as everywhere else (sittingsState) */
+      const stA = sittingsState(ps);
+      if (stA.error || stA.finished) continue;       /* finished, or unreadable */
+      const last = stA.last, total = stA.total;
+      /* the score the sittings add up to, from the home and away clubs' side: a held game has no
+         score on its row, and a published one is read the same way for consistency */
+      const hClub = stA.merged.clubs.find((c) => String(c.ea_club_id) === cHome);
+      const aClub = stA.merged.clubs.find((c) => String(c.ea_club_id) === cAway);
+      if (!hClub || !aClub) continue;
+      const hs = hClub.score || 0, as = aClub.score || 0;
       /* did either club play a DIFFERENT opponent after the last sitting? */
       const movedOn = [cHome, cAway].some((c) => (seenAt.get(c) || []).some((x) => x.pair !== pair && x.ts > (last.ts || 0)));
       if (!movedOn) continue;                         /* still resumable: leave it for the merge */
       done.add(g.id);
       const mins = Math.round(total / 60);
-      if ((g.home_score || 0) === (g.away_score || 0)) {
+      if (hs === as) {
         summary.warnings.push({ game_id: g.id, warning: "abandoned game is level, the officials must rule it" });
-        await tellStaff(`\u26a0\ufe0f **Abandoned game, level score** \u00b7 ${codeOf(g.away_team_id)} at ${codeOf(g.home_team_id)}, week ${g.week}: ${mins} min of game clock was played, the score was level at ${g.home_score}-${g.away_score}, and a club has moved on to another opponent. Rule 4.3 gives the win to the club ahead and neither is, so this one is yours: rule it in Control Center, Stats manager.`);
+        await tellStaff(`\u26a0\ufe0f **Abandoned game, level score** \u00b7 ${codeOf(g.away_team_id)} at ${codeOf(g.home_team_id)}, week ${g.week}: ${mins} min of game clock was played, the score was level at ${hs}-${as}, and a club has moved on to another opponent. Rule 4.3 gives the win to the club ahead and neither is, so this one is the league office's to rule.`);
         continue;
       }
-      const loser = (g.home_score || 0) > (g.away_score || 0) ? g.away_team_id : g.home_team_id;
+      const loser = hs > as ? g.away_team_id : g.home_team_id;
       const winner = loser === g.home_team_id ? g.away_team_id : g.home_team_id;
       const reason = `abandoned: ${mins} min of game clock played, and a club moved on to another opponent (Rule 4.3)`;
       try {
-        const r = await sbRpc("forfeit_abandoned_game", { p_game: g.id, p_forfeiting_team: loser, p_reason: reason });
+        const r = await sbRpc("forfeit_abandoned_game", { p_game: g.id, p_forfeiting_team: loser, p_reason: reason,
+          p_home_score: hs, p_away_score: as });
         const ruled = r && (Array.isArray(r) ? r[0] : r);
         if (!ruled || ruled.ok !== true) continue;
         summary.warnings.push({ game_id: g.id, warning: `abandoned game ruled a forfeit: ${codeOf(winner)} keeps the win, both clubs keep their stats` });
-        await tellStaff(`\u26a0\ufe0f **Abandoned game ruled (Rule 4.3)** \u00b7 ${codeOf(g.away_team_id)} at ${codeOf(g.home_team_id)}, week ${g.week}: only ${mins} min of game clock was played and a club went on to another opponent instead of resuming. **${codeOf(winner)} takes the win ${g.home_score}-${g.away_score}; both clubs keep their statistics.** Undo it in Control Center, Stats manager, if the clubs were still going to replay it.`);
+        await tellStaff(`\u26a0\ufe0f **Abandoned game ruled (Rule 4.3)** \u00b7 ${codeOf(g.away_team_id)} at ${codeOf(g.home_team_id)}, week ${g.week}: only ${mins} min of game clock was played and a club went on to another opponent instead of resuming. **${codeOf(winner)} takes the win ${hs}-${as}; both clubs keep their statistics.** Only a commissioner can reverse it, if the clubs were still going to replay it: report it to the commissioners from the game.`);
       } catch (e) {
         summary.errors.push({ game_id: g.id, error: `could not rule the abandoned game: ${String((e && e.message) || e)}` });
       }

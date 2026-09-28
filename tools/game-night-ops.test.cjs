@@ -155,7 +155,10 @@ A("the whole night goes in one post, claimed once per club per night", /claim\("
 A("a club with no Discord room is REPORTED, not skipped in silence", /errors\.push\(\{ gameReminder: /.test(sched));
 
 console.log("\n— a Rule 4.3 merge that ends level");
-A("the officials are told, with the rule and where to rule on it", /Resumed game ended level/.test(ingest) && /Rule 4\.1/.test(ingest) && /Stats manager/.test(ingest));
+/* v3.53 (Q18, Q20): a level merge is no longer filed as a double loss. It is HELD for its overtime
+   reload; only a game published before v3.53 that is still level is put in front of the officials. */
+A("a level merge is held for its overtime reload", /level \$\{homeClub\.score\}-\$\{awayClub\.score\} after \$\{mins\} minutes, waiting for the overtime reload \(Rule 4\.3\)/.test(ingest));
+A("a published game still level: the officials are told, with the rule and where to rule on it", /Published game still unfinished/.test(ingest) && /Rule 4\.3/.test(ingest) && /Stats manager/.test(ingest));
 A("it rides as a warning, not an error (the import worked)", /summary\.warnings = summary\.warnings \|\| \[\]/.test(ingest) && /warnings: \[\] \};/.test(ingest));
 A("...and the poller keeps the run green while still recording it",
   /const ingestWarns = Array\.isArray\(out\.warnings\) \? out\.warnings : \[\];/.test(poll)

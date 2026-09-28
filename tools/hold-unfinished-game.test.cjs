@@ -22,8 +22,10 @@ const iflat = ing.replace(/\s+/g, " ");
 
 console.log("\n— the gate");
 {
+  /* v3.53: the one finished test (sittingsState): a full clock AND a decided score */
   A("completeness is decided before anything is published",
-    /const complete = elapsed >= REGULATION_S \|\| !!norm\.went_ot;/.test(ing));
+    /const st1 = sittingsState\(\[norm\]\);\s+const complete = st1\.finished;/.test(ing)
+    && /finished: reachedFull && margin > 0/.test(ing));
   A("...from the clock the merge already used", /const elapsed = segElapsed\(norm\);/.test(ing));
   A("a short sitting still writes its box score", /The box score is still written/i.test(iflat));
   A("...and still claims the fixture", /still stamped so the fixture is claimed/.test(iflat));
@@ -49,7 +51,7 @@ console.log("\n— the merge must still be able to find it, which is the part th
   A("...with the reason recorded", /an untouched game is never a merge target/.test(iflat));
   /* the bug the test caught: without this the held game merges and never becomes a result */
   A("the automatic merge now sets status final",
-    /\{ status: "final", home_score: homeClub\.score, away_score: awayClub\.score, went_ot: !!merged\.went_ot/.test(ing));
+    /\{ status: "final", home_score: homeClub\.score, away_score: awayClub\.score, went_ot: !!st\.wentOt/.test(ing));
   A("...and says why that is no longer redundant",
     /without the status the game would carry a correct merged score and never actually be a result/.test(iflat));
 }

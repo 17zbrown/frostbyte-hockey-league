@@ -47,16 +47,19 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/ea_ingest_log?ea_match_id=in.") && u.includes("payload=not.is.null"))
     return J(inList(u).filter((id) => world.archived[id]).map((id) => ({ ea_match_id: id, ...world.archived[id] })));
   const pairRows = (rows) => { const p = pairOf(u); return rows.filter((g) => p && ((g.home_team_id === p[0] && g.away_team_id === p[1]) || (g.home_team_id === p[1] && g.away_team_id === p[0]))); };
-  /* two different callers land here: the abandoned-game sweep still asks for status=eq.final, and
-     the resume-candidate query asks for status=in.(final,scheduled) since v3.18, because a first
-     sitting short of regulation is HELD and leaves the game scheduled. */
+  /* two different callers land here: the abandoned-game sweep (per team) and the resume-candidate
+     query (per pair). Both ask for status=in.(final,scheduled): the candidate query since v3.18,
+     because a first sitting short of regulation is HELD and leaves the game scheduled, and the sweep
+     since v3.53, because a held game is exactly the unfinished game Rule 4.3.9 rules on. */
   if (u.includes("/rest/v1/games?") && (u.includes("status=eq.final") || u.includes("status=in.(final,scheduled)"))) {
     /* the abandoned-game sweep asks per TEAM: or=(home_team_id.eq.T,away_team_id.eq.T) */
     const one = u.match(/home_team_id\.eq\.([^,)]+),away_team_id\.eq\.([^,)]+)/);
     if (one && one[1] === one[2]) {
       const t = one[1];
-      return J(world.finals.filter((g) => g.home_team_id === t || g.away_team_id === t)
-        .map((g) => ({ status: "final", voided: false, forfeit_team_id: null, ...g })));
+      const mine = (g) => g.home_team_id === t || g.away_team_id === t;
+      const fin = world.finals.filter(mine).map((g) => ({ status: "final", voided: false, forfeit_team_id: null, ...g }));
+      if (!u.includes("status=in.(final,scheduled)")) return J(fin);
+      return J(fin.concat((world.held || []).filter(mine).map((g) => ({ voided: false, forfeit_team_id: null, home_score: null, away_score: null, ...g, status: "scheduled" }))));
     }
     const fin = pairRows(world.finals).map((g) => ({ ...g, status: "final" }));
     if (!u.includes("status=in.(final,scheduled)")) return J(fin);
@@ -73,6 +76,8 @@ globalThis.fetch = async (url, opts = {}) => {
     for (const g of world.open) if (g.id === id && b.ea_match_id) g.ea_match_id = b.ea_match_id;
     return NIL();
   }
+  /* v3.53: a game past sixty minutes by more than a goal rings the statistics department's bell */
+  if (u.includes("/rest/v1/rpc/notify_department")) { (world.bells = world.bells || []).push(JSON.parse(opts.body)); return J(null); }
   if (u.includes("/rest/v1/rpc/forfeit_abandoned_game")) {
     const b = JSON.parse(opts.body); world.forfeits.push(b);
     return J({ ok: true, winner: "w", kept_result: true, score: "2-1" });
@@ -114,7 +119,7 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 const reset = () => {
   calls.length = 0;
-  world.open = []; world.finals = []; world.held = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = [];
+  world.open = []; world.finals = []; world.held = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = []; world.bells = [];
 };
 /* an EA match between two clubs that ENDED at `end` and ran `toi` seconds of game clock, with the
    given rosters ({eaPlayerId: name}) on each side */
@@ -200,7 +205,22 @@ console.log("\n— an ABANDONED game: a club moved on to another opponent, so no
     world.forfeits[0] && world.forfeits[0].p_forfeiting_team === "tB" && world.forfeits[0].p_game === "g900", JSON.stringify(world.forfeits[0]));
   A("...with a reason that names the clock and the rule", /min of game clock[\s\S]*Rule 4\.3/.test(String(world.forfeits[0].p_reason)), String(world.forfeits[0].p_reason));
   A("it is reported as a warning, not an error, so the poll stays green", (s1.errors || []).length === 0 && (s1.warnings || []).some((w) => /ruled a forfeit/.test(w.warning)), JSON.stringify(s1.warnings));
-  A("the officials are told, with how to undo it", world.toStaff.some((t) => /Abandoned game ruled/.test(t) && /Undo it/.test(t)), JSON.stringify(world.toStaff).slice(0, 160));
+  /* v3.52: only a commissioner reverses a forfeit, so the post says who can, not "undo it" */
+  A("the officials are told, and who can reverse it", world.toStaff.some((t) => /Abandoned game ruled/.test(t) && /Only a commissioner can reverse it/.test(t)), JSON.stringify(world.toStaff).slice(0, 160));
+  A("...on the score the sittings add up to, passed to the ruling", world.forfeits[0].p_home_score === 2 && world.forfeits[0].p_away_score === 1, JSON.stringify(world.forfeits[0]));
+
+  /* v3.53: a HELD game (scheduled, no score on its row) is ruled too. Before v3.53 the sweep read
+     finals only, so since v3.18 held its unfinished games the ruling could never fire. */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  const heldStub = ea("hb1", at(18), 111, 222, 900, [0, 2]);          // 15 min, tB ahead 2-0 (tA is home)
+  world.held = [{ ...G900, ea_match_id: "hb1" }];
+  world.filed = { hb1: "g900" }; world.archived = { hb1: { status: "incomplete", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "hb1", payload: heldStub }];
+  const sH = await post([ea("nxh", at(60), 222, 333, 3600, [3, 2])]);   // tB goes on to play tC
+  A("a held unfinished game is ruled abandoned too", world.forfeits.length === 1 && world.forfeits[0].p_game === "g900", JSON.stringify(world.forfeits));
+  A("...the club behind (tA, home, 0-2) is charged, on the sittings' score", world.forfeits[0] && world.forfeits[0].p_forfeiting_team === "tA" && world.forfeits[0].p_home_score === 0 && world.forfeits[0].p_away_score === 2, JSON.stringify(world.forfeits[0]));
+  A("...and it is a warning, not an error", (sH.errors || []).length === 0, JSON.stringify(sH.errors));
 
   /* no other opponent yet: the game is still resumable and must NOT be ruled */
   reset();
@@ -233,7 +253,7 @@ console.log("\n— an ABANDONED game: a club moved on to another opponent, so no
   A("a game that ran its full clock is never ruled abandoned", world.forfeits.length === 0);
 }
 
-console.log("\n— a resume that adds up to a TIE: filed, and the officials are told the same minute");
+console.log("\n— a resume that adds up to a TIE (v3.53): held for its overtime; a game already published keeps its row and the officials are told");
 {
   /* Rule 4.1 has continuous overtime and no shootout, so a resumed game cannot end level. A level
      total means the clubs replayed in full instead of resuming, or a sitting was filed twice.
@@ -248,14 +268,25 @@ console.log("\n— a resume that adds up to a TIE: filed, and the officials are 
   world.filed = { t1: "g900" }; world.archived = { t1: { status: "ingested", game_id: "g900" } };
   world.logs = [{ ea_match_id: "t1", payload: first }];
   const s = await post([ea("t1b", at(55), 111, 222, 3600, [1, 2])]);   // 1-0 + 1-2 = 2-2
-  A("the merged game is still filed — the box score is the record", s.ingested.length === 1 && s.ingested[0].resumed === true, JSON.stringify(s));
+  /* this game was PUBLISHED before v3.53 (world.finals): it keeps the row the table already reads */
+  A("a game published before v3.53 is still filed — the box score is the record", s.ingested.length === 1 && s.ingested[0].resumed === true, JSON.stringify(s));
   const gp = of(isGamePatch).slice(-1)[0];
-  A("...on the level line, untouched (an already-final game keeps its status)", gp && gp.body.home_score === 2 && gp.body.away_score === 2 && gp.body.status !== "scheduled", JSON.stringify(gp && gp.body));
+  A("...on the level line (an already-final game keeps its status)", gp && gp.body.home_score === 2 && gp.body.away_score === 2 && gp.body.status === "final", JSON.stringify(gp && gp.body));
   A("it is a WARNING, not an error: the poll stays green", (s.errors || []).length === 0 && (s.warnings || []).length === 1, JSON.stringify({ e: s.errors, w: s.warnings }));
-  A("...naming the match and the score", /2-2/.test(s.warnings[0].warning) && s.warnings[0].ea_match_id === "t1", JSON.stringify(s.warnings[0]));
+  A("...naming the game and the score", /2-2/.test(s.warnings[0].warning) && s.warnings[0].game_id === "g900", JSON.stringify(s.warnings[0]));
   A("the officials are told the same minute, with where to rule on it",
-    world.toStaff.length === 1 && /ended level/i.test(world.toStaff[0]) && /Stats manager/.test(world.toStaff[0]) && /Rule 4\.1/.test(world.toStaff[0]),
+    world.toStaff.some((t) => /Published game still unfinished/.test(t) && /Stats manager/.test(t) && /Rule 4\.3/.test(t)),
     JSON.stringify(world.toStaff).slice(0, 220));
+  A("...and that the reload was a whole game", world.toStaff.some((t) => /A reload ran a whole game/.test(t)), JSON.stringify(world.toStaff).slice(0, 220));
+
+  /* the same sittings on a HELD game: level after sixty is not a result, so it is held for the overtime */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  world.held = [{ ...G900, ea_match_id: "t2" }];
+  world.filed = { t2: "g900" }; world.archived = { t2: { status: "incomplete", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "t2", payload: ea("t2", at(20), 111, 222, 1500, [1, 0]) }];
+  const sL = await post([ea("t2b", at(40), 111, 222, 2100, [0, 1])]);   // 1-0 + 0-1 = 1-1 at 60 minutes
+  A("level at sixty on a held game: held for the overtime reload, not published", (sL.held || []).length === 1 && /level 1-1 after 60 minutes/.test(sL.held[0].reason) && !of(isGamePatch).some((c) => "status" in c.body), JSON.stringify(sL));
 
   reset();
   world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
@@ -263,8 +294,8 @@ console.log("\n— a resume that adds up to a TIE: filed, and the officials are 
   world.finals = [{ ...G900, ea_match_id: "u1" }];
   world.filed = { u1: "g900" }; world.archived = { u1: { status: "ingested", game_id: "g900" } };
   world.logs = [{ ea_match_id: "u1", payload: a }];
-  const t = await post([ea("u1b", at(55), 111, 222, 3600, [2, 1])]);   // 1-0 + 2-1 = 3-1
-  A("a decided resume says nothing to anyone", (t.warnings || []).length === 0 && world.toStaff.length === 0, JSON.stringify(t.warnings));
+  const t = await post([ea("u1b", at(55), 111, 222, 2100, [2, 1])]);   // 1-0 + 2-1 = 3-1, 25 + 35 = 60 minutes
+  A("a decided resume that adds up to a full game says nothing to anyone", (t.warnings || []).length === 0 && world.toStaff.length === 0 && world.bells.length === 0, JSON.stringify(t.warnings));
 }
 
 console.log("\n— a batch: filed matches cost nothing, one prefetch covers the whole delivery");

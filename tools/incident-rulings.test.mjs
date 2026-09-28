@@ -45,6 +45,25 @@ console.log("\n— third-period timing");
   A("...and NOT the five-minutes-earlier instruction", !/EARLIER/.test(early.detail));
   const p2 = ruling({ kind: "disconnect", occurrence: 1, period: 2 });
   A("a second-period drop gets no timing note", !/EARLIER/.test(p2.detail) && !/entire first period/.test(p2.detail));
+  A("...only the ordinary one-minute timing", /within one minute of the game-clock time of the drop/.test(p2.detail));
+}
+
+console.log("\n— v3.53: an overtime drop (Q20) and a drop inside the first ten minutes (Q19)");
+{
+  const ot = ruling({ kind: "disconnect", occurrence: 1, period: 4 });
+  A("an overtime drop owes one penalty", ot.penalties === 1 && !ot.forfeit);
+  A("...and the new overtime is the first period of the reload", /first period of the new game as sudden-death overtime/.test(ot.detail));
+  A("...penalty as soon as possible after puck drop", /as soon as possible after puck drop/.test(ot.detail));
+  A("...never the one-minute or five-minutes-earlier timing", !/within one minute/.test(ot.detail) && !/EARLIER/.test(ot.detail));
+  const ot2 = ruling({ kind: "disconnect", occurrence: 2, period: 4 });
+  A("a second overtime drop owes two, same timing", ot2.penalties === 2 && /sudden-death overtime/.test(ot2.detail));
+  const e1 = ruling({ kind: "disconnect", occurrence: 1, period: 1, early_first: true });
+  A("inside the first ten minutes: restart from the beginning", /restart the game from the beginning of the first period/.test(e1.detail));
+  A("...the stopped sitting is struck", /struck and its statistics removed/.test(e1.detail));
+  const p1 = ruling({ kind: "disconnect", occurrence: 1, period: 1 });
+  A("a later first-period drop is not a restart", !/restart the game/.test(p1.detail));
+  const e1in3 = ruling({ kind: "disconnect", occurrence: 1, period: 3, early_first: true });
+  A("the early-first flag means nothing outside the first period", !/restart the game/.test(e1in3.detail));
 }
 
 /* ---- the announcement: two clubs, two different sentences ---- */
