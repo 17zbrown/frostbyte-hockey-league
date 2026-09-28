@@ -14,7 +14,8 @@ A("names the mechanism", /closed notice on the \(profile_id, season_id\) primary
 A("reopen with a fresh window", /REOPENS the notice with a fresh 24-hour window \(ON CONFLICT DO UPDATE\)/.test(flat));
 A("per-row savepoints", /Every row runs in its own savepoint/.test(flat));
 A("the latent second abort is recorded", /touched no roster spot/.test(flat) && /closes the notice and leaves the sign-up to Rule 1\.1\.4/.test(flat));
-A("the rehearsal is recorded", /3 notices queued, exactly the three players still out/.test(flat));
+A("the rehearsal is recorded", /3 notices queued/.test(flat));
+A("the live outcome is recorded", /HAGERS \(UTA, active\), Stutz x77 \(UTA, camp/.test(flat) && /waived by DAL meanwhile/.test(flat));
 
 console.log("\n— the security revoke");
 for (const f of ["club_notify(uuid,text,text,text,uuid,text,text,text,boolean)", "_post_lineup_notice(", "_notify_lineup_pulled(", "_notify_lineup_moves("])

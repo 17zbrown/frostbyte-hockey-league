@@ -11,9 +11,14 @@
 -- only OPEN notices, so a player noticed on Sep 24, back inside the window on Sep 25, and gone again
 -- at 23:49 ET that night met his own closed notice on the (profile_id, season_id) primary key. The
 -- 23505 rolled back the entire sweep on every discord-sync tick: no club was told of any departure
--- and no window closed for anyone. discord-sync reported ok:false each time. Three rostered players
--- left the Discord in that span (a DAL camp player, a PIT camp player who has since returned, and a
--- UTA active player); two were still out.
+-- and no window closed for anyone. discord-sync reported ok:false each time.
+--
+-- OUTCOME (verified 2026-09-28 14:58 ET): the first sync after the fix ran ok:true and noticed exactly
+-- the rostered players still out of the server: HAGERS (UTA, active), Stutz x77 (UTA, camp; his second
+-- departure is what had broken the sweep) and Toine (NYI), each with a full 24 hours from 14:20 ET.
+-- A DAL camp player who also left in the dead span was waived by DAL meanwhile, so he is no longer
+-- rostered and correctly got no notice (Rule 1.1.4 governs his sign-up); a PIT camp player had
+-- already come back.
 --
 -- Fixes:
 --   a. A second departure REOPENS the notice with a fresh 24-hour window (ON CONFLICT DO UPDATE),
@@ -25,8 +30,8 @@
 --      'touched no roster spot' and abort the sweep the same way. It now closes the notice and
 --      leaves the sign-up to Rule 1.1.4 (remove_departed_signups).
 --
--- Rehearsed in a rolled-back transaction against the live data: 3 notices queued, exactly the three
--- players still out of the server; the returned player got none.
+-- Rehearsed in a rolled-back transaction against the live data: 3 notices queued; the returned player
+-- got none.
 --
 -- 2. ANYONE COULD POST INTO ANY CLUB'S DISCORD ROOM
 --
