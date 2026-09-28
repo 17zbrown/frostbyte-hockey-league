@@ -34,7 +34,7 @@ console.log("\n— six places the book was FALSE, not merely out of format");
   A("0.5 no longer says the office drafts off a club's board when its clock expires",
     !/the league office selects the highest-ranked available player on that club's own board/.test(sec("0.5"))
     && /Nobody drafts for a club/.test(sec("0.5")) && /the selection is skipped/.test(sec("0.5")));
-  A("...and 2.8 agrees", /the selection is skipped and no player is selected on the club's behalf/.test(sec("2.8")));
+  A("...and 2.8 agrees", /the selection is skipped and goes empty: no player is selected on the club's behalf/.test(sec("2.8")));
 
   A("0.6 no longer denies the first placement pass, which fills an ACTIVE roster",
     !/The active roster remains the players the club drafted and its management\./.test(sec("0.6"))

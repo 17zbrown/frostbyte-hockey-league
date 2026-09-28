@@ -42,10 +42,12 @@ console.log("— the style list leads with the NHL lottery");
   A("...its copy names the two-drawing format and the champion-last rule",
     /weighted odds for the top two picks/.test(m[0]) && /champion last/.test(m[0]));
   A("...and says Season 1 falls back to random", /first season with no history falls back to a pure random draw/.test(m[0]));
-  A("the radio seeds from the generated board's style, then nhl_lottery",
-    (live.match(/CG\._dStyle\|\|\(meta&&meta\.style\)\|\|"nhl_lottery"/g) || []).length === 1);
+  /* v3.62 (Q43): the basic format offers no standings style, so the radio and the handler both seed
+     from the board's style when it is offered, else Pure random, through one helper */
+  A("the radio seeds from the board's style when offered, else Pure random (v3.62)",
+    /var on = s\[0\]===CG\.draftStyleDefault\(meta\);/.test(live));
   A("...and so does the handler",
-    (live.match(/CG\._dStyle \|\| \(st && st\.order_meta && st\.order_meta\.style\) \|\| "nhl_lottery"/g) || []).length === 1);
+    /var style = CG\.draftStyleDefault\(st && st\.order_meta\);/.test(live));
 }
 
 console.log("\n— the snake is now format-gated, not gone (v2.48: basic IS a snake)");
@@ -80,9 +82,10 @@ console.log("\n— adversarial-review fixes hold");
   A("the header chip resolves through dStyleName", /esc\(CG\.dStyleName\(st\.order_meta\)\)/.test(live));
   /* !used && !skipped is still correct in the draft-flow sites (a skipped pick isn't "next on the
      clock") — only the TRADE picker must not exclude skipped make-up picks. */
-  A("tPicks lets skipped make-up picks be traded (Rule 2.8)",
-    !/CG\.tPicks[\s\S]{0,400}?!p\.skipped/.test(live));
-  A("...and scopes to the current draft season", /return p\.ownerCode===code && !p\.used && \(!dsn \|\| p\.season===dsn\);/.test(live));
+  /* v3.62 (Q44): a skipped pick goes empty, so it is no longer a trade asset */
+  A("tPicks leaves out a skipped pick, which went empty (v3.62, Rule 2.8)",
+    /CG\.tPicks[\s\S]{0,500}?!p\.skipped/.test(live));
+  A("...and scopes to the current draft season", /return p\.ownerCode===code && !p\.used && !p\.skipped && \(!dsn \|\| p\.season===dsn\);/.test(live));
   A("unresolvable pick ids render an explicit chip, never 'pick pick'",
     (live.match(/pick no longer available/g) || []).length === 2);
   A("the lottery card states the expansion-club treatment",

@@ -4657,6 +4657,20 @@ CG.DRAFT_STYLES = [
   ["manual","Manual order","You arrange the clubs yourself; the board builds from your order."],
   ["as_drawn","Keep the drawn order","Rebuild the board on the order already drawn for this season \u2014 for a new round count or pattern \u2014 without redrawing it. Its original style and any fallback are kept."]
 ];
+/* v3.62 (commissioner, 2026-09-28, Q43): "Season 2 draft: fully random." In the basic format every
+   order is drawn at random, so the desk offers Pure random, a manual order for the rare case the league
+   office rules one is required, and keeping an order already drawn. generate_draft_board refuses the
+   standings styles in a basic season, so this is the same rule, not the only thing enforcing it. */
+CG.DRAFT_STANDINGS_STYLES = ["nhl_lottery","reverse_standings","lottery"];
+CG.draftStylesOffered = function(){
+  var basic = (CG.seasonFormat ? CG.seasonFormat() : "basic") === "basic";
+  return CG.DRAFT_STYLES.filter(function(s){ return !basic || CG.DRAFT_STANDINGS_STYLES.indexOf(s[0]) < 0; });
+};
+CG.draftStyleDefault = function(meta){
+  var offered = CG.draftStylesOffered().map(function(s){ return s[0]; });
+  var want = CG._dStyle || (meta && meta.style);
+  return (want && offered.indexOf(want) >= 0) ? want : (offered.indexOf("random") >= 0 ? "random" : offered[0]);
+};
 /* The style a generated board was ACTUALLY built with — order_meta.fallback wins over
    order_meta.style (Season 1's nhl_lottery falls back to a pure random draw). */
 CG.dStyleName = function(meta){
@@ -4969,13 +4983,14 @@ CG.hubDraftLive = function(){
       '<span style="flex:1"><b style="font-family:var(--f-disp)">The order stands.</b> Draft picks are not trade assets this season — every club picks in the drawn snake order, and trades are players-only (Rule 2.3).</span></div>';
   }
 
-  /* make-up picks (skipped but recoverable) */
+  /* v3.62 (Q44): "a skipped pick goes empty; the club gets one random extra player per missed pick at
+     the end (no make-up picks)." The card records what went empty and what replaces it; there is no
+     button, because the database refuses a skipped pick from anyone. */
   if (mySkipped.length && live){
-    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Make-up picks</h3><span class="chip chip-warn">'+mySkipped.length+' waiting</span></div>'+
+    h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Skipped picks</h3><span class="chip chip-warn">'+mySkipped.length+' empty</span></div>'+
       mySkipped.map(function(p){
         return '<div class="card-b" style="display:flex;gap:12px;align-items:center;border-top:1px solid var(--line-soft)"><span class="mono" style="font-size:12px">R'+p.round+' · #'+p.overall+' overall</span>'+
-          '<span class="caption" style="flex:1">Your clock ran out on this one — it’s still yours. Use it any time before the draft ends.</span>'+
-          '<button class="btn btn-chrome btn-sm" data-openpick="'+p.id+'">Use this pick</button></div>';
+          '<span class="caption" style="flex:1">Your clock ran out on this one, so the pick went empty. It can’t be made up; once the draft is over you receive one player at random for it, at the league minimum (Rule 2.8).</span></div>';
       }).join("")+'</div>';
   }
 
@@ -5047,7 +5062,7 @@ CG.hubDraftLive = function(){
               '<td class="tnum"><span class="mono" style="font-size:11px">'+(p.used?esc(CG.pickPos(p)||"—"):"—")+'</span></td>'+
               '<td class="tleft">'+(isCur?'<span class="chip chip-live" style="font-size:9px"><span class="live-dot"></span>ON THE CLOCK</span>'
                 : p.used?'<span class="chip chip-win" style="font-size:9px">PICKED</span>'
-                : p.skipped?'<span class="chip chip-warn" style="font-size:9px">'+(mine?'MAKE-UP WAITING':'SKIPPED')+'</span>'
+                : p.skipped?'<span class="chip chip-warn" style="font-size:9px">SKIPPED</span>'
                 :'<span class="caption mono" style="font-size:10px">upcoming</span>')+'</td></tr>';
           }).join("");
       }).join("")+'</tbody></table></div></div>';
@@ -5055,9 +5070,9 @@ CG.hubDraftLive = function(){
 
   /* how it works */
   h += '<div class="card"><div class="card-h"><h3>How draft night runs</h3></div><div class="card-b"><div class="grid g2" style="gap:14px">'+
-    [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the pick is skipped: nobody drafts for you. A skipped pick can still be used before the draft concludes; one that never is gets replaced by a random player placed on the club after the draft (Rule 2.8)."],
+    [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the pick is skipped: nobody drafts for you, and the pick goes empty (Rule 2.8)."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
-     ["Skipped picks aren’t lost","If a pick gets skipped, it stays yours — use it any time before the draft ends from the Make-up card."],
+     ["A skipped pick goes empty","It can’t be made up later in the draft. Once the draft is over, you receive one player at random for each pick you missed, at the league minimum, from the players still without a club."],
      ["Eligibility","Registered by 11:59 PM ET the Thursday before the draft and, for randomly assigned first-years, at least 3 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of three still plays — placed on a club under Rule 2.2."]
     ].map(function(kv){ return '<div><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">'+kv[0]+'</b><p class="small" style="color:var(--steel);line-height:1.6">'+kv[1]+'</p></div>'; }).join("")+
     '</div></div></div>';
@@ -5224,8 +5239,8 @@ CG.admDraftLive = function(){
       (meta?'<span class="chip chip-win">'+(meta.fallback?'order set — random draw (no prior season)':'order set — '+esc(CG.dStyleName(meta)))+(meta.snake?' · snake':'')+'</span>':'<span class="chip chip-chrome">step 1</span>')+'</div><div class="card-b">'+
       (function(){ var g=CG.draftSeatGaps(); return g.length ? '<div class="note" style="margin-bottom:14px"><b>The draft cannot start yet</b> — every club needs an Owner and a GM (Rule 2.8). Still open: '+g.map(function(x){ return esc(x.code)+' ('+x.missing.join(", ")+')'; }).join("; ")+'.</div>' : ''; })()+
       '<div class="radio-cards" role="radiogroup" aria-label="Draft order style" style="margin-bottom:14px">'+
-      CG.DRAFT_STYLES.map(function(s){
-        var on = s[0]===(CG._dStyle||(meta&&meta.style)||"nhl_lottery");
+      CG.draftStylesOffered().map(function(s){
+        var on = s[0]===CG.draftStyleDefault(meta);
         return '<label class="'+(on?"on":"")+'" data-dstyle="'+s[0]+'" style="flex-direction:column;align-items:flex-start;gap:3px">'+
           '<input type="radio" name="dStyle"'+(on?" checked":"")+'><b>'+s[1]+'</b>'+
           '<span class="caption" style="text-transform:none;letter-spacing:0">'+s[2]+'</span></label>';
@@ -5259,7 +5274,7 @@ CG.admDraftLive = function(){
       (running&&cur?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
         '<b style="font-family:var(--f-disp)">'+esc(CG.TEAM[cur.ownerCode]?CG.TEAM[cur.ownerCode].name:cur.ownerCode)+' are on the clock</b><span class="caption">R'+cur.round+' · #'+cur.overall+' overall</span>'+
         '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-openpick="'+cur.id+'">Pick on their behalf</button></div>':"")+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the pick is skipped, nothing is drafted for the club (v2.70). Skipped picks stay recoverable — clubs use them from Team HQ, or you can from the table below. Concluding releases every unused pick; ten minutes later everyone still without a club is placed on one automatically (Rule 2.8).</span></div></div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the pick is skipped and goes empty: nothing is drafted for the club and no one, the office included, makes it later (Rule 2.8). The draft concludes itself when no pick is left on the clock. Ten minutes later each club receives one random player per pick it missed, then everyone still without a club is placed as depth. A club without cap room for the league minimum is never drawn.</span></div></div>';
   }
 
   /* FULL BOARD */
@@ -5282,7 +5297,7 @@ CG.admDraftLive = function(){
                 : p.skipped?'<span class="chip chip-warn" style="font-size:9px">SKIPPED</span>'
                 :'<span class="caption mono" style="font-size:10px">upcoming</span>')+'</td>'+
               '<td class="tright">'+(p.used?(canSetup?'<button class="btn btn-ghost btn-sm" data-adm-reverse="'+p.id+'" data-name="'+esc(p.playerName||"the pick")+'">Reverse</button>':'')
-                : (isCur||p.skipped)&&running?'<button class="btn btn-ghost btn-sm" data-openpick="'+p.id+'">Pick for them</button>':'')+'</td></tr>';
+                : isCur&&running?'<button class="btn btn-ghost btn-sm" data-openpick="'+p.id+'">Pick for them</button>':'')+'</td></tr>';
           }).join("");
       }).join("")+'</tbody></table></div></div>';
   }
@@ -5310,7 +5325,7 @@ CG.AFTER._admDraft = function(){
   CG.subscribeDraft(); CG._armDraftTick();
   var st = CG.lg.draftState;
   var sn = st ? st.season_number : ((CG.SEASON&&CG.SEASON.number)||1);
-  var style = CG._dStyle || (st && st.order_meta && st.order_meta.style) || "nhl_lottery";
+  var style = CG.draftStyleDefault(st && st.order_meta);
   CG._manualOrder = CG._manualOrder && CG._manualOrder.length===(CG.TEAMS||[]).length
     ? CG._manualOrder : (CG.TEAMS||[]).map(function(t){ return t.code; });
   function renderManual(){
@@ -5409,7 +5424,7 @@ CG.AFTER._admDraft = function(){
   simpleRpc("dPause","draft_pause",function(){ return { p_season_number: sn }; });
   simpleRpc("dResume","draft_resume",function(){ return { p_season_number: sn }; });
   simpleRpc("dSkip","draft_skip_pick",function(){ return { p_season_number: sn }; },
-    "Skip this pick?","The club keeps the pick as a make-up — they can use it any time before the draft ends.","Skip it");
+    "Skip this pick?","The pick goes empty and can’t be made up. The club receives one player at random for it once the draft is over (Rule 2.8).","Skip it");
   simpleRpc("dResetClock","draft_reset_clock",function(){
     /* pass the typed value through — out-of-range surfaces the server's clear error
        instead of silently resetting to the default */
@@ -13520,10 +13535,10 @@ CG.tRoster = function(code){ return (CG.lg.byTeam[code]||[]).filter(function(p){
 CG.tPicks = function(code){
   /* basic format (Rule 2.3): players only — no pick is ever a trade asset */
   if (!CG.fmt("pick_trades")) return [];
-  /* Skipped make-up picks stay tradeable (Rule 2.8, and accept_trade allows them); scope to the
-     current draft's season the same way draftPicksCur does. */
+  /* v3.62: a skipped pick went empty (Rule 2.8), so it is no asset to trade; scope to the current
+     draft's season the same way draftPicksCur does. */
   var dsn = (CG.lg.draftState && CG.lg.draftState.season_number) || (CG.SEASON && CG.SEASON.number);
-  return (CG.lg.draftPicks||[]).filter(function(p){ return p.ownerCode===code && !p.used && (!dsn || p.season===dsn); });
+  return (CG.lg.draftPicks||[]).filter(function(p){ return p.ownerCode===code && !p.used && !p.skipped && (!dsn || p.season===dsn); });
 };
 CG.pickLabel = function(k){ return k?("’"+String(k.season).slice(-2)+" R"+k.round+(k.origCode&&k.origCode!==k.ownerCode?" (via "+k.origCode+")":"")):"pick"; };
 CG.refreshTrades = function(){ if(!CG.sb) return; CG.loadManagerData().then(function(){ if(location.hash.indexOf("/tradehub")>=0 && CG.router) CG.router(); }); };
