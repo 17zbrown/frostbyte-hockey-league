@@ -1478,6 +1478,12 @@ input.ac-ok{border-color:var(--green) !important;background:var(--green-tint)}
 .lc-pc .ov{font-family:var(--f-mono);font-size:10px;color:var(--steel);align-self:flex-start;margin-top:3px;flex:0 0 auto}
 .lc-pc.sel{outline:2px solid var(--chrome-deep);border-radius:var(--r-s)}
 .lc-pc.dis{opacity:.45;cursor:not-allowed}
+/* v3.54: the weekly limit in the line builder. Yellow: his lines may take him past it. Red: he has already
+   played every game his week allows. Ink tokens, so the outline clears 3:1 on paper in both themes. */
+.lc-slot.cap-warn,.lc-pc.cap-warn{outline:2px solid var(--amber-ink);outline-offset:-2px;border-radius:var(--r-s)}
+.lc-slot.cap-over,.lc-pc.cap-over{outline:2px solid var(--red-ink);outline-offset:-2px;border-radius:var(--r-s)}
+.lc-slot.cap-warn .sl-sub{color:var(--amber-ink)}
+.lc-slot.cap-over .sl-sub{color:var(--red-ink)}
 .lc-pc .lnc{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;color:var(--paper);background:var(--ink);border-radius:5px;padding:1.5px 4px}
 /* v2.91 the jersey field in the Team HQ roster table: a number that looks like the number it
    replaces, not a form control bolted into a data row */

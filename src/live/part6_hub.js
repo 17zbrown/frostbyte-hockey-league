@@ -1021,7 +1021,8 @@ CG.AFTER._lineup = function(){
     /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
        played games by the box score plus games still to come by the filed lineup */
     var cap = CG.gameCapFor(p, game), used = CG.weekGamesFor(p.id, game, club);
-    if (used >= cap) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already played or filed (Rule "+(game.stage==="playoff"?"8.3":"5.2")+"). Drop him from a game you have already dressed to free one.";
+    /* v3.54: a recorded league-office exception for this player in this game lets him past it */
+    if (used >= cap && !(CG.capExceptionFor && CG.capExceptionFor(game.id, p.id))) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already played or filed (Rule "+(game.stage==="playoff"?"8.3":"5.2")+"). Drop him from a game you have already dressed to free one.";
     return null;
   }
   function assign(pid, pos){
@@ -1316,6 +1317,50 @@ CG.lcTogglePerGame = function(club, nightKey){
 CG.lcOpenGames = function(club, nightKey){
   return CG.nightGames(club, nightKey).filter(function(g){ return CG.now() < g.at - 30*60000; });
 };
+/* v3.54 (commissioner, 2026-09-28): "Instead of not allowing a player to be scheduled in the lineup
+   builder on more than 2 lines, give the submitter a warning that they may be over their game limit
+   and make the player's box outline yellow. If they are already over their limit based on their games
+   played for the week, outline their box red."
+   A player's week as the lines stand, unsaved edits included: the games he has PLAYED this week (box
+   scores), plus every game still to come this week that he would be dressed in, by the line pointed
+   at that game or, where no line is, by the sheet already filed. A game the league office has excepted
+   him for is left out (Rule 5.2). The limit itself is still enforced when a lineup is dressed.
+     over  he has already played every game his week allows, and a line still carries him;
+     warn  his lines would take him past his limit this week. */
+CG.lineCapState = function(p, club, slotsOf){
+  if (!p || !club) return null;
+  var lg = CG.lg || {};
+  var ref = (CG.lineNights(club)[0] || {}).game;
+  if (!ref || !CG.weekLoad) return null;
+  var load = CG.weekLoad(p, club, ref);
+  if (!load || !isFinite(load.cap)) return null;
+  var stage = ref.stage || "regular", ahead = 0;
+  (lg.schedule || []).forEach(function(g){
+    if ((g.stage || "regular") !== stage || g.week !== ref.week) return;
+    if (g.home !== club && g.away !== club) return;
+    if (g.status === "final" || g.voided) return;
+    if (CG.capExceptionFor && CG.capExceptionFor(g.id, p.id)) return;
+    var slot = (CG.now() < g.at) ? CG.lcGameSlot(club, CG.gameNight(g), g.id) : null;
+    var inIt;
+    if (slot != null){
+      var sl = slotsOf(slot) || {};
+      inIt = Object.keys(sl).some(function(k){ return sl[k] === p.id; });
+    } else {
+      var lu = (lg._lineups || {})[club + ":" + g.id];
+      inIt = !!lu && [lu.center, lu.lw, lu.rw, lu.ld, lu.rd, lu.goalie].indexOf(p.id) >= 0;
+    }
+    if (inIt) ahead++;
+  });
+  var projected = load.played + ahead;
+  var level = (load.played > load.cap || (load.played >= load.cap && ahead > 0)) ? "over"
+            : (projected > load.cap ? "warn" : null);
+  var why = level === "over"
+      ? p.tag + " has already played " + load.played + " of his " + load.cap + " games this week, so any game his lines still dress him in would take him over the limit (Rule 5.2)."
+      : level === "warn"
+        ? p.tag + " may go over his weekly limit: " + load.played + " played and " + ahead + " more on his lines comes to " + projected + ", and the limit is " + load.cap + " (Rule 5.2)."
+        : null;
+  return { level: level, played: load.played, ahead: ahead, projected: projected, cap: load.cap, why: why };
+};
 CG.lineNights = function(club){
   var seen = {}, out = [];
   (CG.lg.schedule||[]).filter(function(g){
@@ -1339,6 +1384,12 @@ CG.hubLines = function(qs){
   /* which lines each player is on, for the roster board's L1..L4 chips */
   var memb = {};
   [1,2,3].forEach(function(n){ var sl=slotsOf(n); Object.keys(sl).forEach(function(pos){ (memb[sl[pos]]=memb[sl[pos]]||[]).push(n); }); });
+  /* v3.54: yellow and red outlines for the weekly limit, computed from the lines as they stand */
+  var capSt = {};
+  roster.forEach(function(p){ var st = CG.lineCapState(p, club, slotsOf); if (st && st.level) capSt[p.id] = st; });
+  var capCls = function(pid){ var st = capSt[pid]; return st ? (st.level === "over" ? " cap-over" : " cap-warn") : ""; };
+  var capWarnN = Object.keys(capSt).filter(function(k){ return capSt[k].level === "warn"; }).length;
+  var capOverN = Object.keys(capSt).filter(function(k){ return capSt[k].level === "over"; }).length;
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(CG.TEAM[club].name)+' · team HQ</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Lineup builder</h1>'+
@@ -1346,7 +1397,8 @@ CG.hubLines = function(qs){
 
   var bar = '<div class="note '+(dirtyN?"chr":"grn")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">'+(dirtyN?dirtyN+" line"+(dirtyN===1?"":"s")+" with unsaved changes":"All lines saved")+'</b>'+
-    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on more than one line — the weekly limits are checked when a lineup is actually dressed.'+
+    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on any number of lines. A <b style="color:var(--amber-ink)">yellow</b> outline means his lines may take him past his weekly limit; <b style="color:var(--red-ink)">red</b> means he has already played every game his week allows. The limit itself is enforced when a lineup is dressed (Rule 5.2).'+
+    (capWarnN || capOverN ? ' <b>'+(capOverN ? capOverN+' over' : '')+(capOverN && capWarnN ? ', ' : '')+(capWarnN ? capWarnN+' may go over' : '')+'.</b>' : '')+
     ((CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)) ? ' <b>Pre-season:</b> your Owner, GM and AGM may sit at any position on a line; a line carrying one out of position dresses in pre-season games only (Rule 5.2).' : '')+'</span>'+
     '<span style="display:flex;gap:9px">'+
     '<button class="btn btn-ghost btn-sm" id="lcRevert"'+(dirtyN?"":" disabled")+'>Revert</button>'+
@@ -1367,13 +1419,16 @@ CG.hubLines = function(qs){
         ((CG._lcDraft && CG._lcDraft[n])?'<span style="color:var(--chrome-deep);font-weight:700" title="Unsaved">●</span>':"")+'</span></div>';
     POS.forEach(function(pos){
       var pid = sl[pos], pl = pid && CG.playerById(lg, pid);
-      cells += '<div class="lc-slot'+(pl?" filled":"")+'" data-line="'+n+'" data-slot="'+pos+'" tabindex="0" role="button" '+
-        'aria-label="Line '+n+' '+CG.POS_NAME[pos]+(pl?" — "+esc(pl.tag):" — empty")+'" draggable="'+(!!pl)+'">'+
+      var cst = pl ? capSt[pid] : null;
+      cells += '<div class="lc-slot'+(pl?" filled":"")+(pl?capCls(pid):"")+'" data-line="'+n+'" data-slot="'+pos+'" tabindex="0" role="button" '+
+        (cst ? 'title="'+esc(cst.why)+'" ' : '')+
+        'aria-label="Line '+n+' '+CG.POS_NAME[pos]+(pl?" — "+esc(pl.tag):" — empty")+(cst?". "+esc(cst.why):"")+'" draggable="'+(!!pl)+'">'+
         /* v2.95: the same anatomy as the per-game page's slot — the position always labelled,
            then the name, then the rating. The avatar competed with the name in a 6-across grid
            and the position was only implied by the column header. */
         '<span class="sl-pos">'+CG.POS_NAME[pos]+'</span>'+
-        (pl ? '<span class="sl-name">'+esc(pl.tag)+'</span><span class="sl-sub">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+'</span>'
+        (pl ? '<span class="sl-name">'+esc(pl.tag)+'</span><span class="sl-sub">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+
+                (cst ? (cst.level === "over" ? ' · OVER LIMIT' : ' · MAY GO OVER') : '')+'</span>'
             : '<span class="sl-sub">Empty</span>')+'</div>';
     });
   });
@@ -1403,8 +1458,8 @@ CG.hubLines = function(qs){
       return '<div class="lc-col"><div class="lc-ch">'+CG.POS_NAME[pos]+'</div>'+
         (byPos[pos]||[]).map(function(p){
           var dis = suspended[p.id];
-          return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-            (dis?'title="Suspended: locked until it is served (Rule 7.2)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
+          return '<div class="lc-pc'+(dis?" dis":"")+capCls(p.id)+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
+            (dis?'title="Suspended: locked until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
             CG.lcAv(p,34)+
             /* v2.91: the name owns the first row; position, line chips and the week load share the
                second. They used to compete for one line, so every name was cut to an initial and
@@ -1420,8 +1475,8 @@ CG.hubLines = function(qs){
     (camp.length ? '<div class="lc-ch" style="margin-top:14px">Training camp — fills any position (Rule 2.1)</div>'+
       '<div class="lc-board" style="margin-top:8px">'+camp.map(function(p){
         var dis = suspended[p.id];
-        return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-          (dis?'title="Suspended: locked until it is served (Rule 7.2)"':'')+' aria-label="'+esc(p.tag)+', training camp">'+
+        return '<div class="lc-pc'+(dis?" dis":"")+capCls(p.id)+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
+          (dis?'title="Suspended: locked until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', training camp'+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
           CG.lcAv(p,34)+
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
@@ -1501,7 +1556,13 @@ CG.AFTER._lines = function(qs){
   var lg = CG.lg;
   var tid = (lg._codeToId||{})[club];
   var sel = null;
-  function msg(t, bad){ var el=$("#lcMsg"); if (el){ el.textContent=t; el.style.color = bad?"var(--red)":"var(--steel)"; } }
+  function msg(t, bad){ var el=$("#lcMsg"); if (el){ el.textContent=t; el.style.color = bad==="warn" ? "var(--amber-ink)" : bad ? "var(--red-ink)" : "var(--steel)"; } }
+  /* v3.54: after a placement, say so if it puts the player at risk of his weekly limit (a warning, never a refusal) */
+  function capWarnAfter(pid){
+    var p = CG.playerById(lg, pid); if (!p) return;
+    var st = CG.lineCapState(p, club, function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); });
+    if (st && st.level) msg(st.why, "warn");
+  }
   /* Repaint ONLY this tab, in place. Routing the whole page on every drag reset the scroll and made
      each edit feel like a reload — the board swaps its own DOM and rebinds, and the viewport never
      moves. Falls back to the router if the wrapper is somehow gone. */
@@ -1519,30 +1580,8 @@ CG.AFTER._lines = function(qs){
     }
     else if (CG.router) CG.router();
   }
-  /* how many OTHER lines this goaltender already backstops (draft state, target line excluded) */
-  function gLines(pid, exceptLine){
-    var c = 0;
-    [1,2,3].forEach(function(n){
-      if (n===exceptLine) return;
-      var d = (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]);
-      if (d.G===pid) c++;
-    });
-    return c;
-  }
-  /* a goaltender's weekly cap in NIGHTS: six games is two lines (full format), three games is one
-     line (basic format) — a line beyond that is always a mistake (mirrors set_team_line's check) */
-  function goalieCapped(pid, pos, line){
-    if (pos!=="G") return null;
-    /* no weekly cap in the full format's pre-season (Rule 5.2, v2.28), so a goaltender may cover
-       every line — the client must not refuse what set_game_lineup now allows */
-    if (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)) return null;
-    var gMax = Math.max(1, Math.floor(CG.weeklyCap({ pos:"G" }) / 3));
-    if (gLines(pid, line) >= gMax){
-      var p = CG.playerById(lg, pid);
-      return (p?p.tag:"That goaltender")+" already backstops "+(gMax===1?"a line":gMax+" lines")+" — a goaltender's "+CG.weeklyCap({ pos:"G" })+"-game week is "+(gMax===1?"one night":gMax+" nights")+" (Rule 5.2).";
-    }
-    return null;
-  }
+  /* v3.54: the goaltender line refusal (gLines / goalieCapped) is gone. A goaltender may sit on any
+     number of lines; lineCapState outlines him when his lines would take him past his week. */
   function draft(n){
     CG._lcDraft = CG._lcDraft||{};
     if (!CG._lcDraft[n]) CG._lcDraft[n] = CG.lineFromRow((lg._teamLines||{})[n]);
@@ -1565,12 +1604,14 @@ CG.AFTER._lines = function(qs){
   }
   /* assign from the roster: the occupant falls off THIS line only; the player keeps his other lines */
   function assignFromRoster(pid, line, pos){
-    var why = fits(pid, pos) || goalieCapped(pid, pos, line);
+    /* v3.54: position rules still refuse; the weekly limit only warns (yellow/red), per the commissioner */
+    var why = fits(pid, pos);
     if (why){ msg(why, true); return; }
     var d = draft(line);
     Object.keys(d).forEach(function(k){ if (d[k]===pid) delete d[k]; });   /* no dup within a line */
     d[pos] = pid;
     repaint();
+    capWarnAfter(pid);
   }
   /* slot -> slot: MOVE into an empty slot, SWAP with an occupant (both directions validated) */
   function moveSlot(a, p1, b, p2){
@@ -1578,9 +1619,9 @@ CG.AFTER._lines = function(qs){
     var da = draft(a), db = draft(b);
     var X = da[p1]; if (!X) return;
     var Y = db[p2] || null;
-    var whyX = fits(X, p2) || goalieCapped(X, p2, b); if (whyX){ msg(whyX, true); return; }
+    var whyX = fits(X, p2); if (whyX){ msg(whyX, true); return; }
     if (Y){
-      var whyY = fits(Y, p1) || goalieCapped(Y, p1, a);
+      var whyY = fits(Y, p1);
       if (whyY){ msg("Can’t swap: "+whyY, true); return; }
       /* same object when a===b — delete the source FIRST, then write both ends */
       delete da[p1]; db[p2] = X; draft(a)[p1] = Y;
@@ -1588,6 +1629,7 @@ CG.AFTER._lines = function(qs){
       delete da[p1]; db[p2] = X;
     }
     repaint();
+    capWarnAfter(X); if (Y) capWarnAfter(Y);
   }
   document.querySelectorAll("[data-rcard]").forEach(function(el){
     var pid = el.getAttribute("data-rcard");
@@ -1647,6 +1689,21 @@ CG.AFTER._lines = function(qs){
   var saveAll = $("#lcSaveAll");
   if (saveAll) saveAll.addEventListener("click", function(){
     if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
+    if (!Object.keys(CG._lcDraft||{}).length) return;
+    /* v3.54: "give the submitter a warning that they may be over their game limit". A warning, then
+       the manager's choice: the limit is enforced when a lineup is dressed, not when a line is saved. */
+    var sOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
+    var flagged = (lg.byTeam[club]||[]).map(function(p){ var st = CG.lineCapState(p, club, sOf); return st && st.level ? { p:p, st:st } : null; }).filter(Boolean);
+    if (flagged.length){
+      CG.confirm("Save lines that may go over the weekly limit?",
+        flagged.map(function(f){ return f.st.why; }).join(" ")+
+        " You can save these lines, but a lineup that takes a player past his limit is refused when it is dressed (Rule 5.2).",
+        "Save anyway", doSave);
+      return;
+    }
+    doSave();
+  });
+  function doSave(){
     var dirty = Object.keys(CG._lcDraft||{}).map(Number);
     if (!dirty.length) return;
     saveAll.disabled = true;
@@ -1694,7 +1751,7 @@ CG.AFTER._lines = function(qs){
         next(i+1);
       });
     })(0);
-  });
+  }
   document.querySelectorAll(".lc-night").forEach(function(el){
     el.addEventListener("change", function(){
       if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
@@ -1820,7 +1877,7 @@ CG.AFTER._lines = function(qs){
         var six = sixFor(n.key, g.id); if (!six) return;
         var lu = (lg._lineups||{})[club+":"+g.id];
         var on = lu ? [lu.center,lu.lw,lu.rw,lu.ld,lu.rd,lu.goalie].filter(Boolean) : [];
-        six.forEach(function(pid){ if (on.indexOf(pid) < 0) adds[pid] = (adds[pid]||0) + 1; });
+        six.forEach(function(pid){ if (on.indexOf(pid) < 0 && !(CG.capExceptionFor && CG.capExceptionFor(g.id, pid))) adds[pid] = (adds[pid]||0) + 1; });
         on.forEach(function(pid){ if (six.indexOf(pid) < 0) drops[pid] = (drops[pid]||0) + 1; });
       });
       Object.keys(drops).forEach(function(pid){ used[pid] = Math.max(0, loadOfPid(pid) - drops[pid]); });

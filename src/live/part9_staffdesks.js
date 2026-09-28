@@ -456,6 +456,8 @@ CG.deskOfficials = function(){
       }).join("")+'</div>';
   }
 
+  h += CG.deskCapExceptionsCard();
+
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3>'+
     '<span class="chip">'+sus.length+(warns.length?' + '+warns.length+' warned':'')+'</span></div>';
   h += (sus.length||warns.length) ? sus.concat(warns).map(function(s){
@@ -494,6 +496,107 @@ CG.deskOfficials = function(){
     "<b>30 days</b>. Season-long bans, permanent bans, and any ruling against a commissioner are a commissioner’s call — "+
     "leave the case open and escalate. You cannot rule on a case you are party to, or on yourself.");
   return h;
+};
+
+/* v3.54 (commissioner, 2026-09-28): "there is a hard limit of 6 games per week for roster players and
+   3 for training camp players. This limit can be overruled by staff or the commissioners, but very
+   rarely." One player, one game, a reason, and every commissioner told (grant_cap_exception). Only
+   players already AT their limit for the chosen game are offered, because nobody else needs one. */
+CG.deskCapExceptionsCard = function(){
+  var lg = CG.lg || {}, now = Date.now();
+  var byAt = function(a,b){ return a.at-b.at; };
+  var soon = (lg.schedule||[]).filter(function(g){ return g.status!=="final" && !g.voided && g.at > now - 10*60000 && g.at < now + 8*86400000; }).sort(byAt).slice(0, 45);
+  var list = (lg.capExceptions||[]).map(function(e){
+    var g = (lg.schedule||[]).find(function(x){ return x.id === e.game_id; });
+    return g ? { e:e, g:g } : null;
+  }).filter(Boolean).sort(function(a,b){ return b.g.at - a.g.at; });
+  var nameOf = function(pid){ var p = CG.playerById(lg, pid); return p ? p.tag : ((lg._profName||{})[pid] || "A player"); };
+  var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Weekly limit exceptions</h3>'+
+    '<span class="chip">'+list.length+' on record</span></div>'+
+    '<div class="card-b"><p class="caption" style="margin:0 0 10px;max-width:78ch">The weekly limit is hard: six games for the active roster and three for training camp (Rule 5.2). Very rarely, the league office lets one player be dressed past it in one game. Only a player already at his limit for the game you pick is listed. Every commissioner is told, and so is the player’s club.</p>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<select id="capGame" style="flex:1;min-width:230px"><option value="">Pick a game…</option>'+soon.map(function(g){
+        return '<option value="'+esc(g.id)+'">'+esc(CG.fmtDay(g.at)+" "+CG.fmtTime(g.at)+" · "+g.away+" @ "+g.home)+'</option>';
+      }).join("")+'</select>'+
+      '<select id="capPlayer" style="min-width:200px" disabled><option value="">Player at his limit…</option></select>'+
+      '<input id="capWhy" maxlength="500" placeholder="Why he must play past his limit" style="flex:1;min-width:200px">'+
+      '<button class="btn btn-chrome" id="capGo">Grant exception</button></div></div>'+
+    (list.length ? list.map(function(x){
+      var played = x.g.status === "final";
+      return '<div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+        '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:120px">'+CG.fmtDay(x.g.at)+'</span>'+
+        '<b style="font-family:var(--f-disp)">'+esc(nameOf(x.e.profile_id))+'</b>'+
+        '<span class="caption">'+esc(x.g.away+" @ "+x.g.home)+'</span>'+
+        '<span class="caption" style="flex:1;min-width:160px">'+esc(x.e.reason||"")+'</span>'+
+        (played ? '<span class="chip chip-xs">played</span>'
+                : '<button class="btn btn-ghost btn-sm" data-cap-revoke="'+esc(x.e.game_id)+'|'+esc(x.e.profile_id)+'">Withdraw</button>')+
+      '</div>';
+    }).join("") : '')+
+  '</div>';
+  return h;
+};
+CG.wireCapExceptions = function(){
+  var lg = CG.lg || {};
+  var gSel = document.getElementById("capGame"), pSel = document.getElementById("capPlayer"), go = document.getElementById("capGo");
+  if (gSel && pSel) gSel.addEventListener("change", function(){
+    var g = (lg.schedule||[]).find(function(x){ return x.id === gSel.value; });
+    if (!g){ pSel.innerHTML = '<option value="">Player at his limit…</option>'; pSel.disabled = true; return; }
+    pSel.disabled = true; pSel.innerHTML = '<option value="">Reading both clubs’ week…</option>';
+    /* the loader holds only the signed-in member's own club's filed sheets, and a filed sheet counts
+       against the week (Rule 5.2), so read both clubs' sheets for this week before counting */
+    var wk = (lg.schedule||[]).filter(function(x){ return (x.stage||"regular") === (g.stage||"regular") && x.week === g.week &&
+      [x.home, x.away].some(function(c){ return c === g.home || c === g.away; }); });
+    var idToCode = lg._idToCode || {};
+    CG.sb.from("game_lineups").select("game_id,team_id,center,lw,rw,ld,rd,goalie").in("game_id", wk.map(function(x){ return x.id; })).then(function(r){
+      lg._lineups = lg._lineups || {};
+      ((r && !r.error && r.data) || []).forEach(function(row){ var c = idToCode[row.team_id]; if (c) lg._lineups[c+":"+row.game_id] = row; });
+      listAtLimit(g);
+    }, function(){ listAtLimit(g); });
+  });
+  function listAtLimit(g){
+    var at = [];
+    [g.home, g.away].forEach(function(code){
+      (lg.byTeam[code]||[]).forEach(function(p){
+        var load = CG.weekLoad ? CG.weekLoad(p, code, g) : null;
+        /* the game itself does not count against him here; the database measures it the same way */
+        var used = load ? load.rows.filter(function(r){ return r.counts && r.id !== g.id; }).length : 0;
+        if (load && isFinite(load.cap) && used >= load.cap && !CG.capExceptionFor(g.id, p.id)) at.push({ p:p, code:code, used:used, cap:load.cap });
+      });
+    });
+    pSel.innerHTML = at.length
+      ? '<option value="">Player at his limit…</option>'+at.map(function(x){ return '<option value="'+esc(x.p.id)+'">'+esc(x.p.tag+" ("+x.code+") "+x.used+"/"+x.cap)+'</option>'; }).join("")
+      : '<option value="">No one in this game is at his limit</option>';
+    pSel.disabled = !at.length;
+  }
+  if (go) go.addEventListener("click", function(){
+    var gid = gSel && gSel.value, pid = pSel && pSel.value, why = ((document.getElementById("capWhy")||{}).value||"").trim();
+    if (!gid || !pid){ CG.toast("Pick the game and the player","err"); return; }
+    if (why.length < 10){ CG.toast("Say why he must play past his limit","err"); return; }
+    CG.confirm("Grant an exception to the weekly limit?",
+      "He may be dressed in this one game past his limit. Every commissioner and his club’s front office are told, and the reason is kept on the record (Rule 5.2).",
+      "Grant exception", function(){
+        go.disabled = true;
+        CG.sb.rpc("grant_cap_exception", { p_game: gid, p_profile: pid, p_reason: why }).then(function(r){
+          go.disabled = false;
+          if (r.error){ CG.toast(r.error.message || "Couldn’t grant it", "err"); return; }
+          CG.toast("Exception granted for "+((r.data||{}).player||"that player"), "ok");
+          if (CG.reloadLeague) CG.reloadLeague();
+        });
+      });
+  });
+  document.querySelectorAll("[data-cap-revoke]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var parts = this.getAttribute("data-cap-revoke").split("|");
+      CG.confirm("Withdraw this exception?", "He goes back to his weekly limit for that game. If his club has already dressed him in it, the sheet stands and the game is reviewed against the limit when it is final (Rule 5.2).",
+        "Withdraw", function(){
+          CG.sb.rpc("revoke_cap_exception", { p_game: parts[0], p_profile: parts[1] }).then(function(r){
+            if (r.error){ CG.toast(r.error.message || "Couldn’t withdraw it", "err"); return; }
+            CG.toast((r.data && r.data.still_dressed) ? "Withdrawn. He is still on the filed sheet for that game, so tell his club" : "Exception withdrawn", "ok");
+            if (CG.reloadLeague) CG.reloadLeague();
+          });
+        });
+    });
+  });
 };
 
 CG.undoForfeitPrompt = function(id){
@@ -1023,6 +1126,7 @@ CG.staffDeskFor = function(key){
  * Post-render wiring
  * ---------------------------------------------------------------- */
 CG.AFTER._deskOfficials = function(){
+  CG.wireCapExceptions();
   document.querySelectorAll("[data-desk-forfeit]").forEach(function(b){
     b.addEventListener("click", function(){ CG.declareForfeitPrompt(this.getAttribute("data-desk-forfeit")); });
   });

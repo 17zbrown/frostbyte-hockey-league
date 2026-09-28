@@ -83,7 +83,8 @@ console.log("\n— 3. the weekly roster freeze");
 
 console.log("\n— the caps the announcement kept");
 {
-  A("6 games for a rostered player is still the rule", /No active-roster player — skater or goaltender — may be dressed in more than six \(6\) games in a game-week/.test(sec("5.2")));
+  /* v3.54 took the dashes out of this sentence (no dashes as punctuation); the rule is unchanged */
+  A("6 games for a rostered player is still the rule", /No active-roster player, skater or goaltender, may be dressed in more than six \(6\) games in a game-week/.test(sec("5.2")));
   A("3 games for a camp player is still the rule", /Training-camp players are subject to a cap of three \(3\) games in a game-week/.test(sec("5.2")));
   A("...and the built site carries both", /more than six \(6\) games in a game-week/.test(html) && /cap of three \(3\) games in a game-week/.test(html));
   A("the changelog records v3.40", rb.changelog.some((e) => e.version === "3.40"));

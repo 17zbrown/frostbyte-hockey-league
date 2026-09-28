@@ -247,16 +247,16 @@ console.log("\n— design-doc conformance (the bans that apply to markup)");
   A("interactive slots are keyboard-reachable", /tabindex="0"/.test(h));
 }
 
-console.log("\n— goaltending: the weekly cap sets the line limit, by format (v2.48)");
+console.log("\n— goaltending: no line refusal since v3.54; the builder outlines instead");
 {
-  A("the UI refuses a goalie's line beyond CG.weeklyCap's derived max, in rule terms",
-    /function goalieCapped/.test(src6) &&
-    /var gMax = Math\.max\(1, Math\.floor\(CG\.weeklyCap\(\{ pos:"G" \}\) \/ 3\)\);/.test(src6) &&
-    /already backstops "\+\(gMax===1\?"a line":gMax\+" lines"\)\+" — a goaltender's "\+CG\.weeklyCap\(\{ pos:"G" \}\)\+"-game week is "\+\(gMax===1\?"one night":gMax\+" nights"\)\+" \(Rule 5\.2\)\."/.test(src6));
-  A("...checked on assign", /fits\(pid, pos\) \|\| goalieCapped\(pid, pos, line\)/.test(src6));
-  A("...and on BOTH directions of a swap",
-    /fits\(X, p2\) \|\| goalieCapped\(X, p2, b\)/.test(src6) && /fits\(Y, p1\) \|\| goalieCapped\(Y, p1, a\)/.test(src6));
-  A("...counting draft state, target line excluded", /function gLines\(pid, exceptLine\)/.test(src6));
+  /* v3.54 (commissioner, 2026-09-28): "Instead of not allowing a player to be scheduled in the lineup
+     builder on more than 2 lines, give the submitter a warning that they may be over their game limit
+     and make the player's box outline yellow." The v2.48 refusal (goalieCapped / gLines) is gone; the
+     weekly cap still derives the goaltender's week (below) and is enforced when a lineup is dressed. */
+  A("the builder no longer refuses a goaltender's extra line", !/function goalieCapped/.test(src6) && !/function gLines\(/.test(src6));
+  A("...placements are checked for position only, then warned on the limit",
+    /var why = fits\(pid, pos\);\n/.test(src6) && /var whyX = fits\(X, p2\);/.test(src6) && /var whyY = fits\(Y, p1\);/.test(src6) && /capWarnAfter\(X\); if \(Y\) capWarnAfter\(Y\);/.test(src6));
+  A("...and the outline is computed from the weekly cap, draft state included", /CG\.lineCapState = function\(p, club, slotsOf\)/.test(src6) && /var capSt = \{\};/.test(src6));
 
   /* basic (the league standard; v2.51 layout): everyone — goaltenders included — may play six
      (6) games a week, so a goaltender covers TWO lines (two nights); v2.48–v2.50 capped him at 3

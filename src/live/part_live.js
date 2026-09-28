@@ -327,6 +327,10 @@ CG.weekLedgerModal = function(pid, club, gameId){
     '<p class="caption" style="margin-top:12px">A filed sheet counts the moment it is filed, so a club can spend a player'+"\u2019"+'s week before a puck drops (Rule 5.2). Free a game by taking him off a sheet he has not played yet.</p>',
     '<button class="btn btn-ghost" data-close>Close</button>');
 };
+/* v3.54: has the league office excepted this player from his limit for this game (Rule 5.2)? */
+CG.capExceptionFor = function(gameId, pid){
+  return ((CG.lg && CG.lg.capExceptions) || []).some(function(e){ return e.game_id === gameId && e.profile_id === pid; });
+};
 /* the cap that applies to one player in one game: the series cap in the playoffs, else the weekly cap */
 CG.gameCapFor = function(p, game){
   var o = { pos: p.pos, squad: p.squad, stage: game.stage || "regular" };
@@ -1504,6 +1508,13 @@ CG.loadManagerData = async function(){
     CG.lg._myTrades = [];
     if (myTid){ CG.lg._vetoes = {}; CG.lg._servers = {}; CG.lg._lineups = {}; }
     var jobs = [];
+    /* v3.54: the league office's rare exceptions to the weekly limit, one player in one game. Read by
+       the lineup tools (an excepted player may be dressed past his limit in that game) and listed on
+       the Officials' desk. Signed-in members only (RLS). */
+    if (CG.SEASON && CG.SEASON.id && CG.auth && CG.auth.user){
+      jobs.push(CG.sb.from("weekly_cap_exceptions").select("id,game_id,profile_id,team_id,reason,granted_by,created_at").eq("season_id", CG.SEASON.id)
+        .then(function(r){ if (r && !r.error) CG.lg.capExceptions = r.data || []; }, function(){}));
+    }
     /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
     if (myBoardTeam && myBoardTeam.id && CG.SEASON && CG.SEASON.id){
       jobs.push(CG.sb.from("draft_boards").select("profile_id,rank")

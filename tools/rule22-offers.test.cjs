@@ -136,7 +136,9 @@ console.log("\n— the pre-season uncapping reaches the client too");
 {
   const hub = R("src/live/part6_hub.js");
   A("a helper knows when only pre-season games lie ahead", /CG\.preseasonOnlyAhead = function\(club\)/.test(hub));
-  A("the Line Creator stops refusing a third goalie line", /if \(CG\.preseasonOnlyAhead && CG\.preseasonOnlyAhead\(club\)\) return null;/.test(hub));
+  /* v3.54: the Line Creator refuses no goalie line in ANY stage now (the pre-season carve-out went
+     with the refusal); it outlines a player whose lines may take him past his week instead */
+  A("the Line Creator stops refusing a third goalie line", !/function goalieCapped/.test(hub) && /CG\.lineCapState = function/.test(hub));
   A("...and the copy stops stating the caps flatly", /There is no weekly appearance cap in the pre-season/.test(hub));
   A("...in both places", /No weekly cap applies in the pre-season/.test(hub));
   A("the rulebook carries no literal markup", !/<b>The cap does not apply/.test(content));
