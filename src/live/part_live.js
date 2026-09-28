@@ -6498,13 +6498,16 @@ CG.AFTER._preseason = function(){
   });
 };
 CG.removeFromRoster = function(profileId, club, name, isMgmt){
+  /* v3.61 (Q29): a seat holder stays on the active roster, and protect_manager_spot refuses removing him;
+     say so here instead of letting the call fail */
+  if (isMgmt){ CG.toast((name||"This player")+" holds a front-office seat, so the seat is vacated under Teams first (Rule 2.6)","err"); return; }
+  /* v3.66 (commissioner, 2026-09-28, Q12): a player the league office removes "Becomes a free agent." */
   CG.confirm("Remove "+(name||"this player")+(club?" from "+club:"")+"?",
-    "This waives the player back to the free-agent pool, clears their roster spot and cap hit, and logs a transaction. They stay registered — you can re-assign them to any club."+
-    (isMgmt?" They also hold a front-office seat on this club — that Owner/GM/AGM seat (set under Teams) is untouched; only their player roster spot is removed." : ""),
+    "He becomes a free agent: his roster spot and cap hit clear, any club may sign him at the salary he was earning (Rule 2.2), and the move is logged on the transaction wire. The automatic placement never hands a free agent back to a club, so he stays free until someone signs him.",
     "Remove from roster", function(){
     CG.sb.rpc("admin_remove_from_roster",{ p_profile:profileId, p_season_id:(CG.SEASON&&CG.SEASON.id)||null }).then(function(r){
       if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
-      CG.toast((r.data||name||"Player")+" removed — back in the free-agent pool","ok");
+      CG.toast((r.data||name||"Player")+" removed. He is a free agent.","ok");
       CG.reloadLeague();
     });
   });

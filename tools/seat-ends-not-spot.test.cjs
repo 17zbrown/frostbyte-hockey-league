@@ -31,7 +31,7 @@ console.log("\n— the published rule now says what happens when a seat is vacat
   A("the salary rule is stated as the commissioner gave it",
     /cap hit becomes the league minimum, unless the seat he held carried a higher figure, in which case he retains that figure/.test(r26));
   A("...with both cases worked", /Assistant General Manager keeps his \$2,000,000/.test(r26) && /Owner or General Manager, whose seats count \$0, takes the league minimum/.test(r26));
-  A("...and the earned-salary case", /A player who earned a larger salary before taking the seat keeps that salary/.test(r26));
+  A("...and the earned-salary case (v3.66: it comes back when the seat ends, if higher)", /a player who earned more before he took his first seat has that salary back when the seat ends, if it is higher than the seat's figure/.test(r26));
   A("the trade and waiver protection ends with the role", /he may be waived or traded like any other player/.test(r26));
 }
 
