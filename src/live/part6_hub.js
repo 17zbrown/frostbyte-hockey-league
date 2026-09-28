@@ -2024,7 +2024,7 @@ CG.posGroup = function(pos){ return pos==="G" ? "G" : (pos==="D"||pos==="LD"||po
 function squadRoom(club, p){
   var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
   if (p.squad==="tc"){
-    var grp = CG.posGroup(p.pos), cap = CG.ROSTER_QUOTA[grp];   /* the format's shape: 9 F / 6 D / 3 G basic, 9 F / 6 D / 2 G full (Rule 2.1) */
+    var grp = CG.posGroup(p.pos), cap = CG.ROSTER_QUOTA[grp];   /* the format's shape: 7 F / 5 D / 3 G basic (v3.64), 9 F / 6 D / 2 G full (Rule 2.1) */
     return roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp && !CG.spotOutsideShape(x); }).length < cap;
   }
   return roster.filter(function(x){ return x.squad==="tc"; }).length < CG.CAMP_MAX;
@@ -2072,6 +2072,15 @@ function squadBtn(p){
     return '<button class="btn btn-ghost btn-sm" data-squad="'+p.spotId+'" data-squad-to="'+to+'" title="'+title+'">'+
       (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
   }
+  /* v3.64 (Q29): a group already OVER the published shape takes nobody up, not even in a swap; the
+     database refuses it (check_roster_structure), and this says so before the click */
+  if (p.squad==="tc"){
+    var og = CG.posGroup(p.pos), ocap = CG.ROSTER_QUOTA[og];
+    var on = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id) && x.squad!=="tc" && CG.posGroup(x.pos)===og && !CG.spotOutsideShape(x); }).length;
+    if (ocap!=null && on > ocap){
+      return '<button class="btn btn-ghost btn-sm" disabled title="'+esc("Your "+CG.GROUP_NAME[og].toLowerCase()+" are over the limit ("+on+" for "+ocap+" spots). Send some down, waive or trade them before calling anyone up (Rule 2.1).")+'">Call up</button>';
+    }
+  }
   /* roster full at this shape — a straight same-position swap is the only legal move */
   return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="Roster full — swap for '+
     (p.squad==="tc"?"an active-roster":"a camp")+' player of the same position. '+title+'">Swap…</button>';
@@ -2087,8 +2096,21 @@ CG.hubRoster = function(qs){
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · team management</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Roster & salary cap</h1>'+
     '<p class="lede" style="margin-top:8px">Your full club, with contracts and cap hit. Waive a player, put one on the trade block, or open a trade — all under the $'+(CG.CAP/1000000)+'M cap (Rule 2.5).</p></div>';
-  h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
-    '<span><b style="font-family:var(--f-disp)">Confidential — management only.</b> Salaries, cap space, and trade-block status are visible to your Owner, GM, and AGM. Don’t share them with players or rival clubs (Rule 2.3).</span></div>';
+  /* v3.63 (Q51): salaries and cap hits are public; what stays inside the front office is the club's
+     planning and its trade talks */
+  h += '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
+    '<span><b style="font-family:var(--f-disp)">What stays in your front office.</b> Salaries and cap hits are public (Rule 2.5). Your cap planning, your offers and your trade talks are for your Owner, GM and AGM only; don’t share them with players or rival clubs (Rule 2.3).</span></div>';
+  /* v3.64 (Q29): a club over the published shape sees it before anything else on the page */
+  var overG = ["F","D","G"].map(function(g){
+    var n = roster.filter(function(p){ return p.spotId && !CG.isWaived(p.id) && p.squad!=="tc" && !CG.spotOutsideShape(p) && CG.posGroup(p.pos)===g; }).length;
+    return { g:g, n:n, cap:CG.ROSTER_QUOTA[g] };
+  }).filter(function(x){ return x.cap!=null && x.n > x.cap; });
+  if (overG.length){
+    h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
+      '<span><b style="font-family:var(--f-disp)">Over the roster limits.</b> The active roster holds at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen and '+CG.ROSTER_QUOTA.G+' goaltenders (Rule 2.1), and you have '+
+      overG.map(function(x){ return x.n+' '+CG.GROUP_NAME[x.g].toLowerCase(); }).join(" and ")+
+      '. Send players to training camp, waive them or trade them before the roster freezes on Wednesday at 7:30 PM Eastern. Until then you can still make those moves, but you can’t add to a group you’re over in.</span></div>';
+  }
   h += '<div class="grid g3" style="margin-bottom:20px">'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(payroll)+'</b><span>Active payroll</span></div>'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px;color:'+(space<0?"var(--red)":"var(--green)")+'">'+CG.fmtMoney(space)+'</b><span>Cap space</span></div>'+

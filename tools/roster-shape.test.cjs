@@ -46,9 +46,9 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   /* v3.26: the shape is still a published season setting; what changed is that 2.1 now states the
      IN-FORCE form (complete lines plus flex players) instead of leading with the full format's
      per-group quota and offering lines-plus-flex as an alternative. */
-  A("...and the active-roster shape is a season setting the commissioner publishes, as lines plus flex",
+  A("...and the active-roster shape is a season setting the commissioner publishes, per group (7 F / 5 D / 3 G since v3.64)",
     /commissioner shall determine, for each season, the size and composition of the active roster/.test(r21) &&
-    /The composition is published as a number of complete lines together with a number of additional players of any position/.test(r21) &&
+    /The composition is published as the greatest number of forwards, defensemen and goaltenders a club may carry/.test(r21) &&
     /the forward group may hold centers, left wings and right wings in any mix/.test(r21) &&
     /the defense group may hold left and right defensemen in any mix/.test(r21) &&
     /the goaltending group holds only goaltenders/.test(r21));
@@ -66,9 +66,12 @@ console.log("\n— every client roster count excludes training camp");
   /* three separate sites counted byTeam wholesale; each one is a place a manager was told
      "full" while an active spot sat empty */
   const counts = live.match(/\(lg\.byTeam(?:&&lg\.byTeam)?\[?[^\]]*\]?\|\|\[\]\)\.filter\(function\(p\)\{ return p\.squad!=="tc"; \}\)\.length/g) || [];
-  /* v3.55: the waived-player sign dialog counts the active roster too, to say he joins camp when it is full */
-  A("the manager dashboard, the free-agency desk and the sign dialog filter camp out (the random assigner moved into the database, v2.35)",
-    counts.length === 3, counts.length + " sites");
+  /* v3.55: the waived-player sign dialog counts the active roster too, to say he joins camp when it is full;
+     v3.64 keeps those rows (proRows) to count his position group as well */
+  A("the manager dashboard and the free-agency desk filter camp out (the random assigner moved into the database, v2.35)",
+    counts.length === 2, counts.length + " sites");
+  A("...and so does the sign dialog, by total and by group (v3.64)",
+    /var proRows = t \? \(lg\.byTeam\[t\.code\]\|\|\[\]\)\.filter\(function\(p\)\{ return p\.squad!=="tc"; \}\) : \[\];/.test(live));
   A("no client site counts the raw roster length against the cap any more",
     !/var rosterN=\(lg\.byTeam(&&lg\.byTeam)?\[[^\]]*\]\|\|\[\]\)\.length/.test(live) &&
     !/counts\[t\.code\]=\(lg\.byTeam\[t\.code\]\|\|\[\]\)\.length;/.test(live));

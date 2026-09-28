@@ -57,8 +57,8 @@ console.log("\n— six places the book was FALSE, not merely out of format");
 
 console.log("\n— 2.1 states the shape that is actually in force");
 {
-  A("it leads with lines plus flex, the basic form",
-    /The composition is published as a number of complete lines together with a number of additional players of any position/.test(sec("2.1")));
+  A("it states the per-group maximums in force (7 F / 5 D / 3 G since v3.64)",
+    /The composition in force is seven \(7\) forwards, five \(5\) defensemen and three \(3\) goaltenders/.test(sec("2.1")));
   A("...and no longer leads with the full format's per-group quota",
     !/composition by position group/.test(sec("2.1")));
   A("the quota form survives where it belongs, in the shelved twin",

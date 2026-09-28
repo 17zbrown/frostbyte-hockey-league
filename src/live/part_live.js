@@ -99,10 +99,12 @@ CG.now = function(){ return Date.now(); };
    tools/season-format.test.cjs pins the two together. Every format-dependent number is read
    through CG.fmt(key) so it never lives in two places again. */
 CG.FORMAT_RULES = {
-  /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
-     the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and a
-     16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67) */
-  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:10, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
+  /* basic (v2.51): 15 players; camp at 3 games a week; everyone else 6 a week; a 4-game series cap and a
+     16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67).
+     v3.64 (commissioner, 2026-09-28, Q29): at most 7 forwards, 5 defensemen and 3 goaltenders, which sum
+     to the fifteen, so "two full lines plus three of any position" (lines 2, flex 3) is gone. Mirrors
+     public.format_rules('basic'). */
+  basic: { format:"basic", roster_max:15, quota:{ F:7, D:5, G:3 }, lines:null, flex:null, camp_max:10, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
   full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0, min_service_gp:0,
@@ -713,7 +715,7 @@ CG.buildLiveLeague = async function(opts){
     if (CG.reloadLeague) setTimeout(function(){ CG.reloadLeague(); }, 0);
   }
   CG.CAP = (season && season.salary_cap) ? season.salary_cap : CG.fmt("salary_cap", season);
-  CG.ROSTER_MAX = (season && season.roster_max) || CG.fmt("roster_max", season);   /* Rule 2.1: 15 = two full lines + three flex (basic) or 17 = 9 F / 6 D / 2 G (full) */
+  CG.ROSTER_MAX = (season && season.roster_max) || CG.fmt("roster_max", season);   /* Rule 2.1: 15 = 7 F / 5 D / 3 G (basic, v3.64) or 17 = 9 F / 6 D / 2 G (full) */
   CG.ROSTER_QUOTA = Object.assign({}, CG.fmt("quota", season));
   CG.CAMP_MAX = CG.fmt("camp_max", season);
   var seasonId = season ? season.id : null;
@@ -13461,6 +13463,12 @@ CG.AFTER._hubFreeAgents = function(){
   document.querySelectorAll("[data-fa-sign]").forEach(function(b){ b.addEventListener("click", function(){
     var regId=this.getAttribute("data-fa-sign"), name=this.getAttribute("data-name");
     var b=this;
+    /* v3.64 fix: this handler read `pid` (v3.46) and `lg` (v3.55) without ever declaring them, so every
+       click threw a ReferenceError before the dialog opened and the Sign button did nothing, silently.
+       Both come from the registration being signed. tools/fa-sign-click.test.cjs runs this click. */
+    var lg = CG.lg || {};
+    var reg = (lg._registrationsRaw||[]).find(function(x){ return x.id===regId; }) || {};
+    var pid = reg.profile_id || null;
     var uid=(CG.auth.user&&CG.auth.user.id)||((CG.me()||{}).id);
     var t=(CG.TEAMS||[]).find(function(x){ return uid&&(x.owner===uid||x.gm===uid||x.agm===uid); });
     var used=t?CG.teamPayroll(CG.lg, t.code):0;   /* includes unsigned-contract dead cap (Rule 2.5) */
@@ -13476,7 +13484,13 @@ CG.AFTER._hubFreeAgents = function(){
       var sal = CG.waivedSalaryOf(pid) || 750000;
       var salTxt = CG.fmtMoney(sal);
       /* v3.55: a full active roster sends him to training camp (Rule 2.1) */
-      var toCamp = t && (lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }).length >= (CG.ROSTER_MAX||CG.fmt("roster_max"));
+      /* v3.64: his position GROUP can be full while the roster total is not (7 F / 5 D / 3 G); either one
+         sends him to camp, as sign_free_agent does */
+      var proRows = t ? (lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }) : [];
+      var grp = CG.posGroup ? CG.posGroup(reg.position||"C") : null;
+      var grpCap = grp && CG.ROSTER_QUOTA ? CG.ROSTER_QUOTA[grp] : null;
+      var toCamp = !!t && (proRows.length >= (CG.ROSTER_MAX||CG.fmt("roster_max")) ||
+        (grpCap != null && proRows.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length >= grpCap));
       CG.confirm("Sign "+esc(name)+"?",
         "He joins your "+(toCamp ? "training camp, because your active roster is full, " : "roster ")+"the moment you confirm, at "+salTxt+" to the end of the season: the salary he was already earning, which a waiver does not reduce (Rule 2.2). That is "+salTxt+" against your cap, and you have "+CG.fmtMoney(space)+" of room."+(toCamp ? " Call him up from Team HQ when you have room." : "")+" He is not asked and the league office confirms nothing; the signing is logged for the whole league.",
         "Sign player", function(){

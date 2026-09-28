@@ -34,8 +34,8 @@ for (const f of ["basic", "full"]) {
   A(f + ": the client and database key sets match", JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()), JSON.stringify(Object.keys(b).sort()));
   A(f + ": every value matches", keys.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])), keys.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).join(","));
 }
-A("basic is the standard (v2.51 layout): 15 = two lines + three flex (caps 9 F / 7 D / 5 G), camp of 10 (v3.58), everyone 6 a week (camp 3), 4 a series, 16-GP floor (v2.67 default), $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
-  CG.FORMAT_RULES.basic.roster_max === 15 && CG.FORMAT_RULES.basic.lines === 2 && CG.FORMAT_RULES.basic.flex === 3 && CG.FORMAT_RULES.basic.quota.F === 9 && CG.FORMAT_RULES.basic.quota.D === 7 && CG.FORMAT_RULES.basic.quota.G === 5 &&
+A("basic is the standard: 15 = 7 F / 5 D / 3 G (v3.64), camp of 10 (v3.58), everyone 6 a week (camp 3), 4 a series, 16-GP floor (v2.67 default), $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
+  CG.FORMAT_RULES.basic.roster_max === 15 && CG.FORMAT_RULES.basic.lines === null && CG.FORMAT_RULES.basic.flex === null && CG.FORMAT_RULES.basic.quota.F === 7 && CG.FORMAT_RULES.basic.quota.D === 5 && CG.FORMAT_RULES.basic.quota.G === 3 &&
   CG.FORMAT_RULES.basic.camp_max === 10 && CG.FORMAT_RULES.basic.cap_skater === 6 && CG.FORMAT_RULES.basic.cap_camp === 3 && CG.FORMAT_RULES.basic.series_cap === 4 && CG.FORMAT_RULES.basic.playoff_min_gp === 16 &&
   CG.FORMAT_RULES.basic.salary_cap === 50000000 && CG.FORMAT_RULES.basic.weeks === 6 &&
   CG.FORMAT_RULES.basic.trade_deadline_week === 4 && CG.FORMAT_RULES.basic.draft_rounds === 15 && CG.FORMAT_RULES.basic.draft_snake === true && CG.FORMAT_RULES.basic.max_contract_years === 1 &&
@@ -46,15 +46,15 @@ A("full is the shelf: 17 = 9/6/2, $40M, 8 weeks, deadline week 6, 14 linear roun
   CG.FORMAT_RULES.full.trade_deadline_week === 6 && CG.FORMAT_RULES.full.draft_rounds === 14 && !CG.FORMAT_RULES.full.draft_snake && CG.FORMAT_RULES.full.max_contract_years === 3 &&
   CG.FORMAT_RULES.full.cap_goalie === 6 && CG.FORMAT_RULES.full.playoff_per_div === 4 && CG.FORMAT_RULES.full.series_cap === null && CG.FORMAT_RULES.full.playoff_min_gp === 0);
 A("full: the roster shape adds up to roster_max", (function(){ const r = CG.FORMAT_RULES.full; return r.quota.F + r.quota.D + r.quota.G === r.roster_max; })());
-A("basic: two lines plus three flex fit inside every group cap (6+3 F, 4+3 D, 2+3 G) and the total binds", (function(){ const r = CG.FORMAT_RULES.basic; return r.quota.F === 3*r.lines+r.flex && r.quota.D === 2*r.lines+r.flex && r.quota.G === r.lines+r.flex && r.roster_max === 6*r.lines+r.flex; })());
-A("basic goaltending covers a nine-game week with room (2 G x 6 games)", CG.FORMAT_RULES.basic.lines * CG.FORMAT_RULES.basic.cap_goalie >= 9);
+A("basic: the group caps (7 F, 5 D, 3 G) add up to the fifteen (v3.64, Q29)", (function(){ const r = CG.FORMAT_RULES.basic; return r.quota.F + r.quota.D + r.quota.G === r.roster_max; })());
+A("basic goaltending covers a nine-game week with room (3 G x 6 games)", CG.FORMAT_RULES.basic.quota.G * CG.FORMAT_RULES.basic.cap_goalie >= 9);
 A("the series cap and the floor read through the helpers", CG.seriesCap({ pos:"G", season:{ format:"basic" } }) === 4 && CG.seriesCap({ squad:"tc", season:{ format:"basic" } }) === 4 && CG.seriesCap({ pos:"G", season:{ format:"full" } }) === 6 && CG.seriesCap({ pos:"C", season:{ format:"full" } }) === 3 && CG.playoffMinGp({ format:"basic" }) === 16 && CG.playoffMinGp({ format:"full" }) === 0);
 /* v2.67: the floor is the season's to publish. A season row overrides the format, 0 is honored as "no floor", and
    an unset row falls through to the format's figure, mirroring public.season_rules(). */
 A("the season's published floor overrides the format, 0 included, null falls through", CG.playoffMinGp({ format:"basic", playoff_min_gp:16 }) === 16 && CG.playoffMinGp({ format:"basic", playoff_min_gp:20 }) === 20 && CG.playoffMinGp({ format:"basic", playoff_min_gp:0 }) === 0 && CG.playoffMinGp({ format:"basic", playoff_min_gp:null }) === 16 && CG.fmt("draft_rounds", { format:"basic", draft_rounds:12 }) === 12);
 A("the Control Center season editor carries the floor and writes it (empty = inherit, 0 = no floor)", /id="ssPoMin" type="number" min="0"/.test(live) && /playoff_min_gp:\(poRaw === "" \? null : parseInt\(poRaw,10\)\)/.test(live) && /if \(poRaw!=="" && !\/\^\\d\{1,3\}\$\/\.test\(poRaw\)\)\{ CG\.toast\(/.test(live));
 A("the database overlays it the same way", /jsonb_strip_nulls\(jsonb_build_object\('draft_rounds', s\.draft_rounds, 'playoff_min_gp', s\.playoff_min_gp\)\)/.test(R("sql/2026-09-19-playoff-floor-setting.sql")));
-A("the composition in words", CG.rosterShapeWords({ format:"basic" }) === "two full lines plus three players of any position" && CG.rosterShapeWords({ format:"full" }) === "9 F / 6 D / 2 G");
+A("the composition in words", CG.rosterShapeWords({ format:"basic" }) === "7 F / 5 D / 3 G" && CG.rosterShapeWords({ format:"full" }) === "9 F / 6 D / 2 G");
 
 console.log("\n— the helpers");
 A("anything but 'full' is basic", CG.seasonFormat({}) === "basic" && CG.seasonFormat({ format: "basic" }) === "basic" && CG.seasonFormat({ format: "full" }) === "full" && CG.seasonFormat(null) === "basic");
@@ -64,7 +64,7 @@ A("weeklyCap: full 3 skater / 6 goalie / 3 camp / uncapped pre-season", CG.weekl
 A("...and the basic pre-season is not a thing (no exemption)", CG.weeklyCap({ pos: "G", stage: "preseason", season: { format: "basic" } }) === 6);
 /* v2.73: depth is carried in camp and, called up, counts like anyone else; only pre-season loans sit outside the shape by origin */
 A("spots outside the shape: pre-season loans only, never management, never depth", !CG.spotOutsideShape({ origin: "depth_random" }) && CG.spotOutsideShape({ origin: "preseason_random" }) && CG.spotOutsideShape({ origin: "latecomer_random" }) && !CG.spotOutsideShape({ origin: "assigned" }) && !CG.spotOutsideShape({ origin: "preseason_random", mgmt: "gm" }));
-A("the default quota before a season loads is the standard's", CG.ROSTER_QUOTA.G === 5 && CG.CAMP_MAX === 10);
+A("the default quota before a season loads is the standard's", CG.ROSTER_QUOTA.G === 3 && CG.ROSTER_QUOTA.F === 7 && CG.CAMP_MAX === 10);
 
 console.log("\n— every reader goes through the format (no stray literals)");
 A("the season load derives cap / roster / quota / camp from the format", /CG\.CAP = \(season && season\.salary_cap\) \? season\.salary_cap : CG\.fmt\("salary_cap", season\);/.test(live) && /CG\.ROSTER_QUOTA = Object\.assign\(\{\}, CG\.fmt\("quota", season\)\);/.test(live) && /CG\.CAMP_MAX = CG\.fmt\("camp_max", season\);/.test(live));
@@ -107,7 +107,7 @@ A("0.1 explains the two formats and Appendix A", /basic format is the league sta
    derived from it (2 lines + 3 flex = 15, giving F9 / D7 / G5 in format_rules). The re-pin checks
    the in-force shape is the one stated, not merely that the sentence exists. */
 A("2.1: season-settings roster shape, management inside, depth in camp", /determine, for each season, the size and composition of the active roster/.test(sec("2.1"))
-  && /The composition is published as a number of complete lines together with a number of additional players of any position/.test(sec("2.1"))
+  && /The composition is published as the greatest number of forwards, defensemen and goaltenders a club may carry/.test(sec("2.1")) && /seven \(7\) forwards, five \(5\) defensemen and three \(3\) goaltenders, fifteen \(15\) in all/.test(sec("2.1"))
   && !/composition by position group/.test(sec("2.1")) && /shall publish it to the clubs before that season's draft/.test(sec("2.1")) && /counted within the published composition in their own position groups/.test(sec("2.1")) && /is carried in the club's training camp as depth/.test(sec("2.1")) && /Camp is not counted against the published composition/.test(sec("2.1")));
 A("2.1 (shelved): seventeen, two goaltenders, loans", /seventeen \(17\) players/.test(secFull("2.1")) && /two \(2\) goaltenders/.test(secFull("2.1")) && /Pre-season loans are the one exception/.test(secFull("2.1")));
 A("2.8: rounds a season setting, snake, random every season, cutoff is the whole test, no pick trading, depth placement", /commissioner shall determine the number of rounds for each season's draft/.test(sec("2.8")) && /bears no relation to the previous season/.test(sec("2.8")) && /registration by the cutoff is the sole test/.test(sec("2.8")) && /Draft picks are not club assets under the basic format/.test(sec("2.8")) && /as depth in the training camp of a club drawn at random from those whose camp has room, a club with an empty camp drawn first \(Rule 2\.1\)/.test(sec("2.8")));

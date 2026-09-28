@@ -117,12 +117,14 @@ assert("funnel flags the roster spot with no registration", /1 holds a roster sp
 //     treats anything but "full" as basic, so this is the no-season-loaded-yet default too.)
 const grpOrder = [...out.matchAll(/<em>(Forwards|Defensemen|Goaltenders)<\/em>/g)].map((m)=>m[1]);
 assert("groups stay in ice order, not sorted by count", grpOrder.join(",") === "Forwards,Defensemen,Goaltenders", grpOrder.join(","));
-assert("forwards show 40 / 90 (9 spots x 10 clubs)", /Forwards<\/em><\/span><span class="vz-hbv">40 \/ 90</.test(out));
-assert("defensemen show 15 / 70 (a 7-defenseman ceiling x 10 clubs)", /Defensemen<\/em><\/span><span class="vz-hbv">15 \/ 70</.test(out));
-assert("goaltenders show 12 / 50 (a 5-goaltender ceiling x 10 clubs)", /Goaltenders<\/em><\/span><span class="vz-hbv">12 \/ 50</.test(out));
-assert("corner value is signups over the league's TOTAL spots (15 x 10), not the summed ceilings", out.includes("67 / 150") && !out.includes("67 / 210"));
-assert("the subtitle says the figures are ceilings on a 15-spot roster", /10 clubs × 15 spots — at most 9 forwards, 7 defensemen, 5 goaltenders each \(Rule 2\.1\)/.test(out));
-assert("note reports coverage and the thinnest group", /67 of 150 active-roster spots have a registrant/.test(out) && /thinnest among defensemen \(15 for 70\)/.test(out));
+/* v3.64 (Q29): the basic shape is 7 F / 5 D / 3 G, which sums to the fifteen, so the bars are exact
+   spots again (70 / 50 / 30) and the total is still 150 */
+assert("forwards show 40 / 70 (7 spots x 10 clubs)", /Forwards<\/em><\/span><span class="vz-hbv">40 \/ 70</.test(out));
+assert("defensemen show 15 / 50 (5 spots x 10 clubs)", /Defensemen<\/em><\/span><span class="vz-hbv">15 \/ 50</.test(out));
+assert("goaltenders show 12 / 30 (3 spots x 10 clubs)", /Goaltenders<\/em><\/span><span class="vz-hbv">12 \/ 30</.test(out));
+assert("corner value is signups over the league's TOTAL spots (15 x 10)", out.includes("67 / 150"));
+assert("the subtitle names the per-club shape", /10 clubs × 7 forwards, 5 defensemen, 3 goaltenders \(Rule 2\.1\)/.test(out));
+assert("note reports coverage and the thinnest group", /67 of 150 active-roster spots have a registrant/.test(out) && /thinnest among defensemen \(15 for 50\)/.test(out));
 /* v3.12 — the split reads in RINK order now (LW, C, RW, LD, RD, G), not centers first. The
    commissioner asked for that order everywhere it applies, and a note that listed centers first
    while every roster and chart beside it started at left wing was the odd one out. */
@@ -133,9 +135,9 @@ const rowWidth = (label) => {
   const m = out.match(new RegExp('<i style="width:(\\d+)%"></i>\\s*<em>' + label + '</em>'));
   return m ? +m[1] : null;
 };
-assert("forwards 40 / 90 fill 44%", rowWidth("Forwards") === 44, rowWidth("Forwards") + "%");
-assert("goaltenders 12 / 50 fill 24%", rowWidth("Goaltenders") === 24, rowWidth("Goaltenders") + "%");
-assert("defensemen 15 / 70 fill 21%", rowWidth("Defensemen") === 21, rowWidth("Defensemen") + "%");
+assert("forwards 40 / 70 fill 57%", rowWidth("Forwards") === 57, rowWidth("Forwards") + "%");
+assert("goaltenders 12 / 30 fill 40%", rowWidth("Goaltenders") === 40, rowWidth("Goaltenders") + "%");
+assert("defensemen 15 / 50 fill 30%", rowWidth("Defensemen") === 30, rowWidth("Defensemen") + "%");
 assert("a full club (DAL 3 / 3) fills 100%", rowWidth("DAL") === 100, rowWidth("DAL") + "%");
 assert("a 1 / 3 club fills a third", rowWidth("VAN") === 33, rowWidth("VAN") + "%");
 

@@ -28,7 +28,7 @@ A("the overflow helper is not callable from the API", /revoke all on function pu
 A("the rehearsal is recorded", /T4\s+DET sends two forwards to UTA for one: exactly one incoming forward is placed in UTA's camp/.test(sql) && /T6\s+DET sends two forwards to PIT \(camp 10\) for one: the trade is refused/.test(sql));
 
 console.log("\n— the site");
-A("the client mirror carries the camp limit (10 since v3.58)", /basic: \{ format:"basic", roster_max:15, quota:\{ F:9, D:7, G:5 \}, lines:2, flex:3, camp_max:10,/.test(live));
+A("the client mirror carries the camp limit (10 since v3.58)", /basic: \{ format:"basic", roster_max:15, quota:\{ F:7, D:5, G:3 \}, lines:null, flex:null, camp_max:10,/.test(live));
 A("Sign stays open with a full active roster while camp has room", /var full = activeFull && campN >= \(CG\.CAMP_MAX\|\|10\);/.test(live) && /he would join your training camp \(Rule 2\.1\)/.test(live));
 A("the sign dialog says he joins camp", /"He joins your "\+\(toCamp \? "training camp, because your active roster is full, " : "roster "\)/.test(live));
 A("no 'league minimum' left in the waive dialog or the roster footer", !/sign them at the league minimum/.test(hub) && !/sign him at the league minimum/.test(hub));
