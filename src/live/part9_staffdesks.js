@@ -400,7 +400,10 @@ CG.deskOfficials = function(){
   var lg = CG.lg, now = Date.now();
   var upcoming = (lg.schedule||[]).filter(function(g){ return g.status!=="final"; })
     .sort(function(a,b){ return a.at-b.at; });
-  var ruled = (lg.schedule||[]).filter(function(g){ return g.status==="final" && (g.forfeit_team_id || g.voided); });
+  /* the loader maps a schedule row's forfeit to the club CODE (g.forfeit); forfeit_team_id is not on
+     it, so filtering on that listed voids only and never a forfeit (v3.52) */
+  var ruled = (lg.schedule||[]).filter(function(g){ return g.status==="final" && (g.forfeit || g.voided); });
+  var commishNow = CG.auth && CG.auth.role === "commish";
   var sus = (lg.suspensions||[]).filter(function(s){ return s.status==="active"; });
   /* warnings are split OUT of lg.suspensions at the loader (lg.warnings) — filtering suspensions
      for mode==="warning" found nothing, so the desk showed zero warnings however many existed */
@@ -441,12 +444,15 @@ CG.deskOfficials = function(){
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Rulings on the record</h3>'+
       '<span class="chip">'+ruled.length+'</span></div>'+
       ruled.slice(0,10).map(function(g){
-        var code = g.forfeit_team_id ? (lg._idToCode||{})[g.forfeit_team_id] : null;
+        var code = g.forfeit || null;
         return '<div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
           '<span class="mono" style="font-size:11.5px;color:var(--steel);min-width:120px">'+CG.fmtDay(g.at)+'</span>'+
           '<span class="chip '+(code?"chip-loss":"chip")+' chip-xs">'+(code?esc(code)+" FORFEIT":"VOID")+'</span>'+
           '<span style="flex:1;min-width:120px" class="caption">'+esc(g.away)+' @ '+esc(g.home)+'</span>'+
-          '<button class="btn btn-ghost btn-sm" data-desk-unforfeit="'+esc(g.id)+'">Put it back</button></div>';
+          (commishNow
+            ? '<button class="btn btn-ghost btn-sm" data-desk-unforfeit="'+esc(g.id)+'">Put it back</button>'
+            : '<button class="btn btn-ghost btn-sm" data-desk-report="'+esc(g.id)+'" title="Only a commissioner can reverse a ruling">Report a mistake</button>')+
+          '</div>';
       }).join("")+'</div>';
   }
 
@@ -493,7 +499,7 @@ CG.deskOfficials = function(){
 CG.undoForfeitPrompt = function(id){
   CG.confirm("Put this game back on the schedule?",
     "The forfeit or void is reversed, the score is cleared, and the game returns to <b>scheduled</b>. "+
-    "The reversal is posted to the staff channel and written to the transaction log.",
+    "The reversal is announced in #game-scores and posted to the staff channel. Only a commissioner can do this.",
     "Reverse the ruling", function(){
       CG.sb.rpc("undo_forfeit", { p_game: id }).then(function(r){
         if (r.error){ CG.toast(r.error.message || "Couldn’t reverse it", "err"); return; }
@@ -501,6 +507,32 @@ CG.undoForfeitPrompt = function(id){
         CG.reloadLeague();
       });
     });
+};
+
+/* v3.52 (commissioner, 2026-09-28): "Do not allow a staffer to undo any forfeits, if there is a
+   mistake entered by staff, a commissioner must be notified to step in to fix the problem."
+   Staff get this instead of a reversal button: it rings every commissioner's bell, posts to the
+   staff casework channel and writes the audit log. Nothing about the game changes. */
+CG.reportRulingPrompt = function(id){
+  var g = ((CG.lg && CG.lg.schedule) || []).find(function(x){ return x.id === id; });
+  var what = g ? (g.voided ? "the void" : g.forfeit ? ("the forfeit against "+g.forfeit) : g.status === "final" ? "the filed result" : "this game") : "this game";
+  CG.modal("Report a mistake"+(g ? " · "+esc(g.away)+" @ "+esc(g.home) : ""),
+    '<p class="caption" style="margin:0 0 10px">Only a commissioner can reverse or change a ruling. Say what is wrong with '+esc(what)+
+      ' and what it should have been; every commissioner is told at once.</p>'+
+    '<label class="fld"><span>What went wrong</span><textarea id="rrNote" rows="4" maxlength="1000" placeholder="e.g. I charged the forfeit to the wrong club: the away club did not show, not the home club."></textarea></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="rrGo">Send to the commissioners</button>');
+  var go = document.getElementById("rrGo");
+  go.addEventListener("click", function(){
+    var note = (document.getElementById("rrNote").value || "").trim();
+    if (note.length < 10){ CG.toast("Say what is wrong and what it should have been","err"); return; }
+    go.disabled = true;
+    CG.sb.rpc("report_ruling_mistake", { p_game: id, p_note: note }).then(function(r){
+      go.disabled = false;
+      if (r.error){ CG.toast(r.error.message || "Couldn’t send it", "err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast("Sent. The commissioners have it", "ok");
+    });
+  });
 };
 
 /* ---------------------------------------------------------------- *
@@ -993,6 +1025,9 @@ CG.staffDeskFor = function(key){
 CG.AFTER._deskOfficials = function(){
   document.querySelectorAll("[data-desk-forfeit]").forEach(function(b){
     b.addEventListener("click", function(){ CG.declareForfeitPrompt(this.getAttribute("data-desk-forfeit")); });
+  });
+  document.querySelectorAll("[data-desk-report]").forEach(function(b){
+    b.addEventListener("click", function(){ CG.reportRulingPrompt(this.getAttribute("data-desk-report")); });
   });
   document.querySelectorAll("[data-desk-unforfeit]").forEach(function(b){
     b.addEventListener("click", function(){ CG.undoForfeitPrompt(this.getAttribute("data-desk-unforfeit")); });

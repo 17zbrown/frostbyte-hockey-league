@@ -57,6 +57,7 @@ const PROFILES = {
   "rando":      { role: "member", departments: [], gamertag: "Rando", banned: false },
   "other-gm":   { role: "member", departments: [], gamertag: "OtherGM", banned: false },   // runs a club, but not this one
   "statsguy":   { role: "staff", departments: ["statistics"], gamertag: "StatsGuy", banned: false },
+  "commish":    { role: "commissioner", departments: [], gamertag: "Commish", banned: false },
 };
 
 let UID = "bos-gm";
@@ -194,7 +195,7 @@ console.log("\n— the protections that already existed still hold for managers"
   A("nothing was written by either refusal", writes.statDeletes === 0 && writes.gamePatches.length === 0);
 }
 
-console.log("\n— a Rule 3.2 forfeit ruling is statistics staff's: a club cannot merge over it, and no merge clears it");
+console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobody else merges over it, and no merge clears it");
 {
   /* the forfeiting club's own GM used to be able to merge the real sittings onto the game and
      have the merge write forfeit_team_id: null — undoing a staff ruling against itself */
@@ -204,15 +205,18 @@ console.log("\n— a Rule 3.2 forfeit ruling is statistics staff's: a club canno
   A("the desk is told up front that the game carries a ruling", cand.game && cand.game.forfeit === true, JSON.stringify(cand.game));
   const r = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
   const mgmt = JSON.parse(r.body);
-  A("the forfeiting club's management is refused, by name", r.statusCode === 422 && mgmt.error === "This game carries a forfeit ruling — statistics staff can merge it.", mgmt.error);
+  A("the forfeiting club's management is refused, by name", r.statusCode === 422 && mgmt.error === "This game carries a forfeit ruling. Only a commissioner can change a ruled game: report the mistake to the commissioners from the game page.", mgmt.error);
   UID = "tor-agm";
   A("...and so is the other club's", (await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).statusCode === 422);
   A("...with nothing written by either", writes.statDeletes === 0 && writes.gamePatches.length === 0 && writes.logPatches.length === 0);
 
   reset(); UID = "statsguy";
+  const sr = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
+  A("statistics staff are refused too: no staffer changes a ruled game (v3.52)", sr.statusCode === 422 && writes.statDeletes === 0 && writes.gamePatches.length === 0, sr.body);
+  reset(); UID = "commish";
   const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
-  A("statistics staff may still merge the sittings for the record", staff.ok === true && staff.score === "3-1", staff.error);
-  A("...and even THEIR merge leaves the ruling exactly as it was (forfeit_team_id is not in the PATCH at all)",
+  A("a commissioner may merge the sittings for the record", staff.ok === true && staff.score === "3-1", staff.error);
+  A("...and even a commissioner's merge leaves the ruling exactly as it was (forfeit_team_id is not in the PATCH at all)",
     writes.gamePatches.length === 1 && !("forfeit_team_id" in writes.gamePatches[0]), JSON.stringify(writes.gamePatches[0]));
   FORFEIT = null;
   reset(); UID = "bos-gm";

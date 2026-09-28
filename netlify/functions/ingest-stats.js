@@ -1087,7 +1087,7 @@ async function authForGame(jwt, game) {
   catch { return deny; }
   if (!prof || prof.banned) return deny;
   const who = prof.gamertag || uid;
-  if (prof.role === "commissioner") return { ok: true, uid, who, via: "staff" };
+  if (prof.role === "commissioner") return { ok: true, uid, who, via: "staff", commish: true };
   if (prof.role === "staff" && (prof.departments || []).indexOf("statistics") >= 0) return { ok: true, uid, who, via: "staff" };
   let seats = [];
   try { seats = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,owner_profile_id,gm_profile_id,agm_profile_id`); }
@@ -1244,8 +1244,8 @@ export const handler = async (event) => {
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away) return { statusCode: 422, body: JSON.stringify({ error: "This game's clubs no longer exist." }) };
     const linked = { home: home.ea_club_id != null, away: away.ea_club_id != null };
-    /* `forfeit` lets the desk say up front that a ruled game is staff's to merge (the merge
-       route refuses management on it either way) */
+    /* `forfeit` lets the desk say up front that a ruled game is a commissioner's to change (the
+       merge route refuses everyone else on it either way, v3.52) */
     const gameInfo = { id: game.id, week: game.week, status: game.status, home: home.code, away: away.code,
       score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null,
       forfeit: game.forfeit_team_id != null };
@@ -1379,13 +1379,16 @@ export const handler = async (event) => {
     const actor = await authForGame(jwt, game);
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (game.voided) return { statusCode: 422, body: JSON.stringify({ error: "That game is voided." }) };
-    /* A Rule 3.2 forfeit is a statistics-staff ruling (forfeit_game / unforfeit_game). A club's
-       management could otherwise merge real sittings over it and — as this path once did by
-       writing forfeit_team_id: null — erase the ruling against itself. Staff may still merge the
-       sittings for the record; the ruling is untouched here by anyone (see the PATCH below), and
-       staff lift it with unforfeit_game when that is the call. */
-    if (game.forfeit_team_id != null && actor.via !== "staff")
-      return { statusCode: 422, body: JSON.stringify({ error: "This game carries a forfeit ruling — statistics staff can merge it." }) };
+    /* A forfeit is a ruling. A club's management could otherwise merge real sittings over it and,
+       as this path once did by writing forfeit_team_id: null, erase the ruling against itself.
+       v3.52 (commissioner, 2026-09-28: "Do not allow a staffer to undo any forfeits, if there is a
+       mistake entered by staff, a commissioner must be notified to step in"): statistics staff no
+       longer merge onto a ruled game either, because a merge rewrites the ruled game's score and box
+       score. A commissioner may, and even a commissioner's merge leaves the ruling exactly as it was
+       (forfeit_team_id is not in the PATCH below); undo_forfeit is the only way to lift it. Rule 4.3.7
+       is unaffected: there the sittings are merged FIRST and the forfeit is ruled on the merged game. */
+    if (game.forfeit_team_id != null && !actor.commish)
+      return { statusCode: 422, body: JSON.stringify({ error: "This game carries a forfeit ruling. Only a commissioner can change a ruled game: report the mistake to the commissioners from the game page." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away || (home.ea_club_id == null && away.ea_club_id == null))
@@ -1472,7 +1475,7 @@ export const handler = async (event) => {
       return { statusCode: 409, body: JSON.stringify({ error: "Another import wrote this game's box score at the same moment — reload the fixture and try again." }) };
     const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
     /* forfeit_team_id is deliberately NOT in this PATCH. A merge files what was played; whether
-       a Rule 3.2 ruling stands over it is statistics staff's call, made with unforfeit_game. */
+       a ruling stands over it is a commissioner's call, made with undo_forfeit (v3.52). */
     await sbSend("PATCH", `games?id=eq.${game.id}`,
       { status: "final", home_score: homeClub.score, away_score: awayClub.score,
         ea_match_id: merged.ea_match_id, went_ot: !!merged.went_ot,

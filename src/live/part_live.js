@@ -2729,8 +2729,12 @@ CG._smRenderList = function(body){
         '<option value="dc3">Three disconnections (Rule 4.3) — keep the played result</option></select>'+
       '<input id="smFfWhy" placeholder="Reason (no-show, couldn’t ice six…)" style="flex:1;min-width:180px">'+
       '<button class="btn btn-chrome" id="smFfGo">Rule forfeit</button>'+
-      '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button></div></label>'+
-      '<p class="caption" style="margin-top:10px">The three-disconnection kind needs the game’s sessions merged first (League lag-out merge above) — it keeps the merged score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more.</p>'+
+      /* v3.52: only a commissioner reverses a ruling; staff report a mistake to them */
+      (CG.auth && CG.auth.role === "commish"
+        ? '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button>'
+        : '<button class="btn btn-ghost" id="smFfReport" title="Only a commissioner can reverse a forfeit">Report a mistake</button>')+
+      '</div></label>'+
+      '<p class="caption" style="margin-top:10px">The three-disconnection kind needs the game’s sessions merged first (League lag-out merge above): it keeps the merged score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more. Forfeits are ruled the same way in the playoffs, and the series count reads them. Once a forfeit is recorded, only a commissioner can reverse it: if one was entered in error, pick the fixture and report the mistake, and the commissioners are told.</p>'+
       '</div></div>';
     /* game incidents: the countable record behind Rules 3.2/4.3 — logging one computes the
        ruling AND announces it to both clubs' channels within a second (the VM bot listens). */
@@ -2866,7 +2870,7 @@ CG._smRenderList = function(body){
         CG.confirm("Rule this game a forfeit?",
           keep
             ? loser.replace(" forfeited","")+" takes the forfeit loss, but the game WAS played: the merged score and every stat line stay exactly as entered, and the result publishes as an FFL (Rule 4.3)."
-            : loser.replace(" forfeited","")+" takes the forfeit loss. Recorded 1–0 with no player statistics (Rule 3.2); standings update immediately. A later lag-out merge of the real game replaces this ruling.",
+            : loser.replace(" forfeited","")+" takes the forfeit loss. Recorded 1–0 with no player statistics (Rule 3.2); standings update immediately. Only a commissioner can reverse it, so check the fixture and the club before you record it.",
           "Rule forfeit", function(){
             go.disabled = true;
             CG.sb.rpc("forfeit_game", { p_game: gid2, p_forfeiting_team: tid2, p_reason: why || null, p_keep_result: keep }).then(function(r){
@@ -2876,6 +2880,11 @@ CG._smRenderList = function(body){
               CG.reloadLeague && CG.reloadLeague();
             });
           });
+      });
+      var rep = document.getElementById("smFfReport");
+      if (rep) rep.addEventListener("click", function(){
+        if (!gSel.value){ CG.toast("Pick the fixture first","err"); return; }
+        CG.reportRulingPrompt(gSel.value);
       });
       if (undo) undo.addEventListener("click", function(){
         var gid2 = gSel.value;
@@ -11795,7 +11804,7 @@ CG.declareForfeitPrompt = function(id){
       '<option value="home">'+esc(homeName)+' (home) forfeited → '+esc(awayName)+' wins 1-0</option>'+
       '<option value="void">Neither club played → void (no result, kept out of the standings)</option>'+
     '</select></label>'+
-    '<p class="caption">A no-show forfeit is recorded as a 1-0 win with no individual stats (Rule 3.2). The losing club still burns the game toward its weekly count. The league does not record double forfeits — a game neither club played is voided and kept out of the standings (Rule 3.2). A game that WAS played and ended on three disconnections keeps its stats instead: merge the sessions in the Stats Manager, then rule it there (Rule 4.3). Reversible from the game once declared.</p>',
+    '<p class="caption">A no-show forfeit is recorded as a 1-0 win with no individual stats (Rule 3.2), and because nobody took the ice it counts toward no player’s weekly games on either club. The league does not record double forfeits: a game neither club played is voided and kept out of the standings (Rule 3.2). A game that WAS played and ended on three disconnections keeps its stats instead: merge the sessions in the Stats Manager, then rule it there (Rule 4.3). Playoff games are ruled the same way. Once recorded, only a commissioner can reverse it; a staffer who records one in error reports it to the commissioners from the Officials’ desk.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ffGo">Record it</button>');
   document.getElementById("ffGo").addEventListener("click", function(){
     var who=document.getElementById("ffWho").value;
@@ -12830,9 +12839,9 @@ CG._gsOne = function(el){
           '<div><span class="caption">Current result</span><div id="gsCurScore" style="font-family:var(--f-disp);font-size:20px">'+
             (g.status==="final" && g.home_score!=null ? esc(g.home_score+"–"+g.away_score)+' <span class="caption" style="font-size:11px">('+esc(idToCode[g.home_team_id]||"home")+' first)</span>' : 'not final yet')+'</div></div>'+
           '<div><span class="caption">Box score lines</span><div id="gsCurLines" style="font-family:var(--f-disp);font-size:20px">'+lines+'</div></div>'+
-          (g.forfeit_team_id ? '<div><span class="caption">Ruling</span><div style="padding-top:5px"><span class="chip chip-warn">Forfeit — '+esc(idToCode[g.forfeit_team_id]||"?")+' did not play</span></div></div>' : '')+
+          (g.forfeit_team_id ? '<div><span class="caption">Ruling</span><div style="padding-top:5px"><span class="chip chip-warn">Forfeit charged to '+esc(idToCode[g.forfeit_team_id]||"?")+'</span></div></div>' : '')+
         '</div></div>'+
-        (g.forfeit_team_id ? '<div class="note" style="margin-bottom:14px">This game stands as a 1–0 forfeit (Rule 3.2). If it was actually played — or finished after a disconnect — the winning club’s management enters the real result below, which replaces the forfeit ruling.</div>' : '')+
+        (g.forfeit_team_id ? '<div class="note" style="margin-bottom:14px">This game carries a forfeit ruling, and a ruled game is not rebuilt from this desk. Only a commissioner can change or reverse a forfeit. If the ruling is wrong, <a href="#/hub/complaints" style="font-weight:700;border-bottom:2px solid var(--chrome)">open a case with the league office</a> and say what happened.</div>' : '')+
         '<div id="gsCands"><p class="caption">Looking for this game’s sittings in the EA archive…</p></div>';
       function loadCands(){
         var out0 = document.getElementById("gsCands");

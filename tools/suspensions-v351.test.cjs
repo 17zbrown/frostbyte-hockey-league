@@ -106,7 +106,9 @@ A("7.6 once, routed, issuer barred", /Each sanction may be appealed once/.test(s
 A("7.7 new scale + timeout", /three \(3\) to eighteen \(18\) games in steps of three/.test(sec("7.7").paragraphs[1]) && /timeout in the league Discord/.test(sec("7.7").paragraphs[1]));
 A("7.7 bans entered on the site", /entered on the site by a commissioner/.test(sec("7.7").paragraphs.join(" ")));
 A("2.1.4 names the lock", /A suspended player is locked where he stands/.test(sec("2.1").paragraphs[3]));
-A("v3.51 recorded", rb.changelog[0].version === "3.51");
-A("no dash as punctuation in Chapter 7 or the changelog entry", !/—| - /.test(JSON.stringify(["7.1","7.2","7.5","7.6","7.7"].map((k) => sec(k).paragraphs)) + JSON.stringify(rb.changelog[0])));
+/* by version, never by position: a later release takes changelog[0] */
+const e351 = rb.changelog.find((c) => c.version === "3.51");
+A("v3.51 recorded", !!e351);
+A("no dash as punctuation in Chapter 7 or the changelog entry", !/—| - /.test(JSON.stringify(["7.1","7.2","7.5","7.6","7.7"].map((k) => sec(k).paragraphs)) + JSON.stringify(e351)));
 console.log(`\n${n - fail}/${n} passed`);
 process.exit(fail ? 1 : 0);
