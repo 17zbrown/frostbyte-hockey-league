@@ -34,9 +34,9 @@ for (const f of ["basic", "full"]) {
   A(f + ": the client and database key sets match", JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()), JSON.stringify(Object.keys(b).sort()));
   A(f + ": every value matches", keys.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])), keys.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).join(","));
 }
-A("basic is the standard (v2.51 layout): 15 = two lines + three flex (caps 9 F / 7 D / 5 G), camp of 8 (v3.55), everyone 6 a week (camp 3), 4 a series, 16-GP floor (v2.67 default), $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
+A("basic is the standard (v2.51 layout): 15 = two lines + three flex (caps 9 F / 7 D / 5 G), camp of 10 (v3.58), everyone 6 a week (camp 3), 4 a series, 16-GP floor (v2.67 default), $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
   CG.FORMAT_RULES.basic.roster_max === 15 && CG.FORMAT_RULES.basic.lines === 2 && CG.FORMAT_RULES.basic.flex === 3 && CG.FORMAT_RULES.basic.quota.F === 9 && CG.FORMAT_RULES.basic.quota.D === 7 && CG.FORMAT_RULES.basic.quota.G === 5 &&
-  CG.FORMAT_RULES.basic.camp_max === 8 && CG.FORMAT_RULES.basic.cap_skater === 6 && CG.FORMAT_RULES.basic.cap_camp === 3 && CG.FORMAT_RULES.basic.series_cap === 4 && CG.FORMAT_RULES.basic.playoff_min_gp === 16 &&
+  CG.FORMAT_RULES.basic.camp_max === 10 && CG.FORMAT_RULES.basic.cap_skater === 6 && CG.FORMAT_RULES.basic.cap_camp === 3 && CG.FORMAT_RULES.basic.series_cap === 4 && CG.FORMAT_RULES.basic.playoff_min_gp === 16 &&
   CG.FORMAT_RULES.basic.salary_cap === 50000000 && CG.FORMAT_RULES.basic.weeks === 6 &&
   CG.FORMAT_RULES.basic.trade_deadline_week === 4 && CG.FORMAT_RULES.basic.draft_rounds === 15 && CG.FORMAT_RULES.basic.draft_snake === true && CG.FORMAT_RULES.basic.max_contract_years === 1 &&
   !CG.FORMAT_RULES.basic.extensions && !CG.FORMAT_RULES.basic.rights && !CG.FORMAT_RULES.basic.pick_trades && !CG.FORMAT_RULES.basic.preseason && !CG.FORMAT_RULES.basic.fa_window &&
@@ -64,7 +64,7 @@ A("weeklyCap: full 3 skater / 6 goalie / 3 camp / uncapped pre-season", CG.weekl
 A("...and the basic pre-season is not a thing (no exemption)", CG.weeklyCap({ pos: "G", stage: "preseason", season: { format: "basic" } }) === 6);
 /* v2.73: depth is carried in camp and, called up, counts like anyone else; only pre-season loans sit outside the shape by origin */
 A("spots outside the shape: pre-season loans only, never management, never depth", !CG.spotOutsideShape({ origin: "depth_random" }) && CG.spotOutsideShape({ origin: "preseason_random" }) && CG.spotOutsideShape({ origin: "latecomer_random" }) && !CG.spotOutsideShape({ origin: "assigned" }) && !CG.spotOutsideShape({ origin: "preseason_random", mgmt: "gm" }));
-A("the default quota before a season loads is the standard's", CG.ROSTER_QUOTA.G === 5 && CG.CAMP_MAX === 8);
+A("the default quota before a season loads is the standard's", CG.ROSTER_QUOTA.G === 5 && CG.CAMP_MAX === 10);
 
 console.log("\n— every reader goes through the format (no stray literals)");
 A("the season load derives cap / roster / quota / camp from the format", /CG\.CAP = \(season && season\.salary_cap\) \? season\.salary_cap : CG\.fmt\("salary_cap", season\);/.test(live) && /CG\.ROSTER_QUOTA = Object\.assign\(\{\}, CG\.fmt\("quota", season\)\);/.test(live) && /CG\.CAMP_MAX = CG\.fmt\("camp_max", season\);/.test(live));

@@ -63,8 +63,8 @@ console.log("— the rulebook says what the announcement says");
   A("...and the shelved full-format text still holds the top four, eight-club field",
     /top four \(4\) clubs in each division/.test(secFull("8.1")) && /eight-club field/.test(secFull("8.1")));
   /* v3.55 (commissioner, 2026-09-28): the basic format's camp is capped at eight */
-  A("Rule 2.1 (basic, v3.55) caps training camp at eight",
-    /may carry up to eight \(8\) training-camp players/.test(sec("2.1")) && !/up to three \(3\) training-camp players/.test(sec("2.1")));
+  A("Rule 2.1 (basic, v3.55) caps training camp at ten (v3.58)",
+    /may carry up to ten \(10\) training-camp players/.test(sec("2.1")) && !/up to three \(3\) training-camp players/.test(sec("2.1")));
   A("...while the shelved full-format text still caps camp at three", /up to three \(3\) training-camp players/.test(secFull("2.1")));
   A("Rule 2.4 (basic) puts the deadline at midnight Friday of the fourth game week",
     /closes at midnight Eastern Time at the end of the Friday of the fourth \(4th\) game-week/.test(sec("2.4")));

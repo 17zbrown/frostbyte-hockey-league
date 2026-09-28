@@ -102,7 +102,7 @@ CG.FORMAT_RULES = {
   /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
      the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and a
      16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67) */
-  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:8, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
+  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:10, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
   full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0, min_service_gp:0,
@@ -13354,7 +13354,7 @@ CG.hubFreeAgents = function(){
            training camp. Only a full camp as well does (camp limit 8, Rule 2.1). */
         var activeFull = rosterN>=rosterMax;
         var campN = (lg.byTeam[t.code]||[]).filter(function(p){ return p.squad==="tc"; }).length;
-        var full = activeFull && campN >= (CG.CAMP_MAX||8);
+        var full = activeFull && campN >= (CG.CAMP_MAX||10);
         /* v2.34: his old club holds his rights until free agency opens — nobody else may approach */
         var rh = CG.rightsHeldContractOf ? CG.rightsHeldContractOf(r.profile_id) : null;
         var rhCode = rh ? (((CG.lg && CG.lg._idToCode) || {})[rh.team_id] || null) : null;

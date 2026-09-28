@@ -39,8 +39,8 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
   const r21 = sec("2.1"), r21f = secFull("2.1");
   /* v3.55 (commissioner, 2026-09-28): "Cap the Training camps at 8 players each" */
-  A("camp is carried outside the active roster, in addition to it, up to eight (v3.55)",
-    /A club may carry up to eight \(8\) training-camp players in addition to its active roster/.test(r21) &&
+  A("camp is carried outside the active roster, in addition to it, up to ten (v3.58)",
+    /A club may carry up to ten \(10\) training-camp players in addition to its active roster/.test(r21) &&
     !/camp is unlimited/.test(r21) &&
     /camp is carried outside the active roster, not outside the payroll/.test(r21));
   /* v3.26: the shape is still a published season setting; what changed is that 2.1 now states the

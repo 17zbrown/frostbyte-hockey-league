@@ -28,8 +28,8 @@ A("the overflow helper is not callable from the API", /revoke all on function pu
 A("the rehearsal is recorded", /T4\s+DET sends two forwards to UTA for one: exactly one incoming forward is placed in UTA's camp/.test(sql) && /T6\s+DET sends two forwards to PIT \(camp 10\) for one: the trade is refused/.test(sql));
 
 console.log("\n— the site");
-A("the client mirror carries camp_max 8", /basic: \{ format:"basic", roster_max:15, quota:\{ F:9, D:7, G:5 \}, lines:2, flex:3, camp_max:8,/.test(live));
-A("Sign stays open with a full active roster while camp has room", /var full = activeFull && campN >= \(CG\.CAMP_MAX\|\|8\);/.test(live) && /he would join your training camp \(Rule 2\.1\)/.test(live));
+A("the client mirror carries the camp limit (10 since v3.58)", /basic: \{ format:"basic", roster_max:15, quota:\{ F:9, D:7, G:5 \}, lines:2, flex:3, camp_max:10,/.test(live));
+A("Sign stays open with a full active roster while camp has room", /var full = activeFull && campN >= \(CG\.CAMP_MAX\|\|10\);/.test(live) && /he would join your training camp \(Rule 2\.1\)/.test(live));
 A("the sign dialog says he joins camp", /"He joins your "\+\(toCamp \? "training camp, because your active roster is full, " : "roster "\)/.test(live));
 A("no 'league minimum' left in the waive dialog or the roster footer", !/sign them at the league minimum/.test(hub) && !/sign him at the league minimum/.test(hub));
 A("...they say the salary travels", /at the "\+CG\.fmtMoney\(p\.salary\)\+" they were already earning/.test(hub) && /at the salary he was already earning, to the end of the season/.test(hub));
@@ -40,7 +40,7 @@ const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.55");
 A("changelog records 3.55", !!e);
-A("2.1.4: camp of eight", /up to eight \(8\) training-camp players/.test(secs["2.1"].paragraphs[3]) && !/camp is unlimited/.test(secs["2.1"].paragraphs[3]));
+A("2.1.4: camp of ten (v3.58 raised it from eight)", /up to ten \(10\) training-camp players/.test(secs["2.1"].paragraphs[3]) && !/camp is unlimited/.test(secs["2.1"].paragraphs[3]));
 A("2.1.4: trades overflow to camp; like-for-like between full clubs does not", /he joins the club's training camp, its front office is told/.test(secs["2.1"].paragraphs[3]) && /two full clubs exchanging like for like send nobody to camp/.test(secs["2.1"].paragraphs[3]));
 A("2.1.4: transactions staff in special circumstances", /in special circumstances the transactions department may make that move for a club/.test(secs["2.1"].paragraphs[3]));
 A("2.2.3: signing into camp", /he joins its training camp, which must have room under Rule 2\.1/.test(secs["2.2"].paragraphs[2]));
