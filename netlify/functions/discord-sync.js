@@ -2448,6 +2448,11 @@ export async function runSweep(opts = {}) {
     if (acted.length) {
       sum.rosterDepartures = acted.map((a) => `${a.action}: ${a.gamertag}${a.club ? " (" + a.club + ")" : ""}`);
     }
+    /* v3.50: the sweep isolates each row in its own savepoint and reports a failed row as
+       action 'error' instead of rolling the whole sweep back. That keeps one bad row from stopping
+       Rule 1.1 for the league, but it must still fail this run loudly, or the watchdog goes green. */
+    const bad = acted.filter((a) => a.action === "error");
+    if (bad.length) sum.errors.push({ rosterDepartures: bad.map((a) => `${a.gamertag}${a.club ? " (" + a.club + ")" : ""}: ${a.detail}`) });
   } catch (e) { sum.errors.push({ rosterDepartures: String(e.message || e) }); }
 
   /* v3.18 — a game held for the rest of its clock that never got it. The importer holds a sitting

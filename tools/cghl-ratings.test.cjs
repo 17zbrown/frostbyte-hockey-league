@@ -112,10 +112,11 @@ console.log("\n— the book");
   A("...the scale and the hold", /scale from 50 to 99 on which the league median is 70/.test(all) && /held toward the middle until a player's fifth league game/.test(all));
   A("...and never states the formula", !/0\.12/.test(all) && !/1\.5\)/.test(all) && !/0\.372/.test(all));
   A("Rule 0.4 still says ratings come from regular-season play", /Overall ratings are compiled from regular-season play/.test(all));
-  A("the changelog records v3.49", rb.changelog[0].version === "3.49");
-  A("...and says whose is whose", rb.changelog[0].items.some((i) => /The variables and the category structure are chelstats\.app's/.test(i)));
-  A("...with the numbers matching the record", rb.changelog[0].items.some((i) => /league average 70\.6, range 58 to 85, three at 80 or better, one at 85 or better, none yet at 90/.test(i)));
-  const mine = JSON.stringify(rb.changelog[0]) + s61.paragraphs[1];
+  const e349 = rb.changelog.find((e) => e.version === "3.49") || { items: [] };
+  A("the changelog records v3.49", !!rb.changelog.find((e) => e.version === "3.49"));
+  A("...and says whose is whose", e349.items.some((i) => /The variables and the category structure are chelstats\.app's/.test(i)));
+  A("...with the numbers matching the record", e349.items.some((i) => /league average 70\.6, range 58 to 85, three at 80 or better, one at 85 or better, none yet at 90/.test(i)));
+  const mine = JSON.stringify(e349) + s61.paragraphs[1];
   A("no em dash or spaced hyphen in the new prose", !/—/.test(mine) && !/ - /.test(mine));
 }
 
