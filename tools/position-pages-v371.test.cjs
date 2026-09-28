@@ -28,6 +28,7 @@ A("a goaltender group uses the goaltender cells", /SV%/.test(ctx.CG.statCellsHtm
 const cw = ctx.CG.centerWingLine(L);
 A("center against wing, per game", /Center against wing, per game:<\/b> 2\.00 against 1\.00 points, 1\.50 against 0\.00 goals, 3\.50 against 2\.00 shots \(2 games at center, 1 on the wing\)/.test(cw), cw);
 A("no comparison without both", ctx.CG.centerWingLine({ C: L.C }) === "");
+A("one game reads 'game', not 'games'", /\(1 game at center, 2 on the wing\)/.test(ctx.CG.centerWingLine({ C: { gp:1, p:1, g:0, shots:1 }, W: { gp:2, p:0, g:0, shots:7 } })));
 A("the picker appears for two or more groups and re-renders in place", /var posPick = posKeys\.length >= 2/.test(pub) && /box\.innerHTML = CG\.statCellsHtml\(CG\.profileStatCells\(CG\.posGroupLines\(id\)\[v\], v === "G"\)\);/.test(pub));
 
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));

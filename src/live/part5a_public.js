@@ -2809,7 +2809,7 @@ CG.centerWingLine = function(lines){
   var pg = function(x, k){ return (x[k] / x.gp).toFixed(2); };
   return '<p class="caption" style="margin-top:12px"><b>Center against wing, per game:</b> '+
     pg(c,"p")+' against '+pg(w,"p")+' points, '+pg(c,"g")+' against '+pg(w,"g")+' goals, '+
-    pg(c,"shots")+' against '+pg(w,"shots")+' shots ('+c.gp+' games at center, '+w.gp+' on the wing).</p>';
+    pg(c,"shots")+' against '+pg(w,"shots")+' shots ('+c.gp+' game'+(c.gp===1?'':'s')+' at center, '+w.gp+' on the wing).</p>';
 };
 CG.posSplit = function(rows){
   var split = {};
