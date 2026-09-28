@@ -265,7 +265,7 @@ CG.admUsers = function(qs){
     '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>League accounts — all 96</caption><thead><tr>'+
     '<th class="tleft">Account</th><th class="tleft">Club</th><th class="tleft">League role</th><th class="tleft">Status</th><th></th></tr></thead><tbody>'+
     list.map(function(p){
-      var sus = lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; });
+      var sus = lg.suspensions.some(function(s){ return s.playerId===p.id && s.status==="active"; });
       return '<tr><td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(p.eaId)+'</small></span></span></td>'+
       '<td class="tleft" style="font-size:12px">'+esc(CG.TEAM[p.team].name)+'</td>'+
       '<td class="tleft"><span class="chip'+(roleOf(p)!=="Member"?" chip-chrome":"")+'">'+roleOf(p)+'</span></td>'+

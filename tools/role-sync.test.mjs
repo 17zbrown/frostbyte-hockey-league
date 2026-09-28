@@ -338,7 +338,7 @@ console.log("\n— one hung member never stalls the queue (audit 2026-09-17, P2-
   A("...and it is reconciled like every managed role, so a call-up drops it", MANAGED_STATIC.includes("Training Camp"));
   const syncSrc = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
   const bot = fs.readFileSync(new URL("../bot/role-sync.mjs", import.meta.url), "utf8");
-  A("the sweep reads squad off the season's roster spots and passes camp into the rules", /select=profile_id,position,squad,status/.test(syncSrc) && /rookies, camp, managedIds \}/.test(syncSrc) && /\["Training Camp", true\]/.test(syncSrc));
+  A("the sweep reads squad off the season's roster spots and passes camp into the rules", /select=profile_id,position,squad,status/.test(syncSrc) && /rookies, camp, managedIds[,\s\w]*\}/.test(syncSrc) && /\["Training Camp", true\]/.test(syncSrc));
   A("the bot's instant lane does the same, so the two paths cannot fight", /select=position,squad,status/.test(bot) && /camp: inCamp \? new Set\(\[profileId\]\) : new Set\(\)/.test(bot));
 }
 {

@@ -463,6 +463,7 @@ CG.deskOfficials = function(){
         '<b style="font-family:var(--f-disp)">'+esc(nm)+'</b>'+
         '<span class="caption" style="flex:1;min-width:120px">'+esc(s.reason||"")+'</span>'+
         '<span class="chip '+(s.mode==="warning"?"chip-warn":"chip-loss")+' chip-xs">'+esc(len)+'</span>'+
+        (s.id && s.mode!=="warning" && s.status==="active"?'<button class="btn btn-ghost btn-sm" data-desk-extend="'+esc(s.id)+'" data-name="'+esc(nm)+'">Extend</button>':"")+
         (s.id?'<button class="btn btn-ghost btn-sm" data-desk-lift="'+esc(s.id)+'" data-name="'+esc(nm)+'">Lift</button>':"")+
         (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
     }).join("")
@@ -870,20 +871,24 @@ CG.deskCommunity = function(){
     '<button class="btn btn-ink btn-sm" id="commSuspend">Suspend a member</button></div>'+
     '<div class="card-b"><p class="small" style="color:var(--steel);margin:0">Conduct in the Discord is this desk\u2019s to rule on (Rule 7.1). '+
       'A ruling is written under one or more headings \u2014 <b>vulgar language</b>, <b>slurs</b>, <b>posting inappropriate content</b>, <b>other</b> \u2014 '+
-      'and runs <b>3, 6 or 9 games</b> (Rule 7.7). Tick everything that applies: one outburst is often more than one thing. '+
+      'and runs <b>3 to 18 games in steps of three</b>, or to a date for a member with no roster spot (Rule 7.7). Tick everything that applies: one outburst is often more than one thing. '+
       'The member is told the headings and what you write, on the site and by direct message, and has 48 hours to appeal (Rule 7.6). '+
-      'Anything longer than nine games, an outright ban, or anything about a commissioner or a staff member is a commissioner ruling \u2014 leave the case open and hand it up.</p></div>'+
+      'A further offense while a suspension runs is added to its end with Extend. A second suspension in the same season runs for the rest of the season unless you keep the length. '+
+      'Anything longer than 18 games, an outright ban, or anything about a commissioner or a staff member is a commissioner ruling: leave the case open and hand it up.</p></div>'+
     (disc.length || warns.length
       ? disc.concat(warns).map(function(s){
-          var mine = me && s.created_by === me;
+          /* v3.51: community decides Discord-conduct appeals, so it may lift any Discord-conduct
+             suspension, not only its own (lift_suspension checks the same) */
+          var mine = me && (s.created_by === me || s.venue === "discord");
           return '<div class="card-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
             '<b style="font-family:var(--f-disp);flex:1;min-width:130px">'+esc(nameOf(s.profile_id))+'</b>'+
             '<span class="chip '+(s.mode==="warning"?"":"chip-warn")+' chip-xs">'+esc(s.mode==="warning"?"warning":lenOf(s))+'</span>'+
             '<span class="caption" style="flex:2;min-width:180px">'+esc(s.reason||"no reason recorded")+'</span>'+
             (s.mode!=="warning" && mine
-              ? '<button class="btn btn-ghost btn-sm" data-comm-lift="'+esc(s.id)+'" data-name="'+esc(nameOf(s.profile_id))+'">Lift</button>'
+              ? '<button class="btn btn-ghost btn-sm" data-comm-extend="'+esc(s.id)+'" data-name="'+esc(nameOf(s.profile_id))+'">Extend</button>'+
+                '<button class="btn btn-ghost btn-sm" data-comm-lift="'+esc(s.id)+'" data-name="'+esc(nameOf(s.profile_id))+'">Lift</button>'
               : s.mode!=="warning"
-                ? '<span class="chip chip-xs" title="Only the desk that issued it, the officiating department or a commissioner can lift this">not yours to lift</span>'
+                ? '<span class="chip chip-xs" title="A suspension for play on the ice is the officiating department\u2019s to change">officiating</span>'
                 : '')+
             '</div>';
         }).join("")
@@ -899,6 +904,11 @@ CG.AFTER._deskCommunity = function(){
   document.querySelectorAll("[data-comm-lift]").forEach(function(x){
     x.addEventListener("click", function(){
       CG.liftUserSuspension(this.getAttribute("data-comm-lift"), this.getAttribute("data-name"));
+    });
+  });
+  document.querySelectorAll("[data-comm-extend]").forEach(function(x){
+    x.addEventListener("click", function(){
+      CG.extendSuspensionPrompt(this.getAttribute("data-comm-extend"), this.getAttribute("data-name"));
     });
   });
 };
@@ -990,6 +1000,11 @@ CG.AFTER._deskOfficials = function(){
   document.querySelectorAll("[data-desk-lift]").forEach(function(b){
     b.addEventListener("click", function(){
       CG.liftUserSuspension(this.getAttribute("data-desk-lift"), this.getAttribute("data-name"));
+    });
+  });
+  document.querySelectorAll("[data-desk-extend]").forEach(function(b){
+    b.addEventListener("click", function(){
+      CG.extendSuspensionPrompt(this.getAttribute("data-desk-extend"), this.getAttribute("data-name"));
     });
   });
 };

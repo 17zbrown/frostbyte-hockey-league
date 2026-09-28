@@ -2147,13 +2147,13 @@ CG.ROUTES.team = function(code, qs){
       var s = (x.text||"");
       return s.indexOf(t.name)>=0 || new RegExp("\\b"+code+"\\b").test(s);
     }).slice(0,12);
-    var sus = lg.suspensions.filter(function(x){ return x.team===code; });
+    var sus = lg.suspensions.filter(function(x){ return x.team===code && x.status!=="lifted"; });
     body += '<div class="grid g2"><div class="card"><div class="card-h"><h3>Transactions</h3></div>'+
       (tx.length?tx.map(function(x){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic(CG.txIcon(x.type),15)+'</span><span style="min-width:0"><p style="font-weight:600">'+CG.txText(x.text)+'</p></span><span class="nf-t">'+(x.dateIso?CG.fmtDate(x.dateIso):"")+'</span></div>'; }).join(""):
         '<div class="empty"><b>No transactions</b><p>Trades, signings, waivers, and placements involving this club appear here when they happen.</p></div>')+'</div>'+
       '<div class="card"><div class="card-h"><h3>Discipline</h3></div>'+
       (sus.length?sus.map(function(x){ var p = CG.playerById(lg,x.playerId);
-        return '<div class="notif" style="cursor:default"><span class="nf-ic" style="color:var(--red)">'+CG.ic("flag",15)+'</span><span><b>'+esc(p.tag)+' — '+x.games+'-game suspension ('+x.status+')</b><p>'+esc(x.reason)+'</p></span><span class="nf-t">'+CG.fmtDate(x.issued)+'</span></div>'; }).join(""):
+        return '<div class="notif" style="cursor:default"><span class="nf-ic" style="color:var(--red)">'+CG.ic("flag",15)+'</span><span><b>'+esc(p ? p.tag : (x.playerName||"A player"))+': suspended '+esc(CG.suspensionLen(x))+' ('+CG.suspensionStateWord(x)+')</b><p>'+esc(CG.suspensionHeadings(x))+'</p></span><span class="nf-t">'+CG.fmtDate(x.issued)+'</span></div>'; }).join(""):
         '<div class="empty"><b>Clean sheet</b><p>No suspensions or warnings on record for this club.</p></div>')+'</div></div>';
   }
   if (tab==="honors" && archived){
@@ -2223,7 +2223,7 @@ CG.ROUTES.players = function(param, qs){
     if (fPos && p.pos!==fPos) return false;
     if (fQ && p.tag.toLowerCase().indexOf(fQ)<0 && (p.eaId||"").toLowerCase().indexOf(fQ)<0) return false;
     if (fFlag==="rookie" && !p.rookie) return false;
-    if (fFlag==="susp" && !lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return false;
+    if (fFlag==="susp" && !lg.suspensions.some(function(s){ return s.playerId===p.id && s.status==="active"; })) return false;
     return true;
   }).sort(function(a,b){ return lg.ratings[b.id].ovr - lg.ratings[a.id].ovr; });
   /* unrostered accounts join under "All clubs" or the dedicated "No club yet" filter; the rookie
@@ -2341,7 +2341,7 @@ CG.ROUTES.player = function(pid, qs){
   var archived = seasonKey!=="cur";
   var t = CG.TEAM[p.team], s = SD.pstats[p.id], r = lg.ratings[p.id];
   var tab = qs.tab||"overview";
-  var sus = lg.suspensions.find(function(x){ return x.playerId===p.id; });
+  var sus = lg.suspensions.find(function(x){ return x.playerId===p.id && x.status!=="lifted"; });
   var isG = p.pos==="G";
   var me = CG.me();
   /* "no games" has to mean no games at ANY stage: s.gp is regular-season only, and a player
@@ -2560,13 +2560,16 @@ CG.ROUTES.player = function(pid, qs){
     body += '<div class="grid g3">'+
       '<div class="kpi" style="cursor:default"><b class="num">'+potws.length+'</b><span>Player of the Week awards</span></div>'+
       '<div class="kpi" style="cursor:default"><b class="num">'+starN+'</b><span>Three Stars selections</span></div>'+
-      '<div class="kpi" style="cursor:default"><b class="num">'+(sus?sus.games:0)+'</b><span>Suspension games</span></div></div>'+
+      '<div class="kpi" style="cursor:default"><b class="num">'+lg.suspensions.filter(function(x){ return x.playerId===p.id && x.status!=="lifted" && x.mode==="games"; }).reduce(function(n,x){ return n+(x.games||0); },0)+'</b><span>Suspension games</span></div></div>'+
       (potws.length?'<div class="card" style="margin-top:18px"><div class="card-h"><h3>Weekly honors</h3></div>'+potws.map(function(w){
         var blurb = (CG.CONTENT.awards.potw.find(function(x){ return x.week===w.week; })||{});
         return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("trophy",15)+'</span><span><b>Week '+w.week+' — '+(w.skater===p.id?"Skater":"Goaltender")+' of the Week</b>'+
           '<p>'+esc(w.skater===p.id?blurb.skaterBlurb||"":blurb.goalieBlurb||"")+'</p></span></div>';
       }).join("")+'</div>':"")+
-      (sus?'<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+esc(sus.reason)+' — '+sus.games+' games, '+sus.status+'. Issued '+CG.fmtDate(sus.issued)+' by '+esc(sus.decidedBy)+'. <a href="#/rulebook?rule=7.4" style="font-weight:700;border-bottom:2px solid var(--chrome)">Rule 7.4 →</a></div>':"")+
+      (sus?'<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+
+        'Suspended '+esc(CG.suspensionLen(sus))+', '+CG.suspensionStateWord(sus)+'. '+esc(CG.suspensionHeadings(sus))+'. Issued '+CG.fmtDate(sus.issued)+'.'+
+        (sus.reason ? '<span class="caption" style="display:block;margin-top:6px">Reason (you and league staff only): '+esc(sus.reason)+'</span>' : '')+
+        ' <a href="#/rulebook?rule=7.2" style="font-weight:700;border-bottom:2px solid var(--chrome)">Rule 7.2 \u2192</a></div>':"")+
       /* `joined` was a hardcoded "Season 1" on every player and nobody is an "original roster"
          member of a season that has not started — so say only what is actually known: the club
          he is on right now, and how he got there (origin is real, set at placement). */
@@ -2654,6 +2657,23 @@ CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
 CG.posGroupLabel = function(grp){
   return grp === "G" ? "goaltenders" : grp === "D" ? "defensemen" : "forwards";
 };
+/* v3.51: how a suspension reads in public. Commissioner, 2026-09-28 (Q61): the public record shows
+   the LENGTH and the HEADINGS only; the written reason reaches only the member and league staff
+   (the suspension_record view returns it to nobody else), so every public surface is written from
+   these two helpers rather than from s.reason. */
+CG.suspensionLen = function(s){
+  if (!s) return "";
+  if (s.mode==="games") return s.games+" game"+(s.games===1?"":"s")+(s.status==="active" && s.gamesServed ? " ("+s.gamesServed+" served)" : "");
+  if (s.mode==="seasons") return "rest of Season "+(s.untilSeason||"");
+  if (s.mode==="date") return "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice");
+  return "warning";
+};
+CG.suspensionHeadings = function(s){
+  var labels = {}; (CG.CONDUCT_REASONS||[]).forEach(function(r){ labels[r.code] = r.label; });
+  var h = (s && (s.codes || s.reason_codes) || []).map(function(c){ return labels[c] || c; });
+  return h.length ? h.join(", ") : (s && s.venue==="discord" ? "Discord conduct" : "Conduct on the ice");
+};
+CG.suspensionStateWord = function(s){ return s.status==="active" ? "running" : s.status==="served" ? "served" : s.status; };
 /* How settled is a player's overall? v3.49: the database rates a player against the league at his
    position and shrinks that standard score toward zero (a rating of 70) while his sample is thin:
    0.12 per game through four games, then gp/(gp+1.5) from the fifth (public.cghl_confidence). The

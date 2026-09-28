@@ -36,15 +36,16 @@ console.log("\n— several headings at once, which is the point");
 
 console.log("\n— the 3/6/9 scale");
 {
-  A("the ladder is one constant", /CG\.CONDUCT_LADDER = \[3, 6, 9\]/.test(live));
-  A("the length is a select built from it", /CG\.CONDUCT_LADDER\.map\(function\(g\)\{ return '<option value="'\+g\+'">'\+g\+' games<\/option>'/.test(live));
-  A("...and re-checked before sending", /CG\.CONDUCT_LADDER\.indexOf\(games\)<0/.test(live));
+  /* v3.51: one ladder for all staff, 3 to 18 in steps of three (commissioner, 2026-09-28) */
+  A("the ladder is one constant", /CG\.SUSPENSION_LADDER = \[3, 6, 9, 12, 15, 18\];/.test(live) && /CG\.CONDUCT_LADDER = CG\.SUSPENSION_LADDER;/.test(live));
+  A("the length is a select built from it", /CG\.SUSPENSION_LADDER\.map\(function\(g\)\{ return '<option value="'\+g\+'">'\+g\+' games<\/option>'/.test(live));
+  A("...and the database re-checks it (the real gate)", /p_games % 3 <> 0 or p_games > 18/.test(R("sql/2026-09-28-suspensions-v351-issue.sql")));
   A("conduct mode never offers a date", (function(){
     const i = live.indexOf("if (conduct){"), j = live.indexOf("} else {", i);
     return live.slice(i, j).indexOf("susDate") < 0;
   })());
   A("the desk copy states the scale and what needs a commissioner",
-    /3, 6 or 9 games<\/b> \(Rule 7\.7\)/.test(desks) && /an outright ban/.test(desks));
+    /3 to 18 games in steps of three<\/b>/.test(desks) && /an outright ban/.test(desks));
 }
 
 console.log("\n— one modal, two forms");
@@ -81,16 +82,16 @@ console.log("\n— Rule 7.7");
     A("...lists " + h, !!s77 && s77[0].indexOf(h) >= 0));
   A("...requires words when Other is used", !!s77 && /other, which requires the ruling to say in words what happened/.test(s77[0]));
   A("...allows more than one heading, with a reason", !!s77 && /should not be narrowed to fit a single label/.test(s77[0]));
-  A("...sets the scale at 3, 6 or 9", !!s77 && /runs three \(3\), six \(6\) or nine \(9\) games/.test(s77[1]));
+  A("...sets the scale at 3 to 18 in steps of three (v3.51)", !!s77 && /runs three \(3\) to eighteen \(18\) games in steps of three \(3\)/.test(s77[1]));
   A("...and reserves longer, expulsion and staff to a commissioner",
-    !!s77 && /longer than nine \(9\) games, an expulsion from the league, and any sanction against a commissioner or a member of league staff are imposed only by a commissioner/.test(s77[1]));
+    !!s77 && /longer than eighteen \(18\) games, an expulsion from the league, and any sanction against a commissioner or a member of league staff are imposed only by a commissioner/.test(s77[1]));
   A("...tells the member the headings", !!s77 && /told the headings recorded against him/.test(s77[2]));
   A("...and settles the two-department case", !!s77 && /whichever rule fits the conduct he is ruling on/.test(s77[2]));
-  A("7.1 points at 7.7 now", /on the scale of Rule 7\.7/.test(ch7.sections.find((x) => x.id === "7.1").paragraphs[1]));
-  A("7.2 still carries the general staff ceiling for officiating",
-    /up to ten \(10\) games or thirty \(30\) days/.test(ch7.sections.find((x) => x.id === "7.2").paragraphs[0]));
-  A("7.4's mandatory 2-game baseline is untouched",
-    /baseline sanction for a verified act of dangerous contact is a two \(2\) game suspension/.test(ch7.sections.find((x) => x.id === "7.4").paragraphs[1]));
+  A("7.1 points at the ceilings of 7.2 (v3.51)", /within the ceilings of Rule 7\.2/.test(ch7.sections.find((x) => x.id === "7.1").paragraphs[1]));
+  A("7.2 carries one staff ceiling for both departments (v3.51)",
+    /from three \(3\) to eighteen \(18\) games/.test(ch7.sections.find((x) => x.id === "7.2").paragraphs[0]));
+  A("7.4's mandatory baseline is three games since v3.51 (the shortest step of the scale)",
+    /baseline sanction for a verified act of dangerous contact is a three \(3\) game suspension/.test(ch7.sections.find((x) => x.id === "7.4").paragraphs[1]));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.39"));
 }
 

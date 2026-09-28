@@ -43,9 +43,10 @@ console.log("\n— it reuses the one suspension modal rather than growing a seco
 
 console.log("\n— lifting is scoped to what this desk issued");
 {
-  A("only the viewer's own rulings offer Lift", /var mine = me && s\.created_by === me;/.test(desks));
-  A("...and the rest say so instead of offering a button the DB would refuse",
-    /not yours to lift/.test(desks));
+  /* v3.51: community decides Discord-conduct appeals, so it lifts any Discord-conduct suspension */
+  A("the desk offers Lift on its own rulings and on any Discord-conduct one (v3.51)", /var mine = me && \(s\.created_by === me \|\| s\.venue === "discord"\);/.test(desks));
+  A("...and says whose an ice suspension is instead of offering a button the DB would refuse",
+    /officiating department\\u2019s to change/.test(desks));
   A("Lift reuses the existing confirm flow", /CG\.liftUserSuspension\(this\.getAttribute\("data-comm-lift"\)/.test(desks));
   A("the record explains the scoping", /Letting it suspend without letting it lift/.test(flat));
 }
@@ -87,19 +88,19 @@ console.log("\n— the rulebook");
   rb.chapters.find((c) => c.num === 7).sections.forEach((x) => (s7[x.id] = x.paragraphs));
   A("7.1 no longer limits community to warnings",
     !/may issue warnings and escalate anything heavier/.test(s7["7.1"][1]));
-  A("...it may now suspend, on its own scale since v3.39",
-    /may issue warnings and suspensions on the scale of Rule 7\.7/.test(s7["7.1"][1]));
+  A("...it issues warnings and suspensions within the ceilings of Rule 7.2 (v3.51)",
+    /Both departments issue warnings and suspensions within the ceilings of Rule 7\.2/.test(s7["7.1"][1]));
   A("...and the principle is stated: a department rules on the conduct it sees",
     /A department rules on the conduct it sees/.test(s7["7.1"][1]) &&
     /the community department is not asked to decide a hit it never watched/.test(s7["7.1"][1]));
-  A("7.2 still sets the staff ceiling at 10 games or 30 days",
-    /League staff may impose suspensions of up to ten \(10\) games or thirty \(30\) days/.test(s7["7.2"][0]));
+  A("7.2 sets the staff ceiling at 3 to 18 games in steps of three, or 30 days (v3.51)",
+    /from three \(3\) to eighteen \(18\) games/.test(s7["7.2"][0]) && /no more than thirty \(30\) days away/.test(s7["7.2"][0]));
   A("...and the heavier sanctions are still the commissioner's",
     /are imposed only by a commissioner/.test(s7["7.2"][0]));
-  A("7.2 now says the member is told when it is imposed",
-    /A member is told of a sanction at the moment it is imposed, on the site and, where he has linked his Discord account, by direct message/.test(s7["7.2"][1]));
+  A("7.2 says the member is told when it is imposed (now paragraph 6)",
+    /A member is told of a sanction at the moment it is imposed, on the site and, where he has linked his Discord account, by direct message/.test(s7["7.2"][5]));
   A("...and that the appeal clock runs from that notice",
-    /The appeal window of Rule 7\.6 runs from that notice/.test(s7["7.2"][1]));
+    /The appeal window of Rule 7\.6 runs from that notice/.test(s7["7.2"][5]));
   A("7.6 still gives 48 hours", /forty-eight \(48\) hours/.test(s7["7.6"][0]));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.38"));
 }

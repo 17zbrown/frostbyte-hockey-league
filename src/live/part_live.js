@@ -591,7 +591,10 @@ CG.buildLiveLeague = async function(opts){
     }),
     sb.from("feature_flags").select("key,enabled"),
     sb.from("site_config").select("key,value"),
-    CG.sbAll("suspensions","*","created_at",false),
+    /* v3.51: the suspension_record view, not the table. The public sees a suspension's length and
+       headings; the member and league staff also see the reason, and staff the issuing official
+       (commissioner, 2026-09-28, Q61). The table itself is no longer readable from the site. */
+    CG.sbAll("suspension_record","*","created_at",false),
     CG.sbAll("awards","*","week"),
     /* Career games, ACROSS ALL SEASONS, as ~200 aggregate rows. The box-score load above is
        scoped to one season, so counting career games from it would report 0 for every returning
@@ -857,20 +860,24 @@ CG.buildLiveLeague = async function(opts){
   var preResults = results.filter(function(r){ return r.stage==="preseason"; });
   var regResults = results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; });
   /* discipline record straight from the suspensions table (newest first) */
-  var maxDoneSeason = (CG._seasonsRaw||[]).reduce(function(m,s){ return s.status==="complete" ? Math.max(m, s.number||0) : m; }, 0);
+  /* v3.51: whether a suspension is running comes from the database (suspension_record.running,
+     which is public.suspension_running_at, the one definition). The client used to re-derive it and
+     only ever knew "lifted" or a finished season, so a served games or dated suspension read as
+     active on every screen until someone lifted it by hand.
+     Both shapes are kept: the raw columns (the Community desk reads s.profile_id, s.games_total,
+     s.created_by) and the mapped names the rest of the site reads (s.playerId, s.games, s.endsAt). */
   var suspAll = suspRaw.map(function(sx){
     var by = profById[sx.created_by], who = profById[sx.profile_id];
-    /* a season-length suspension is served once its final season has completed — mirror the
-       DB's is_suspended() so the client never blocks a player the server already cleared,
-       even in the window before flip_season_status() flips the row to 'lifted' */
-    var served = sx.status!=="active" ||
-      (sx.mode==="seasons" && sx.until_season!=null && maxDoneSeason >= sx.until_season);
-    return { id:sx.id, playerId:sx.profile_id,
+    var pl = players.find(function(p){ return p.id===sx.profile_id; });
+    var status = sx.mode==="warning" ? sx.status
+      : (sx.status==="active" && sx.running!==false) ? "active"
+      : sx.status==="lifted" ? "lifted" : "served";
+    return Object.assign({}, sx, { id:sx.id, playerId:sx.profile_id,
       playerName: (who && (who.gamertag||who.display_name)) || null,
-      status: served ? "served" : "active",
-      games: sx.games_total||0, mode: sx.mode, endsAt: sx.ends_at, untilSeason: sx.until_season,
-      reason: sx.reason||"", issued: sx.created_at,
-      decidedBy: (by && (by.gamertag||by.display_name)) || "Commissioner" };
+      status: status, rawStatus: sx.status, team: pl ? pl.team : null,
+      games: sx.games_total||0, gamesServed: sx.games_served||0, mode: sx.mode, endsAt: sx.ends_at, untilSeason: sx.until_season,
+      reason: sx.reason||"", codes: sx.reason_codes||[], scope: sx.scope||"play", venue: sx.venue||null, issued: sx.created_at,
+      decidedBy: (by && (by.gamertag||by.display_name)) || "League office" });
   });
   /* A formal warning is "on record, no games lost" — it must NEVER read as a suspension.
      Split it out HERE, at the source, so every downstream consumer (lineup builder, public
@@ -6764,7 +6771,8 @@ CG.admUsersLive = function(){
         '<td>'+(pr.banned?'<span class="chip chip-loss">Banned</span>':sus?'<span class="chip chip-loss">Suspended</span>':'<span class="chip chip-win">Active</span>')+'</td>'+
         '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
           '<button class="btn btn-ghost btn-sm" data-uedit="'+pr.id+'">Edit</button>'+
-          (sus?'<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
+          (sus?'<button class="btn btn-ghost btn-sm" data-extend-susp="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Extend</button>'+
+               '<button class="btn btn-ghost btn-sm" data-lift="'+sus.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Lift suspension</button>'
               :'<button class="btn btn-ghost btn-sm" data-suspend="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Suspend</button>')+
           (pr.banned?'<button class="btn btn-ghost btn-sm" data-unban="'+pr.id+'">Unban</button>':'<button class="btn btn-ghost btn-sm" data-ban="'+pr.id+'" data-name="'+esc(pr.gamertag||pr.display_name||"member")+'">Ban</button>')+
         '</span></td></tr>';
@@ -6801,76 +6809,160 @@ CG.CONDUCT_REASONS = [
   { code:"inappropriate", label:"Posting inappropriate content" },
   { code:"other",         label:"Other" }
 ];
-/* The community ladder (Rule 7.7). Longer than this, or a ban, is a commissioner ruling. */
-CG.CONDUCT_LADDER = [3, 6, 9];
+/* v3.51 (commissioner, 2026-09-28): "Game suspensions can be issued in intervals of 3, up to 18.
+   Anything beyond that needs to pass through the commissioners office." One ladder for every
+   staff official, community and officiating alike; a commissioner may set any length. The SQL twin
+   is public._issue_suspension, which is the real gate. */
+CG.SUSPENSION_LADDER = [3, 6, 9, 12, 15, 18];
+CG.CONDUCT_LADDER = CG.SUSPENSION_LADDER;
+CG.isCommishNow = function(){ return !!(CG.auth && CG.auth.role === "commish"); };
+/* who the member is, for the dialog: rostered this season (games) or not (a date), league staff
+   (a commissioner ruling, with a scope), and whether this would be his second suspension this
+   season (the rest of the season unless the official keeps his length) */
+CG.disciplineContext = function(pid){
+  var lg = CG.lg || {};
+  var pr = (lg._profilesRaw||[]).find(function(x){ return x.id===pid; }) || {};
+  var rostered = !!(lg.players||[]).find(function(p){ return p.id===pid && p.spotId; });
+  var sid = CG.SEASON && CG.SEASON.id;
+  var prior = (lg.suspensions||[]).filter(function(x){ return x.playerId===pid && x.season_id===sid && (x.rawStatus==="active"||x.rawStatus==="served"); });
+  var running = CG.suspensionOf ? CG.suspensionOf(pid) : null;
+  return { rostered:rostered, staff:(pr.role==="staff"||pr.role==="commissioner"), prior:prior.length, running:running };
+};
+CG.ladderOptions = function(){
+  return CG.SUSPENSION_LADDER.map(function(g){ return '<option value="'+g+'">'+g+' games</option>'; }).join("");
+};
+/* the fields every discipline dialog shares after the grounds: length, scope, keep-length */
+CG.disciplineLengthFields = function(ctx, withWarning, withSeasons){
+  var commish = CG.isCommishNow();
+  var cur = (CG.SEASON && CG.SEASON.number) || 1;
+  var modes = (withWarning ? '<option value="warning">Formal warning (on record, no games lost)</option>' : '')+
+    (ctx.rostered ? '<option value="games" selected>Suspension in games</option>' : '')+
+    '<option value="date"'+(ctx.rostered?'':' selected')+'>Suspension to a date</option>'+
+    ((withSeasons && commish) ? '<option value="seasons">Suspension through a season</option>' : '');
+  return '<div class="grid g2" style="gap:12px;margin-top:4px">'+
+    '<label class="fld"><span>Discipline</span><select id="dlMode">'+modes+'</select></label>'+
+    '<label class="fld" id="dlGamesWrap"><span>Games</span>'+
+      (commish ? '<input id="dlGames" type="number" min="1" max="82" value="3">' : '<select id="dlGames">'+CG.ladderOptions()+'</select>')+'</label>'+
+    '<label class="fld" id="dlDateWrap" style="display:none"><span>Last day (ends 11:59 PM ET)</span><input id="dlDate" type="date"></label>'+
+    '<label class="fld" id="dlSeasonWrap" style="display:none"><span>Through season</span><input id="dlSeason" type="number" min="'+cur+'" value="'+cur+'"></label>'+
+    '</div>'+
+    ((commish && ctx.staff) ? '<label class="fld"><span>What it takes (league staff)</span><select id="dlScope">'+
+      '<option value="play">Playing: he may not be scheduled or play</option>'+
+      '<option value="staff">Staff duties: his desks and staff powers are switched off</option>'+
+      '<option value="both">Both</option></select></label>' : '')+
+    (ctx.prior ? '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer"><input type="checkbox" id="dlKeep">'+
+      '<span class="small">This is his <b>second suspension this season</b>, so it runs for the <b>rest of the season</b> (Rule 7.2). Tick to keep the length set above instead.</span></label>' : '')+
+    '<p class="caption" style="margin-top:8px">'+(commish
+      ? 'As a commissioner you may set any length.'
+      : 'Staff set 3 to 18 games in steps of three, or a date up to 30 days away for a member with no roster spot. Anything longer, a ban, or anything about league staff is a commissioner ruling.')+
+    ' Games are counted on the games of whichever club he is on and carry into the next season. Every suspension ends at 11:59 PM Eastern on its last day.</p>';
+};
+CG.wireDisciplineLength = function(){
+  var sel = document.getElementById("dlMode"); if (!sel) return;
+  var sync = function(){
+    var m = sel.value;
+    document.getElementById("dlGamesWrap").style.display = m==="games" ? "" : "none";
+    document.getElementById("dlDateWrap").style.display = m==="date" ? "" : "none";
+    document.getElementById("dlSeasonWrap").style.display = m==="seasons" ? "" : "none";
+  };
+  sel.addEventListener("change", sync); sync();
+};
+/* read the length fields; returns null (with a toast) when something is missing */
+CG.readDisciplineLength = function(){
+  var m = document.getElementById("dlMode").value, out = { p_mode:m };
+  if (m==="games"){
+    var g = parseInt(document.getElementById("dlGames").value,10);
+    if (!(g>=1)){ CG.toast("Pick how many games","err"); return null; }
+    out.p_games = g;
+  } else if (m==="date"){
+    var d = document.getElementById("dlDate").value;
+    if (!d){ CG.toast("Pick the last day","err"); return null; }
+    out.p_ends_at = CG.etISO(d, "23:59");
+  } else if (m==="seasons"){
+    out.p_until_season = parseInt(document.getElementById("dlSeason").value,10) || ((CG.SEASON&&CG.SEASON.number)||1);
+  }
+  var sc = document.getElementById("dlScope"); if (sc) out.p_scope = sc.value;
+  var kp = document.getElementById("dlKeep"); if (kp) out.p_keep_length = !!kp.checked;
+  return out;
+};
+CG.disciplineDone = function(name){
+  if (CG.closeOverlay) CG.closeOverlay();
+  CG.toast("Discipline issued for "+name+". He and his club are told, and he has 48 hours to appeal.","ok");
+  if (CG.reloadLeague) CG.reloadLeague();
+};
 
-/* ONE suspension modal. opts.conduct switches it to the community desk's form: the headings as
-   checkboxes (several at once, because one outburst is often more than one thing), and the ladder
-   instead of a free number. Everything below is re-checked in the database, which is the real gate. */
+/* ONE suspension modal for the Moderation card and Users and roles. opts.conduct is the community
+   desk's form: the headings as checkboxes (several at once, because one outburst is often more
+   than one thing). Everything is re-checked in the database, which is the real gate. */
 CG.suspendUser = function(profileId, name, opts){
   opts = opts || {};
-  var conduct = !!opts.conduct;
-  var body;
-  if (conduct){
-    body = '<p class="caption" style="margin-bottom:10px">For conduct in the Discord (Rule 7.1). Tick everything that applies.</p>'+
+  var conduct = !!opts.conduct, ctx = CG.disciplineContext(profileId);
+  if (ctx.running){
+    CG.toast(name+" is already suspended. Extend the suspension he is serving instead (Rule 7.2).","err");
+    return;
+  }
+  if (ctx.staff && !CG.isCommishNow()){
+    CG.toast("Only a commissioner can discipline a member of league staff (Rule 7.2). Escalate it.","err");
+    return;
+  }
+  var grounds = conduct
+    ? '<p class="caption" style="margin-bottom:10px">For conduct in the Discord (Rule 7.1). Tick everything that applies.</p>'+
       '<div class="fld"><span>What happened</span><div style="display:flex;flex-direction:column;gap:7px;margin-top:6px">'+
       CG.CONDUCT_REASONS.map(function(r){
         return '<label style="display:flex;gap:8px;align-items:center;cursor:pointer">'+
-          '<input type="checkbox" class="susCode" value="'+esc(r.code)+'">'+
-          '<span>'+esc(r.label)+'</span></label>';
+          '<input type="checkbox" class="susCode" value="'+esc(r.code)+'"><span>'+esc(r.label)+'</span></label>';
       }).join("")+'</div></div>'+
-      '<label class="fld" style="margin-top:10px"><span>What happened, in your words'+
-        ' <span class="caption" id="susNoteReq">(required if you tick Other)</span></span>'+
-        '<textarea id="susReason" rows="2" placeholder="Quote it or say where it was. The member is shown this."></textarea></label>'+
-      '<label class="fld" style="max-width:220px"><span>Length</span><select id="susGamesSel">'+
-        CG.CONDUCT_LADDER.map(function(g){ return '<option value="'+g+'">'+g+' games</option>'; }).join("")+
-      '</select></label>'+
-      '<p class="caption">Community rulings run 3, 6 or 9 games. Anything longer, and any ban, is a commissioner ruling (Rule 7.7). '+
-      'The member is told the headings you tick and what you write, on the site and by direct message, and has 48 hours to appeal (Rule 7.6).</p>';
-  } else {
-    body = '<label class="fld"><span>Reason (shown on the profile\u2019s discipline record)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.4 dangerous contact, baseline"></textarea></label>'+
-      '<div class="grid g2" style="gap:12px;margin-top:4px">'+
-      '<label class="fld"><span>Length</span><select id="susMode"><option value="games">Number of games</option><option value="date">Until a date</option></select></label>'+
-      '<label class="fld" id="susGamesWrap"><span>Games</span><input id="susGames" type="number" min="1" max="82" value="1"></label>'+
-      '<label class="fld" id="susDateWrap" style="display:none"><span>Ends (ET)</span><input id="susDate" type="datetime-local"></label></div>'+
-      '<p class="caption">A suspended member can\u2019t be added to rosters or lineups and their management moves are blocked. The record shows on their profile (Rule 7.4). Reversible with Lift.</p>';
-  }
-  CG.modal("Suspend "+esc(name), body,
+      '<label class="fld" style="margin-top:10px"><span>What happened, in your words <span class="caption">(required if you tick Other)</span></span>'+
+        '<textarea id="susReason" rows="2" placeholder="Quote it or say where it was. The member is shown this."></textarea></label>'
+    : '<label class="fld"><span>Reason (the member is shown this)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.4 dangerous contact"></textarea></label>';
+  CG.modal("Suspend "+esc(name), grounds + CG.disciplineLengthFields(ctx, false, true),
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
-  var modeSel=document.getElementById("susMode");
-  if (modeSel) modeSel.addEventListener("change", function(){
-    var byDate=this.value==="date";
-    document.getElementById("susGamesWrap").style.display=byDate?"none":"";
-    document.getElementById("susDateWrap").style.display=byDate?"":"none";
-  });
+  CG.wireDisciplineLength();
   document.getElementById("susGo").addEventListener("click", function(){
-    var reason=(document.getElementById("susReason").value||"").trim();
-    var mode, games=null, ends=null, codes=null;
+    var reason=(document.getElementById("susReason").value||"").trim(), codes=null;
     if (conduct){
       codes=[].slice.call(document.querySelectorAll(".susCode:checked")).map(function(c){ return c.value; });
-      if(!codes.length){ CG.toast("Tick at least one heading \u2014 what was it about the chat that broke the rules?","err"); return; }
-      if(codes.indexOf("other")>=0 && !reason){ CG.toast("\u201cOther\u201d says nothing on its own \u2014 write what happened","err"); return; }
-      mode="games"; games=parseInt(document.getElementById("susGamesSel").value,10);
-      if(CG.CONDUCT_LADDER.indexOf(games)<0){ CG.toast("Pick 3, 6 or 9 games","err"); return; }
-    } else {
-      if(!reason){ CG.toast("Give the suspension a reason \u2014 it\u2019s the league record","err"); return; }
-      mode=modeSel.value;
-      if (mode==="games"){
-        games=parseInt(document.getElementById("susGames").value,10);
-        if(!(games>=1)){ CG.toast("Games must be 1 or more","err"); return; }
-      } else {
-        var v=document.getElementById("susDate").value;
-        if(!v){ CG.toast("Pick the end date","err"); return; }
-        ends=CG.etISO(v.slice(0,10), v.slice(11,16));
-      }
-    }
+      if(!codes.length){ CG.toast("Tick at least one heading: what was it about the chat that broke the rules?","err"); return; }
+      if(codes.indexOf("other")>=0 && !reason){ CG.toast("“Other” says nothing on its own. Write what happened.","err"); return; }
+    } else if(!reason){ CG.toast("Give the suspension a reason: it is the league record","err"); return; }
+    var len = CG.readDisciplineLength(); if (!len) return;
+    if (len.p_mode==="seasons"){ CG.toast("A suspension through a season is issued from a case","err"); return; }
     var btn=this; btn.disabled=true;
-    CG.sb.rpc("suspend_player",{ p_profile:profileId, p_mode:mode, p_ends_at:ends, p_games:games, p_reason:reason||null, p_codes:codes }).then(function(r){
+    CG.sb.rpc("suspend_player", Object.assign({ p_profile:profileId, p_ends_at:null, p_games:null, p_reason:reason||null, p_codes:codes }, len)).then(function(r){
       btn.disabled=false;
-      if(r.error){ CG.toast("Couldn\u2019t suspend: "+r.error.message,"err"); return; }
-      if(CG.closeOverlay) CG.closeOverlay();
-      CG.toast(name+" suspended "+(mode==="games"?"for "+games+" game"+(games===1?"":"s"):"until "+CG.fmtFull(Date.parse(ends))),"ok");
-      CG.reloadLeague();
+      if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
+      CG.disciplineDone(name);
+    });
+  });
+};
+/* A further offense while a suspension runs is added to its end (commissioner, 2026-09-28). */
+CG.extendSuspensionPrompt = function(susId, name){
+  var s = ((CG.lg && CG.lg.suspensions) || []).find(function(x){ return x.id===susId; });
+  if (!s){ CG.toast("That suspension is not on the page any more. Reload.","err"); return; }
+  var commish = CG.isCommishNow();
+  var field = s.mode==="games"
+    ? '<label class="fld"><span>Add games</span>'+(commish
+        ? '<input id="exN" type="number" min="1" value="3">'
+        : '<select id="exN">'+CG.SUSPENSION_LADDER.filter(function(g){ return (s.games||0)+g <= 18; }).map(function(g){ return '<option value="'+g+'">'+g+' more games</option>'; }).join("")+'</select>')+'</label>'
+    : s.mode==="date"
+    ? '<label class="fld"><span>Add days (ends 11:59 PM ET on the new last day)</span><input id="exN" type="number" min="1" max="30" value="3"></label>'
+    : '';
+  if (!field){ CG.toast("A suspension for the rest of a season is a commissioner ruling to change","err"); return; }
+  if (s.mode==="games" && !commish && (s.games||0) >= 18){ CG.toast("This one is already 18 games: anything longer goes to a commissioner","err"); return; }
+  CG.modal("Extend "+esc(name)+"’s suspension",
+    '<p class="caption" style="margin-bottom:10px">Now: '+esc(CG.suspensionText ? CG.suspensionText(s) : "")+'</p>'+field+
+    '<label class="fld"><span>Why (the member is shown this)</span><textarea id="exWhy" rows="2" placeholder="e.g. appeared in a box score while suspended"></textarea></label>',
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="exGo">Extend</button>');
+  document.getElementById("exGo").addEventListener("click", function(){
+    var n = parseInt(document.getElementById("exN").value,10), why = (document.getElementById("exWhy").value||"").trim();
+    if (!(n>=1)){ CG.toast("How much longer?","err"); return; }
+    if (!why){ CG.toast("Say why it is being extended","err"); return; }
+    var btn=this; btn.disabled=true;
+    CG.sb.rpc("extend_suspension", { p_id:susId, p_games: s.mode==="games" ? n : null, p_days: s.mode==="date" ? n : null, p_reason: why }).then(function(r){
+      btn.disabled=false;
+      if (r.error){ CG.toast("Couldn’t extend: "+r.error.message,"err"); return; }
+      if (CG.closeOverlay) CG.closeOverlay();
+      CG.toast(name+"’s suspension extended","ok"); if (CG.reloadLeague) CG.reloadLeague();
     });
   });
 };
@@ -7007,6 +7099,7 @@ CG.AFTER._admUsers = function(){
   });
   document.querySelectorAll("[data-role-for]").forEach(function(sel){ sel.addEventListener("change", function(){ CG.setUserRole(this.getAttribute("data-role-for"), this.value, this); }); });
   document.querySelectorAll("[data-suspend]").forEach(function(b){ b.addEventListener("click", function(){ CG.suspendUser(this.getAttribute("data-suspend"), this.getAttribute("data-name")); }); });
+  document.querySelectorAll("[data-extend-susp]").forEach(function(b){ b.addEventListener("click", function(){ CG.extendSuspensionPrompt(this.getAttribute("data-extend-susp"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-lift]").forEach(function(b){ b.addEventListener("click", function(){ CG.liftUserSuspension(this.getAttribute("data-lift"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-ban]").forEach(function(b){ b.addEventListener("click", function(){ CG.banUser(this.getAttribute("data-ban"), this.getAttribute("data-name")); }); });
   document.querySelectorAll("[data-unban]").forEach(function(b){ b.addEventListener("click", function(){ CG.unbanUser(this.getAttribute("data-unban")); }); });
@@ -8379,46 +8472,41 @@ CG.fileActionRequest = function(type){
 /* issue a warning or suspension straight from a case — resolves it and links the record */
 CG.caseDisciplineModal = function(caseId, targetName, targetId){
   var players = (CG.lg.players||[]).slice().sort(function(a,b){ return a.tag.localeCompare(b.tag); });
-  /* Prefer the profile the filer actually picked. Falling back to a name comparison is what the
-     old behaviour did everywhere, and it silently stops matching the moment someone changes their
-     gamertag — so it's now only the path for cases filed before the picker existed. */
+  /* Prefer the profile the filer actually picked. Falling back to a name comparison is only the path
+     for cases filed before the picker existed. */
   var match = (targetId && players.find(function(p){ return p.id===targetId; }))
     || players.find(function(p){ return targetName && p.tag.toLowerCase()===String(targetName).toLowerCase(); });
-  var opts = '<option value="">— pick the player —</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
-  var cur = (CG.SEASON&&CG.SEASON.number)||1;
+  var opts = '<option value="">Pick the player</option>'+players.map(function(p){ return '<option value="'+p.id+'"'+(match&&match.id===p.id?" selected":"")+'>'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("");
+  var draw = function(pid){
+    var ctx = pid ? CG.disciplineContext(pid) : { rostered:true, staff:false, prior:0, running:null };
+    return (ctx.running ? '<div class="note" style="margin-bottom:10px">'+CG.ic("flag",14)+' He is already suspended. Extend that suspension from the desk instead of issuing another (Rule 7.2).</div>' : '')+
+      (ctx.staff && !CG.isCommishNow() ? '<div class="note" style="margin-bottom:10px">'+CG.ic("flag",14)+' He is league staff. Only a commissioner can discipline him (Rule 7.2): leave the case open and escalate.</div>' : '')+
+      '<div class="fld"><span>Headings <span class="caption">(for Discord conduct; required from the community desk)</span></span>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px">'+CG.CONDUCT_REASONS.map(function(r){
+        return '<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" class="dcCode" value="'+esc(r.code)+'"><span>'+esc(r.label)+'</span></label>';
+      }).join("")+'</div></div>'+
+      CG.disciplineLengthFields(ctx, true, true)+
+      '<label class="fld"><span>Reason (recorded on the player and the case; he is shown it)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
+      '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7).</p>';
+  };
   CG.modal("Issue discipline",
-    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label>'+
-    '<label class="fld"><span>Type</span><select id="dcType">'+
-      '<option value="warning">Formal warning — on record, no games lost</option>'+
-      '<option value="games">Suspension — number of games</option>'+
-      '<option value="date">Suspension — until a date</option>'+
-      '<option value="seasons">Suspension — through a season</option></select></label>'+
-    '<div id="dcGames" class="fld" style="display:none"><label><span>Games</span><input id="dcGamesN" type="number" min="1" value="1"></label></div>'+
-    '<div id="dcDate" class="fld" style="display:none"><label><span>Ends after</span><input id="dcDateN" type="date"></label></div>'+
-    '<div id="dcSeasons" class="fld" style="display:none"><label><span>Through season number</span><input id="dcSeasonsN" type="number" min="'+cur+'" value="'+cur+'"></label></div>'+
-    '<label class="fld"><span>Reason (recorded on the player and the case)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
-    '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7). A games-based suspension needs the player on a roster.</p>',
+    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label><div id="dcBody">'+draw(match&&match.id)+'</div>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
-  function sync(){ var t=document.getElementById("dcType").value;
-    document.getElementById("dcGames").style.display=t==="games"?"block":"none";
-    document.getElementById("dcDate").style.display=t==="date"?"block":"none";
-    document.getElementById("dcSeasons").style.display=t==="seasons"?"block":"none"; }
-  document.getElementById("dcType").addEventListener("change", sync); sync();
+  CG.wireDisciplineLength();
+  document.getElementById("dcPlayer").addEventListener("change", function(){
+    document.getElementById("dcBody").innerHTML = draw(this.value); CG.wireDisciplineLength();
+  });
   document.getElementById("dcGo").addEventListener("click", function(){
     var pid=document.getElementById("dcPlayer").value; if(!pid){ CG.toast("Pick the player","err"); return; }
-    var t=document.getElementById("dcType").value;
-    var args={ p_request:caseId, p_profile:pid, p_mode:t, p_reason:(document.getElementById("dcReason").value||"").trim()||null };
-    if(t==="games") args.p_games=parseInt(document.getElementById("dcGamesN").value,10)||0;
-    /* ET, not the browser's zone. This built the instant from local time while the Users-and-roles
-       suspension path used CG.etISO, so the same "until Mar 3" ruling expired at different moments
-       depending on which screen issued it — and for a staffer abroad, up to a day early. */
-    if(t==="date"){ var d=document.getElementById("dcDateN").value; if(!d){ CG.toast("Pick an end date","err"); return; } args.p_ends_at=CG.etISO(d, "23:59"); }
-    if(t==="seasons") args.p_until_season=parseInt(document.getElementById("dcSeasonsN").value,10)||cur;
+    var len = CG.readDisciplineLength(); if (!len) return;
+    var codes = [].slice.call(document.querySelectorAll(".dcCode:checked")).map(function(c){ return c.value; });
+    var args = Object.assign({ p_request:caseId, p_profile:pid, p_reason:(document.getElementById("dcReason").value||"").trim()||null,
+                               p_codes: codes.length ? codes : null }, len);
     var btn=this; btn.disabled=true;
     CG.sb.rpc("discipline_from_case", args).then(function(r){
       btn.disabled=false;
       if(r.error){ CG.toast(r.error.message||"Couldn’t issue discipline","err"); return; }
-      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Discipline issued — case resolved","ok");
+      if(CG.closeOverlay)CG.closeOverlay(); CG.toast("Discipline issued. The case is resolved.","ok");
       if(CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
     });
   });

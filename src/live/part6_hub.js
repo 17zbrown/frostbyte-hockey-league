@@ -875,7 +875,7 @@ CG.hubLineup = function(qs){
     : (dbLu ? { LW:dbLu.lw||null, C:dbLu.center||null, RW:dbLu.rw||null, LD:dbLu.ld||null, RD:dbLu.rd||null, G:dbLu.goalie||null } : {});
   var roster = lg.byTeam[club];
   var suspended = {};
-  lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
+  lg.suspensions.forEach(function(s){ if (s.status==="active") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock */
   var assigned = Object.values(slots);
   /* Per-GAME switcher: one chip per upcoming game, not per night. Three games a night each lock on
      their own puck drop, so a manager must be able to jump straight to game 2 or 3 — the old
@@ -951,7 +951,7 @@ CG.hubLineup = function(qs){
       var un = avv === "no", noAns = !avKey || avv === "nr";
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
-      var reason = dis ? "Suspended (Rule 7.4)" : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
+      var reason = dis ? "Suspended: locked until it is served (Rule 7.2)" : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
       return groupHead + '<div class="bp'+(used?" dis":"")+(dis?" dis":"")+(un?" warn":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
         CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+(CG.isCamp(p)?CG.campChip("xs"):"")+
         (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':noAns?'<span class="chip chip-ink" style="font-size:9px">NO ANSWER</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
@@ -1015,7 +1015,7 @@ CG.AFTER._lineup = function(){
     if (isLocked()) return "This game is under way, so the sheet is closed. Who actually played is read from the box score (Rule 5.3).";
     if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
-    if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status!=="served"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.4).";
+    if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status==="active"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.2).";
     /* v2.76: a player marked out is dressable; avWarn() names him when he is placed */
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
     /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
@@ -1333,7 +1333,7 @@ CG.hubLines = function(qs){
   if (!club || !lg.byTeam[club]) return '<div class="note">This account doesn’t run a club — the line creator belongs to team management.</div>';
   var roster = lg.byTeam[club];
   var suspended = {};
-  lg.suspensions.forEach(function(s){ if (s.team===club && s.status!=="served") suspended[s.playerId]=true; });
+  lg.suspensions.forEach(function(s){ if (s.status==="active") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock */
   var slotsOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
   var dirtyN = 0; [1,2,3].forEach(function(n){ if (CG._lcDraft && CG._lcDraft[n]) dirtyN++; });
   /* which lines each player is on, for the roster board's L1..L4 chips */
@@ -1404,7 +1404,7 @@ CG.hubLines = function(qs){
         (byPos[pos]||[]).map(function(p){
           var dis = suspended[p.id];
           return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-            (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
+            (dis?'title="Suspended: locked until it is served (Rule 7.2)"':'')+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+'">'+
             CG.lcAv(p,34)+
             /* v2.91: the name owns the first row; position, line chips and the week load share the
                second. They used to compete for one line, so every name was cut to an initial and
@@ -1421,7 +1421,7 @@ CG.hubLines = function(qs){
       '<div class="lc-board" style="margin-top:8px">'+camp.map(function(p){
         var dis = suspended[p.id];
         return '<div class="lc-pc'+(dis?" dis":"")+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-          (dis?'title="Suspended (Rule 7.4)"':'')+' aria-label="'+esc(p.tag)+', training camp">'+
+          (dis?'title="Suspended: locked until it is served (Rule 7.2)"':'')+' aria-label="'+esc(p.tag)+', training camp">'+
           CG.lcAv(p,34)+
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
@@ -1972,8 +1972,27 @@ function squadRoom(club, p){
   }
   return roster.filter(function(x){ return x.squad==="tc"; }).length < CG.CAMP_MAX;
 }
+/* v3.51 (commissioner, 2026-09-28): "Lock a player in the team HQ by graying them out and locking
+   them while they are suspended. If they are suspended they cannot be moved between the roster and
+   training camp as punishment to the team." The database refuses it (guard_squad_move); this grays
+   the row and says why before the click. status "active" is the database's own "running". */
+CG.suspensionOf = function(pid){
+  return ((CG.lg && CG.lg.suspensions) || []).find(function(s){ return s.playerId===pid && s.status==="active"; }) || null;
+};
+CG.suspensionText = function(s){
+  if (!s) return "";
+  var len = s.mode==="games" ? (s.gamesServed||0)+" of "+s.games+" games served"
+    : s.mode==="seasons" ? "for the rest of Season "+(s.untilSeason||"")
+    : "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice")+" at 11:59 PM ET";
+  return "Suspended, "+len+". He is locked where he is: he cannot be scheduled, called up or sent down until it is served (Rule 7.2).";
+};
 function squadBtn(p){
   if (!p.spotId) return "";
+  var sus = CG.suspensionOf(p.id);
+  if (sus){
+    return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(sus))+'">'+CG.ic("lock",12)+' '+
+      (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
+  }
   var club = CG.myClub();
   var title = 'Squad changes are unlimited all season (Rule 2.1)';
   /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it
@@ -2049,10 +2068,12 @@ CG.hubRoster = function(qs){
   var canEditNum = CG.can("roster.manage") && (!CG.mgmtAccess || CG.mgmtAccess("roster") !== "hidden");
   var rowFor = function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
+    var susp = CG.suspensionOf(p.id);
     var status = waived ? '<span class="chip chip-loss">Waived</span>'
       : mrole ? '<span class="chip chip-chrome">'+mrole+'</span>'
       : onBlk ? '<span class="chip chip-warn">On block</span>'
       : '<span class="chip chip-win">Active</span>';
+    if (susp) status = '<span class="chip chip-loss" title="'+esc(CG.suspensionText(susp))+'">'+CG.ic("lock",11)+' Suspended</span> '+status;
     if (p.spotId && p.squad === "tc")
       status += ' <span class="chip chip-warn" title="'+((CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club))
         ? 'Training camp — fills any position; no weekly cap in the pre-season (Rules 2.1, 5.2)'
@@ -2093,7 +2114,8 @@ CG.hubRoster = function(qs){
     var posCell = (loan && rp && rp !== p.pos)
       ? '<span title="Listed at '+esc(p.pos)+' for the pre-season to fill an open seat; he registered as '+esc(rp)+' (Rule 0.4)">'+esc(p.pos)+' <span class="caption">· reg. '+esc(rp)+'</span></span>'
       : esc(p.pos);
-    return '<tr class="'+(loan?"loan-row":"")+'"'+(waived?' style="opacity:.55"':"")+'>'+
+    return '<tr class="'+(loan?"loan-row":"")+(susp?" susp-row":"")+'"'+((waived||susp)?' style="opacity:.55"':"")+
+      (susp?' title="'+esc(CG.suspensionText(susp))+'"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
       /* v2.91: the club sets its own numbers. Editable for management (and the office in a
          preview); a loan is not the club's player, so his number is not the club's to change. */

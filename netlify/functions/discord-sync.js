@@ -1724,7 +1724,8 @@ function cutShort(sum, left) {
 }
 async function syncLinkedMembers(ctx, sum, outOfTime) {
   const { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds } = ctx;
+    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
+    timeoutUntil, timeoutsApplied } = ctx;
   const linked = links.filter((m) => m.discord_id);
   for (let i = 0; i < linked.length; i++) {
     if (outOfTime()) { cutShort(sum, linked.length - i); return; }
@@ -1752,6 +1753,27 @@ async function syncLinkedMembers(ctx, sum, outOfTime) {
       if (mem.__notfound) { sum.notInServer++; await markGuild(m.profile_id, false); continue; }
       sum.checked++;
       await markGuild(m.profile_id, true);
+
+      /* v3.51: the Discord-conduct timeout (Q7). */
+      if (timeoutUntil && timeoutsApplied) {
+        const did = String(m.discord_id), want = timeoutUntil.get(m.profile_id);
+        if (want) {
+          const cap = Date.now() + 28 * 864e5 - 5 * 60e3;
+          const until = new Date(Math.min(Date.parse(want), cap)).toISOString();
+          const cur = mem.communication_disabled_until ? Date.parse(mem.communication_disabled_until) : 0;
+          if (cur < Date.parse(until) - 60e3) {
+            const res = await dApi("PATCH", `/guilds/${GUILD}/members/${did}`, { communication_disabled_until: until });
+            if (!(res && res.__notfound)) { timeoutsApplied[did] = until; sum.timedOut = (sum.timedOut || 0) + 1; }
+          }
+        } else if (timeoutsApplied[did]) {
+          /* the suspension ended or was lifted: clear the timeout this sync set, and only that one */
+          if (Date.parse(timeoutsApplied[did]) > Date.now()) {
+            await dApi("PATCH", `/guilds/${GUILD}/members/${did}`, { communication_disabled_until: null });
+            sum.timeoutCleared = (sum.timeoutCleared || 0) + 1;
+          }
+          delete timeoutsApplied[did];
+        }
+      }
 
       // (1) username sync — site gamertag follows Discord display name. Two refusals: never an
       // empty name (a nick of spaces would blank the tag the whole site keys on), and never a
@@ -2832,9 +2854,31 @@ export async function runSweep(opts = {}) {
      when the budget is spent and the result says so (partial, membersLeft); the next tick picks
      the remainder up, because a member that needed nothing is a no-op that costs no request. */
   const outOfTime = () => Date.now() - T0 > BUDGET_MS;
+  /* (loaded here, after `sum` exists: tools/tdz-guard.test.cjs) */
+  /* v3.51 (commissioner, 2026-09-28, Q7): a member suspended for Discord conduct to a date is "in
+     timeout for the length of their suspension". The suspension ends at 11:59 PM ET on its last
+     day; Discord caps a timeout at 28 days, so a longer one is renewed on a later tick. Only a
+     timeout this sync set is ever cleared (a moderator's own is left alone): what it set is kept in
+     app_config.discord_timeouts_applied. */
+  const timeoutUntil = new Map();
+  try {
+    const nowIso = new Date().toISOString();
+    for (const r of await sbGet(`suspensions?status=eq.active&venue=eq.discord&mode=eq.date&ends_at=gt.${encodeURIComponent(nowIso)}&select=profile_id,ends_at`)) {
+      const prev = timeoutUntil.get(r.profile_id);
+      if (!prev || Date.parse(r.ends_at) > Date.parse(prev)) timeoutUntil.set(r.profile_id, r.ends_at);
+    }
+  } catch (e) { sum.errors.push({ timeouts: String(e.message || e) }); }
+  let timeoutsApplied = {};
+  try { timeoutsApplied = JSON.parse((await sbCfgMany(["discord_timeouts_applied"])).discord_timeouts_applied || "{}") || {}; }
+  catch (e) { timeoutsApplied = {}; }
+  const timeoutsBefore = JSON.stringify(timeoutsApplied);
   const ctx = { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds };
+    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
+    timeoutUntil, timeoutsApplied };
   await syncLinkedMembers(ctx, sum, outOfTime);
+  if (JSON.stringify(timeoutsApplied) !== timeoutsBefore) {
+    await sbUpsertCfg("discord_timeouts_applied", JSON.stringify(timeoutsApplied)).catch((e) => sum.errors.push({ timeoutsLedger: String(e.message || e) }));
+  }
   try { await syncUnlinkedMembers(ctx, sum, outOfTime); }
   catch (e) { sum.errors.push({ unlinkedPass: String(e.message || e) }); }
   sum.elapsedMs = Date.now() - T0;
