@@ -10136,7 +10136,7 @@ CG.hubStaffDesk = function(){
   h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
     (mediaNoBallot
       ? 'Media staff read the tallies but don’t vote on awards (Rule 2.7) — the department covers the league rather than deciding it.'
-      : 'Every staff member and commissioner gets one vote per award (change it any time before the finalize). Media staff are the exception — they hold no ballot (Rule 2.7). Finalizing tallies the ballots — a tie asks the commissioner to break it — and publishes the winner to the Awards page and the newsroom.')+
+      : 'Every rostered player, and every staff member and commissioner, gets one vote per award, for a player on another club; players vote from the Awards page (v3.60). Media staff who are not rostered hold no ballot (Rule 2.7). Finalizing counts the votes for playoff-eligible players only and publishes the winner; a commissioner picks only to break a tie. The statistical titles are filed from the record when the regular season ends.')+
     '</span></div></div>';
   return h;
 };
@@ -10181,7 +10181,7 @@ CG.AFTER._staffdesk = function(){
   document.querySelectorAll("[data-ballot-final]").forEach(function(b){ b.addEventListener("click", function(){
     var cat=this.getAttribute("data-ballot-final"), label=this.getAttribute("data-label");
     CG.confirm("Finalize "+label+"?",
-      "Tallies the staff ballots and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to break it. Re-running later corrects the record.",
+      "Counts the votes for playoff-eligible players and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to pick one of the tied players.",
       "Finalize award", function(){
       CG.sb.rpc("finalize_season_award",{ p_season:CG.SEASON.id, p_category:cat }).then(function(r){
         if(r.error){ CG.toast(r.error.message,"err"); return; }

@@ -80,7 +80,9 @@ CG.ROUTES.awards = function(param, qs){
   if (tab==="season"){
     var mvps = CG.skaterLeaders(lg,"p").slice(0,3);
     /* finalized hardware first — champion + any staff-balloted awards already decided */
-    var AWARD_LABELS = { mvp:"Most Valuable Player", best_goalie:"Best Goaltender", best_defenseman:"Best Defenseman", rookie_of_year:"Rookie of the Year" };
+    var AWARD_LABELS = { mvp:"Most Valuable Player", best_goalie:"Best Goaltender", best_defenseman:"Best Defenseman", rookie_of_year:"Rookie of the Year",
+      /* v3.60: the statistical titles, filed from the record at the end of the regular season */
+      points_title:"Scoring Title", goals_title:"Goal-scoring Title", assists_title:"Playmaking Title", goaltending_title:"Goaltending Title" };
     var decided = (lg.seasonAwards||[]).filter(function(a){ return a.profile_id && CG.playerById(lg, a.profile_id); });
     if (lg.champion || decided.length){
       body += '<div class="grid g3" style="margin-bottom:18px">'+
@@ -93,30 +95,104 @@ CG.ROUTES.awards = function(param, qs){
         decided.map(function(a){ var p = CG.playerById(lg, a.profile_id);
           return '<div class="card raise" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(p.team,44)+
             '<div><span class="chip chip-chrome">'+esc(AWARD_LABELS[a.category]||a.category)+'</span><b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px">'+esc(p.tag)+'</b>'+
-            '<span class="caption">'+esc(CG.TEAM[p.team].name)+' · staff ballot</span></div></div></div>';
+            '<span class="caption">'+esc(CG.TEAM[p.team].name)+' · '+(a.decided_by==="record" ? esc(a.stat_line||"from the record") : "by vote")+'</span></div></div></div>';
         }).join("")+'</div>';
     }
-    body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Season hardware is decided by staff ballot.</b> Staff vote from the Staff Desk through the season; the commissioner finalizes each award after the finale. Nominees below are the current statistical front-runners, not winners.</div>'+
+    /* v3.60 (commissioner, 2026-09-28, Q37): "allow all players to put 1 vote in per award. Statistical
+       awards should be awarded by you based on per game averages for the awards. A player must be playoff
+       eligible to be eligible to receive the award." */
+    var floor = CG.playoffMinGp ? CG.playoffMinGp() : 0;
+    var perGame = function(p, k){ var st = lg.pstats[p.id]; return st && st.gp ? (st[k]||0)/st.gp : 0; };
+    var eligibleNow = function(p){ var st = lg.pstats[p.id]; return !!st && st.gp >= Math.max(1, floor); };
+    body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Voted awards are decided by the league\u2019s players.</b> '+
+      'Every rostered player and every member of league staff casts one vote per award, for a player on another club, and can change it until the award is decided. '+
+      'The statistical titles are not voted on: they go to the best per-game average in the official record. '+
+      'Only a playoff-eligible player can win either kind'+(floor ? ' ('+floor+' regular-season games)' : '')+' (Rules 9.2 and 9.3).</div>'+
+      CG.awardBallotCard(lg)+
       '<div class="grid g3">'+
       [["Most Valuable Player", mvps],
        ["Best Goaltender", CG.goalieLeaders(lg).slice(0,3)],
        ["Rookie of the Year", lg.players.filter(function(p){return p.rookie && p.pos!=="G";}).sort(function(a,b){ return lg.pstats[b.id].p-lg.pstats[a.id].p; }).slice(0,3)]
       ].map(function(pair){
         return '<div class="card"><div class="card-h"><h3>'+pair[0]+'</h3><span class="chip">Front-runners</span></div>'+
-          pair[1].map(function(p,i){ var s = lg.pstats[p.id];
+          pair[1].map(function(p,i){ var st = lg.pstats[p.id];
             return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(p.team,28)+
               '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small class="caption" style="display:block">'+esc(CG.TEAM[p.team].name)+'</small></span>'+
-              '<span class="val"><b class="num">'+(p.pos==="G"?(s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,""):s.p)+'</b><span>'+(p.pos==="G"?"SV%":"PTS")+'</span></span></div>';
+              '<span class="val"><b class="num">'+(p.pos==="G"?(st.sv/Math.max(1,st.sa)).toFixed(3).replace(/^0/,""):st.p)+'</b><span>'+(p.pos==="G"?"SV%":"PTS")+'</span></span></div>';
           }).join("")+'</div>';
       }).join("")+'</div>'+
-      '<div class="grid g4" style="margin-top:18px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))">'+
-      ["Most Valuable Player","Best Goaltender","Best Defenseman","Rookie of the Year"].map(function(a){
-        return '<div class="kpi" style="cursor:default"><b style="font-size:15px;font-family:var(--f-disp)">'+a+'</b><span>Decided by staff ballot</span></div>';
+      /* the four statistical titles, as they stand: per-game averages among players who have reached the floor */
+      '<h3 class="h-sec" style="font-size:18px;margin:26px 0 10px">Statistical titles <span class="caption" style="font-size:12px">per game, from the record'+(floor?' · '+floor+' games to qualify':'')+'</span></h3>'+
+      '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'+
+      [["Scoring Title","p",false,"PTS/GP"],["Goal-scoring Title","g",false,"G/GP"],["Playmaking Title","a",false,"A/GP"],["Goaltending Title","ga",true,"GA/GP"]].map(function(t){
+        var won = (lg.seasonAwards||[]).find(function(a){ return AWARD_LABELS[a.category]===t[0]; });
+        var rows = lg.players.filter(function(p){ return (t[2] ? p.pos==="G" : p.pos!=="G") && eligibleNow(p); })
+          .sort(function(a,b){ var d = perGame(b,t[1]) - perGame(a,t[1]); return t[2] ? -d : d; }).slice(0,3);
+        return '<div class="card"><div class="card-h"><h3>'+t[0]+'</h3><span class="chip'+(won?" chip-win":"")+'">'+(won?"Decided":"Leaders")+'</span></div>'+
+          (rows.length ? rows.map(function(p,i){
+            return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(p.team,28)+
+              '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small class="caption" style="display:block">'+lg.pstats[p.id].gp+' GP</small></span>'+
+              '<span class="val"><b class="num">'+perGame(p,t[1]).toFixed(2)+'</b><span>'+t[3]+'</span></span></div>';
+          }).join("") : '<div class="card-b"><p class="caption">Nobody has reached '+Math.max(1,floor)+' games yet.</p></div>')+'</div>';
       }).join("")+'</div>';
   }
   return head + tabs + body + '</div>';
 };
+/* v3.60: the ballot, for every rostered player and league staff (the database decides who may vote,
+   public.can_vote_awards; this only decides whether to show the card). One vote per award, for a player on
+   another club; the player sees his own votes, not the tally. */
+CG.AWARD_BALLOT = [["mvp","Most Valuable Player",null],["best_goalie","Best Goaltender","G"],["best_defenseman","Best Defenseman","D"],["rookie_of_year","Rookie of the Year",null]];
+CG.awardBallotCard = function(lg){
+  var uid = CG.auth && CG.auth.user && CG.auth.user.id;
+  if (!uid || !CG.LIVE_MODE) return "";
+  var me = CG.playerById(lg, uid);
+  var role = CG.role ? CG.role() : "guest";
+  if (!me && role !== "staff" && role !== "commish") return "";
+  var mine = {};
+  (CG.TEAMS||[]).forEach(function(t){ if (t.owner===uid || t.gm===uid || t.agm===uid) mine[t.code] = true; });
+  if (me) mine[me.team] = true;
+  var decided = {}; (lg.seasonAwards||[]).forEach(function(a){ decided[a.category] = true; });
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your ballot</h3><span class="chip">one vote per award</span></div>'+
+    CG.AWARD_BALLOT.map(function(cat){
+      var pool = (lg.players||[]).filter(function(p){
+        if (p.id === uid || mine[p.team]) return false;
+        if (cat[2]==="G") return p.pos==="G";
+        if (cat[2]==="D") return ["LD","RD","D"].indexOf(p.pos)>=0;
+        if (cat[0]==="rookie_of_year") return p.rookie !== false;
+        return true;
+      }).sort(function(a,b){ return a.tag.localeCompare(b.tag); });
+      return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
+        '<b style="font-family:var(--f-disp);min-width:190px">'+cat[1]+'</b>'+
+        (decided[cat[0]] ? '<span class="chip chip-win">Decided</span>'
+          : '<select data-aw-cat="'+cat[0]+'" style="padding:6px;max-width:240px" aria-label="Your vote for '+cat[1]+'"><option value="">Pick a player</option>'+
+              pool.map(function(p){ return '<option value="'+p.id+'">'+esc(p.tag)+' · '+esc(p.team)+'</option>'; }).join("")+'</select>'+
+            '<button class="btn btn-ghost btn-sm" data-aw-save="'+cat[0]+'">Save vote</button>')+
+        '</div>';
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">You can change a vote until the award is decided. You cannot vote for yourself or for a player on your own club (Rule 9.2).</span></div></div>';
+};
 CG.AFTER.awards = function(param){
+  var sid = CG.SEASON && CG.SEASON.id, uid = CG.auth && CG.auth.user && CG.auth.user.id;
+  if (sid && uid && CG.sb && document.querySelector("[data-aw-cat]")){
+    CG.sb.from("award_ballots").select("category,profile_id").eq("season_id", sid).eq("voter_id", uid).then(function(r){
+      ((r && r.data) || []).forEach(function(row){
+        var sel = document.querySelector('[data-aw-cat="'+row.category+'"]'); if (sel) sel.value = row.profile_id;
+      });
+    });
+  }
+  $$("[data-aw-save]").forEach(function(b){ b.addEventListener("click", function(){
+    var cat = this.getAttribute("data-aw-save"), btn = this;
+    var sel = document.querySelector('[data-aw-cat="'+cat+'"]');
+    if (!sel || !sel.value){ CG.toast("Pick a player first","err"); return; }
+    btn.disabled = true;
+    CG.sb.from("award_ballots").upsert({ season_id:sid, category:cat, voter_id:uid, profile_id:sel.value, updated_at:new Date().toISOString() },
+      { onConflict:"season_id,category,voter_id" }).select("id").then(function(r){
+        btn.disabled = false;
+        if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+        if (!r.data || !r.data.length){ CG.toast("Couldn’t save: nothing was written. Sign out and back in, then retry.","err"); return; }
+        CG.toast("Vote saved. You can change it until the award is decided","ok");
+      });
+  }); });
   $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){ location.hash="#/awards?tab="+this.getAttribute("data-tab"); }); });
 };
 

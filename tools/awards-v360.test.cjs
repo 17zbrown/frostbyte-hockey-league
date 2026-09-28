@@ -1,0 +1,27 @@
+/* v3.60: season awards (Q37 to Q39). Rehearsed in Postgres (recorded at the foot of the SQL file). */
+const fs = require("fs"), path = require("path");
+const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+let fail = 0, n = 0;
+const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  got: " + String(got).slice(0, 220))); } };
+const sql = R("sql/2026-09-28-awards-v360.sql"), sqlF = sql.replace(/\n--\s*/g, " "), pub2 = R("src/live/part5b_public2.js");
+A("the rulings are quoted", /allow all players to put 1 vote in per award/.test(sqlF) && /A player must be playoff eligible to be eligible to receive the award/.test(sqlF) && /If it is statistical, no/.test(sqlF));
+A("every rostered player may vote; Media only as a player", /exists \(select 1 from public\.roster_spots rs where rs\.season_id = p_season and rs\.profile_id = auth\.uid\(\) and rs\.status = 'active'\)/.test(sql) && /public\.is_staff\(\) and not public\.is_media_staff\(auth\.uid\(\)\)/.test(sql));
+A("ballots: own-club, self, position and rookie checks", /plays for your own club/.test(sql) && /A vote for yourself is not counted/.test(sql) && /is not rostered as a goaltender/.test(sql) && /is not in his first CGHL season/.test(sql));
+A("the winner must be playoff eligible; the commissioner only breaks a tie", /and public\.award_eligible\(p_season, profile_id\)/.test(sql) && /a commissioner picks only to break a tie/.test(sql));
+A("eligibility is the playoff floor", /public\.regular_gp\(p_season, p_profile\) >= public\.playoff_min_gp\(p_season\)/.test(sql));
+A("titles are per game and filed only when the regular season is over", /\(goals \+ assists\)::numeric \/ gp/.test(sql) && /return 0;   -- the regular season is not over/.test(sql));
+A("the category constraint knows the titles", /'points_title','goals_title','assists_title','goaltending_title'\]\)\)/.test(sql));
+A("the rehearsal is recorded", /T5\s+statistical_titles returns four/.test(sql));
+A("the Awards page carries the ballot and the titles", /CG\.awardBallotCard = function\(lg\)/.test(pub2) && /Statistical titles <span class="caption"/.test(pub2) && /from\("award_ballots"\)\.upsert/.test(pub2));
+A("...and no longer says staff ballot", !/Season hardware is decided by staff ballot/.test(pub2) && !/· staff ballot</.test(pub2));
+global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
+const rb = CG.CONTENT.rulebook, secs = {};
+rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
+const e = rb.changelog.find((c) => c.version === "3.60");
+A("changelog records 3.60", !!e);
+A("9.1: the slate", /Rookie of the Year, a rookie being a player in his first CGHL season/.test(secs["9.1"].paragraphs[0]) && /the Scoring Title, the Goal-scoring Title, the Playmaking Title and the Goaltending Title/.test(secs["9.1"].paragraphs[0]));
+A("9.2: every rostered player votes; titles by per-game average", /among every rostered player and league staff/.test(secs["9.2"].paragraphs[0]) && /most points per game/.test(secs["9.2"].paragraphs[1]));
+A("9.3: playoff eligible to win", /Only a player who is playoff-eligible under Rule 8\.3 can receive/.test(secs["9.3"].paragraphs[0]));
+A("no em dashes or spaced hyphens in the 3.60 entry or the new 9.x text", !/—| - /.test(JSON.stringify(e) + secs["9.1"].paragraphs[0] + secs["9.2"].paragraphs.join(" ")));
+console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));
+process.exit(fail ? 1 : 0);
