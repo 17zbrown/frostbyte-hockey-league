@@ -2169,6 +2169,7 @@ CG.hubRoster = function(qs){
   /* only a seat that may manage the roster can renumber it; the same gate the page's other
      roster moves use, so a seat the Owner has put behind approval cannot quietly renumber either */
   var canEditNum = CG.can("roster.manage") && (!CG.mgmtAccess || CG.mgmtAccess("roster") !== "hidden");
+  var wkRefR = (CG.lineNights ? ((CG.lineNights(club)[0] || {}).game || null) : null);
   var rowFor = function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
     var susp = CG.suspensionOf(p.id);
@@ -2213,6 +2214,9 @@ CG.hubRoster = function(qs){
                 '<span class="chip chip-warn chip-xs" title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</span>'
               : '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button>'; })()+'</div>');
     var gp = (lg.pstats[p.id]||{}).gp||0;
+    /* v3.70 (commissioner, 2026-09-28, Q3): management sees games PLAYED against games SCHEDULED. The week's
+       chip splits the box-score appearances from the games filed but not yet played, against his limit. */
+    var wkLoad = (wkRefR && CG.weekLoad) ? CG.weekLoad(p, club, wkRefR) : null;
     var rp = regPos[p.id];
     var posCell = (loan && rp && rp !== p.pos)
       ? '<span title="Listed at '+esc(p.pos)+' for the pre-season to fill an open seat; he registered as '+esc(rp)+' (Rule 0.4)">'+esc(p.pos)+' <span class="caption">· reg. '+esc(rp)+'</span></span>'
@@ -2230,15 +2234,16 @@ CG.hubRoster = function(qs){
       '<td class="tnum" data-v="'+(p.salary||0)+'" data-l="Cap">'+'<b>'+CG.fmtMoney(p.salary)+'</b></td>'+
       '<td class="tnum" data-l="Term">'+(loan?'<span class="caption">loan</span>':p.term+' yr'+(p.term>1?"s":""))+'</td>'+
       '<td class="tnum" data-v="'+gp+'" data-l="GP">'+gp+'</td>'+
+      '<td class="tnum" data-v="'+(wkLoad?wkLoad.used:0)+'" data-l="Week">'+(wkLoad && CG.weekLoadChip ? CG.weekLoadChip(wkLoad, "xs") : '<span class="caption">—</span>')+'</td>'+
       '<td>'+status+'</td>'+
       '<td class="tright">'+actions+'</td></tr>';
   };
   /* v2.72: the active roster and training camp are two blocks, never interleaved (Rule 2.1) */
   var sqSplit = CG.splitSquads(contracted);
-  var rows = (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="9" class="tleft"><b style="font-family:var(--f-disp)">Active roster — '+sqSplit.active.length+'</b></td></tr>' : "") +
+  var rows = (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="10" class="tleft"><b style="font-family:var(--f-disp)">Active roster — '+sqSplit.active.length+'</b></td></tr>' : "") +
     sqSplit.active.map(rowFor).join("") +
-    (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="9" class="tleft"><b style="font-family:var(--f-disp)">Training camp — '+sqSplit.camp.length+'</b> <span class="caption">Outside the active roster and its shape; a camp player fills any position and dresses in up to three games a week. Call up moves him onto the active roster when it has room (Rules 2.1, 5.2).</span></td></tr>' + sqSplit.camp.map(rowFor).join("") : "") +
-    (loans.length ? '<tr class="loan-head"><td colspan="9" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
+    (sqSplit.camp.length ? '<tr class="squad-head"><td colspan="10" class="tleft"><b style="font-family:var(--f-disp)">Training camp — '+sqSplit.camp.length+'</b> <span class="caption">Outside the active roster and its shape; a camp player fills any position and dresses in up to three games a week. Call up moves him onto the active roster when it has room (Rules 2.1, 5.2).</span></td></tr>' + sqSplit.camp.map(rowFor).join("") : "") +
+    (loans.length ? '<tr class="loan-head"><td colspan="10" class="tleft"><b style="font-family:var(--f-disp)">Pre-season loans — '+loans.length+'</b> <span class="caption">Randomly assigned to your club for the pre-season only. They are not the club’s assets: no trades, no waivers, no contracts — they return to the draft pool when the final pre-season game ends (Rule 0.4). One listed at another position than he registered is filling that seat for the pre-season.</span></td></tr>'+loans.map(rowFor).join("") : "");
   /* the 9/6/2 shape is CONTRACTED players only; pre-season loans ride the active roster without
      counting against it (Rule 2.1) and are shown as their own tally */
   /* v2.73: depth placements live in camp and count like anyone else wherever they are; the depth
@@ -2344,7 +2349,7 @@ CG.hubRoster = function(qs){
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols roster-tbl"><caption>'+esc(t.name)+' roster, contracts and cap hit</caption><thead><tr>'+
-    '<th class="tleft sortable">Player</th><th class="sortable" title="Jersey number — click to change (Rule 2.1)">#</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played">GP</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
+    '<th class="tleft sortable">Player</th><th class="sortable" title="Jersey number — click to change (Rule 2.1)">#</th><th class="sortable">POS</th><th class="sortable">OVR</th><th class="sortable">Cap hit</th><th class="sortable">Term</th><th class="sortable" title="Regular-season games played this season: games he appeared in, from the box score">GP</th><th class="sortable" title="This game-week: games played (box score) plus games filed but not yet played, against his weekly limit (Rule 5.2)">This week</th><th>Status</th><th class="tright">Actions</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
     (rightsHeld.length ? '<div class="card-b" style="border-top:1px solid var(--line)"><b style="font-family:var(--f-disp);display:block;margin-bottom:8px">Rights held until free agency opens</b>'+
       '<p class="caption" style="margin-bottom:10px">Their deals ended with last season. Until this season’s free agency opens, only you can re-sign them — after that they are free agents (Rule 2.2).</p>'+

@@ -16,7 +16,8 @@ console.log("— the column");
 {
   A("the roster table carries a # column, between the player and his position",
     /<th class="tleft sortable">Player<\/th><th class="sortable" title="Jersey number[^"]*">#<\/th><th class="sortable">POS<\/th>/.test(hub));
-  A("...and the section headers span it", !/colspan="8"/.test(hub) && (hub.match(/colspan="9"/g) || []).length >= 2);
+  /* v3.70 added the This week column, so the section headers span ten */
+  A("...and the section headers span it", !/colspan="8"/.test(hub) && !/colspan="9"/.test(hub) && (hub.match(/colspan="10"/g) || []).length >= 2);
   A("management gets a field, everyone else the number", /canEditNum \? /.test(hub.replace(/\s+/g, " ")) || /\(canEditNum && !loan && !isDepth\(p\)\)/.test(hub));
   A("...gated on the same permission as the page's other roster moves",
     /var canEditNum = CG\.can\("roster\.manage"\) && \(!CG\.mgmtAccess \|\| CG\.mgmtAccess\("roster"\) !== "hidden"\);/.test(hub));
