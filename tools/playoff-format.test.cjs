@@ -1,4 +1,4 @@
-/* Playoff series: best-of-7, 2-2-3 in one week, higher seed home Wed+Fri (Rule 8.3).
+/* Playoff series: best-of-7, 2-2-3 in one week; home by game 2-2-1-1-1 since v3.59 (Rule 8.3).
    Run: node tools/playoff-format.test.cjs
 
    The scheduler used to lay one game per night, alternating home — contradicting a rulebook that
@@ -17,10 +17,11 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 function schedule(bestOf, higher, lower) {
   const SLOTS = ["21:00", "21:35", "22:10"], wk = ["Wed", "Thu", "Fri"];
   const perNight = [Math.min(2, bestOf), Math.min(2, Math.max(0, bestOf - 2)), Math.max(0, bestOf - 4)];
-  const hostHigher = [true, false, true];
+  /* v3.59 (Q33): home by GAME, the NHL's 2-2-1-1-1 (CG.playoffHostHigher) */
+  const hostHigherByGame = (gi) => gi < 2 ? true : gi < 4 ? false : (gi - 4) % 2 === 0;
   const rows = []; let gi = 0;
   for (let ni = 0; ni < 3; ni++) for (let k = 0; k < perNight[ni] && gi < bestOf; k++, gi++) {
-    const host = hostHigher[ni] ? higher : lower;
+    const host = hostHigherByGame(gi) ? higher : lower;
     rows.push({ game: gi + 1, night: wk[ni], slot: SLOTS[k], home: host, away: host === higher ? lower : higher });
   }
   return rows;
@@ -32,12 +33,12 @@ console.log("— best-of-7 lays out exactly 2-2-3");
   const wed = g.filter((r) => r.night === "Wed"), thu = g.filter((r) => r.night === "Thu"), fri = g.filter((r) => r.night === "Fri");
   A("seven games total", g.length === 7);
   A("2 Wednesday, 2 Thursday, 3 Friday", wed.length === 2 && thu.length === 2 && fri.length === 3);
-  A("higher seed home Wednesday and Friday", [...wed, ...fri].every((r) => r.home === "TOR"));
-  A("lower seed home Thursday", thu.every((r) => r.home === "BOS"));
+  A("higher seed home games 1, 2, 5 and 7", [1, 2, 5, 7].every((n) => g[n - 1].home === "TOR"));
+  A("lower seed home games 3, 4 and 6", [3, 4, 6].every((n) => g[n - 1].home === "BOS"));
   A("each night uses distinct time slots", new Set(fri.map((r) => r.slot)).size === 3 && new Set(wed.map((r) => r.slot)).size === 2);
   A("the source schedules by night with a 2/2/rest split, not one-per-night alternating",
     /var perNight=\[Math\.min\(2,bestOf\), Math\.min\(2,Math\.max\(0,bestOf-2\)\), Math\.max\(0,bestOf-4\)\];/.test(live) &&
-    /var hostHigher=\[true,false,true\];/.test(live));
+    /var host = CG\.playoffHostHigher\(gi\) \? m\[0\] : m\[1\];/.test(live));
   A("...and the old alternating one-per-night loop is gone", !/host = gi%2===0 \? m\[0\] : m\[1\]/.test(live));
 }
 
@@ -45,7 +46,7 @@ console.log("\n— the config and copy agree on best-of-7");
 {
   A("the client default is best of 7", /playoff_format\.bestOf\) \|\| 7;/.test(live));
   A("the panel offers 3/5/7", /\[3,5,7\]\.map/.test(live));
-  A("...and notes the single-week 2-2-3 cadence", /2 games Wednesday, 2 Thursday, up to 3 Friday, higher seed home Wednesday and Friday/.test(live));
+  A("...and notes the single-week 2-2-3 cadence", /2 games Wednesday, 2 Thursday, up to 3 Friday\. Home follows the NHL pattern: the higher seed is home for games 1, 2, 5 and 7/.test(live));
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;
   const r83 = (() => { for (const c of rb.chapters) for (const s of c.sections) if (s.id === "8.3") return s.paragraphs.join(" "); })();
   A("Rule 8.3 already describes best-of-seven 2-2-3", /best-of-seven series played within a single game-week in a 2-2-3 format/.test(r83));

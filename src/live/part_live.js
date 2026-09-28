@@ -12270,7 +12270,7 @@ CG.admPlayoffsLive = function(){
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Series length</h3><span class="chip">Best of '+bestOf+'</span></div><div class="card-b">'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[3,5,7].map(function(n){
       return '<button class="btn '+(n===bestOf?"btn-chrome":"btn-ghost")+' btn-sm" data-bestof="'+n+'"'+((poLive||fmtLocked)?" disabled":"")+'>Best of '+n+'</button>'; }).join("")+'</div>'+
-    '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series, and each series runs inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday, higher seed home Wednesday and Friday (Rule 8.3). '+
+    '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series, and each series runs inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday. Home follows the NHL pattern: the higher seed is home for games 1, 2, 5 and 7, the lower seed for games 3, 4 and 6 (Rule 8.3). '+
     (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round.')+'</p></div></div>';
 
   /* how many clubs qualify per division — same lock as the series length, because the bracket
@@ -12360,6 +12360,13 @@ CG.playoffSlot = function(shp, k){
   mins = ((mins % 1440) + 1440) % 1440;
   return ("0"+Math.floor(mins/60)).slice(-2)+":"+("0"+(mins%60)).slice(-2);
 };
+/* v3.59 (Q33): home in a playoff series by game number, the NHL's 2-2-1-1-1. gi is 0-based: the higher
+   seed hosts games 1 and 2, the lower seed 3 and 4, then they alternate starting with the higher seed. */
+CG.playoffHostHigher = function(gi){
+  if (gi < 2) return true;
+  if (gi < 4) return false;
+  return (gi - 4) % 2 === 0;
+};
 CG.seriesWinners = function(round){
   var need = Math.floor(CG.playoffBestOf()/2)+1;
   var pairs = {};
@@ -12417,7 +12424,12 @@ CG.generatePlayoffRound = function(round){
     /* the final: the two division champions, i.e. whoever won the last divisional round */
     var champs = CG.seriesWinners(K-1).map(function(r){ return r.code; });
     if (champs.length < 2){ CG.toast("Both division finals must finish first","err"); return; }
-    champs.sort(bySeed);
+    /* v3.59 (Q34, commissioner: "do it based off regular season points"): the higher seed in the final
+       is the champion with more regular-season points, then the Rule 8.2 tiebreakers, which is the
+       order of the league-wide table. Seed rank was division-major, so the first-listed division's
+       champion was always home. */
+    var tbl = CG.standings(CG.lg).map(function(r){ return r.code || (r.team && r.team.code); });
+    champs.sort(function(a, b){ return tbl.indexOf(a) - tbl.indexOf(b); });
     matchups = [[champs[0], champs[1]]];
   } else if (round === 1){
     matchups = [];
@@ -12464,8 +12476,9 @@ CG.generatePlayoffRound = function(round){
     if (!matchups.length){ CG.toast("The previous round has to finish first","err"); return; }
   }
   /* Schedule the series 2-2-3 inside ONE game week (Rule 8.3): two games Wednesday, two Thursday,
-     up to three Friday. The higher seed (m[0]) hosts the Wednesday and Friday games; the lower seed
-     hosts Thursday. All seven slots are laid down now; trg_conclude_series deletes the ones a 4-win
+     up to three Friday. v3.59 (Q33, commissioner: "higher seed home for the first 2, same as real
+     life"): home follows the NHL's 2-2-1-1-1 by GAME, not by night, so the higher seed (m[0]) hosts
+     games 1, 2, 5 and 7 and the lower seed games 3, 4 and 6 (CG.playoffHostHigher). All seven slots are laid down now; trg_conclude_series deletes the ones a 4-win
      series never reaches. The three nights come from the season's own game-night set, so a holiday
      week is stepped over the same way the regular schedule steps over it. */
   var anchor = s.playoffs_start_at ? CG.etYMD(s.playoffs_start_at) : CG.etYMD(new Date(CG.now()+2*86400000).toISOString());
@@ -12477,13 +12490,13 @@ CG.generatePlayoffRound = function(round){
   /* 2-2-3: at most 2 on night 1, 2 on night 2, the remainder on night 3. Generalizes for any
      best-of-N, but for the league's best-of-seven it is exactly 2 / 2 / 3. */
   var perNight=[Math.min(2,bestOf), Math.min(2,Math.max(0,bestOf-2)), Math.max(0,bestOf-4)];
-  var hostHigher=[true,false,true];   /* higher seed home Wed + Fri, lower seed home Thu */
+  /* v3.59: by game number (2-2-1-1-1), not by night */
   var rows=[];
   matchups.forEach(function(m){
     var gi=0;
     for (var ni=0; ni<3; ni++){
       for (var k=0; k<perNight[ni] && gi<bestOf; k++, gi++){
-        var host = hostHigher[ni] ? m[0] : m[1];
+        var host = CG.playoffHostHigher(gi) ? m[0] : m[1];
         var away = host===m[0] ? m[1] : m[0];
         var day = wk[ni] || CG.dayAdd(wk[wk.length-1]||anchor, (ni+1)*2);
         rows.push({ season_id:s.id, week:round, stage:"playoff",
