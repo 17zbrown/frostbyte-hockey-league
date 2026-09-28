@@ -2396,9 +2396,7 @@ CG.ROUTES.player = function(pid, qs){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding-top:22px;padding-bottom:40px">';
   if (tab==="overview"){
-    var cells = isG
-      ? [["GP",s.gp],["Record",s.w+"-"+s.l+"-"+s.otl],["SV%",s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",s.gp?(s.ga/s.gp).toFixed(2):"—"],["Shutouts",s.so],["Quality starts",s.qs]]
-      : [["GP",s.gp],["Goals",s.g],["Assists",s.a],["Points",s.p],["+/-",(s.pm>0?"+":"")+s.pm],["Shots",s.shots],["Shooting%",s.shots?Math.round(100*s.g/s.shots)+"%":"—"],["Hits",s.hits],["Blocks",s.blk],["Takeaways",s.tk],["PIM",s.pim],["GWG",s.gwg]];
+    var cells = CG.profileStatCells(s, isG);
     var sideCard = archived
       ? '<div class="card"><div class="card-h"><h3>'+esc(SD.label)+'</h3><span class="chip">Final</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">This season is archived — the line above is final and read-only. Overall ratings are computed per season, so archived seasons keep their stat lines while the rating on the header always reflects the current campaign.</p>'+
@@ -2485,8 +2483,20 @@ CG.ROUTES.player = function(pid, qs){
     /* by-position split: only for the live season (archived seasons kept aggregates, not rows),
        and it hides itself unless the player really logged games at 2+ positions */
     var posCard = archived ? "" : CG.posSplitTable(CG.posSplit((CG.lg.posSplitRows||{})[p.id]));
-    var kpiStrip = '<div class="pm-pad"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
-      cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div></div>';
+    /* v3.71 (commissioner, 2026-09-28, Q30): "split-position players: separate stat pages per position
+       group via dropdown on the profile; show C vs W difference." A player who played more than one
+       position group this season gets a Position picker: the season line re-renders in place for the
+       group chosen (AFTER.player), and a center-against-wing line compares the two when he played both. */
+    var posLines = archived ? {} : CG.posGroupLines(p.id);
+    var posKeys = CG.POS_VIEW_GROUPS.filter(function(g){ return posLines[g[0]] && posLines[g[0]].gp > 0; });
+    var posPick = posKeys.length >= 2
+      ? '<label class="fld" style="max-width:260px;margin:0 0 14px"><span>Position</span><select id="posView" data-pid="'+esc(p.id)+'">'+
+          '<option value="all">All positions · '+(s.gp||0)+' GP</option>'+
+          posKeys.map(function(g){ return '<option value="'+g[0]+'">'+esc(g[1])+' · '+posLines[g[0]].gp+' GP</option>'; }).join("")+
+        '</select></label>'
+      : "";
+    var kpiStrip = '<div class="pm-pad">'+posPick+'<div id="posKpi">'+CG.statCellsHtml(cells)+'</div>'+
+      (posKeys.length >= 2 ? CG.centerWingLine(posLines) : "")+'</div>';
     var scoutCard = '<div class="card"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
     if (isEmpty) sideCard = "";   /* the fresh-sheet card already explains the scouted overall */
@@ -2753,6 +2763,54 @@ CG.GOALIE_DNA_AXES = ["Stopping","GAA","Workload","Quality Starts","Shutouts","W
    roster or lobby position. Hides itself for single-position players (the table would just
    restate the season line). Skaters and goalies get their own column sets: one table with mixed
    columns would either bury SV% or pad wingers with dashes. */
+/* v3.71 (Q30): the profile's position groups. Center and wing are separate groups on purpose: the
+   commissioner asked to see the difference between them. */
+CG.POS_VIEW_GROUPS = [["C","Center"],["W","Wing"],["D","Defense"],["G","Goaltender"]];
+CG.posViewGroup = function(b){
+  if (!b) return null;
+  if (b.goalie) return "G";
+  if (b.pos === "C") return "C";
+  if (b.pos === "LW" || b.pos === "RW" || b.pos === "W") return "W";
+  if (b.pos === "D" || b.pos === "LD" || b.pos === "RD") return "D";
+  return "C";
+};
+/* one regular-season line per position group, from the same box-score lines CG.aggregate sums, so
+   the groups add up to the season line */
+CG.posGroupLines = function(pid){
+  var out = {};
+  ((CG.lg && CG.lg.results) || []).forEach(function(r){
+    [r.home, r.away].forEach(function(code){
+      var b = r.box && r.box[code] && r.box[code][pid]; if (!b) return;
+      var k = CG.posViewGroup(b);
+      var s = out[k] = out[k] || (k === "G" ? { gp:0, w:0, l:0, otl:0, sa:0, sv:0, ga:0, so:0, qs:0 }
+                                            : { gp:0, g:0, a:0, p:0, pm:0, shots:0, hits:0, blk:0, tk:0, pim:0, gwg:0 });
+      s.gp++;
+      if (k === "G"){ s.w+=b.w||0; s.l+=b.l||0; s.otl+=b.otl||0; s.sa+=b.sa||0; s.sv+=b.sv||0; s.ga+=b.ga||0; s.so+=b.so||0; s.qs+=b.qs||0; }
+      else { s.g+=b.g||0; s.a+=b.a||0; s.p+=(b.g||0)+(b.a||0); s.pm+=b.pm||0; s.shots+=b.shots||0; s.hits+=b.hits||0; s.blk+=b.blk||0; s.tk+=b.tk||0; s.pim+=b.pim||0; s.gwg+=b.gwg||0; }
+    });
+  });
+  return out;
+};
+/* the season-line cells, goaltender or skater, shared by the profile's first paint and the picker */
+CG.profileStatCells = function(s, goalie){
+  s = s || {};
+  return goalie
+    ? [["GP",s.gp||0],["Record",(s.w||0)+"-"+(s.l||0)+"-"+(s.otl||0)],["SV%",s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",s.gp?(s.ga/s.gp).toFixed(2):"—"],["Shutouts",s.so||0],["Quality starts",s.qs||0]]
+    : [["GP",s.gp||0],["Goals",s.g||0],["Assists",s.a||0],["Points",s.p||0],["+/-",((s.pm||0)>0?"+":"")+(s.pm||0)],["Shots",s.shots||0],["Shooting%",s.shots?Math.round(100*s.g/s.shots)+"%":"—"],["Hits",s.hits||0],["Blocks",s.blk||0],["Takeaways",s.tk||0],["PIM",s.pim||0],["GWG",s.gwg||0]];
+};
+CG.statCellsHtml = function(cells){
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
+    cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>';
+};
+/* "show C vs W difference": per-game rates side by side, only when he played both */
+CG.centerWingLine = function(lines){
+  var c = lines && lines.C, w = lines && lines.W;
+  if (!c || !w || !c.gp || !w.gp) return "";
+  var pg = function(x, k){ return (x[k] / x.gp).toFixed(2); };
+  return '<p class="caption" style="margin-top:12px"><b>Center against wing, per game:</b> '+
+    pg(c,"p")+' against '+pg(w,"p")+' points, '+pg(c,"g")+' against '+pg(w,"g")+' goals, '+
+    pg(c,"shots")+' against '+pg(w,"shots")+' shots ('+c.gp+' games at center, '+w.gp+' on the wing).</p>';
+};
 CG.posSplit = function(rows){
   var split = {};
   (rows||[]).forEach(function(r){
@@ -2905,6 +2963,18 @@ CG.scoutLine = function(p){
     s.pim+" PIM. This summary is computed from verified game data only.";
 };
 CG.AFTER.player = function(pid, qs){
+  /* v3.71 (Q30): the Position picker re-renders the season line in place, never the page */
+  var pv = document.getElementById("posView");
+  if (pv) pv.addEventListener("change", function(){
+    var box = document.getElementById("posKpi"); if (!box) return;
+    var v = this.value, id = this.getAttribute("data-pid");
+    if (v === "all"){
+      var pl = (CG.lg.players || []).find(function(x){ return x.id === id; }) || {};
+      box.innerHTML = CG.statCellsHtml(CG.profileStatCells((CG.lg.pstats || {})[id], pl.pos === "G"));
+    } else {
+      box.innerHTML = CG.statCellsHtml(CG.profileStatCells(CG.posGroupLines(id)[v], v === "G"));
+    }
+  });
   /* Account-only profile (not a rostered league player): fill the minimal header with the gamertag.
      The rest of this handler's selectors are all guarded and no-op on the minimal page; the pickup
      fetch below targets #pickupSection and runs for any account. */

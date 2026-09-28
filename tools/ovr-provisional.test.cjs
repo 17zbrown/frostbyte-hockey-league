@@ -64,8 +64,10 @@ console.log("\n— the copy no longer claims it is a scouting number");
   A("the directory explains the real rule", /measures a player against the league at his position from CGHL box scores alone, and stays pulled toward 70 until his fifth game/.test(pub));
   A("...and nothing still says three games", !/settle[s]? onto (a player's|the) real rating (over|across) (his first )?three games/.test(pub) && !/first three games/.test(live));
   A("the profile says it is recomputed after every final", /recomputed after every final/.test(pub));
-  A("the Control Center no longer claims nothing hand-edits a rating",
-    !/the site never hand-edits a rating/.test(live) && /A commissioner CAN override a single rating/.test(live));
+  /* v3.67 (Q59): "commissioners should not be able to edit player or team overalls", so the note now says
+     nobody hand-edits one, the commissioner included */
+  A("the Control Center says nobody hand-edits a rating, the commissioner included (v3.67)",
+    !/the site never hand-edits a rating/.test(live) && !/A commissioner CAN override a single rating/.test(live) && /Nobody hand-edits a rating, the commissioner included/.test(live));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
