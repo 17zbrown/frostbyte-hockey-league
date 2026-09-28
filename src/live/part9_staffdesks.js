@@ -847,7 +847,11 @@ CG.AFTER._deskTransactions = function(){
         '<span class="caption" aria-hidden="true">Details ›</span>'+
         (t.status==="accepted"
           ? '<button class="btn btn-ghost btn-sm" data-tx-reverse="'+t.id+'" data-pair="'+esc(f+" / "+to)+'">Send back</button>'
-          : "")+'</div>';
+          /* v3.68 (commissioner, 2026-09-28): transactions staff may resend a declined or withdrawn offer as it
+             was; the receiving club still accepts or declines it (resend_trade) */
+          : (t.status==="declined" || t.status==="cancelled")
+            ? '<button class="btn btn-ghost btn-sm" data-tx-resend="'+t.id+'" data-pair="'+esc(f+" / "+to)+'">Resend</button>'
+            : "")+'</div>';
     }
 
     var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Trades on the table</h3>'+
@@ -908,6 +912,19 @@ CG.AFTER._deskTransactions = function(){
     }
     body.querySelectorAll("[data-tx-reverse]").forEach(function(b){ b.addEventListener("click", function(e){
       e.stopPropagation(); openReverse(this.getAttribute("data-tx-reverse"), this.getAttribute("data-pair"));
+    }); });
+    body.querySelectorAll("[data-tx-resend]").forEach(function(b){ b.addEventListener("click", function(e){
+      e.stopPropagation();
+      var id = this.getAttribute("data-tx-resend"), pair = this.getAttribute("data-pair");
+      CG.confirm("Resend the "+pair+" offer?",
+        "It goes back to the receiving club exactly as it was, marked as resent by the league office. That club accepts or declines it like any offer; nothing moves until it does.",
+        "Resend", function(){
+          CG.sb.rpc("resend_trade", { p_trade:id }).then(function(r){
+            if (r.error){ CG.toast(r.error.message,"err"); return; }
+            CG.toast("Offer resent to the receiving club","ok");
+            if (CG.reloadLeague) CG.reloadLeague(); else CG.AFTER._deskTransactions();
+          });
+        });
     }); });
   });
 };

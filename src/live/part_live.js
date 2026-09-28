@@ -8167,7 +8167,14 @@ CG.ACTION_META = {
   complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
   appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
   trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s front office for a move. It goes to your Owner, GM and AGM, and to nobody else (Rule 2.3)." },
-  position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." }
+  position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." },
+  /* v3.68 (commissioner, 2026-09-28, Q60): a club's front office asks the statistics department to correct
+     the record (Rule 6.3); the database refuses anyone without a club seat and routes it (guard_stats_correction) */
+  stats_correction:{ label:"Statistics correction",   icon:"grid",  route:"commissioner", mgmtOnly:true, blurb:"For club management: a stat line or result the import got wrong. It goes straight to the statistics department (Rule 6.3)." }
+};
+CG.actionTypesFor = function(){
+  var mgr = !!(CG.myManagedTeam && CG.myManagedTeam());
+  return Object.keys(CG.ACTION_META).filter(function(k){ return !CG.ACTION_META[k].mgmtOnly || mgr; });
 };
 CG.COMPLAINT_SUBJECTS = ["Player conduct / toxicity","Harassment or abuse","Cheating or exploiting","Trolling / griefing in-game","No-show or forfeit","Lag / connection manipulation","Manager or GM conduct","Commissioner or staff conduct","Rulebook violation","Discord behavior","Something else"];
 CG.APPEAL_SUBJECTS = ["Single-game suspension","Multi-game suspension","Season ban","Permanent ban","Forfeit ruling","Roster or cap penalty","Warning or strike","Trade reversal","Something else"];
@@ -8364,7 +8371,7 @@ CG.hubComplaintsLive = function(opts){
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+(review?"All cases · league office":"Your cases")+'</span>'+
     '<h1 class="h-sec" style="margin-top:8px">'+(opts.admin?"Complaints & requests":"Action Center")+'</h1>'+
     '<p class="lede" style="margin-top:8px">File a complaint, appeal a ruling, or send a request — everything lands with '+(review?"you":"the league office")+' and carries its status here.</p></div>';
-  h += '<div class="grid g2" style="margin-bottom:22px">'+Object.keys(CG.ACTION_META).map(function(k){
+  h += '<div class="grid g2" style="margin-bottom:22px">'+CG.actionTypesFor().map(function(k){
     var m = CG.ACTION_META[k];
     return '<div class="card raise" data-file-action="'+k+'" role="button" tabindex="0" style="cursor:pointer"><div class="card-b" style="display:flex;gap:12px;align-items:flex-start">'+
       '<span class="nf-ic">'+CG.ic(m.icon,16)+'</span><div><b style="font-family:var(--f-disp)">'+esc(m.label)+'</b>'+
@@ -8484,8 +8491,20 @@ CG.fileActionRequest = function(type){
       (pcDl?'<p class="caption">Position changes close <b>'+CG.fmtFull(pcDl)+'</b> — 11:59 PM ET on the Tuesday before the first pre-season game (Rule 2.9). After that your position is set for the season.</p>':"");
   }
   if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
+  if (type==="stats_correction"){
+    var mt = CG.myManagedTeam && CG.myManagedTeam();
+    if (!mt){ CG.toast("A statistics correction is filed by a club's Owner, GM or AGM (Rule 6.3)","err"); return; }
+    /* the club's own finished games, newest first, as the subject */
+    var myGames = ((CG.lg && CG.lg.schedule) || []).filter(function(g){ return g.status==="final" && (g.home===mt.code || g.away===mt.code); })
+      .sort(function(a,b){ return (b.at||0)-(a.at||0); }).slice(0, 30);
+    fields += '<label class="fld"><span>Which game?</span><select id="acSubject"><option value="">Pick the game…</option>'+
+      myGames.map(function(g){ var lbl = CG.fmtDay(g.at)+" · "+g.away+" at "+g.home; return '<option value="'+esc(lbl)+'">'+esc(lbl)+'</option>'; }).join("")+
+      '<option value="Another game or season total">Another game or a season total</option></select></label>';
+  }
   fields += '<label class="fld"><span>'+(type==="trade_request"?"Why are you requesting a trade?":"Details")+'</span><textarea id="acDetails" rows="5" placeholder="'+(type==="complaint"?"What happened, when, and in which game or channel. Link any evidence.":"Explain your request.")+'"></textarea></label>'+
-    '<p class="caption">'+(meta.route==="manager"
+    '<p class="caption">'+(type==="stats_correction"
+      ? "Goes to the league’s statistics department, who correct the record or tell you why not (Rule 6.3). Name the player, the stat and what it should read."
+      : meta.route==="manager"
       ? "Private to your club’s front office. Your Owner, GM and AGM are notified on the site and on Discord. The league office does not receive it (Rule 2.3)."
       : "Goes to the league office. Commissioners are notified instantly.")+'</p>';
   CG.modal("File — "+esc(meta.label), fields,
@@ -9627,8 +9646,10 @@ CG.loadAppBallots = function(){
     .select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
     .then(function(vb){ if(CG.lg) CG.lg._appBallots = (vb && !vb.error && vb.data) || []; return true; }, function(){ return false; });
 };
-/* The reviewer vote IS the decision. Once every reviewer (staff carrying the 'applications'
-   department) has voted, the DB auto-applies 50%+1. Commissioners don't vote but can override. */
+/* The reviewer vote IS the decision. v3.68 (commissioner, 2026-09-28, Q47): "Staff can only place individual
+   votes that need to add up to 50% +1 out of all the voting staff", and "Only a commissioner can decide on a
+   vote on their own." The database decides the moment the outcome is certain: approved at a majority of ALL
+   reviewers, denied once that majority can no longer be reached. Commissioners don't vote but can decide. */
 CG.appBallotSection = function(type, a, decided){
   var uid = CG.auth.user && CG.auth.user.id;
   var reviewers = CG.appReviewers();
@@ -9663,7 +9684,7 @@ CG.appBallotSection = function(type, a, decided){
 
   if (!decided && isReviewer){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
-      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote — change it any time until the last reviewer votes":"Cast your vote")+'</span>'+
+      '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote. Change it any time until the application is decided, the moment "+need+" of "+N+" reviewers agree":"Cast your vote: "+need+" of "+N+" reviewers decide it")+'</span>'+
       '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
         '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
