@@ -144,20 +144,26 @@ console.log("\n— the same gate guards the write, not just the read");
   A("...and nothing was written", writes.statDeletes === 0 && writes.gamePatches.length === 0);
 }
 
-console.log("\n— a club merges its own lag-out");
+/* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the specific staff
+   for that and commissioners." A club attaches one sitting; two or more are statistics staff's to combine. */
+console.log("\n— a club cannot combine its lag-out (v3.67); statistics staff do");
 {
   LOG = twoSittings(); reset();
   UID = "bos-gm";
+  const r0 = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
+  const refused = JSON.parse(r0.body);
+  A("a club's two-sitting merge is refused, by rule", r0.statusCode === 403 && /Only statistics staff or a commissioner combine a game played in more than one sitting \(Rule 4\.3\)/.test(refused.error || ""), refused.error);
+  A("...and nothing is written", writes.statDeletes === 0 && writes.gamePatches.length === 0 && writes.logPatches.length === 0);
+  LOG = twoSittings(); reset();
+  UID = "statsguy";
   const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
-  A("the merge succeeds", res.ok === true && res.sittings === 2, JSON.stringify(res).slice(0, 120));
+  A("statistics staff combine it", res.ok === true && res.sittings === 2, JSON.stringify(res).slice(0, 120));
   A("the score aggregates across sittings", res.score === "3-1");
   A("the old box score is replaced, not appended", writes.statDeletes === 1);
   const home = writes.statRows.find((r) => r.skater_name === "HomeGuy");
   A("stats sum on the right side despite EA flipping the clubs", home && home.goals === 3 && home.team_id === "T1");
-  A("provenance names the human and the club", /BosGM \(BOS management\)/.test(JSON.stringify(writes.logPatches)));
-  A("...on the merged sitting too", writes.logPatches.filter((p) => /BosGM/.test(JSON.stringify(p.body))).length === 2);
-  A("staff are told a club rebuilt a game", writes.webhooks.length === 1 && /BosGM/.test(writes.webhooks[0].content));
-  A("the notice names the fixture and the new score", /TOR @ BOS/.test(writes.webhooks[0].content) && /3-1/.test(writes.webhooks[0].content));
+  A("provenance names the human and says stats staff", /StatsGuy \(stats staff\)/.test(JSON.stringify(writes.logPatches)));
+  A("...on the merged sitting too", writes.logPatches.filter((p) => /StatsGuy/.test(JSON.stringify(p.body))).length === 2);
 }
 
 console.log("\n— a club cannot reach past its own fixture");
@@ -170,7 +176,7 @@ console.log("\n— a club cannot reach past its own fixture");
   ];
   reset(); UID = "bos-gm";
   const mgmt = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mLater"] } })).body);
-  A("a different meeting can't be grafted on by a club", /wasn.t played around this fixture/.test(mgmt.error || ""), mgmt.error);
+  A("a club can't graft another sitting on at all (v3.67)", /Only statistics staff or a commissioner combine/.test(mgmt.error || ""), mgmt.error);
   A("...and the game was left untouched", writes.statDeletes === 0 && writes.gamePatches.length === 0);
   reset(); UID = "statsguy";
   const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mLater"] } })).body);
@@ -185,9 +191,10 @@ console.log("\n— the protections that already existed still hold for managers"
     { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", SAME_NIGHT, 1, 0, false, 300) },
     { ea_match_id: "mX", status: "ingested", game_id: "gOther", et_day: "2026-10-21", payload: rawSitting("mX", SAME_NIGHT_LATER, 3, 3, false, 700) },
   ];
-  reset(); UID = "bos-gm";
+  reset(); UID = "statsguy";
   const stolen = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mX"] } })).body);
   A("another game's sitting still can't be stolen", /already belongs to another game/.test(stolen.error || ""));
+  UID = "bos-gm";
 
   LOG = [{ ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", SAME_NIGHT_LATER, 2, 1, false, 420) }];
   const orphan = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m2"] } })).body);
@@ -219,9 +226,9 @@ console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobod
   A("...and even a commissioner's merge leaves the ruling exactly as it was (forfeit_team_id is not in the PATCH at all)",
     writes.gamePatches.length === 1 && !("forfeit_team_id" in writes.gamePatches[0]), JSON.stringify(writes.gamePatches[0]));
   FORFEIT = null;
-  reset(); UID = "bos-gm";
+  reset(); UID = "statsguy";
   const clean = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
-  A("without a ruling the club merges as before", clean.ok === true);
+  A("without a ruling statistics staff merge as before (a club no longer combines, v3.67)", clean.ok === true, clean.error);
   A("...and its PATCH carries no forfeit_team_id either — the key is absent, not null", !("forfeit_team_id" in writes.gamePatches[0]));
   /* v3.53: re-filing a restarted game strikes sittings and their statistics: statistics staff only */
   reset(); UID = "bos-gm";
@@ -231,7 +238,7 @@ console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobod
 
 console.log("\n— the archive is written before the game is touched, so a merge that dies mid-flight is never unattributed");
 {
-  LOG = twoSittings(); reset(); UID = "bos-gm";
+  LOG = twoSittings(); reset(); UID = "statsguy";   /* v3.67: a combine is statistics staff's */
   const order = [];
   const inner = globalThis.fetch;
   globalThis.fetch = async (url, opts = {}) => {
@@ -254,7 +261,7 @@ console.log("\n— a box score another writer filed at the same moment is not ov
 {
   /* game_stats is unique per (game, club, player); PostgREST answers the collision with 409 and
      Postgres's 23505. The other poll lane or the desk got there first — say so, do not clobber. */
-  LOG = twoSittings(); reset(); UID = "bos-gm";
+  LOG = twoSittings(); reset(); UID = "statsguy";
   const inner = globalThis.fetch;
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url), m = opts.method || "GET";
@@ -309,7 +316,7 @@ console.log("\n— one linked side is enough: the opponent is derived, then prov
   A("the opposing EA club is named on each sitting", res.candidates.every((c) => c.oppEaId === "222" && c.oppEaName === "Leafs EA"));
   A("scores still read home-first", res.candidates[1].homeScore === 2 && res.candidates[1].awayScore === 1);
 
-  reset();
+  reset(); UID = "statsguy";   /* v3.67: combining is statistics staff's */
   const mg = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
   A("the one-sided merge succeeds", mg.ok === true && mg.score === "3-1", mg.error);
   A("the merge PROVES the opponent's EA club and links it", EA_LINK.T2 === "222" && writes.teamPatches.some((tp) => tp.id === "T2" && tp.body.ea_club_id === "222"));
@@ -326,7 +333,7 @@ console.log("\n— one linked side is enough: the opponent is derived, then prov
         const c = r2.clubs["222"]; delete r2.clubs["222"]; r2.clubs["333"] = c;
         const p2 = r2.players["222"]; delete r2.players["222"]; r2.players["333"] = p2; return r2; })() },
   ];
-  reset(); UID = "bos-gm";
+  reset(); UID = "statsguy";
   const mixed = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mAlien"] } })).body);
   A("sittings against different opponents are refused", /different opponents/.test(mixed.error || ""), mixed.error);
   A("...and no linkage happened", EA_LINK.T2 === null && writes.teamPatches.length === 0);

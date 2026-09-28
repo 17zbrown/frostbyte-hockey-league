@@ -1546,6 +1546,11 @@ export const handler = async (event) => {
        is unaffected: there the sittings are merged FIRST and the forfeit is ruled on the merged game. */
     if (game.forfeit_team_id != null && !actor.commish)
       return { statusCode: 422, body: JSON.stringify({ error: "This game carries a forfeit ruling. Only a commissioner can change a ruled game: report the mistake to the commissioners from the game page." }) };
+    /* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the specific
+       staff for that and commissioners." A club's management attaches ONE sitting to its fixture; two or
+       more are a statistics-staff merge. A held game is flagged to that staff automatically (v3.53). */
+    if (actor.via === "management" && matchIds.length > 1)
+      return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff or a commissioner combine a game played in more than one sitting (Rule 4.3). Attach the single sitting that is this game, or leave it to them: a game short of sixty minutes is held and flagged to them automatically." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away || (home.ea_club_id == null && away.ea_club_id == null))

@@ -1462,7 +1462,7 @@ CG.mapDraftData = function(lg, draftPicks, registrations){
   /* a declined registration is not in the pool — the commissioner is promised that Decline
      keeps a banned or withdrawn member out of the draft entirely */
   lg.draftPool = (registrations||[]).filter(function(r){ return !rostered[r.profile_id] && !held[r.profile_id] && !picked[r.profile_id] && r.status!=="declined" && (!r.season_id || r.season_id===poolSeason); })
-    .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(r.scout_ovr==null?null:r.scout_ovr), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
+    .map(function(r){ return { profileId:r.profile_id, tag:(r.profiles&&r.profiles.gamertag)||"?", pos:r.position, ovr:(CG.regOverall ? CG.regOverall(r) : ((r.profiles && r.profiles.overall != null) ? r.profiles.overall : null)), eaId:(r.profiles&&r.profiles.ea_id)||null }; })
     .sort(function(a,b){ return (b.ovr==null?-1:b.ovr)-(a.ovr==null?-1:a.ovr); });
   lg.registrationsCount = (registrations||[]).length;
 };
@@ -1478,7 +1478,7 @@ CG.loadManagerData = async function(){
          and this select still asked for it. PostgREST refuses the WHOLE query for one unknown
          column, so every registration vanished from the Control Center and Draft & placement read
          "no sign-ups" in the middle of a season with 179 of them. */
-      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at,waived_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number)"),
+      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at,waived_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number,overall)"),
       CG.sb.from("draft_state").select("*")
     ]);
     /* ...and it failed SILENTLY, because an error fell back to [] and an empty board looks exactly
@@ -6245,7 +6245,7 @@ CG.admPreseason = function(qs){
     'Release runs automatically after the final pre-season game; post-draft placement runs automatically ten minutes after the draft concludes and seats everyone still without a club at the league minimum. '+
     'The sign-up deadline is a draft-eligibility cutoff, not a hard close — anyone registering after it (and anyone joining mid-season) is placed on a club with an open spot automatically. These buttons are manual overrides.</p></div></div>';
 
-  var sortedRegs=regs.slice().sort(function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); });
+  var sortedRegs=regs.slice().sort(function(a,b){ var x=CG.regOverall(a), y=CG.regOverall(b); return (y==null?-1:y)-(x==null?-1:x); });
   var clubOpts=CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
   h+='<div class="card"><div class="reg-bar">'+
     '<div class="seg" role="group" aria-label="Filter registrations">'+
@@ -6255,7 +6255,7 @@ CG.admPreseason = function(qs){
     '<input type="search" id="regSearch" placeholder="Search gamertag or EA ID…" aria-label="Search registrations">'+
     '<span class="caption" id="regShowing">'+regs.length+' shown</span></div>'+
     (regs.length?'<div class="tblwrap"><table class="tbl keepcols compact"><caption class="sr">Season registrations</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>Scout OVR</th><th>Pre-season</th><th>Draft eligibility</th><th>Status</th><th class="tright">Action</th></tr></thead><tbody id="regBody">'+
+      '<th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>OVR</th><th>Pre-season</th><th>Draft eligibility</th><th>Status</th><th class="tright">Action</th></tr></thead><tbody id="regBody">'+
       sortedRegs.map(function(r){
         var prof=r.profiles||{}, on=rosteredIds[r.profile_id], pl=playerById[r.profile_id];
         var declined=r.status==="declined", st=declined?"dec":on?"ros":"fa";
@@ -6294,7 +6294,8 @@ CG.admPreseason = function(qs){
           '<td class="tleft"><span class="playercell">'+(av?'<img src="'+av+'" alt="" class="pc-av">':'')+'<span style="min-width:0"><span class="nm">'+esc(prof.gamertag||"—")+'</span><small class="mono">'+esc(prof.ea_id||"no EA ID")+'</small></span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td>'+
           '<td class="tleft">'+(club?'<span class="teamcell">'+CG.crest(club,18)+'<span class="mono" style="font-size:11px">'+esc(club)+'</span></span>':'<span class="caption">—</span>')+'</td>'+
-          '<td class="tnum"><input type="number" min="40" max="99" value="'+(r.scout_ovr==null?"":r.scout_ovr)+'" data-scout="'+r.id+'" class="scout-in" placeholder="—"'+(declined?" disabled":"")+'></td>'+
+          /* v3.67 (Q59): overalls come from the ratings engine alone; nobody types one in */
+          '<td class="tnum">'+(CG.regOverall(r)==null?'<span class="caption">—</span>':CG.regOverall(r))+'</td>'+
           '<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>'+
           '<td>'+elig+'</td><td>'+statusChip+'</td>'+
           '<td class="tright reg-act">'+actions+'</td></tr>';
@@ -6393,16 +6394,6 @@ CG.admPreseason = function(qs){
   return h;
 };
 CG.AFTER._preseason = function(){
-  document.querySelectorAll("[data-scout]").forEach(function(el){
-    el.addEventListener("change", function(){
-      var id=this.getAttribute("data-scout"), v=(this.value||"").trim();
-      var nv = v===""?null:Math.max(40,Math.min(99,parseInt(v,10)||0));
-      CG.sb.from("season_registrations").update({scout_ovr:nv}).eq("id",id).select("id").then(function(r){
-        if(r.error||!(r.data||[]).length){ CG.toast("Couldn’t save"+(r.error?": "+r.error.message:" — nothing was written; sign out and back in, then retry"),"err"); }
-        else { CG.toast("Scout OVR saved","ok"); var reg=(CG.lg._registrationsRaw||[]).find(function(x){return x.id===id;}); if(reg)reg.scout_ovr=nv; }
-      });
-    });
-  });
   /* owner/staff application decisions are made by the reviewer vote (Staff Desk), not here */
   var paa=document.getElementById("preAssignAll"); if (paa) paa.addEventListener("click", CG.preseasonRandomAssign);
   var prn=document.getElementById("preReleaseNow"); if (prn) prn.addEventListener("click", CG.preseasonRelease);
@@ -13020,7 +13011,11 @@ CG._gsOne = function(el){
         }
         out.innerHTML = searchCard + '<div class="card"><div class="card-h"><h3>Sittings EA recorded</h3><span class="chip chip-warn">Rebuilds the box score</span></div>'+
           '<div class="card-b">'+
-          '<p class="caption" style="margin:0 0 12px;max-width:78ch">Select every sitting that was part of this one game — the first half and everything played after the lag-out, or the single partial sitting if the game ended early on a forfeit. They are summed into a single final: stats added together, score aggregated, overtime taken from the deciding sitting. Anything already tied to a different game is not shown.</p>'+
+          /* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the
+             specific staff for that and commissioners." A club attaches the one sitting that is its game;
+             a game played in more than one sitting is combined by statistics staff, and ingest-stats
+             refuses a club's multi-sitting merge. */
+          '<p class="caption" style="margin:0 0 12px;max-width:78ch">Pick the one sitting that is this game and attach it: its score and every player line become the box score. If the game lagged out and was played in more than one sitting, statistics staff combine them (Rule 4.3); a game that comes in short of a full sixty minutes is held and flagged to them automatically. Anything already tied to a different game is not shown.</p>'+
           cs.map(function(c){
             return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
               '<button type="button" class="chip'+(c.attached?' chip-chrome':'')+'" data-gssel="'+esc(c.matchId)+'" aria-pressed="'+(c.attached?"true":"false")+'" style="cursor:pointer">'+(c.attached?'✓':'—')+'</button>'+
@@ -13031,27 +13026,32 @@ CG._gsOne = function(el){
                 '<div class="caption">'+(c.ts?CG.fmtFull(c.ts*1000):'')+'</div></div>'+
             '</div></div>';
           }).join("")+
-          '<button class="btn btn-chrome" id="gsMerge" style="margin-top:6px">Combine the selected sittings into this game</button>'+
+          '<button class="btn btn-chrome" id="gsMerge" style="margin-top:6px">Attach this sitting to the game</button>'+
           (blocked ? '<p class="caption" style="margin-top:10px">'+blocked+' sitting'+(blocked===1?" is":"s are")+' already attached to a different game and can’t be used here.</p>' : '')+
           '</div></div>' + fetchBtn;
         wireEa();
+        /* v3.67 (Q23): one sitting at a time; picking one clears the others */
         out.querySelectorAll("[data-gssel]").forEach(function(b){ b.addEventListener("click", function(){
-          var on = this.getAttribute("aria-pressed")!=="true";
-          this.setAttribute("aria-pressed", on?"true":"false");
-          this.classList.toggle("chip-chrome", on);
-          this.textContent = on ? "✓" : "—";
+          var on = this.getAttribute("aria-pressed")!=="true", me = this;
+          out.querySelectorAll("[data-gssel]").forEach(function(x){
+            var sel = on && x === me;
+            x.setAttribute("aria-pressed", sel?"true":"false");
+            x.classList.toggle("chip-chrome", sel);
+            x.textContent = sel ? "✓" : "—";
+          });
         }); });
         var mg = document.getElementById("gsMerge");
         if (mg) mg.addEventListener("click", function(){
           var ids = [].slice.call(out.querySelectorAll('[data-gssel][aria-pressed="true"]')).map(function(x){ return x.getAttribute("data-gssel"); });
-          if (!ids.length){ CG.toast("Select at least one sitting","err"); return; }
+          if (!ids.length){ CG.toast("Pick the sitting that is this game","err"); return; }
+          if (ids.length > 1){ CG.toast("Statistics staff combine a game played in more than one sitting (Rule 4.3)","err"); return; }
           var btn = this;
-          CG.confirm("Rebuild this game from "+ids.length+" sitting"+(ids.length===1?"":"s")+"?",
-            "The box score for this fixture is replaced by the combined result. Standings, player totals, and profiles update immediately, and league staff are notified that your club rebuilt it.",
-            "Rebuild", function(){
+          CG.confirm("Attach this sitting to the game?",
+            "Its score and player lines become this fixture's box score. Standings, player totals and profiles update immediately, and league staff are told your club attached it.",
+            "Attach", function(){
               btn.disabled = true; btn.textContent = "Rebuilding…";
               CG._smLeagueApi({ leagueMerge: { gameId: gid, matchIds: ids } }).then(function(res){
-                btn.disabled = false; btn.textContent = "Combine the selected sittings into this game";
+                btn.disabled = false; btn.textContent = "Attach this sitting to the game";
                 if (res.error){ CG.toast(res.error,"err"); return; }
                 /* the header above was rendered from the PRE-merge row — leaving it would sit a
                    stale "current result" directly above the new one and read as a contradiction */
@@ -13064,7 +13064,7 @@ CG._gsOne = function(el){
                   : '<div class="note grn"><b style="font-family:var(--f-disp)">Done.</b> '+res.sittings+' sitting'+(res.sittings===1?"":"s")+' combined into one game — final '+esc(res.score)+(res.wentOt?" (OT)":"")+', '+res.players+' player lines ('+res.linked+' matched to profiles). <a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to your games</a></div>';
                 CG.toast(res.held ? "Combined and held: not yet a full game" : "Game rebuilt from "+res.sittings+" sittings","ok");
                 CG.reloadLeague && CG.reloadLeague();
-              }).catch(function(e){ btn.disabled = false; btn.textContent = "Combine the selected sittings into this game"; CG.toast(e.message,"err"); });
+              }).catch(function(e){ btn.disabled = false; btn.textContent = "Attach this sitting to the game"; CG.toast(e.message,"err"); });
             });
         });
         }).catch(function(e){ var out2 = document.getElementById("gsCands"); if (out2) out2.innerHTML = eb(e.message); });
@@ -13350,6 +13350,16 @@ CG.hubSettings = function(){
    basic format: his own contract for this season, which the waiver expires but leaves the salary on.
    The database is the authority and decides the figure; this is so a manager sees the cap hit BEFORE
    he presses Sign, instead of being told $750K and charged $3.25M. */
+/* v3.67 (commissioner, 2026-09-28, Q59): "commissioners should not be able to edit player or team
+   overalls." A player's overall is the ratings engine's (profiles.overall, written only by
+   refresh_player_overall); the hand-entered "Scout OVR" is gone, and every list that sorted or showed it
+   reads this instead. */
+CG.regOverall = function(r){
+  var p = r && r.profiles;
+  if (p && p.overall != null) return p.overall;
+  var raw = ((CG.lg && CG.lg._profilesRaw) || []).find(function(x){ return x.id === (r && r.profile_id); });
+  return raw && raw.overall != null ? raw.overall : null;
+};
 CG.waivedSalaryOf = function(pid){
   var sn = CG.SEASON || {}, num = sn.number;
   var rows = ((CG.lg && CG.lg._contractsRaw) || []).filter(function(c){
@@ -13390,7 +13400,7 @@ CG.hubFreeAgents = function(){
     return (!r.season_id || r.season_id===s.id) && r.status!=="declined" &&
       !rosteredIds[r.profile_id] && !faHeld[r.profile_id];
   };
-  var byOvr=function(a,b){ return (b.scout_ovr==null?-1:b.scout_ovr)-(a.scout_ovr==null?-1:a.scout_ovr); };
+  var byOvr=function(a,b){ var x=CG.regOverall(a), y=CG.regOverall(b); return (y==null?-1:y)-(x==null?-1:x); };
   /* ONE board (v2.33). Rookie bidding is abolished: the draft (the season's published round count) fills every active
      spot outright, so there is no post-draft rookie class to auction. Anyone still without a
      club — first-year or veteran — is signed here by offer and acceptance (Rule 2.2). */
@@ -13413,7 +13423,7 @@ CG.hubFreeAgents = function(){
     '<div class="kpi" style="cursor:default;justify-content:center;display:flex;align-items:center">'+winChip+'</div></div>';
   h+='<div class="card"><div class="card-h"><h3>The board</h3><span class="chip">'+pool.length+'</span></div>'+
     (pool.length?'<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Signable free agents</caption><thead><tr>'+
-      '<th class="tleft">Player</th><th>POS</th><th>Scout OVR</th>'+(basicFA?'':'<th>Pre-season</th>')+'<th class="tleft">Background</th><th class="tright">Actions</th></tr></thead><tbody>'+
+      '<th class="tleft">Player</th><th>POS</th><th>OVR</th>'+(basicFA?'':'<th>Pre-season</th>')+'<th class="tleft">Background</th><th class="tright">Actions</th></tr></thead><tbody>'+
       pool.map(function(r){
         var prof=r.profiles||{}, pre=lg.preGp[r.profile_id]||{gp:0,g:0,a:0};
         var bg = basicFA
@@ -13433,7 +13443,7 @@ CG.hubFreeAgents = function(){
         if (held) bg += ' <span class="chip chip-warn" title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)">Rights held by '+esc(rhCode)+'</span>';
         return '<tr><td class="tleft"><span class="playercell"><span class="nm">'+esc(prof.gamertag||"—")+'</span></span></td>'+
           '<td class="tnum">'+esc(r.position||"—")+'</td>'+
-          '<td class="tnum">'+(r.scout_ovr==null?'<span class="caption">—</span>':r.scout_ovr)+'</td>'+
+          '<td class="tnum">'+(CG.regOverall(r)==null?'<span class="caption">—</span>':CG.regOverall(r))+'</td>'+
           (basicFA?'':'<td class="tnum">'+(pre.gp?pre.gp+' GP · '+pre.g+'G '+pre.a+'A':'<span class="caption">—</span>')+'</td>')+
           '<td class="tleft">'+bg+'</td>'+
           '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
