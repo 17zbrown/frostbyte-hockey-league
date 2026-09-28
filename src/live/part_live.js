@@ -102,7 +102,7 @@ CG.FORMAT_RULES = {
   /* basic (v2.51): 15 = two full lines plus three players of any position, so the group caps overlap and
      the total binds; camp unlimited at 3 games a week; everyone else 6 a week; a 4-game series cap and a
      16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67) */
-  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:999, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
+  basic: { format:"basic", roster_max:15, quota:{ F:9, D:7, G:5 }, lines:2, flex:3, camp_max:8, cap_skater:6, cap_goalie:6, cap_camp:3, series_cap:4, playoff_min_gp:16, min_service_gp:0,
            salary_cap:50000000, weeks:6, trade_deadline_week:4, draft_rounds:15, draft_snake:true, max_contract_years:1,
            extensions:false, rights:false, pick_trades:false, preseason:false, fa_window:false, playoff_per_div:3, playoff_best_of:7 },
   full:  { format:"full",  roster_max:17, quota:{ F:9, D:6, G:2 }, lines:null, flex:null, camp_max:3, cap_skater:3, cap_goalie:6, cap_camp:3, series_cap:null, playoff_min_gp:0, min_service_gp:0,
@@ -13349,7 +13349,11 @@ CG.hubFreeAgents = function(){
               /* v3.46: the cap hit travels with him, so it belongs on the row and not only in the dialog */
               return sv ? ' <span class="chip chip-xs" title="He keeps this salary for the season (Rule 2.2)">'+CG.fmtMoney(sv)+'</span>' : ''; })()
           : lg.isVeteran(r.profile_id) ? '<span class="chip">Veteran</span>' : '<span class="chip chip-win">'+pre.gp+' pre-season games</span>';
-        var full = rosterN>=rosterMax;
+        /* v3.55 (commissioner, 2026-09-28, Q2): a full ACTIVE roster no longer stops a signing; he joins
+           training camp. Only a full camp as well does (camp limit 8, Rule 2.1). */
+        var activeFull = rosterN>=rosterMax;
+        var campN = (lg.byTeam[t.code]||[]).filter(function(p){ return p.squad==="tc"; }).length;
+        var full = activeFull && campN >= (CG.CAMP_MAX||8);
         /* v2.34: his old club holds his rights until free agency opens — nobody else may approach */
         var rh = CG.rightsHeldContractOf ? CG.rightsHeldContractOf(r.profile_id) : null;
         var rhCode = rh ? (((CG.lg && CG.lg._idToCode) || {})[rh.team_id] || null) : null;
@@ -13363,7 +13367,7 @@ CG.hubFreeAgents = function(){
           '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
             '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'"'+(held?' disabled title="Exclusive to '+esc(rhCode)+' until free agency opens — approaching him is tampering (Rule 2.2)"':'')+'>Approach</button>'+
             '<button class="btn btn-chrome btn-sm" data-fa-sign="'+r.id+'" data-name="'+esc(prof.gamertag||"this player")+'"'+((canSign&&!full&&!held)?"":" disabled")+
-              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your roster is full"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
+              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your active roster and training camp are both full (Rule 2.1)"':activeFull?' title="Your active roster is full, so he would join your training camp (Rule 2.1)"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(basicFA
@@ -13404,8 +13408,10 @@ CG.AFTER._hubFreeAgents = function(){
          below is only what we show the manager first. */
       var sal = CG.waivedSalaryOf(pid) || 750000;
       var salTxt = CG.fmtMoney(sal);
+      /* v3.55: a full active roster sends him to training camp (Rule 2.1) */
+      var toCamp = t && (lg.byTeam[t.code]||[]).filter(function(p){ return p.squad!=="tc"; }).length >= (CG.ROSTER_MAX||CG.fmt("roster_max"));
       CG.confirm("Sign "+esc(name)+"?",
-        "He joins your roster the moment you confirm, at "+salTxt+" to the end of the season — the salary he was already earning, which a waiver does not reduce (Rule 2.2). That is "+salTxt+" against your cap, and you have "+CG.fmtMoney(space)+" of room. He is not asked and the league office confirms nothing; the signing is logged for the whole league.",
+        "He joins your "+(toCamp ? "training camp, because your active roster is full, " : "roster ")+"the moment you confirm, at "+salTxt+" to the end of the season: the salary he was already earning, which a waiver does not reduce (Rule 2.2). That is "+salTxt+" against your cap, and you have "+CG.fmtMoney(space)+" of room."+(toCamp ? " Call him up from Team HQ when you have room." : "")+" He is not asked and the league office confirms nothing; the signing is logged for the whole league.",
         "Sign player", function(){
         var btn=b; btn.disabled=true;
         CG.mgmtQueue("sign_free_agent", { p_registration:regId, p_salary:null }, "sign "+name+" at "+salTxt+" to the end of the season").then(function(q){ if (q){ btn.disabled=false; return; }
@@ -13413,7 +13419,7 @@ CG.AFTER._hubFreeAgents = function(){
           btn.disabled=false;
           if (r.error){ CG.toast("Couldn’t sign: "+r.error.message,"err"); return; }
           if (CG.closeOverlay) CG.closeOverlay();
-          CG.toast(name+" signed to the end of the season. He’s on your roster.","ok");
+          CG.toast(name+" signed to the end of the season. "+(/\(training camp\)$/.test(String(r.data||"")) ? "He’s in your training camp." : "He’s on your roster."),"ok");
           CG.reloadLeague();
         });
         });

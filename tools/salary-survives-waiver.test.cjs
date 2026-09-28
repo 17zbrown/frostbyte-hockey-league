@@ -60,7 +60,8 @@ console.log("\n— the rules");
   A("...and the old forced minimum is gone", !/may sign a waived player at the league minimum salary/.test(sec("2.2")));
   A("2.5 separates a depth placement from a waived player",
     /a depth placement's contract carries the league minimum salary\. A waived player carries the salary he already had/.test(sec("2.5")));
-  A("2.5's unclaimed-waiver line follows", /may be signed by any club with room in his position group, at his own salary/.test(sec("2.5")));
+  /* v3.55 (Q1): 2.5.4 no longer describes a claim window; the salary still travels */
+  A("2.5's waiver line follows", /any club may sign him at the salary he carried until the movement deadline/.test(sec("2.5")));
   A("a drafted player is still paid by round", /A drafted player's contract carries the salary fixed for his round by Rule 2\.8/.test(sec("2.5")));
   A("depth placement is still at the minimum", /placed on a club by the league office as depth at the league minimum salary/.test(sec("2.2")));
   A("the increment rule is untouched", /every salary in the league is a multiple of \$250,000 above it/.test(sec("2.5")));

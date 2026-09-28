@@ -850,3 +850,19 @@ create or replace function public.format_rules(p_format text)
 -- Rulebook: 2.2 (a club may waive at any time), 2.4 (minimum service restricts neither move and
 -- survives as a setting at zero), 10.1 (the definition). This supersedes the line in the
 -- opening-week announcement that kept the minimum for waivers.
+
+-- v3.55 (2026-09-28): the basic format's training camp is capped at eight. Commissioner: "Cap the
+-- Training camps at 8 players each though." Applied as a one-token patch of the literal by
+-- sql/2026-09-28-camp-and-signings-v355.sql (camp_max 999 -> 8); recorded here as the table in force.
+-- Every other value is unchanged.
+create or replace function public.format_rules(p_format text)
+ returns jsonb language sql immutable as $function$
+  select case when p_format = 'full' then
+    '{"format":"full","roster_max":17,"quota":{"F":9,"D":6,"G":2},"lines":null,"flex":null,"camp_max":3,"cap_skater":3,"cap_goalie":6,"cap_camp":3,"series_cap":null,"playoff_min_gp":0,"min_service_gp":0,
+      "salary_cap":40000000,"weeks":8,"trade_deadline_week":6,"draft_rounds":14,"draft_snake":false,"max_contract_years":3,
+      "extensions":true,"rights":true,"pick_trades":true,"preseason":true,"fa_window":true,"playoff_per_div":4,"playoff_best_of":7}'::jsonb
+  else
+    '{"format":"basic","roster_max":15,"quota":{"F":9,"D":7,"G":5},"lines":2,"flex":3,"camp_max":8,"cap_skater":6,"cap_goalie":6,"cap_camp":3,"series_cap":4,"playoff_min_gp":16,"min_service_gp":0,
+      "salary_cap":50000000,"weeks":6,"trade_deadline_week":4,"draft_rounds":15,"draft_snake":true,"max_contract_years":1,
+      "extensions":false,"rights":false,"pick_trades":false,"preseason":false,"fa_window":false,"playoff_per_div":3,"playoff_best_of":7}'::jsonb
+  end $function$;

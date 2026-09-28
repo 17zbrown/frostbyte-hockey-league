@@ -38,9 +38,10 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s.paragraphs.join(" "); throw new Error("no " + id); };
   const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error("no " + id); };
   const r21 = sec("2.1"), r21f = secFull("2.1");
-  A("camp is carried outside the active roster, in addition to it — and unlimited unless a camp limit is published (basic, v2.51)",
-    /A club may carry any number of training-camp players in addition to its active roster/.test(r21) &&
-    /the commissioner may publish a camp limit as a season setting, and where none is published camp is unlimited/.test(r21) &&
+  /* v3.55 (commissioner, 2026-09-28): "Cap the Training camps at 8 players each" */
+  A("camp is carried outside the active roster, in addition to it, up to eight (v3.55)",
+    /A club may carry up to eight \(8\) training-camp players in addition to its active roster/.test(r21) &&
+    !/camp is unlimited/.test(r21) &&
     /camp is carried outside the active roster, not outside the payroll/.test(r21));
   /* v3.26: the shape is still a published season setting; what changed is that 2.1 now states the
      IN-FORCE form (complete lines plus flex players) instead of leading with the full format's
@@ -65,8 +66,9 @@ console.log("\n— every client roster count excludes training camp");
   /* three separate sites counted byTeam wholesale; each one is a place a manager was told
      "full" while an active spot sat empty */
   const counts = live.match(/\(lg\.byTeam(?:&&lg\.byTeam)?\[?[^\]]*\]?\|\|\[\]\)\.filter\(function\(p\)\{ return p\.squad!=="tc"; \}\)\.length/g) || [];
-  A("the manager dashboard and the free-agency desk filter camp out (the random assigner moved into the database, v2.35)",
-    counts.length === 2, counts.length + " sites");
+  /* v3.55: the waived-player sign dialog counts the active roster too, to say he joins camp when it is full */
+  A("the manager dashboard, the free-agency desk and the sign dialog filter camp out (the random assigner moved into the database, v2.35)",
+    counts.length === 3, counts.length + " sites");
   A("no client site counts the raw roster length against the cap any more",
     !/var rosterN=\(lg\.byTeam(&&lg\.byTeam)?\[[^\]]*\]\|\|\[\]\)\.length/.test(live) &&
     !/counts\[t\.code\]=\(lg\.byTeam\[t\.code\]\|\|\[\]\)\.length;/.test(live));

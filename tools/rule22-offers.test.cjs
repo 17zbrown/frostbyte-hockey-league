@@ -95,7 +95,7 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("[basic] 2.2: no free-agency period and no open market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
   A("[basic] 2.2: ...but it does not claim the league has no free agents", /It does have free agents, and the next paragraph but one says who they are/.test(sec("2.2")));
   A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /the league office confirms nothing and has no part in the move/.test(sec("2.2")));
-  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club with room in the player's position group may sign a waived player on a contract running to the end of the season/.test(sec("2.2")));
+  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club may sign a waived player on a contract running to the end of the season/.test(sec("2.2")) && /he joins its training camp, which must have room under Rule 2\.1/.test(sec("2.2")));   /* v3.55: a full active roster signs him into camp */
   /* v3.46: the signing is at HIS salary now, not the league minimum. */
   A("[basic] 2.2: ...at the salary he was already earning", /at the salary he was already earning/.test(sec("2.2")));
   A("[basic] 2.2: ...and a waiver does not reduce it", /A player keeps his salary for the whole season: being waived does not reduce it/.test(sec("2.2")));

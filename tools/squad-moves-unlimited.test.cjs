@@ -23,7 +23,8 @@ A("...with the reason stated", /The week's games are played against the roster a
 A("...and a league-office door for a club that cannot ice a lineup",
   /The league office may move a player in the window where a club would otherwise be unable to ice a lineup/.test(p21));
 A("...and no longer caps them at three", !/three \(3\) times/.test(p21) && !/swap cap/.test(p21));
-A("...and camp itself is unlimited unless a camp limit is published (v2.51)", /may carry any number of training-camp players/.test(p21) && !/carries no more than three players in camp/.test(p21));
+/* v3.55: moves stay unlimited; the CAMP itself is capped at eight (commissioner, 2026-09-28) */
+A("...and camp itself holds up to eight (v3.55)", /may carry up to eight \(8\) training-camp players/.test(p21) && !/carries no more than three players in camp/.test(p21));
 A("Rule 2.4 says the deadline never touches roster<->camp moves", /is not restricted by the deadline \(Rule 2\.1\)/.test(p24));
 A("a v2.30 changelog entry exists (pinned by version, never by index)", rb.changelog.some(e => e.version === "2.30" && /unlimited/.test(e.summary)));
 
