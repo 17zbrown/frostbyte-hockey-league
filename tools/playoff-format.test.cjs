@@ -44,7 +44,7 @@ console.log("— best-of-7 lays out exactly 2-2-3");
 
 console.log("\n— the config and copy agree on best-of-7");
 {
-  A("the client default is best of 7", /playoff_format\.bestOf\) \|\| 7;/.test(live));
+  A("the client reads best of 7 from the format in every format (v3.63, Q64)", /CG\.playoffBestOf = function\(\)\{ return CG\.fmt\("playoff_best_of"\) \|\| 7; \};/.test(live));
   A("the panel offers 3/5/7", /\[3,5,7\]\.map/.test(live));
   A("...and notes the single-week 2-2-3 cadence", /2 games Wednesday, 2 Thursday, up to 3 Friday\. Home follows the NHL pattern: the higher seed is home for games 1, 2, 5 and 7/.test(live));
   const rb = JSON.parse(content.match(/CG\.CONTENT = (\{[\s\S]*?\});\n/)[1]).rulebook;

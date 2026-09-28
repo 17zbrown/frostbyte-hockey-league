@@ -76,7 +76,7 @@ A("the Squads meter caps camp at CG.CAMP_MAX and goaltenders at the quota", /met
    through CG.weekLoad (gameCapFor -> weeklyCap), so it follows the format the same way */
 A("the line creator's goalie rule follows the weekly cap", /CG\.lineCapState = function/.test(hub) && /if \(!load \|\| !isFinite\(load\.cap\)\) return null;/.test(hub));
 A("the playoff series flag follows the weekly cap", /CG\.weeklyCap\(\{ pos: isGoalie \? "G" : "C", stage:"playoff" \}\)/.test(pub2));
-A("playoffs: per-division and series length are the format's in basic", /if \(CG\.isBasic\(\)\) return CG\.fmt\("playoff_per_div"\);/.test(live) && /if \(CG\.isBasic\(\)\) return CG\.fmt\("playoff_best_of"\);/.test(live));
+A("playoffs: per-division and series length are the format's, in every format since v3.63 (Q64)", /return CG\.fmt\("playoff_per_div"\) \|\| CG\.PLAYOFF_PER_DIV_DEFAULT;/.test(live) && /return CG\.fmt\("playoff_best_of"\) \|\| 7;/.test(live));
 A("Road to N is empty without a pre-season; eligibility is the cutoff alone in basic", /if \(!CG\.fmt\("preseason"\)\) return out;/.test(live) && /if \(CG\.isBasic\(_sR\)\) return true;/.test(live));
 A("rights classes only exist in full", /if \(CG\.fmt\("rights"\) && served > 0/.test(live));
 A("trades: picks are not assets in basic", /if \(!CG\.fmt\("pick_trades"\)\) return \[\];/.test(live) && /Draft picks are not traded in the basic format — trade players only \(Rule 2\.3\)/.test(live));

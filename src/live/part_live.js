@@ -118,7 +118,8 @@ CG.fmt = function(key, s){
   if (key === "draft_rounds"){ var sn = s || CG.SEASON; if (sn && sn.draft_rounds) return sn.draft_rounds; }
   /* Rule 8.3 (v2.67): so is the playoff eligibility floor. An explicit 0 means "no floor", so the
      season's value wins whenever it is set at all, not only when it is truthy. */
-  if (key === "playoff_min_gp"){ var sp = s || CG.SEASON; if (sp && sp.playoff_min_gp != null) return sp.playoff_min_gp; }
+  /* v3.63 (Q64): only in the basic format; the full format's playoff figures are fixed (Appendix A) */
+  if (key === "playoff_min_gp" && CG.seasonFormat(s) === "basic"){ var sp = s || CG.SEASON; if (sp && sp.playoff_min_gp != null) return sp.playoff_min_gp; }
   return CG.FORMAT_RULES[CG.seasonFormat(s)][key];
 };
 /* Rule 5.2: the weekly appearance cap for one player — mirrors public.weekly_cap() */
@@ -9334,7 +9335,7 @@ CG.mgmtPermissionsCard = function(m){
   var pol=(CG.lg&&CG.lg._mgmtPolicy)||{}, names=(CG.lg&&CG.lg._profName)||{};
   var seats=[["gm","General Manager",m.t.gm],["agm","Assistant GM",m.t.agm]];
   var head='<div class="card-h"><h3>Management permissions</h3>'+(m.isOwner?'<span class="chip chip-xs">Only you can change these</span>':'<span class="chip chip-xs">Set by the Owner</span>')+'</div>';
-  var intro='<div class="card-b" style="padding-bottom:6px"><p class="caption" style="margin:0;max-width:78ch">For every Team HQ page, each seat gets <b>full access</b>, <b>Owner approves</b> (they see the page, but every move on it waits for your approval), or <b>hidden</b> (the page is withheld and its moves refused). Everything starts at full access except this Management page, which only you see unless you open it. Your own seat is never limited, and the league office keeps its powers either way (Rule 2.6).</p></div>';
+  var intro='<div class="card-b" style="padding-bottom:6px"><p class="caption" style="margin:0;max-width:78ch">For every Team HQ page, each seat gets <b>full access</b>, <b>Owner approves</b> (they see the page, but every move on it waits for your approval), or <b>hidden</b> (the page is withheld and its moves refused). Everything starts at full access except this Management page, which only you see unless you open it. When the Owner seat changes hands, these settings return to the defaults and any move still waiting for approval is withdrawn (Rule 2.6). Your own seat is never limited, and the league office keeps its powers either way (Rule 2.6).</p></div>';
   var rows=CG.MGMT_PAGES.map(function(pg){
     var cells=seats.map(function(sd){
       var mode=((pol[sd[0]]||{})[pg[0]])||CG.mgmtDefaultMode(pg[0]);
@@ -12223,11 +12224,9 @@ CG.playoffDivisions = function(){
   return CG.DIVISIONS && CG.DIVISIONS.length ? CG.DIVISIONS : ["East","West"];
 };
 CG.playoffPerDiv = function(){
-  /* basic format: fixed by the format (Rule 8.1 — top three per division, the winners rest through
-     round 1). full format: the Control Center setting. Mirrors public.playoff_per_div(). */
-  if (CG.isBasic()) return CG.fmt("playoff_per_div");
-  var v = parseInt((CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.perDiv), 10);
-  return (v >= 1 && v <= 8) ? v : CG.PLAYOFF_PER_DIV_DEFAULT;
+  /* v3.63 (commissioner, 2026-09-28, Q64): "full-format playoff figures fixed." Every format's qualifier
+     count is the format's own (Rule 8.1: basic three, full four). Mirrors public.playoff_per_div(). */
+  return CG.fmt("playoff_per_div") || CG.PLAYOFF_PER_DIV_DEFAULT;
 };
 CG.playoffSeeds = function(){
   var per = CG.playoffPerDiv(), out = [];
@@ -12288,7 +12287,8 @@ CG.playoffRoundName = function(round){
        : back === 3 ? "Division quarter-finals"
        : "Division round " + round;
 };
-CG.playoffBestOf = function(){ if (CG.isBasic()) return CG.fmt("playoff_best_of"); return (CG._siteCfg && CG._siteCfg.playoff_format && CG._siteCfg.playoff_format.bestOf) || 7; };
+/* v3.63 (Q64): fixed by the format in every format. Mirrors public.playoff_best_of(). */
+CG.playoffBestOf = function(){ return CG.fmt("playoff_best_of") || 7; };
 /* seeds are FROZEN when the quarter-finals are generated — later rounds must
    never re-derive them from a table that can still move (a late-ingested
    regular-season final would otherwise rewrite the bracket mid-playoffs) */
@@ -12314,13 +12314,18 @@ CG.admPlayoffsLive = function(){
 
   /* series length control — locked once any playoff game exists so a live
      series can't be stranded by a mid-round change */
-  var poLive = pog.length>0, fmtLocked = CG.isBasic();
-  if (fmtLocked) h += '<div class="note" style="margin-bottom:18px"><b>'+CG.FORMAT_NAME.basic+'</b> — the bracket is set by the format (Rule 8.1): the top three in each division, a first-round bye for the division winners, every series a best-of-seven inside one game week. The controls below are read-only; switch the season to the full format in Seasons to change them.</div>';
+  /* v3.63 (Q64): the bracket's figures are fixed by the format in every format, so these controls are
+     read-only records of it */
+  var poLive = pog.length>0, fmtLocked = true;
+  h += '<div class="note" style="margin-bottom:18px"><b>'+esc(CG.FORMAT_NAME[CG.seasonFormat()]||"This format")+'</b>: the bracket is set by the format (Rules 8.1 and 8.3). '+
+    (CG.isBasic() ? 'The top three in each division, a first-round bye for the division winners, every series a best-of-seven inside one game week.'
+                  : 'The top four in each division, every series a best-of-seven inside one game week, and no games-played floor (Appendix A).')+
+    ' The controls below are a read-only record of it.</div>';
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Series length</h3><span class="chip">Best of '+bestOf+'</span></div><div class="card-b">'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+[3,5,7].map(function(n){
       return '<button class="btn '+(n===bestOf?"btn-chrome":"btn-ghost")+' btn-sm" data-bestof="'+n+'"'+((poLive||fmtLocked)?" disabled":"")+'>Best of '+n+'</button>'; }).join("")+'</div>'+
     '<p class="caption" style="margin-top:10px">Every round uses this length. First to '+(Math.floor(bestOf/2)+1)+' wins the series, and each series runs inside one game week — 2 games Wednesday, 2 Thursday, up to 3 Friday. Home follows the NHL pattern: the higher seed is home for games 1, 2, 5 and 7, the lower seed for games 3, 4 and 6 (Rule 8.3). '+
-    (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round.')+'</p></div></div>';
+    'Fixed by the format (Rule 8.3).</p></div></div>';
 
   /* how many clubs qualify per division — same lock as the series length, because the bracket
      shape is derived from it and a live series must not be stranded mid-round */
@@ -12333,8 +12338,7 @@ CG.admPlayoffsLive = function(){
       return '<button class="btn '+(n===per?"btn-chrome":"btn-ghost")+' btn-sm" data-perdiv="'+n+'"'+((poLive||tooBig||fmtLocked)?" disabled":"")+
         (tooBig?' title="A division only has '+minDiv+' clubs"':'')+'>Top '+n+'</button>'; }).join("")+'</div>'+
     '<p class="caption" style="margin-top:10px">'+esc(CG.playoffBracketBlurb())+' That is a '+CG.playoffFieldSize()+'-club field over '+CG.playoffRounds()+' round'+(CG.playoffRounds()===1?"":"s")+'.</p>'+
-    '<p class="caption" style="margin-top:6px"><b>This is published law.</b> Rule 8.1 states the number, so change it here and amend the rulebook to match. '+
-    (poLive?'Locked — the postseason is under way. Clear all playoff rounds to change it.':'Set it before generating the first round; seeds freeze when round 1 is built.')+'</p></div></div>';
+    '<p class="caption" style="margin-top:6px"><b>This is published law.</b> Rule 8.1 fixes the number for the format. Seeds freeze when round 1 is built.</p></div></div>';
 
   /* seeds */
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(frozen?"Seeding — locked at the quarter-finals":"Seeding — from the final table")+'</h3><span class="chip">'+(frozen?"locked in":regLeft?regLeft+" regular games left":"regular season complete")+'</span></div><div class="card-b">';

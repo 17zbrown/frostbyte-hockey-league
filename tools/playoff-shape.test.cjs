@@ -39,15 +39,19 @@ for (const name of ["playoffDivisions", "playoffPerDiv", "playoffBestOf", "playo
   vm.runInContext(m[0], ctx);
 }
 const CG = ctx.CG;
-const setPer = (n) => { CG._siteCfg.playoff_format = { perDiv: n }; };
+/* v3.63 (Q64): the qualifier count is the format's own figure in every format; the Control Center
+   setting no longer moves it. The shape is still derived from the count, so every count a format could
+   publish is exercised by setting the format figure itself. */
+const setPer = (n) => { CG.FORMAT_RULES.full.playoff_per_div = n; };
 
 console.log("— the setting is read, and nonsense falls back to four");
 {
-  setPer(2); A("a valid setting is used", CG.playoffPerDiv() === 2);
-  CG._siteCfg.playoff_format = {}; A("unset falls back to 4", CG.playoffPerDiv() === 4);
-  CG._siteCfg.playoff_format = { perDiv: 0 }; A("zero falls back", CG.playoffPerDiv() === 4);
-  CG._siteCfg.playoff_format = { perDiv: 99 }; A("out of range falls back", CG.playoffPerDiv() === 4);
-  CG._siteCfg.playoff_format = { perDiv: "3" }; A("a string setting still parses", CG.playoffPerDiv() === 3);
+  CG._siteCfg.playoff_format = { perDiv: 2, bestOf: 5 };
+  A("full: a Control Center setting no longer moves the qualifiers (v3.63, Q64)", CG.playoffPerDiv() === 4);
+  A("...or the series length", CG.playoffBestOf() === 7);
+  CG._siteCfg.playoff_format = {}; A("full with no setting: four", CG.playoffPerDiv() === 4);
+  setPer(2); A("the format's own figure drives it", CG.playoffPerDiv() === 2);
+  setPer(4);
 }
 
 console.log("\n— basic format: fixed by the format, site_config is ignored (Rule 8.1)");
