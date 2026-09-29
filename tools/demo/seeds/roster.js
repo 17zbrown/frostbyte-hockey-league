@@ -1,6 +1,6 @@
 /* seed: roster — Team HQ → Roster (#/hub/roster) and the Owner's approval queue (#/hub/management)
    populated the way the Bruins' front office sees them mid-season in the BASIC format (v2.51): a
-   15-man active roster (two full lines plus three flex, management inside) plus two in camp, on
+   15-man active roster (7 forwards, 5 defensemen, 3 goaltenders since v3.64, management inside) plus two in camp, on
    the $250K salary lattice, one-season contracts, one player on the trade block, the cap outlook,
    the Owner's permission policy (the GM's roster moves need approval) and a queue of pending /
    decided moves. Games played are spread around the 16-game playoff floor (Rule 8.3, Season 1's published figure) so the Road
@@ -35,7 +35,7 @@
     [proto("RD",2), null,  "CellyKing",      "RD", 1.75*M,  1, "pro", null, 12],   /* on the trade block */
     [proto("G",1),  null,  "IronWall_31",    "G",  3.5*M,   1, "pro", null, 19],
     [proto("G",2),  null,  "StonewallSt4n",  "G",  1.25*M,  1, "pro", null, 9],
-    [null, "bx1",  "SauceBoss77",    "C",  2.0*M,   1, "pro", 79, 16],
+    [null, "bx1",  "ButterflyBo",    "G",  2.0*M,   1, "pro", 79, 16],   /* v3.64: the third goaltender of 7 F / 5 D / 3 G */
     [null, "bx2",  "OneTimerOtto",   "RW", 1.5*M,   1, "pro", 74, 11],
     [null, "bx3",  "BodycheckBruno", "LD", 1.75*M,  1, "pro", 76, 20],
     [null, "bx5",  "BreakawayBex",   "LW", 0.75*M,  1, "tc",  68, 3],
@@ -67,7 +67,7 @@
   /* ---- variants ---- */
   if (st === "campfull"){
     /* three forwards in camp: camp is full, so every active-roster row can only "Swap…" */
-    byTag("OneTimerOtto").squad = "tc"; byTag("SauceBoss77").squad = "tc";
+    byTag("OneTimerOtto").squad = "tc"; byTag("TopShelfTy").squad = "tc";
     roster = roster.filter(function(p){ return p.tag !== "HipCheckHank"; });
   }
   var loans = [];

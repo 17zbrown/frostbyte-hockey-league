@@ -83,37 +83,6 @@
    "colorScheme": "light",
    "scale": 2,
    "settle": 1600,
-   "name": "lines-position-refused",
-   "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
-   "steps": [
-    {
-     "click": "[data-rcard][aria-label^='IronWall_31']",
-     "after": 250
-    },
-    {
-     "click": ".lc-slot[data-line='2'][data-slot='LW']",
-     "after": 300
-    },
-    {
-     "eval": "document.querySelector('.lc-grid').closest('.card').id='shotGrid'"
-    }
-   ],
-   "clip": "#shotGrid",
-   "pad": 0,
-   "marks": {
-    "4": "#lcMsg"
-   },
-   "crop": [
-    0,
-    62,
-    100,
-    38
-   ]
-  },
-  {
-   "colorScheme": "light",
-   "scale": 2,
-   "settle": 1600,
    "name": "lines-assign-unsaved-bar",
    "url": "?as=owner&theme=light&seed=lineup,roster#/hub/lines",
    "steps": [
@@ -278,63 +247,6 @@
    "pad": 0,
    "marks": {
     "8": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
-   }
-  },
-  {
-   "colorScheme": "light",
-   "scale": 2,
-   "settle": 1600,
-   "name": "lineup-per-game-locked-bar",
-   "url": "?as=owner&theme=light&seed=lineup,roster&state=locked#/hub/lineup?game=lu-n1-1",
-   "steps": [
-    {
-     "eval": "var bar=[...document.querySelectorAll('main .note')].find(function(n){ return /Status:/.test(n.textContent); }); bar.id='shotLocked';"
-    }
-   ],
-   "clip": "#shotLocked",
-   "pad": 0,
-   "marks": {
-    "10": "#shotLocked a.btn, #shotLocked .btn"
-   }
-  },
-  {
-   "colorScheme": "light",
-   "scale": 2,
-   "settle": 1600,
-   "name": "lineup-emergency-mode-note",
-   "url": "?as=owner&theme=light&seed=lineup,roster&state=emergency#/hub/lineup?game=lu-n1-1",
-   "steps": [
-    {
-     "eval": "var n=[...document.querySelectorAll('main .note')].find(function(x){ return /emergency/i.test(x.textContent); }); n.id='shotEm';"
-    }
-   ],
-   "clip": "#shotEm",
-   "pad": 0
-  },
-  {
-   "colorScheme": "light",
-   "scale": 2,
-   "settle": 1600,
-   "name": "lineup-emergency-submit-confirm",
-   "url": "?as=owner&theme=light&seed=lineup,roster&state=emergency#/hub/lineup?game=lu-n1-1",
-   "steps": [
-    {
-     "eval": "var b=[...document.querySelectorAll('main button')].find(function(x){ return /Submit emergency/i.test(x.textContent); }); b.id='shotEmBtn';"
-    },
-    {
-     "eval": "document.getElementById('toast-root').innerHTML='';",
-     "after": 100
-    },
-    {
-     "click": "#shotEmBtn",
-     "after": 400
-    }
-   ],
-   "clip": "#overlay-root .modal",
-   "fixed": true,
-   "pad": 0,
-   "marks": {
-    "11": "#overlay-root .modal .btn-chrome, #overlay-root .modal .btn-ink"
    }
   },
   {
