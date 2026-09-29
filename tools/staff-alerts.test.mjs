@@ -47,7 +47,8 @@ console.log("\n— each arrival finds its own desk");
   A("an unmatched EA import no longer routes anywhere",
     route("ea_ingest_log", { id: "e1", status: "unmatched", ea_match_id: "77" }) === null);
   A("...and neither does a clean one", route("ea_ingest_log", { id: "e2", status: "matched" }) === null);
-  A("a game incident -> officials", route("game_incidents", { id: "i1", kind: "late_start" }).dept === "officiating");
+  /* v3.73: the game-incident log was retired, so an incident row (there are none) routes nowhere */
+  A("a retired game incident routes nowhere", route("game_incidents", { id: "i1", kind: "late_start" }) === null);
   A("a vote fans out to the departments it targets", (() => {
     const r = route("staff_votes", { id: "v1", title: "T", departments: ["officiating", "media"] });
     return r.depts.length === 2 && r.depts.includes("media");
@@ -239,7 +240,7 @@ console.log("\n— catch-up never floods, never replays, never loses");
       cfg = [{ value: JSON.parse(opts.body).value }];
       return new Response("", { status: 201 });
     }
-    if (/\/rest\/v1\/(owner_applications|staff_applications|management_applications|action_requests|staff_votes|game_incidents|ea_ingest_log)\?/.test(u)) {
+    if (/\/rest\/v1\/(owner_applications|staff_applications|management_applications|action_requests|staff_votes|ea_ingest_log)\?/.test(u)) {
       if (u.includes("owner_applications?")) {
         return new Response(JSON.stringify([{ id: "old1", profile_id: "p1", created_at: "2026-08-05T19:00:00Z" }]),
           { status: 200, headers: { "content-type": "application/json" } });

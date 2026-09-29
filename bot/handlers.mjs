@@ -29,7 +29,7 @@ function discordName(m) {
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 
 /* ================= the bot's transport: every call has a deadline =================
-   One definition for all four instant lanes (role-sync, club-notices, incidents, staff-alerts
+   One definition for all four instant lanes (role-sync, club-notices, dms, staff-alerts
    import these), kept here rather than in a module of its own because this file already owns the
    bot's failure posture. Before this, no Discord or Supabase call in the bot carried a timeout: a
    socket that stopped answering mid-response hung its lane forever — and role-sync's serial
@@ -387,7 +387,7 @@ export function createHandlers(env, opts = {}) {
       departures: sum.departures, departAnnounced: sum.departAnnounced,
       departUnannounced: sum.departUnannounced,
       uptimeMin: Math.round((Date.now() - startedAt) / 60000),
-      ...(opts.extra || {}),          // e.g. the incident lane's own liveness
+      ...(opts.extra || {}),          // e.g. each instant lane's own liveness
       errCount: errors.length,
       laneErrors,                     // every failed instant-lane operation since this process started
       laneErrorsRecent: laneRecent.length,   // lanes with a failure inside the last hour (what flips ok)

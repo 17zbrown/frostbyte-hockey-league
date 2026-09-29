@@ -306,7 +306,7 @@ console.log("\n— instant-lane failures reach the heartbeat (audit 2026-09-17)"
   res = JSON.parse(cfg["rl_gateway-bot_result"]);
   A("an hour later the row is green again, the counts still there", res.ok === true && res.laneErrors === 3 && res.laneErrorsRecent === 0 && res.lastError === null);
   const src = (await import("node:fs")).readFileSync(new URL("../bot/chel-bot.mjs", import.meta.url), "utf8");
-  A("chel-bot wires every instant lane into the heartbeat's lanes", /lanes: LANES/.test(src) && /key: "role-sync", sum: RS\.sum/.test(src) && /key: "club-notices", sum: CLUB\.sum/.test(src) && /key: "incidents", sum: INC\.sum/.test(src) && /key: "staff-alerts", sum: DESK\.sum/.test(src));
+  A("chel-bot wires every instant lane into the heartbeat's lanes", /lanes: LANES/.test(src) && /key: "role-sync", sum: RS\.sum/.test(src) && /key: "club-notices", sum: CLUB\.sum/.test(src) && /key: "dms", sum: DMS\.sum/.test(src) && !/key: "incidents"/.test(src) && /key: "staff-alerts", sum: DESK\.sum/.test(src));
 }
 
 console.log("\n— the heartbeat reports the GATEWAY, not the timer");

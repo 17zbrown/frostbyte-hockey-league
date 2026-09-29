@@ -19,7 +19,6 @@
 
 import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
 import { createHandlers } from "./handlers.mjs";
-import { createIncidentNotifier } from "./incidents.mjs";
 import { createStaffAlerter } from "./staff-alerts.mjs";
 import { createRoleSyncer } from "./role-sync.mjs";
 import { createClubNotices } from "./club-notices.mjs";
@@ -101,12 +100,6 @@ client.once(Events.ClientReady, (c) => {
     .then((r) => { if (r && r.replayed) console.log(`role-sync catch-up: replayed ${r.replayed}`); })
     .catch((e) => console.error("role-sync catch-up failed:", e.message));
   roleSweep();
-  /* incident rulings: same reasoning as the two sweeps above — a ruling written while this
-     process was down, or one whose post failed and released its claim, is otherwise never sent */
-  const incSweep = () => INC.catchUp()
-    .then((n) => { if (n) console.log(`incident catch-up: announced ${n}`); })
-    .catch((e) => console.error("incident catch-up failed:", e.message));
-  incSweep();
   /* club notices: a signing, waiver, trade or roster move written while this process was down is
      otherwise never posted into the club's room */
   const clubSweep = () => CLUB.catchUp()
@@ -119,7 +112,6 @@ client.once(Events.ClientReady, (c) => {
     .catch((e) => console.error("dm catch-up failed:", e.message));
   dmSweep();
   setInterval(dmSweep, 300_000);
-  setInterval(incSweep, 600_000);
   setInterval(roleSweep, 600_000);
 });
 client.on(Events.Error, (e) => console.error("gateway error:", e.message));
@@ -142,12 +134,8 @@ client.on(Events.ShardDisconnect, (event) => {
     .finally(() => process.exit(1));
 });
 
-/* ---- instant game-incident rulings (Rules 3.2 / 4.3) ----
-   Late starts and disconnections get argued out in club chats in seconds, so the ruling has to
-   land in seconds too — a sweep that runs every couple of minutes always arrives after the
-   argument. Supabase Realtime pushes the row the moment staff log it, and both clubs are told
-   at the same instant, which is the point: no "my guy said one penalty". */
-const INC = createIncidentNotifier(env);
+/* v3.73 (commissioner, 2026-09-29): the game-incident log and its instant rulings lane were retired
+   ("You can remove the game-incident log. I dont think that will be used."). */
 const DESK = createStaffAlerter(env);
 const RS = createRoleSyncer(env);
 const CLUB = createClubNotices(env);
@@ -155,25 +143,14 @@ let clubNoticesLive = false;
 /* direct messages the league asks the bot to send one member (v2.75: the Rule 5.1 availability nudge) */
 const DMS = createDms(env);
 let dmsLive = false;
-let incidentsLive = false;
 let deskAlertsLive = false;
 let roleSyncLive = false;
-/* Tables whose arrival is work for a department. game_incidents is on BOTH streams on purpose:
-   the clubs get the ruling, the Officials' desk gets told the case exists. Adding a table here is
-   the whole job — staff-alerts.mjs decides the room, or stays silent. */
+/* Tables whose arrival is work for a department. Adding a table here is the whole job:
+   staff-alerts.mjs decides the room, or stays silent. */
 const DESK_TABLES = ["action_requests", "owner_applications", "staff_applications",
-  "management_applications", "ea_ingest_log", "staff_votes", "game_incidents"];
+  "management_applications", "ea_ingest_log", "staff_votes"];
 if (env.SB_URL && env.SB_KEY) {
   const sb = createClient(env.SB_URL, env.SB_KEY, { auth: { persistSession: false } });
-  sb.channel("game-incidents")
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_incidents" }, (payload) => {
-      INC.announce(payload.new).then((r) => console.log(`incident ${payload.new && payload.new.id}: ${r}`));
-    })
-    .subscribe((status) => {
-      incidentsLive = status === "SUBSCRIBED";
-      console.log(`game-incident rulings: ${status}`);
-    });
-
   /* ---- instant staff-desk alerts ----
      A member files a complaint or an application and the owning department hears about it in its
      own room within a second. The daily casework nudge stays on as the "still unresolved" chaser;
@@ -246,9 +223,9 @@ if (env.SB_URL && env.SB_KEY) {
 // own failures (sum.errors / lastErrorAt / lastError) and beat() grades the last hour of them.
 const LANES = [
   { key: "role-sync", sum: RS.sum }, { key: "club-notices", sum: CLUB.sum }, { key: "dms", sum: DMS.sum },
-  { key: "incidents", sum: INC.sum }, { key: "staff-alerts", sum: DESK.sum },
+  { key: "staff-alerts", sum: DESK.sum },
 ];
-setInterval(() => H.beat({ extra: { incidentsLive, incidentsAnnounced: INC.sum.announced, incidentErrors: INC.sum.errors,
+setInterval(() => H.beat({ extra: {
     deskAlertsLive, deskAlerts: DESK.sum.announced, deskSuppressed: DESK.sum.suppressed, deskErrors: DESK.sum.errors,
     roleSyncLive, roleSynced: RS.sum.synced, rolePatched: RS.sum.patched, roleErrors: RS.sum.errors,
     roleRetried: RS.sum.retried, roleDropped: RS.sum.dropped, roleTimedOut: RS.sum.timedOut,

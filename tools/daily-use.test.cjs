@@ -12,7 +12,6 @@ const ui = R("src/live/part4_ui.js");
 const css = R("src/live/part1_head.html");
 const build = R("src/live/build.cjs");
 const roleSync = R("bot/role-sync.mjs");
-const incidents = R("bot/incidents.mjs");
 const botMain = R("bot/chel-bot.mjs");
 const ingest = R("netlify/functions/ingest-stats.js");
 const pickup = R("netlify/functions/pickup-import.js");
@@ -104,16 +103,8 @@ console.log("— the Discord bot survives 200 members");
   A("role-sync honors 429 and Retry-After", /if \(r\.status === 429\)[\s\S]{0,120}retry-after/.test(roleSync));
   A("...and backs off on 5xx", /if \(r\.status >= 500\)[\s\S]{0,80}600 \* \(attempt \+ 1\)/.test(roleSync));
   A("...and drains serially instead of firing 500 timers at once", /async function drain\(\)/.test(roleSync) && /while \(queue\.length\)/.test(roleSync));
-  A("incident rulings retry", /rate-limited after retries/.test(incidents));
-  A("...claim so a retry can't double-post", /kind: "incident", ref/.test(incidents));
-  /* v2.57: a failed destination is settled per destination — released on a provable failure, the claim
-     kept on an ambiguous one (timeout / 5xx after Discord may have accepted it) so it is never re-sent */
-  A("...release only the destination that failed", (incidents.match(/await settle\(_ref \+ ":" \+/g)||[]).length === 2 && /if \(e && e\.provable\) \{ await release\(ref\); return; \}/.test(incidents));
-  A("...and a catch-up re-sends what was missed", /async function catchUp\(minutes = 24 \* 60\)/.test(incidents) && /INC\.catchUp\(\)/.test(botMain));
-  /* review round 2: the claim is per DESTINATION, so a half-delivered ruling retries only the
-     club that missed it instead of re-sending to the one that already had it */
-  A("...claimed per destination, not per ruling", /claim\(_ref \+ ":" \+ mine\.discord_channel_id\)/.test(incidents) && /claim\(_ref \+ ":" \+ other\.discord_channel_id\)/.test(incidents));
-  A("...and an idless row can't collapse every ruling onto one ref", /row\.game_id, row\.team_id, row\.kind/.test(incidents));
+  /* v3.73: the incident-rulings lane (bot/incidents.mjs) was retired with the game-incident log */
+  A("the retired incident lane is gone from the bot", !/incidents\.mjs|INC\.catchUp|game_incidents/.test(botMain));
   A("role-sync merges a repeat enqueue instead of dropping its callback", /existing\.onDone = prev \? function\(r\)\{ prev\(r\); job\.onDone\(r\); \} : job\.onDone;/.test(roleSync));
 }
 

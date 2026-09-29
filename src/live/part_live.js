@@ -2751,24 +2751,8 @@ CG._smRenderList = function(body){
       '</div></label>'+
       '<p class="caption" style="margin-top:10px">The three-disconnections kind needs the game’s sittings in first, merged or held (League lag-out merge above): it keeps the played score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more. Use it too for a game abandoned before it finished (Rule 4.3.9), charging the club that was behind: a held game is ruled on the score its box score adds up to. Forfeits are ruled the same way in the playoffs, and the series count reads them. Once a forfeit is recorded, only a commissioner can reverse it: if one was entered in error, pick the fixture and report the mistake, and the commissioners are told.</p>'+
       '</div></div>';
-    /* game incidents: the countable record behind Rules 3.2/4.3 — logging one computes the
-       ruling AND announces it to both clubs' channels within a second (the VM bot listens). */
-    var incidentCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Log a game incident</h3><span class="chip chip-chrome">Announces instantly</span></div>'+
-      '<div class="card-b">'+
-      '<p class="caption" style="margin:0 0 12px;max-width:78ch">Late start or disconnection. The occurrence count is kept for you — a second or third incident by the same club in the same game escalates automatically — and the ruling posts to both clubs’ Discord channels the moment you log it.</p>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-      '<select id="smInGame" style="flex:1;min-width:240px"><option value="">Pick a game…</option>'+lgGames.map(function(g){
-        return '<option value="'+esc(g.id)+'" data-home="'+esc(g.home)+'" data-away="'+esc(g.away)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" · ")+g.away+" @ "+g.home+" · "+CG.fmtDay(g.at))+'</option>';
-      }).join("")+'</select>'+
-      '<select id="smInTeam" style="min-width:150px"><option value="">Which club?</option></select>'+
-      '<select id="smInKind" style="min-width:140px"><option value="late_start">Late start</option><option value="disconnect">Disconnection</option></select>'+
-      '<input id="smInMin" type="number" min="0" max="60" placeholder="Min late" style="width:90px">'+
-      '<select id="smInPeriod" style="width:110px;display:none"><option value="">Period…</option><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">OT</option></select>'+
-      '<label class="fld" id="smInEarlyWrap" style="margin:0;flex-direction:row;align-items:center;gap:6px;display:none"><input id="smInEarly" type="checkbox"><span id="smInEarlyLbl" style="margin:0;white-space:nowrap">First 5:00 of the 3rd</span></label>'+
-      '<input id="smInNotes" placeholder="Notes (optional)" style="flex:1;min-width:140px">'+
-      '<button class="btn btn-chrome" id="smInGo">Log &amp; announce</button></div>'+
-      '<div id="smInOut" style="margin-top:12px"></div>'+
-      '</div></div>';
+    /* v3.73 (commissioner, 2026-09-29): the game-incident log was retired; disconnections and late starts
+       are ruled from the clubs' reports and the game record (Rules 3.2, 4.3). */
     var listCard = '<div class="card"><div class="card-h"><h3>EA games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
     if (!games.length){
       listCard += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No EA games yet</b><p>Import one above and it will appear here to manage.</p></div></div>';
@@ -2784,7 +2768,7 @@ CG._smRenderList = function(body){
         }).join("")+'</tbody></table></div>';
     }
     listCard += '</div>';
-    body.innerHTML = addCard + leagueCard + fixCard + forfeitCard + incidentCard + listCard;
+    body.innerHTML = addCard + leagueCard + fixCard + forfeitCard + listCard;
 
     /* v3.42: correct a filed result. stats_game_set_result is gated to statistics staff in the
        database; this is the first thing on the site to call it. */
@@ -2816,58 +2800,6 @@ CG._smRenderList = function(body){
             CG.toast("Result corrected","ok");
             if (CG.reloadLeague) CG.reloadLeague();
           });
-      });
-    })();
-
-    /* --- wire the incident log --- */
-    (function(){
-      var gSel = document.getElementById("smInGame"), tSel = document.getElementById("smInTeam");
-      var kSel = document.getElementById("smInKind"), go = document.getElementById("smInGo");
-      var out = document.getElementById("smInOut");
-      if (!gSel || !go) return;
-      gSel.addEventListener("change", function(){
-        var opt = gSel.options[gSel.selectedIndex] || {};
-        var h = opt.getAttribute && opt.getAttribute("data-home"), a = opt.getAttribute && opt.getAttribute("data-away");
-        tSel.innerHTML = '<option value="">Which club?</option>'+
-          (h&&a ? [a,h].map(function(code){
-            var id = (CG.lg && CG.lg._codeToId && CG.lg._codeToId[code]) || "";
-            return '<option value="'+esc(id)+'">'+esc(code)+'</option>';
-          }).join("") : '');
-      });
-      /* v3.53: the early box means the first 5:00 of the 3rd (Rule 4.3.6) or, in the 1st, the first
-         10:00 (Q19: restart from the beginning); an overtime drop needs no box (Q20) */
-      function syncKind(){
-        var dc = kSel.value === "disconnect";
-        var per = document.getElementById("smInPeriod").value;
-        document.getElementById("smInMin").style.display = dc ? "none" : "";
-        document.getElementById("smInPeriod").style.display = dc ? "" : "none";
-        var early = dc && (per === "1" || per === "3");
-        document.getElementById("smInEarlyWrap").style.display = early ? "flex" : "none";
-        document.getElementById("smInEarlyLbl").textContent = per === "1" ? "First 10:00 of the 1st" : "First 5:00 of the 3rd";
-        if (!early) document.getElementById("smInEarly").checked = false;
-      }
-      kSel.addEventListener("change", syncKind);
-      document.getElementById("smInPeriod").addEventListener("change", syncKind); syncKind();
-      go.addEventListener("click", function(){
-        var gid2 = gSel.value, tid2 = tSel.value;
-        if (!gid2 || !tid2){ CG.toast("Pick the game and the club","err"); return; }
-        var dc = kSel.value === "disconnect";
-        go.disabled = true;
-        CG.sb.rpc("log_game_incident", {
-          p_game: gid2, p_team: tid2, p_kind: kSel.value,
-          p_minutes_late: dc ? null : (parseInt(document.getElementById("smInMin").value, 10) || 0),
-          p_period: dc ? (parseInt(document.getElementById("smInPeriod").value, 10) || null) : null,
-          p_game_clock: null,
-          p_early_third: dc && document.getElementById("smInPeriod").value === "3" ? !!document.getElementById("smInEarly").checked : false,
-          p_early_first: dc && document.getElementById("smInPeriod").value === "1" ? !!document.getElementById("smInEarly").checked : false,
-          p_notes: (document.getElementById("smInNotes").value||"").trim() || null
-        }).then(function(r){
-          go.disabled = false;
-          if (r.error){ CG.toast(r.error.message||"Couldn’t log it","err"); return; }
-          var d = r.data || {};
-          out.innerHTML = '<div class="note'+(d.forfeit?' red':' grn')+'"><b style="font-family:var(--f-disp)">Occurrence '+(d.occurrence||1)+' logged.</b> '+esc(d.ruling||"")+' <span class="caption">Both clubs’ channels were notified.</span></div>';
-          CG.toast(d.forfeit ? "That’s a forfeit — rule it in the card above" : "Incident logged and announced","ok");
-        });
       });
     })();
 

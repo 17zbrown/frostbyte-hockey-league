@@ -98,13 +98,6 @@ export function route(table, row, extra = {}) {
     return { dept: null, suppressed: `unrouted case type "${type}"` };
   }
 
-  if (table === "game_incidents") {
-    const k = row.kind === "late_start" ? "Late start" : row.kind === "disconnect" ? "Disconnection" : "Game incident";
-    return { dept: "officiating", kind: `${k} logged`,
-      line: `${extra.fixture ? `**${extra.fixture}** — ` : ""}the ruling has already gone to both clubs.`,
-      cta: "Listed on the Officials' desk if it needs a second look." };
-  }
-
   /* v3.09 (commissioner, 2026-09-24): "You fixed the problem with the automatic stats so you dont
      need to send the statistics room a link to the manual entry since they can do that at their
      staff desk." This used to ping Statistics for every `unmatched` archive row with a "link it by
@@ -135,7 +128,6 @@ export const TABLE_KEYS = {
   staff_applications: { id: "id", ts: "created_at" },
   management_applications: { id: "id", ts: "created_at" },
   staff_votes: { id: "id", ts: "created_at" },
-  game_incidents: { id: "id", ts: "created_at" },
   ea_ingest_log: { id: "ea_match_id", ts: "first_seen_at" },
 };
 export function rowKey(table, row) {
@@ -241,14 +233,6 @@ export function createStaffAlerter(env, opts = {}) {
       if (table === "management_applications" && row.team_id) {
         const t = await sbGet(`teams?id=eq.${row.team_id}&select=code,name`);
         if (t && t[0]) out.club = t[0].code || t[0].name;
-      }
-      if (table === "game_incidents" && row.game_id) {
-        const g = await sbGet(`games?id=eq.${row.game_id}&select=week,home_team_id,away_team_id`);
-        if (g && g[0]) {
-          const t = await sbGet(`teams?id=in.(${g[0].home_team_id},${g[0].away_team_id})&select=id,code`);
-          const by = Object.fromEntries((t || []).map((x) => [x.id, x.code]));
-          out.fixture = `${by[g[0].away_team_id] || "?"} @ ${by[g[0].home_team_id] || "?"}${g[0].week != null ? ` · week ${g[0].week}` : ""}`;
-        }
       }
     } catch (e) { note(e); }   // a missing name must never stop the alert
     return out;

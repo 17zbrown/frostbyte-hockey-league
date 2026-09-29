@@ -15,7 +15,7 @@ console.log("\n— the control exists and calls the RPC that was never called");
 {
   A("the card is in the Stats Manager", /<h3>Correct a filed result<\/h3>/.test(live));
   A("...between the merge and the forfeit cards",
-    /body\.innerHTML = addCard \+ leagueCard \+ fixCard \+ forfeitCard \+ incidentCard \+ listCard;/.test(live));
+    /body\.innerHTML = addCard \+ leagueCard \+ fixCard \+ forfeitCard \+ listCard;/.test(live));
   A("it calls stats_game_set_result", /rpc\("stats_game_set_result", \{ p_game:id, p_home:hs, p_away:as, p_final:true, p_ot:ot\.checked \}\)/.test(live));
   A("...which is the only CALL to it in the client (the other mention is the comment that explains it)",
     (live.match(/rpc\("stats_game_set_result"/g) || []).length === 1);

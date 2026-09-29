@@ -83,8 +83,8 @@ A("the freeze mirror survives an Intl build that renders midnight as 24", /\(\(p
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
-const e = rb.changelog[0];
-A("changelog 3.72 is the newest entry, dated 2026-09-29", e.version === "3.72" && e.dateIso === "2026-09-29");
+const e = rb.changelog.find((c) => c.version === "3.72");   /* pinned by version, never by index */
+A("changelog records 3.72, dated 2026-09-29", !!e && e.dateIso === "2026-09-29");
 A("2.1.4: an active place for an active place, a camp place for a camp place", /takes the place of a player his new club sent away in the same trade: an active-roster place for an active-roster place, and a training-camp place for a training-camp place/.test(secs["2.1"].paragraphs[3]));
 A("...extras by room, never past the composition, same rule in the freeze", /each additional player joins the active roster where the roster and his position group have room for him/.test(secs["2.1"].paragraphs[3]) && /The rule is the same whether or not the roster is frozen, so a trade never serves as a call-up\./.test(secs["2.1"].paragraphs[3]));
 A("...trades stay open in the freeze, and the old 'roster held at first puck' sentence is gone", /Trades and the signing of waived players stay open during the freeze/.test(secs["2.1"].paragraphs[3]) && !/played against the roster a club held when the week's first puck dropped/.test(secs["2.1"].paragraphs[3]));

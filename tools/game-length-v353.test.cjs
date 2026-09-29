@@ -8,7 +8,7 @@ let fail = 0, n = 0;
 const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  got: " + String(got).slice(0, 220))); } };
 const sql = R("sql/2026-09-28-game-length-v353.sql"), ing = R("netlify/functions/ingest-stats.js");
 const sqlF = sql.replace(/\n--\s*/g, " ");   // the quoted rulings wrap across comment lines
-const live = R("src/live/part_live.js"), bot = R("bot/incidents.mjs");
+const live = R("src/live/part_live.js");   /* bot/incidents.mjs retired in v3.73 */
 
 console.log("\n— the rulings are quoted");
 A("Q18", /Once it reaches a full game but keep in mind there may be a simulated/.test(sqlF) && /Flag any games that go over the 60 minutes but is more than a 1 goal/.test(sqlF));
@@ -41,8 +41,9 @@ A("the level-merge double loss is gone", !/Resumed game ended level/.test(ing));
 console.log("\n— the site and the bot");
 A("Stats manager: the Restarted option", /id="smLgRestart"/.test(live) && /leagueMerge: \{ gameId: gid, matchIds: ids, restart: restart \}/.test(live));
 A("both desks say when a merge is held", /Merged and held\./.test(live) && /Combined and held\./.test(live));
-A("the incident form sends the early first-period flag", /p_early_first: dc && document\.getElementById\("smInPeriod"\)\.value === "1"/.test(live));
-A("the bot's overtime and early-restart notes", /first period of the new game as sudden-death overtime/.test(bot) && /restart the game from the beginning of the first period/.test(bot));
+/* v3.73 (commissioner, 2026-09-29): the game-incident log, its Stats manager form and the bot's incident
+   rulings were retired; the early-restart and overtime rulings live in Rule 4.3 alone. */
+A("the retired incident form is gone from the Stats manager", !/smInPeriod/.test(live) && !/log_game_incident/.test(live));
 
 console.log("\n— the book");
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
