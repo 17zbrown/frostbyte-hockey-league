@@ -2210,7 +2210,7 @@ CG.ROUTES.players = function(param, qs){
   var nRostered = lg.players.length;
   var head = CG.pageHead("Player directory","Every skater. Every tendy.",
     esc((nRostered+unrostered.length)+" players — "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
-      "An overall measures a player against the league at his position from CGHL box scores alone, and stays pulled toward 70 until his fifth game; games, points, and save percentage come straight from EA box scores."));
+      "An overall measures a player against the league at the position he signed up at, from CGHL box scores alone, and stays pulled toward 70 until his sixth game there; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
     '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+
@@ -2259,7 +2259,7 @@ CG.ROUTES.players = function(param, qs){
   var shown = list.length + freeList.length;
   var body = shown
     ? '<div class="card"><div class="card-h"><h3>'+shown+' players</h3><span class="chip">Sorted by overall</span>'+
-      '<span class="caption" style="margin-left:auto">* still settling — fewer than '+CG.OVR_SETTLE_GP+' games</span></div>'+
+      '<span class="caption" style="margin-left:auto">* still settling: fewer than '+CG.OVR_SETTLE_GP+' games at his position</span></div>'+
       '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Player</th><th>POS</th><th>#</th><th class="tleft">EA ID</th><th>GP</th><th class="tleft">Season</th><th>OVR</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     : '<div class="empty"><div class="e-art">'+CG.ic("user",22)+'</div><b>No players match</b><p>Loosen the filters — everyone who has signed in to the site lives in this directory.</p></div>';
   return head + filters + '<div class="shell" style="padding-bottom:40px">'+body+'</div>';
@@ -2376,14 +2376,12 @@ CG.ROUTES.player = function(pid, qs){
             ? '<span class="chip chip-warn">Suspension served</span>'
             : '<span class="chip chip-loss">Suspended</span>') : "")+
         '</div></div>'+
-      /* OVR comes from profiles.overall, which the database recomputes after every final
-         (refresh_player_overall, on the v3.49 cghl_* engine). Until a player's fifth game the number
-         is held toward 70, so the badge is shown with how far along it is rather than bare; see
-         CG.ovrNote. */
-      '<div class="hero-ovr" style="text-align:center" title="'+esc(CG.ovrNote(p.id,"title"))+'">'+
-        '<span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+r.ovr+'</span>'+
-        '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink)">Overall</span>'+
-        CG.ovrNote(p.id)+'</div></div>'+
+      /* v3.74: the overall is the rating at the position he signed up at, recomputed by the database after
+         every final (refresh_player_overall). Until his sixth game at that position it is held toward 70, so
+         the badge says how far along it is (CG.ovrNote). The Position picker swaps in his rating at another
+         position, in place (CG.heroOvrInner). */
+      '<div class="hero-ovr" id="heroOvr" style="text-align:center" title="'+esc(CG.ovrNote(p.id,"title"))+'">'+
+        CG.heroOvrInner(p.id, null, r.ovr)+'</div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
       CG.seasonPicker(seasonKey)+
       /* v2.60: only the archived warning rides beside the picker — the "Live" and "not yet under
@@ -2408,9 +2406,9 @@ CG.ROUTES.player = function(pid, qs){
       : (anyGp===0
         ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
           '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
-          'The '+r.ovr+' overall is recomputed after every final and is held toward 70 until his fifth game. The category bars '+
+          'The '+r.ovr+' overall is recomputed after every final and is held toward 70 until his sixth game at the position he signed up at. The category bars '+
           'appear here once box scores exist.</p></div></div>'
-        : '<div class="card" id="ratingBreak"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b" id="ratingBreakBody">'+
+        : '<div class="card" id="ratingBreak"><div class="card-h"><h3>Rating breakdown</h3><span class="chip" id="ratingBreakOvr">OVR '+r.ovr+'</span></div><div class="card-b" id="ratingBreakBody">'+
           CG.ratingBars(r.bd, p.id)+
       '</div></div>');
     var scout = archived
@@ -2456,7 +2454,7 @@ CG.ROUTES.player = function(pid, qs){
           '<h3 style="font-family:var(--f-disp);font-weight:800;font-size:clamp(22px,3.4vw,30px);color:#fff;line-height:1.04;letter-spacing:-.01em;text-transform:none;margin:8px 0 0">Yet to take a shift</h3>'+
         '</div></div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
-        '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. Every overall opens at 70 and settles onto the real rating over five games, so '+esc(p.tag)+'’s '+r.ovr+' will move as soon as there are games behind it.</p></div></div>';
+        '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. Every overall opens at 70 and settles onto the real rating over six games at a position, so '+esc(p.tag)+'’s '+r.ovr+' will move as soon as there are games behind it.</p></div></div>';
     /* Stat Lab viz for players with a REGULAR-SEASON game sample: skater DNA radar + efficiency
        gauges (goalies get goaltending gauges). Gated on s.gp (season only) — a player with just
        pre-season games has an all-zero season line, which would collapse the radar to its floor,
@@ -2488,11 +2486,17 @@ CG.ROUTES.player = function(pid, qs){
        position group this season gets a Position picker: the season line re-renders in place for the
        group chosen (AFTER.player), and a center-against-wing line compares the two when he played both. */
     var posLines = archived ? {} : CG.posGroupLines(p.id);
-    var posKeys = CG.POS_VIEW_GROUPS.filter(function(g){ return posLines[g[0]] && posLines[g[0]].gp > 0; });
+    /* v3.74 (commissioner, 2026-09-29): a rating per position, the headline at the signed-up one. The picker
+       also offers every position he is rated at and the one he signed up at, even before he has played it. */
+    var posE = (!archived && lg.posOvr && lg.posOvr[p.id]) || {}, posHead = posE.head || "";
+    var posKeys = CG.POS_VIEW_GROUPS.filter(function(g){
+      return (posLines[g[0]] && posLines[g[0]].gp > 0) || (posE[g[0]] && posE[g[0]].gp > 0) || g[0] === posHead;
+    });
+    var posGp = function(k){ return posLines[k] ? posLines[k].gp : (posE[k] ? posE[k].gp : 0); };
     var posPick = posKeys.length >= 2
-      ? '<label class="fld" style="max-width:260px;margin:0 0 14px"><span>Position</span><select id="posView" data-pid="'+esc(p.id)+'">'+
+      ? '<label class="fld" style="max-width:280px;margin:0 0 14px"><span>Position</span><select id="posView" data-pid="'+esc(p.id)+'" data-head="'+esc(posHead)+'">'+
           '<option value="all">All positions · '+(s.gp||0)+' GP</option>'+
-          posKeys.map(function(g){ return '<option value="'+g[0]+'">'+esc(g[1])+' · '+posLines[g[0]].gp+' GP</option>'; }).join("")+
+          posKeys.map(function(g){ return '<option value="'+g[0]+'">'+esc(g[1])+' · '+posGp(g[0])+' GP'+(g[0]===posHead?' · signed up':'')+'</option>'; }).join("")+
         '</select></label>'
       : "";
     var kpiStrip = '<div class="pm-pad">'+posPick+'<div id="posKpi">'+CG.statCellsHtml(cells)+'</div>'+
@@ -2684,26 +2688,31 @@ CG.suspensionHeadings = function(s){
   return h.length ? h.join(", ") : (s && s.venue==="discord" ? "Discord conduct" : "Conduct on the ice");
 };
 CG.suspensionStateWord = function(s){ return s.status==="active" ? "running" : s.status==="served" ? "served" : s.status; };
-/* How settled is a player's overall? v3.49: the database rates a player against the league at his
-   position and shrinks that standard score toward zero (a rating of 70) while his sample is thin:
-   0.12 per game through four games, then gp/(gp+1.5) from the fifth (public.cghl_confidence). The
-   number is real and it moves, but until the fifth game it is deliberately held toward the middle,
-   so showing it bare invites the reader to treat a placeholder as a scouting verdict. We keep the
-   number and say how far along it is. Counted over every final game, the same way the database
-   counts it. Mirror of public.cghl_settle_gp(). */
-CG.OVR_SETTLE_GP = 5;   /* a rating is not fully earned until this many games (3 from v2.46 to v3.48) */
-CG.ovrProgress = function(pid){
-  var gp = ((CG.lg && CG.lg.careerGp) || {})[pid] || 0;
+/* How settled is a player's overall? The database rates a player at each position he plays (v3.74), from
+   the games he played there, and shrinks each standard score toward zero (a rating of 70) while that
+   sample is thin: 0.10 per game through five games, then gp/(gp+1.5) from the sixth
+   (public.cghl_confidence). The number is real and it moves, but until the sixth game at a position it is
+   deliberately held toward the middle, so showing it bare invites the reader to treat a placeholder as a
+   scouting verdict. We keep the number and say how far along it is. The games counted are the ones at the
+   position asked about, by default the one he signed up at (lg.posOvr, from player_position_overalls);
+   without that load, his career games stand in. Mirror of public.cghl_settle_gp(). */
+CG.OVR_SETTLE_GP = 6;   /* a rating is not fully earned until this many games at a position (5 from v3.49, 3 from v2.46) */
+CG.POS_VIEW_NAME = { C:"Center", W:"Wing", D:"Defense", G:"Goal" };
+CG.ovrProgress = function(pid, grp){
+  var po = CG.lg && CG.lg.posOvr, gp, k = null;
+  if (po){ var e = po[pid] || {}; k = grp || e.head || null; gp = (k && e[k]) ? (e[k].gp || 0) : 0; }
+  else gp = ((CG.lg && CG.lg.careerGp) || {})[pid] || 0;
   var need = Math.max(0, CG.OVR_SETTLE_GP - gp);
-  return { gp: gp, need: need, provisional: need > 0 };
+  return { gp: gp, need: need, provisional: need > 0, grp: k };
 };
 /* the heads-up itself. `style` picks how loud it is for the surface it sits on. */
-CG.ovrNote = function(pid, style){
-  var pr = CG.ovrProgress(pid);
+CG.ovrNote = function(pid, style, grp){
+  var pr = CG.ovrProgress(pid, grp);
   if (!pr.provisional) return "";
-  var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games";
-  if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + txt + '</span>';
-  if (style === "title") return "Provisional: " + txt + " played. A rating is held toward 70 until the fifth game, then measures the player against the league at his position.";
+  var nm = pr.grp && (CG.POS_VIEW_NAME || {})[pr.grp], at = nm ? " at " + nm.toLowerCase() : "";
+  var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games" + at;
+  if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + pr.gp + " of " + CG.OVR_SETTLE_GP + " games" + '</span>';
+  if (style === "title") return "Provisional: " + txt + " played. A rating is held toward 70 until the sixth game at a position, then measures the player against the league there.";
   /* the colour follows the SURFACE, not the call site: .caption is the light-card token and
      .hero-ovr .ovr-prov re-points it on the dark profile hero (part1_head.html) */
   return '<span class="caption ovr-prov" style="display:block;margin-top:4px">Provisional · ' + txt + '</span>';
@@ -2712,16 +2721,16 @@ CG.ovrNote = function(pid, style){
    the same 50 to 99 scale as the overall, so the bar is drawn from 50 (empty) to 99 (full) and the
    number beside it is the rating itself. No breakdown yet (first paint before the fetch lands, or a
    player without a league game) gets one honest line rather than an empty card. */
-CG.ratingBars = function(bd, pid){
+CG.ratingBars = function(bd, pid, grp){
   var comps = (bd && bd.components) || [];
   if (!comps.length) return '<p class="small" style="color:var(--steel);line-height:1.65">Category ratings are computed from CGHL box scores after every final and appear here.</p>';
-  var pr = CG.ovrProgress(pid);
+  var pr = CG.ovrProgress(pid, grp || (bd && bd.category) || null);
   return comps.map(function(c){
     var w = Math.max(0, Math.min(100, Math.round((c.score - 50) / 49 * 100)));
     return '<div class="rbar"><span class="rb-lab">'+esc(c.label)+'</span><span class="rb-track"><span class="rb-fill" style="width:'+w+'%"></span></span><span class="rb-v num">'+c.score+'</span></div>';
   }).join("")+
   '<p class="caption" style="margin-top:10px">Each bar measures the player against the league at his position, from CGHL box scores alone, on the same 50 to 99 scale as the overall: the league median is 70 and the top tenth begins at 85.'+
-  (pr.provisional ? ' Held toward 70 until the fifth game ('+pr.gp+' of '+CG.OVR_SETTLE_GP+' played).' : '')+'</p>';
+  (pr.provisional ? ' Held toward 70 until the sixth game at this position ('+pr.gp+' of '+CG.OVR_SETTLE_GP+' played).' : '')+'</p>';
 };
 /* 0-100 attribute profile from a real stat line (per-game, clamped) — the radar's shape. */
 CG.skaterDNA = function(s){
@@ -2763,6 +2772,37 @@ CG.GOALIE_DNA_AXES = ["Stopping","GAA","Workload","Quality Starts","Shutouts","W
    roster or lobby position. Hides itself for single-position players (the table would just
    restate the season line). Skaters and goalies get their own column sets: one table with mixed
    columns would either bury SV% or pad wingers with dashes. */
+/* v3.74: the hero overall at a position (the headline when grp is empty), with its caption and hold note */
+CG.heroOvrInner = function(pid, grp, fallback){
+  var e = CG.lg && CG.lg.posOvr && CG.lg.posOvr[pid], head = e && e.head;
+  var k = (grp && grp !== "all") ? grp : head;
+  var ovr = (e && k && e[k]) ? e[k].ovr : fallback;
+  var other = !!(k && head && k !== head);
+  return '<span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+(ovr == null ? 70 : ovr)+'</span>'+
+    '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink)">'+(other ? esc(CG.POS_VIEW_NAME[k])+' overall' : 'Overall')+'</span>'+
+    CG.ovrNote(pid, null, k || null);
+};
+/* v3.74: the breakdown card at a position, fetched from the engine (player_rating) and cached per position.
+   A late answer never overwrites the position the picker has moved on to. */
+CG._rbCache = CG._rbCache || {};
+CG.paintRatingBreak = function(pid, grp){
+  if (!document.getElementById("ratingBreakBody") || !CG.sb) return;
+  var key = pid + ":" + (grp || "");
+  var paint = function(bd){
+    if (!bd) return;
+    var pv = document.getElementById("posView");
+    if (pv){
+      var cur = pv.value === "all" ? (pv.getAttribute("data-head") || "") : pv.value;
+      if (cur !== (grp || "")) return;
+    }
+    var el = document.getElementById("ratingBreakBody"); if (el) el.innerHTML = CG.ratingBars(bd, pid, grp);
+    var chip = document.getElementById("ratingBreakOvr"); if (chip && bd.overall != null) chip.textContent = "OVR " + bd.overall;
+  };
+  if (CG._rbCache[key]) paint(CG._rbCache[key]);
+  CG.sb.rpc("player_rating", grp ? { p_profile: pid, p_cat: grp } : { p_profile: pid }).then(function(res){
+    if (res && !res.error && res.data){ CG._rbCache[key] = res.data; paint(res.data); }
+  }, function(){});
+};
 /* v3.71 (Q30): the profile's position groups. Center and wing are separate groups on purpose: the
    commissioner asked to see the difference between them. */
 CG.POS_VIEW_GROUPS = [["C","Center"],["W","Wing"],["D","Defense"],["G","Goaltender"]];
@@ -2966,14 +3006,22 @@ CG.AFTER.player = function(pid, qs){
   /* v3.71 (Q30): the Position picker re-renders the season line in place, never the page */
   var pv = document.getElementById("posView");
   if (pv) pv.addEventListener("change", function(){
-    var box = document.getElementById("posKpi"); if (!box) return;
-    var v = this.value, id = this.getAttribute("data-pid");
-    if (v === "all"){
-      var pl = (CG.lg.players || []).find(function(x){ return x.id === id; }) || {};
-      box.innerHTML = CG.statCellsHtml(CG.profileStatCells((CG.lg.pstats || {})[id], pl.pos === "G"));
-    } else {
-      box.innerHTML = CG.statCellsHtml(CG.profileStatCells(CG.posGroupLines(id)[v], v === "G"));
+    var v = this.value, id = this.getAttribute("data-pid"), head = this.getAttribute("data-head") || null;
+    var box = document.getElementById("posKpi");
+    if (box){
+      if (v === "all"){
+        var pl = (CG.lg.players || []).find(function(x){ return x.id === id; }) || {};
+        box.innerHTML = CG.statCellsHtml(CG.profileStatCells((CG.lg.pstats || {})[id], pl.pos === "G"));
+      } else {
+        box.innerHTML = CG.statCellsHtml(CG.profileStatCells(CG.posGroupLines(id)[v], v === "G"));
+      }
     }
+    /* v3.74 (commissioner, 2026-09-29): "their overall for that position should pop up in its place". The
+       hero overall and the breakdown card follow the position chosen; All positions is the headline. */
+    var grp = v === "all" ? head : v;
+    var ho = document.getElementById("heroOvr");
+    if (ho){ ho.innerHTML = CG.heroOvrInner(id, grp, ((CG.lg.ratings || {})[id] || {}).ovr); ho.title = CG.ovrNote(id, "title", grp); }
+    CG.paintRatingBreak(id, grp);
   });
   /* Account-only profile (not a rostered league player): fill the minimal header with the gamertag.
      The rest of this handler's selectors are all guarded and no-op on the minimal page; the pickup
@@ -3017,6 +3065,9 @@ CG.AFTER.player = function(pid, qs){
     var paintBd = function(bd){
       if (!bd) return;
       if (rt){ rt.bd = bd; rt.parts = {}; (bd.components||[]).forEach(function(c){ rt.parts[c.label] = c.score; }); }
+      /* v3.74: this is the headline; if the picker has moved to another position, that position's paint wins */
+      var pk = document.getElementById("posView");
+      if (pk && pk.value !== "all" && pk.value !== (pk.getAttribute("data-head") || "")) return;
       var el = document.getElementById("ratingBreakBody"); if (el) el.innerHTML = CG.ratingBars(bd, pid);
     };
     CG.sb.rpc("player_rating", { p_profile: pid }).then(function(res){

@@ -449,10 +449,28 @@ CG._seasonHint = function(){
    tab on every games event was the "herd" that took the database down at forty tabs
    (docs/audits/2026-09-17-stress-test.md, P0-3). */
 CG._bootCache = null;
-/* The boot array's tail, by name. career_games_played is entry 17 and the codes view entry 18;
-   v2.57 read the codes from 17 (so codes were blank on a full boot) and its delta wrote them
-   there (wiping careerGp until the next full load). tools/boot-index.test.cjs counts the array. */
-CG.BOOT_CAREER = 17; CG.BOOT_CODES = 18;
+/* The boot array's tail, by name. v3.74 put the per-position ratings at 17, so career_games_played is
+   entry 18 and the codes view entry 19; v2.57 read the codes from the career slot (so codes were blank on
+   a full boot) and its delta wrote them there (wiping careerGp until the next full load).
+   tools/boot-index.test.cjs counts the array. */
+CG.BOOT_PPO = 17; CG.BOOT_CAREER = 18; CG.BOOT_CODES = 19;
+/* v3.74: the per-position ratings, ~300 rows, and the map every rating surface reads */
+CG._posOvrLoad = function(){
+  if (!CG.sb) return Promise.resolve({ data:[], error:null });
+  return CG.sbAll("player_position_overalls","profile_id,pos_cat,overall,gp,headline","profile_id")
+    .then(function(r){ return r; }, function(e){ return { data:null, error:e }; });
+};
+CG._posOvrMap = function(res){
+  if (!res || res.error || !res.data) return null;
+  var out = {};
+  res.data.forEach(function(r){
+    if (!r.profile_id || !r.pos_cat) return;
+    var e = out[r.profile_id] = out[r.profile_id] || {};
+    e[r.pos_cat] = { ovr: +r.overall, gp: +r.gp || 0 };
+    if (r.headline) e.head = r.pos_cat;
+  });
+  return out;
+};
 CG._deltaBoot = async function(cached, gameIds, roster){
   var q = cached.slice();
   if (gameIds){
@@ -468,6 +486,9 @@ CG._deltaBoot = async function(cached, gameIds, roster){
       }
     }
     q[CG.BOOT_CODES] = await CG._codesToday();
+    /* v3.74: a final re-rates everyone, so the per-position ratings are re-read with the games */
+    var ppo = await CG._posOvrLoad();
+    if (!ppo.error) q[CG.BOOT_PPO] = ppo;
   }
   /* v2.72: a roster delta (a draft pick landing, a signing, a waiver) re-reads the two tables the
      rosters are built from and nothing else, so every roster surface repaints from the record
@@ -607,8 +628,10 @@ CG.buildLiveLeague = async function(opts){
     /* Career games, ACROSS ALL SEASONS, as ~200 aggregate rows. The box-score load above is
        scoped to one season, so counting career games from it would report 0 for every returning
        player — and the OVR surfaces would call a settled rating "provisional" league-wide. */
+    /* v3.74: a rating per position (player_position_overalls), one of them the headline */
+    CG._posOvrLoad(),
     CG.sb.rpc("career_games_played"),
-    /* 17: tonight's lobby codes and server picks through the masked view (Rule 4.2) */
+    /* tonight's lobby codes and server picks through the masked view (Rule 4.2) */
     CG._codesToday()
   ]);
   CG._bootCache = q;
@@ -645,6 +668,9 @@ CG.buildLiveLeague = async function(opts){
   CG.regSeason = function(){
     return (CG.SEASONS||[]).find(function(s){ return s.registration_open; }) || CG.SEASON || null;
   };
+  /* v3.74: a rating per position group, one of them the headline (the group he signed up at). A failed load
+     leaves posOvr null and every surface falls back to profiles.overall and the career game count. */
+  var posOvr = CG._posOvrMap(q[CG.BOOT_PPO]);
   var teamsRaw=q[0].data||[], divisions=q[1].data||[], season=CG.pickCurrentSeason(q[2].data||[]),
       profiles=q[3].data||[], roster=q[4].data||[], contracts=q[5].data||[],
       games=q[6].data||[], transactions=q[7].data||[], news=q[8].data||[],
@@ -756,7 +782,10 @@ CG.buildLiveLeague = async function(opts){
            arch/shoots are still placeholders: they need real profile columns (not yet built). */
         arch: "Two-Way", shoots: "L", joined: "Season 1",
         twitch: p.twitch || null, twitchLive: !!p.live,
-        overall: p.overall || 70,
+        /* v3.74: the headline row is written in the same transaction as profiles.overall, and a games
+           delta re-reads it, so it is the fresher of the two after a final */
+        overall: (posOvr && posOvr[p.id] && posOvr[p.id].head && posOvr[p.id][posOvr[p.id].head])
+          ? posOvr[p.id][posOvr[p.id].head].ovr : (p.overall || 70),
         eaId: p.ea_id || "", avatar: p.avatar_url || null,
         banned: !!p.banned,
         salary: (c && c.salary!=null) ? c.salary : (rs.salary||0),
@@ -903,7 +932,8 @@ CG.buildLiveLeague = async function(opts){
   var clinchedCfg = (CG._siteCfg && CG._siteCfg["clinched_"+((season&&season.number)||1)]) || [];
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
              allResults:results, playoffGames:playoffGames, clinched:clinchedCfg,
-             suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true };
+             suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true,
+             posOvr:posOvr };
   if (preResults.length){
     CG.SEASON.completedWeeks = preWeeksDone;
     lg.results = preResults; CG.aggregate(lg, {});
@@ -11853,7 +11883,7 @@ CG.declareForfeitPrompt = function(id){
 CG.admRatingsLive = function(){
   var lg = CG.lg;
   var list = lg.players.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr||0)-(lg.ratings[a.id].ovr||0); });
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from CGHL box scores after every final, each player measured against the league at his position, held toward 70 until his fifth game. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from CGHL box scores after every final, each player measured against the league at every position he plays, held toward 70 until his sixth game at a position; the overall shown is the one at the position he signed up at. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
     '<div class="card"><div class="card-h"><h3>Current overalls</h3><span class="chip">'+list.length+' rostered</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>Rostered players by overall</caption><thead><tr><th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>GP</th><th>OVR</th></tr></thead><tbody>'+
     list.map(function(p){ var s=lg.pstats[p.id];
@@ -11862,7 +11892,7 @@ CG.admRatingsLive = function(){
         '<td class="tnum">'+p.pos+'</td><td class="tleft">'+esc(CG.TEAM[p.team].code)+'</td><td>'+(s?s.gp:0)+'</td>'+
         '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">A rating is held toward 70 until a player’s fifth game (player_rating returns a provisional flag until then). The engine lives in the database (the cghl_* functions, v3.49): every stat is scored against the league’s own distribution at the player’s position, weighted into Shooting, Passing, Hand-eye, Physicality and Defense (Reflexes, Consistency and Clutchness for goaltenders), and the composite is placed on a 50 to 99 curve where the league median is 70 and 90 sits two standard deviations clear. It reruns for everyone after every final. Nobody hand-edits a rating, the commissioner included (Rule 6.1, v3.67).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">A rating is held toward 70 until a player’s sixth game at a position (player_rating returns a provisional flag until then). The engine lives in the database (the cghl_* functions, v3.49): every stat is scored against the league’s own distribution at the player’s position, weighted into Shooting, Passing, Hand-eye, Physicality and Defense (Reflexes, Consistency and Clutchness for goaltenders), and the composite is placed on a 50 to 99 curve where the league median is 70 and 90 sits two standard deviations clear. It reruns for everyone after every final. Nobody hand-edits a rating, the commissioner included (Rule 6.1, v3.67).</span></div></div>';
 };
 
 /* ================================================================

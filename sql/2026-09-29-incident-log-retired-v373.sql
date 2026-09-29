@@ -26,4 +26,8 @@ end $mig$;
 drop function public.log_game_incident(uuid, uuid, text, integer, integer, text, boolean, text, boolean);
 drop table public.game_incidents;
 
-/* APPLIED: see the record appended below once it has run. */
+/* APPLIED 2026-09-29 13:48 UTC as migration v373_incident_log_retired, after the push of v3.73 (4c8fa1c):
+   the VM bot had restarted at 13:47 (rl_gateway-bot_result uptimeMin 0, no incidentsLive field), and
+   realtime.subscription held no game_incidents row while the staff-desk channel had rejoined its six tables.
+   Afterwards: to_regclass('public.game_incidents') is null, log_game_incident is gone, and no public function
+   body mentions game_incident. */

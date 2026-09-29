@@ -72,15 +72,16 @@ console.log("\n— the four defects are recorded with their numbers");
 
 console.log("\n— the shipped client");
 {
-  A("the settle constant is five", /CG\.OVR_SETTLE_GP = 5;/.test(html));
+  /* v3.74: six games at a position (the v3.49 block above keeps the record of five) */
+  A("the settle constant is six (v3.74)", /CG\.OVR_SETTLE_GP = 6;/.test(html));
   A("the breakdown card fetches the engine's own categories", /rpc\("player_rating", \{ p_profile: pid \}\)/.test(html));
   A("...into a container the page can repaint in place", /id="ratingBreakBody"/.test(html) && /CG\.ratingBars = function/.test(html));
   A("...drawn from 50 to 99, not 0 to 100", /\(c\.score - 50\) \/ 49 \* 100/.test(html));
   A("nothing still says three games",
     !/settle[s]? onto (a player's|the) real rating (over|across) (his first )?three games/.test(html) &&
     !/first three games/.test(pub) && !/first three games/.test(live));
-  A("the directory says what the number is", /measures a player against the league at his position from CGHL box scores alone/.test(html));
-  A("the hover note explains the hold", /held toward 70 until the fifth game/.test(html));
+  A("the directory says what the number is", /measures a player against the league at the position he signed up at, from CGHL box scores alone/.test(html));
+  A("the hover note explains the hold", /held toward 70 until the sixth game at a position/.test(html));
   A("the Control Center names the engine", /the cghl_\* functions, v3\.49/.test(html));
   A("the ratingBars helper runs", (() => {
     const ctx = { console, Math, Object, String, Number, JSON, CG: {} }; ctx.esc = (v) => String(v == null ? "" : v);
@@ -98,7 +99,7 @@ console.log("\n— the shipped client");
     vm.runInContext(pub.match(/CG\.OVR_SETTLE_GP = \d+;/)[0], ctx);
     for (const fn of ["ovrProgress", "ratingBars"]) vm.runInContext(pub.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n\\};"))[0], ctx);
     ctx.CG.lg = { careerGp: { p: 3 } };
-    return /Held toward 70 until the fifth game \(3 of 5 played\)/.test(ctx.CG.ratingBars({ components: [{ label: "Defense", score: 72 }] }, "p"));
+    return /Held toward 70 until the sixth game at this position \(3 of 6 played\)/.test(ctx.CG.ratingBars({ components: [{ label: "Defense", score: 72 }] }, "p"));
   })());
 }
 
@@ -109,7 +110,7 @@ console.log("\n— the book");
   const all = rb.chapters.flatMap((c) => c.sections.flatMap((s) => s.paragraphs)).join("\n");
   A("Rule 6.1 says what a rating is built from", s61 && s61.paragraphs.some((p) => /from the league's own regular-season and playoff box scores alone/.test(p)));
   A("...names the categories", /Shooting, Passing, Hand-eye, Physicality and Defense for skaters; Reflexes, Consistency and Clutchness for goaltenders/.test(all));
-  A("...the scale and the hold", /scale from 50 to 99 on which the league median is 70/.test(all) && /held toward the middle until a player's fifth league game/.test(all));
+  A("...the scale and the hold", /scale from 50 to 99 on which the league median is 70/.test(all) && /held toward the middle until a player's sixth league game at that position/.test(all));
   A("...and never states the formula", !/0\.12/.test(all) && !/1\.5\)/.test(all) && !/0\.372/.test(all));
   A("Rule 0.4 still says ratings come from regular-season play", /Overall ratings are compiled from regular-season play/.test(all));
   const e349 = rb.changelog.find((e) => e.version === "3.49") || { items: [] };
