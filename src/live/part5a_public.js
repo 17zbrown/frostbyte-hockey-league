@@ -2712,7 +2712,7 @@ CG.ovrNote = function(pid, style, grp){
   var nm = pr.grp && (CG.POS_VIEW_NAME || {})[pr.grp], at = nm ? " at " + nm.toLowerCase() : "";
   var txt = pr.gp + " of " + CG.OVR_SETTLE_GP + " games" + at;
   if (style === "chip") return '<span class="chip chip-warn" style="font-size:9px">' + pr.gp + " of " + CG.OVR_SETTLE_GP + " games" + '</span>';
-  if (style === "title") return "Provisional: " + txt + " played. A rating is held toward 70 until the sixth game at a position, then measures the player against the league there.";
+  if (style === "title") return "Provisional: " + pr.gp + " of " + CG.OVR_SETTLE_GP + " games played" + at + ". A rating is held toward 70 until the sixth game at a position, then measures the player against the league there.";
   /* the colour follows the SURFACE, not the call site: .caption is the light-card token and
      .hero-ovr .ovr-prov re-points it on the dark profile hero (part1_head.html) */
   return '<span class="caption ovr-prov" style="display:block;margin-top:4px">Provisional · ' + txt + '</span>';

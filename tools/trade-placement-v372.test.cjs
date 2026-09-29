@@ -64,9 +64,11 @@ A("twin: a same-group arrival wins the one active place even when listed second"
 const accept = live.slice(live.indexOf("CG.acceptTrade = function"), live.indexOf("CG.declineTrade = function"));
 A("accept dialog says where incoming players land", /Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place/.test(accept));
 A("...and, after the reload, names anyone the trade placed in camp (read back, not predicted)",
-  /CG\.loadTrades\(\)\.then\(function\(\)\{ return CG\.reloadLeague\(\); \}\)\.then\(function\(\)\{/.test(accept) && /joined your training camp: each player you receive takes the place of one you send \(Rule 2\.1\)\./.test(accept));
-A("Trade Hub says trades stay open while the freeze is on", /Roster freeze, trades open\.<\/b> Call-ups and send-downs are locked until/.test(live) && /so a trade never works as a call-up \(Rule 2\.1\)/.test(live));
-A("roster page shows the freeze in the page, not only a tooltip", /Roster freeze\.<\/b> Call-ups and send-downs are locked until '\+esc\(fzR\.reopens\)\+' \(Rule 2\.1\)\. Trades stay open:/.test(hub));
+  /* v3.75: the second step now receives whether the reload worked */
+  /CG\.loadTrades\(\)\.then\(function\(\)\{ return CG\.reloadLeague\(\); \}\)\.then\(function\(ok\)\{/.test(accept) && /joined your training camp: each player you receive takes the place of one you send \(Rule 2\.1\)\./.test(accept));
+/* v3.75: the note no longer claims a trade can never work as a call-up (a series of trades can; Rule 2.1 now says so) */
+A("Trade Hub says trades stay open while the freeze is on", /Roster freeze, trades open\.<\/b> Call-ups and send-downs are locked until/.test(live) && !/so a trade never works as a call-up/.test(live));
+A("roster page shows the freeze in the page, not only a tooltip", /Roster freeze\.<\/b> Call-ups and send-downs are locked until '\+esc\(fzR\.reopens\)\+' \(Rule 2\.1\)\. '/.test(hub) && /: 'Trades stay open: /.test(hub));
 A("over-limits note no longer says trading stops at the freeze", !/waive them or trade them before the roster freezes/.test(hub) && /Waivers and trades stay open through the freeze/.test(hub));
 A("no copy says squad changes are unlimited all season", !/unlimited all season/.test(hub + live) && !/freely, as often as you like, all season/.test(hub));
 A("the basic squads caption gives the camp limit, not 'unlimited'", !/training camp is unlimited/.test(hub) && /training camp holds up to '\+CG\.CAMP_MAX\+' players/.test(hub));
@@ -86,7 +88,7 @@ rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.72");   /* pinned by version, never by index */
 A("changelog records 3.72, dated 2026-09-29", !!e && e.dateIso === "2026-09-29");
 A("2.1.4: an active place for an active place, a camp place for a camp place", /takes the place of a player his new club sent away in the same trade: an active-roster place for an active-roster place, and a training-camp place for a training-camp place/.test(secs["2.1"].paragraphs[3]));
-A("...extras by room, never past the composition, same rule in the freeze", /each additional player joins the active roster where the roster and his position group have room for him/.test(secs["2.1"].paragraphs[3]) && /The rule is the same whether or not the roster is frozen, so a trade never serves as a call-up\./.test(secs["2.1"].paragraphs[3]));
+A("...extras by room, never past the composition, same rule in the freeze", /each additional player joins the active roster where the roster and his position group have room for him/.test(secs["2.1"].paragraphs[3]) && /The rule is the same whether or not the roster is frozen\./.test(secs["2.1"].paragraphs[3]));
 A("...trades stay open in the freeze, and the old 'roster held at first puck' sentence is gone", /Trades and the signing of waived players stay open during the freeze/.test(secs["2.1"].paragraphs[3]) && !/played against the roster a club held when the week's first puck dropped/.test(secs["2.1"].paragraphs[3]));
 A("2.3.1 and 2.3.3 agree", /Trades stay open during the weekly roster freeze \(Rule 2\.1\)/.test(secs["2.3"].paragraphs[0]) && /each player acquired takes the place of one the club sent/.test(secs["2.3"].paragraphs[2]));
 A("0.7 mentions the weekly freeze", /the roster freezes: no player is called up from training camp or sent down to it, though trades stay open/.test(secs["0.7"].paragraphs[0]));

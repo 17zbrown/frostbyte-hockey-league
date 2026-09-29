@@ -23,7 +23,7 @@ A("the rehearsal is recorded", /calling a camp forward up was refused/.test(sql)
 
 console.log("\n— the site");
 A("the client quota is 7/5/3", /basic: \{ format:"basic", roster_max:15, quota:\{ F:7, D:5, G:3 \}, lines:null, flex:null,/.test(live));
-A("Team HQ warns a club over the limits", /Over the roster limits\./.test(hub) && /you can’t add to a group you’re over in/.test(hub));
+A("Team HQ warns a club over the limits", /Over the roster limits\./.test(hub) && /you can’t add to a group you’re over in/i.test(hub)   /* v3.75: now its own sentence */);
 A("...and locks Call up into an over group", /if \(ocap!=null && on > ocap\)\{/.test(hub));
 A("the roster page no longer calls salaries confidential", !/Confidential — management only\./.test(hub) && /Salaries and cap hits are public \(Rule 2\.5\)/.test(hub));
 A("the Sign handler declares what it reads", /var lg = CG\.lg \|\| \{\};\s+var reg = \(lg\._registrationsRaw\|\|\[\]\)\.find\(function\(x\)\{ return x\.id===regId; \}\) \|\| \{\};\s+var pid = reg\.profile_id \|\| null;/.test(live));

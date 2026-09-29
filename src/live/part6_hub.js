@@ -2126,13 +2126,24 @@ CG.hubRoster = function(qs){
     h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
       '<span><b style="font-family:var(--f-disp)">Over the roster limits.</b> The active roster holds at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen and '+CG.ROSTER_QUOTA.G+' goaltenders (Rule 2.1), and you have '+
       overG.map(function(x){ return x.n+' '+CG.GROUP_NAME[x.g].toLowerCase(); }).join(" and ")+
-      '. Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern, when call-ups and send-downs stop until Saturday. Waivers and trades stay open through the freeze, but you can’t add to a group you’re over in.</span></div>';
+      '. '+(function(){
+        /* v3.75: the advice depends on the week: in the freeze a send-down waits, after the deadline a trade does */
+        var fzOv = CG.rosterFreeze ? CG.rosterFreeze() : { on:false }, lockedOv = !!(CG.movesLockedNow && CG.movesLockedNow());
+        if (fzOv.on) return 'Send-downs are locked by the weekly roster freeze until '+esc(fzOv.reopens)+'. '+
+          (lockedOv ? 'Trades and waivers closed at the movement deadline (Rule 2.4), so send players to training camp once the freeze lifts.'
+                    : 'Until then, a waiver or a trade is the way to comply.');
+        return lockedOv
+          ? 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern. Trades and waivers closed at the movement deadline (Rule 2.4).'
+          : 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern, when call-ups and send-downs stop until Saturday. Waivers and trades stay open through the freeze.';
+      })()+' You can’t add to a group you’re over in.</span></div>';
   }
   /* v3.72: the weekly freeze was explained only in a button tooltip, which a phone never shows */
   var fzR = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
   if (fzR.on){
     h += '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
-      '<span><b style="font-family:var(--f-disp)">Roster freeze.</b> Call-ups and send-downs are locked until '+esc(fzR.reopens)+' (Rule 2.1). Trades stay open: each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place, and an extra player joins the active roster where his position group has room, and training camp where it doesn’t.</span></div>';
+      '<span><b style="font-family:var(--f-disp)">Roster freeze.</b> Call-ups and send-downs are locked until '+esc(fzR.reopens)+' (Rule 2.1). '+
+      ((CG.movesLockedNow && CG.movesLockedNow()) ? 'Trades and waivers closed at the movement deadline (Rule 2.4).'
+        : 'Trades stay open: each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins the active roster only where both have room (Rule 2.1).')+'</span></div>';
   }
   h += '<div class="grid g3" style="margin-bottom:20px">'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(payroll)+'</b><span>Active payroll</span></div>'+
@@ -2284,7 +2295,7 @@ CG.hubRoster = function(qs){
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
         : 'Camp players may dress in up to '+cCap+' games a week at any position; skaters play their own position group, up to '+sCap+' games a week'+(gCap===sCap?', goaltenders too':' (goaltenders up to '+gCap+')')+' — Rule 5.2. ')+
-      'You may move players between the active roster and training camp as often as you like, except during the weekly roster freeze from Wednesday 7:30 PM to midnight at the end of Friday ET. Trades stay open during the freeze. Each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place; an extra player joins the active roster where his position group has room, and training camp where it doesn’t (Rule 2.1).'+
+      'You may move players between the active roster and training camp as often as you like, except during the weekly roster freeze from Wednesday 7:30 PM to midnight at the end of Friday ET. Trades stay open during the freeze until the movement deadline. Each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins the active roster only where both have room (Rule 2.1).'+
       (CG.minServiceGp()?' A player can be waived or traded only after '+CG.minServiceGp()+' regular-season games this season; until then his Trade and Waive buttons wait, and the count sits beside them (Rule 2.4).':'')+'</p></div></div>';
   }
   /* Road to 3 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'

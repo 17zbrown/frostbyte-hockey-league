@@ -158,7 +158,17 @@ CG.rosterFreeze = function(at){
   var dow = parts.weekday, mins = ((parseInt(parts.hour,10)||0) % 24)*60 + (parseInt(parts.minute,10)||0);
   var on = dow==="Thu" || dow==="Fri" || (dow==="Wed" && mins >= 19*60+30);
   return { on: on, reopens: on ? "Saturday 12:00 AM ET" : null,
-    why: "Rule 2.1: the roster is frozen from Wednesday 7:30 PM until Friday midnight ET. Call-ups and send-downs reopen Saturday. Trades stay open." };
+    why: "Rule 2.1: the roster is frozen from Wednesday 7:30 PM until Friday midnight ET. Call-ups and send-downs reopen Saturday." +
+      (CG.movesLockedNow && CG.movesLockedNow() ? "" : " Trades stay open until the movement deadline.") };
+};
+/* v3.75: the movement deadline as the site sees it, mirroring public.moves_locked(): the season's override first,
+   then the deadline itself. Trades and waivers close there (Rule 2.4); the weekly freeze does not close them. */
+CG.movesLockedNow = function(){
+  var s = CG.SEASON || {};
+  if (s.moves_lock_override === "locked") return true;
+  if (s.moves_lock_override === "open") return false;
+  var ts = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null;
+  return !!(ts && (CG.now ? CG.now() : Date.now()) >= ts);
 };
 
 CG.posLocksOn = function(s){ var sn = s || CG.SEASON; return !!(sn && sn.position_locks); };
@@ -7564,7 +7574,8 @@ CG.reloadLeague = async function(){
     /* offers ride along with every reload, so a negotiation moves without a page refresh */
     await Promise.all([CG.loadAvailability(), CG.loadTrades(), CG.loadMyOffers()]);
     CG.renderChrome(); CG.router();
-  } catch(e){ CG.toast("Reload failed — refresh the page","err"); }
+    return true;
+  } catch(e){ CG.toast("Reload failed. Refresh the page.","err"); return false; }
 };
 
 /* ================================================================
@@ -11988,7 +11999,7 @@ CG.seasonForm = function(id){
     if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; document.getElementById("ssPoMin").value = r.playoff_min_gp; }
     ["ssOff","ssPre","ssFaOpen","ssFaClose"].forEach(function(id){ var el = document.getElementById(id); el.disabled = (f==="basic"); if (f==="basic") el.value = ""; el.closest("label").style.opacity = f==="basic" ? ".45" : ""; });
     document.getElementById("ssFormatNote").textContent = f==="basic"
-      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+") with unlimited camp, everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a "+r.playoff_min_gp+"-game floor and a "+r.series_cap+"-game series cap."
+      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+")"+(r.camp_max>=999?" with unlimited camp":" with a training camp of up to "+r.camp_max)+", everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a "+r.playoff_min_gp+"-game floor and a "+r.series_cap+"-game series cap."
       : "The richer model on the shelf: two dark weeks, a two-week pre-season with random loans, a "+r.draft_rounds+"-round linear draft, a free-agency week, "+r.weeks+" weeks, a "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), goaltenders "+r.cap_goalie+" games a week, $"+(r.salary_cap/1e6)+"M cap, multi-season contracts, extensions and pick trading.";
     document.getElementById("ssSpaceHelp").textContent = f==="basic"
       ? "Give “Draft night” a Saturday and Auto-space fills the rest: sign-ups open until 11:59 PM ET the Thursday before it, puck drop the Wednesday after, this season’s run of regular-season weeks, and playoffs the game week after the last one. Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is placed on a club as depth after the draft. Nothing saves until you hit Save."
@@ -13648,7 +13659,7 @@ CG.hubTradeHubLive = function(qs){
   h+='<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Confidential to management.</b> Offers and notes are visible to your Owner, GM, and AGM (Rule 2.3).</span></div>';
   /* v3.72: trades stay open through the weekly roster freeze, and the page says so while it is on */
   var fzT = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
-  if (fzT.on) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Roster freeze, trades open.</b> Call-ups and send-downs are locked until '+esc(fzT.reopens)+', but you can still propose and accept trades. Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place, so a trade never works as a call-up (Rule 2.1).</span></div>';
+  if (fzT.on && !(CG.movesLockedNow && CG.movesLockedNow())) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Roster freeze, trades open.</b> Call-ups and send-downs are locked until '+esc(fzT.reopens)+', but you can still propose and accept trades. Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins your active roster only where both have room (Rule 2.1).</span></div>';
   var inc='<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
   if(incoming.length){
     inc+=incoming.map(function(tr){ var fromCode=lg._idToCode[tr.from_team_id];
@@ -13693,7 +13704,7 @@ CG.hubTradeHubLive = function(qs){
     ((d.offP.length||d.reqP.length) ? CG.tradeBalanceCard(club, d.offP, d.partner, d.reqP, { compact:true }) : '')+
     '<label class="fld" style="margin-top:14px"><span>Note to the other club (optional)</span><input id="tradeNote" placeholder="Why this works for both sides…"></label>'+
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
-    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded. Each player a club receives takes the place of one it sends, an active place for an active place and a camp place for a camp place; an extra player joins the active roster where his position group has room, and training camp where it doesn’t (Rule 2.1).'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
+    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded. Each player a club receives takes the place of one it sends, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins the active roster only where both have room (Rule 2.1).'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
   '</div></div>';
   /* v3.37 (commissioner): Build a trade stays at the top of the page. The block board is a long
      table and it had pushed the builder down; the builder is the tool, so it comes first and
@@ -13871,8 +13882,9 @@ CG.proposeTrade = function(){
 CG.acceptTrade = function(id){
   var tr0 = (CG.lg._myTrades||[]).find(function(x){ return x.id===id; });
   var incoming = tr0 ? (tr0.offered_profile_ids||[]).slice() : [];
-  CG.confirm("Accept this trade?",(CG.fmt("pick_trades")?"The players and picks change hands immediately and it’s logged. ":"The players change hands immediately and it’s logged. ")+"Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place; an extra player joins your active roster where his position group has room, and training camp where it doesn’t (Rule 2.1). The deal must clear your cap, and your camp must have room for anyone placed there.","Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed. Rosters are updated for both clubs.","ok");
-    CG.loadTrades().then(function(){ return CG.reloadLeague(); }).then(function(){
+  CG.confirm("Accept this trade?",(CG.fmt("pick_trades")?"The players and picks change hands immediately and it’s logged. ":"The players change hands immediately and it’s logged. ")+"Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins your active roster only where both have room (Rule 2.1). The deal must clear your cap, and your camp must have room for anyone placed there.","Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed. Rosters are updated for both clubs.","ok");
+    CG.loadTrades().then(function(){ return CG.reloadLeague(); }).then(function(ok){
+      if (ok === false) return;   /* v3.75: a failed reload would read the pre-trade squads */
       var camp = incoming.map(function(pid){ return CG.tPlayer(pid); }).filter(function(p){ return p && CG.isCamp(p); });
       if (camp.length) CG.toast(camp.map(function(p){ return p.tag; }).join(", ")+" joined your training camp: each player you receive takes the place of one you send (Rule 2.1).","ok");
     }); }); }); }); };
