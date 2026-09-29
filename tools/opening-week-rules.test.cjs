@@ -71,7 +71,9 @@ console.log("\n— 3. the weekly roster freeze");
   A("...for both directions, from the one button", /\(p\.squad==="tc" \? "Call up" : "To camp"\)\+'<\/button>'\+/.test(hub));
   A("2.1 carries the freeze", /the roster freezes each week from Wednesday at 7:30 PM Eastern Time/.test(sec("2.1")));
   A("...naming the availability hour it starts at", /the hour availability is due under Rule 5\.1/.test(sec("2.1")));
-  A("...with the reason", /The week's games are played against the roster a club held when the week's first puck dropped/.test(sec("2.1")));
+  /* v3.72: trades stay open through the freeze, so "the roster a club held when the week's first puck dropped"
+     stopped being true; the reason is now that the freeze stops call-ups and send-downs, not trades. */
+  A("...with the reason", /so a club's roster may change during the week by those means, but never by a call-up or a send-down/.test(sec("2.1")));
   A("...and the league-office door", /The league office may move a player in the window where a club would otherwise be unable to ice a lineup/.test(sec("2.1")));
   A("the record puts it on the trigger, not the two doors",
     /enforced on the TRIGGER, guard_squad_move, and not on set_roster_squad and swap_roster_squad/.test(flat));

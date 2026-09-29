@@ -47,7 +47,8 @@ console.log("\n— one cap definition, one roster definition");
   A("the transactions desk uses CG.teamPayroll", /byClub\[c\]\.used = CG\.teamPayroll\(lg, c\) \|\| 0;/.test(desks));
   A("...and no longer hand-sums playerSalary", !/e\.used \+= \(CG\.playerSalary\(lg, p\.id\) \|\| 0\)/.test(desks));
   A("...counting camp outside the 17", /if \(p\.squad !== "tc"\) e\.n\+\+;/.test(desks));
-  A("accepting a trade reloads the whole league", /CG\.toast\("Trade completed — rosters updated for both clubs","ok"\); CG\.loadTrades\(\)\.then\(function\(\)\{ CG\.reloadLeague\(\); \}\);/.test(live));
+  /* v3.72: same reload, now returned so the toast can name anyone the trade placed in camp */
+  A("accepting a trade reloads the whole league", /CG\.toast\("Trade completed\. Rosters are updated for both clubs\.","ok"\);\s+CG\.loadTrades\(\)\.then\(function\(\)\{ return CG\.reloadLeague\(\); \}\)/.test(live));
 }
 
 console.log("\n— a same-night double-header can't misfile a box score (v2.37: the game window, one shared definition)");

@@ -19,7 +19,8 @@ A("Rule 2.1 states squad changes are unlimited in number", /move a player betwee
 A("...but not at any time: the weekly freeze is the one restriction",
   /the roster freezes each week from Wednesday at 7:30 PM Eastern Time/.test(p21) &&
   /until midnight Eastern at the end of Friday, and no player may be called up or sent down in that window/.test(p21));
-A("...with the reason stated", /The week's games are played against the roster a club held when the week's first puck dropped/.test(p21));
+/* v3.72: trades stay open through the freeze, so the reason is the call-up/send-down stop, not a fixed roster */
+A("...with the reason stated", /so a club's roster may change during the week by those means, but never by a call-up or a send-down/.test(p21));
 A("...and a league-office door for a club that cannot ice a lineup",
   /The league office may move a player in the window where a club would otherwise be unable to ice a lineup/.test(p21));
 A("...and no longer caps them at three", !/three \(3\) times/.test(p21) && !/swap cap/.test(p21));
@@ -31,8 +32,9 @@ A("a v2.30 changelog entry exists (pinned by version, never by index)", rb.chang
 console.log("\n— Team HQ no longer rations moves");
 A("no 'Squad locked' button", !/Squad locked/.test(hub));
 A("no 'of 3 squad changes left' tooltip", !/of 3 squad changes left/.test(hub) && !/squadMovesLeft/.test(hub));
-A("the squad button says changes are unlimited", /Squad changes are unlimited all season \(Rule 2\.1\)/.test(hub));
-A("the Squads card copy says so too", /there is no limit on squad changes \(Rule 2\.1\)/.test(hub));
+/* v3.72: still no count, but "all season" was untrue since the v3.40 weekly freeze */
+A("the squad button says changes have no limit outside the weekly freeze", /No limit on squad changes outside the weekly roster freeze, Wednesday 7:30 PM to Friday midnight ET \(Rule 2\.1\)/.test(hub));
+A("the Squads card copy says so too", /as often as you like, except during the weekly roster freeze from Wednesday 7:30 PM to midnight at the end of Friday ET/.test(hub));
 /* v2.48: the camp cap is no longer a hardcoded 3 in the meter — it reads CG.CAMP_MAX. v2.51: basic
    camp is unlimited (CAMP_MAX 999), so the meter draws no cap at all rather than "of 999". */
 A("...and the camp meter reads the format's camp cap (CG.CAMP_MAX), not a hardcoded 3 — and no cap when camp is unlimited",

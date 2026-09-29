@@ -37,7 +37,8 @@ where n.nspname = 'public'
   and p.proname in ('club_notify','_post_lineup_notice','_notify_lineup_pulled','_notify_lineup_moves',
                     '_post_lock_notices','_club_batch_notices','_announce_once','_mgmt_move_send',
                     'create_notification','notify_department','notify_discord','notify_staff',
-                    'notify_staff_ch','notify_staff_bell','notify_commissioners')
+                    'notify_staff_ch','notify_staff_bell','notify_commissioners',
+                    '_place_trade_arrivals')
   and (has_function_privilege('anon', p.oid, 'EXECUTE') or has_function_privilege('authenticated', p.oid, 'EXECUTE'))
 union all
 -- 6) (v3.50) a SECURITY DEFINER function the API roles can execute that calls a notice writer and whose

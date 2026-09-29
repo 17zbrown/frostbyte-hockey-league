@@ -2075,7 +2075,7 @@ function squadBtn(p){
       CG.ic("lock",12)+' To camp</button>';
   }
   var club = CG.myClub();
-  var title = 'Squad changes are unlimited all season (Rule 2.1)';
+  var title = 'No limit on squad changes outside the weekly roster freeze, Wednesday 7:30 PM to Friday midnight ET (Rule 2.1)';
   /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it
      anyway; this says so before the click instead of after it. */
   var fz = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
@@ -2126,7 +2126,13 @@ CG.hubRoster = function(qs){
     h += '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("flag",16)+
       '<span><b style="font-family:var(--f-disp)">Over the roster limits.</b> The active roster holds at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen and '+CG.ROSTER_QUOTA.G+' goaltenders (Rule 2.1), and you have '+
       overG.map(function(x){ return x.n+' '+CG.GROUP_NAME[x.g].toLowerCase(); }).join(" and ")+
-      '. Send players to training camp, waive them or trade them before the roster freezes on Wednesday at 7:30 PM Eastern. Until then you can still make those moves, but you can’t add to a group you’re over in.</span></div>';
+      '. Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern, when call-ups and send-downs stop until Saturday. Waivers and trades stay open through the freeze, but you can’t add to a group you’re over in.</span></div>';
+  }
+  /* v3.72: the weekly freeze was explained only in a button tooltip, which a phone never shows */
+  var fzR = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
+  if (fzR.on){
+    h += '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
+      '<span><b style="font-family:var(--f-disp)">Roster freeze.</b> Call-ups and send-downs are locked until '+esc(fzR.reopens)+' (Rule 2.1). Trades stay open: each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place, and an extra player joins the active roster where his position group has room, and training camp where it doesn’t.</span></div>';
   }
   h += '<div class="grid g3" style="margin-bottom:20px">'+
     '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+CG.fmtMoney(payroll)+'</b><span>Active payroll</span></div>'+
@@ -2270,7 +2276,7 @@ CG.hubRoster = function(qs){
       meter("goaltenders",grpN("G"),qG)+(CG.isBasic()?meter("active roster",proSq.length,CG.ROSTER_MAX):"")+meter("training camp",tcSq.length,CG.CAMP_MAX>=999?null:CG.CAMP_MAX)+
       (loanSq.length?meter("pre-season loans",loanSq.length,null):"")+(depthSq.length?meter("depth",depthSq.length,null):"")+'</div>'+
       '<p class="caption" style="margin-top:12px">Rule 2.1 — '+(CG.isBasic()
-        ? 'the active roster is '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' players: '+CG.rosterShapeWords()+' (at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen or '+qG+' goaltenders), with your Owner, GM and AGM inside those spots; training camp is unlimited. '
+        ? 'the active roster is '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' players: '+CG.rosterShapeWords()+' (at most '+CG.ROSTER_QUOTA.F+' forwards, '+CG.ROSTER_QUOTA.D+' defensemen or '+qG+' goaltenders), with your Owner, GM and AGM inside those spots; training camp holds up to '+CG.CAMP_MAX+' players. '
         : 'the active roster is '+CG.ROSTER_QUOTA.F+' forwards (centers and wings in any mix), '+CG.ROSTER_QUOTA.D+' defensemen (either side) and '+qG+' goaltenders, the one position locked to its exact role; training camp holds up to '+CG.CAMP_MAX+' players. ')+
       (CG.isBasic()
         ? 'Players the league office places after the draft (anyone undrafted, and late sign-ups) join your training camp as depth: real one-season contracts you can dress at any position up to '+cCap+' games a week, trade or waive. Call one up and he takes an active-roster spot like anyone else, so the roster must have room (Rule 2.8). '
@@ -2278,7 +2284,7 @@ CG.hubRoster = function(qs){
       (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
         ? 'There is no weekly appearance cap in the pre-season (Rule 5.2) — dress whoever you need, as often as you need. Camp players still fill any position, and in pre-season games so do your Owner, GM and AGM (Rule 2.1). '
         : 'Camp players may dress in up to '+cCap+' games a week at any position; skaters play their own position group, up to '+sCap+' games a week'+(gCap===sCap?', goaltenders too':' (goaltenders up to '+gCap+')')+' — Rule 5.2. ')+
-      'You may move players between the active roster and training camp freely, as often as you like, all season — there is no limit on squad changes (Rule 2.1).'+
+      'You may move players between the active roster and training camp as often as you like, except during the weekly roster freeze from Wednesday 7:30 PM to midnight at the end of Friday ET. Trades stay open during the freeze. Each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place; an extra player joins the active roster where his position group has room, and training camp where it doesn’t (Rule 2.1).'+
       (CG.minServiceGp()?' A player can be waived or traded only after '+CG.minServiceGp()+' regular-season games this season; until then his Trade and Waive buttons wait, and the count sits beside them (Rule 2.4).':'')+'</p></div></div>';
   }
   /* Road to 3 (Rule 2.8): during the pre-season, this club is custodian of its assigned players'

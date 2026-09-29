@@ -154,10 +154,11 @@ CG.rosterFreeze = function(at){
   var d = new Date(at || CG.now());
   var f = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", weekday:"short", hour:"2-digit", minute:"2-digit", hour12:false });
   var parts = {}; f.formatToParts(d).forEach(function(x){ parts[x.type] = x.value; });
-  var dow = parts.weekday, mins = (parseInt(parts.hour,10)||0)*60 + (parseInt(parts.minute,10)||0);
+  /* % 24: some Intl builds render midnight as hour "24" under hour12:false */
+  var dow = parts.weekday, mins = ((parseInt(parts.hour,10)||0) % 24)*60 + (parseInt(parts.minute,10)||0);
   var on = dow==="Thu" || dow==="Fri" || (dow==="Wed" && mins >= 19*60+30);
   return { on: on, reopens: on ? "Saturday 12:00 AM ET" : null,
-    why: "Rule 2.1: the roster is frozen from Wednesday 7:30 PM until Friday midnight ET. Call-ups and send-downs reopen Saturday." };
+    why: "Rule 2.1: the roster is frozen from Wednesday 7:30 PM until Friday midnight ET. Call-ups and send-downs reopen Saturday. Trades stay open." };
 };
 
 CG.posLocksOn = function(s){ var sn = s || CG.SEASON; return !!(sn && sn.position_locks); };
@@ -9605,7 +9606,7 @@ CG.AFTER._roster = function(){
     CG.modal("Swap "+esc(me.tag),
       '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
       ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
-      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+' — any position in the group (Rule 2.1). Squad changes are unlimited all season.</p>'+
+      ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+', any position in the group (Rule 2.1). Squad changes have no limit outside the weekly roster freeze, Wednesday 7:30 PM to Friday midnight ET.</p>'+
       '<div class="stack" style="gap:6px">'+opts.map(function(x){
         return '<button class="btn btn-ghost" style="justify-content:space-between;width:100%" data-swap-with="'+x.spotId+'">'+
           '<span>'+esc(x.tag)+' · '+esc(x.pos)+'</span><span class="caption">'+CG.fmtMoney(x.salary||0)+'</span></button>';
@@ -13683,6 +13684,9 @@ CG.hubTradeHubLive = function(qs){
     '<h1 class="h-sec" style="margin-top:8px">Trade Hub</h1>'+
     '<p class="lede" style="margin-top:8px">Offer players'+(CG.fmt("pick_trades")?' and draft picks':'')+', review incoming offers, and propose deals — all live. Nothing changes hands until the other club accepts.</p></div>';
   h+='<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Confidential to management.</b> Offers and notes are visible to your Owner, GM, and AGM (Rule 2.3).</span></div>';
+  /* v3.72: trades stay open through the weekly roster freeze, and the page says so while it is on */
+  var fzT = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
+  if (fzT.on) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Roster freeze, trades open.</b> Call-ups and send-downs are locked until '+esc(fzT.reopens)+', but you can still propose and accept trades. Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place, so a trade never works as a call-up (Rule 2.1).</span></div>';
   var inc='<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
   if(incoming.length){
     inc+=incoming.map(function(tr){ var fromCode=lg._idToCode[tr.from_team_id];
@@ -13727,7 +13731,7 @@ CG.hubTradeHubLive = function(qs){
     ((d.offP.length||d.reqP.length) ? CG.tradeBalanceCard(club, d.offP, d.partner, d.reqP, { compact:true }) : '')+
     '<label class="fld" style="margin-top:14px"><span>Note to the other club (optional)</span><input id="tradeNote" placeholder="Why this works for both sides…"></label>'+
     '<button class="btn btn-chrome" id="tradePropose">Propose to '+(d.partner?esc(CG.TEAM[d.partner].code):"club")+'</button>'+
-    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded.'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
+    '<p class="caption" style="margin-top:10px">The offer goes to the other club’s management and only executes when they accept. Owner/GM/AGM can’t be traded. Each player a club receives takes the place of one it sends, an active place for an active place and a camp place for a camp place; an extra player joins the active roster where his position group has room, and training camp where it doesn’t (Rule 2.1).'+(CG.fmt("pick_trades")?'':' Players only — draft picks are not trade assets in the basic format (Rule 2.3).')+'</p>'+
   '</div></div>';
   /* v3.37 (commissioner): Build a trade stays at the top of the page. The block board is a long
      table and it had pushed the builder down; the builder is the tool, so it comes first and
@@ -13900,7 +13904,16 @@ CG.proposeTrade = function(){
 };
 /* reloadLeague, not refreshTrades: the latter reloads only the trade lists, so the accepting GM
    kept building his next deal against the PRE-trade roster and cap sheet. */
-CG.acceptTrade = function(id){ CG.confirm("Accept this trade?",(CG.fmt("pick_trades")?"The players and picks change hands immediately and it’s logged. Make sure the deal clears your cap.":"The players change hands immediately and it’s logged. Make sure the deal clears your cap and your roster shape."),"Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed — rosters updated for both clubs","ok"); CG.loadTrades().then(function(){ CG.reloadLeague(); }); }); }); }); };
+/* v3.72: the confirm says where the players land, and once the league reloads the toast names any player
+   the trade placed in training camp (the database's own placement, read back, never predicted). */
+CG.acceptTrade = function(id){
+  var tr0 = (CG.lg._myTrades||[]).find(function(x){ return x.id===id; });
+  var incoming = tr0 ? (tr0.offered_profile_ids||[]).slice() : [];
+  CG.confirm("Accept this trade?",(CG.fmt("pick_trades")?"The players and picks change hands immediately and it’s logged. ":"The players change hands immediately and it’s logged. ")+"Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place; an extra player joins your active roster where his position group has room, and training camp where it doesn’t (Rule 2.1). The deal must clear your cap, and your camp must have room for anyone placed there.","Accept trade", function(){ CG.mgmtQueue("accept_trade",{ p_trade:id }, "accept the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.rpc("accept_trade",{ p_trade:id }).then(function(r){ if(r.error){ CG.toast("Couldn’t accept: "+r.error.message,"err"); return; } CG.toast("Trade completed. Rosters are updated for both clubs.","ok");
+    CG.loadTrades().then(function(){ return CG.reloadLeague(); }).then(function(){
+      var camp = incoming.map(function(pid){ return CG.tPlayer(pid); }).filter(function(p){ return p && CG.isCamp(p); });
+      if (camp.length) CG.toast(camp.map(function(p){ return p.tag; }).join(", ")+" joined your training camp: each player you receive takes the place of one you send (Rule 2.1).","ok");
+    }); }); }); }); };
 /* .select() on both: an RLS-refused update returns 0 rows and NO error, and the old success toast
    told a manager an offer was declined that the other club still saw live (the false-success class). */
 CG.declineTrade = function(id){ CG.mgmtQueue("trade_decline",{ p_trade:id }, "decline the trade offer from "+CG.tradePartnerName(id)).then(function(q){ if (q) return; CG.sb.from("trades").update({ status:"declined", updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){ if(r.error) CG.toast("Couldn’t decline: "+r.error.message,"err"); else if(!r.data||!r.data.length) CG.toast("Couldn’t decline — the offer may have changed. Refresh and retry.","err"); else { CG.toast("Offer declined","ok"); CG.refreshTrades(); } }); }); };
