@@ -6422,7 +6422,7 @@ CG.AFTER._preseason = function(){
     var el=this, regId=el.getAttribute("data-assign"), sel=document.querySelector('[data-assign-team="'+regId+'"]'), code=sel?sel.value:"";
     if(!code){ CG.toast("Pick a club first","err"); return; }
     var name=el.getAttribute("data-name");
-    CG.confirm("Sign "+name+" to "+CG.TEAM[code].name+"?","This adds the player to the club's active roster with the next open jersey number and logs a transaction. Reversible with a waive.","Sign player", function(){
+    CG.confirm("Sign "+name+" to "+CG.TEAM[code].name+"?","This adds the player to the club's active roster, wearing his chosen jersey number if it is free on the club and the next open one if not, and logs a transaction. Reversible with a waive.","Sign player", function(){
       CG.assignRegistration(regId, el.getAttribute("data-prof"), el.getAttribute("data-pos"), name, code);
     });
   }); });
@@ -6738,8 +6738,12 @@ CG.assignRegistration = async function(regId, profileId, position, playerName, c
   if(!s||!teamId){ CG.toast("Missing season/club","err"); return; }
   var used={}; (CG.lg.byTeam[code]||[]).forEach(function(p){ if(p.jersey) used[p.jersey]=1; });
   var num=0; for(var n=1;n<=99;n++){ if(!used[n]){ num=n; break; } }
-  var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 });
+  /* v3.78: num is only an offer. The database gives him his chosen number when it is free on the club (Rule 2.1),
+     so the log, the toast and the table all quote the number it actually stored. */
+  var r1 = await CG.sb.from("roster_spots").insert({ season_id:s.id, team_id:teamId, profile_id:profileId, jersey_number:num, position:position, salary:0 }).select("jersey_number");
   if(r1.error){ CG.toast("Couldn’t sign: "+r1.error.message,"err"); return; }
+  if(!(r1.data||[]).length){ CG.toast("The database did not confirm the signing. Reload before trying again.","err"); return; }
+  num = r1.data[0].jersey_number;
   var r2 = await CG.sb.from("season_registrations").update({ status:"assigned" }).eq("id", regId).select("id,status");
   if (r2.error || !(r2.data||[]).length || r2.data[0].status!=="assigned") CG.toast("On the roster, but the registration still reads as unplaced"+(r2.error?": "+r2.error.message:""),"err");
   var r3 = await CG.sb.from("transactions").insert({ season_id:s.id, type:"sign", description: CG.TEAM[code].name+" signed <b>"+String(playerName||"a player").replace(/[<>]/g,"")+"</b> ("+position+" #"+num+")" }).select("id");
@@ -7062,7 +7066,8 @@ CG.userEditModal = function(id){
     '<label class="fld"><span>Console</span><select id="uePlat">'+CG.platOptions(pr.platform||"","—")+'</select></label>'+
     fld("Xbox gamertag / PSN name","ueTag",pr.platform_gamertag,'placeholder="the name on their console"')+
     fld("Time zone","ueTZ",pr.timezone,'placeholder="e.g. Eastern"')+
-    fld("Jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99"')+
+    /* v3.78: profiles.jersey_number is the player's own choice (Rule 2.1), not the number he wears on his club */
+    fld("Chosen jersey number","ueJer",pr.jersey_number,'type="number" min="1" max="99" data-was="'+(pr.jersey_number==null?"":pr.jersey_number)+'" title="The player\u2019s own choice, used when he joins a club. It does not renumber his current club: do that in the club\u2019s Team HQ."')+
     fld("Overall rating","ueOvr",pr.overall,'type="number" min="40" max="99"')+
     fld("Twitch channel","ueTw",pr.twitch,'placeholder="channel name only"')+
     posSel+
@@ -7070,7 +7075,10 @@ CG.userEditModal = function(id){
     '<p class="caption" style="margin-top:10px">Gamertag follows their <b>Discord display name</b> — the 2-minute sync will overwrite a hand edit unless they rename on Discord too. Role, club, and departments are managed from this table and the Staff Desk, not here. A position change moves his roster spot this season (the club\'s shape must have room in the new group, Rule 2.1) and his sign-up; his Discord position role follows.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ueGo">Save player</button>');
   document.getElementById("ueGo").addEventListener("click", function(){
-    var jer = parseInt(document.getElementById("ueJer").value,10);
+    /* v3.78: the chosen number is sent only when the office changed it, so a save of another field never puts
+       back a number the player has since changed himself; anything but 1 to 99 is refused, not clamped */
+    var jerEl = document.getElementById("ueJer"), jerRaw = String(jerEl.value||"").trim(), jerChanged = jerRaw !== String(jerEl.dataset.was||"");
+    if (jerChanged && ((jerEl.validity && jerEl.validity.badInput) || (jerRaw !== "" && !/^\d{1,2}$/.test(jerRaw)) || (jerRaw !== "" && (+jerRaw < 1 || +jerRaw > 99)))){ CG.toast("A jersey number is a whole number from 1 to 99","err"); return; }
     var ovr = parseInt(document.getElementById("ueOvr").value,10);
     var payload = {
       gamertag:(document.getElementById("ueGT").value||"").trim()||null,
@@ -7079,10 +7087,10 @@ CG.userEditModal = function(id){
       platform:document.getElementById("uePlat").value||null,
       platform_gamertag:(document.getElementById("ueTag").value||"").trim()||null,
       timezone:(document.getElementById("ueTZ").value||"").trim()||null,
-      jersey_number:isNaN(jer)?null:Math.max(1,Math.min(99,jer)),
       overall:isNaN(ovr)?null:Math.max(40,Math.min(99,ovr)),
       twitch:(document.getElementById("ueTw").value||"").trim()||null
     };
+    if (jerChanged) payload.jersey_number = jerRaw === "" ? null : +jerRaw;
     if (!payload.gamertag){ CG.toast("A player needs a gamertag","err"); return; }
     var btn=this; btn.disabled=true;
     var newPos = (document.getElementById("uePos")||{}).value || "";
@@ -13228,15 +13236,51 @@ CG.AFTER.hub = function(param, qs){
     /* The list is the league's, not this form's: a server the league no longer plays on is refused
        here rather than written and then quietly ignored by the resolver. */
     if (srv && (CG.SERVERS||[]).indexOf(srv)<0){ CG.toast("That server is not one the league plays on","err"); return; }
-    CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null, platform_gamertag:ptag||null, preferred_server:srv||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
-      if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-      if(!(r.data||[]).length){ CG.toast("That didn’t save — your sign-in may have expired. Sign in again and retry.","err"); return; }
+    /* v3.78: the jersey number goes through its own door (set_my_jersey_number), which puts it on his club
+       too and refuses a number a teammate wears. Sent only when he changed the field: a save of his EA ID
+       never touches his number (a club's renumber or a choice a teammate wears stays as it is). */
+    var jEl=document.getElementById("sJerseyLive"), jRaw=jEl?String(jEl.value||"").trim():"", jNum=null, jSend=false;
+    if (jEl){
+      /* a typed "7a" reads as "" in a number field: refuse it rather than take it as "clear my number" */
+      if ((jEl.validity && jEl.validity.badInput) || (jRaw!=="" && !/^\d{1,2}$/.test(jRaw))){ CG.toast("A jersey number is a whole number from 1 to 99","err"); return; }
+      jNum = jRaw==="" ? null : parseInt(jRaw,10);
+      if (jNum!==null && (jNum<1 || jNum>99)){ CG.toast("A jersey number is a whole number from 1 to 99","err"); return; }
+      jSend = jRaw !== String(jEl.dataset.was||"");
+    }
+    var saveProfile = CG.sb.from("profiles").update({ ea_id:ea||null, platform:plat||null, platform_gamertag:ptag||null, preferred_server:srv||null }).eq("id",CG.auth.user.id).select("id").then(function(r){
+      if(r.error) return "Couldn’t save: "+r.error.message;
+      if(!(r.data||[]).length) return "That didn’t save. Your sign-in may have expired: sign in again and retry.";
       CG.auth.profile.ea_id=ea||null; CG.auth.profile.platform=plat||null;
       CG.auth.profile.platform_gamertag=ptag||null; CG.auth.profile.preferred_server=srv||null;
       /* the club's board reads lg.players, so update the loaded row too: the suggestion shows up
          on the Schedule desk immediately instead of after the next full league load */
       ((CG.lg&&CG.lg.players)||[]).forEach(function(lp){ if(lp.id===CG.auth.user.id) lp.server=srv||null; });
-      CG.toast("Profile saved","ok");
+      return null;
+    }, function(e){ return "Couldn’t save: "+String((e&&e.message)||e); });
+    var saveJersey = jSend ? CG.saveMyJersey(jNum) : Promise.resolve({});
+    Promise.all([saveProfile, saveJersey]).then(function(res){
+      var pErr=res[0], jr=res[1]||{}, jErr=jr.err||null;
+      CG.paintMyJersey();   /* in place: the field and hint now say what the database holds */
+      if (pErr && jErr){ CG.toast(pErr+" Your number did not change either: "+jErr,"err"); return; }
+      if (pErr){ CG.toast(pErr+(jSend?" Your jersey number was saved.":""),"err"); return; }
+      if (jErr){ CG.toast("Profile saved, but your number did not change: "+jErr,"err"); return; }
+      var d=jr.d;
+      CG.toast(!d || d.chosen==null ? "Profile saved"
+        : d.wearing!=null ? "Profile saved. You wear #"+d.wearing+" for the "+(jr.club||"club")+"."
+        : "Profile saved. #"+d.chosen+" is yours when you join a club, if nobody there wears it.","ok");
+    });
+  });
+  /* v3.78: "Wear #N" in the jersey hint puts his saved choice on his club. Delegated from the hint, which is
+     redrawn in place after every write, so the listener outlives each redraw. */
+  var jh=document.getElementById("sJerseyHint");
+  if (jh) jh.addEventListener("click", function(e){
+    var b=e.target && e.target.closest ? e.target.closest("#sJerseyWear") : null; if(!b) return;
+    e.preventDefault(); if (b.getAttribute("aria-disabled")==="true") return;
+    b.setAttribute("aria-disabled","true");
+    CG.saveMyJersey(parseInt(b.dataset.n,10)).then(function(jr){
+      CG.paintMyJersey();
+      if (jr.err){ CG.toast("Your number did not change: "+jr.err,"err"); return; }
+      CG.toast("You wear #"+jr.d.wearing+" for the "+(jr.club||"club")+".","ok");
     });
   });
   if (CG._origHubAfter) CG._origHubAfter(param, qs);
@@ -13332,6 +13376,62 @@ CG.switchDiscordAccount = function(id, name){
 
 /* Settings — the live version writes to the real profile; the prototype's placebo privacy
    toggles and demo-seat card are gone. Theme picker keeps part6's markup + wiring. */
+/* v3.78 (commissioner, 2026-10-01): a player chooses his own jersey number in his league profile (Rule 2.1).
+   The choice is his (profiles.jersey_number) and goes with him: whenever he joins a club he wears it there if
+   nobody does. On his club this season it takes effect the moment he saves, unless a teammate wears it. The
+   database decides all of that (set_my_jersey_number); this only reads the two numbers so the card can say
+   which one he chose and which one he wears, and they are not always the same. */
+CG.myJersey = function(){
+  var uid = CG.auth && CG.auth.user && CG.auth.user.id, prof = (CG.auth && CG.auth.profile) || {};
+  var sid = CG.SEASON && CG.SEASON.id, lg = CG.lg || {};
+  var mine = function(rs){ return !sid || rs.season_id === sid; };
+  var spot = (lg._rosterRaw || []).find(function(rs){ return rs.profile_id === uid && mine(rs); }) || null;
+  var code = spot && lg._idToCode ? lg._idToCode[spot.team_id] : null;
+  var chosen = prof.jersey_number != null ? +prof.jersey_number : null, takenBy = null;
+  if (spot && chosen && +spot.jersey_number !== chosen){
+    var w = (lg._rosterRaw || []).find(function(rs){ return mine(rs) && rs.team_id === spot.team_id && rs.profile_id !== uid && +rs.jersey_number === chosen; });
+    if (w){ var pl = CG.playerById && lg.players ? CG.playerById(lg, w.profile_id) : null; takenBy = (pl && pl.tag) || ((lg._profName || {})[w.profile_id]) || "a teammate"; }
+  }
+  return { chosen: chosen, wearing: spot && spot.jersey_number ? +spot.jersey_number : null,
+           club: code && CG.TEAM[code] ? CG.TEAM[code].name : null, spot: spot, takenBy: takenBy };
+};
+CG.jerseyHint = function(j){
+  j = j || CG.myJersey();
+  var club = esc(j.club || "your club");
+  if (j.wearing && j.chosen && j.chosen !== j.wearing && j.takenBy)
+    return 'You wear <b>#'+j.wearing+'</b> for the '+club+'. Your saved choice, #'+j.chosen+', is worn there by '+esc(j.takenBy)+', so it stays your choice for your next club. Enter another number to change it here.';
+  if (j.wearing && j.chosen && j.chosen !== j.wearing)
+    return 'You wear <b>#'+j.wearing+'</b> for the '+club+', and your saved choice is <b>#'+j.chosen+'</b>, which is free there. '+
+      '<a href="#" role="button" class="btn btn-ghost btn-sm" id="sJerseyWear" data-n="'+j.chosen+'" style="margin-top:6px">Wear #'+j.chosen+'</a>';
+  if (j.wearing)
+    return 'You wear <b>#'+j.wearing+'</b> for the '+club+'. Enter another number and save: it changes on your club right away unless a teammate already wears it, and it goes with you if you move clubs.';
+  return 'Your number, 1 to 99. When you join a club you wear it there if nobody else does; if somebody does, you get a free number and can change it here.';
+};
+/* The one write for both the Save button and "Wear #N": the database decides, and everything the page shows is
+   patched from its answer (never from the snapshot), so a number he does not wear is never displayed as his. */
+CG.saveMyJersey = function(n){
+  return CG.sb.rpc("set_my_jersey_number", { p_number: n }).then(function(r){
+    if (r.error) return { err: r.error.message };
+    var d = r.data || {}, uid = CG.auth.user.id, lg = CG.lg || {}, sid = CG.SEASON && CG.SEASON.id;
+    CG.auth.profile.jersey_number = d.chosen == null ? null : +d.chosen;
+    if (d.wearing != null){
+      var spot = (lg._rosterRaw || []).find(function(rs){ return rs.profile_id === uid && (!sid || rs.season_id === sid) && rs.team_id === d.team_id; });
+      if (spot) spot.jersey_number = +d.wearing;
+      else if (CG.reloadLeague) CG.reloadLeague();    /* the page's roster is older than the database's: refetch it */
+      (lg.players || []).forEach(function(lp){ if (lp.id === uid) lp.jersey = +d.wearing; });
+      Object.keys(lg.byTeam || {}).forEach(function(c){ (lg.byTeam[c] || []).forEach(function(lp){ if (lp.id === uid) lp.jersey = +d.wearing; }); });
+    }
+    var code = d.team_id && lg._idToCode ? lg._idToCode[d.team_id] : null;
+    return { d: d, club: code && CG.TEAM[code] ? CG.TEAM[code].name : null };
+  }, function(e){ return { err: String((e && e.message) || e) }; });
+};
+CG.paintMyJersey = function(){
+  var j = CG.myJersey(), el = document.getElementById("sJerseyLive"), hint = document.getElementById("sJerseyHint");
+  var v = j.wearing || j.chosen || "";
+  if (el){ el.value = v; el.dataset.was = String(v); }
+  if (hint) hint.innerHTML = CG.jerseyHint(j);
+};
+
 CG.hubSettings = function(){
   var p = CG.auth.profile || {}, tp = CG.themePref();
   return '<div style="margin-bottom:20px"><span class="eyebrow chr">Account</span><h1 class="h-sec" style="margin-top:8px">Settings</h1></div>'+
@@ -13364,6 +13464,11 @@ CG.hubSettings = function(){
     '<label class="fld"><span>Suggested server</span><select id="sSrvLive"><option value="">No preference</option>'+
       (CG.SERVERS||[]).map(function(x){ return '<option value="'+esc(x)+'"'+((p.preferred_server||"")===x?" selected":"")+'>'+esc(x)+'</option>'; }).join("")+
     '</select><span class="hint">The server you play best on. Your club\u2019s management sees the whole roster\u2019s answers when it sets each game\u2019s server picks and veto (Rule 4.2). It is a suggestion, not a vote: the picks stay management\u2019s. Leave it on <b>No preference</b> if you play anywhere.</span></label>'+
+    /* the field shows the number he WEARS on his club (his choice when he has no club); a saved choice he does
+       not wear is offered in the hint, with its own button, so an unrelated save never changes his number */
+    (function(){ var j = CG.myJersey(), v = j.wearing || j.chosen || "";
+      return '<label class="fld"><span>Jersey number</span><input id="sJerseyLive" type="number" min="1" max="99" step="1" inputmode="numeric" value="'+v+'" data-was="'+v+'" placeholder="1 to 99">'+
+        '<span class="hint" id="sJerseyHint">'+CG.jerseyHint(j)+'</span></label>'; })()+
     '<button class="btn btn-ink" id="sSaveLive">Save profile</button></div></div>'+
     '<div class="stack">'+
     '<div class="card" id="dcAcctCard"><div class="card-h"><h3>Discord account</h3><span class="chip" id="dcAcctChip">Checking…</span></div><div class="card-b" id="dcAcctBody"><p class="small" style="color:var(--steel)">Loading your linked accounts…</p></div></div>'+

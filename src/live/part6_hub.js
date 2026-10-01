@@ -2457,6 +2457,10 @@ CG.AFTER._roster = function(){
         if (r.error){ CG.toast(r.error.message, "err"); el.value = was; return; }
         was = String(n);
         var pl = CG.playerById(CG.lg, pid); if (pl) pl.jersey = n;    /* the table, the cards and the crest all read this */
+        /* v3.78: and the player's own Settings card reads the raw spot, so a renumber shows there too */
+        var sid = CG.SEASON && CG.SEASON.id;
+        ((CG.lg && CG.lg._rosterRaw) || []).forEach(function(rs){ if (rs.profile_id === pid && rs.team_id === tid && (!sid || rs.season_id === sid)) rs.jersey_number = n; });
+        Object.keys((CG.lg && CG.lg.byTeam) || {}).forEach(function(c){ (CG.lg.byTeam[c] || []).forEach(function(lp){ if (lp.id === pid) lp.jersey = n; }); });
         CG.toast((pl?pl.tag:"That player")+" wears #"+n, "ok");
       });
     };

@@ -22,7 +22,7 @@ from pg_policies where schemaname = 'public' and cmd = 'SELECT' and qual = 'true
 union all
 -- 4) client RPCs that lost their grant (paste the current list from `grep -oh 'rpc("[a-z_0-9]*"' src/live/*.js | sort -u`)
 select 'client-rpc-not-executable', c.name, '', false
-from unnest(array['respond_offer','sign_free_agent','offer_free_agent','set_game_lineup','draft_make_pick','waive_player','accept_trade','set_roster_squad','swap_roster_squad','resolve_game_server','registration_pool','career_games_played','can_see_match']) c(name)
+from unnest(array['respond_offer','sign_free_agent','offer_free_agent','set_game_lineup','draft_make_pick','waive_player','accept_trade','set_roster_squad','swap_roster_squad','resolve_game_server','registration_pool','career_games_played','can_see_match','set_my_jersey_number']) c(name)
 where not coalesce((select bool_or(has_function_privilege('authenticated', p.oid, 'EXECUTE')) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = c.name), false)
 union all
 -- 5) internal notice writers (v3.50). These post into club rooms, ring bells and page staff, and check
