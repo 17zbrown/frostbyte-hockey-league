@@ -25,6 +25,7 @@
 // case involving someone is worked by someone else.
 
 import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
+import { noLinkPreviews } from "../shared/discord-links.cjs";
 
 /* Desk routes mirror CG.STAFF_DESKS — key is the department, value the hash route of its desk. */
 const DESK_PATH = {
@@ -206,7 +207,8 @@ export function createStaffAlerter(env, opts = {}) {
     for (let attempt = 0; attempt < 4; attempt++) {
       const r = await timedFetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        /* no link previews in anything the league posts (commissioner, 2026-10-01) */
+        body: JSON.stringify(noLinkPreviews(body)),
       }, D_MS);
       if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
       if (r.status >= 500) { const e = new Error(`post ${channelId} -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }

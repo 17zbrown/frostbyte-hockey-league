@@ -21,12 +21,16 @@
 // function lives in netlify/functions/discord-sync.js; change one, change the other.
 
 import { buildDepartureEmbed } from "../shared/departure-card.mjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
 
 function discordName(m) {
   return String((m && (m.globalName || m.username)) || "").trim() || null;
 }
 
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
+/* the Discord calls that write a message: a create (or a forum post carrying one) and an edit */
+const MSG_CREATE = /^\/channels\/[^/]+\/(messages|threads)$/;
+const MSG_EDIT = /^\/channels\/[^/]+\/messages\/[^/]+$/;
 
 /* ================= the bot's transport: every call has a deadline =================
    One definition for all four instant lanes (role-sync, club-notices, dms, staff-alerts
@@ -141,10 +145,14 @@ export function createHandlers(env, opts = {}) {
      claim (audit 2026-09-17, P2-12). */
   async function dApi(method, path, body) {
     const idempotent = method !== "POST";
+    /* no link previews in anything the league posts (commissioner, 2026-10-01): message creates and
+       edits go through the shared helper, every other call is sent as written */
+    const payload = method === "POST" && MSG_CREATE.test(path) ? noLinkPreviews(body)
+      : method === "PATCH" && MSG_EDIT.test(path) ? noLinkPreviewsEdit(body) : body;
     for (let attempt = 0; attempt < 4; attempt++) {
       const r = await rfetch(`https://discord.com/api/v10${path}`, {
         method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body)
+        body: payload === undefined ? undefined : JSON.stringify(payload)
       }, D_MS);
       if (r.status === 404) return { __notfound: true };   // callers MUST check — see dPost
       if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }

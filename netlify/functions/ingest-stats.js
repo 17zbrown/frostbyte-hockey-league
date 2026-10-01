@@ -21,6 +21,7 @@ export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
 
 import { timingSafeEqual } from "node:crypto";
 import { matchInWindow, fixtureForMatch, describeWindow, FULL_GAME_CLOCK_S, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS } from "../../shared/game-window.cjs";
+import { noLinkPreviews } from "../../shared/discord-links.cjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1271,8 +1272,9 @@ async function tellStaff(text) {
     const byKey = Object.fromEntries((rows || []).map((r) => [r.key, r.value]));
     const hook = byKey.discord_staff_webhook || byKey.discord_updates_webhook;
     if (!hook) return;
+    /* no link previews in anything the league posts (commissioner, 2026-10-01) */
     await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: text.slice(0, 1800), allowed_mentions: { parse: [] }, flags: 4 }) });
+      body: JSON.stringify(noLinkPreviews({ content: text.slice(0, 1800), allowed_mentions: { parse: [] } })) });
   } catch { /* never breaks the merge */ }
 }
 

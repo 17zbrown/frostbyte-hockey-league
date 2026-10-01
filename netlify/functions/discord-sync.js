@@ -28,6 +28,7 @@ import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
   desiredRolesFor, applyManagedRoles, managedRoleIds } from "../../shared/roles.mjs";
 import { buildDepartureEmbed } from "../../shared/departure-card.mjs";
 import { buildNoticeEmbed } from "../../bot/club-notices.mjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -103,8 +104,19 @@ async function sbPatch(path, body) {
    decides what "unknown" means for its bookkeeping, never dApi. Everything else (role and channel
    PATCHes, PUT overwrites, GETs) is idempotent and retried as before. */
 const isMessagePost = (method, path) => method === "POST" && /^\/channels\/[^/]+\/messages$/.test(path);
+/* v3.77, commissioner 2026-10-01: no link previews in anything the league posts. Every message write
+   that passes through dApi (a create or an edit, by method) goes through the shared rule in
+   shared/discord-links.cjs; role, channel, overwrite and webhook-creation calls are sent as is. */
+const MESSAGE_CREATE_PATH = /^\/(channels\/[^/?]+\/(messages|threads)|webhooks\/[^/?]+\/[^/?]+|interactions\/[^/?]+\/[^/?]+\/callback)(\?.*)?$/;
+const MESSAGE_EDIT_PATH = /^\/(channels\/[^/?]+|webhooks\/[^/?]+\/[^/?]+)\/messages\/[^/?]+(\?.*)?$/;
+function previewSafe(method, path, body) {
+  if (method === "POST" && MESSAGE_CREATE_PATH.test(path)) return noLinkPreviews(body);
+  if (method === "PATCH" && MESSAGE_EDIT_PATH.test(path)) return noLinkPreviewsEdit(body);
+  return body;
+}
 async function dApi(method, path, body) {
   const oneShot = isMessagePost(method, path);
+  body = previewSafe(method, path, body);
   // Retry on 429 (respect Retry-After) so a busy run doesn't skip members and mis-flag them.
   for (let attempt = 0; attempt < 4; attempt++) {
     let r;

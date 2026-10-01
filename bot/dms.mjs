@@ -11,8 +11,12 @@
 // on the fifth knock, and the site notification written in the same transaction still reaches him.
 // A 5xx or a timeout is an unknown outcome: the claim is kept and the row is marked unconfirmed.
 import { timedFetch, withRetries, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
 
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
+/* the Discord calls that write a message: a create (or a forum post carrying one) and an edit */
+const MSG_CREATE = /^\/channels\/[^/]+\/(messages|threads)$/;
+const MSG_EDIT = /^\/channels\/[^/]+\/messages\/[^/]+$/;
 
 export function createDms(env, opts = {}) {
   const { SB_URL, SB_KEY, BOT } = env;
@@ -37,10 +41,14 @@ export function createDms(env, opts = {}) {
   }
   /* one attempt apart from a 429; 4xx = provable refusal, 5xx/timeout = ambiguous (see club-notices.mjs) */
   async function discord(method, path, body) {
+    /* no link previews in anything the league posts (commissioner, 2026-10-01): message creates and
+       edits go through the shared helper; the DM channel open is sent as written */
+    const payload = method === "POST" && MSG_CREATE.test(path) ? noLinkPreviews(body)
+      : method === "PATCH" && MSG_EDIT.test(path) ? noLinkPreviewsEdit(body) : body;
     for (let attempt = 0; attempt < 4; attempt++) {
       const r = await timedFetch(`https://discord.com/api/v10${path}`, {
         method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-        body: body == null ? undefined : JSON.stringify(body),
+        body: payload == null ? undefined : JSON.stringify(payload),
       }, D_MS);
       if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
       if (r.status >= 500) { const e = new Error(`${method} ${path} -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }
@@ -85,8 +93,7 @@ export function createDms(env, opts = {}) {
       try {
         let ch = dmChannels.get(row.discord_id);
         if (!ch) { const c = await discord("POST", "/users/@me/channels", { recipient_id: row.discord_id }); ch = c.id; dmChannels.set(row.discord_id, ch); }
-        /* flags 4 = SUPPRESS_EMBEDS: a DM carries a link to the site and the unfurled card buried it */
-        await discord("POST", `/channels/${ch}/messages`, { content: String(row.content).slice(0, 1990), allowed_mentions: { parse: [] }, flags: 4 });
+        await discord("POST", `/channels/${ch}/messages`, { content: String(row.content).slice(0, 1990), allowed_mentions: { parse: [] } });
       } catch (e) {
         const msg = String(e.message || e).slice(0, 200);
         if (e.retry) {

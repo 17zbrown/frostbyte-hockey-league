@@ -20,6 +20,8 @@
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN. Node 18+.
 
+import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
+
 export const config = { schedule: "*/2 * * * *" };
 
 const SB_URL = process.env.SUPABASE_URL;
@@ -58,8 +60,18 @@ async function casState(id, prevUpdatedAt, body) {
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) && rows.length > 0;
 }
+// No link previews (commissioner, 2026-10-01), applied to MESSAGE writes only: a POST that creates a
+// message (or a forum post carrying one) and a PATCH that edits one. Deletes and reads are left alone.
+const MSG_CREATE = /^\/channels\/[^/?]+\/(?:messages|threads)(?:\?|$)/;
+const MSG_EDIT = /^\/channels\/[^/?]+\/messages\/[^/?]+(?:\?|$)/;
+function previewSafe(method, path, body) {
+  if (method === "POST" && MSG_CREATE.test(path)) return noLinkPreviews(body);
+  if (method === "PATCH" && MSG_EDIT.test(path)) return noLinkPreviewsEdit(body);
+  return body;
+}
 // Retries on 429 / 5xx: a rate limit mid-sweep must not silently drop a player's only warning.
 async function dApi(method, path, body) {
+  body = previewSafe(method, path, body);
   for (let i = 0; i < 4; i++) {
     const r = await fetch(`https://discord.com/api/v10${path}`, {
       method, headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },

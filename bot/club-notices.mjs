@@ -19,6 +19,7 @@
 // message, the posted_at stamp is retried and, failing that, the claim is still kept: releasing
 // it after a delivery is the other way to post twice.
 import { timedFetch, withRetries, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
+import { noLinkPreviews } from "../shared/discord-links.cjs";
 
 const UA = "DiscordBot (https://chelgamingleague.com,1.0)";
 const SITE = "https://chelgamingleague.com";
@@ -81,7 +82,8 @@ export function createClubNotices(env, opts = {}) {
     for (let attempt = 0; attempt < 4; attempt++) {
       const r = await timedFetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST", headers: { Authorization: `Bot ${BOT}`, "User-Agent": UA, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        /* no link previews in anything the league posts (commissioner, 2026-10-01) */
+        body: JSON.stringify(noLinkPreviews(body)),
       }, D_MS);
       if (r.status === 429) { const ra = +(r.headers.get("retry-after") || 1); await new Promise((res) => setTimeout(res, ra * 1000 + 250)); continue; }
       if (r.status >= 500) { const e = new Error(`post ${channelId} -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }

@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
 
 export const config = { schedule: "*/5 * * * *" };
 
@@ -55,12 +56,10 @@ async function release(kind, ref) {
 // `ambiguous` marks the one case where we don't know whether the message landed.
 async function postWithRetry(url, headers, payload) {
   const ATTEMPTS = 4;
-  /* Commissioner's standing instruction (2026-09-22): no link previews. Every post of ours that
-     carries a URL was unfurling into a card that buried the message under a site preview, three
-     and four deep in the weekly schedule. SUPPRESS_EMBEDS (flag 4) is set on every plain-text
-     message; a post that carries its own `embeds` (the #rules mirror, the schedule card) is left
-     alone, because that flag would hide those too. */
-  if (payload && payload.content && !payload.embeds) payload = { ...payload, flags: 4 };
+  /* No link previews (commissioner, 2026-09-22; every message on the server, 2026-10-01). Every
+     post through here is a new message, so shared/discord-links.cjs sets SUPPRESS_EMBEDS on a plain
+     one and wraps the links instead on one that carries its own embeds (the flag would hide them). */
+  payload = noLinkPreviews(payload);
   for (let i = 0; i < ATTEMPTS; i++) {
     let r;
     try {
@@ -186,6 +185,10 @@ export function readRulebook() {
 /* Posting 16 messages back-to-back trips Discord's per-channel limit, so this honours Retry-After
    instead of dropping the tail of the rulebook. */
 async function rulesApi(method, p, body, tries = 5) {
+  /* No link previews (commissioner, 2026-10-01): a message created or edited through here goes
+     through shared/discord-links.cjs. Reads, deletes and every other call are sent as given. */
+  if (method === "POST" && /^\/channels\/[^/]+\/(messages|threads)$/.test(p)) body = noLinkPreviews(body);
+  else if (method === "PATCH" && /^\/channels\/[^/]+\/messages\/[^/]+$/.test(p)) body = noLinkPreviewsEdit(body);
   for (let i = 0; i < tries; i++) {
     let r;
     try {

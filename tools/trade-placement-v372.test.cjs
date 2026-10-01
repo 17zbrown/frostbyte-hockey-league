@@ -32,7 +32,7 @@ A("the deferred shape check judges a row as the transaction leaves it",
 A("a full camp can swap: the camp player comes up first",
   /update roster_spots set squad = ''pro'' where id = b\.id;\s+update roster_spots set squad = ''tc''  where id = a\.id;/.test(sql));
 A("the rehearsal is recorded", /REHEARSAL OK: T1 ok; T2 ok; T3 ok; T4 ok; T5 ok; T6 ok; S1 ok; S2 ok; S3 ok; S4 ok\./.test(sql));
-A("the grant audit names the placement helper", /'_place_trade_arrivals'\)/.test(R("tools/sql/grant-audit.sql")));
+A("the grant audit names the placement helper", /'_place_trade_arrivals'[,)]/.test(R("tools/sql/grant-audit.sql")));
 
 /* ---- the rule's arithmetic, as a JS twin of the SQL, on the cases the rehearsal ran ---- */
 function place(club, incoming, vacatedActive, departing, q, max) {

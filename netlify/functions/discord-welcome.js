@@ -16,6 +16,8 @@
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // No-ops safely if any are missing. Node 18+ (global fetch, no dependencies).
 
+import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
+
 export const config = { schedule: "*/5 * * * *" };
 
 const SB_URL = process.env.SUPABASE_URL;
@@ -67,6 +69,10 @@ async function markWelcomed(ids) {
   });
 }
 async function dApi(method, path, body) {
+  /* No link previews (commissioner, 2026-10-01): a message created or edited through here goes
+     through shared/discord-links.cjs. Reads and every other call are sent as given. */
+  if (method === "POST" && /^\/channels\/[^/]+\/(messages|threads)$/.test(path)) body = noLinkPreviews(body);
+  else if (method === "PATCH" && /^\/channels\/[^/]+\/messages\/[^/]+$/.test(path)) body = noLinkPreviewsEdit(body);
   /* 6 attempts, not 4: with the exponential ladder below this rides out ~15s of Discord
      unavailability instead of ~3.6s, which is the difference between absorbing a wobble and
      paging a human about one. */

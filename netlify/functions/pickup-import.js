@@ -10,6 +10,8 @@
 // EA blocks datacenter IPs, so EA calls go through the same residential proxy ea-poll uses (HTTPS_PROXY).
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, HTTPS_PROXY, optional PLATFORM. Node 18+.
 
+import { noLinkPreviews } from "../../shared/discord-links.cjs";
+
 const SB_URL = process.env.SUPABASE_URL;
 const BOT = process.env.DISCORD_BOT_TOKEN;   // optional: lets an import announce + close its lobby room
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -60,11 +62,12 @@ async function closePlayedLobby(rows) {
   if (!hit) return null;
   if (BOT) {
     try {
+      /* no link previews in anything the league posts (commissioner, 2026-10-01) */
       await fetch(`https://discord.com/api/v10/channels/${hit.lobby.thread_id}/messages`, {
         method: "POST", headers: { Authorization: `Bot ${BOT}`, "Content-Type": "application/json", "User-Agent": "DiscordBot (https://chelgamingleague.com,1.0)" },
-        body: JSON.stringify({ embeds: [{ title: "\uD83D\uDCCA Box score is in \u2014 GG!",
+        body: JSON.stringify(noLinkPreviews({ embeds: [{ title: "\uD83D\uDCCA Box score is in \u2014 GG!",
           description: `${hit.overlap} of this lobby's players matched the imported game. Stats are on your profiles at chelgamingleague.com \u2014 this channel clears itself in a couple of minutes.`,
-          color: 0xFFE500 }] }), signal: AbortSignal.timeout(4000) });
+          color: 0xFFE500 }] })), signal: AbortSignal.timeout(4000) });
     } catch (e) { /* the announcement is a courtesy; the close below is the point */ }
   }
   await sbSend("PATCH", `lfg_lobbies?id=eq.${hit.lobby.id}`, { status: "closed", updated_at: new Date().toISOString() });

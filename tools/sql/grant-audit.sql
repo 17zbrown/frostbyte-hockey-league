@@ -38,7 +38,7 @@ where n.nspname = 'public'
                     '_post_lock_notices','_club_batch_notices','_announce_once','_mgmt_move_send',
                     'create_notification','notify_department','notify_discord','notify_staff',
                     'notify_staff_ch','notify_staff_bell','notify_commissioners',
-                    '_place_trade_arrivals')
+                    '_place_trade_arrivals','discord_http_post')
   and (has_function_privilege('anon', p.oid, 'EXECUTE') or has_function_privilege('authenticated', p.oid, 'EXECUTE'))
 union all
 -- 6) (v3.50) a SECURITY DEFINER function the API roles can execute that calls a notice writer and whose
@@ -49,4 +49,12 @@ from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.prokind = 'f' and p.prosecdef and p.prorettype <> 'trigger'::regtype
   and (has_function_privilege('anon', p.oid, 'EXECUTE') or has_function_privilege('authenticated', p.oid, 'EXECUTE'))
   and p.prosrc ~ '(club_notify|create_notification|notify_department|notify_discord|notify_staff|notify_commissioners|discord_dms)'
-  and not (lower(p.prosrc) ~ '(is_commissioner|trusted_writer|is_gm_of|is_team_manager|has_department|is_staff\(|_is_stats|is_stats_staff|mgmt_gate|assert_|raise exception ''only|raise exception ''not_authorized|if v_uid is null|auth\.uid\(\) is null)');
+  and not (lower(p.prosrc) ~ '(is_commissioner|trusted_writer|is_gm_of|is_team_manager|has_department|is_staff\(|_is_stats|is_stats_staff|mgmt_gate|assert_|raise exception ''only|raise exception ''not_authorized|if v_uid is null|auth\.uid\(\) is null)')
+union all
+-- 7) (v3.77) a function that posts to Discord straight through net.http_post. Every database post to Discord
+--    goes through public.discord_http_post, which suppresses link previews (commissioner, 2026-10-01: "always
+--    remove the embed when you use a link in any text on the server"). sql/2026-10-01-no-link-previews-v377.sql.
+select 'discord-post-without-no-previews', p.proname, pg_get_function_identity_arguments(p.oid), false
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.proname <> 'discord_http_post'
+  and p.prosrc ~ 'net\.http_post\s*\(' and p.prosrc ~* '(discord|webhook)';

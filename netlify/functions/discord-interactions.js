@@ -12,6 +12,7 @@
 // so it is inlined; update it only if the Discord application's key is regenerated.
 
 import crypto from "node:crypto";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
 
 const PUBLIC_KEY = "4a2af92fd2cdfa5fdad8d2f1e3fd2eb9e8e17f76dc2c82a154491ebabac3d369";
 const SB_URL = process.env.SUPABASE_URL;
@@ -61,7 +62,9 @@ const UPDATE = 7;              // edit the message the component is attached to
 const REPLY = 4;              // new message (channel or ephemeral)
 const EPHEMERAL = 64;
 // Classic Netlify handler responses: { statusCode, headers, body } (matches ingest-stats / parse-screenshots)
-const respond = (obj) => ({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(obj) });
+// No link previews (commissioner, 2026-10-01): every callback goes out through here. Type 4 is a new
+// message, type 7 an edit; pongs and anything else pass through unchanged.
+const respond = (obj) => ({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(noLinkPreviews(obj)) });
 const ephemeral = (content) => respond({ type: REPLY, data: { content, flags: EPHEMERAL } });
 
 /* ---------- Ed25519 signature verification (dependency-free) ---------- */
@@ -204,7 +207,18 @@ async function sbIsStatsStaff(discordId) {
 }
 
 /* ---------- Discord REST (bot token) — the public summary + per-lobby channel ---------- */
+// No link previews (commissioner, 2026-10-01), applied to MESSAGE writes only: a POST that creates a
+// message (or a forum post carrying one) and a PATCH that edits one. Channels, permissions and
+// deletes are left alone.
+const MSG_CREATE = /^\/channels\/[^/?]+\/(?:messages|threads)(?:\?|$)/;
+const MSG_EDIT = /^\/channels\/[^/?]+\/messages\/[^/?]+(?:\?|$)/;
+function previewSafe(method, path, body) {
+  if (method === "POST" && MSG_CREATE.test(path)) return noLinkPreviews(body);
+  if (method === "PATCH" && MSG_EDIT.test(path)) return noLinkPreviewsEdit(body);
+  return body;
+}
 async function dApi(method, path, body, ms) {
+  body = previewSafe(method, path, body);
   const r = await fetch(`https://discord.com/api/v10${path}`, {
     method, headers: { Authorization: `Bot ${BOT}`, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(ms || 1600),

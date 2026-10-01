@@ -9,6 +9,7 @@
    a new thread and reports the old one's id so the office can close it — the guide history stays. */
 import fs from "node:fs";
 import path from "node:path";
+import { noLinkPreviews } from "../../shared/discord-links.cjs";
 const [dir, ...rest] = process.argv.slice(2);
 if (!dir) { console.error("usage: post-faq-guides.mjs <dir> [--only a,b]"); process.exit(2); }
 const only = (rest.indexOf("--only") > -1 ? rest[rest.indexOf("--only") + 1] : "").split(",").filter(Boolean);
@@ -53,9 +54,10 @@ for (const g of GUIDES) {
     const files = [...pages, pdf].slice(0, 10);
     const fd = new FormData();
     const applied = tagId(forum, g.tag) ? [tagId(forum, g.tag)] : [];
-    fd.append("payload_json", JSON.stringify({ name: g.title, applied_tags: applied,
+    /* no link previews in anything the league posts (commissioner, 2026-10-01); the flag leaves attachments showing */
+    fd.append("payload_json", JSON.stringify(noLinkPreviews({ name: g.title, applied_tags: applied,
       message: { content: g.body + "\n\nThe pages are below; the PDF is the same guide as one scrollable file.",
-        attachments: files.map((f, i) => ({ id: i, filename: path.basename(f) })) } }));
+        attachments: files.map((f, i) => ({ id: i, filename: path.basename(f) })) } })));
     files.forEach((f, i) => fd.append(`files[${i}]`, new Blob([fs.readFileSync(f)], { type: f.endsWith(".pdf") ? "application/pdf" : "image/png" }), path.basename(f)));
     const th = await api("POST", `/channels/${chan}/threads`, fd);
     console.log(`${forum}/${g.key}: thread ${th.id} "${g.title}" (${files.length} files)`);
