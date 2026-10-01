@@ -1505,7 +1505,10 @@ export const handler = async (event) => {
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     /* fetch as the actor's own club when it's linked; otherwise any linked side of the fixture */
-    const mine = actor.via === "management" ? teams.find((t) => t.id === actor.teamId) : null;
+    /* v3.76: league staff and the league office name the club they are working for (Team HQ preview) */
+    const named = String((body.leagueEaFetch && body.leagueEaFetch.teamId) || "");
+    const mine = actor.via === "management" ? teams.find((t) => t.id === actor.teamId)
+      : (named ? teams.find((t) => t.id === named) : null) || null;
     const src = (mine && mine.ea_club_id != null) ? mine : teams.find((t) => t.ea_club_id != null);
     if (!src) return { statusCode: 422, body: JSON.stringify({ error: "Link your club's EA club first (search above)." }) };
     const raw = await eaClubMatches(String(src.ea_club_id)).catch((e) => ({ __err: e.message }));

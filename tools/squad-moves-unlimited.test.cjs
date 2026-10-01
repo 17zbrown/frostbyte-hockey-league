@@ -20,9 +20,9 @@ A("...but not at any time: the weekly freeze is the one restriction",
   /the roster freezes each week from Wednesday at 7:30 PM Eastern Time/.test(p21) &&
   /until midnight Eastern at the end of Friday, and no player may be called up or sent down in that window/.test(p21));
 /* v3.72: trades stay open through the freeze, so the reason is the call-up/send-down stop, not a fixed roster */
-A("...with the reason stated", /so a club's roster may change during the week by those means, but never by a call-up or a send-down/.test(p21));
+A("...with the reason stated", /so a club's roster may change during the week by those means, but never by its own call-up or send-down/.test(p21));
 A("...and a league-office door for a club that cannot ice a lineup",
-  /The league office may move a player in the window where a club would otherwise be unable to ice a lineup/.test(p21));
+  /* v3.76: the freeze binds the club's management; a commissioner moves players at any time */ /The freeze binds the club's own management only: a commissioner may move a player between any club's active roster and its training camp at any time, the window included/.test(p21));
 A("...and no longer caps them at three", !/three \(3\) times/.test(p21) && !/swap cap/.test(p21));
 /* v3.55: moves stay unlimited; the CAMP itself is capped at eight (commissioner, 2026-09-28) */
 A("...and camp itself holds up to ten (v3.58)", /may carry up to ten \(10\) training-camp players/.test(p21) && !/carries no more than three players in camp/.test(p21));

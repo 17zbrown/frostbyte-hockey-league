@@ -176,7 +176,8 @@ console.log("\n— switching the previewed club reloads its data");
     /if \(e\.target && e\.target\.id === "cmPreviewSeat"\)\{/.test(live) &&
     live.indexOf('e.target.id === "cmPreviewSeat"') > live.indexOf('document.addEventListener("change"'));
   A("the picker reloads manager data before re-rendering",
-    /CG\.setPreviewClub\(v \|\| null\);[\s\S]{0,600}CG\.loadManagerData\(\)\.then\(done, done\)/.test(live));
+    /* v3.76: alongside the club's contract offers, after clearing the last club's drafts */
+    /CG\.setPreviewClub\(v \|\| null\);[\s\S]{0,1200}Promise\.all\(\[CG\.loadManagerData \? CG\.loadManagerData\(\) : null, CG\.loadMyOffers \? CG\.loadMyOffers\(\) : null\]\)\.then\(done, done\)/.test(live));
   A("the club-keyed loads follow myClub(), which honors the preview",
     /var myCode = CG\.myClub && CG\.myClub\(\), myTid = \(CG\.lg\._codeToId\|\|\{\}\)\[myCode\]/.test(live));
 }
@@ -193,8 +194,9 @@ console.log("\n— locks and caps cannot be planned around");
     !/from\("game_lineups"\)\.(insert|upsert|update)/.test(src6));
   A("a published night shows that, instead of a Dress button",
     /* v2.85 widened: the per-game picker and the Clear button sit between the two.
-       v3.05: "Locked" became "Published", because the lock no longer closes anything. */
-    /open\.length[\s\S]{0,900}Published/.test(src6));
+       v3.05: "Locked" became "Published", because the lock no longer closes anything.
+       v3.76: the Clear button counts the clearable games, which made the gap longer. */
+    /open\.length[\s\S]{0,1400}Published/.test(src6));
   A("a refused dress surfaces the rule's own message", /the rules refused: /.test(src6));
   A("saving a line goes through set_team_line", /CG\.sb\.rpc\("set_team_line"/.test(src6));
   A("planning a night goes through set_team_line_night", /CG\.sb\.rpc\("set_team_line_night"/.test(src6));

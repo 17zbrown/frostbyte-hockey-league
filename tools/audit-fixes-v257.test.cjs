@@ -40,7 +40,7 @@ console.log("— the basic format signs a waived player outright (P0-1 as ruled 
   /* v3.46: the salary is no longer the client's to name. It passes null and the database reads the
      player's own contract, so a waiver cannot reduce what he earns. */
   A("Sign calls sign_free_agent through the approval queue first, letting the DB set the salary",
-    /CG\.mgmtQueue\("sign_free_agent", \{ p_registration:regId, p_salary:null \}/.test(live) && /CG\.sb\.rpc\("sign_free_agent",\{ p_registration:regId, p_salary:null \}\)/.test(live));
+    /CG\.mgmtQueue\("sign_free_agent", \{ p_registration:regId, p_salary:null \}/.test(live) && /* v3.76: it also names the club this Team HQ acts for */ /CG\.sb\.rpc\("sign_free_agent",\{ p_registration:regId, p_salary:null, p_team:faTeamId \}\)/.test(live));
   A("...and the client no longer hardcodes the league minimum", !/p_salary:750000/.test(live));
   A("...but it shows the manager the real figure first", /var sal = CG\.waivedSalaryOf\(pid\) \|\| 750000;/.test(live));
   A("the queue knows the page for it", /sign_free_agent:"freeagents"/.test(live));

@@ -16,8 +16,9 @@ let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
 console.log("— the per-game builder");
-A("a Remove button appears only when something is actually FILED, and only before the lock",
-  /\(dbLu && !rawLocked \? '<button class="btn btn-ghost btn-sm" id="luRemove"/.test(hub));
+/* v3.76: before the lock for a club; the league office until the game is under way */
+A("a Remove button appears only when something is actually FILED, and only before the lock (the office: until puck drop)",
+  /\(dbLu && !shut && \(!rawLocked \|\| CG\.role\(\)==="commish"\) \? '<button class="btn btn-ghost btn-sm" id="luRemove"/.test(hub));
 A("...it goes through the RPC, never a direct delete",
   /CG\.sb\.rpc\("clear_game_lineup", \{ p_game: game\.id, p_team: \(lg\._codeToId\|\|\{\}\)\[club\] \}\)/.test(hub) &&
   !/from\("game_lineups"\)[\s\S]{0,80}\.delete\(\)/.test(hub));
@@ -30,10 +31,12 @@ A("nothing claims success before the server answers",
   hub.indexOf('CG.sb.rpc("clear_game_lineup"') < hub.indexOf('CG.toast(r.data === false ? "There was no lineup on file'));
 
 console.log("\n— the night row");
-A("a Clear button appears only when that night has something filed", /\(dressedN \? '<button class="btn btn-ghost btn-sm lc-clear"/.test(hub));
+/* v3.76: "something filed" is now the clearable set itself, so the label and the click always agree */
+A("a Clear button appears only when that night has something filed", /\(CG\.lcClearableGames\(club, n\.key\)\.length \? '<button class="btn btn-ghost btn-sm lc-clear"/.test(hub));
 /* v2.89: the per-game picker became a per-game LINE select, so Clear withdraws the night's open
    games rather than a selected subset of them */
-A("...and clears the night's open games", /var night = el\.dataset\.night, picks = CG\.lcOpenGames\(club, night\);/.test(hub));
+/* v3.76: the clearable games are the filed ones (open games for a club, games not under way for the office) */
+A("...and clears the night's open games", /var night = el\.dataset\.night, picks = CG\.lcClearableGames\(club, night\);/.test(hub) && /: CG\.lcOpenGames\(club, nightKey\);\s+return gs\.filter\(function\(g\)\{ return lu\[club\+":"\+g\.id\]; \}\);/.test(hub));
 A("...one RPC per game, refusals collected per game", /CG\.sb\.rpc\("clear_game_lineup", \{ p_game: picks\[i\]\.id, p_team: tid \}\)/.test(hub) &&
   /errs\.push\(CG\.fmtTime\(picks\[i\]\.at\)\+": "\+r\.error\.message\)/.test(hub));
 A("...and the in-memory copy follows each success", /\{ n\+\+; if \(lg\._lineups\) delete lg\._lineups\[club\+":"\+picks\[i\]\.id\]; \}/.test(hub));

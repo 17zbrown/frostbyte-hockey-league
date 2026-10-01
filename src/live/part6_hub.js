@@ -382,7 +382,7 @@ CG.hubDashboard = function(){
     }
   }
   if (me && CG.managesClub()){
-    cards.push(CG.gmTasksCard(me.team));
+    cards.push(CG.gmTasksCard((CG.hqClub && CG.hqClub()) || me.team));   /* v3.76: the previewed club, not the viewer's own */
   }
   if (r==="staff" || r==="commish"){
     /* Cases assigned to THIS official, from the live action-request table — the prototype filtered
@@ -919,7 +919,8 @@ CG.hubLineup = function(qs){
     })()+
     /* v2.85: withdraw the sheet. Nothing could unfile a game before, so a club that had filled its
        week had no way to give a player his games back short of finding a replacement with room. */
-    (dbLu && !rawLocked ? '<button class="btn btn-ghost btn-sm" id="luRemove" title="Withdraw this sheet: the six come off this game and get the game back in their week (Rule 5.2)">Remove lineup</button>' : "")+
+    /* v3.76: the league office may withdraw a published sheet until the game is under way */
+    (dbLu && !shut && (!rawLocked || CG.role()==="commish") ? '<button class="btn btn-ghost btn-sm" id="luRemove" title="Withdraw this sheet: the six come off this game and get the game back in their week (Rule 5.2)">Remove lineup</button>' : "")+
     '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(status==="submitted"?"Resubmit":"Submit lineup")+'</button>';
   var bar = '<div class="note '+(shut?"":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">Status: '+(shut?"Game under way":(rawLocked?"Published":status))+'</b>'+
@@ -1184,7 +1185,7 @@ CG.AFTER._lineup = function(){
             : [game];
           if (!targets.some(function(g){ return g.id===game.id; })) targets.unshift(game);
           /* v2.38: under "Owner approves" each game's lineup is queued for the Owner, not dressed */
-          if (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve"){
+          if (CG.mgmtWillQueue ? CG.mgmtWillQueue("lines") : (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve")){
             var qN = 0, qFail = 0;
             (function qnext(i){
               if (i >= targets.length){
@@ -1333,6 +1334,15 @@ CG.lcTogglePerGame = function(club, nightKey){
 };
 CG.lcOpenGames = function(club, nightKey){
   return CG.nightGames(club, nightKey).filter(function(g){ return CG.now() < g.at - 30*60000; });
+};
+/* v3.76: the sheets that may be withdrawn. A club may until the lock; the league office until the game is
+   under way (clear_game_lineup lets a commissioner past the lock). Only games with a sheet on file count. */
+CG.lcClearableGames = function(club, nightKey){
+  var lu = (CG.lg && CG.lg._lineups) || {};
+  var gs = CG.role()==="commish"
+    ? CG.nightGames(club, nightKey).filter(function(g){ return !(CG.emergencyClosed && CG.emergencyClosed(g)); })
+    : CG.lcOpenGames(club, nightKey);
+  return gs.filter(function(g){ return lu[club+":"+g.id]; });
 };
 /* v3.54 (commissioner, 2026-09-28): "Instead of not allowing a player to be scheduled in the lineup
    builder on more than 2 lines, give the submitter a warning that they may be over their game limit
@@ -1558,9 +1568,13 @@ CG.hubLines = function(qs){
               ? '<button class="btn btn-ghost btn-sm lc-dress"'+(toDress.length?"":" disabled")+' data-night="'+n.key+'" title="'+
                   (toDress.length ? 'Submit each game with the line set for it'+(distinct.length>1?' ('+distinct.length+' different lines tonight)':'') : 'Set a line on at least one game')+'">'+
                   (dressedN?"Redress":"Dress")+' '+toDress.length+' game'+(toDress.length===1?"":"s")+'</button>'+
-                (dressedN ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="Withdraw the filed sheets for this night\u2019s games. Everyone on them gets those games back in his week (Rule 5.2).">Clear '+open.length+'</button>' : "")
+                /* v3.76: label, visibility and the click all count the same games: the ones with a sheet to withdraw */
+                (CG.lcClearableGames(club, n.key).length ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="Withdraw the filed sheets for this night\u2019s games. Everyone on them gets those games back in his week (Rule 5.2).">Clear '+CG.lcClearableGames(club, n.key).length+'</button>' : "")
               : '<span class="lock" title="Every game this night is published to the opponent">'+CG.ic("lock",13)+'Published</span>'+
-                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Change a published sheet: free, up to puck drop (Rule 5.3)">Change a sheet</a>')
+                '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Change a published sheet: free, up to puck drop (Rule 5.3)">Change a sheet</a>'+
+                /* v3.76: the league office may withdraw a published sheet until the game is under way */
+                (CG.role()==="commish" && CG.lcClearableGames(club, n.key).length
+                  ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="League office: withdraw the filed sheets for this night\u2019s games that are not under way yet (Rule 5.2).">Clear '+CG.lcClearableGames(club, n.key).length+'</button>' : ""))
           : '<span class="caption">pick a line to enable dressing</span>')+
       '</div>';
     }).join("") : '<div class="card-b"><span class="caption">No upcoming games — the plan fills in once the schedule does.</span></div>')+
@@ -1725,7 +1739,7 @@ CG.AFTER._lines = function(qs){
     if (!dirty.length) return;
     saveAll.disabled = true;
     /* v2.38: under "Owner approves" each changed line is queued for the Owner, not saved */
-    if (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve"){
+    if (CG.mgmtWillQueue ? CG.mgmtWillQueue("lines") : (CG.mgmtAccess && CG.mgmtAccess("lines")==="approve")){
       var qN = 0, qFail = 0, sentSlots = [];
       (function qnext(i){
         if (i >= dirty.length){
@@ -1940,7 +1954,7 @@ CG.AFTER._lines = function(qs){
   });
   document.querySelectorAll(".lc-clear").forEach(function(el){
     el.addEventListener("click", function(){
-      var night = el.dataset.night, picks = CG.lcOpenGames(club, night);
+      var night = el.dataset.night, picks = CG.lcClearableGames(club, night);
       if (!picks.length) return;
       CG.confirm("Withdraw "+picks.length+" sheet"+(picks.length===1?"":"s")+"?",
         (CG.NIGHT_LABEL[night]||night)+": "+picks.map(function(g){ return CG.fmtTime(g.at); }).join(", ")+
@@ -2079,7 +2093,10 @@ function squadBtn(p){
   /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it
      anyway; this says so before the click instead of after it. */
   var fz = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
-  if (fz.on){
+  /* v3.76: the league office is not frozen (guard_squad_move lets a commissioner through); it keeps the
+     buttons and the chip says the club's own moves are frozen */
+  var fzOffice = fz.on && CG.role()==="commish";
+  if (fz.on && !fzOffice){
     return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(fz.why)+'">'+
       (p.squad==="tc" ? "Call up" : "To camp")+'</button>'+
       '<span class="chip chip-warn chip-xs" title="'+esc(fz.why)+'">frozen</span>';
@@ -2142,6 +2159,8 @@ CG.hubRoster = function(qs){
   if (fzR.on){
     h += '<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+
       '<span><b style="font-family:var(--f-disp)">Roster freeze.</b> Call-ups and send-downs are locked until '+esc(fzR.reopens)+' (Rule 2.1). '+
+      /* v3.76 (commissioner, 2026-10-01): the lock binds the club's management; a commissioner moves players 24/7 */
+      (CG.role()==="commish" ? 'The lock binds the club’s Owner, GM and AGM; as a commissioner you can still call players up and send them down. ' : '')+
       ((CG.movesLockedNow && CG.movesLockedNow()) ? 'Trades and waivers closed at the movement deadline (Rule 2.4).'
         : 'Trades stay open: each player a trade brings you takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins the active roster only where both have room (Rule 2.1).')+'</span></div>';
   }

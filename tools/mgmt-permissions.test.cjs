@@ -104,7 +104,7 @@ function finish(){
     A("a refused send is a third outcome (MGMT_FAILED), never counted as sent", /return CG\.MGMT_FAILED;/.test(live) && /if \(q===true\) qN\+\+; else if \(q\) qFail\+\+;/.test(hub) && /if \(q===true\)\{ qN\+\+; sentSlots\.push\(n\); \} else if \(q\) qFail\+\+;/.test(hub));
     A("...and only lines actually sent leave the draft", /sentSlots\.forEach\(function\(n\)\{ delete CG\._lcDraft\[n\];/.test(hub));
     A("...and a refused squad move re-enables its button", /if \(q===CG\.MGMT_FAILED\) btn\.disabled = false;/.test(live) && /if \(q===CG\.MGMT_FAILED\) swapBtn\.disabled = false;/.test(live));
-    A("the trade-block toggle decides synchronously and the click skips its success toast when queued", /if \(CG\.setOnBlock\(pid, !on\)\) return;/.test(hub) && /if \(CG\.mgmtAccess && CG\.mgmtAccess\("roster"\)==="approve"\)\{\n    CG\.mgmtQueue\("roster_block"/.test(live));
+    A("the trade-block toggle decides synchronously and the click skips its success toast when queued", /if \(CG\.setOnBlock\(pid, !on\)\) return;/.test(hub) && /* v3.76: through the one helper, which never queues the league office */ /if \(CG\.mgmtWillQueue\("roster"\)\)\{\n    CG\.mgmtQueue\("roster_block"/.test(live));
     A("the draft board under approval sends one request after the ranking settles and keeps the local ranking across reloads", /CG\._boardQueueT = setTimeout\(/.test(live) && /if \(waiting\) CG\.lg\._myBoard = CG\._boardLocal\.slice\(\); else CG\._boardLocal = null;/.test(live));
     /* v3.05: emergency mode no longer exists (a late switch is free), so there is no mode to
        leave. What still matters is that a queued lineup does not claim to be filed. */

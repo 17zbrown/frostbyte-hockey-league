@@ -27,7 +27,7 @@ A("a club's management cannot combine two or more sittings", /if \(actor\.via ==
 console.log("\n— the site");
 A("no Scout OVR input or header, no scout_ovr write", !/data-scout=/.test(live) && !/update\(\{scout_ovr:/.test(live) && !/<th>Scout OVR<\/th>/.test(live));
 A("lists read the engine overall", /CG\.regOverall = function\(r\)\{/.test(live) && (live.match(/CG\.regOverall\(/g) || []).length >= 6 && /jersey_number,overall\)/.test(live));
-A("the club desk attaches one sitting", /Attach this sitting to the game/.test(live) && /if \(ids\.length > 1\)\{ CG\.toast\("Statistics staff combine a game played in more than one sitting \(Rule 4\.3\)"/.test(live) && !/Combine the selected sittings/.test(live));
+A("the club desk attaches one sitting", /Attach this sitting to the game/.test(live) && /* v3.76: one sitting for a club; the league office and statistics staff may combine */ /if \(ids\.length > 1 && !gsMulti\)\{ CG\.toast\("Statistics staff combine a game played in more than one sitting \(Rule 4\.3\)"/.test(live) && !/Combine the selected sittings/.test(live));
 
 console.log("\n— the book");
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
