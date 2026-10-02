@@ -4,6 +4,10 @@
  * standings when the NHL season is running, the final table of the
  * most recent season otherwise. No API key required (public NHL API).
  * Keep in sync with the club list in `teams` when a club is added or removed.
+ *
+ * An ES module like every other function: package.json declares "type": "module", and Netlify's
+ * bundler (zip-it-and-ship-it 16.2, late Sep 2026) refuses a CommonJS file under it. Written with
+ * `exports.handler`, this file failed every deploy from v3.76 on and the site stayed on v3.75.
  */
 const CODES = ["CAR", "TOR", "OTT", "SJS", "BOS"];
 
@@ -16,7 +20,7 @@ async function grab(url) {
   return Array.isArray(j.standings) ? j.standings : [];
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     const q = (event && event.queryStringParameters) || {};
     /* ?club=COL&season=20252026 → the club's completed games as a trend series */
