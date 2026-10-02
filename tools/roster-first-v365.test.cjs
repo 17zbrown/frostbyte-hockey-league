@@ -19,45 +19,19 @@ A("counted against the open spots of that kind", /if coalesce\(array_length\(v_l
 A("the anchor is asserted unique", /set_game_lineup: the anchor is not unique/.test(sql));
 A("the rehearsal and the refile notice are recorded", /Result: REHEARSAL OK \(all five\)/.test(sql) && /Only DAL had any/.test(sql));
 
-console.log("\n— the lineup builder runs the same test");
-const m = hub.match(/  function validate\(p, pos\)\{[\s\S]*?\n  \}\n/);
-A("located validate()", !!m);
-if (m) {
-  const mk = (id, tag, pos, squad) => ({ id, tag, pos, squad });
-  const roster = [mk("r1","R1","C","pro"), mk("r2","R2","LW","pro"), mk("r3","R3","RW","pro"), mk("r4","R4","LD","pro"), mk("r5","R5","RD","pro"),
-                  mk("r6","R6","C","pro"), mk("g1","G1","G","pro"), mk("c1","C1","C","tc"), mk("cg","CG","G","tc")];
-  const run = (slots, pid, pos, avail) => {
-    const ctx = { Object, Array, String, Math, JSON,
-      CG: { POS_NAME: {}, posGroup: (p) => (p === "G" ? "G" : /D$/.test(p) ? "D" : "F"), isWaived: () => false,
-            weekGamesFor: () => 0, gameCapFor: (x) => (x.squad === "tc" ? 3 : 6), capExceptionFor: () => false },
-      lg: { byTeam: { DAL: roster }, suspensions: [] }, club: "DAL", game: { id: "g", stage: "regular" },
-      state: { slots }, isLocked: () => false, flex: () => true, preGame: false,
-      avState: (x) => (avail.indexOf(x.id) >= 0 ? "yes" : "nr") };
-    vm.createContext(ctx);
-    vm.runInContext(m[0] + "\nthis.out = validate(CG_p, CG_pos);".replace("CG_p", JSON.stringify(roster.find((x) => x.id === pid))).replace("CG_pos", JSON.stringify(pos)), ctx);
-    return ctx.out;
-  };
-  const five = { LW: "r2", C: "r1", RW: "r3", LD: "r4", RD: "r5" };
-  const four = { LW: "r2", RW: "r3", LD: "r4", RD: "r5", G: "g1" };   /* C open for the camp skater */
-  const r1 = run(four, "c1", "C", ["r1","r2","r3","r4","r5","r6","g1"]);
-  A("a camp skater over available roster skaters left out is refused, by name", /^Roster players come first \(Rule 5\.2\): R1, R6 are available for this game and not in the lineup/.test(r1 || ""), r1);
-  A("...allowed when no roster skater left out said yes", run(four, "c1", "C", ["r2","r3","r4","r5","g1"]) === null);
-  const r2 = run(five, "c1", "C", ["r2","r3","r4","r5","g1"]);
-  A("...and replacing a roster skater who said yes counts him as left out", r2 === null && /R1 is available/.test(run(five, "c1", "C", ["r1","r2","r3","r4","r5","g1"]) || ""));
-  A("a camp goaltender is judged against goaltenders only", run(Object.assign({}, five), "cg", "G", ["r1","r2","r3","r4","r5","r6"]) === null &&
-    /the goaltender’s spot/.test(run(Object.assign({}, five), "cg", "G", ["g1"]) || ""));
-  A("open spots count: one camp skater with four skater spots open and one roster skater out is fine", run({ C: "r1" }, "c1", "LW", ["r1","r6"]) === null);
-}
-
-console.log("\n— the book");
+console.log("\n— v3.80: withdrawn (commissioner, 2026-10-02: \"I know this is a rule, but remove the mechanic for it\")");
+/* the v3.65 record above stays: it is the history of the rule. What is pinned now is that nothing applies it. */
+A("the lineup builder no longer applies it", !/Roster players come first \(Rule 5\.2\)/.test(hub) && /the v3\.65 roster-first check \(Q14\) is withdrawn/.test(hub));
+A("set_game_lineup no longer applies it (the v3.80 record removes the block whole)", /v380_camp_players_dress_freely/.test(R("sql/2026-10-02-camp-players-dress-freely-v380.sql")));
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = global.CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
-const e = rb.changelog.find((c) => c.version === "3.65");
-A("changelog records 3.65", !!e);
-A("5.1.1: camp players submit availability", /Every rostered player, training-camp players included, must submit weekly availability/.test(secs["5.1"].paragraphs[0]));
-A("5.2.3: roster players come first, refused on filing", /Roster players come first\. A training-camp player may be dressed in a game only when no active-roster player who is available for that game/.test(secs["5.2"].paragraphs[2]) && /A lineup that breaks this is refused when it is filed/.test(secs["5.2"].paragraphs[2]));
-A("no em dashes or spaced hyphens in the 3.65 entry", !/—| - /.test(JSON.stringify(e)));
+A("changelog keeps 3.65 as history", !!rb.changelog.find((c) => c.version === "3.65"));
+A("5.1.1: camp players still submit availability", /Every rostered player, training-camp players included, must submit weekly availability/.test(secs["5.1"].paragraphs[0]));
+A("5.2 no longer says roster players come first, in either format", !/Roster players come first/.test(secs["5.2"].paragraphs.join(" ")) && !/given preference over training-camp players/.test((secs["5.2"].full || []).join(" "))
+  && /whether or not an active-roster player is left out of it/.test(secs["5.2"].paragraphs[2]));
+A("5.1 no longer says an available roster player comes before a camp player", !/comes before a training-camp player/.test(secs["5.1"].paragraphs.join(" ")));
+
 
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));
 process.exit(fail ? 1 : 0);

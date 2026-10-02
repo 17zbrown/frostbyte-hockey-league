@@ -118,8 +118,9 @@ A("Rules 2.4, 4.2, 5.3 and 7.2 say the office's exemption", /may waive or trade 
   && /The league office may still change a club's picks after it/.test(sec("4.2").paragraphs.join(" "))
   && /The league office may still file or change a club's sheet after that/.test(sec("5.3").paragraphs.join(" "))
   && /The lock binds the club; the league office may move him/.test(sec("7.2").paragraphs.join(" ")));
-A("changelog 3.79 leads", rb.changelog[0].version === "3.79" && rb.changelog[1].version === "3.78");
-const newText = [sec("2.6").paragraphs[6], sec("2.6").full[6]].concat(rb.changelog[0].items, [rb.changelog[0].summary]).join(" ");
+const i79 = rb.changelog.findIndex((c) => c.version === "3.79"), e79 = rb.changelog[i79];
+A("changelog records 3.79, right after 3.78", i79 >= 0 && rb.changelog[i79 + 1].version === "3.78");
+const newText = [sec("2.6").paragraphs[6], sec("2.6").full[6]].concat(e79.items, [e79.summary]).join(" ");
 A("no em dashes or spaced hyphens in the new text", !/—|–| - /.test(newText.replace(/[^.]*—[^.]*\(the last paragraph of this rule\)/, "")));
 
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");
