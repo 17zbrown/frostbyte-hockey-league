@@ -19,7 +19,7 @@ process.env.DISCORD_BOT_TOKEN = "t";
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
-const MIN = 60000, H = 60 * MIN;
+const MIN = 60000;
 const TEAMS = [
   { id: "t1", code: "BOS", name: "Bruins", discord_channel_id: "ch1", discord_role_id: "r1" },
   { id: "t2", code: "DAL", name: "Stars", discord_channel_id: "ch2", discord_role_id: "r2" },
@@ -28,48 +28,33 @@ const TEAMS = [
 
 let games, posts, claims, released, boardCalls, boardGate, cfgRows, fetched = [];
 
-/* A night of three games 35 minutes apart, the first of them `leadH` hours from now. The night's
-   lock is first puck drop minus 30 minutes, so leadH 0.5 is exactly the lock. */
+/* THE CLOCK. The scheduler decides "tonight" from the clock (a night is an ET calendar day, as it is for
+   public.night_board), so a suite that builds its fixtures from the REAL clock passes or fails by the
+   hour it runs: late in the evening a catch-up night (first game 24 minutes ago, last one 16 minutes
+   ahead) runs past ET midnight and splits into two nights. Earlier fixes slid fixtures around the
+   real time and still missed the upcoming midnight. So the clock is not real here: every block pins
+   "now" to an instant relative to ONE fixed game night, and the scheduler, which reads Date.now() and
+   new Date(), reads this clock too. Nothing in this file depends on when it runs. */
+const RealDate = Date;
+let NOW = RealDate.now();
+class TestDate extends RealDate {
+  constructor(...a) { if (a.length) super(...a); else super(NOW); }
+  static now() { return NOW; }
+}
+globalThis.Date = TestDate;
+/* the night: Thursday October 8, 2026, first puck drop 9:00 PM EDT (01:00 UTC on the 9th) */
+const FIRST = RealDate.parse("2026-10-09T01:00:00Z");
+
+/* A night of three games `spacing` minutes apart (35 by default: 9:00, 9:35 and 10:10 PM ET), and the
+   clock set `atMin` minutes after its first puck drop (negative is before it). The night's lock is
+   first puck drop minus 30 minutes, so atMin -30 is exactly the lock. */
 function reset(over = {}) {
-  /* `anchor: true` pins the night at 9:00 PM ET two days out, so its three games cannot straddle
-     midnight ET and split into two nights. A night IS an ET calendar day, so before this these
-     assertions passed or failed depending on the hour the suite ran: after about 10:30 PM ET,
-     now + 0.5h + 70min lands on tomorrow. Content blocks use the anchor and open the gate with
-     `boardGate`; only the WINDOW blocks need a real clock offset. */
-  const first = over.anchor
-    ? (() => { const d = new Date(Date.now() + 2 * 86400000); d.setUTCHours(1, 0, 0, 0); return d.getTime(); })()
-    : Date.now() + (over.leadH ?? 1.25) * H;
-  /* WINDOW blocks need a real clock, so they can compress the night with `spacing`. A 3-game night
-     35 minutes apart spans 70 minutes and straddles midnight ET when the suite runs late, which
-     splits it into two nights: that is a real property of the code (a night IS an ET calendar day)
-     and it made these blocks pass or fail by the hour. Compressing keeps a night inside one ET day
-     at any hour without changing what is being tested. */
   const sp = over.spacing ?? 35;
-  /* ...and the same hazard at the OTHER end of the clock. A block that starts its night in the
-     past (`leadH` negative, to test the catch-up) can CROSS midnight ET when the suite runs in
-     the small hours: at 00:14 ET a first game "24 minutes ago" is yesterday while the rest are
-     today, so the night splits in two and the post correctly covers only one of them.
-     Only a night that genuinely straddles the boundary is moved, and it is moved WHOLE, so a
-     block that means "the last game has already started" (leadH -2, entirely inside yesterday)
-     is left exactly as it was. */
-  const etMinNow = (() => {
-    const f = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
-    const [h, m] = f.format(new Date()).split(":").map(Number);
-    return h * 60 + m;
-  })();
-  const dayStart = Date.now() - etMinNow * MIN;          // today's ET midnight
-  const span = sp * 2 * MIN;
-  const firstAdj = (() => {
-    const straddles = (first < dayStart) !== ((first + span) < dayStart);
-    if (!straddles) return first;
-    const fwd = dayStart + MIN;                          // slide the night wholly into today
-    if (fwd + span >= Date.now()) return fwd;
-    return dayStart - MIN - span;                        // or wholly into yesterday
-  })();
+  NOW = FIRST + (over.atMin ?? -75) * MIN;
   games = over.games || [
-    { id: "g1", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(firstAdj).toISOString(), game_code: "AAA111" },
-    { id: "g2", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t2", away_team_id: "t1", scheduled_at: new Date(firstAdj + sp * MIN).toISOString(), game_code: "BBB222" },
-    { id: "g3", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(firstAdj + sp * 2 * MIN).toISOString(), game_code: "CCC333" },
+    { id: "g1", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(FIRST).toISOString(), game_code: "AAA111" },
+    { id: "g2", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t2", away_team_id: "t1", scheduled_at: new Date(FIRST + sp * MIN).toISOString(), game_code: "BBB222" },
+    { id: "g3", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t2", scheduled_at: new Date(FIRST + sp * 2 * MIN).toISOString(), game_code: "CCC333" },
   ];
   cfgRows = over.cfgRows || [{ key: "discord_mgmt_room_management_announcements_id", value: "mgmtroom" }];
   boardGate = over.boardGate ?? null;   // null = honor the real lock; true/false = force
@@ -135,7 +120,7 @@ const clubPosts = () => posts.filter((p) => /Game night\./.test(p.content || "")
 
 console.log("— the codes come from the board, and only from the board");
 {
-  reset({ leadH: 1.25 });
+  reset({ atMin: -75 });
   await tick();
   const sel = fetched.find((u) => u.includes("/rest/v1/games?"));
   A("the scheduler's own games query no longer pulls the lobby codes", sel && !/game_code/.test(sel), sel && sel.slice(sel.indexOf("select="), sel.indexOf("select=") + 130));
@@ -143,21 +128,21 @@ console.log("— the codes come from the board, and only from the board");
 
 console.log("\n— before the night locks, nothing goes out");
 {
-  reset({ leadH: 1.25 });                 // 75 minutes out: exactly where the old bug fired
+  reset({ atMin: -75 });                  // 75 minutes out: exactly where the old bug fired
   const body = await (await tick()).json();
   A("no club post at T-75", clubPosts().length === 0, String(body.reminders));
   A("...and it says when the night locks", /nothing to post yet/.test(String(body.reminders)), String(body.reminders));
   A("no lobby code reached Discord", !posts.some((p) => /AAA111|BBB222|CCC333/.test(p.content || "")));
   A("no claim was taken, so the real post is not blocked later", ![...claims].some((k) => k.startsWith("game_reminder/")));
 
-  reset({ leadH: 0.6 });                  // 36 minutes out: still 6 minutes before the lock
+  reset({ atMin: -36 });                  // 36 minutes out: still 6 minutes before the lock
   await tick();
   A("still nothing six minutes before the lock", clubPosts().length === 0);
 }
 
 console.log("\n— at the lock, one message per club with everything in it");
 {
-  reset({ anchor: true, boardGate: true });                  // the lock exactly
+  reset({ atMin: -30, boardGate: true });                    // the lock exactly
   const body = await (await tick()).json();
   A("both roomed clubs are posted to", clubPosts().length === 2, String(body.reminders));
   const bos = clubPosts().find((p) => p.channel === "ch1");
@@ -181,29 +166,29 @@ console.log("\n— at the lock, one message per club with everything in it");
 
 console.log("\n— it never double-posts, and it catches up");
 {
-  reset({ anchor: true, boardGate: true });
+  reset({ atMin: -30, boardGate: true });
   await tick();
   const firstRound = clubPosts().length;
   await tick();
   A("a second tick in the same night posts nothing more", clubPosts().length === firstRound, `${firstRound} then ${clubPosts().length}`);
 
-  reset({ leadH: -0.4, spacing: 20 });    // first game started 24 min ago, last is 16 min away: a catch-up
+  reset({ atMin: 24, spacing: 20 });      // first game started 24 min ago, last is 16 min away: a catch-up
   await tick();
   A("a tick after puck drop still delivers the night", clubPosts().length === 2, String(clubPosts().length));
   const c = clubPosts()[0].content;
   A("...and still lists the game already under way", (c.match(/^• /gm) || []).length === 3);
-  /* whether a LATER sheet is still open depends on the hour the suite runs, and it is already
-     pinned in the anchored block above. What this block is for is the catch-up itself. */
-  A("...and says something true about the sheets either way",
-    /still open:/.test(c) || /Every sheet for tonight is locked/.test(c), c.split("\n").find((l) => /\u{1F4CB}/u.test(l)));
+  /* 24 minutes after the first puck drop the 9:20 and 9:40 PM sheets have locked too (each 30 minutes
+     before its own game), so every sheet is locked: the clock is fixed, so this is exact now. */
+  A("...and says every sheet for tonight is locked",
+    /Every sheet for tonight is locked/.test(c), c.split("\n").find((l) => /\u{1F4CB}/u.test(l)));
 
-  reset({ leadH: -0.1, spacing: 4 });     // the first game is under way, the last is not
+  reset({ atMin: 6, spacing: 4 });        // the first game is under way, the last is not
   await tick();
   const late = clubPosts()[0];
   A("a catch-up mid-night still delivers the whole night",
     late && (late.content.match(/^• /gm) || []).length === 3);
 
-  reset({ leadH: -2 });                   // the night's LAST game has already started
+  reset({ atMin: 120 });                  // the night's LAST game has already started
   const over = await (await tick()).json();
   A("once the night's last game has started the window is shut", clubPosts().length === 0, String(over.reminders));
   A("...and it says so rather than failing silently", /no game night ahead/.test(String(over.reminders)), String(over.reminders));
@@ -211,8 +196,8 @@ console.log("\n— it never double-posts, and it catches up");
 
 console.log("\n— a club with no Discord room is reported, never silently dropped");
 {
-  reset({ leadH: 0.5, games: [
-    { id: "gx", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t3", scheduled_at: new Date(Date.now() + 0.5 * H).toISOString(), game_code: "ZZZ999" },
+  reset({ atMin: -30, games: [
+    { id: "gx", week: 1, stage: "regular", voided: false, status: "scheduled", home_team_id: "t1", away_team_id: "t3", scheduled_at: new Date(FIRST).toISOString(), game_code: "ZZZ999" },
   ] });
   const body = await (await tick()).json();
   const errs = JSON.stringify(body.errors || []);
@@ -222,7 +207,7 @@ console.log("\n— a club with no Discord room is reported, never silently dropp
 
 console.log("\n— it never asserts a server the resolver did not choose");
 {
-  reset({ anchor: true, boardGate: true });
+  reset({ atMin: -30, boardGate: true });
   const real = globalThis.fetch;
   globalThis.fetch = async (u, i) => {
     if (String(u).includes("rpc/night_board")) {
@@ -244,7 +229,7 @@ console.log("\n— it never asserts a server the resolver did not choose");
 
 console.log("\n— a voided game is never announced");
 {
-  reset({ anchor: true, boardGate: true });
+  reset({ atMin: -30, boardGate: true });
   games[1].voided = true;
   await tick();
   const c = clubPosts()[0].content;
@@ -253,7 +238,7 @@ console.log("\n— a voided game is never announced");
 
 console.log("\n— if the board cannot be read, nothing is invented");
 {
-  reset({ anchor: true, boardGate: true });
+  reset({ atMin: -30, boardGate: true });
   const real = globalThis.fetch;
   globalThis.fetch = async (u, i) => (String(u).includes("rpc/night_board")
     ? new Response("boom", { status: 500 }) : real(u, i));
